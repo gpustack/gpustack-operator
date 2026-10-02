@@ -45,7 +45,6 @@ import (
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
-	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -1353,16 +1352,17 @@ func modelDeploymentPodEligible(
 		return false
 	}
 
-	if modelDeploymentRoleExternalDP(md, role) {
-		return true
-	}
-	if modelDeploymentRoleSize(role) == 1 {
+	// WHICH MEMBERS ANSWER IS THE SHAPE'S DECISION, and it is the one derivation the retirement drain
+	// also uses. This reader happens to hold the role, so it reads the facts from there; the drain
+	// holds the members instead and reads the same facts from the Pods the role rendered. Sharing
+	// the derivation is what keeps the two from answering "which members serve" differently.
+	shape := modelDeploymentAnsweringShapeOf(
+		modelDeploymentRoleExternalDP(md, role), modelDeploymentRoleSize(role))
+	if shape == modelDeploymentAnsweringAll || shape == modelDeploymentAnsweringSole {
 		return true
 	}
 
-	index, ok := pod.Labels[modelDeploymentMemberIndexLabel]
-
-	return ok && index == strconvx.Itoa(modelDeploymentLeaderMemberIndex)
+	return modelDeploymentAnsweringMemberLeader(pod)
 }
 
 // modelDeploymentRoleExternalDP reads the role's own argument stream for its balance shape: the

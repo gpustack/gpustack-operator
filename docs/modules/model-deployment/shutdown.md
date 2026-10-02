@@ -108,6 +108,15 @@ protocol and the hook cannot disagree about what counts as work in flight.
 have to carry every expected gauge, and a single unlucky zero cannot carry the protocol past a
 member that is still working. A second read that finds work holds the operation.
 
+**Not every member of a replica is read, because not every member can answer.** The protocol works
+out which members of the target can speak for it as a whole, and reads only those: a replica of one
+Pod answers through itself, and a leader-served replica of several answers through the member
+carrying rank 0.
+
+Selecting them does not narrow the deletion, which still covers every member the reservation bound,
+so a replica is only held when the operator cannot tell which member its answer comes from. See
+[Coverage limits](#coverage-limits) for what a hold there means.
+
 ### What the drain read refuses
 
 Every one of these holds the replica in place, and the `reason` on the reservation names which one
@@ -164,12 +173,15 @@ member is recognized by its data-parallel balance flags, and an SGLang member by
   and keeps the Kubernetes default when the role sets none.
 - **A role that moves the engine with its own `--port`** gets only the first 5 s: nothing answers the
   hook on the port the operator rendered.
-- **A replica of several Pods drains only its leader.** The other members serve no metrics, so their
-  hooks return after the first 5 s, and they receive SIGTERM while the leader is still draining. The
-  retirement protocol reads **every** member of its target and holds unless each one answers, so a
-  multi-member replica is held on its non-serving members and the operation ends as `Aborted` with
-  its capacity retained. Reducing or shedding a role at `size` above one therefore leaves its
-  replicas in place.
+- **A replica of several Pods drains through its leader, and every member is still deleted.** The
+  other members serve no metrics, so their hooks return after the first 5 s, and they receive SIGTERM
+  while the leader is still draining. The protocol reads the members whose answer stands for the whole
+  replica, which on a leader-served replica is the leader alone.
+- **Selecting the leader does not narrow the deletion.** The reservation still binds every member the
+  replica is made of, so the followers are deleted with the leader and the operation completes only
+  once all of them are gone. A replica whose answering member cannot be named is held — none of its
+  members carries the leader index, more than one does, its members disagree on the shape, or its
+  role says a size the replica does not have — and the `reason` names which.
 - **A prefill or decode replica is refused by the protocol**, so it is never deleted through one.
   The [drain window](#the-drain-window) still applies to it once something else deletes its Pod.
 - **A direct decoder on a cluster below Kubernetes 1.29** runs its routing proxy as a classic

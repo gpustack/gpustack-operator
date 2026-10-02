@@ -588,7 +588,7 @@ review; exact verification env follows the repo convention
   committed T7 behavior, kept deliberately over granting eligibility on a weaker signal.
   Verify: package tests (per-engine verifiable/unsupported matrix; healthy multi-member group
   admitted only via the observation; broken collective revoked; single-member path unchanged).
-- [ ] **T12 Shape-aware retirement drain membership.** Blocked by: T9. Owns: drain member
+- [x] **T12 Shape-aware retirement drain membership.** Blocked by: T9. Owns: drain member
   selection in-package (`model_deployment_retirement*.go` and its tests) plus the two
   multi-member limit paragraphs in `docs/modules/model-deployment/shutdown.md`. Gate: root
   staged-gate review of this task's exact diff before any commit. Acceptance: the retirement
