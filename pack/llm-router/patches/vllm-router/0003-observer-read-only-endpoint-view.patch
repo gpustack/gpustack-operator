@@ -59,10 +59,10 @@ index 5c4c406..8388376 100644
  pub mod otel_trace;
 diff --git a/src/observer.rs b/src/observer.rs
 new file mode 100644
-index 0000000..2a338c7
+index 0000000..46749cf
 --- /dev/null
 +++ b/src/observer.rs
-@@ -0,0 +1,216 @@
+@@ -0,0 +1,217 @@
 +// Read-only endpoint observer for external confirmation of pool membership.
 +//
 +// WHAT THIS IS. One GET handler that serializes the worker registry the request path
@@ -195,7 +195,7 @@ index 0000000..2a338c7
 +    // the registry's internal map iteration order, which is what makes two consecutive
 +    // revisions comparable at all.
 +    let mut by_url: BTreeMap<String, ObserverWorker> = BTreeMap::new();
-+    for (id, worker) in state.worker_registry.get_all_with_ids() {
++    for (id, worker) in state.context.worker_registry.get_all_with_ids() {
 +        let url = worker.url().to_string();
 +        let healthy = worker.is_healthy();
 +        // The circuit state is read for the report only; can_execute is the exact
@@ -208,10 +208,11 @@ index 0000000..2a338c7
 +        by_url.insert(
 +            url.clone(),
 +            ObserverWorker {
++                url: url.clone(),
 +                port: url_port(&url),
 +                role: role_name(worker.as_ref()),
 +                pod_hint: pod_hint(&url),
-+                worker_id: id.0.clone(),
++                worker_id: id.as_str().to_string(),
 +                selection: ObserverSelection {
 +                    registered: true,
 +                    healthy,

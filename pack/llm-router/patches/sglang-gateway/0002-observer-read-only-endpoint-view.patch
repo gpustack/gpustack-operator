@@ -99,10 +99,10 @@ index a4ee2e7..0c9171f 100644
  pub mod reasoning_parser;
 diff --git a/sgl-model-gateway/src/observer.rs b/sgl-model-gateway/src/observer.rs
 new file mode 100644
-index 0000000..3b66a88
+index 0000000..d11134c
 --- /dev/null
 +++ b/sgl-model-gateway/src/observer.rs
-@@ -0,0 +1,236 @@
+@@ -0,0 +1,237 @@
 +// Read-only endpoint observer for external confirmation of pool membership.
 +//
 +// WHAT THIS IS. One GET handler that serializes the worker registry the request path
@@ -225,7 +225,7 @@ index 0000000..3b66a88
 +}
 +
 +/// The role name as the request path uses it.
-+fn role_name(worker: &Worker) -> String {
++fn role_name(worker: &dyn Worker) -> String {
 +    match worker.worker_type() {
 +        crate::core::worker::WorkerType::Regular => "regular".to_string(),
 +        crate::core::worker::WorkerType::Prefill { .. } => "prefill".to_string(),
@@ -248,10 +248,11 @@ index 0000000..3b66a88
 +        by_url.insert(
 +            url.clone(),
 +            ObserverWorker {
++                url: url.clone(),
 +                port: url_port(&url),
 +                role: role_name(worker.as_ref()),
 +                pod_hint: pod_hint(&url),
-+                worker_id: id.0.clone(),
++                worker_id: id.as_str().to_string(),
 +                selection: ObserverSelection {
 +                    registered: true,
 +                    healthy,
@@ -328,7 +329,7 @@ index 0000000..3b66a88
 +    };
 +    match serde_json::to_string(&view) {
 +        Ok(body) => (
-+            [(axum::http::header::CONTENT_TYPE, "application/json")],
++            [(http::header::CONTENT_TYPE, "application/json")],
 +            body,
 +        )
 +            .into_response(),
