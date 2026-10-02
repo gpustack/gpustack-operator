@@ -545,7 +545,7 @@ review; exact verification env follows the repo convention
   Owns: observer-only patch additions + Go client/aggregation. Gate: root staged-gate review of
   this task's exact diff before any commit. Acceptance: AC-2.1–2.6 with the listed negatives.
   Verify: package tests + harness negatives.
-- [ ] **T7 Group health predicate + activation gating.** Blocked by: T6. Owns: controller
+- [x] **T7 Group health predicate + activation gating.** Blocked by: T6. Owns: controller
   health/eligibility paths (globs: `pkg/worker/controllers/worker/model_deployment*.go`, serial
   package). Gate: root staged-gate review of this task's exact diff before any commit.
   Acceptance: AC-3.1–3.5. Verify: package tests (unsupported-engine
@@ -570,10 +570,24 @@ review; exact verification env follows the repo convention
   proven, never a per-member individual zero; missing coverage = Unsupported/Unknown hold).
   Verify: fixture matrix (missing series / wrong container / watch-gap / aggregate-only /
   complete zero ×2 / P/D hold; a body missing a required series as the anchor negative).
-- [ ] **T10 Owning docs + spec sync + full gates.** Blocked by: T1–T9. Owns:
+- [ ] **T10 Owning docs + spec sync + full gates.** Blocked by: T1–T9, T11. Owns:
   `docs/modules/model-deployment/{status,routing,shutdown}.md`, `docs/README.md`. Gate: root
   staged-gate review of this task's exact diff before any commit. Acceptance:
   docs match shipped behavior. Verify: `make lint docs`; `make lint`; `make generate` no-diff.
+- [ ] **T11 Engine group-forward observation.** Blocked by: T7 (the predicate it feeds is
+  committed; the serial package admits one in-flight task at a time). Owns:
+  `pkg/worker/controllers/worker/model_deployment_health*.go` plus any new engine-observation
+  client files in-package; no `pack/llm-router` or retirement-path edits. Gate: root staged-gate
+  review of this task's exact diff before any commit. Acceptance: the GroupForward leg gains a
+  verifiable observation for each engine where one factually exists at the pinned versions —
+  per-engine evidence cited from the pinned engine surfaces, and where none exists the leg stays
+  Unsupported with the reason naming the engine; a healthy multi-member group qualifies only
+  through that observation, a broken collective still revokes through the definite-fault legs,
+  and the single-member path is byte-identical in behavior. Until this task lands, multi-member
+  replica groups (TP/PP groups, External-DP multi-member roles, P/D roles) stay held — the
+  committed T7 behavior, kept deliberately over granting eligibility on a weaker signal.
+  Verify: package tests (per-engine verifiable/unsupported matrix; healthy multi-member group
+  admitted only via the observation; broken collective revoked; single-member path unchanged).
 
 ### Test Plan
 
