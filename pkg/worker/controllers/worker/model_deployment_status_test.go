@@ -214,7 +214,7 @@ func TestComputeModelDeploymentStatus_Roles(t *testing.T) {
 }
 
 func TestProjectModelDeploymentRouterStatus_FollowsTheRender(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil, false)
 	require.NoError(t, err)
 	objects.Contract.Endpoint = "http://perturbed-router.test:8081"
 	objects.Contract.Metrics.QueuedRequests = "perturbed_queue_metric"
@@ -233,7 +233,7 @@ func TestProjectModelDeploymentRouterStatus_FollowsTheRender(t *testing.T) {
 
 func TestRenderModelDeploymentRouterStatus_RoleSetIsExact(t *testing.T) {
 	md := routedModelDeployment()
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	want := make([]string, 0, len(md.Spec.Roles))
@@ -253,7 +253,7 @@ func TestRenderModelDeploymentRouterStatus_RoleSetIsExact(t *testing.T) {
 
 func TestComputeModelDeploymentRouterStatus_ProjectsPoolClientEndpoint(t *testing.T) {
 	md := routedModelDeployment()
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 	pool := &workercore.KVCachePool{
 		ObjectMeta: meta.ObjectMeta{Name: "pool-a"},
@@ -273,7 +273,7 @@ func TestComputeModelDeploymentRouterStatus_ProjectsPoolClientEndpoint(t *testin
 func TestComputeModelDeploymentStatus_RouterReadinessControlsEndpointAndPhase(t *testing.T) {
 	md := routedModelDeployment()
 	pods := readyRouterRolePods(md)
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	testCases := []struct {
