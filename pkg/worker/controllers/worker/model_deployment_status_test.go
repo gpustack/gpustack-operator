@@ -2692,3 +2692,87 @@ func TestComputeModelDeploymentStatus_ReadsRoleParallelism(t *testing.T) {
 		})
 	}
 }
+
+// TestEligibilityDecisionMirrorsTheRecordedCondition requires the pass-decision helper and the
+// recorded condition to agree across qualified, held, unsupported, fault, and empty replicas.
+func TestEligibilityDecisionMirrorsTheRecordedCondition(t *testing.T) {
+	leg := func(verdict modelDeploymentLegVerdict) modelDeploymentQualificationLeg {
+		return modelDeploymentQualificationLeg{
+			Name:    modelDeploymentLegGroupForward,
+			Verdict: verdict,
+		}
+	}
+	unsupported := func() modelDeploymentInstanceQualification {
+		return modelDeploymentInstanceQualification{
+			Observed: true,
+			GroupForward: modelDeploymentGroupForward{
+				State: modelDeploymentGroupForwardUnsupported,
+			},
+			Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegUnknown)},
+		}
+	}
+
+	for _, tc := range []struct {
+		name           string
+		qualifications []modelDeploymentInstanceQualification
+		wantDecided    bool
+		wantCondition  string
+	}{
+		{
+			name: "every observed replica qualified decides True",
+			qualifications: []modelDeploymentInstanceQualification{
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegVerified)}},
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegVerified)}},
+			},
+			wantDecided: true, wantCondition: "True",
+		},
+		{
+			name: "a qualified replica beside a held one decides nothing",
+			qualifications: []modelDeploymentInstanceQualification{
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegVerified)}},
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegUnknown)}},
+			},
+			wantDecided: false, wantCondition: "Unknown",
+		},
+		{
+			name: "a qualified replica beside an unsupported one decides nothing",
+			qualifications: []modelDeploymentInstanceQualification{
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegVerified)}},
+				unsupported(),
+			},
+			wantDecided: false, wantCondition: "Unknown",
+		},
+		{
+			name: "a definite fault decides False beside a held one",
+			qualifications: []modelDeploymentInstanceQualification{
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegFailed)}},
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegUnknown)}},
+			},
+			wantDecided: true, wantCondition: "False",
+		},
+		{
+			name:           "no observed replica decides nothing",
+			qualifications: []modelDeploymentInstanceQualification{{Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegUnknown)}}},
+			wantDecided:    false, wantCondition: "Unknown",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			holder := new(workercore.ModelDeployment)
+			observeModelDeploymentEndpointEligibility(holder, tc.qualifications)
+
+			condition := ""
+			for i := range holder.Status.Conditions {
+				if holder.Status.Conditions[i].Type == string(ModelDeploymentConditionEndpointEligibility) {
+					condition = string(holder.Status.Conditions[i].Status)
+				}
+			}
+			assert.Equal(t, tc.wantCondition, condition, "recorded condition")
+
+			decided := modelDeploymentEligibilityDecided(holder)
+			assert.Equal(t, tc.wantDecided, decided, "from the recorded condition")
+			assert.Equal(t, tc.wantDecided,
+				modelDeploymentQualificationsDecided(tc.qualifications),
+				"from the raw qualifications")
+		})
+	}
+}

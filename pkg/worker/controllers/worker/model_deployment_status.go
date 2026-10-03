@@ -634,8 +634,7 @@ func observeModelDeploymentEndpointEligibility(
 func modelDeploymentQualificationsDecided(
 	qualifications []modelDeploymentInstanceQualification,
 ) bool {
-	revoked, decided := 0, false
-	observed := 0
+	revoked, qualified, observed := 0, 0, 0
 	for _, qualification := range qualifications {
 		if !qualification.Observed {
 			continue
@@ -643,13 +642,15 @@ func modelDeploymentQualificationsDecided(
 		observed++
 		switch {
 		case qualification.Eligible():
-			decided = true
+			qualified++
 		case qualification.HasFailure():
 			revoked++
 		}
 	}
 
-	return revoked > 0 || (observed > 0 && decided && revoked == 0)
+	// A definite failure decides False. Otherwise the pass decides only when every observed
+	// replica qualified, which is the same bar the recorded Unknown condition uses.
+	return revoked > 0 || (observed > 0 && qualified == observed)
 }
 
 // heldLegNames renders the unverified leg names for a condition message, sorted so the same held
