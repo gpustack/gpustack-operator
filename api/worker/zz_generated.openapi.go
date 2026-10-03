@@ -191,6 +191,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentPort{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentPort(ref),
 		v1alpha1.ModelDeploymentRetirementStatus{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentRetirementStatus(ref),
 		v1alpha1.ModelDeploymentRole{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref),
+		v1alpha1.ModelDeploymentRoleElasticEP{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleElasticEP(ref),
 		v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleEndpointsStatus(ref),
 		v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleParallelismStatus(ref),
 		v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref),
@@ -10042,12 +10043,52 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							Format:      "int64",
 						},
 					},
+					"elasticEp": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ElasticEP opts this role into the managed elastic-EP profile: the operator then renders one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head and one whole-GPU member per engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role without it renders exactly as it did before this field existed, and a profile that is turned on and off again describes a different deployment, so the field's presence and HeadInstanceType are frozen at creation while Width stays editable.\n\nThe profile admits exactly one such role per deployment, running the vLLM engine as a single Server role of one instance of one Pod. Every member -- the reserved API/DP-master and every Ray-only worker -- takes one whole, non-sliced, non-partitioned accelerator, so the role's resources are pinned to that shape at admission. The head is admitted separately against HeadInstanceType's own queue and never counts toward Width.",
+							Ref:         ref(v1alpha1.ModelDeploymentRoleElasticEP{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"name", "instanceType"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName(), v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentPort{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleTopology{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName(), v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentPort{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleElasticEP{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleTopology{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleElasticEP(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.\n\nWidth is the ONLY mutable field: it answers how large the collective currently should be, which is a running-state question. Presence and HeadInstanceType answer which deployment this is and where its control plane lives, which is identity, and are frozen with the rest of the identity fields.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"width": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Width is the total number of GPU engines in the elastic collective, INCLUDING the reserved API/DP-master member; width-1 of them are Ray-only workers. It is the total engine world the engine is told to run, not a Pod count and not a rank mapping: which member holds which rank is the engine's own runtime fact and is never implied by this number.",
+							Default:     0,
+							Minimum:     ptr.To[float64](2),
+							Maximum:     ptr.To[float64](64),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"headInstanceType": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HeadInstanceType is the name of the CPU-only InstanceType the Ray control-plane head runs against. The head is admitted as its own CPU-accounted workload on that type's queue: it takes no accelerator, joins no GPU queue at zero charge, and is not a width member.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"width", "headInstanceType"},
+			},
+		},
 	}
 }
 
