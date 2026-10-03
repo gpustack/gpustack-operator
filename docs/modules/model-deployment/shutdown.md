@@ -82,6 +82,10 @@ surplus replicas, and a replica of a role the spec has dropped. Its progress is 
 [`status.retirement` field](status.md#status), and the replica stays in place, still counted,
 for as long as the protocol holds it.
 
+For `llm-d-router`, withdrawal also waits for recent dispatches reported for a target member.
+This applies after the Router removes that member from selection. These records do not increase
+the serving count. A dispatch to an unrelated survivor does not hold the target.
+
 Two mechanisms are involved and they answer different questions. The protocol decides **whether the
 Pod may be deleted**; the [drain window](#the-drain-window) above decides **how long the engine
 takes to exit once it is**, on the kubelet's grace clock after the delete. A replica passes the

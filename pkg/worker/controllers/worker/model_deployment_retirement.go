@@ -845,16 +845,31 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementResidual(
 	}
 
 	serving := sets.New[types.UID]()
+	// The journal is added to what has to be checked, never to the serving count. A worker the
+	// router removed from its selection is not serving, and counting it as such would keep every
+	// other member of the deployment waiting on a count that is wrong. What it does mean is that a
+	// dispatch reached this target, so releasing it now releases a member that may still be
+	// serving. That is evidence enough to hold, and it is evidence about the target alone, so an
+	// unrelated survivor's dispatch never holds the captured target.
+	dispatched := sets.New[types.UID]()
 	for _, observation := range observations {
 		for _, endpoint := range observation.Bound {
 			if endpoint.Serving {
 				serving.Insert(endpoint.PodUID)
 			}
 		}
+		for _, endpoint := range observation.RecentDispatch {
+			dispatched.Insert(endpoint.PodUID)
+		}
 	}
 
 	residual := sets.New[types.UID]()
 	for uid := range serving {
+		if held.Has(uid) {
+			residual.Insert(uid)
+		}
+	}
+	for uid := range dispatched {
 		if held.Has(uid) {
 			residual.Insert(uid)
 		}

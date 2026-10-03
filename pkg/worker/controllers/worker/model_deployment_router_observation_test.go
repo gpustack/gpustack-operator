@@ -2,7 +2,9 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -303,7 +305,7 @@ func TestBindRouterObservationView(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			bound, err := bindRouterObservationView(tc.view, tc.pods)
+			bound, _, err := bindRouterObservationView(tc.view, tc.pods, false)
 			if tc.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tc.wantErr)
@@ -882,6 +884,170 @@ func TestObservationBudgetCoversDiscoveryAndRemainingRetirement(t *testing.T) {
 				require.False(t, deadline.IsZero(), "every discovery is bounded")
 				require.LessOrEqual(t, deadline.Sub(now), tc.want+500*time.Millisecond)
 			}
+		})
+	}
+}
+
+// journalWorker is one observed worker, stated as facts rather than as a handler. The maps are the
+// literal JSON the shipped observer serves, so a row cannot drift into a shape the producer does
+// not emit.
+type journalWorker map[string]any
+
+// journalWorkerFact builds one observed worker at a live Pod's own address. The address is the Pod
+// list's, never a literal here, because the collection binds a worker's address to the Pod it
+// resolves to at read time and refuses a view it cannot bind.
+func journalWorkerFact(ip, uid string, inSelection bool, lastJob map[string]any) journalWorker {
+	worker := journalWorker{
+		"url":  "http://" + ip + ":8000",
+		"port": "8000", "role": "server",
+		"pod_hint": uid, "worker_id": uid,
+		"selection": map[string]any{
+			"registered": inSelection, "healthy": inSelection,
+			"circuit_open": false, "in_selection": inSelection,
+		},
+	}
+	if lastJob != nil {
+		worker["last_job"] = lastJob
+	}
+
+	return worker
+}
+
+// journalView renders the view the shipped llm-d observer serves for a set of workers. A failure to
+// encode is a broken fixture rather than a case under test, so it stops the test where it is
+// reported instead of carrying a panic into the collection.
+func journalView(t *testing.T, workers []journalWorker) []byte {
+	t.Helper()
+
+	payload, err := json.Marshal(map[string]any{
+		"router":            map[string]any{"boot_generation": 1, "now_ms": 1},
+		"registry_revision": 1,
+		"workers":           workers,
+	})
+	require.NoError(t, err)
+
+	return payload
+}
+
+// TestRetirementResidualReadsTheDispatchJournal asks the real residual function, with the real
+// collector, about a target the router removed from its selection.
+//
+// The shipped observer keeps a removed worker in the view with in_selection false and marks the
+// dispatches it recently sent to it under last_job.recent_dispatch. The binder refuses to count a
+// worker outside the selection as serving, which is right, so the journal is the only remaining
+// evidence that a dispatch reached the target. Before it was read, a target with a recent dispatch
+// read as a target with nothing left serving it, and the operation released it.
+func TestRetirementResidualReadsTheDispatchJournal(t *testing.T) {
+	recent := map[string]any{"recent_dispatch": true}
+	notRecent := map[string]any{"recent_dispatch": false}
+
+	for _, tc := range []struct {
+		name     string
+		workers  []journalWorker
+		status   int
+		wantHeld bool
+	}{
+		{
+			name:     "a removed captured target with a recent dispatch holds the release",
+			workers:  []journalWorker{journalWorkerFact("10.0.1.1", "member-1", false, recent)},
+			wantHeld: true,
+		},
+		{
+			name:     "a complete view with no target selection and no dispatch clears this check",
+			workers:  []journalWorker{journalWorkerFact("10.0.1.1", "member-1", false, nil)},
+			wantHeld: false,
+		},
+		{
+			name:     "a journal that says the dispatch was not recent does not hold",
+			workers:  []journalWorker{journalWorkerFact("10.0.1.1", "member-1", false, notRecent)},
+			wantHeld: false,
+		},
+		{
+			name: "recent dispatch for an unrelated survivor does not hold the captured target",
+			workers: []journalWorker{
+				journalWorkerFact("10.0.1.1", "member-1", false, nil),
+				journalWorkerFact("10.0.1.2", "other-1", false, recent),
+			},
+			wantHeld: false,
+		},
+		{
+			// A journal block the producer does not emit is a block this operator cannot read.
+			// Reading it as false would be a decoder default turning unreadable evidence into
+			// confirmed absence of a dispatch, which is the one thing the journal must never be.
+			name:     "a journal without the boolean holds rather than confirming absence",
+			workers:  []journalWorker{journalWorkerFact("10.0.1.1", "member-1", false, map[string]any{"job_type": "add"})},
+			wantHeld: true,
+		},
+		{
+			name:     "a selectable captured target is still held by the serving count",
+			workers:  []journalWorker{journalWorkerFact("10.0.1.1", "member-1", true, nil)},
+			wantHeld: true,
+		},
+		{
+			// The observer answers 503 while a selection or send is pending, which is exactly the
+			// window in which a dispatch may be in flight and unrecorded. No supported shape, no
+			// fresh timestamp and no absent journal can stand in for that answer.
+			name:     "an actual native 503 remains unknown and holds",
+			workers:  nil,
+			status:   http.StatusServiceUnavailable,
+			wantHeld: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md, _ := retirementRouterFixture(newRenderDeployment())
+			pods := []corev1.Pod{
+				*surplusReplicaAt(t, md, "qwen-server-one", 1, ""),
+				*surplusReplicaAt(t, md, "qwen-server-zero", 0, ""),
+			}
+			pods[0].UID = "member-1"
+			pods[1].UID = "other-1"
+			ips := []string{"10.0.1.1", "10.0.1.2"}
+			objects := make([]ctrlcli.Object, 0, 2+len(pods))
+			objects = append(objects, md, retirementRouterPod("router-zero", "10.0.9.1"))
+			for i := range pods {
+				pods[i].Status.Phase = corev1.PodRunning
+				pods[i].Status.PodIP = ips[i]
+				objects = append(objects, pods[i].DeepCopy())
+			}
+			client := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(objects...).Build()
+			status := tc.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			r := &ModelDeploymentReconciler{
+				Client: client, APIReader: client, clock: time.Now,
+				servingViewFetch: func(context.Context, string) ([]byte, error) {
+					if status != http.StatusOK {
+						return nil, fmt.Errorf("observer answered %d", status)
+					}
+
+					return journalView(t, tc.workers), nil
+				},
+			}
+
+			reason, held := r.observeModelDeploymentRetirementResidual(
+				context.Background(), md, sets.New[types.UID]("member-1"))
+
+			assert.Equal(t, tc.wantHeld, held, reason)
+		})
+	}
+}
+
+// TestTheObserverIsReadFromTheOwningProfileListener pins the listener each profile serves the
+// observer on. The llm-d patches attach it to the management listener the router already runs;
+// the other two serve it on the request port their Service already targets, and their contract is
+// unchanged.
+func TestTheObserverIsReadFromTheOwningProfileListener(t *testing.T) {
+	for _, tc := range []struct {
+		profile string
+		want    int32
+	}{
+		{profile: "llm-d-router", want: modelDeploymentRouterMetricsPort},
+		{profile: "vllm-router", want: modelDeploymentRouterHTTPPort},
+		{profile: "sglang-gateway", want: modelDeploymentRouterHTTPPort},
+	} {
+		t.Run(tc.profile, func(t *testing.T) {
+			assert.Equal(t, tc.want, modelDeploymentRouterObserverPort(tc.profile))
 		})
 	}
 }

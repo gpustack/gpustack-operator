@@ -554,6 +554,10 @@ disposition rather than opening another general review or automatic retry.
       identity checks require the expected API kind/version and a running container. No status
       wire or accepted budgets change.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -count=1 -race ./pkg/worker/controllers/worker/...`
+      Completed offline leaf: profile-specific observer listeners and llm-d recent-dispatch
+      consumption. Independent baseline failure and corrected race controls verify this leaf.
+      The remaining ownership, membership, endpoint and drain checks stay open.
+      Full integration remains blocked by T2. CPU checks do not prove physical EP behavior.
 - [ ] **T4 · Ray workload, admission and identity-safe retirement realization**
       Blocked by: T2, T3
       Owns: `pkg/worker/controllers/worker/model_deployment_elastic_workload*.go` and

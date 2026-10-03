@@ -244,7 +244,14 @@ type RouterServingObservation struct {
 	// on the operator's clock, not the router's.
 	CollectedAt time.Time
 	Bound       []ServingEndpoint
-	Err         error
+	// RecentDispatch is the journal of workers this router recently dispatched to, bound to the
+	// same Pod identity as Bound and kept deliberately OUT of it. These workers are no longer in
+	// the selection, so folding them into Bound would raise the serving count for workers the
+	// router has already stopped selecting. The journal answers a different question, which only
+	// the retirement residual asks: did a dispatch reach this target recently enough that
+	// releasing it now would be releasing a member that may still be serving.
+	RecentDispatch []ServingEndpoint
+	Err            error
 }
 
 // Empty reports a view that was never read. A transport failure produces an Empty
@@ -257,6 +264,21 @@ func (o RouterServingObservation) Empty() bool {
 // observerURL is the endpoint the observer patches serve, on the router's existing
 // listener.
 const observerURLPath = "/observer/endpoints"
+
+// modelDeploymentRouterObserverPort is the listener the owning profile serves the observer on.
+//
+// llm-d attaches the observer to the admin handler it already runs, which is the management
+// listener where its metrics live. The other two profiles serve it on the request port their
+// Service already targets, so their contract is unchanged. The value is read from the profile
+// rather than discovered from a Pod, because a Pod port is what a container happens to have open
+// and not something a caller may read a view from.
+func modelDeploymentRouterObserverPort(profile string) int32 {
+	if profile == workercore.ModelDeploymentRouterLLMD {
+		return modelDeploymentRouterMetricsPort
+	}
+
+	return modelDeploymentRouterHTTPPort
+}
 
 // modelDeploymentObserverMaxBodyBytes caps one observer body. It is generous for a membership view
 // of a few hundred workers and small enough that a Router misbehaving cannot grow the response into
@@ -344,8 +366,8 @@ func collectRouterServingView(
 // Workers outside the selection are never bound and never refuse the view: they are the
 // workers the router itself already refused.
 func bindRouterObservationView(
-	view RouterServingView, pods []*corev1.Pod,
-) ([]ServingEndpoint, error) {
+	view RouterServingView, pods []*corev1.Pod, journal bool,
+) ([]ServingEndpoint, []ServingEndpoint, error) {
 	byIP := make(map[string][]*corev1.Pod, len(pods))
 	for _, pod := range pods {
 		if ip := pod.Status.PodIP; ip != "" {
@@ -354,35 +376,84 @@ func bindRouterObservationView(
 	}
 
 	bound := make([]ServingEndpoint, 0)
+	dispatched := make([]ServingEndpoint, 0)
 	for _, worker := range view.Workers {
-		if !worker.Selection.InSelection {
-			continue
+		// A worker outside the selection is never counted as serving, whether or not it appears
+		// in the journal. The journal is separate evidence, not a promotion back into Bound.
+		inSelection := worker.Selection.InSelection
+		if !inSelection {
+			if !journal {
+				continue
+			}
+			recent, failure := recentDispatchFromLastJob(worker.LastJob)
+			if failure != nil {
+				return nil, nil, failure
+			}
+			if !recent {
+				continue
+			}
 		}
 		host := workerHost(worker.URL)
 		if host == "" {
-			return nil, fmt.Errorf("binding indeterminate: worker URL %q has no address", worker.URL)
+			return nil, nil, fmt.Errorf("binding indeterminate: worker URL %q has no address", worker.URL)
 		}
 		candidates := byIP[host]
 		if len(candidates) != 1 {
-			return nil, fmt.Errorf(
+			return nil, nil, fmt.Errorf(
 				"binding indeterminate: %s resolves to %d live pods, not one", host, len(candidates))
 		}
 		pod := candidates[0]
 		if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
-			return nil, fmt.Errorf(
+			return nil, nil, fmt.Errorf(
 				"binding indeterminate: %s is pod %s which is not live", host, pod.Name)
 		}
-		bound = append(bound, ServingEndpoint{
+		endpoint := ServingEndpoint{
 			PodUID:  pod.UID,
 			Member:  pod.Name,
 			Role:    worker.Role,
 			URL:     worker.URL,
 			Port:    worker.Port,
-			Serving: true,
-		})
+			Serving: inSelection,
+		}
+		if inSelection {
+			bound = append(bound, endpoint)
+
+			continue
+		}
+		dispatched = append(dispatched, endpoint)
 	}
 
-	return bound, nil
+	return bound, dispatched, nil
+}
+
+// recentDispatchFromLastJob reads the journal field the shipped llm-d observer writes.
+//
+// The producer omits last_job entirely for a worker it never dispatched to, so an absent block is
+// the absence of a recent dispatch rather than a missing required field. Requiring it would make
+// every untouched worker an error. A block that is present must carry recent_dispatch as a boolean,
+// because the producer emits it only to mark a dispatch. A block without it, or with it as anything
+// else, is a shape this operator does not understand, and it is refused rather than read as false:
+// a decoder default would turn a journal it could not read into a confirmed absence of a dispatch,
+// which is the one reading this field must never get.
+//
+// A worker outside the selection with no journal block is left to the caller. The other two
+// routers publish the gateway's own last_job shape there, which this operator does not interpret.
+func recentDispatchFromLastJob(raw json.RawMessage) (bool, error) {
+	if len(raw) == 0 {
+		return false, nil
+	}
+	var job struct {
+		Recent *bool `json:"recent_dispatch"`
+	}
+	if err := json.Unmarshal(raw, &job); err != nil {
+		return false, fmt.Errorf("the dispatch journal is not readable: %w", err)
+	}
+	if job.Recent == nil {
+		return false, fmt.Errorf(
+			"the dispatch journal carries no recent_dispatch boolean, so it cannot be read")
+	}
+
+	return *job.Recent, nil
 }
 
 // workerHost extracts the address portion of a worker URL: scheme-stripped, path-stripped.
@@ -619,6 +690,14 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 		fetch = defaultServingViewFetch
 	}
 
+	// The observer is served on the listener the owning profile already runs. llm-d serves it on
+	// its management listener, which is where its metrics and admin endpoints already are; the
+	// other two serve it on the request port their Service targets. The port comes from the
+	// profile, never from an arbitrary Pod port, because a Pod port is not a contract.
+	port := modelDeploymentRouterObserverPort(md.Spec.Router.Name)
+	// The dispatch journal is read only from the profile that publishes it. The other two publish
+	// the gateway's own last_job shape under that key, which this operator does not interpret.
+	journal := md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD
 	observations := make([]RouterServingObservation, 0, len(routerPods.Items))
 	for i := range routerPods.Items {
 		routerPod := &routerPods.Items[i]
@@ -629,7 +708,7 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 			callCtx context.Context, path string,
 		) ([]byte, error) {
 			return fetch(callCtx, fmt.Sprintf("http://%s:%d%s",
-				routerPod.Status.PodIP, modelDeploymentRouterHTTPPort, path))
+				routerPod.Status.PodIP, port, path))
 		}, routerPod.UID)
 		if err != nil {
 			observations = append(observations, observation)
@@ -641,7 +720,7 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 		// fetch could push the last view's recorded age to the freshness edge before the
 		// aggregate ever judged it. The freshness gate in the aggregate is unchanged.
 		observation.CollectedAt = r.modelDeploymentNow()
-		observation.Bound, err = bindRouterObservationView(observation.View, live)
+		observation.Bound, observation.RecentDispatch, err = bindRouterObservationView(observation.View, live, journal)
 		if err != nil {
 			observation.Err = err
 		}
