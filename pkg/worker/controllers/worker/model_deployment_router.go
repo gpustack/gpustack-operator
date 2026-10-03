@@ -553,9 +553,6 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 ) error {
 	var rendered ModelDeploymentRouterObjects
 	if md.Spec.Router != nil {
-		// RETENTION: the discovery equality, once published, survives a quiet pass. The live
-		// ConfigMap is the published fact; the static activatability half still governs, so a
-		// deployment whose shapes stopped being activatable loses the term on this pass.
 		// RETENTION: the discovery equality, once published, survives a quiet pass on EVERY
 		// shipped profile. The llm-d profile publishes the ConfigMap; the vllm-router and
 		// sglang-gateway profiles configure by argv and render none, so absence of a ConfigMap is
