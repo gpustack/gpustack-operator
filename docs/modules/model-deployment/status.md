@@ -245,9 +245,8 @@ operation occupies.
 The drain step is where a replica still holding requests is caught before anything is cut; it is
 described in [Model Deployment Shutdown](shutdown.md#the-retirement-protocol).
 
-
-Eight conditions carry the axes a single phase cannot. They are independent: "quota reserved but
-cache not attached" is a real and actionable state. Seven are described below; `WeightsReady` is
+Nine conditions carry the axes a single phase cannot. They are independent: "quota reserved but
+cache not attached" is a real and actionable state. Eight are described below; `WeightsReady` is
 described with the artifact it reports on, in [Model Artifact](../model-delivery/artifact.md#status).
 
 **`DomainRegistered`** — whether the referenced Binding resolved and its domain was read.

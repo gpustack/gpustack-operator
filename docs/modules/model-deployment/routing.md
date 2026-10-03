@@ -104,8 +104,8 @@ of the Router itself; they are published separately in
 
 The observation is a plain HTTP GET with a short timeout against each Router Pod's own address. It
 deliberately does not go through the Router Service, which would load balance across the Router's
-replicas and report one of them as the whole Router. Every Router's view is collected, and the
-answer is `Confirmed` only when the complete, fresh, identity-bound views agree.
+replicas and report one of them as the whole Router. What `Confirmed` then means is the
+serving-observation contract [`status.roles[].endpoints`](status.md#status) defines once.
 
 **A collected view informs the answer for fifteen seconds.** Past that the answer becomes `Unknown`,
 so a Router that stops being reachable is reported as unobserved and never as serving whatever it
@@ -114,10 +114,6 @@ served last.
 > The freshness bound is what keeps a stopped Router from reading as a healthy one. A view that
 > outlived its evidence would report a serving count for a process that is gone, and the only way
 > back would be an edit to the deployment.
-
-> **Acceptance pending.** The mechanism above is as built. Its measured observation latency under
-> full-matrix conditions has not met the 30 s budget, and the ruling on that is outstanding. Treat
-> the timeliness of this observation as unverified until it is.
 
 ## Per-worker routing metrics
 
