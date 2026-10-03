@@ -343,7 +343,7 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRouter(
 		return 0, nil
 	}
 
-	objects, err := renderModelDeploymentRouterObjects(ctx, md, manufacturers)
+	objects, err := renderModelDeploymentRouterObjects(ctx, md, manufacturers, false)
 	if err != nil {
 		// A render refusal is a spec problem, not a cluster one: it is projected as the condition
 		// and the rest of the status computes anyway, because returning here would freeze every
@@ -626,6 +626,32 @@ func observeModelDeploymentEndpointEligibility(
 	}
 }
 
+// modelDeploymentQualificationsDecided mirrors observeModelDeploymentEndpointEligibility's
+// precedence over the same replicas: a definite revocation decides False and a fully qualified
+// pass decides True, while Unsupported, a hold, and no observation decide nothing. The status
+// holder is a copy, so the convergence paths read the pass's decision from here rather than from
+// a condition that is not persisted yet.
+func modelDeploymentQualificationsDecided(
+	qualifications []modelDeploymentInstanceQualification,
+) bool {
+	revoked, decided := 0, false
+	observed := 0
+	for _, qualification := range qualifications {
+		if !qualification.Observed {
+			continue
+		}
+		observed++
+		switch {
+		case qualification.Eligible():
+			decided = true
+		case qualification.HasFailure():
+			revoked++
+		}
+	}
+
+	return revoked > 0 || (observed > 0 && decided && revoked == 0)
+}
+
 // heldLegNames renders the unverified leg names for a condition message, sorted so the same held
 // group reports the same reason on two consecutive passes.
 func heldLegNames(held map[modelDeploymentQualificationLegName]bool) string {
@@ -641,12 +667,6 @@ func heldLegNames(held map[modelDeploymentQualificationLegName]bool) string {
 	return strings.Join(names, ", ")
 }
 
-// observeModelDeploymentEndpointEligibility reports, at the deployment level, whether the
-// endpoints have been qualified at all. While no qualification observation exists the answer is
-// Unknown rather than False, because a False here would read as a disqualification the operator
-// made, and no pass has made one: the nil per-role eligible counts and this condition say the
-// same fact at their two levels, so neither can be read as an empty set.
-//
 // modelDeploymentPodRole reads which role a replica belongs to.
 func modelDeploymentPodRole(pod *core.Pod) string {
 	return pod.Labels[modelDeploymentLabelKeyComponent]

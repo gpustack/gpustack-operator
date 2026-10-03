@@ -145,16 +145,16 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 			wantLeg: modelDeploymentLegMemberSetComplete, wantVect: modelDeploymentLegFailed,
 		},
 		{
-			name: "one member not ready fails the whole replica",
+			name: "one member not ready fails the whole replica, and no probe is spent on it",
 			md:   healthDeployment(2),
 			pods: []core.Pod{
 				healthPod("server", 0, 0, healthBool(true), "uid-a"),
 				healthPod("server", 0, 1, healthBool(false), "uid-b"),
 			},
-			// The group leg is verified here — the transport carried this operator's request through
-			// both members — so the fault is the ONLY thing standing between this replica and
-			// selection, which is what makes the case a statement about whole-group readiness.
-			wantEligible: false, wantActivated: true,
+			// The readiness fault alone condemns the replica, so no live probe is fired for it:
+			// the group leg reads Unknown as an absence of evidence, and the definite fault is
+			// the only thing standing between this replica and selection.
+			wantEligible: false, wantActivated: false,
 			wantLeg: modelDeploymentLegMembersReady, wantVect: modelDeploymentLegFailed,
 		},
 		{
@@ -593,4 +593,57 @@ func TestAnUnverifiedLegIsAHoldAndNotARevocation(t *testing.T) {
 		"the hold names its class and is not reported as a revocation")
 	assert.NotContains(t, modelDeploymentRoleQualified(qualifications), "server",
 		"a held replica contributes no count, so the role's count stays nil")
+}
+
+// TestACondemnedReplicaIsNeverProbed pins the cheap-legs-first ordering at the real call site:
+// a replica already condemned by a definite cache-carried leg must reach the probe transport
+// zero times, on any engine shape the probe would otherwise serve. A one-token live request
+// against a replica whose fault is already certain spends engine tokens on an answer that
+// cannot soften the fault.
+func TestACondemnedReplicaIsNeverProbed(t *testing.T) {
+	calls := 0
+	countingFetch := func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+		calls++
+		return boundProbeFetch(context.Background(), "", nil)
+	}
+
+	t.Run("an unready member condemns the replica before any probe", func(t *testing.T) {
+		calls = 0
+		md := healthDeployment(2)
+		pods := []core.Pod{
+			healthPod("server", 0, 0, healthBool(true), "uid-a"),
+			healthPod("server", 0, 1, healthBool(false), "uid-b"),
+		}
+		qualifications := qualifyModelDeploymentInstances(
+			context.Background(), md, pods,
+			modelDeploymentPendingReplacement{}, countingFetch,
+		)
+		require.Len(t, qualifications, 1)
+		assert.Zero(t, calls, "a replica condemned by the readiness leg must not be probed")
+		assert.False(t, qualifications[0].Activated())
+		assert.True(t, qualifications[0].HasFailure())
+	})
+
+	t.Run("an incomplete replica condemns it before any probe", func(t *testing.T) {
+		calls = 0
+		md := healthDeployment(2)
+		pods := []core.Pod{
+			healthPod("server", 0, 0, healthBool(true), "uid-a"),
+			healthPod("server", 0, 1, healthBool(true), "uid-b"),
+			healthPod("server", 1, 0, healthBool(true), "uid-c"),
+		}
+		_ = pods
+		pods = []core.Pod{
+			healthPod("server", 0, 0, healthBool(true), "uid-a"),
+		}
+		qualifications := qualifyModelDeploymentInstances(
+			context.Background(), md, pods,
+			modelDeploymentPendingReplacement{}, countingFetch,
+		)
+		// One member of two: the completeness leg fails AND the shape answers without the
+		// network (NotApplicable), so zero calls is true twice over.
+		require.Len(t, qualifications, 1)
+		assert.Zero(t, calls)
+		assert.False(t, qualifications[0].Eligible())
+	})
 }

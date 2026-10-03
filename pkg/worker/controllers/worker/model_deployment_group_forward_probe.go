@@ -44,7 +44,11 @@ import (
 // route, so the probe is identifiable in the engine's own logs and counters by anyone reading them.
 const modelDeploymentQualifyRIDPrefix = "gpustack-qualify-"
 
-// modelDeploymentGroupForwardBound is how long one member has to answer the probe.
+// modelDeploymentGroupForwardBound is how long the whole replica's probe may take. It is ONE
+// budget shared across every member asked, not one per member: the members are probed
+// sequentially under it, so an early member that answers slowly consumes the budget the later
+// members would have used. The bound sizes the whole pass's patience for one replica, exactly
+// like the router observation budget sizes one collection.
 //
 // IT IS A BOUND AND NOT A DEADLINE THE ENGINE HONORS, because neither engine's request struct
 // carries a timeout: vLLM's CompletionRequest at both versions read here has no such field, and
@@ -319,6 +323,13 @@ func modelDeploymentGroupForwardUnknownFor(reason string) modelDeploymentGroupFo
 
 // modelDeploymentGroupForwardURL builds the member's own serving URL from the annotations the
 // render already stamps on it, so the probe needs nothing this operator did not already write.
+//
+// THE ANNOTATION IS A HARD REQUIREMENT, AND A TAKE-OVER ROLE HAS NONE. The render stamps
+// prometheus.io/port only for roles running the operator's own command line: for a replaced
+// command the operator cannot know what the replacement serves, so it stamps nothing. A
+// multi-member take-over role therefore cannot be probed and reads Unknown; no port is guessed
+// from the container spec, because inventing a serving contract the command never declared
+// would turn absence of evidence into a claim.
 func modelDeploymentGroupForwardURL(member *core.Pod, path string) (string, error) {
 	if member.Status.PodIP == "" {
 		return "", fmt.Errorf("has no address to be asked at yet")

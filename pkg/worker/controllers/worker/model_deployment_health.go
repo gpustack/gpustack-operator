@@ -298,30 +298,16 @@ func qualifyModelDeploymentInstance(
 	fetch modelDeploymentGroupForwardFetch,
 ) modelDeploymentInstanceQualification {
 	size := modelDeploymentRoleSize(role)
-	groupForward := observeModelDeploymentGroupForward(ctx, md, role, view, fetch)
 
-	qualification := modelDeploymentInstanceQualification{
-		View:         view,
-		Generation:   modelDeploymentGenerationOf(view),
-		GroupForward: groupForward,
-	}
-	for _, member := range view.Members {
-		if modelDeploymentMemberReadiness(member) != modelDeploymentLegUnknown {
-			qualification.Observed = true
-
-			break
-		}
-	}
-
-	// COMPLETENESS IS NOT REDUNDANT WITH READINESS. A replica short of a declared member can
-	// have every member it does hold reporting ready, while Kueue has composed no Workload for
-	// it and it is admitted by nothing. It is absent with some Pods lying around, not partly
-	// working.
-	qualification.Legs = append(qualification.Legs, modelDeploymentQualificationLeg{
+	// THE CHEAP LEGS ARE DECIDED BEFORE THE OBSERVATION IS ASKED FOR. A replica that is short a
+	// member or holds an unready one is already condemned by facts the informer cache carries, so
+	// it never pays for a live observation, and more importantly its definite fault is never
+	// softened into a hold by an observation that happens to be missing.
+	membersComplete := modelDeploymentQualificationLeg{
 		Name:    modelDeploymentLegMemberSetComplete,
 		Verdict: legVerdict(modelDeploymentReplicaIsComplete(view, size)),
 		Reason:  "the replica holds " + strconvx.Itoa(len(view.Members)) + " of " + strconvx.Itoa(size) + " declared members",
-	})
+	}
 
 	unready, unobserved := 0, 0
 	for _, member := range view.Members {
@@ -352,6 +338,37 @@ func qualifyModelDeploymentInstance(
 		membersReady.Reason = strconvx.Itoa(unready) + " of " +
 			strconvx.Itoa(len(view.Members)) + " members report not ready"
 	}
+
+	// A replica condemned by a definite leg owes nothing to a live probe: the request would
+	// spend engine tokens on an answer that cannot soften the fault. The observation is still
+	// ASKED, with no transport: answers that never needed the network (a one-member replica is
+	// NotApplicable, an unverified shape is Unsupported) are unchanged, and only the probe leg
+	// comes back as an absence of evidence.
+	fetchForReplica := fetch
+	if membersComplete.Verdict == modelDeploymentLegFailed ||
+		membersReady.Verdict == modelDeploymentLegFailed {
+		fetchForReplica = nil
+	}
+	groupForward := observeModelDeploymentGroupForward(ctx, md, role, view, fetchForReplica)
+
+	qualification := modelDeploymentInstanceQualification{
+		View:         view,
+		Generation:   modelDeploymentGenerationOf(view),
+		GroupForward: groupForward,
+	}
+	for _, member := range view.Members {
+		if modelDeploymentMemberReadiness(member) != modelDeploymentLegUnknown {
+			qualification.Observed = true
+
+			break
+		}
+	}
+
+	// COMPLETENESS IS NOT REDUNDANT WITH READINESS. A replica short of a declared member can
+	// have every member it does hold reporting ready, while Kueue has composed no Workload for
+	// it and it is admitted by nothing. It is absent with some Pods lying around, not partly
+	// working.
+	qualification.Legs = append(qualification.Legs, membersComplete)
 	qualification.Legs = append(qualification.Legs, membersReady)
 
 	qualification.Legs = append(qualification.Legs, modelDeploymentQualificationLeg{
@@ -398,6 +415,11 @@ func legVerdict(ok bool) modelDeploymentLegVerdict {
 // and it makes the answer move on the pass after the create, which is a status write an unchanged
 // spec has no reason to issue. A condition that is present and False is a real observation and is
 // reported as one.
+//
+// AN UNKNOWN CONDITION IS ABSENCE OF EVIDENCE TOO. Kubernetes legitimately writes PodReady=Unknown
+// (a kubelet that is restarting, a node gone quiet, an eviction in progress), and at that moment
+// nothing is known about the member's health; reading it as Failed would report a definite fault
+// the cluster never observed. Only False is the definite answer.
 func modelDeploymentMemberReadiness(pod *core.Pod) modelDeploymentLegVerdict {
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type != core.PodReady {
@@ -406,8 +428,11 @@ func modelDeploymentMemberReadiness(pod *core.Pod) modelDeploymentLegVerdict {
 		if condition.Status == core.ConditionTrue {
 			return modelDeploymentLegVerified
 		}
+		if condition.Status == core.ConditionFalse {
+			return modelDeploymentLegFailed
+		}
 
-		return modelDeploymentLegFailed
+		return modelDeploymentLegUnknown
 	}
 
 	return modelDeploymentLegUnknown
