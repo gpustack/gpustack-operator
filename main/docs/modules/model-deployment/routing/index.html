@@ -507,6 +507,8 @@ on a server role; on a prefill/decode pair, where each half is chosen separately
 </li>
 <li><a href="#llm-d-router-takes-no-policy-flag">llm-d-router takes no policy flag</a>
 </li>
+<li><a href="#confirming-that-a-router-serves">Confirming that a Router serves</a>
+</li>
 <li><a href="#per-worker-routing-metrics">Per-worker routing metrics</a>
 </li>
 </ul>
@@ -633,6 +635,25 @@ those has been run either.</p>
 <p><strong><code>llm-d-router</code> cannot be switched through <code>extraArgs</code>.</strong> Its scorers and their weights are in the
 configuration document the operator renders and mounts, and <code>--config-file</code>, which would point the
 router at another one, is refused there. No field sets them either.</p>
+<h2 id="confirming-that-a-router-serves">Confirming that a Router serves</h2>
+<p><strong>Which replicas a Router can reach is not the same question as which replicas it is serving, and
+the operator reports both.</strong> The first is the qualification list, and the second is an observation
+of the Router itself; they are published separately in
+<a href="/gpustack-operator/main/docs/modules/model-deployment/status/#status"><code>status.roles[].endpoints</code></a>
+ and never collapse into one number.</p>
+<p>The observation is a plain HTTP GET with a short timeout against each Router Pod&rsquo;s own address. It
+deliberately does not go through the Router Service, which would load balance across the Router&rsquo;s
+replicas and report one of them as the whole Router. What <code>Confirmed</code> then means is the
+serving-observation contract <a href="/gpustack-operator/main/docs/modules/model-deployment/status/#status"><code>status.roles[].endpoints</code></a>
+ defines once.</p>
+<p><strong>A collected view informs the answer for fifteen seconds.</strong> Past that the answer becomes <code>Unknown</code>,
+so a Router that stops being reachable is reported as unobserved and never as serving whatever it
+served last.</p>
+<blockquote>
+<p>The freshness bound is what keeps a stopped Router from reading as a healthy one. A view that
+outlived its evidence would report a serving count for a process that is gone, and the only way
+back would be an edit to the deployment.</p>
+</blockquote>
 <h2 id="per-worker-routing-metrics">Per-worker routing metrics</h2>
 <p>The deployment&rsquo;s <a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">metrics snapshot</a>
  does not say which replica served a
@@ -708,7 +729,7 @@ counters a deployment&rsquo;s snapshot reads.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/4b81d9b1077c38a5355e00bcb8bdd8f0da96239a/docs/modules/model-deployment/routing.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/c79e83a98a753e58d1a1ca2ebfc7485c13398619/docs/modules/model-deployment/routing.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/routing.md">Edit this page</a>
             
@@ -723,6 +744,7 @@ counters a deployment&rsquo;s snapshot reads.</li></ul>
     <li><a href="#prefix-affinity">Prefix affinity</a></li>
     <li><a href="#switching-to-round-robin">Switching to round robin</a></li>
     <li><a href="#llm-d-router-takes-no-policy-flag">llm-d-router takes no policy flag</a></li>
+    <li><a href="#confirming-that-a-router-serves">Confirming that a Router serves</a></li>
     <li><a href="#per-worker-routing-metrics">Per-worker routing metrics</a></li>
   </ul>
 </nav>

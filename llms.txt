@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers hardware, shapes accelerator capacity, and helps Kubernetes place workloads where that capacity is available.
 
-Documentation version: main. Source revision: 4b81d9b1077c38a5355e00bcb8bdd8f0da96239a.
+Documentation version: main. Source revision: c79e83a98a753e58d1a1ca2ebfc7485c13398619.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -59,10 +59,10 @@ documentation and code for your release. This index routes questions; follow its
 - [Model Deployment Configuration](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md): Configure serving roles and overrides.
 - [Model Deployment Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md): Pair serving roles.
 - [Engine Versions](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md): Check supported engine versions.
-- [Model Deployment Routing](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/routing/index.md): Choose a routing policy.
+- [Model Deployment Routing](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/routing/index.md): Choose a routing policy, confirm a Router serves.
 - [Model Deployment Metrics](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md): Read serving metrics.
-- [Model Deployment Status](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/status/index.md): Diagnose deployment conditions.
-- [Model Deployment Shutdown](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/shutdown/index.md): Understand replica draining.
+- [Model Deployment Status](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/status/index.md): Diagnose deployment conditions, follow a retirement.
+- [Model Deployment Shutdown](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/shutdown/index.md): Understand replica retirement and draining.
 
 ## Accelerated instances
 
@@ -91,6 +91,6 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/4b81d9b1077c38a5355e00bcb8bdd8f0da96239a/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/c79e83a98a753e58d1a1ca2ebfc7485c13398619/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.

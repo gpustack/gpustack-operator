@@ -501,12 +501,18 @@ The grace period bounds how long it can wait for running requests and engine shu
 <ul>
 <li><a href="#the-drain-window">The drain window</a>
 </li>
+<li><a href="#the-retirement-protocol">The retirement protocol</a>
+</li>
 <li><a href="#coverage-limits">Coverage limits</a>
 </li>
 </ul>
 <h2 id="the-drain-window">The drain window</h2>
 <p>A replica whose command line the operator builds drains before its engine stops, whatever deleted
-its Pod: a scale-down, a rollout, a node drain, a preemption or <code>kubectl delete pod</code>.</p>
+its Pod: a rollout, a node drain, a preemption or <code>kubectl delete pod</code>. A removal the spec makes —
+a <code>replicas</code> reduction, a surplus shed, a dropped role — goes through
+<a href="#the-retirement-protocol">the retirement protocol</a>
+ first, and its Pod is deleted when that
+finishes.</p>
 <p><code>G</code> below is the role&rsquo;s grace: <code>roles[].terminationGracePeriodSeconds</code>, 30 when unset, written to
 the Pod&rsquo;s field of the same name.</p>
 <table>
@@ -601,6 +607,131 @@ carries them turns each existing replica over once; see
 <p>Changing a role&rsquo;s <code>terminationGracePeriodSeconds</code> turns its replicas over the same way, and each
 replica that leaves in that rollout leaves with the grace it was created with. Writing 30 onto a
 role that set none renders the same Pods, so it turns nothing over.</p>
+<h2 id="the-retirement-protocol">The retirement protocol</h2>
+<p><strong>A replica the spec takes capacity away from is withdrawn and drained before it is deleted, and
+the deletion waits for that to finish.</strong> The protocol covers a <code>replicas</code> reduction, a shed of
+surplus replicas, and a replica of a role the spec has dropped. Its progress is the
+<a href="/gpustack-operator/main/docs/modules/model-deployment/status/#status"><code>status.retirement</code> field</a>
+, and the replica stays in place, still counted,
+for as long as the protocol holds it.</p>
+<p>Two mechanisms are involved and they answer different questions. The protocol decides <strong>whether the
+Pod may be deleted</strong>; the <a href="#the-drain-window">drain window</a>
+ above decides <strong>how long the engine
+takes to exit once it is</strong>, on the kubelet&rsquo;s grace clock after the delete. A replica passes the
+first and still spends the second.</p>
+<h3 id="reading-a-members-work">Reading a member&rsquo;s work</h3>
+<p>The read is one bounded, read-only <code>pods/exec</code> into the member&rsquo;s own <code>main</code> container, which
+fetches that engine&rsquo;s <code>/metrics</code> over loopback on the port the member&rsquo;s own
+<a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/#scraping-the-pods">scrape annotations</a>
+ name. Reading it from inside the member is what
+makes the answer per-member: a scrape through the Service would land on whichever replica answered
+and could not say which one was idle.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Bound</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>response size</td>
+          <td>1 MiB</td>
+      </tr>
+      <tr>
+          <td>the engine&rsquo;s own answer</td>
+          <td>2 s</td>
+      </tr>
+      <tr>
+          <td>the whole read including the connection</td>
+          <td>5 s</td>
+      </tr>
+  </tbody>
+</table>
+<p>The gauges read are the same ones the hook sums, and they are named once in the tree, so the
+protocol and the hook cannot disagree about what counts as work in flight.</p>
+<p><strong>A member must read idle twice, on complete envelopes, before the deletion commits.</strong> Both reads
+have to carry every expected gauge, and a single unlucky zero cannot carry the protocol past a
+member that is still working. A second read that finds work holds the operation.</p>
+<p><strong>Not every member of a replica is read, because not every member can answer.</strong> The protocol works
+out which members of the target can speak for it as a whole, and reads only those: a replica of one
+Pod answers through itself, and a leader-served replica of several answers through the member
+carrying rank 0.</p>
+<p>Selecting them does not narrow the deletion, which still covers every member the reservation bound,
+so a replica is only held when the operator cannot tell which member its answer comes from. See
+<a href="#coverage-limits">Coverage limits</a>
+ for what a hold there means.</p>
+<h3 id="what-the-drain-read-refuses">What the drain read refuses</h3>
+<p>Every one of these holds the replica in place, and the <code>reason</code> on the reservation names which one
+applied. They are the ordinary outcomes of a replica that is busy, loading, or not
+the shape the protocol knows how to measure.</p>
+<table>
+  <thead>
+      <tr>
+          <th>The member</th>
+          <th>Verdict</th>
+          <th>Why</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>still serving requests</td>
+          <td>held</td>
+          <td>there is work in flight, which is what the read is for</td>
+      </tr>
+      <tr>
+          <td>answers with some gauges missing</td>
+          <td>held</td>
+          <td>a partial envelope is not evidence of an empty queue, and a reader cannot sum what it did not find</td>
+      </tr>
+      <tr>
+          <td>the exec fails, times out, or returns a body that is not metrics</td>
+          <td>held</td>
+          <td>nothing was measured, and an absence of measurement is not a measurement of absence</td>
+      </tr>
+      <tr>
+          <td>the container has restarted</td>
+          <td>held</td>
+          <td>the gauges now served come from an engine that did not exist when the protocol began watching</td>
+      </tr>
+      <tr>
+          <td>a prefill or decode replica</td>
+          <td>refused</td>
+          <td>see below</td>
+      </tr>
+      <tr>
+          <td>a take-over role</td>
+          <td>held</td>
+          <td>the operator renders no endpoint for it, so there is nothing to read</td>
+      </tr>
+      <tr>
+          <td>an engine with no gauge list</td>
+          <td>refused</td>
+          <td>no such measurement exists for it</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>A restarted container is held, and the hold is bounded.</strong> The gauges a
+restarted engine serves describe a fresh process, so they cannot speak for the work the protocol
+set out to account for. The drain budget and the operation&rsquo;s total still apply, so a replica that
+keeps crash-looping ends as <code>Aborted</code> with its capacity retained, and never blocks the queue.</p>
+<blockquote>
+<p>A restart throws away a loaded model and any request it was serving, so the replica is not worth
+less for it. The protocol cannot tell whether a restarted engine is a replacement it should wait
+for or a crash loop it should give up on, and the budget is what resolves that question.</p>
+</blockquote>
+<p><strong>A prefill or decode replica is refused outright.</strong> Its queues are visible from both engines, so
+this is not a case of unmeasured work.</p>
+<p>What is not verifiable is the release. A decode replica reading zero is an engine about to be
+handed work, and nothing in either engine&rsquo;s metrics proves it will not be. The shape stays refused
+until a decoder-side release can be verified, because the other answer deletes a decode replica in
+the middle of a prefill.</p>
+<p>Both engines report a decoder&rsquo;s work while it waits to receive its KV: a prefill half holds it in
+its transfer queue, and a decode half holds it in its own prealloc and transfer queues.</p>
+<p>The refusal is read from the member Pod&rsquo;s own rendered command, so it still applies to a replica
+whose role the spec has already dropped. Both engines are covered: a vLLM
+member is recognized by its data-parallel balance flags, and an SGLang member by its
+<code>--disaggregation-mode prefill</code> or <code>decode</code>.</p>
 <h2 id="coverage-limits">Coverage limits</h2>
 <ul>
 <li><strong>A request still running at <code>G</code> − 5 is cut</strong>, 25 s after the delete at the default. vLLM aborts it
@@ -616,8 +747,19 @@ that container serves the gauges. Its Pod gets the role&rsquo;s <code>terminatio
 and keeps the Kubernetes default when the role sets none.</li>
 <li><strong>A role that moves the engine with its own <code>--port</code></strong> gets only the first 5 s: nothing answers the
 hook on the port the operator rendered.</li>
-<li><strong>A replica of several Pods</strong> drains only its leader. The other members serve no metrics, so their
-hooks return after the first 5 s, and they receive SIGTERM while the leader is still draining.</li>
+<li><strong>A replica of several Pods drains through its leader, and every member is still deleted.</strong> The
+other members serve no metrics, so their hooks return after the first 5 s, and they receive SIGTERM
+while the leader is still draining. The protocol reads the members whose answer stands for the whole
+replica, which on a leader-served replica is the leader alone.</li>
+<li><strong>A replica whose answering member cannot be named is held</strong> — none of its members carries the
+leader index, more than one does, its members disagree on the shape, or its role says a size the
+replica does not have — and the <code>reason</code> names which. Selecting the leader does not narrow the
+deletion: as <a href="#the-retirement-protocol">the protocol above</a>
+ states, it still covers every member
+the reservation bound.</li>
+<li><strong>A prefill or decode replica is refused by the protocol</strong>, so it is never deleted through one.
+The <a href="#the-drain-window">drain window</a>
+ still applies to it once something else deletes its Pod.</li>
 <li><strong>A direct decoder on a cluster below Kubernetes 1.29</strong> runs its routing proxy as a classic
 container, which stops at the delete while the engine behind it drains, so a request in flight
 through the proxy still resets. The proxy&rsquo;s image has no shell to run a hook of its own.</li>
@@ -643,7 +785,7 @@ reads.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/4b81d9b1077c38a5355e00bcb8bdd8f0da96239a/docs/modules/model-deployment/shutdown.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/c79e83a98a753e58d1a1ca2ebfc7485c13398619/docs/modules/model-deployment/shutdown.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/shutdown.md">Edit this page</a>
             
@@ -655,6 +797,12 @@ reads.</li></ul>
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#the-drain-window">The drain window</a></li>
+    <li><a href="#the-retirement-protocol">The retirement protocol</a>
+      <ul>
+        <li><a href="#reading-a-members-work">Reading a member&rsquo;s work</a></li>
+        <li><a href="#what-the-drain-read-refuses">What the drain read refuses</a></li>
+      </ul>
+    </li>
     <li><a href="#coverage-limits">Coverage limits</a></li>
   </ul>
 </nav>

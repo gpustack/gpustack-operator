@@ -506,8 +506,8 @@ fields and its conditions to diagnose a deployment that is still starting or has
 <p><code>status.phase</code> is the field to read first: <code>Starting</code>, <code>Ready</code>, <code>Degraded</code> or <code>Deleting</code>. <code>Degraded</code>
 means some required serving capacity is ready and some is not: either some role replicas are down, or
 all role replicas are ready but a declared router has no ready replica.
-<code>status.roles[]</code> carries <code>name</code>, <code>kind</code>, <code>desired</code>, <code>ready</code>, <code>quotaReserved</code>, <code>unmanaged</code> and
-<code>assignedFlavors</code> per role.</p>
+<code>status.roles[]</code> carries <code>name</code>, <code>kind</code>, <code>desired</code>, <code>ready</code>, <code>quotaReserved</code>, <code>unmanaged</code>,
+<code>assignedFlavors</code>, <code>parallelism</code> and <code>endpoints</code> per role.</p>
 <p><code>kubectl get modeldeployments</code> shows <code>status.roleSummary</code> in its <code>ROLES</code> column. It counts current
 Ready instances by kind: <code>R</code> is managed router Pods, <code>S</code> is ordinary servers, <code>P</code> is prefillers,
 and <code>D</code> is decoders. For example, <code>1R2S</code> means one Ready router and two Ready servers; <code>1R3P4D</code>
@@ -601,8 +601,143 @@ assigned different flavors, the signal to investigate and not a degraded form of
 on is the converger&rsquo;s internal slotting rather than a promise this API makes, and a reader who
 needs the mapping reads the replicas&rsquo; own Pods. A flavor reported here is read through the same
 lens the per-accelerator admission gate uses, so the two cannot disagree.</p>
-<p>Eight conditions carry the axes a single phase cannot. They are independent: &ldquo;quota reserved but
-cache not attached&rdquo; is a real and actionable state. Seven are described below; <code>WeightsReady</code> is
+<p><code>parallelism</code> reports the parallelism the role&rsquo;s own arguments declare, with the provenance of
+the reading. Every pass reads each managed role&rsquo;s own argument stream — its extra arguments,
+under the engine&rsquo;s own parser rules: registered spellings and their abbreviations, a repeated
+flag resolved last-wins, everything past a bare <code>--</code> ignored, and the environment read only
+where the engine itself reads it.</p>
+<p>Nothing is defaulted into the read: a degree the role does not declare is <code>null</code>, an explicit
+<code>1</code> and an explicit local <code>0</code> are preserved as written, and an observed mode carries its
+explicit boolean — the absence of a mode key is not <code>false</code>.</p>
+<p><code>parallelism.loadBalance</code> derives the balance shape from the stream&rsquo;s wiring: the vLLM
+external-balance flag or an assigned data-parallel rank derives <code>External</code>, the hybrid and
+multi-port flags derive <code>Hybrid</code> and <code>MultiPort</code>, flags that disagree leave it <code>Unknown</code> with
+the flags named in <code>parallelism.source.unreadableReason</code>, and anything else balances
+<code>Internal</code>.</p>
+<p><code>parallelism.source</code> says where the reading came from: <code>kind</code> (<code>ExtraArgs</code>, <code>Command</code>,
+<code>UnmanagedCommand</code>), whether the reading itself was <code>complete</code>, and an <code>unreadableReason</code>
+naming what could not be established — the source when <code>complete</code> is false, or a derived fact
+such as the balance shape when the declared flags disagree, which a complete reading can
+still carry.</p>
+<p>A role that replaced its command line is not read at all — the replaced argv is the role&rsquo;s
+own book — so its source is <code>Unknown</code> with <code>complete: false</code> and reason <code>Unmanaged</code>, and no
+degree, mode or balance is claimed from it.</p>
+<p>A stream that cannot be parsed, including an effective environment value that is not an
+integer, is likewise <code>Unknown</code> with the flag and value named — never a silently defaulted
+degree.</p>
+<p><code>endpoints</code> separates what the operator qualified from what Routers were actually observed to
+select, and the two never collapse into one number:</p>
+<ul>
+<li><code>endpoints.eligible</code> is how many endpoints the qualification list holds, written only when
+that list is complete. <code>null</code> means the set was never observed; an explicit <code>0</code> means it was
+observed and is empty. It is named for eligibility and never presents itself as serving.</li>
+<li><code>endpoints.serving.state</code> is the actual per-Router confirmation: <code>Confirmed</code> means complete,
+fresh, identity-bound Router views agree; <code>NotConverged</code> means complete views disagree;
+<code>Unknown</code> means a required view is missing, stale or indeterminate; <code>NotConfigured</code> means the
+deployment declares no router at all, so there is no Router process whose answer could be
+missing. Only <code>Confirmed</code> carries <code>endpoints.serving.value</code>, and its zero is as real as any
+other number.</li>
+</ul>
+<p><strong>A replica qualifies on five named legs, and a leg this operator cannot evaluate holds.</strong> <code>MemberSetComplete</code> (every member the role declares exists), <code>MembersReady</code> (each
+answered its engine&rsquo;s health route), <code>GroupForward</code> (each member&rsquo;s forward path was observed to
+carry a request), <code>NoPlannedRetirement</code> (no retirement operation holds the replica) and
+<code>NoPendingReplacement</code> (nothing is already on its way to replace it).</p>
+<table>
+  <thead>
+      <tr>
+          <th>Leg verdict</th>
+          <th>What it does</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>verified</td>
+          <td>passes; the replica contributes to <code>endpoints.eligible</code></td>
+      </tr>
+      <tr>
+          <td>failed</td>
+          <td>revokes the replica from the list immediately, whether or not the other legs agreed</td>
+      </tr>
+      <tr>
+          <td>unknown</td>
+          <td><strong>holds</strong>: it never revokes on its own and never restores</td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p>A leg that cannot be evaluated is not evidence of a fault. An engine that is still loading, a
+Router view that has gone stale and a replica whose group was not observed are all cases where
+the operator cannot tell. <code>endpoints.eligible</code> stays <code>null</code> in each, because a short list here
+would be contradicted by a later pass.</p>
+</blockquote>
+<p>A replica that was qualifying and stops is restored only when the legs pass again <strong>and</strong> the group
+still holds the same members. A replica replaced in the meantime is a different group, and the
+answer that held for the old one does not carry over to it.</p>
+<p>The <code>EndpointEligibility</code> condition says the same thing at the deployment level: while no
+qualification observation exists it is <code>Unknown</code> with reason <code>NotObserved</code> — not <code>False</code>,
+which would say the operator disqualified endpoints it saw. A pass that has qualified nothing
+reports the condition and leaves the per-role counts <code>null</code>.</p>
+<p><code>status.retirement</code> is present only while a retirement operation is running, at most one at a
+time; absent means no operation. It names the role and replica ordinal it retires (ordinal
+<code>0</code> is a real position and is always encoded), the <code>metadata.generation</code> it was admitted
+against, and the target member Pod and Workload UIDs its deletions carry as preconditions.</p>
+<p><code>state</code> is the protocol step (<code>Admitted</code>, <code>Disqualified</code>, <code>Withdrawing</code>, <code>Draining</code>,
+<code>Deleting</code>, <code>Settling</code>, <code>Aborted</code>, <code>Completed</code>), <code>reason</code> names what put it there, and
+<code>startedAt</code>/<code>deadline</code>/<code>phaseStartedAt</code> carry the budgets across a controller restart.
+<code>lastConsumedRetryToken</code> is the retry directive token already consumed, persisted before the
+annotation that carried it is cleared.</p>
+<p><strong>Three kinds of removal start an operation, and they are the ones that take capacity away from a
+role the spec still declares.</strong> A <code>replicas</code> reduction starts one for the ordinals it no longer
+declares, a shed of surplus replicas starts one for the whole set at once, and a replica of a role
+the spec has dropped — by a scale-away or a role rename — starts one.</p>
+<p>Everything else that deletes a replica deletes it without an operation, including the rollout that
+turns an outdated replica over.</p>
+<blockquote>
+<p>The three are the removals for which a withdrawal and a drain are worth their cost, since each
+one takes away capacity the deployment had. A rollout replaces a replica with an identical one and
+has nothing to protect, so it does not pay for a protocol.</p>
+</blockquote>
+<p><strong>A second removal arriving mid-operation is refused, and the replica is held.</strong> At most one
+operation runs at a time, and the replica a second intent named stays where it is, so it is not
+taken out from under the first. Look for <code>reason</code> naming the refusal when a scale-down appears to
+stall behind another removal.</p>
+<p><strong>Each step has its own budget, and the operation has a total.</strong> A phase that runs out ends the
+operation, and the total is the earlier of the two:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Step</th>
+          <th>Budget</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Withdrawing</code></td>
+          <td>30 s</td>
+      </tr>
+      <tr>
+          <td><code>Draining</code></td>
+          <td>240 s</td>
+      </tr>
+      <tr>
+          <td><code>Settling</code></td>
+          <td>30 s</td>
+      </tr>
+      <tr>
+          <td>whole operation</td>
+          <td>300 s</td>
+      </tr>
+  </tbody>
+</table>
+<p><code>Aborted</code> is retained capacity, not a rollback: a budget exhausted before deletion leaves every
+member and the Workload in place, and the reason names the step that ran out. <code>Completed</code> is the
+one state that clears the field, because a reservation left behind would keep holding a slot no
+operation occupies.</p>
+<p>The drain step is where a replica still holding requests is caught before anything is cut; it is
+described in <a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/#the-retirement-protocol">Model Deployment Shutdown</a>
+.</p>
+<p>Nine conditions carry the axes a single phase cannot. They are independent: &ldquo;quota reserved but
+cache not attached&rdquo; is a real and actionable state. Eight are described below; <code>WeightsReady</code> is
 described with the artifact it reports on, in <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#status">Model Artifact</a>
 .</p>
 <p><strong><code>DomainRegistered</code></strong> — whether the referenced Binding resolved and its domain was read.</p>
@@ -979,6 +1114,26 @@ conditions, the role counts) keeps computing with the cause named.</p>
       </tr>
   </tbody>
 </table>
+<p><strong><code>EndpointEligibility</code></strong> — whether the deployment&rsquo;s endpoints have been qualified at all. It
+answers for the reading, not for the endpoints: until endpoint qualification exists it is
+<code>Unknown</code>/<code>NotObserved</code>, because a <code>False</code> would say the operator disqualified endpoints it
+saw, and no pass that reports this has seen any.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Reason</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>NotObserved</code></td>
+          <td>no endpoint qualification has been observed for any role yet; the per-role <code>endpoints.eligible</code> counts are <code>null</code>, not zero</td>
+      </tr>
+  </tbody>
+</table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
@@ -1001,7 +1156,7 @@ distinguish from the operator&rsquo;s own.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/4b81d9b1077c38a5355e00bcb8bdd8f0da96239a/docs/modules/model-deployment/status.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/c79e83a98a753e58d1a1ca2ebfc7485c13398619/docs/modules/model-deployment/status.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/status.md">Edit this page</a>
             
