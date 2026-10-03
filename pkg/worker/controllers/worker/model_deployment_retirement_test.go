@@ -210,17 +210,21 @@ func TestRetirementPhaseEndsAtTheEarlierOfOverallAndPhase(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			started := time.Now().Add(-tc.phaseAgo)
+			// ONE CONTROLLED MOMENT FOR BOTH. Reading the wall clock twice would let the two
+			// readings differ, so a case whose whole subject is the exact boundary could pass or
+			// fail on how long the fixture took to build rather than on the arithmetic.
+			now := time.Now()
+			started := now.Add(-tc.phaseAgo)
 			reservation := retirementReservation(
 				workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"u"},
 				func(r *workercore.ModelDeploymentRetirementStatus) {
 					r.PhaseStartedAt = meta.NewTime(started)
-					r.Deadline = meta.NewTime(time.Now().Add(tc.overallRemains))
+					r.Deadline = meta.NewTime(now.Add(tc.overallRemains))
 				},
 			)
 
 			assert.Equal(t, tc.wantExhausted,
-				modelDeploymentRetirementBudgetSpent(reservation, tc.phaseBudget))
+				modelDeploymentRetirementBudgetSpent(reservation, tc.phaseBudget, now))
 		})
 	}
 }
@@ -290,7 +294,16 @@ func TestDrainNeverCountsAnIncompleteReadAsIdle(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			md = reserve(md, retirementReservation(
 				workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"member-1"}))
-			cli := newModelDeploymentClient(md.DeepCopy())
+			// The member is seeded, because the release capture reads the target back from the
+			// server before it will authorize a delete. A pod handed to the planner without
+			// existing on the server is a target the capture cannot observe.
+			md = withResourceVersion(md)
+			seeded := make([]ctrlcli.Object, 0, 1+len(pods))
+			seeded = append(seeded, md.DeepCopy())
+			for i := range pods {
+				seeded = append(seeded, pods[i].DeepCopy())
+			}
+			cli := newModelDeploymentClient(seeded...)
 			reader := &scriptedDrainReader{
 				answers: map[types.UID][]modelDeploymentDrainAnswer{
 					"member-1": {tc.answer, tc.answer},
@@ -310,6 +323,19 @@ func TestDrainNeverCountsAnIncompleteReadAsIdle(t *testing.T) {
 			assert.Contains(t, plan.Reservation.Reason, tc.wantReason)
 		})
 	}
+}
+
+// withResourceVersion gives a fixture deployment the resource version a real server hands out.
+//
+// The release record is written with a real optimistic lock, and a lock compares against the
+// version it read. Seeding an object while leaving the caller's own copy without one describes a
+// state no server produces, so the fixture is corrected here rather than by weakening the lock.
+func withResourceVersion(md *workercore.ModelDeployment) *workercore.ModelDeployment {
+	if md.ResourceVersion == "" {
+		md.ResourceVersion = "1"
+	}
+
+	return md
 }
 
 // TestDrainNeedsTwoConsecutiveCompleteZeros pins the observation rule rather than the sample.
@@ -344,7 +370,16 @@ func TestDrainNeedsTwoConsecutiveCompleteZeros(t *testing.T) {
 			pods := []core.Pod{healthPod("server", 1, 0, healthBool(true), "member-1")}
 			md = reserve(md, retirementReservation(
 				workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"member-1"}))
-			cli := newModelDeploymentClient(md.DeepCopy())
+			// The member is seeded, because the release capture reads the target back from the
+			// server before it will authorize a delete. A pod handed to the planner without
+			// existing on the server is a target the capture cannot observe.
+			md = withResourceVersion(md)
+			seeded := make([]ctrlcli.Object, 0, 1+len(pods))
+			seeded = append(seeded, md.DeepCopy())
+			for i := range pods {
+				seeded = append(seeded, pods[i].DeepCopy())
+			}
+			cli := newModelDeploymentClient(seeded...)
 			reader := &scriptedDrainReader{
 				answers: map[types.UID][]modelDeploymentDrainAnswer{"member-1": tc.answers},
 			}
@@ -501,22 +536,33 @@ func TestAnAbortedReservationIsNotRetriedUnchanged(t *testing.T) {
 // would spend the whole operation's budget again on a replica that was already withdrawn, and a
 // deployment that restarts often would never finish at all.
 func TestRestartResumesFromThePersistedState(t *testing.T) {
-	md := retirementDeployment()
+	md := retirementRouterBacked(retirementDeployment())
 	pods := []core.Pod{healthPod("server", 1, 0, healthBool(true), "member-1")}
+	for i := range pods {
+		pods[i].Status.Phase = core.PodRunning
+		pods[i].Status.PodIP = "10.0.2.1"
+	}
 	// The operation enters at Disqualified, one step before the withdrawal answer is read, so the
 	// pass has to resume the transition the previous pass left rather than the one after it. Entering
 	// at Withdrawing would land directly in the drain step and never touch the resumed fields.
 	resumed := retirementReservation(
 		workercore.ModelDeploymentRetirementStateDisqualified, "server", 1, []string{"member-1"})
 	md = reserve(md, resumed)
-	cli := newModelDeploymentClient(md.DeepCopy())
-	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
+	// The pods are seeded because the router view binds each worker's address to a live Pod; with
+	// nothing on the server the view is refused as indeterminate and every row asserts a hold.
+	seeded := make([]ctrlcli.Object, 0, 2+len(pods))
+	seeded = append(seeded, md.DeepCopy(), retirementRouterPod("router-zero", "10.0.9.1"))
+	for i := range pods {
+		seeded = append(seeded, pods[i].DeepCopy())
+	}
+	cli := newModelDeploymentClient(seeded...)
+	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), pods)
 
 	plan := r.planModelDeploymentRetirement(context.Background(), md, pods)
 
-	// The pass re-enters at Withdrawing. With no Router declared the withdrawal has no residual to
-	// report, so it advances -- and what matters is that it advanced FROM there rather than
-	// re-running Disqualified and re-spending that phase's budget.
+	// The pass re-enters at Withdrawing. The declared router reports no member of the target still
+	// served, so the withdrawal is confirmed and the operation advances -- and what matters is that
+	// it advanced FROM there rather than re-running Disqualified and re-spending that phase's budget.
 	assert.Equal(t, workercore.ModelDeploymentRetirementStateWithdrawing, plan.Reservation.State,
 		"the pass re-entered at the persisted state and advanced exactly the one step it was on, "+
 			"rather than re-deciding the operation from Admitted")
@@ -816,10 +862,13 @@ func TestRetryIsIgnoredWhileTheOperationIsNotAborted(t *testing.T) {
 // left behind before the next one begins, so a protocol that reached Deleting without ever having
 // withdrawn would still fail this case rather than pass it.
 func TestTheProtocolCompletesTheWholeProtocol(t *testing.T) {
-	md := retirementDeployment()
+	md := retirementRouterBacked(retirementDeployment())
 	md.Spec.Roles[0].Replicas = 2
 	target := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
 	target.UID = "member-1"
+	target.Status.Phase = core.PodRunning
+	target.Status.PodIP = "10.0.3.1"
+	pods := []core.Pod{*target}
 	md = reserve(md, retirementReservation(
 		workercore.ModelDeploymentRetirementStateAdmitted, "server", 1, []string{"member-1"}))
 
@@ -828,8 +877,9 @@ func TestTheProtocolCompletesTheWholeProtocol(t *testing.T) {
 			"member-1": {idleDrain(), idleDrain()},
 		},
 	}
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), target)
-	r := holdReconciler(cli, reader, time.Now())
+	cli := newModelDeploymentClient(
+		md, newRenderInstanceType(), target, retirementRouterPod("router-zero", "10.0.9.1"))
+	r := retirementRouterReconciler(cli, reader, time.Now(), pods)
 
 	states := make([]workercore.ModelDeploymentRetirementState, 0, 8)
 	for pass := 0; pass < 6; pass++ {
@@ -862,7 +912,7 @@ func TestTheProtocolCompletesTheWholeProtocol(t *testing.T) {
 
 	assert.Nil(t, getModelDeployment(t, cli).Status.Retirement,
 		"a completed operation is cleared rather than left as a tombstone that keeps holding")
-	survivors := replicaNames(t, cli)
+	survivors := retirementReplicaNames(t, cli)
 	assert.Len(t, survivors, 1, "the target is gone and exactly one replica of the two survives")
 	assert.NotContains(t, survivors, "qwen-server-one", "the target is the replica that left")
 }
@@ -969,16 +1019,22 @@ func TestAScaleDownRunsTheWholeProtocolFromNoReservation(t *testing.T) {
 		},
 	}
 
-	md := retirementDeployment(func(md *workercore.ModelDeployment) {
+	md := retirementRouterBacked(retirementDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 1
-	})
+	}))
 	kept := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
 	target := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
 	target.UID = "member-1"
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), kept, target)
-	r := holdReconciler(cli, &scriptedDrainReader{
+	target.Status.Phase = core.PodRunning
+	target.Status.PodIP = "10.0.4.1"
+	kept.Status.Phase = core.PodRunning
+	kept.Status.PodIP = "10.0.4.2"
+	pods := []core.Pod{*kept, *target}
+	cli := newModelDeploymentClient(
+		md, newRenderInstanceType(), kept, target, retirementRouterPod("router-zero", "10.0.9.1"))
+	r := retirementRouterReconciler(cli, &scriptedDrainReader{
 		answers: map[types.UID][]modelDeploymentDrainAnswer{"member-1": {idleDrain(), idleDrain()}},
-	}, time.Now())
+	}, time.Now(), pods)
 
 	require.Nil(t, getModelDeployment(t, cli).Status.Retirement,
 		"the deployment starts with no operation, which is the whole point of this case")
@@ -1023,12 +1079,30 @@ func replicaOrdinals(t *testing.T, cli ctrlcli.Client) []string {
 	require.NoError(t, cli.List(context.Background(), podList, ctrlcli.InNamespace("team-a")))
 
 	ordinals := make([]string, 0, len(podList.Items))
-	for i := range podList.Items {
-		ordinals = append(ordinals, podList.Items[i].Labels[modelDeploymentReplicaOrdinalLabel])
+	for _, pod := range replicaPods(t, cli) {
+		ordinals = append(ordinals, pod.Labels[modelDeploymentReplicaOrdinalLabel])
 	}
 	slices.Sort(ordinals)
 
 	return ordinals
+}
+
+// retirementReplicaNames lists the deployment's serving replicas, leaving out the Router pod.
+//
+// replicaNames counts every pod in the namespace, which is right for a fixture with no router and
+// wrong for one with: the Router is discovered alongside the replicas but is not one of them, and
+// a test asserting "exactly one replica of the two survives" must not see it.
+func retirementReplicaNames(t *testing.T, cli ctrlcli.Client) []string {
+	t.Helper()
+
+	pods := replicaPods(t, cli)
+	names := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		names = append(names, pod.Name)
+	}
+	slices.Sort(names)
+
+	return names
 }
 
 // TestTheCreateGateDoesNotRefillTheSlotTheOperationIsEmptying pins the seventh guard, which the
@@ -1331,10 +1405,19 @@ func TestNoReservationLeavesEveryPathUnchanged(t *testing.T) {
 	for _, tc := range retirementDeletionPaths {
 		t.Run(tc.name, func(t *testing.T) {
 			md, objs, target := tc.build(t)
+			// The path is exercised against a deployment whose ingress can be OBSERVED, because a
+			// deployment declaring no router now holds by design and none of these rows is about
+			// that hold. The router reports no member of the target still served, so the removal
+			// the path wanted is carried out by the protocol rather than refused forever.
+			md = retirementRouterBacked(md)
+			objs = append(objs, retirementRouterPod("router-zero", "10.0.9.1"))
 			cli := newModelDeploymentClient(append(objs, md)...)
 			standInForKueue(t, cli, true)
 
 			r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
+			r.servingViewFetch = func(_ context.Context, _ string) ([]byte, error) {
+				return retirementRouterView(nil, nil), nil
+			}
 			_, err := reconcileModelDeploymentWith(t, r)
 			require.NoError(t, err)
 
@@ -1513,6 +1596,11 @@ func TestARouterResidualBlocksDeletion(t *testing.T) {
 
 // retirementRouterPod builds the Router Pod the serving collection discovers by label, with the
 // address the fetch is dialed against. The workers it reports come from the view, not from here.
+//
+// IT CARRIES NO KUEUE GROUP LABEL, and that is the production shape rather than an omission:
+// renderModelDeploymentRouterObjects gives the Router the name, instance and router labels and
+// nothing else, because the Router is not a Kueue-managed member of a serving group. A group label
+// here would invent Router quota the real object never asks for.
 func retirementRouterPod(name, ip string) *core.Pod {
 	return &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
@@ -1630,6 +1718,13 @@ func (r retirementIdleReader) Drain(
 
 // reconcileModelDeploymentDraining reconciles with the seam stood up, so a pass that admits a
 // reservation can go on to complete one.
+//
+// THE ROUTER FETCH IS SCRIPTED HERE TOO, answering with a view that serves no member. A deployment
+// that declares a router has its ingress observed through that router, and leaving the transport
+// unwired would dial the router pod's address for real and hang the test rather than answer it. The
+// scripted answer is the one a fixture driving an operation to its end needs: the observer was
+// asked, and it reported that nothing serves the target. A deployment that declares NO router
+// never reaches this code at all -- the direct-Service hold answers before any fetch is made.
 func reconcileModelDeploymentDraining(t *testing.T, cli ctrlcli.Client) (ctrl.Result, error) {
 	t.Helper()
 	retirementAssignPodUIDs(t, cli)
@@ -1637,6 +1732,9 @@ func reconcileModelDeploymentDraining(t *testing.T, cli ctrlcli.Client) (ctrl.Re
 	return reconcileModelDeploymentWith(t, &ModelDeploymentReconciler{
 		Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
 		drainReader: retirementIdleReader{idle: idleDrain()},
+		servingViewFetch: func(_ context.Context, _ string) ([]byte, error) {
+			return retirementRouterView(nil, nil), nil
+		},
 	})
 }
 
@@ -1757,15 +1855,19 @@ func TestARemovalIntentAdmitsAndTheAdmittingPassDeletesNothing(t *testing.T) {
 // TestASecondRemovalIntentIsRefusedWhileOneIsInFlight pins the serialization, and the reason it is
 // serialized rather than queued.
 func TestASecondRemovalIntentIsRefusedWhileOneIsInFlight(t *testing.T) {
-	md := retirementDeployment()
+	md := retirementRouterBacked(retirementDeployment())
 	md.Spec.Roles[0].Replicas = 1
 	first := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
 	first.UID = "first"
 	second := surplusReplicaAt(t, md, "qwen-server-two", 2, "")
 	second.UID = "second"
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), first, second)
+	cli := newModelDeploymentClient(
+		md, newRenderInstanceType(), first, second, retirementRouterPod("router-zero", "10.0.9.1"))
 	standInForKueue(t, cli, true)
 	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
+	r.servingViewFetch = func(_ context.Context, _ string) ([]byte, error) {
+		return retirementRouterView(nil, nil), nil
+	}
 
 	_, err := reconcileModelDeploymentWith(t, r)
 	require.NoError(t, err)
@@ -2011,4 +2113,523 @@ func TestTheHoldSurvivesIntoTheCommittedDelete(t *testing.T) {
 	assert.True(t, plan.holds(target.UID),
 		"and the target specifically, which is the one the surplus rule would otherwise collect")
 	assert.False(t, plan.holds(keeper.UID), "a replica the operation does not name is not held")
+}
+
+// advancingReconciler builds a reconciler whose clock is a variable the test moves, so a phase
+// budget is spent by time passing rather than by repeated calls at one instant. Repeated calls at
+// a single moment cannot spend any budget at all, which is why every expiry case here advances it.
+func advancingReconciler(
+	cli ctrlcli.Client, reader modelDeploymentDrainReader, now *time.Time,
+) *ModelDeploymentReconciler {
+	r := holdReconciler(cli, reader, *now)
+	r.clock = func() time.Time { return *now }
+
+	return r
+}
+
+// TestTheWithdrawalBudgetIsSpentByAnAdvancingClock pins that the withdrawal phase budget is
+// reachable at all.
+//
+// The operation waits at Admitted for the target to leave selection, and the health predicate
+// removes the eligibility key on the ordinary convergence, so a pass that polls Admitted can see
+// the key still present many times over. If each such pass restarted the phase clock, the budget
+// would reset on every poll and the withdrawal could never time out however long the target
+// refused to leave selection. The clock here advances, so the budget is genuinely spendable.
+func TestTheWithdrawalBudgetIsSpentByAnAdvancingClock(t *testing.T) {
+	md := retirementDeployment()
+	md.Spec.Roles[0].Replicas = 2
+	target := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
+	target.UID = "member-1"
+	// THE KEY STAYS ON, because that is the situation the budget exists for: the target is still
+	// in endpoint selection, so the operation waits and the wait is bounded.
+	if target.Labels == nil {
+		target.Labels = map[string]string{}
+	}
+	target.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+	target.Status.Phase = core.PodRunning
+
+	started := time.Now()
+	md = reserve(md, retirementReservation(
+		workercore.ModelDeploymentRetirementStateAdmitted, "server", 1, []string{"member-1"},
+		func(r *workercore.ModelDeploymentRetirementStatus) {
+			r.StartedAt = meta.NewTime(started)
+			r.Deadline = meta.NewTime(started.Add(modelDeploymentRetirementOverallBudget))
+			r.PhaseStartedAt = meta.NewTime(started)
+		}))
+
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), target)
+	now := started
+	r := advancingReconciler(cli, &scriptedDrainReader{}, &now)
+
+	// The operation polls at Admitted while the key is on it. No budget is spent, and the phase
+	// start is the one the operation was admitted with.
+	for pass := 0; pass < 5; pass++ {
+		now = now.Add(2 * time.Second)
+		plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{*target})
+		require.Equal(t, workercore.ModelDeploymentRetirementStateAdmitted, plan.Reservation.State,
+			"a target still in selection keeps the operation waiting")
+		assert.True(t, plan.Reservation.PhaseStartedAt.Time.Equal(started),
+			"waiting must not move the phase start, or the budget resets on every poll")
+	}
+
+	// Time passes beyond the withdrawal budget with the key still present.
+	now = now.Add(modelDeploymentRetirementWithdrawalBudget)
+	plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{*target})
+
+	assert.Equal(t, workercore.ModelDeploymentRetirementStateAborted, plan.Reservation.State,
+		"a target that will not leave selection runs the withdrawal budget out and aborts")
+	assert.Contains(t, plan.Reservation.Reason, "retained",
+		"an abort before deletion retains the members, the workload and the capacity")
+	assert.True(t, plan.Hold, "and the retained target stays held rather than being collected")
+}
+
+// TestARetainedAbortedReservationRefusesASecondRemoval pins that a retained abort serializes
+// removal intents.
+//
+// An abort deliberately retains the replica, so a later scale-down that deleted it would not have
+// retained anything. The second intent below names a different replica: it is refused, and the
+// retained reservation is left exactly as it was rather than being overwritten by the new target.
+func TestARetainedAbortedReservationRefusesASecondRemoval(t *testing.T) {
+	md := retirementDeployment()
+	// One replica is declared, so the target at ordinal one is surplus and is not a re-declared
+	// slot. Adoption is for a replica the spec wants again, and a fixture that made the retained
+	// target re-declared would be cleared by adoption before the second intent was ever asked.
+	md.Spec.Roles[0].Replicas = 1
+	retained := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
+	retained.UID = "retained"
+	retained.Status.Phase = core.PodRunning
+	other := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
+	other.UID = "other"
+	other.Status.Phase = core.PodRunning
+
+	md = reserve(md, retirementReservation(
+		workercore.ModelDeploymentRetirementStateAborted, "server", 1, []string{"retained"},
+		func(r *workercore.ModelDeploymentRetirementStatus) {
+			r.Reason = "the withdrawal budget was exhausted; members, workload and capacity are retained"
+		}))
+	before := md.Status.Retirement.DeepCopy()
+
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), retained, other)
+	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
+	pods := []core.Pod{*retained, *other}
+
+	// The abort holds the retained target but is no longer in flight, which is exactly the state
+	// in which a second intent used to be admitted.
+	plan := r.planModelDeploymentRetirement(context.Background(), md, pods)
+	require.False(t, plan.InFlight, "an abort is terminal until new intent, so nothing is in flight")
+	require.True(t, plan.Hold, "and the retained target is still held")
+
+	refused := r.refuseModelDeploymentRemoval(context.Background(), md, plan, other, pods, nil)
+
+	assert.True(t, refused, "a retained reservation refuses a second removal intent")
+	after := getModelDeployment(t, cli).Status.Retirement
+	require.NotNil(t, after, "the retained reservation is still on the object")
+	assert.Equal(t, before.State, after.State, "and its state is untouched")
+	assert.Equal(t, before.TargetMemberUIDs, after.TargetMemberUIDs,
+		"the retained target's identity is not replaced by the second intent's target")
+}
+
+// TestAnExternallyTerminatedAbortStillAdmits pins the other side of the same guard.
+//
+// An abort that retained nothing has no reason to serialize anything: the target is gone, the hold
+// was released with it, and a later removal is a new operation rather than a conflict.
+func TestAnExternallyTerminatedAbortStillAdmits(t *testing.T) {
+	md := retirementDeployment()
+	md.Spec.Roles[0].Replicas = 1
+	other := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
+	other.UID = "other"
+	other.Status.Phase = core.PodRunning
+
+	md = reserve(md, retirementReservation(
+		workercore.ModelDeploymentRetirementStateAdmitted, "server", 1, []string{"vanished"},
+		func(r *workercore.ModelDeploymentRetirementStatus) { r.Reason = "admitted" }))
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), other)
+	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
+	pods := []core.Pod{*other}
+
+	// The reservation's target no longer exists, so the pass records the external termination,
+	// releases the hold, and leaves nothing in flight.
+	plan := r.planModelDeploymentRetirement(context.Background(), md, pods)
+	require.Equal(t, workercore.ModelDeploymentRetirementStateAborted, plan.Reservation.State)
+	require.False(t, plan.Hold, "a target that cannot be retained must not be held")
+	require.False(t, plan.InFlight)
+
+	refused := r.refuseModelDeploymentRemoval(context.Background(), md, plan, other, pods, nil)
+	assert.True(t, refused, "the pass that admits holds the removal itself; the next one deletes")
+	assert.Equal(t, "other", getModelDeployment(t, cli).Status.Retirement.TargetMemberUIDs[0],
+		"and the new target's identity is the one now reserved, because nothing was retained")
+}
+
+// TestANoRouterDeploymentHoldsUntilTheBudgetAbortsAndRetains pins the direct-Service contract.
+//
+// With no router there is no observer to ask, and "nobody to ask" is not a reading of the
+// connections the target's own Service already established. The operation therefore holds where it
+// is, keeps every member, issues no delete, and lets the withdrawal budget end it the way any other
+// pre-delete expiry ends: aborted, with the members, the workload and the capacity retained.
+func TestANoRouterDeploymentHoldsUntilTheBudgetAbortsAndRetains(t *testing.T) {
+	md := retirementDeployment()
+	require.Nil(t, md.Spec.Router, "this is the direct-Service case: the fixture declares no router")
+	md.Spec.Roles[0].Replicas = 2
+	target := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
+	target.UID = "member-1"
+	keeper := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
+	keeper.UID = "keeper"
+	target.Status.Phase, keeper.Status.Phase = core.PodRunning, core.PodRunning
+
+	started := time.Now()
+	md = reserve(md, retirementReservation(
+		workercore.ModelDeploymentRetirementStateAdmitted, "server", 1, []string{"member-1"},
+		func(r *workercore.ModelDeploymentRetirementStatus) {
+			r.StartedAt = meta.NewTime(started)
+			r.Deadline = meta.NewTime(started.Add(modelDeploymentRetirementOverallBudget))
+			r.PhaseStartedAt = meta.NewTime(started)
+		}))
+
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), target, keeper)
+	now := started
+	r := advancingReconciler(cli, &scriptedDrainReader{}, &now)
+	pods := []core.Pod{*target, *keeper}
+
+	// Each pass re-enters at the state the previous one persisted, which is what the controller
+	// does between passes; the test carries the reservation forward itself because it is calling
+	// the planner rather than the reconciler.
+	pass := func() *modelDeploymentRetirementPlan {
+		plan := r.planModelDeploymentRetirement(context.Background(), md, pods)
+		md.Status.Retirement = plan.Reservation.DeepCopy()
+
+		return plan
+	}
+
+	// The target is out of selection, so the withdrawal step is reached and has to answer.
+	plan := pass()
+	require.Equal(t, workercore.ModelDeploymentRetirementStateDisqualified, plan.Reservation.State,
+		"leaving selection is observed; what is not observed is the established-connection hold")
+
+	now = now.Add(10 * time.Second)
+	plan = pass()
+	assert.Equal(t, workercore.ModelDeploymentRetirementStateDisqualified, plan.Reservation.State,
+		"with no quiescence observation the operation stays where it is rather than advancing")
+	assert.Contains(t, plan.Reservation.Reason, "direct-Service",
+		"and the reason names what could not be observed")
+	assert.True(t, plan.Hold)
+	assert.Empty(t, plan.Deletes, "no delete is authorized while the hold stands")
+
+	// The budget runs out with the connections still unobserved, and the expiry is an ordinary
+	// pre-delete abort: everything is retained and nothing was deleted.
+	now = now.Add(modelDeploymentRetirementWithdrawalBudget)
+	plan = pass()
+	assert.Equal(t, workercore.ModelDeploymentRetirementStateAborted, plan.Reservation.State)
+	assert.True(t, plan.Hold, "the retained target is held after the abort")
+	assert.Contains(t, plan.Reservation.Reason, "retained")
+	assert.Empty(t, plan.Deletes)
+
+	survivors := replicaNames(t, cli)
+	assert.Contains(t, survivors, "qwen-server-one",
+		"the target is preserved: a direct-Service hold never deletes the replica")
+	assert.Contains(t, survivors, "qwen-server-zero", "and the surviving replica is untouched")
+
+	// THE NEGATIVE, STATED AS ONE. A deployment that declares no router must not have acquired a
+	// Router Workload or quota on the way to being held: the hold is an absence of observation, and
+	// the fixture corrections made beside it must not have invented the capability to satisfy it.
+	workloadList := new(kueue.WorkloadList)
+	require.NoError(t, cli.List(context.Background(), workloadList, ctrlcli.InNamespace("team-a")))
+	for _, workload := range workloadList.Items {
+		assert.NotContains(t, workload.Name, "router",
+			"holding a direct-Service deployment composes no Router Workload and claims no Router quota")
+	}
+	assert.Empty(t, routerPods(t, cli),
+		"and no Router pod appears either: nothing here is answered by a Router that does not exist")
+}
+
+// retirementRouterBacked makes a deployment one whose ingress CAN be observed, by declaring a
+// router and answering its view with the given served members.
+//
+// It exists because a deployment that declares no router now holds by design: there is no observer
+// to ask, and the established direct-Service connections cannot be read from anything this operator
+// sees. A test whose subject is the protocol -- the state sequence, the delete, the interception --
+// therefore has to be a deployment whose ingress is actually observed, or it would be asserting
+// against a path the contract deliberately stops. The no-Router case is not hidden by this: it has
+// its own test, which holds, retains and times out.
+func retirementRouterBacked(md *workercore.ModelDeployment) *workercore.ModelDeployment {
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "llm-d-router"}
+
+	return md
+}
+
+// retirementRouterFixture makes a deployment one whose ingress is OBSERVED, returning the Router
+// pod to seed alongside it.
+//
+// It is applied at the call sites whose subject is a removal being carried out, not inside every
+// retiring helper: a deployment that declares no router holds by design, so a test about a removal
+// that should happen has to say the removal can be observed. A test about the hold itself declares
+// no router and must keep not declaring one.
+func retirementRouterFixture(
+	md *workercore.ModelDeployment,
+) (*workercore.ModelDeployment, *core.Pod) {
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "llm-d-router"}
+
+	return md, retirementRouterPod("router-zero", "10.0.9.1")
+}
+
+// retirementRouterReconciler wires a reconciler that answers the declared router's view with the
+// given served members, resolving addresses against the same Pods the deployment's own listing sees.
+func retirementRouterReconciler(
+	cli ctrlcli.Client, reader modelDeploymentDrainReader, now time.Time, pods []core.Pod,
+	served ...string,
+) *ModelDeploymentReconciler {
+	r := holdReconciler(cli, reader, now)
+	r.servingViewFetch = func(_ context.Context, _ string) ([]byte, error) {
+		return retirementRouterView(served, pods), nil
+	}
+
+	return r
+}
+
+// TestAReservedPodIsHeldEvenWhenItsOrdinalLabelIsGone pins that the reservation's own identity
+// decides, not a mutable label on the Pod it holds.
+//
+// The wire names a target member by UID. The ordinal label is not part of that identity, and a Pod
+// that loses it stops being a replica the wire can name while continuing to be the very Pod the
+// operation is holding. Removing the ordinal before the reservation is consulted would hand that
+// Pod to a path that deletes on the role, taking a member the protocol decided to retain.
+func TestAReservedPodIsHeldEvenWhenItsOrdinalLabelIsGone(t *testing.T) {
+	md := retirementRouterBacked(retirementDeployment())
+	md.Spec.Roles[0].Replicas = 1
+	retained := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
+	retained.UID = "retained-uid"
+	retained.Status.Phase = core.PodRunning
+	retained.Status.PodIP = "10.0.5.1"
+	keeper := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
+	keeper.UID = "keeper-uid"
+	keeper.Status.Phase = core.PodRunning
+	keeper.Status.PodIP = "10.0.5.2"
+
+	md = reserve(md, retirementReservation(
+		workercore.ModelDeploymentRetirementStateAborted, "server", 1, []string{"retained-uid"},
+		func(res *workercore.ModelDeploymentRetirementStatus) {
+			res.Reason = "the withdrawal budget was exhausted; members, workload and capacity are retained"
+		}))
+	before := md.Status.Retirement.DeepCopy()
+
+	cli := newModelDeploymentClient(
+		md, newRenderInstanceType(), retained, keeper, retirementRouterPod("router-zero", "10.0.9.1"))
+	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*retained, *keeper})
+
+	plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{*retained, *keeper})
+	require.True(t, plan.holds("retained-uid"), "the reservation still holds that Pod by UID")
+
+	// THE LABEL IS REMOVED, not the Pod. Same UID, same object, one mutable label gone.
+	stripped := *retained.DeepCopy()
+	delete(stripped.Labels, modelDeploymentReplicaOrdinalLabel)
+	_, seated := modelDeploymentPodOrdinal(&stripped)
+	require.False(t, seated, "the Pod no longer claims an ordinal, so nothing downstream can name it")
+
+	refused := r.refuseModelDeploymentRemoval(
+		context.Background(), md, plan, &stripped, []core.Pod{stripped, *keeper}, nil)
+
+	assert.True(t, refused, "a Pod the reservation holds is refused even with no ordinal to name it by")
+	after := getModelDeployment(t, cli).Status.Retirement
+	require.NotNil(t, after)
+	assert.Equal(t, before.State, after.State, "and the retained reservation is untouched")
+	assert.Equal(t, before.TargetMemberUIDs, after.TargetMemberUIDs,
+		"the retained member UID set is still the one the operation bound")
+}
+
+// TestAnUnseatedPodTheReservationDoesNotHoldIsStillNotFrozen is the boundary of the guard above.
+//
+// The correction refuses a Pod the reservation holds. It must not refuse every Pod that happens to
+// be unseated, or the rollout could no longer remove a Pod with no seat -- and a hold with no
+// reservation to clear is a replica nothing would ever remove.
+func TestAnUnseatedPodTheReservationDoesNotHoldIsStillNotFrozen(t *testing.T) {
+	md := retirementRouterBacked(retirementDeployment())
+	md.Spec.Roles[0].Replicas = 1
+	// An UNRELATED Pod with no ordinal and no place in the reservation: the rollout's business.
+	unseated := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name: "stray", Namespace: "team-a", UID: "stray-uid",
+			Labels: map[string]string{
+				modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+				modelDeploymentLabelKeyInstance: "qwen",
+			},
+		},
+		Status: core.PodStatus{Phase: core.PodRunning, PodIP: "10.0.6.9"},
+	}
+	keeper := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
+	keeper.UID = "keeper-uid"
+	keeper.Status.Phase = core.PodRunning
+	keeper.Status.PodIP = "10.0.6.1"
+
+	md = reserve(md, retirementReservation(
+		workercore.ModelDeploymentRetirementStateAborted, "server", 1, []string{"gone-uid"},
+		func(res *workercore.ModelDeploymentRetirementStatus) { res.Reason = "aborted and retained" }))
+
+	cli := newModelDeploymentClient(
+		md, newRenderInstanceType(), unseated, keeper, retirementRouterPod("router-zero", "10.0.9.1"))
+	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*unseated, *keeper})
+	pods := []core.Pod{*unseated, *keeper}
+
+	plan := r.planModelDeploymentRetirement(context.Background(), md, pods)
+	require.False(t, plan.holds("stray-uid"), "the reservation does not hold this Pod")
+
+	refused := r.refuseModelDeploymentRemoval(context.Background(), md, plan, unseated, pods, nil)
+
+	assert.False(t, refused,
+		"an unseated Pod outside the reservation is left to the rollout, not frozen by a narrow guard")
+}
+
+// TestH382SettlingRequiresReleaseObservation is the original C02 counterexample.
+//
+// Before the release predicate, Settling completed on the budget check alone: the operation read
+// nothing, so a target whose Workload was still present and whose accelerator was still carved
+// completed with the reason "its release has been observed". Every case below drives the operation
+// to Settling with the target deleted and then checks what the completion actually observed.
+func TestH382SettlingRequiresReleaseObservation(t *testing.T) {
+	// A workload that is still present, owning the target's member. Nothing has released it, so
+	// the operation must not complete.
+	t.Run("a workload still present holds the operation", func(t *testing.T) {
+		fixture := newRetirementReleaseFixture(t, retirementReleaseFacts{workloadStillPresent: true})
+
+		plan := fixture.planAt(t, workercore.ModelDeploymentRetirementStateSettling)
+
+		// THE STATE MACHINE STEP IS CALLED, NOT THE PREDICATE. Calling the predicate directly would
+		// pass whether or not completion consults it, and the whole defect was that it did not.
+		fixture.r.advanceModelDeploymentRetirementToCompleted(context.Background(), fixture.md, plan)
+
+		assert.NotEqual(t, workercore.ModelDeploymentRetirementStateCompleted, plan.Reservation.State,
+			"a captured workload that is still present has not released the quota, so the operation "+
+				"does not complete")
+		assert.False(t, plan.Clear, "and it is not cleared either")
+		assert.Contains(t, plan.Reservation.Reason, "workload",
+			"the reason names what is still holding it")
+	})
+}
+
+// retirementReleaseFacts are the facts a release case needs to set up, so each case states the
+// server state it is about rather than repeating the wiring.
+type retirementReleaseFacts struct {
+	// workloadStillPresent leaves the captured Workload on the server. The target pod itself is
+	// always gone, because Settling is reached only once it is: without that, every case would be
+	// asserting the member predicate and none would reach the quota question.
+	workloadStillPresent bool
+}
+
+// newRetirementReleaseFixture builds a target that has reached the point where its release must be
+// observed, and returns the object, the reconciler and the held set the predicates read.
+func newRetirementReleaseFixture(
+	t *testing.T, facts retirementReleaseFacts,
+) *modelDeploymentRetirementReleaseFixture {
+	t.Helper()
+
+	md, router := retirementRouterFixture(retirementDeployment())
+	md.Spec.Roles[0].Replicas = 1
+	target := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
+	target.UID = "member-1"
+	target.Status.Phase = core.PodRunning
+	target.Status.PodIP = "10.0.7.1"
+	keeper := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
+	keeper.UID = "keeper"
+	keeper.Status.Phase = core.PodRunning
+	keeper.Status.PodIP = "10.0.7.2"
+
+	workload := admittedReplicaWorkload(target, true)
+	cli := newModelDeploymentClient(
+		md, newRenderInstanceType(), target, keeper, router, workload)
+	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*target, *keeper})
+
+	// THE CAPTURE HAPPENS WHILE THE TARGET IS STILL THERE, which is the whole point of capturing in
+	// Draining. The reservation is written first so the record can bind to a real operation, then
+	// the target is deleted, which is the state the protocol is in by the time it settles. The
+	// Workload is what is left un-released for this case to be about.
+	md = reserve(md, retirementReservation(
+		workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"member-1"},
+		func(res *workercore.ModelDeploymentRetirementStatus) {
+			started := time.Now()
+			res.StartedAt = meta.NewTime(started)
+			res.Deadline = meta.NewTime(started.Add(modelDeploymentRetirementOverallBudget))
+			res.PhaseStartedAt = meta.NewTime(started)
+			res.TargetWorkloadUID = string(workload.UID)
+		}))
+
+	fixture := &modelDeploymentRetirementReleaseFixture{
+		t: t, md: md, r: r, cli: cli, workloadUID: string(workload.UID),
+		held: sets.New[types.UID]("member-1"),
+	}
+	capturePlan := &modelDeploymentRetirementPlan{Reservation: md.Status.Retirement, held: fixture.held}
+	capturePlan.Hold = true
+	record, err := r.captureModelDeploymentRetirementRelease(context.Background(), md, capturePlan)
+	require.NoError(t, err, "the target is still present, so it can still be captured")
+	require.NoError(t, r.persistModelDeploymentRetirementRelease(context.Background(), md, record))
+	fixture.md = md
+
+	require.NoError(t, cli.Delete(context.Background(), target))
+	if !facts.workloadStillPresent {
+		require.NoError(t, cli.Delete(context.Background(), workload))
+	}
+
+	return fixture
+}
+
+type modelDeploymentRetirementReleaseFixture struct {
+	t           *testing.T
+	md          *workercore.ModelDeployment
+	r           *ModelDeploymentReconciler
+	cli         ctrlcli.Client
+	workloadUID string
+	held        sets.Set[types.UID]
+	// started and retry are the operation's identity. They are carried across phase changes
+	// because a phase change is neither a new operation nor a new attempt.
+	started time.Time
+	retry   string
+}
+
+// planAt builds the plan the predicates read at one state, with the captured record already
+// written, so each case is about the observation rather than about reaching the state.
+func (f *modelDeploymentRetirementReleaseFixture) planAt(
+	t *testing.T, state workercore.ModelDeploymentRetirementState,
+) *modelDeploymentRetirementPlan {
+	t.Helper()
+
+	// The SAME start time is carried across phase changes. Restamping it here would make each phase
+	// a different operation, and a record bound to the previous one would be refused for a reason
+	// that has nothing to do with what the case is about. The two attempts can still share a
+	// serialized second, which is what the retry token is bound with.
+	started := f.started
+	if started.IsZero() {
+		started = time.Now()
+		f.started = started
+	}
+	f.md = reserve(f.md, retirementReservation(
+		state, "server", 1, []string{"member-1"},
+		func(res *workercore.ModelDeploymentRetirementStatus) {
+			res.StartedAt = meta.NewTime(started)
+			res.Deadline = meta.NewTime(started.Add(modelDeploymentRetirementOverallBudget))
+			res.PhaseStartedAt = meta.NewTime(time.Now())
+			res.LastConsumedRetryToken = f.retry
+			res.TargetWorkloadUID = f.workloadUID
+		}))
+	// The reservation is PERSISTED and read back. The release observation reads the operation from
+	// the server, so a fixture that keeps it only in this object would be asserting against a
+	// reservation the observation cannot see.
+	require.NoError(t, f.cli.Status().Update(context.Background(), f.md))
+	key := ctrlcli.ObjectKeyFromObject(f.md)
+	f.md = new(workercore.ModelDeployment)
+	require.NoError(t, f.cli.Get(context.Background(), key, f.md))
+
+	pods := new(core.PodList)
+	require.NoError(t, f.cli.List(context.Background(), pods, ctrlcli.InNamespace("team-a")))
+	members := make([]core.Pod, 0, len(pods.Items))
+	for i := range pods.Items {
+		if pods.Items[i].Labels[modelDeploymentReplicaOrdinalLabel] == "1" {
+			members = append(members, pods.Items[i])
+		}
+	}
+
+	plan := &modelDeploymentRetirementPlan{
+		Reservation: f.md.Status.Retirement,
+		held:        f.held,
+		Deletes:     members,
+	}
+	plan.Hold = true
+
+	return plan
 }

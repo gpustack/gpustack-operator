@@ -693,8 +693,11 @@ func TestModelDeploymentReconciler_ClearsTheHeldConditionWhenTheStoreReturns(t *
 // the condition says True because it looked and they match -- not because a pass that looked at
 // nothing left the old value standing.
 func TestModelDeploymentReconciler_AScaleStillVouchesForTheSurvivors(t *testing.T) {
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
-		newRenderBinding(), newRenderPool(), newRenderBackend())
+	// Router-backed: the trim below only removes the highest ordinal once the withdrawal is
+	// observed, and a deployment declaring no router holds instead.
+	fixture, router := retirementRouterFixture(newRenderDeployment())
+	cli := newModelDeploymentClient(fixture, newRenderInstanceType(),
+		newRenderBinding(), newRenderPool(), newRenderBackend(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)

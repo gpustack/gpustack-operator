@@ -60,6 +60,16 @@ RUN <<EOF
     git rev-parse HEAD >/tmp/commit
 EOF
 
+# Native observation uses the existing metrics server and preserves routing decisions.
+# A version whose source no longer matches the patch fails before compilation.
+COPY pack/llm-router/patches/llm-d/ /tmp/patches/
+RUN <<EOF
+    set -exo pipefail
+
+    git apply /tmp/patches/*.patch
+    rm -rf /tmp/patches
+EOF
+
 # CGO stays off to match upstream's own build: the picker links nothing from the C world, and a
 # static binary is what lets the runtime stage below be an ordinary base image rather than one
 # chosen to satisfy this binary's loader.

@@ -48,6 +48,10 @@ type modelDeploymentDrainTarget struct {
 	Container string
 	Role      string
 	Engine    string
+	// DeploymentUID is the deployment the member is read on behalf of. A member is only this
+	// member if the live object still belongs to the operation that named it, and a Pod whose owner
+	// has been recreated under the same name is a different owner.
+	DeploymentUID types.UID
 }
 
 // modelDeploymentDrainAnswer is three-valued on purpose and carries its own completeness, because

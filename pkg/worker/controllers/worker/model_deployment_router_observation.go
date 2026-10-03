@@ -19,7 +19,7 @@
 //   - Never a fake zero: an unusable, stale, missing or disagreeing set of views is
 //     Unknown or NotConverged; NotConfigured means the deployment declares no Router at
 //     all; Confirmed — including the explicit zero — requires every view fresh, complete,
-//     generation-converged, and agreeing.
+//     generation-consistent per Router process, and agreeing.
 package worker
 
 import (
@@ -86,19 +86,52 @@ type RouterServingView struct {
 	Workers              []RouterObservedWorker
 }
 
+// routerObservedSelectionWire carries the four selection booleans as pointers, so the decoder can
+// tell an absent field from an explicit false and a null from a value. A missing boolean used to
+// decode as false, which is the same value the router sends for a worker it has refused, so a
+// truncated or partial payload was indistinguishable from a refusal and confirmed a zero.
+type routerObservedSelectionWire struct {
+	Registered  *bool `json:"registered"`
+	Healthy     *bool `json:"healthy"`
+	CircuitOpen *bool `json:"circuit_open"`
+	InSelection *bool `json:"in_selection"`
+}
+
+// routerObservedWorkerWire is the on-the-wire worker. Selection is a pointer so a null or absent
+// selection block stays distinguishable from a complete one.
+type routerObservedWorkerWire struct {
+	URL       string                       `json:"url"`
+	Port      string                       `json:"port,omitempty"`
+	Role      string                       `json:"role"`
+	PodHint   string                       `json:"pod_hint"`
+	WorkerID  string                       `json:"worker_id"`
+	Selection *routerObservedSelectionWire `json:"selection"`
+	Lane      *struct {
+		Busy    bool `json:"busy"`
+		Waiting int  `json:"waiting"`
+	} `json:"lane,omitempty"`
+	LastJob json.RawMessage `json:"last_job,omitempty"`
+}
+
 type routerObservationPayload struct {
 	Router struct {
 		BootGeneration uint64 `json:"boot_generation"`
 		NowMS          uint64 `json:"now_ms"`
 	} `json:"router"`
-	RegistryRevision uint64                 `json:"registry_revision"`
-	Workers          []RouterObservedWorker `json:"workers"`
+	RegistryRevision uint64 `json:"registry_revision"`
+	// Workers is a pointer so an absent or null array stays distinguishable from an
+	// explicit one. Both routers serialize a non-Option vector, so the array is always
+	// on the wire; a payload without it states no membership, and reading that as an
+	// empty registry would confirm a zero for a router that is serving.
+	Workers *[]routerObservedWorkerWire `json:"workers"`
 }
 
 // parseRouterObservationView decodes one observer payload strictly. The decoder
 // disallows unknown fields, so a service that answers the endpoint with some other
 // document — the per-plugin debug-dump shapes the spec warns about — fails here instead
-// of parsing into an empty, confident-looking view.
+// of parsing into an empty, confident-looking view. A view must also carry its workers
+// array explicitly: an explicit [] is a real empty registry and yields a valid zero,
+// while an omitted or null array is a payload that never said what it was serving.
 func parseRouterObservationView(data []byte) (RouterServingView, error) {
 	var payload routerObservationPayload
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
@@ -109,12 +142,86 @@ func parseRouterObservationView(data []byte) (RouterServingView, error) {
 	if payload.Router.BootGeneration == 0 {
 		return RouterServingView{}, fmt.Errorf("observer payload carries no boot_generation")
 	}
+	if payload.Workers == nil {
+		return RouterServingView{}, fmt.Errorf("observer payload carries no workers array")
+	}
+
+	// A document with a second JSON value after the payload is not the payload. The decoder reads
+	// the first one and would otherwise ignore whatever followed.
+	if err := decoder.Decode(new(json.RawMessage)); err != io.EOF {
+		return RouterServingView{}, fmt.Errorf("observer payload carries a trailing JSON value")
+	}
+
+	workers := make([]RouterObservedWorker, 0, len(*payload.Workers))
+	for i, wire := range *payload.Workers {
+		worker, err := routerObservedWorkerOf(wire)
+		if err != nil {
+			return RouterServingView{}, fmt.Errorf("observer payload worker %d: %w", i, err)
+		}
+		workers = append(workers, worker)
+	}
 
 	return RouterServingView{
 		RouterBootGeneration: payload.Router.BootGeneration,
 		RouterNowMS:          payload.Router.NowMS,
 		RegistryRevision:     payload.RegistryRevision,
-		Workers:              payload.Workers,
+		Workers:              workers,
+	}, nil
+}
+
+// routerObservedWorkerOf converts one wire row, refusing anything that does not state its
+// selection completely.
+//
+// EVERY SELECTION BOOLEAN MUST BE PRESENT, NON-NULL AND BOOLEAN before a row means anything. The
+// reason is that the answer the protocol acts on is a zero, and a zero is a claim that the router
+// is serving nobody. A row that never said whether it is registered, healthy, open-circuited or in
+// selection has not said it is serving nobody, and reading its silence as consent is how an
+// incomplete payload confirms a zero for a router that is serving. An explicit false is the
+// opposite case and stays a refusal to serve, which is the router's own answer.
+func routerObservedWorkerOf(wire routerObservedWorkerWire) (RouterObservedWorker, error) {
+	if wire.Selection == nil {
+		return RouterObservedWorker{}, fmt.Errorf("carries no selection")
+	}
+
+	selection, err := routerObservedSelectionOf(*wire.Selection)
+	if err != nil {
+		return RouterObservedWorker{}, err
+	}
+
+	return RouterObservedWorker{
+		URL:       wire.URL,
+		Port:      wire.Port,
+		Role:      wire.Role,
+		PodHint:   wire.PodHint,
+		WorkerID:  wire.WorkerID,
+		Selection: selection,
+		Lane:      wire.Lane,
+		LastJob:   wire.LastJob,
+	}, nil
+}
+
+// routerObservedSelectionOf requires all four booleans to be stated. The exported selection keeps
+// plain bools because it is what the rest of the tree reads; presence is settled here, once, so
+// nothing downstream has to re-ask.
+func routerObservedSelectionOf(wire routerObservedSelectionWire) (RouterObservedSelection, error) {
+	if wire.Registered == nil {
+		return RouterObservedSelection{}, fmt.Errorf("selection states no registered")
+	}
+	if wire.Healthy == nil {
+		return RouterObservedSelection{}, fmt.Errorf("selection states no healthy")
+	}
+	if wire.CircuitOpen == nil {
+		return RouterObservedSelection{}, fmt.Errorf("selection states no circuit_open")
+	}
+	if wire.InSelection == nil {
+		return RouterObservedSelection{}, fmt.Errorf("selection states no in_selection")
+	}
+
+	return RouterObservedSelection{
+		Registered:  *wire.Registered,
+		Healthy:     *wire.Healthy,
+		CircuitOpen: *wire.CircuitOpen,
+		InSelection: *wire.InSelection,
 	}, nil
 }
 
@@ -150,6 +257,62 @@ func (o RouterServingObservation) Empty() bool {
 // observerURL is the endpoint the observer patches serve, on the router's existing
 // listener.
 const observerURLPath = "/observer/endpoints"
+
+// modelDeploymentObserverMaxBodyBytes caps one observer body. It is generous for a membership view
+// of a few hundred workers and small enough that a Router misbehaving cannot grow the response into
+// the reconciler's memory.
+const modelDeploymentObserverMaxBodyBytes = 4 << 20
+
+// modelDeploymentObservationBudget is the total time one collection may take, across every Router it
+// reads and the binding it does afterwards.
+//
+// IT IS ONE BUDGET AND NOT ONE PER ROUTER. Each read already carries the caller's own deadline, but
+// a caller with no deadline gave none, and a deployment of several Routers multiplied that absence
+// into a pass whose length is the sum of however long each of them chose to take. Deriving the
+// total here means one collection is bounded whatever the caller passed and however many Routers
+// answered.
+//
+// IT IS SHORTER THAN THE FRESHNESS IT HAS TO SURVIVE. A view collected right at the freshness limit
+// is stale by the time the aggregation judges it, so a read budget equal to the freshness would
+// collect answers the aggregator is obliged to refuse. The allowance below is the time discovery,
+// the last read and the binding take out of the window.
+const modelDeploymentObservationBudget = modelDeploymentServingFreshness - time.Second
+
+// modelDeploymentObservationContext derives the single context every read of one collection runs
+// under, so a caller that supplied its own deadline keeps it and an unlimited caller still gets a
+// finite one.
+func modelDeploymentObservationContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, modelDeploymentObservationBudget)
+}
+
+// modelDeploymentRouterObservationContext keeps collection within the active retirement budget.
+func (r *ModelDeploymentReconciler) modelDeploymentRouterObservationContext(
+	ctx context.Context, md *workercore.ModelDeployment,
+) (context.Context, context.CancelFunc) {
+	budget := modelDeploymentObservationBudget
+	if reservation := md.Status.Retirement; reservation != nil {
+		phaseBudget := time.Duration(0)
+		switch reservation.State {
+		case workercore.ModelDeploymentRetirementStateAdmitted,
+			workercore.ModelDeploymentRetirementStateDisqualified,
+			workercore.ModelDeploymentRetirementStateWithdrawing:
+			phaseBudget = modelDeploymentRetirementWithdrawalBudget
+		case workercore.ModelDeploymentRetirementStateDraining:
+			phaseBudget = modelDeploymentRetirementDrainBudget
+		case workercore.ModelDeploymentRetirementStateSettling:
+			phaseBudget = modelDeploymentRetirementSettleBudget
+		case workercore.ModelDeploymentRetirementStateDeleting:
+			phaseBudget = modelDeploymentRetirementOverallBudget
+		}
+		if phaseBudget != 0 {
+			now := r.modelDeploymentNow()
+			budget = min(budget, reservation.Deadline.Sub(now),
+				reservation.PhaseStartedAt.Add(phaseBudget).Sub(now))
+		}
+	}
+
+	return context.WithTimeout(ctx, budget)
+}
 
 type routerViewFetch func(ctx context.Context, url string) ([]byte, error)
 
@@ -268,7 +431,18 @@ func aggregateModelDeploymentServing(
 		}
 	}
 
-	generations := map[uint64]struct{}{}
+	// BOOT GENERATION IS A PER-PROCESS VALUE. Both routers document it as their process
+	// start time in milliseconds, so two independent replicas are EXPECTED to report
+	// different ones, and comparing one scalar across distinct processes made every
+	// multi-replica deployment permanently NotConverged — a stall that no amount of
+	// waiting clears, because the disagreement is normal rather than transient.
+	// Consistency is therefore asked one process at a time. The only disagreement that
+	// makes the answer dishonest is ONE process reporting two generations, which means a
+	// Router rolled mid-observation and the views describe different incarnations of it.
+	// Views that carry no identity cannot be placed in any process, so they share one
+	// group and are held against each other: dropping the check there would read a roll
+	// as convergence, and treating each as its own process would never compare anything.
+	generationByRouter := map[types.UID]uint64{}
 	for _, observation := range observations {
 		if observation.Err != nil {
 			return ServingAnswer{
@@ -282,15 +456,17 @@ func aggregateModelDeploymentServing(
 				Reason: fmt.Sprintf("a router view is stale by %s", age.Round(time.Second)),
 			}
 		}
-		generations[observation.View.RouterBootGeneration] = struct{}{}
-	}
-	// A router that rolled mid-observation means the views describe two different
-	// processes; no single number is honest until they converge on the surviving one.
-	if len(generations) > 1 {
-		return ServingAnswer{
-			State:  workercore.ModelDeploymentServingStateNotConverged,
-			Reason: "router generations disagree: a router rolled during observation",
+		routerUID := observation.View.RouterPodUID
+		generation := observation.View.RouterBootGeneration
+		if seen, known := generationByRouter[routerUID]; known && seen != generation {
+			return ServingAnswer{
+				State: workercore.ModelDeploymentServingStateNotConverged,
+				Reason: fmt.Sprintf(
+					"a router process reports two boot generations (%d and %d): a router rolled during observation",
+					seen, generation),
+			}
 		}
+		generationByRouter[routerUID] = generation
 	}
 
 	// The deduplicated union across views, with per-endpoint agreement checked as it
@@ -334,7 +510,14 @@ const modelDeploymentServingFreshness = 15 * time.Second
 // against the URL the caller built from the Router Pod's own IP — never the Router's
 // Service, which would sample one replica and silently drop the rest.
 func defaultServingViewFetch(ctx context.Context, url string) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// AN UNLIMITED CALLER STILL GETS A FINITE REQUEST. The collection derives one budget for the
+	// whole pass, but this transport is also reachable on its own, and a request that inherits a
+	// context with no deadline has none of its own: it waits as long as the Router keeps the
+	// connection open, which is unbounded and is exactly the shape of a Router that has wedged.
+	requestCtx, cancel := modelDeploymentObservationContext(ctx)
+	defer cancel()
+
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +530,20 @@ func defaultServingViewFetch(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("observer answered %s", response.Status)
 	}
 
-	return io.ReadAll(response.Body)
+	// THE BODY IS READ UNDER A CAP, not to its end. An observer that never finishes writing would
+	// otherwise hold a reconcile open for as long as it liked, and the deadline above is the only
+	// thing standing between one Router and a pass that never returns.
+	body := io.LimitReader(response.Body, modelDeploymentObserverMaxBodyBytes+1)
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("read observer body: %w", err)
+	}
+	if len(raw) > modelDeploymentObserverMaxBodyBytes {
+		return nil, fmt.Errorf("observer served more than the %d byte bound",
+			modelDeploymentObserverMaxBodyBytes)
+	}
+
+	return raw, nil
 }
 
 // observeModelDeploymentServing is the reconcile-time collection: discover the Router
@@ -360,11 +556,8 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentServing(
 	if md.Spec.Router == nil {
 		return aggregateModelDeploymentServing(false, nil, 0)
 	}
-
-	fetch := r.servingViewFetch
-	if fetch == nil {
-		fetch = defaultServingViewFetch
-	}
+	ctx, cancel := r.modelDeploymentRouterObservationContext(ctx, md)
+	defer cancel()
 
 	endpointPods, err := r.listModelDeploymentPods(ctx, md)
 	if err != nil {
@@ -378,8 +571,39 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentServing(
 		live = append(live, &endpointPods[i])
 	}
 
+	observations, failure := r.collectModelDeploymentRouterObservations(ctx, md, live)
+	if failure != "" {
+		return ServingAnswer{
+			State:  workercore.ModelDeploymentServingStateUnknown,
+			Reason: failure,
+		}
+	}
+
+	return aggregateModelDeploymentServing(true, observations, modelDeploymentServingFreshness)
+}
+
+// collectModelDeploymentRouterObservations is the ONE collection of Router views, and both callers
+// of a Router view run it: the reconcile-time serving answer and the retirement residual. They
+// each carried their own copy of discovery, fetch, parse and binding, which is how the two drifted
+// and how a residual could be collected under a budget the serving answer knew nothing about.
+//
+// DISCOVERY, EVERY READ AND THE BINDING ALL RUN INSIDE ONE CONTEXT. A caller that passed a deadline
+// keeps it; an unlimited caller gets the observation budget; and a single Router cannot renew the
+// total by being slow, because every read after the first inherits whatever the first left. A read
+// that runs out of time, fails, or comes back unusable is recorded as an error on its own
+// observation, so the aggregate answers Unknown and the residual holds, rather than a read
+// silently becoming an empty registry.
+func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
+	ctx context.Context, md *workercore.ModelDeployment, live []*corev1.Pod,
+) ([]RouterServingObservation, string) {
+	collectCtx, cancel := r.modelDeploymentRouterObservationContext(ctx, md)
+	defer cancel()
+	if err := collectCtx.Err(); err != nil {
+		return nil, fmt.Sprintf("the router observation budget is exhausted: %v", err)
+	}
+
 	routerPods := &corev1.PodList{}
-	if err := r.Client.List(ctx, routerPods,
+	if err := r.Client.List(collectCtx, routerPods,
 		ctrlcli.InNamespace(md.Namespace),
 		ctrlcli.MatchingLabels{
 			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
@@ -387,10 +611,12 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentServing(
 			modelDeploymentRouterLabelKey:   md.Spec.Router.Name,
 		},
 	); err != nil {
-		return ServingAnswer{
-			State:  workercore.ModelDeploymentServingStateUnknown,
-			Reason: fmt.Sprintf("the router's pods could not be listed: %v", err),
-		}
+		return nil, fmt.Sprintf("the router's pods could not be listed: %v", err)
+	}
+
+	fetch := r.servingViewFetch
+	if fetch == nil {
+		fetch = defaultServingViewFetch
 	}
 
 	now := time.Now()
@@ -400,7 +626,7 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentServing(
 		if routerPod.Status.PodIP == "" || routerPod.DeletionTimestamp != nil {
 			continue
 		}
-		observation, err := collectRouterServingView(ctx, func(
+		observation, err := collectRouterServingView(collectCtx, func(
 			callCtx context.Context, path string,
 		) ([]byte, error) {
 			return fetch(callCtx, fmt.Sprintf("http://%s:%d%s",
@@ -419,7 +645,11 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentServing(
 		observations = append(observations, observation)
 	}
 
-	return aggregateModelDeploymentServing(true, observations, modelDeploymentServingFreshness)
+	if err := collectCtx.Err(); err != nil {
+		return nil, fmt.Sprintf("the router observation budget is exhausted: %v", err)
+	}
+
+	return observations, ""
 }
 
 // applyModelDeploymentServing writes the observed answer onto every role's serving field.

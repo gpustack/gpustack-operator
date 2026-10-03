@@ -793,8 +793,12 @@ func TestModelDeploymentEndpointReadsEveryFlagTheEngineGets(t *testing.T) {
 // a scale must move its endpoints and leave the object alone.
 func TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 4 })
+	// Router-backed so the trim completes; the Router is seeded BEFORE the measured pass below, so
+	// the write counter still sees only the two departing replicas being deleted and no Service
+	// being created.
+	md, router := retirementRouterFixture(md)
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType())
+	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)

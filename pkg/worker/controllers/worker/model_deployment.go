@@ -2114,8 +2114,11 @@ func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts co
 	if err != nil {
 		return fmt.Errorf("build core client for the drain reader: %w", err)
 	}
+	// THE MANAGER'S API READER IS THE AUTHORITY, and the cached client is the locator. Every fact the
+	// drain acts on is read live before and after the exec, because a controller that reads its own
+	// cache cannot tell a member that restarted from one that merely looks the same.
 	r.drainReader = newModelDeploymentDrainCollector(
-		r.Client, opts.Manager.GetConfig(), coreClient,
+		r.Client, opts.Manager.GetAPIReader(), opts.Manager.GetConfig(), coreClient,
 	)
 
 	return ctrl.NewControllerManagedBy(opts.Manager).

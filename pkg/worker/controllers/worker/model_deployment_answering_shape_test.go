@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
@@ -114,7 +115,30 @@ func planFor(
 	}
 	md = reserve(md, retirementReservation(
 		workercore.ModelDeploymentRetirementStateDraining, "server", 1, uids))
-	cli := newModelDeploymentClient(md.DeepCopy())
+	// The reconciler patches THIS object when it writes the release record, and that write is a
+	// real optimistic lock, so it compares against a resource version. A server always hands one
+	// out; a fixture that seeds the object but leaves the caller's copy without it describes a
+	// state no server produces, and the lock refuses it before it reaches the client.
+	md = withResourceVersion(md)
+	// The supplied pods are SEEDED, not just handed to the planner. The release capture reads the
+	// target's members back from the server before it will authorize a delete, because a member that
+	// is not observable cannot be said to have held anything. A fixture that passes pods to the
+	// planner without creating them is exercising a target the capture cannot see, which is a
+	// fixture gap rather than a behavior to assert.
+	seeded := make([]ctrlcli.Object, 0, len(pods)+1)
+	seeded = append(seeded, md.DeepCopy())
+	seen := map[ctrlcli.ObjectKey]struct{}{}
+	for i := range pods {
+		key := ctrlcli.ObjectKeyFromObject(&pods[i])
+		// Seeded once per object. A case whose members deliberately collapse to one name is
+		// asserting that they do, and the server cannot hold two objects under one name.
+		if _, already := seen[key]; already {
+			continue
+		}
+		seen[key] = struct{}{}
+		seeded = append(seeded, pods[i].DeepCopy())
+	}
+	cli := newModelDeploymentClient(seeded...)
 	r := holdReconciler(cli, reader, time.Now())
 
 	return r.planModelDeploymentRetirement(context.Background(), md, pods)

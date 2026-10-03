@@ -37,12 +37,38 @@ import (
 )
 
 func newModelDeploymentClient(objs ...ctrlcli.Object) ctrlcli.Client {
+	// An object read from a server always carries a resource version, and the release record's
+	// write is a real optimistic lock that needs one to compare against. A fixture that omits it
+	// describes a state no server hands out, so it is stamped here rather than in every case.
+	for _, obj := range objs {
+		if md, ok := obj.(*workercore.ModelDeployment); ok && md.ResourceVersion == "" {
+			md.ResourceVersion = "1"
+		}
+	}
+
 	return ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
+		// The release observation lists a node's pods with the spec.nodeName field selector, which
+		// a real API server answers directly. The fake client can only answer it when the field is
+		// indexed, so the index is registered here rather than in the one case that uses it.
+		WithIndex(&core.Pod{}, "spec.nodeName", func(obj ctrlcli.Object) []string {
+			pod, ok := obj.(*core.Pod)
+			if !ok {
+				return nil
+			}
+			if pod.Spec.NodeName == "" {
+				return nil
+			}
+
+			return []string{pod.Spec.NodeName}
+		}).
 		// The Binding is here because the deployment writes its usedBy through the status
 		// subresource. Left out, the claim would be written as a whole-object update, and the
 		// counting fixture would attribute the most frequent cross-object write to the wrong hook.
-		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
+		// The release observation compares the node's own records against the ledger the device
+		// manager published, and a published ledger is a status write on a cluster-scoped object.
+		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{},
+			&workercore.Devices{}).
 		WithObjects(objs...).
 		Build()
 }
@@ -94,7 +120,10 @@ func newCountingModelDeploymentClient(w *modelDeploymentWrites, objs ...ctrlcli.
 		// The Binding is here because the deployment writes its usedBy through the status
 		// subresource. Left out, the claim would be written as a whole-object update, and the
 		// counting fixture would attribute the most frequent cross-object write to the wrong hook.
-		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
+		// The release observation compares the node's own records against the ledger the device
+		// manager published, and a published ledger is a status write on a cluster-scoped object.
+		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{},
+			&workercore.Devices{}).
 		WithObjects(objs...).
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{
 			Create: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption) error {
@@ -166,15 +195,59 @@ func drainEvents(recorder *ctrlrecord.FakeRecorder) []string {
 
 // replicaNames lists the replicas the deployment owns, sorted, so a case can state the whole set it
 // expects rather than probing for the names it happens to think of.
+// realSurplusReplicaAt builds a Pod from the reconciling renderer's OWN output, not from the
+// single-pod helper above.
+//
+// The single-pod helper renders one replica and stops, but the reconciler synthesizes the KV
+// connector into the role as well -- the event config, its two ports and the transfer engine's
+// metrics environment. A Pod built without that describes a spec the reconciler never intended to
+// produce, so its fingerprint matches nothing the reconciler renders and every comparison against
+// the current render falls through to whatever breaks the tie afterwards. A fixture for a rule
+// about currency has to be built from the same instrument the rule reads.
+func realSurplusReplicaAt(
+	t *testing.T, md *workercore.ModelDeployment, name string, ordinal int, staleHash string,
+) *core.Pod {
+	t.Helper()
+
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	desired, err := r.renderModelDeploymentPods(context.Background(), md, nil, nil, nil)
+	require.NoError(t, err)
+	require.Contains(t, desired, "server")
+
+	pod := desired["server"][ordinal][0].DeepCopy()
+	pod.Name = name
+	if staleHash != "" {
+		pod.Annotations[modelDeploymentPodSpecHashAnnotation] = staleHash
+	}
+
+	return pod
+}
+
+// realRenderHashOf is the fingerprint the reconciler renders for one seat, read the same way the
+// currency rule reads it.
+func realRenderHashOf(
+	t *testing.T, md *workercore.ModelDeployment, ordinal int,
+) string {
+	t.Helper()
+
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	desired, err := r.renderModelDeploymentPods(context.Background(), md, nil, nil, nil)
+	require.NoError(t, err)
+
+	return desired["server"][ordinal][0].Annotations[modelDeploymentPodSpecHashAnnotation]
+}
+
+// replicaNames lists the deployment's serving replica pods by name.
+//
+// It reads replicaPods, so a Router pod is left out: the Router is discovered in the same namespace
+// but is not a seat on a replica, and a case asserting how many replicas remain must not count it.
 func replicaNames(t *testing.T, cli ctrlcli.Client) []string {
 	t.Helper()
 
-	podList := new(core.PodList)
-	require.NoError(t, cli.List(context.Background(), podList, ctrlcli.InNamespace("team-a")))
-
-	names := make([]string, 0, len(podList.Items))
-	for i := range podList.Items {
-		names = append(names, podList.Items[i].Name)
+	pods := replicaPods(t, cli)
+	names := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		names = append(names, pod.Name)
 	}
 	slices.Sort(names)
 
@@ -442,7 +515,10 @@ func TestModelDeploymentReconciler_CreatedReplicasCarryNoName(t *testing.T) {
 	var created []*core.Pod
 	cli := ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
-		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
+		// The release observation compares the node's own records against the ledger the device
+		// manager published, and a published ledger is a status write on a cluster-scoped object.
+		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{},
+			&workercore.Devices{}).
 		WithObjects(newRenderDeployment(), newRenderInstanceType()).
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{
 			Create: func(
@@ -592,7 +668,10 @@ func TestModelDeploymentReconciler_ALostCreateResponseLeavesOnePodPerOrdinal(t *
 	var lostCreates int
 	cacheView := ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
-		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
+		// The release observation compares the node's own records against the ledger the device
+		// manager published, and a published ledger is a status write on a cluster-scoped object.
+		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{},
+			&workercore.Devices{}).
 		WithObjects(md, newRenderInstanceType()).
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{
 			Create: func(
@@ -658,7 +737,10 @@ func TestModelDeploymentReconciler_ALostCreateResponseLeavesOnePodPerOrdinal(t *
 func TestModelDeploymentReconciler_CountChangeTrimsTheHighestOrdinals(t *testing.T) {
 	ctx := context.Background()
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 4 })
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	// Router-backed: this case is about which ordinals a trim keeps, and a trim only completes when
+	// the withdrawal can be observed. Without a router the surplus would be held, not removed.
+	md, router := retirementRouterFixture(md)
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
@@ -731,11 +813,23 @@ func surplusReplicaAt(
 func TestModelDeploymentReconciler_ScaleDownShedsTheSurplusBySlot(t *testing.T) {
 	t.Run("the seat keeps the member its current render describes", func(t *testing.T) {
 		md := newRenderDeployment() // declares two
-		stale := surplusReplicaAt(t, md, "qwen-server-dup-z", 0, "a-hash-no-render-produces")
-		keeper := surplusReplicaAt(t, md, "qwen-server-dup-a", 0, "")
-		seated := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
+		// The router is declared BEFORE the replicas are rendered, because the render the seat rule
+		// compares against is taken from the spec as it stands. Declaring the router afterwards
+		// would leave the seeded members describing a spec that no longer exists.
+		md, router := retirementRouterFixture(md)
+		// BUILT FROM THE REAL RENDER, and asserted current before the rule is tested at all: if the
+		// intended keeper did not describe the seat the reconciler renders, this case would be
+		// asserting a tie-break's outcome rather than the currency rule that is supposed to decide.
+		stale := realSurplusReplicaAt(t, md, "qwen-server-dup-z", 0, "a-hash-no-render-produces")
+		keeper := realSurplusReplicaAt(t, md, "qwen-server-dup-a", 0, "")
+		require.Equal(t, realRenderHashOf(t, md, 0), keeper.Annotations[modelDeploymentPodSpecHashAnnotation],
+			"the intended keeper is built from the reconciler's own render and is therefore current")
+		require.NotEqual(t, keeper.Annotations[modelDeploymentPodSpecHashAnnotation],
+			stale.Annotations[modelDeploymentPodSpecHashAnnotation],
+			"and the stale occupant's fingerprint is distinct from it")
+		seated := realSurplusReplicaAt(t, md, "qwen-server-one", 1, "")
 
-		cli := newModelDeploymentClient(md, newRenderInstanceType(), stale, keeper, seated)
+		cli := newModelDeploymentClient(md, newRenderInstanceType(), stale, keeper, seated, router)
 
 		res, err := reconcileModelDeploymentRetiring(t, cli)
 		require.NoError(t, err)
@@ -748,11 +842,12 @@ func TestModelDeploymentReconciler_ScaleDownShedsTheSurplusBySlot(t *testing.T) 
 
 	t.Run("the greatest name keeps the seat when nothing separates the members", func(t *testing.T) {
 		md := newRenderDeployment() // declares two
-		lesser := surplusReplicaAt(t, md, "qwen-server-dup-a", 0, "")
-		greater := surplusReplicaAt(t, md, "qwen-server-dup-z", 0, "")
-		seated := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
+		md, router := retirementRouterFixture(md)
+		lesser := realSurplusReplicaAt(t, md, "qwen-server-dup-a", 0, "")
+		greater := realSurplusReplicaAt(t, md, "qwen-server-dup-z", 0, "")
+		seated := realSurplusReplicaAt(t, md, "qwen-server-one", 1, "")
 
-		cli := newModelDeploymentClient(md, newRenderInstanceType(), lesser, greater, seated)
+		cli := newModelDeploymentClient(md, newRenderInstanceType(), lesser, greater, seated, router)
 
 		_, err := reconcileModelDeploymentRetiring(t, cli)
 		require.NoError(t, err)

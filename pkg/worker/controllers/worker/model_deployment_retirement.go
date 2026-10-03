@@ -28,7 +28,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -184,7 +186,10 @@ func (r *ModelDeploymentReconciler) planModelDeploymentRetirement(
 		// declares. A retirement deletes a replica member by member; the convergence's removal is
 		// a per-replica decision, and the two disagree in exactly this state.
 		plan.Hold = true
-		r.advanceModelDeploymentRetirementPastDeletion(md, plan)
+		// The caller's context travels with it. A pass that was canceled has not read the server,
+		// and a post-delete step that ran on a fresh background context would answer a question
+		// about the operation that the caller already stopped asking.
+		r.advanceModelDeploymentRetirementPastDeletion(ctx, md, plan)
 
 		return plan
 	}
@@ -276,13 +281,19 @@ func (r *ModelDeploymentReconciler) planModelDeploymentRetirement(
 // the delete is in flight; that is what makes the delete below a single decision rather than a race
 // with the ordinary convergence.
 func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementPastDeletion(
-	md *workercore.ModelDeployment, plan *modelDeploymentRetirementPlan,
+	ctx context.Context, md *workercore.ModelDeployment, plan *modelDeploymentRetirementPlan,
 ) {
+	if err := ctx.Err(); err != nil {
+		plan.Clear = false
+		plan.Reservation.Reason = fmt.Sprintf("the pass was cancelled, so the release is not observed: %v", err)
+
+		return
+	}
 	switch plan.Reservation.State {
 	case workercore.ModelDeploymentRetirementStateDeleting:
-		r.advanceModelDeploymentRetirementToSettling(context.Background(), md, plan)
+		r.advanceModelDeploymentRetirementToSettling(ctx, md, plan)
 	case workercore.ModelDeploymentRetirementStateSettling:
-		r.advanceModelDeploymentRetirementToCompleted(context.Background(), md, plan)
+		r.advanceModelDeploymentRetirementToCompleted(ctx, md, plan)
 	}
 }
 
@@ -393,13 +404,59 @@ func (r *ModelDeploymentReconciler) persistModelDeploymentRetirement(
 	if plan.Clear {
 		next = nil
 	}
+
+	return r.writeModelDeploymentRetirement(ctx, md, previous, next)
+}
+
+// writeModelDeploymentRetirement persists the reservation and nothing else.
+//
+// The three early retirement writes share one shape, and they share one failure mode if they do
+// not share one writer: a full-object status write sends the whole typed status back to the API
+// server, including every field the object happens to carry, and the server validates all of it.
+// A stored object written by an older version can carry enum values the current schema does not
+// accept in fields this operation never touches, and then a write that only means "move the
+// operation one phase on" is refused for something it did not say. Patching only the retirement
+// field sends only what this operation asserts.
+//
+// The patch is optimistic: it carries the resourceVersion this pass read, so a stored object that
+// moved underneath the write is a Conflict rather than a silent overwrite. A no-op writes nothing
+// at all, and clearing a reservation writes an explicit null, because a patch that omits the field
+// leaves whatever was there.
+//
+// The object is updated from the server's response, so a later write in the same pass carries the
+// version this one produced rather than the one this pass started with.
+func (r *ModelDeploymentReconciler) writeModelDeploymentRetirement(
+	ctx context.Context, md *workercore.ModelDeployment,
+	previous, next *workercore.ModelDeploymentRetirementStatus,
+) error {
 	if kubemeta.DeepEqual(previous, next) {
 		return nil
 	}
 
-	md.Status.Retirement = next
+	// The base is the object as the server last had it, which is why the caller hands both sides
+	// over. A base copied after the caller assigned the new value would already contain it, and the
+	// diff between the two would be empty.
+	base := md.DeepCopy()
+	base.Status.Retirement = previous
+	candidate := base.DeepCopy()
+	candidate.Status.Retirement = next
 
-	return r.Client.Status().Update(ctx, md)
+	optimistic := ctrlcli.MergeFromWithOptions(base, ctrlcli.MergeFromWithOptimisticLock{})
+	if err := r.Client.Status().Patch(ctx, candidate, optimistic); err != nil {
+		return err
+	}
+
+	// The patch decodes the server's response into the candidate, so the version this write produced
+	// is the version the next write in the pass carries. Nothing is read back, because that would
+	// ask the client for a Get this writer does not otherwise depend on.
+	//
+	// The candidate is copied back only once the server has accepted it. A write that fails leaves
+	// the caller's object describing what the server still holds, which is what the rest of the pass
+	// reads to decide whether a token was consumed and whether a delete is allowed.
+	md.ResourceVersion = candidate.ResourceVersion
+	md.Status = candidate.Status
+
+	return nil
 }
 
 // modelDeploymentRetirementTarget resolves a reservation to the replica it names, by UID.
@@ -450,10 +507,11 @@ func modelDeploymentRetirementTarget(
 func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToDisqualified(
 	_ context.Context, _ *workercore.ModelDeployment, plan *modelDeploymentRetirementPlan,
 ) {
+	// The phase start is not stamped here. Admitted is polled on every pass while the target
+	// carries the eligibility key, so a stamp on entry would reset the budget on every pass.
+	// Admission already persists the moment the phase began.
 	now := r.modelDeploymentNow()
-	plan.Reservation.PhaseStartedAt = meta.NewTime(now)
-
-	if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementWithdrawalBudget) {
+	if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementWithdrawalBudget, now) {
 		r.abortModelDeploymentRetirement(plan, now,
 			"the withdrawal budget was exhausted before the target left selection")
 
@@ -483,7 +541,7 @@ func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToWithdrawin
 	ctx context.Context, md *workercore.ModelDeployment, plan *modelDeploymentRetirementPlan,
 ) {
 	now := r.modelDeploymentNow()
-	if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementWithdrawalBudget) {
+	if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementWithdrawalBudget, now) {
 		r.abortModelDeploymentRetirement(plan, now,
 			"the withdrawal budget was exhausted before the target stopped serving")
 
@@ -509,7 +567,7 @@ func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToDraining(
 	now := r.modelDeploymentNow()
 	plan.Reservation.PhaseStartedAt = meta.NewTime(now)
 
-	if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementDrainBudget) {
+	if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementDrainBudget, now) {
 		r.abortModelDeploymentRetirement(plan, now,
 			"the drain budget was exhausted before the target left deletion")
 
@@ -526,7 +584,7 @@ func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToDeleting(
 	ctx context.Context, md *workercore.ModelDeployment, plan *modelDeploymentRetirementPlan,
 ) {
 	now := r.modelDeploymentNow()
-	if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementDrainBudget) {
+	if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementDrainBudget, now) {
 		r.abortModelDeploymentRetirement(plan, now,
 			"the drain budget was exhausted before the target's queues reached zero")
 
@@ -535,6 +593,39 @@ func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToDeleting(
 
 	if reason, drained := r.observeModelDeploymentRetirementDrained(ctx, md, plan); !drained {
 		plan.Reservation.Reason = reason
+
+		return
+	}
+
+	// THE RELEASE EVIDENCE IS CAPTURED AND PERSISTED BEFORE THE DELETE IS AUTHORIZED. This is the
+	// last moment the members, their allocation records and their Workloads are all still present:
+	// a member deleted here cannot be reconstructed from the pods that remain, and an operation
+	// that cannot say what it held cannot later say the hold came back. A capture that fails holds
+	// the operation, because deleting now would destroy the very evidence completion needs.
+	record, err := r.captureModelDeploymentRetirementRelease(ctx, md, plan)
+	if err != nil {
+		plan.Reservation.Reason = fmt.Sprintf(
+			"the target's release cannot be recorded, so nothing is deleted: %v", err)
+		plan.DeletesAllowed = false
+		plan.Deletes = nil
+
+		return
+	}
+	if err := r.persistModelDeploymentRetirementRelease(ctx, md, record); err != nil {
+		plan.Reservation.Reason = fmt.Sprintf(
+			"the target's release could not be written, so nothing is deleted: %v", err)
+		plan.DeletesAllowed = false
+		plan.Deletes = nil
+
+		return
+	}
+	// The identity is re-read after the write, so a record that did not land for THIS operation
+	// stops here rather than being discovered missing once the delete is committed.
+	if _, err := r.loadModelDeploymentRetirementRelease(md, plan); err != nil {
+		plan.Reservation.Reason = fmt.Sprintf(
+			"the target's release was not recorded for this operation, so nothing is deleted: %v", err)
+		plan.DeletesAllowed = false
+		plan.Deletes = nil
 
 		return
 	}
@@ -554,16 +645,21 @@ func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToDeleting(
 // begins when the target is absent from the server, which is the only moment the capacity is
 // genuinely free.
 func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToSettling(
-	_ context.Context, _ *workercore.ModelDeployment, plan *modelDeploymentRetirementPlan,
+	ctx context.Context, md *workercore.ModelDeployment, plan *modelDeploymentRetirementPlan,
 ) {
 	now := r.modelDeploymentNow()
 	plan.DeletesAllowed = true
 
-	// A reservation still holding a UID at Deleting means the delete has not landed. The operation
-	// re-issues it rather than waiting, because the Pods are what the Workload holds and a
-	// Workload deleted ahead of its Pods would stop the group the protocol is still counting on.
-	if plan.held.Len() > 0 {
-		plan.Reservation.Reason = "the target is still present; the delete has not landed"
+	// THE HELD SET IS NOT ABSENCE. It skips objects with a deletion timestamp, so a member that is
+	// terminating empties it while the object is still on the server and still carved. The delete
+	// is re-issued from it, and the transition waits on a fresh read of the captured UIDs instead.
+	//
+	// The observation is deliberately limited to the members here. The accelerator and quota
+	// release is observed at Settling, where the ledger and the Workloads can be compared against
+	// what was captured; this step only establishes that the target is really gone.
+	reason, absent := r.observeModelDeploymentRetirementTargetsGone(ctx, md, plan)
+	if !absent {
+		plan.Reservation.Reason = reason
 		plan.Deletes = modelDeploymentRetirementDeleteSet(plan.Target)
 
 		return
@@ -582,17 +678,29 @@ func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToSettling(
 // state it reached and records the reason, which is the only honest answer available once the
 // deletion is committed.
 func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToCompleted(
-	_ context.Context, _ *workercore.ModelDeployment, plan *modelDeploymentRetirementPlan,
+	ctx context.Context, md *workercore.ModelDeployment, plan *modelDeploymentRetirementPlan,
 ) {
-	if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementSettleBudget) {
-		plan.Reservation.Reason = "the settle budget was exhausted; the target is deleted and the " +
-			"release has not been observed"
+	now := r.modelDeploymentNow()
+
+	// THE RELEASE IS OBSERVED BEFORE THE BUDGET IS CONSULTED. A budget bounds waiting; it is not a
+	// license to claim a result. An operation that observed the release late has observed it, and
+	// reporting it as unobserved because the deadline passed would be the same fabrication this
+	// predicate replaced. Only when the release has not been observed does the deadline decide what
+	// to say, and then it says so without clearing anything.
+	reason, released := r.observeModelDeploymentRetirementReleased(ctx, md, plan)
+	if !released {
+		if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementSettleBudget, now) {
+			plan.Reservation.Reason = fmt.Sprintf(
+				"the settle budget was exhausted and the release has not been observed: %s", reason)
+		} else {
+			plan.Reservation.Reason = reason
+		}
 
 		return
 	}
 
 	plan.Reservation.State = workercore.ModelDeploymentRetirementStateCompleted
-	plan.Reservation.Reason = "the target is deleted and its release has been observed"
+	plan.Reservation.Reason = "the target is deleted and its accelerator and quota release were observed"
 	plan.Clear = true
 	plan.InFlight = false
 	plan.Hold = false
@@ -622,8 +730,11 @@ func (r *ModelDeploymentReconciler) abortModelDeploymentRetirement(
 // THE PHASE ENDS AT THE EARLIER OF THE TWO DEADLINES. A phase budget longer than the remaining
 // overall budget must not extend the operation past it, and an operation whose overall budget has
 // passed must not be given a fresh phase by a generous per-phase number.
+//
+// `now` is the reconciler's clock, so a test can drive the budget by moving time rather than by
+// waiting for it. Equality is exhausted: a phase ending exactly now has run out.
 func modelDeploymentRetirementBudgetSpent(
-	reservation *workercore.ModelDeploymentRetirementStatus, budget time.Duration,
+	reservation *workercore.ModelDeploymentRetirementStatus, budget time.Duration, now time.Time,
 ) bool {
 	phaseEnd := reservation.PhaseStartedAt.Add(budget)
 	overallEnd := reservation.Deadline.Time
@@ -631,7 +742,7 @@ func modelDeploymentRetirementBudgetSpent(
 		phaseEnd = overallEnd
 	}
 
-	return !time.Now().Before(phaseEnd)
+	return !now.Before(phaseEnd)
 }
 
 // modelDeploymentRetirementTargetTerminal reports whether every member the reservation still holds
@@ -696,12 +807,15 @@ func (r *ModelDeploymentReconciler) modelDeploymentNow() time.Time {
 func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementResidual(
 	ctx context.Context, md *workercore.ModelDeployment, held sets.Set[types.UID],
 ) (string, bool) {
-	// A DEPLOYMENT THAT DECLARES NO ROUTER HAS NO ROUTER TO ASK, which is a different answer from
-	// Unknown and must not be read as a residual. What still has to be true is the connections the
-	// target's own Service already established, and that is the withdrawer's own question.
+	// No router is no reading of the ingress. Service convergence stops new-connection selection,
+	// but established connections keep delivering requests and nothing readable reports whether one
+	// has gone quiet. So the answer is a hold rather than the absence of a residual.
 	if md.Spec.Router == nil {
-		return "", false
+		return "this deployment declares no router, so the established direct-Service connections " +
+			"this target's service may still hold cannot be observed; the operation holds", true
 	}
+	ctx, cancel := r.modelDeploymentRouterObservationContext(ctx, md)
+	defer cancel()
 
 	pods, err := r.listModelDeploymentPods(ctx, md)
 	if err != nil {
@@ -712,46 +826,11 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementResidual(
 		live = append(live, &pods[i])
 	}
 
-	routerPods := &core.PodList{}
-	if err = r.Client.List(ctx, routerPods,
-		ctrlcli.InNamespace(md.Namespace),
-		ctrlcli.MatchingLabels{
-			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
-			modelDeploymentLabelKeyInstance: md.Name,
-			modelDeploymentRouterLabelKey:   md.Spec.Router.Name,
-		},
-	); err != nil {
-		return "the router's pods could not be listed: " + err.Error(), true
-	}
-
-	fetch := r.servingViewFetch
-	if fetch == nil {
-		fetch = defaultServingViewFetch
-	}
-	now := time.Now()
-	observations := make([]RouterServingObservation, 0, len(routerPods.Items))
-	for i := range routerPods.Items {
-		routerPod := &routerPods.Items[i]
-		if routerPod.Status.PodIP == "" || routerPod.DeletionTimestamp != nil {
-			continue
-		}
-		observation, collectErr := collectRouterServingView(ctx, func(
-			callCtx context.Context, path string,
-		) ([]byte, error) {
-			return fetch(callCtx, fmt.Sprintf("http://%s:%d%s",
-				routerPod.Status.PodIP, modelDeploymentRouterHTTPPort, path))
-		}, routerPod.UID)
-		if collectErr != nil {
-			observations = append(observations, observation)
-
-			continue
-		}
-		observation.CollectedAt = now
-		observation.Bound, collectErr = bindRouterObservationView(observation.View, live)
-		if collectErr != nil {
-			observation.Err = collectErr
-		}
-		observations = append(observations, observation)
+	// The same collection the serving answer uses, under the same single total budget. The residual
+	// asks a different question of the result, not a different question of the Routers.
+	observations, failure := r.collectModelDeploymentRouterObservations(ctx, md, live)
+	if failure != "" {
+		return failure, true
 	}
 
 	// The aggregate rules come first and are not optional: a view that is stale, unusable or from a
@@ -1011,6 +1090,9 @@ func modelDeploymentRetirementDrainTarget(
 		Container: modelDeploymentMainContainerName,
 		Role:      modelDeploymentRetirementRoleName(role, plan),
 		Engine:    modelDeploymentRetirementEngine(md),
+		// The operation's own deployment identity, so a live Pod that no longer belongs to it is a
+		// member this operation never held rather than one it may read.
+		DeploymentUID: md.UID,
 	}
 }
 
@@ -1040,7 +1122,70 @@ func modelDeploymentDrainMemberIdle(
 		return "member " + member.Name + " is missing " + strings.Join(missing, ", "), false
 	}
 
+	// A READER IS NOT TRUSTED WITH ITS OWN VERDICT. It is an interface, and a custom or forged one can
+	// claim Idle over any numbers it likes; the protocol decides what activity means rather than
+	// asking whether the reader agrees. A value that is not a count, or a count below zero, is not
+	// evidence of anything, and an Idle claim resting on one is refused.
+	if invalid := modelDeploymentDrainUnusableSeries(target.Engine, answer.Series); len(invalid) > 0 {
+		return "member " + member.Name + " reported unusable activity in " +
+			strings.Join(invalid, ", "), false
+	}
+
+	// IDLE MEANS ZERO, and it means zero on every expected gauge rather than on their sum. A sum
+	// cannot be zero for a reader that never looked at one of them, and the sum of nonneg counts is
+	// zero only when each is, so the check is made per gauge and the sum is never consulted.
+	if busy := modelDeploymentDrainActiveSeries(target.Engine, answer.Series); len(busy) > 0 {
+		return "member " + member.Name + " still holds activity in " + strings.Join(busy, ", "), false
+	}
+
 	return "", true
+}
+
+// modelDeploymentDrainActivityValue reports whether a gauge value can be read as activity at all.
+//
+// A count of work in flight is a nonnegative finite number, and anything else is an answer this
+// protocol cannot use: NaN compares false against every bound, so it slips past a zero test while
+// being no measurement of anything, and an infinity or a negative count is a signed row that says
+// more about the scrape than about the queue. The parser and the protocol share this one predicate
+// so a value refused at the envelope is refused identically where it is judged.
+func modelDeploymentDrainActivityValue(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
+}
+
+// modelDeploymentDrainUnusableSeries names the expected gauges whose values are not activity.
+func modelDeploymentDrainUnusableSeries(engine string, series map[string]float64) []string {
+	expected, known := modelDeploymentInFlightMetrics[engine]
+	if !known {
+		return []string{"a measurement for engine " + engine}
+	}
+
+	unusable := make([]string, 0, len(expected))
+	for _, metric := range expected {
+		if value, present := series[metric]; present && !modelDeploymentDrainActivityValue(value) {
+			unusable = append(unusable, metric)
+		}
+	}
+	sort.Strings(unusable)
+
+	return unusable
+}
+
+// modelDeploymentDrainActiveSeries names the expected gauges that are not exactly zero.
+func modelDeploymentDrainActiveSeries(engine string, series map[string]float64) []string {
+	expected, known := modelDeploymentInFlightMetrics[engine]
+	if !known {
+		return []string{"a measurement for engine " + engine}
+	}
+
+	active := make([]string, 0, len(expected))
+	for _, metric := range expected {
+		if value := series[metric]; value != 0 {
+			active = append(active, metric)
+		}
+	}
+	sort.Strings(active)
+
+	return active
 }
 
 // modelDeploymentDrainMissingSeries names the expected gauges a read did not carry.
@@ -1261,8 +1406,7 @@ func (r *ModelDeploymentReconciler) consumeModelDeploymentRetry(
 
 	// THE PERSISTENCE THAT MATTERS. This write is what makes the token consumed; the annotation
 	// clear below is only tidying that happens once it is true.
-	md.Status.Retirement = reservation
-	if err := r.Client.Status().Update(ctx, md); err != nil {
+	if err := r.writeModelDeploymentRetirement(ctx, md, md.Status.Retirement, reservation); err != nil {
 		logger.Error(err, "persist a consumed retirement retry token")
 
 		return false
@@ -1367,18 +1511,31 @@ func (r *ModelDeploymentReconciler) refuseModelDeploymentRemoval(
 	role := modelDeploymentPodRole(pod)
 	ordinal, seated := modelDeploymentPodOrdinal(pod)
 
+	// A reserved pod is refused before it is asked whether it is seated. The reservation names its
+	// members by UID, and the ordinal label is mutable: strip it and the pod is no longer a replica
+	// the wire can name, while the operation still holds that very pod. The unseated return below
+	// would hand it to a path that deletes on the role. The check is narrow, and only a pod the
+	// reservation actually holds is refused here.
+	if plan.holds(pod.UID) {
+		logger.V(3).Info("holding a removal of a pod the reservation already holds",
+			"pod", pod.Name, "role", role, "ordinal", ordinal, "seated", seated,
+			"state", plan.Reservation.State)
+
+		return true
+	}
+
 	if !seated {
 		return false
 	}
 
-	// AN OPERATION IS ALREADY IN FLIGHT, so this removal waits rather than starting one. The
-	// reservation's own target is the case the coordinator's rule covers as well: an Aborted
-	// operation retains its capacity deliberately, and a scale-down that deleted the retained
-	// replica would not have retained anything.
-	if plan.InFlight {
-		logger.V(3).Info("holding a removal while a retirement reservation is in flight",
+	// A removal is refused while the protocol runs and while it retains. InFlight covers only the
+	// first: an abort clears it while keeping the target, so a second intent would overwrite the
+	// retained reservation. Hold is true exactly when something is retained, so both together
+	// refuse a conflict without freezing the exits that legitimately replace the reservation.
+	if plan.InFlight || plan.Hold {
+		logger.V(3).Info("holding a removal while a retirement reservation is in flight or retained",
 			"pod", pod.Name, "role", role, "ordinal", ordinal,
-			"state", plan.Reservation.State)
+			"state", plan.Reservation.State, "retained", plan.Hold)
 
 		return true
 	}
@@ -1466,8 +1623,7 @@ func (r *ModelDeploymentReconciler) admitModelDeploymentRetirement(
 		PhaseStartedAt:     meta.NewTime(now),
 	}
 
-	md.Status.Retirement = reservation
-	if err := r.Client.Status().Update(ctx, md); err != nil {
+	if err := r.writeModelDeploymentRetirement(ctx, md, md.Status.Retirement, reservation); err != nil {
 		return fmt.Errorf("persist an admitted retirement reservation: %w", err)
 	}
 

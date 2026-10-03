@@ -178,8 +178,11 @@ func TestModelDeploymentEvents_NothingForASteadyDeployment(t *testing.T) {
 // the Instance path uses and which would be the obvious thing to copy.
 func TestModelDeploymentEvents_TheReconcilerLeavesReplicasObservableWhileTheyGo(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 2 })
+	// Router-backed so the 2-to-1 trim completes. The Router is seeded before the measured pass, so
+	// the delete counter still observes exactly the one departing replica.
+	md, router := retirementRouterFixture(md)
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType())
+	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)

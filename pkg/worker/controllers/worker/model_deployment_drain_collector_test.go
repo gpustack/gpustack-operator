@@ -2,8 +2,10 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -11,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -29,12 +33,16 @@ import (
 
 const (
 	drainTestUID        = types.UID("member-uid-1")
+	drainTestDeployUID  = types.UID("deployment-uid")
 	drainTestEngine     = workercore.ModelDeploymentEngineVLLM
 	drainTestContainer  = modelDeploymentMainContainerName
 	drainTestPort       = "8000"
 	drainTestScheme     = "http"
 	drainTestPath       = "/metrics"
 	drainTestContainerI = "containerd://before"
+	drainTestRole       = "server"
+	drainTestOwner      = "ModelDeployment"
+	drainTestIP         = "10.0.4.1"
 )
 
 // drainTestPod is a member the collector is allowed to read: the engine's own container, a live
@@ -45,6 +53,17 @@ func drainTestPod(mutate ...func(*corev1.Pod)) *corev1.Pod {
 			Name:      "server-0-abcde",
 			Namespace: "default",
 			UID:       drainTestUID,
+			// The role label and the controlling owner are what bind this member to the deployment
+			// that declared it, and the read compares both across its two live reads. A fixture
+			// without them is a member nothing can be compared against, so they are real here.
+			Labels: map[string]string{modelDeploymentLabelKeyComponent: drainTestRole},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: workercore.GroupVersion.String(),
+				Kind:       drainTestOwner,
+				Name:       "qwen",
+				UID:        drainTestDeployUID,
+				Controller: boolPtr(true),
+			}},
 			Annotations: map[string]string{
 				"prometheus.io/path":   drainTestPath,
 				"prometheus.io/port":   drainTestPort,
@@ -59,6 +78,7 @@ func drainTestPod(mutate ...func(*corev1.Pod)) *corev1.Pod {
 			}},
 		},
 		Status: corev1.PodStatus{
+			PodIP: drainTestIP,
 			ContainerStatuses: []corev1.ContainerStatus{{
 				Name:        drainTestContainer,
 				ContainerID: drainTestContainerI,
@@ -77,8 +97,13 @@ func drainTestPod(mutate ...func(*corev1.Pod)) *corev1.Pod {
 // transport has to survive can be produced on demand.
 type drainTestReader struct {
 	collector *modelDeploymentDrainCollector
-	client    ctrlcli.Client
-	pod       *corev1.Pod
+	// client is the locator and fresh is the authority, and they are separate fakes on purpose. A
+	// single fake cannot show that the read went to the live reader rather than to the cache the
+	// locator already answered from, because a mutation applied to one of them is invisible to a
+	// read that only ever consults the other.
+	client ctrlcli.Client
+	fresh  ctrlcli.Client
+	pod    *corev1.Pod
 	// bodies is served in order, one per exec, so a test can make the first read complete and the
 	// second incomplete without two separate fixtures.
 	bodies []string
@@ -101,18 +126,22 @@ func newDrainTestReader(pod *corev1.Pod, bodies ...string) *drainTestReader {
 		return []string{string(p.UID)}
 	}
 
-	client := ctrlfake.NewClientBuilder().
-		WithScheme(scheme.Scheme).
-		WithObjects(pod).
-		WithIndex(&corev1.Pod{}, modelDeploymentDrainIndexPodUID, indexed).
-		Build()
+	build := func() ctrlcli.Client {
+		return ctrlfake.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithObjects(pod.DeepCopy()).
+			WithIndex(&corev1.Pod{}, modelDeploymentDrainIndexPodUID, indexed).
+			Build()
+	}
+	client, fresh := build(), build()
 
 	reader := &drainTestReader{
 		client: client,
+		fresh:  fresh,
 		pod:    pod,
 		bodies: bodies,
 	}
-	reader.collector = newModelDeploymentDrainCollector(client, nil, nil)
+	reader.collector = newModelDeploymentDrainCollector(client, fresh, nil, nil)
 	reader.collector.exec = func(
 		ctx context.Context, _ *corev1.Pod, _ string, _ []string,
 	) (string, error) {
@@ -143,10 +172,11 @@ func (r *drainTestReader) drain(t *testing.T, mutate ...func(*modelDeploymentDra
 	t.Helper()
 
 	target := modelDeploymentDrainTarget{
-		PodUID:    drainTestUID,
-		Container: drainTestContainer,
-		Role:      "server",
-		Engine:    drainTestEngine,
+		PodUID:        drainTestUID,
+		Container:     drainTestContainer,
+		Role:          "server",
+		Engine:        drainTestEngine,
+		DeploymentUID: drainTestDeployUID,
 	}
 	for _, m := range mutate {
 		m(&target)
@@ -158,6 +188,19 @@ func (r *drainTestReader) drain(t *testing.T, mutate ...func(*modelDeploymentDra
 	}
 
 	return answer
+}
+
+// drainTestTarget is the member the fixture's Pod is, as the protocol carries it.
+func drainTestTarget() modelDeploymentDrainTarget {
+	return modelDeploymentDrainTarget{
+		PodUID:    drainTestUID,
+		Container: drainTestContainer,
+		Role:      drainTestRole,
+		Engine:    drainTestEngine,
+		// The fixture's Pod is owned by this deployment, so the read names it. An empty owner here
+		// would only prove that an unset target and an unset owner agree with each other.
+		DeploymentUID: drainTestDeployUID,
+	}
 }
 
 // drainBody renders the envelope the collector's own script produces for a set of series, so the
@@ -266,9 +309,13 @@ func TestDrainCollectorFixtureMatrix(t *testing.T) {
 			pod:    drainTestPod(),
 			bodies: []string{vllmZero()},
 			during: func(ctx context.Context, r *drainTestReader) {
+				// The mutation lands on the AUTHORITATIVE reader. Mutating only the locator's cache
+				// would leave the read looking at a member that never changed, and the case would
+				// pass for the wrong reason: it would be proving that the cache was not consulted
+				// again rather than that a replaced container is unobserved.
 				mutated := r.pod.DeepCopy()
 				mutated.Status.ContainerStatuses[0].ContainerID = "containerd://after"
-				if err := r.client.Status().Update(ctx, mutated); err != nil {
+				if err := r.fresh.Status().Update(ctx, mutated); err != nil {
 					panic(err)
 				}
 			},
@@ -841,4 +888,474 @@ func TestTheGeneratedScriptSumsLabelSetsWithinOneBody(t *testing.T) {
 	if _, unwanted := answer.Series["some_other_metric"]; unwanted {
 		t.Error("the read carried a series it was never asked for")
 	}
+}
+
+// drainScriptAnswer runs the ACTUAL generated collector program against a served body and returns
+// what the Go parser made of its real output.
+//
+// THE SCRIPT IS EXECUTED RATHER THAN REIMPLEMENTED. A test that re-reads the program and asserts
+// what it ought to contain proves the reading right, not the program; running the one this tree
+// generates, through the one parser this tree uses, and into the one protocol rule this tree
+// applies, is the only way a claim about the wire is a claim about the wire.
+//
+// The fetch is replaced rather than the script, so the program under test is byte for byte the one
+// a member would run, and a Python that is missing is an instrument failure rather than a product
+// result: the cases below are all reached or the run is not a result at all.
+func drainScriptAnswer(t *testing.T, engine, body string) modelDeploymentDrainAnswer {
+	t.Helper()
+
+	python, err := exec.LookPath("python3")
+	require.NoError(t, err, "the generated collector program is a Python program")
+
+	expected, known := modelDeploymentInFlightMetrics[engine]
+	require.True(t, known, "the test names an engine the tree measures")
+
+	argv := modelDeploymentDrainArgv("http://127.0.0.1:8000/metrics", expected)
+	require.Len(t, argv, 3)
+	require.Equal(t, "python3", argv[0])
+	require.Equal(t, "-c", argv[1])
+
+	literal, err := json.Marshal(body)
+	require.NoError(t, err)
+	bootstrap := fmt.Sprintf("import io, urllib.request\n"+
+		"urllib.request.urlopen = lambda *args, **kwargs: io.BytesIO(%s.encode())\n", literal)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	wire, err := exec.CommandContext(ctx, python, "-c", bootstrap+argv[2]).CombinedOutput()
+	require.NoError(t, err, "the generated script must execute before its output is judged: %s", wire)
+
+	return modelDeploymentDrainAnswerFromBody(string(wire), expected)
+}
+
+// drainScriptIdle reports what the protocol makes of that answer, so every case is judged by the
+// rule that actually authorizes a delete rather than by the parser's verdict alone.
+func drainScriptIdle(
+	t *testing.T, engine string, answer modelDeploymentDrainAnswer,
+) (string, bool) {
+	t.Helper()
+
+	member := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-0-abcde"}}
+
+	return modelDeploymentDrainMemberIdle(member, modelDeploymentDrainTarget{Engine: engine}, answer)
+}
+
+// TestTheGeneratedDrainScriptRefusesEvidenceItCannotCount drives the actual program for both
+// engines the tree measures.
+//
+// A gauge is in flight work, so its value is a nonnegative finite count. Every case below is a
+// number that is not one, or a way of combining numbers that must not produce one: a value that
+// parses but is not a measurement, a negative count, an infinity, a sum that overflows, a tiny
+// positive that a rounded zero would erase, and a good row that must not be allowed to stand in
+// for a bad one in the same gauge.
+//
+// THE ORDER OF THE ROWS IS CARRIED IN THE CASES because it is the whole of the cancellation defect:
+// a gauge the engine splits by label is several rows, and which of them is unreadable decides
+// whether the gauge is refused or whether a readable sibling quietly speaks for it.
+func TestTheGeneratedDrainScriptRefusesEvidenceItCannotCount(t *testing.T) {
+	for _, engine := range []string{
+		workercore.ModelDeploymentEngineVLLM,
+		workercore.ModelDeploymentEngineSGLang,
+	} {
+		t.Run(engine, func(t *testing.T) {
+			expected, known := modelDeploymentInFlightMetrics[engine]
+			require.True(t, known)
+			require.NotEmpty(t, expected)
+			first := expected[0]
+			rest := expected[1:]
+
+			for _, tc := range []struct {
+				name string
+				rows []string
+				want modelDeploymentDrainState
+			}{
+				{
+					name: "a complete zero is idle",
+					rows: []string{first + " 0"},
+					want: modelDeploymentDrainIdle,
+				},
+				{
+					name: "a positive count is busy",
+					rows: []string{first + " 2"},
+					want: modelDeploymentDrainBusy,
+				},
+				{
+					name: "a tiny positive stays busy rather than rounding to zero",
+					rows: []string{first + " 0.0000001"},
+					want: modelDeploymentDrainBusy,
+				},
+				{
+					name: "two readable rows for one gauge are summed",
+					rows: []string{first + " 1", first + "{replica=\"other\"} 2"},
+					want: modelDeploymentDrainBusy,
+				},
+				{
+					name: "an unreadable row alone refuses the gauge",
+					rows: []string{first + " unreadable"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "an unreadable row first is not cancelled by a readable sibling",
+					rows: []string{first + " unreadable", first + "{replica=\"other\"} 0"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "an unreadable row last is not cancelled by a readable sibling either",
+					rows: []string{first + "{replica=\"other\"} 0", first + " unreadable"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "not a number refuses the gauge",
+					rows: []string{first + " not-a-number"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "an absent value refuses the gauge",
+					rows: []string{first + " 0", first + "{replica=\"other\"}"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "NaN refuses the gauge",
+					rows: []string{first + " NaN"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "positive infinity refuses the gauge",
+					rows: []string{first + " +Inf"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "negative infinity refuses the gauge",
+					rows: []string{first + " -Inf"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "a negative count refuses the gauge",
+					rows: []string{first + " -1"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "a negative row cannot cancel a positive sibling into a zero",
+					rows: []string{first + " 1", first + "{replica=\"other\"} -1"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "a negative row first cannot cancel a positive sibling either",
+					rows: []string{first + " -1", first + "{replica=\"other\"} 1"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "a sum that overflows is not a count",
+					rows: []string{first + " 1e308", first + "{replica=\"other\"} 1e308"},
+					want: modelDeploymentDrainUnknown,
+				},
+				{
+					name: "an invalid row for a different gauge is not invented as a zero",
+					rows: []string{},
+					want: modelDeploymentDrainUnknown,
+				},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					var body strings.Builder
+					for _, row := range tc.rows {
+						body.WriteString(row)
+						body.WriteString("\n")
+					}
+					for _, metric := range rest {
+						body.WriteString(metric)
+						body.WriteString(" 0\n")
+					}
+
+					answer := drainScriptAnswer(t, engine, body.String())
+					assert.Equal(t, tc.want, answer.State, "reason=%q series=%v", answer.Reason, answer.Series)
+
+					reason, idle := drainScriptIdle(t, engine, answer)
+					assert.Equal(t, tc.want == modelDeploymentDrainIdle, idle,
+						"the protocol must refuse anything that is not a zero, reason=%s", reason)
+				})
+			}
+		})
+	}
+}
+
+// TestTheReadIsAboutTheMemberItJustReReadCovers every way the member under the exec can stop being
+// the member the reservation bound.
+//
+// THE LOCATOR AND THE AUTHORITY ARE SEPARATE FAKES, and each mutation below lands on the authority
+// alone. A mutation applied only to the locator's cache would be invisible to a read that consults
+// the live reader, which is the point: it shows the read is answered by the live object rather than
+// by whatever the watch last delivered. Each case also asserts the mutation actually fired, so a
+// case cannot pass by never having changed anything.
+func TestTheReadIsAboutTheMemberItJustReRead(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// status says which half of the object the case changes, because a Pod's status is a
+		// subresource and a mutation has to be written through the writer that owns it.
+		status  bool
+		mutate  func(pod *corev1.Pod)
+		want    modelDeploymentDrainState
+		mention string
+	}{
+		{
+			name:   "nothing changed",
+			mutate: func(*corev1.Pod) {},
+			want:   modelDeploymentDrainIdle,
+		},
+		{
+			name:    "the container restarted during the read",
+			status:  true,
+			mutate:  func(pod *corev1.Pod) { pod.Status.ContainerStatuses[0].RestartCount = 2 },
+			want:    modelDeploymentDrainUnknown,
+			mention: "restarted",
+		},
+		{
+			name: "the pod was replaced under the same name",
+			mutate: func(pod *corev1.Pod) {
+				pod.UID = types.UID("member-uid-2")
+			},
+			want:    modelDeploymentDrainUnknown,
+			mention: "now carries uid",
+		},
+		{
+			name:    "the member changed address",
+			status:  true,
+			mutate:  func(pod *corev1.Pod) { pod.Status.PodIP = "10.0.4.9" },
+			want:    modelDeploymentDrainUnknown,
+			mention: "changed address",
+		},
+		{
+			name:    "the member changed role",
+			mutate:  func(pod *corev1.Pod) { pod.Labels[modelDeploymentLabelKeyComponent] = "other" },
+			want:    modelDeploymentDrainUnknown,
+			mention: "changed role",
+		},
+		{
+			name:    "the member changed controller",
+			mutate:  func(pod *corev1.Pod) { pod.OwnerReferences[0].Name = "someone-else" },
+			want:    modelDeploymentDrainUnknown,
+			mention: "changed controller",
+		},
+		{
+			name: "the metrics endpoint moved",
+			mutate: func(pod *corev1.Pod) {
+				pod.Annotations["prometheus.io/port"] = "9000"
+			},
+			want:    modelDeploymentDrainUnknown,
+			mention: "changed its metrics endpoint",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fired := false
+			reader := newDrainTestReader(drainTestPod(), vllmZero())
+			reader.during = func(ctx context.Context, r *drainTestReader) {
+				mutated := r.pod.DeepCopy()
+				tc.mutate(mutated)
+				// The mutation lands on the AUTHORITATIVE reader, and never on the locator's cache:
+				// mutating only the cache would leave a read that consults the live object looking at
+				// a member that never changed, and the case would pass for the wrong reason.
+				var err error
+				if tc.status {
+					err = r.fresh.Status().Update(ctx, mutated)
+				} else {
+					err = r.fresh.Update(ctx, mutated)
+				}
+				require.NoError(t, err,
+					"the mutation must reach the authoritative reader or the case proves nothing")
+				fired = true
+			}
+
+			answer, err := reader.collector.Drain(context.Background(), drainTestTarget())
+			require.NoError(t, err)
+			require.True(t, fired, "the mutation must have fired during the exec")
+			require.Equal(t, 1, reader.calls, "and the read must have actually executed")
+			assert.Equal(t, tc.want, answer.State, "reason=%s", answer.Reason)
+			if tc.mention != "" {
+				assert.Contains(t, answer.Reason, tc.mention)
+			}
+		})
+	}
+
+	t.Run("the member is gone from the authoritative reader", func(t *testing.T) {
+		reader := newDrainTestReader(drainTestPod(), vllmZero())
+		reader.during = func(ctx context.Context, r *drainTestReader) {
+			require.NoError(t, r.fresh.Delete(ctx, r.pod))
+		}
+
+		answer, err := reader.collector.Drain(context.Background(), drainTestTarget())
+		require.NoError(t, err)
+		assert.Equal(t, modelDeploymentDrainUnknown, answer.State, "reason=%s", answer.Reason)
+	})
+
+	t.Run("no authoritative reader leaves the member unobserved", func(t *testing.T) {
+		reader := newDrainTestReader(drainTestPod(), vllmZero())
+		reader.collector = newModelDeploymentDrainCollector(reader.client, nil, nil, nil)
+
+		answer, err := reader.collector.Drain(context.Background(), drainTestTarget())
+		require.NoError(t, err)
+		assert.Equal(t, modelDeploymentDrainUnknown, answer.State,
+			"a read that cannot prove what it is measuring has not measured it")
+		assert.Contains(t, answer.Reason, "no live reader")
+	})
+}
+
+// TestTheProtocolRefusesAReaderThatIsMerelyOptimistic covers the reader seam itself, which the
+// script controls cannot reach.
+//
+// A reader is an interface, and a custom one can claim Idle over any numbers it likes. The protocol
+// decides what activity means rather than asking the reader whether it agrees, so an Idle claim
+// resting on a value that is not a count, or on a count that is not zero, holds.
+func TestTheProtocolRefusesAReaderThatIsMerelyOptimistic(t *testing.T) {
+	complete := func(series map[string]float64) modelDeploymentDrainAnswer {
+		return modelDeploymentDrainAnswer{
+			State: modelDeploymentDrainIdle, Complete: true, Series: series,
+		}
+	}
+
+	for _, tc := range []struct {
+		name    string
+		answer  modelDeploymentDrainAnswer
+		want    modelDeploymentDrainState
+		mention string
+	}{
+		{
+			name: "an honest complete zero is idle",
+			answer: complete(map[string]float64{
+				"vllm:num_requests_running": 0, "vllm:num_requests_waiting": 0,
+			}),
+			want: modelDeploymentDrainIdle,
+		},
+		{
+			name: "a reader claiming idle over positive evidence is refused",
+			answer: complete(map[string]float64{
+				"vllm:num_requests_running": 3, "vllm:num_requests_waiting": 0,
+			}),
+			want:    modelDeploymentDrainUnknown,
+			mention: "still holds activity",
+		},
+		{
+			name: "a reader claiming idle over NaN is refused",
+			answer: complete(map[string]float64{
+				"vllm:num_requests_running": math.NaN(), "vllm:num_requests_waiting": 0,
+			}),
+			want:    modelDeploymentDrainUnknown,
+			mention: "unusable activity",
+		},
+		{
+			name: "a reader claiming idle over an infinity is refused",
+			answer: complete(map[string]float64{
+				"vllm:num_requests_running": math.Inf(1), "vllm:num_requests_waiting": 0,
+			}),
+			want:    modelDeploymentDrainUnknown,
+			mention: "unusable activity",
+		},
+		{
+			name: "a reader claiming idle over a negative count is refused",
+			answer: complete(map[string]float64{
+				"vllm:num_requests_running": -2, "vllm:num_requests_waiting": 0,
+			}),
+			want:    modelDeploymentDrainUnknown,
+			mention: "unusable activity",
+		},
+		{
+			name: "an unknown state does not become success by default",
+			answer: modelDeploymentDrainAnswer{
+				State: modelDeploymentDrainUnknown, Complete: true,
+				Series: map[string]float64{
+					"vllm:num_requests_running": 0, "vllm:num_requests_waiting": 0,
+				},
+			},
+			want:    modelDeploymentDrainUnknown,
+			mention: "unobserved",
+		},
+		{
+			name: "an unrelated metric cannot cancel a required one",
+			answer: complete(map[string]float64{
+				"vllm:num_requests_running": 4, "vllm:num_requests_waiting": 0,
+				"unrelated:some_counter": -4,
+			}),
+			want:    modelDeploymentDrainUnknown,
+			mention: "still holds activity",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			member := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-0-abcde"}}
+			target := modelDeploymentDrainTarget{
+				Engine: workercore.ModelDeploymentEngineVLLM,
+			}
+
+			reason, idle := modelDeploymentDrainMemberIdle(member, target, tc.answer)
+			assert.Equal(t, tc.want == modelDeploymentDrainIdle, idle, "reason=%s", reason)
+			if !idle {
+				assert.Contains(t, reason, tc.mention)
+			}
+		})
+	}
+}
+
+// TestTheReadIsRefusedAMemberItCannotProveItOwns covers what the live read must still be before it
+// may say anything about the member.
+//
+// A member is the Pod the reservation bound to THIS operation. Each case below is a way that stops
+// being true while the Pod's name, address and container stay the same, which is why comparing the
+// observable fields is not enough. An empty expectation and an empty observation agree with each
+// other, so a target that names no deployment is refused rather than passed.
+func TestTheReadIsRefusedAMemberItCannotProveItOwns(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		target  func(md modelDeploymentDrainTarget) modelDeploymentDrainTarget
+		pod     func(*corev1.Pod)
+		mention string
+	}{
+		{
+			name:    "a target that names no deployment is refused",
+			target:  func(t modelDeploymentDrainTarget) modelDeploymentDrainTarget { t.DeploymentUID = ""; return t },
+			mention: "names no deployment",
+		},
+		{
+			name:    "a member whose owner was recreated under the same name is refused",
+			pod:     func(pod *corev1.Pod) { pod.OwnerReferences[0].UID = types.UID("recreated-uid") },
+			mention: "rather than the operation's deployment",
+		},
+		{
+			name:    "a member with no controlling owner is refused",
+			pod:     func(pod *corev1.Pod) { pod.OwnerReferences = nil },
+			mention: "no controlling owner",
+		},
+		{
+			name:    "a member whose role is not the reserved role is refused",
+			pod:     func(pod *corev1.Pod) { pod.Labels[modelDeploymentLabelKeyComponent] = "other" },
+			mention: "is role",
+		},
+		{
+			name:    "a member the kubelet has not yet identified is refused",
+			pod:     func(pod *corev1.Pod) { pod.Status.ContainerStatuses[0].ContainerID = "" },
+			mention: "no container identity",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := drainTestPod()
+			if tc.pod != nil {
+				tc.pod(pod)
+			}
+			reader := newDrainTestReader(pod, vllmZero())
+			target := drainTestTarget()
+			if tc.target != nil {
+				target = tc.target(target)
+			}
+
+			answer, err := reader.collector.Drain(context.Background(), target)
+			require.NoError(t, err, "a refusal is an answer, not a transport failure")
+			assert.Equal(t, modelDeploymentDrainUnknown, answer.State, "reason=%s", answer.Reason)
+			assert.Contains(t, answer.Reason, tc.mention)
+		})
+	}
+
+	t.Run("a member the operation still owns is read", func(t *testing.T) {
+		reader := newDrainTestReader(drainTestPod(), vllmZero())
+		answer, err := reader.collector.Drain(context.Background(), drainTestTarget())
+		require.NoError(t, err)
+		assert.Equal(t, modelDeploymentDrainIdle, answer.State, "reason=%s", answer.Reason)
+		assert.True(t, reader.calls > 0, "and the read actually reached the transport")
+	})
 }

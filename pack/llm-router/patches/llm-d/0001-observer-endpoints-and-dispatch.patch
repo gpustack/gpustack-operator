@@ -1,0 +1,1156 @@
+Observe native endpoints and actual recent dispatch on the existing metrics server.
+The view refuses pending selection/send windows, unsynchronized membership and
+unsupported native profiles. GET does not mutate routing or expire native state.
+Removed dispatched listeners retain false selection flags with recent-dispatch evidence.
+
+Written against llm-d-router v0.10.0, commit 71f4f0999f95b96c49a9d0c4afbd18dfdb943c26.
+The operator collector must consume recent-dispatch evidence before using this view.
+
+diff --git a/cmd/epp/runner/observer_test.go b/cmd/epp/runner/observer_test.go
+new file mode 100644
+index 0000000..7188e6d
+--- /dev/null
++++ b/cmd/epp/runner/observer_test.go
+@@ -0,0 +1,42 @@
++// Copyright 2026 The Kubernetes Authors.
++// SPDX-License-Identifier: Apache-2.0
++package runner
++
++import (
++	"context"
++
++	"github.com/llm-d/llm-d-router/pkg/epp/datastore"
++	"github.com/llm-d/llm-d-router/pkg/epp/observer"
++	runserver "github.com/llm-d/llm-d-router/pkg/epp/server"
++	"os"
++	"testing"
++)
++
++// Fixtures come from the operator's router.Render, including native system defaults.
++func TestObserverSupportsRenderedOperatorProfiles(t *testing.T) {
++	for _, name := range []string{"server", "pd"} {
++		t.Run(name, func(t *testing.T) {
++			data, err := os.ReadFile("observer_testdata/" + name + ".yaml")
++			if err != nil {
++				t.Fatal(err)
++			}
++			runner := NewRunner()
++			opts := runserver.NewOptions()
++			opts.ConfigText = string(data)
++			raw, err := runner.parseConfigurationPhaseOne(context.Background(), opts)
++			if err != nil {
++				t.Fatal(err)
++			}
++			ds := datastore.NewDatastore(t.Context(), nil)
++			if _, err := runner.parseConfigurationPhaseTwo(t.Context(), raw, ds); err != nil {
++				t.Fatal(err)
++			}
++			if !observer.SupportedPlugins(runner.PluginHandle) {
++				for _, plugin := range runner.PluginHandle.GetAllPlugins() {
++					t.Log(plugin.TypedName())
++				}
++				t.Fatal("actual rendered operator profile is refused")
++			}
++		})
++	}
++}
+diff --git a/cmd/epp/runner/observer_testdata/pd.yaml b/cmd/epp/runner/observer_testdata/pd.yaml
+new file mode 100644
+index 0000000..e18abb1
+--- /dev/null
++++ b/cmd/epp/runner/observer_testdata/pd.yaml
+@@ -0,0 +1,57 @@
++apiVersion: llm-d.ai/v1alpha1
++kind: EndpointPickerConfig
++plugins:
++- name: decode-pods
++  parameters:
++    matchLabels:
++      modeldeployment.gpustack.ai/role-kind: decode
++  type: label-selector-filter
++- name: prefill-pods
++  parameters:
++    matchLabels:
++      modeldeployment.gpustack.ai/role-kind: prefill
++  type: label-selector-filter
++- type: approx-prefix-cache-producer
++- type: queue-scorer
++- type: kv-cache-utilization-scorer
++- type: max-score-picker
++- type: prefix-cache-scorer
++- type: metrics-data-source
++- parameters:
++    engineConfigs:
++    - cacheInfoSpec: vllm:cache_config_info
++      kvUsageSpec: vllm:kv_cache_usage_perc
++      name: vllm
++      queuedRequestsSpec: vllm:num_requests_waiting
++      runningRequestsSpec: vllm:num_requests_running
++  type: core-metrics-extractor
++- parameters:
++    nonCachedTokens: 8
++    promptTokens: 0
++  type: prefix-based-pd-decider
++- parameters:
++    deciders:
++      prefill: prefix-based-pd-decider
++    profiles:
++      decode: decode
++      prefill: prefill
++  type: disagg-profile-handler
++schedulingProfiles:
++- name: decode
++  plugins:
++  - pluginRef: decode-pods
++  - pluginRef: queue-scorer
++    weight: 2
++  - pluginRef: kv-cache-utilization-scorer
++    weight: 2
++  - pluginRef: max-score-picker
++- name: prefill
++  plugins:
++  - pluginRef: prefill-pods
++  - pluginRef: queue-scorer
++    weight: 2
++  - pluginRef: kv-cache-utilization-scorer
++    weight: 2
++  - pluginRef: max-score-picker
++  - pluginRef: prefix-cache-scorer
++    weight: 3
+diff --git a/cmd/epp/runner/observer_testdata/server.yaml b/cmd/epp/runner/observer_testdata/server.yaml
+new file mode 100644
+index 0000000..532453d
+--- /dev/null
++++ b/cmd/epp/runner/observer_testdata/server.yaml
+@@ -0,0 +1,33 @@
++apiVersion: llm-d.ai/v1alpha1
++kind: EndpointPickerConfig
++plugins:
++- name: server-pods
++  parameters:
++    matchLabels:
++      modeldeployment.gpustack.ai/role-kind: server
++  type: label-selector-filter
++- type: approx-prefix-cache-producer
++- type: queue-scorer
++- type: kv-cache-utilization-scorer
++- type: max-score-picker
++- type: prefix-cache-scorer
++- type: metrics-data-source
++- parameters:
++    engineConfigs:
++    - cacheInfoSpec: vllm:cache_config_info
++      kvUsageSpec: vllm:kv_cache_usage_perc
++      name: vllm
++      queuedRequestsSpec: vllm:num_requests_waiting
++      runningRequestsSpec: vllm:num_requests_running
++  type: core-metrics-extractor
++schedulingProfiles:
++- name: server
++  plugins:
++  - pluginRef: server-pods
++  - pluginRef: queue-scorer
++    weight: 2
++  - pluginRef: kv-cache-utilization-scorer
++    weight: 2
++  - pluginRef: max-score-picker
++  - pluginRef: prefix-cache-scorer
++    weight: 3
+diff --git a/cmd/epp/runner/runner.go b/cmd/epp/runner/runner.go
+index 21f443d..680087a 100644
+--- a/cmd/epp/runner/runner.go
++++ b/cmd/epp/runner/runner.go
+@@ -146,6 +146,7 @@ import (
+ 	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
+ 	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
+ 	"github.com/llm-d/llm-d-router/pkg/epp/metrics/collectors"
++	"github.com/llm-d/llm-d-router/pkg/epp/observer"
+ 	"github.com/llm-d/llm-d-router/pkg/epp/requestcontrol"
+ 	"github.com/llm-d/llm-d-router/pkg/epp/scheduling"
+ 	runserver "github.com/llm-d/llm-d-router/pkg/epp/server"
+@@ -468,7 +469,15 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
+ 		director.SetRequestEvictor(requestEvictor)
+ 	}
+ 
++	store, _ := ds.(observer.Snapshotter)
++	nativeObserver := observer.New(store, func() bool {
++		return !r.featureGates[flowcontrol.FeatureGate] && observer.SupportedPlugins(r.PluginHandle)
++	})
++	if err := mgr.AddMetricsServerExtraHandler(observer.Path, nativeObserver); err != nil {
++		return nil, nil, err
++	}
+ 	serverRunner := &runserver.ExtProcServerRunner{
++		Observer:                         nativeObserver,
+ 		GrpcPort:                         opts.GRPCPort,
+ 		GKNN:                             *gknn,
+ 		Datastore:                        ds,
+diff --git a/pkg/epp/datastore/datastore.go b/pkg/epp/datastore/datastore.go
+index 59cc507..ccb0645 100644
+--- a/pkg/epp/datastore/datastore.go
++++ b/pkg/epp/datastore/datastore.go
+@@ -127,6 +127,8 @@ func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory
+ }
+ 
+ type datastore struct {
++	observerMu       sync.RWMutex
++	observerRevision uint64
+ 	// parentCtx controls the lifecycle of the background metrics goroutines that spawn up by the datastore.
+ 	parentCtx context.Context
+ 	// mu is used to synchronize access to pool, objectives, and rewrites.
+@@ -147,11 +149,19 @@ type datastore struct {
+ }
+ 
+ func (ds *datastore) WithEndpointPool(pool *datalayer.EndpointPool) Datastore {
++	ds.observerMu.Lock()
++	defer ds.observerMu.Unlock()
++	ds.observerRevision++
++	ds.mu.Lock()
++	defer ds.mu.Unlock()
+ 	ds.pool = pool
+ 	return ds
+ }
+ 
+ func (ds *datastore) Clear() {
++	ds.observerMu.Lock()
++	defer ds.observerMu.Unlock()
++	ds.observerRevision++
+ 	ds.mu.Lock()
+ 	defer ds.mu.Unlock()
+ 	ds.pool = nil
+@@ -171,6 +181,9 @@ func (ds *datastore) PoolSet(ctx context.Context, reader client.Reader, endpoint
+ 		ds.Clear()
+ 		return nil
+ 	}
++	ds.observerMu.Lock()
++	defer ds.observerMu.Unlock()
++	ds.observerRevision++
+ 	logger := log.FromContext(ctx)
+ 	ds.mu.Lock()
+ 	defer ds.mu.Unlock()
+@@ -299,6 +312,9 @@ func (ds *datastore) PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.Endpoi
+ }
+ 
+ func (ds *datastore) PodUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.Pod) error {
++	ds.observerMu.Lock()
++	defer ds.observerMu.Unlock()
++	ds.observerRevision++
+ 	// Take a reference to pool under read lock to avoid racing with PoolSet().
+ 	// This is safe because PoolSet() replaces the entire pool struct rather than
+ 	// updating it in-place.
+@@ -392,6 +408,9 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
+ }
+ 
+ func (ds *datastore) PodDelete(podName string) {
++	ds.observerMu.Lock()
++	defer ds.observerMu.Unlock()
++	ds.observerRevision++
+ 	ds.pods.Range(func(k, v any) bool {
+ 		ep := v.(fwkdl.Endpoint)
+ 		if ep.GetMetadata().Name == podName {
+@@ -403,12 +422,18 @@ func (ds *datastore) PodDelete(podName string) {
+ }
+ 
+ func (ds *datastore) EndpointUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata) {
++	ds.observerMu.Lock()
++	defer ds.observerMu.Unlock()
++	ds.observerRevision++
+ 	if _, err := ds.upsertEndpoint(ctx, meta); err != nil {
+ 		log.FromContext(ctx).Error(err, "failed to register endpoint", "endpoint", meta.ID)
+ 	}
+ }
+ 
+ func (ds *datastore) EndpointDelete(id types.NamespacedName) {
++	ds.observerMu.Lock()
++	defer ds.observerMu.Unlock()
++	ds.observerRevision++
+ 	if v, ok := ds.pods.LoadAndDelete(id); ok {
+ 		ds.epf.ReleaseEndpoint(v.(fwkdl.Endpoint))
+ 	}
+@@ -534,3 +559,22 @@ func selectorEqual(a, b labels.Selector) bool {
+ 	}
+ 	return a.String() == b.String()
+ }
++
++// ObserverSnapshot clones one coherent native membership without running plugins.
++func (ds *datastore) ObserverSnapshot() ([]*fwkdl.EndpointMetadata, uint64, error) {
++	if !ds.observerMu.TryRLock() {
++		return nil, 0, errors.New("endpoint membership is changing")
++	}
++	defer ds.observerMu.RUnlock()
++	ds.mu.RLock()
++	defer ds.mu.RUnlock()
++	if ds.pool == nil || ds.needsResync {
++		return nil, 0, errors.New("endpoint pool is not fully synchronized")
++	}
++	result := make([]*fwkdl.EndpointMetadata, 0)
++	ds.pods.Range(func(_, value any) bool {
++		result = append(result, value.(fwkdl.Endpoint).GetMetadata().Clone())
++		return true
++	})
++	return result, ds.observerRevision, nil
++}
+diff --git a/pkg/epp/datastore/observer_test.go b/pkg/epp/datastore/observer_test.go
+new file mode 100644
+index 0000000..3949725
+--- /dev/null
++++ b/pkg/epp/datastore/observer_test.go
+@@ -0,0 +1,75 @@
++// Copyright 2026 The Kubernetes Authors.
++// SPDX-License-Identifier: Apache-2.0
++package datastore
++
++import (
++	"context"
++	"sync"
++	"testing"
++
++	"github.com/llm-d/llm-d-router/pkg/epp/datalayer"
++	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
++	"k8s.io/apimachinery/pkg/types"
++)
++
++func TestObserverSnapshotOwnsMetadataAndRequiresSyncedPool(t *testing.T) {
++	ds := NewDatastore(context.Background(), &mockEndpointFactory{}).(*datastore)
++	if _, _, err := ds.ObserverSnapshot(); err == nil {
++		t.Fatal("unsynced store accepted")
++	}
++	ds.WithEndpointPool(&datalayer.EndpointPool{TargetPorts: []int{8000}})
++	meta := &fwkdl.EndpointMetadata{ID: types.NamespacedName{Name: "rank-0"}, Name: "worker", Address: "192.0.2.1", Port: "8000", Labels: map[string]string{"role": "server"}}
++	ds.EndpointUpsert(context.Background(), meta)
++	snapshot, revision, err := ds.ObserverSnapshot()
++	if err != nil || len(snapshot) != 1 || revision == 0 {
++		t.Fatalf("snapshot %v %v", snapshot, err)
++	}
++	snapshot[0].Labels["role"] = "mutated"
++	snapshot[0].Port = "bad"
++	if meta.Labels["role"] != "server" || meta.Port != "8000" {
++		t.Fatal("observer leaked native mutable metadata")
++	}
++	ds.mu.Lock()
++	ds.needsResync = true
++	ds.mu.Unlock()
++	if _, _, err := ds.ObserverSnapshot(); err == nil {
++		t.Fatal("failed resync accepted")
++	}
++	ds.mu.Lock()
++	ds.needsResync = false
++	ds.mu.Unlock()
++	ds.EndpointDelete(meta.ID)
++	snapshot, after, err := ds.ObserverSnapshot()
++	if err != nil || len(snapshot) != 0 || after <= revision {
++		t.Fatalf("native removal not observed: %v %d %v", snapshot, after, err)
++	}
++}
++func TestObserverSnapshotConcurrentMembership(t *testing.T) {
++	ds := NewDatastore(context.Background(), &mockEndpointFactory{}).(*datastore)
++	ds.WithEndpointPool(&datalayer.EndpointPool{})
++	var group sync.WaitGroup
++	group.Add(1)
++	go func() {
++		defer group.Done()
++		for i := 0; i < 200; i++ {
++			meta := &fwkdl.EndpointMetadata{ID: types.NamespacedName{Name: "rank-0"}, Name: "worker", Port: "8000", Labels: map[string]string{"role": "server"}}
++			ds.EndpointUpsert(context.Background(), meta)
++			ds.EndpointDelete(meta.ID)
++		}
++	}()
++	for i := 0; i < 200; i++ {
++		metas, _, err := ds.ObserverSnapshot()
++		if err != nil {
++			continue
++		}
++		if len(metas) > 1 {
++			t.Fatalf("mixed snapshot %v %v", metas, err)
++		}
++		for _, meta := range metas {
++			if meta.Port != "8000" || meta.Labels["role"] != "server" {
++				t.Fatal("partial metadata")
++			}
++		}
++	}
++	group.Wait()
++}
+diff --git a/pkg/epp/handlers/observer_test.go b/pkg/epp/handlers/observer_test.go
+new file mode 100644
+index 0000000..9d0297d
+--- /dev/null
++++ b/pkg/epp/handlers/observer_test.go
+@@ -0,0 +1,135 @@
++// Copyright 2026 The Kubernetes Authors.
++// SPDX-License-Identifier: Apache-2.0
++package handlers
++
++import (
++	"context"
++	"encoding/json"
++	"io"
++	"net/http/httptest"
++	"sync"
++	"testing"
++	"time"
++
++	configPb "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
++	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
++	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
++	"github.com/llm-d/llm-d-router/pkg/epp/observer"
++	"k8s.io/apimachinery/pkg/types"
++)
++
++type observedStore struct {
++	mu   sync.Mutex
++	meta *fwkdl.EndpointMetadata
++}
++
++func (s *observedStore) ObserverSnapshot() ([]*fwkdl.EndpointMetadata, uint64, error) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	if s.meta == nil {
++		return nil, 1, nil
++	}
++	return []*fwkdl.EndpointMetadata{s.meta.Clone()}, 1, nil
++}
++
++type observedDirector struct {
++	Director
++	meta    *fwkdl.EndpointMetadata
++	entered bool
++}
++
++func (d *observedDirector) GetRandomEndpoint() *fwkdl.EndpointMetadata {
++	d.entered = true
++	return d.meta
++}
++
++type blockedObserverStream struct {
++	mockProcessServer
++	ctx      context.Context
++	received bool
++	entered  chan struct{}
++	release  chan struct{}
++	sent     chan struct{}
++}
++
++func (s *blockedObserverStream) Context() context.Context { return s.ctx }
++func (s *blockedObserverStream) Recv() (*extProcPb.ProcessingRequest, error) {
++	if s.received {
++		<-s.ctx.Done()
++		return nil, io.EOF
++	}
++	s.received = true
++	return &extProcPb.ProcessingRequest{Request: &extProcPb.ProcessingRequest_RequestHeaders{RequestHeaders: &extProcPb.HttpHeaders{Headers: &configPb.HeaderMap{}, EndOfStream: true}}}, nil
++}
++func (s *blockedObserverStream) Send(r *extProcPb.ProcessingResponse) error {
++	close(s.entered)
++	<-s.release
++	err := s.mockProcessServer.Send(r)
++	close(s.sent)
++	return err
++}
++func TestObserverCoversActualProcessPendingSend(t *testing.T) {
++	meta := &fwkdl.EndpointMetadata{ID: types.NamespacedName{Name: "rank-0"}, Name: "worker", Address: "192.0.2.1", Port: "8000", Labels: map[string]string{"app.kubernetes.io/component": "custom"}}
++	store := &observedStore{meta: meta}
++	o := observer.New(store, func() bool { return true })
++	director := &observedDirector{meta: meta}
++	server := NewStreamingServer(nil, director, nil, 0)
++	server.SetObserver(o)
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	stream := &blockedObserverStream{ctx: ctx, entered: make(chan struct{}), release: make(chan struct{}), sent: make(chan struct{})}
++	done := make(chan error, 1)
++	go func() { defer close(done); done <- server.Process(stream) }()
++	var releaseOnce sync.Once
++	t.Cleanup(func() {
++		releaseOnce.Do(func() { close(stream.release) })
++		cancel()
++		select {
++		case <-done:
++		case <-time.After(time.Second):
++			t.Error("native stream leaked")
++		}
++	})
++	select {
++	case <-stream.entered:
++	case <-time.After(time.Second):
++		t.Fatal("actual native Send was not reached")
++	}
++	if !director.entered {
++		t.Fatal("native random candidate was not read")
++	}
++	store.mu.Lock()
++	store.meta = nil
++	store.mu.Unlock()
++	r := httptest.NewRecorder()
++	o.ServeHTTP(r, httptest.NewRequest("GET", observer.Path, nil))
++	if r.Code != 503 {
++		t.Fatalf("copied pending Send accepted after datastore removal: %d", r.Code)
++	}
++	releaseOnce.Do(func() { close(stream.release) })
++	<-stream.sent
++	cancel()
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("native stream did not finish")
++	}
++	r = httptest.NewRecorder()
++	o.ServeHTTP(r, httptest.NewRequest("GET", observer.Path, nil))
++	var result struct {
++		Workers []struct {
++			Selection struct {
++				InSelection bool `json:"in_selection"`
++			} `json:"selection"`
++			LastJob struct {
++				Recent bool `json:"recent_dispatch"`
++			} `json:"last_job"`
++		} `json:"workers"`
++	}
++	if err := json.Unmarshal(r.Body.Bytes(), &result); err != nil {
++		t.Fatal(err)
++	}
++	if r.Code != 200 || len(result.Workers) != 1 || result.Workers[0].Selection.InSelection || !result.Workers[0].LastJob.Recent {
++		t.Fatalf("sent old endpoint was lost: %d %s", r.Code, r.Body.String())
++	}
++}
+diff --git a/pkg/epp/handlers/request.go b/pkg/epp/handlers/request.go
+index 574cae7..679bced 100644
+--- a/pkg/epp/handlers/request.go
++++ b/pkg/epp/handlers/request.go
+@@ -58,10 +58,13 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
+ }
+ 
+ func (s *StreamingServer) fallbackToRandomEndpoint(ctx context.Context, reqCtx *RequestContext, requestSize int) error {
++	reqCtx.ObserverWindow = s.observer.Begin()
++	reqCtx.observerHeaderOnly = requestSize == 0
+ 	endpoint := s.director.GetRandomEndpoint()
+ 	if endpoint == nil {
+ 		return errcommon.Error{Code: errcommon.Internal, Msg: "no pods available in datastore"}
+ 	}
++	reqCtx.ObserverWindow.Record(endpoint)
+ 	reqCtx.TargetEndpoint = endpoint.GetIPAddress() + ":" + endpoint.GetPort()
+ 	reqCtx.RequestSize = requestSize
+ 	reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(ctx, reqCtx)
+diff --git a/pkg/epp/handlers/server.go b/pkg/epp/handlers/server.go
+index 1913ee8..40ba92d 100644
+--- a/pkg/epp/handlers/server.go
++++ b/pkg/epp/handlers/server.go
+@@ -52,6 +52,7 @@ import (
+ 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+ 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
+ 	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
++	"github.com/llm-d/llm-d-router/pkg/epp/observer"
+ )
+ 
+ // EvictChannelLookup is an optional interface for looking up eviction channels by request ID.
+@@ -102,6 +103,7 @@ type Datastore interface {
+ // Server implements the Envoy external processing server.
+ // https://www.envoyproxy.io/docs/envoy/latest/api-v3/service/ext_proc/v3/external_processor.proto
+ type StreamingServer struct {
++	observer          *observer.Observer
+ 	datastore         Datastore
+ 	director          Director
+ 	parserRegistry    *ParserRegistry
+@@ -119,8 +121,10 @@ type StreamingServer struct {
+ // Refactor this monolithic struct. Fields related to the Envoy ext-proc protocol should be decoupled from the internal
+ // request lifecycle state.
+ type RequestContext struct {
+-	TargetPod      *fwkdl.EndpointMetadata
+-	TargetEndpoint string
++	ObserverWindow     *observer.Window
++	observerHeaderOnly bool
++	TargetPod          *fwkdl.EndpointMetadata
++	TargetEndpoint     string
+ 	// TargetEndpointScores maps endpoint address to the scheduler's score for it, covering
+ 	// every endpoint the primary profile scored rather than only those in TargetEndpoint.
+ 	// Nil when the primary profile ran no scorers.
+@@ -286,6 +290,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+ 		},
+ 	}
+ 
++	defer func() { reqCtx.ObserverWindow.Finish() }()
++
+ 	// Request-phase failures (parser resolution, body parsing, admission
+ 	// rejection) leave the switch before the success path, so both call this.
+ 	// Flow-control rejections carry the queue wait and are the slowest samples;
+@@ -473,6 +479,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+ 					break
+ 				}
+ 
++				reqCtx.ObserverWindow = s.observer.Begin()
+ 				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, parseResult.Body)
+ 				if err != nil {
+ 					logger.Error(err, "Error handling request")
+@@ -583,6 +590,9 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+ 		if err := reqCtx.updateStateAndSendIfNeeded(srv, logger); err != nil {
+ 			return err
+ 		}
++		if reqCtx.RequestState == BodyRequestResponsesComplete || reqCtx.RequestState == RequestResponseProcessingSkipped || (reqCtx.observerHeaderOnly && reqCtx.RequestState == HeaderRequestResponseComplete) {
++			reqCtx.ObserverWindow.Finish()
++		}
+ 		if reqCtx.RequestState == RequestResponseProcessingSkipped {
+ 			logger.V(logutil.DEFAULT).Info("EPP skipped response interception, routed request",
+ 				"targetEndpoint", reqCtx.TargetEndpoint,
+@@ -756,3 +766,6 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
+ 	}
+ 	return nil
+ }
++
++// SetObserver attaches the admin observer to the native selection-to-send lifecycle.
++func (s *StreamingServer) SetObserver(o *observer.Observer) { s.observer = o }
+diff --git a/pkg/epp/observer/endpoints.go b/pkg/epp/observer/endpoints.go
+new file mode 100644
+index 0000000..14f6a62
+--- /dev/null
++++ b/pkg/epp/observer/endpoints.go
+@@ -0,0 +1,261 @@
++// Copyright 2026 The Kubernetes Authors.
++// SPDX-License-Identifier: Apache-2.0
++
++// Package observer exposes membership without changing native routing decisions.
++package observer
++
++import (
++	"encoding/json"
++	"errors"
++	"fmt"
++	"net"
++	"net/http"
++	"sort"
++	"strconv"
++	"sync"
++	"time"
++
++	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
++	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
++)
++
++const Path = "/observer/endpoints"
++const freshness = 15 * time.Second
++
++type Snapshotter interface {
++	ObserverSnapshot() ([]*fwkdl.EndpointMetadata, uint64, error)
++}
++
++type dispatch struct {
++	meta *fwkdl.EndpointMetadata
++	at   time.Time
++}
++
++// Observer shares the native selection-to-send window with the admin handler.
++type Observer struct {
++	mu        sync.Mutex
++	store     Snapshotter
++	supported func() bool
++	now       func() time.Time
++	boot      uint64
++	epoch     uint64
++	active    uint64
++	recent    map[string]dispatch
++}
++
++func New(store Snapshotter, supported func() bool) *Observer {
++	return &Observer{store: store, supported: supported, now: time.Now,
++		boot: uint64(time.Now().UnixNano()), recent: make(map[string]dispatch)}
++}
++
++// SupportedPlugins limits coverage to the operator's pinned native plugins.
++func SupportedPlugins(handle fwkplugin.HandlePlugins) bool {
++	if handle == nil {
++		return false
++	}
++	plugins := handle.GetAllPluginsWithNames()
++	if len(plugins) == 0 {
++		return false
++	}
++	for _, plugin := range plugins {
++		if plugin == nil {
++			return false
++		}
++		switch plugin.TypedName().Type {
++		case "label-selector-filter", "queue-scorer", "kv-cache-utilization-scorer",
++			"max-score-picker", "prefix-cache-scorer", "metrics-data-source",
++			"core-metrics-extractor", "approx-prefix-cache-producer",
++			"precise-prefix-cache-producer", "token-producer", "endpoint-notification-source",
++			"prefix-based-pd-decider", "disagg-profile-handler", "single-profile-handler",
++			"openai-parser", "anthropic-parser", "vllmhttp-parser",
++			"fcfs-ordering-policy", "global-strict-fairness-policy",
++			"static-usage-limit-policy-type", "utilization-detector":
++		default:
++			return false
++		}
++	}
++	return true
++}
++
++// Window covers copies of candidates and routing responses until the native send ends.
++type Window struct {
++	owner    *Observer
++	targets  map[string]*fwkdl.EndpointMetadata
++	finished bool
++}
++
++func (o *Observer) Begin() *Window {
++	if o == nil {
++		return nil
++	}
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	o.active++
++	o.epoch++
++	return &Window{owner: o, targets: make(map[string]*fwkdl.EndpointMetadata)}
++}
++
++func endpointKey(meta *fwkdl.EndpointMetadata) string {
++	return meta.ID.String() + "|" + meta.Address + "|" + meta.Port
++}
++
++// Record preserves the actual native primary and auxiliary dispatch targets.
++func (w *Window) Record(meta *fwkdl.EndpointMetadata) {
++	if w == nil || meta == nil {
++		return
++	}
++	w.owner.mu.Lock()
++	defer w.owner.mu.Unlock()
++	if !w.finished {
++		w.targets[endpointKey(meta)] = meta.Clone()
++	}
++}
++
++// Finish retains recent targets while releasing the pending native send window.
++func (w *Window) Finish() {
++	if w == nil {
++		return
++	}
++	o := w.owner
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if w.finished {
++		return
++	}
++	w.finished = true
++	now := o.now()
++	for key, item := range o.recent {
++		if now.Sub(item.at) >= freshness {
++			delete(o.recent, key)
++		}
++	}
++	for key, meta := range w.targets {
++		o.recent[key] = dispatch{meta: meta, at: now}
++	}
++	o.active--
++	o.epoch++
++}
++
++type selection struct {
++	Registered  bool `json:"registered"`
++	Healthy     bool `json:"healthy"`
++	CircuitOpen bool `json:"circuit_open"`
++	InSelection bool `json:"in_selection"`
++}
++
++type worker struct {
++	URL       string    `json:"url"`
++	Port      string    `json:"port"`
++	Role      string    `json:"role"`
++	PodHint   string    `json:"pod_hint"`
++	WorkerID  string    `json:"worker_id"`
++	Selection selection `json:"selection"`
++	LastJob   *struct {
++		Recent bool `json:"recent_dispatch"`
++	} `json:"last_job,omitempty"`
++}
++
++type view struct {
++	Router struct {
++		Boot uint64 `json:"boot_generation"`
++		Now  uint64 `json:"now_ms"`
++	} `json:"router"`
++	Revision uint64   `json:"registry_revision"`
++	Workers  []worker `json:"workers"`
++}
++
++func observedWorker(meta *fwkdl.EndpointMetadata, registered, recent bool) (worker, error) {
++	if meta == nil {
++		return worker{}, errors.New("missing endpoint metadata")
++	}
++	port, err := strconv.Atoi(meta.Port)
++	role := meta.Labels["app.kubernetes.io/component"]
++	if err != nil || port < 1 || port > 65535 || net.ParseIP(meta.Address) == nil || meta.Name == "" || meta.ID.Name == "" || role == "" {
++		return worker{}, errors.New("endpoint identity or listener is incomplete")
++	}
++	result := worker{URL: "http://" + net.JoinHostPort(meta.Address, meta.Port), Port: meta.Port,
++		Role: role, PodHint: meta.Name, WorkerID: meta.ID.String(),
++		Selection: selection{Registered: registered, Healthy: registered, InSelection: registered}}
++	if recent {
++		result.LastJob = &struct {
++			Recent bool `json:"recent_dispatch"`
++		}{true}
++	}
++	return result, nil
++}
++
++func (o *Observer) snapshot() (view, error) {
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.store == nil || o.supported == nil || !o.supported() {
++		return view{}, errors.New("native routing profile is not covered")
++	}
++	if o.active != 0 {
++		return view{}, errors.New("native endpoint selection or send is pending")
++	}
++	metas, revision, err := o.store.ObserverSnapshot()
++	if err != nil {
++		return view{}, err
++	}
++	now := o.now()
++	rows := make(map[string]worker, len(metas)+len(o.recent))
++	for _, meta := range metas {
++		item, err := observedWorker(meta, true, false)
++		if err != nil {
++			return view{}, err
++		}
++		key := endpointKey(meta)
++		if prior, ok := rows[key]; ok && (prior.Role != item.Role || prior.PodHint != item.PodHint) {
++			return view{}, errors.New("endpoint identity conflicts")
++		}
++		rows[key] = item
++	}
++	for key, item := range o.recent {
++		if now.Before(item.at) || now.Sub(item.at) < freshness {
++			row, err := observedWorker(item.meta, false, true)
++			if err != nil {
++				return view{}, err
++			}
++			if prior, ok := rows[key]; ok {
++				if prior.Role != row.Role || prior.PodHint != row.PodHint {
++					return view{}, errors.New("recent endpoint identity conflicts")
++				}
++				prior.LastJob = row.LastJob
++				row = prior
++			}
++			rows[key] = row
++		}
++	}
++	keys := make([]string, 0, len(rows))
++	for key := range rows {
++		keys = append(keys, key)
++	}
++	sort.Strings(keys)
++	result := view{Revision: revision + o.epoch, Workers: make([]worker, 0, len(rows))}
++	result.Router.Boot = o.boot
++	result.Router.Now = uint64(now.UnixMilli())
++	for _, key := range keys {
++		result.Workers = append(result.Workers, rows[key])
++	}
++	return result, nil
++}
++
++func (o *Observer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
++	if r.Method != http.MethodGet {
++		w.Header().Set("Allow", http.MethodGet)
++		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
++		return
++	}
++	result, err := o.snapshot()
++	if err != nil {
++		http.Error(w, err.Error(), http.StatusServiceUnavailable)
++		return
++	}
++	payload, err := json.Marshal(result)
++	if err != nil {
++		http.Error(w, fmt.Sprintf("failed to encode membership: %v", err), http.StatusServiceUnavailable)
++		return
++	}
++	w.Header().Set("Content-Type", "application/json")
++	_, _ = w.Write(payload)
++}
+diff --git a/pkg/epp/observer/endpoints_test.go b/pkg/epp/observer/endpoints_test.go
+new file mode 100644
+index 0000000..45d030e
+--- /dev/null
++++ b/pkg/epp/observer/endpoints_test.go
+@@ -0,0 +1,165 @@
++// Copyright 2026 The Kubernetes Authors.
++// SPDX-License-Identifier: Apache-2.0
++package observer
++
++import (
++	"context"
++	"encoding/json"
++	"errors"
++	"net/http"
++	"net/http/httptest"
++	"reflect"
++	"testing"
++	"time"
++
++	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
++	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
++	"k8s.io/apimachinery/pkg/types"
++)
++
++type testStore struct {
++	metas []*fwkdl.EndpointMetadata
++	err   error
++}
++
++func (s *testStore) ObserverSnapshot() ([]*fwkdl.EndpointMetadata, uint64, error) {
++	return s.metas, 4, s.err
++}
++func testMetadata() *fwkdl.EndpointMetadata {
++	return &fwkdl.EndpointMetadata{ID: types.NamespacedName{Namespace: "ns", Name: "worker-rank-0"}, Name: "worker", Address: "192.0.2.1", Port: "8000", Labels: map[string]string{"app.kubernetes.io/component": "custom-role"}}
++}
++func readView(t *testing.T, o *Observer) (int, view) {
++	t.Helper()
++	r := httptest.NewRecorder()
++	o.ServeHTTP(r, httptest.NewRequest(http.MethodGet, Path, nil))
++	var result view
++	if r.Code == http.StatusOK {
++		if err := json.Unmarshal(r.Body.Bytes(), &result); err != nil {
++			t.Fatal(err)
++		}
++	}
++	return r.Code, result
++}
++func TestObserverMembershipAndPendingDispatch(t *testing.T) {
++	now := time.Now()
++	meta := testMetadata()
++	store := &testStore{metas: []*fwkdl.EndpointMetadata{meta}}
++	o := New(store, func() bool { return true })
++	o.now = func() time.Time { return now }
++	before := meta.Clone()
++	code, result := readView(t, o)
++	if code != 200 || len(result.Workers) != 1 || !result.Workers[0].Selection.InSelection {
++		t.Fatalf("registered listener: %d %+v", code, result)
++	}
++	boot := result.Router.Boot
++	window := o.Begin()
++	window.Record(meta)
++	store.metas = nil
++	if code, _ := readView(t, o); code != 503 {
++		t.Fatalf("pending copied endpoint accepted: %d", code)
++	}
++	window.Finish()
++	window.Finish()
++	code, result = readView(t, o)
++	if code != 200 || len(result.Workers) != 1 || result.Workers[0].Selection.InSelection || result.Workers[0].LastJob == nil || !result.Workers[0].LastJob.Recent {
++		t.Fatalf("removed dispatched endpoint was lost or fabricated registered: %d %+v", code, result)
++	}
++	if !reflect.DeepEqual(before, meta) {
++		t.Fatal("observer changed native endpoint")
++	}
++	now = now.Add(freshness - time.Nanosecond)
++	if _, result := readView(t, o); len(result.Workers) != 1 {
++		t.Fatal("recent dispatch expired early")
++	}
++	now = now.Add(time.Nanosecond)
++	code, result = readView(t, o)
++	if code != 200 || result.Workers == nil || len(result.Workers) != 0 || result.Router.Boot != boot {
++		t.Fatalf("honest zero: %d %+v", code, result)
++	}
++	if len(o.recent) != 1 {
++		t.Fatal("GET mutated journal")
++	}
++}
++func TestObserverRefusesIncompleteCoverage(t *testing.T) {
++	tests := []struct {
++		name           string
++		unavailable    bool
++		missingStore   bool
++		storeErr       bool
++		brokenMetadata bool
++		want           int
++	}{
++		{name: "supported empty", want: 200}, {name: "uncovered flow or plugin", unavailable: true, want: 503},
++		{name: "missing datastore", missingStore: true, want: 503}, {name: "pool resync incomplete", storeErr: true, want: 503},
++		{name: "invalid native listener", brokenMetadata: true, want: 503},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			store := &testStore{}
++			if tt.storeErr {
++				store.err = errors.New("resync incomplete")
++			}
++			if tt.brokenMetadata {
++				meta := testMetadata()
++				meta.Port = "bad"
++				store.metas = []*fwkdl.EndpointMetadata{meta}
++			}
++			var snapshotter Snapshotter = store
++			if tt.missingStore {
++				snapshotter = nil
++			}
++			o := New(snapshotter, func() bool { return !tt.unavailable })
++			if code, _ := readView(t, o); code != tt.want {
++				t.Fatalf("code=%d want=%d", code, tt.want)
++			}
++		})
++	}
++}
++func TestObserverRetainsAuxiliaryAndOldTransport(t *testing.T) {
++	meta := testMetadata()
++	other := meta.Clone()
++	other.ID.Name = "prefill-rank-0"
++	other.Name = "prefill"
++	other.Address = "192.0.2.2"
++	other.Labels["app.kubernetes.io/component"] = "prefill-role"
++	store := &testStore{}
++	o := New(store, func() bool { return true })
++	window := o.Begin()
++	window.Record(meta)
++	window.Record(other)
++	window.Finish()
++	changed := meta.Clone()
++	changed.Port = "8001"
++	store.metas = []*fwkdl.EndpointMetadata{changed}
++	code, result := readView(t, o)
++	if code != 200 || len(result.Workers) != 3 {
++		t.Fatalf("lost auxiliary or old listener: %d %+v", code, result)
++	}
++}
++
++type testPlugin string
++
++func (p testPlugin) TypedName() fwkplugin.TypedName {
++	return fwkplugin.TypedName{Type: string(p), Name: string(p)}
++}
++func TestObserverPluginCoverage(t *testing.T) {
++	for _, tt := range []struct {
++		name  string
++		types []string
++		want  bool
++	}{
++		{name: "missing", want: false}, {name: "operator default", types: []string{"single-profile-handler", "label-selector-filter", "queue-scorer", "kv-cache-utilization-scorer", "max-score-picker", "prefix-cache-scorer", "metrics-data-source", "core-metrics-extractor", "approx-prefix-cache-producer"}, want: true},
++		{name: "operator disaggregation", types: []string{"disagg-profile-handler", "prefix-based-pd-decider", "precise-prefix-cache-producer", "token-producer", "endpoint-notification-source"}, want: true},
++		{name: "unknown plugin", types: []string{"single-profile-handler", "retains-private-candidates"}, want: false},
++	} {
++		t.Run(tt.name, func(t *testing.T) {
++			h := fwkplugin.NewEppHandle(context.Background(), nil)
++			for _, kind := range tt.types {
++				h.AddPlugin(kind, testPlugin(kind))
++			}
++			if SupportedPlugins(h) != tt.want {
++				t.Fatal("coverage mismatch")
++			}
++		})
++	}
++}
+diff --git a/pkg/epp/requestcontrol/director.go b/pkg/epp/requestcontrol/director.go
+index d6ea634..e70e16a 100644
+--- a/pkg/epp/requestcontrol/director.go
++++ b/pkg/epp/requestcontrol/director.go
+@@ -362,6 +362,15 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
+ 	}
+ 
+ 	reqCtx.SchedulingRequest.SchedulingResult = result
++	if result != nil {
++		for _, profile := range result.ProfileResults {
++			if profile != nil {
++				for _, endpoint := range profile.TargetEndpoints {
++					reqCtx.ObserverWindow.Record(endpoint.GetMetadata())
++				}
++			}
++		}
++	}
+ 
+ 	// Prepare Request (Populates RequestContext and call PreRequest plugins)
+ 	// Insert target endpoint to instruct Envoy to route requests to the specified target pod and attach the port number.
+diff --git a/pkg/epp/requestcontrol/observer_test.go b/pkg/epp/requestcontrol/observer_test.go
+new file mode 100644
+index 0000000..a0c12f0
+--- /dev/null
++++ b/pkg/epp/requestcontrol/observer_test.go
+@@ -0,0 +1,68 @@
++// Copyright 2026 The Kubernetes Authors.
++// SPDX-License-Identifier: Apache-2.0
++package requestcontrol
++
++import (
++	"encoding/json"
++	"net/http/httptest"
++	"testing"
++
++	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
++	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
++	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/openai"
++	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
++	"github.com/llm-d/llm-d-router/pkg/epp/observer"
++	"k8s.io/apimachinery/pkg/types"
++)
++
++type emptyObservedStore struct{}
++
++func (emptyObservedStore) ObserverSnapshot() ([]*fwkdl.EndpointMetadata, uint64, error) {
++	return nil, 1, nil
++}
++func TestObserverRecordsNativeDirectorAuxiliaryTargets(t *testing.T) {
++	makeEndpoint := func(name, address, role string) fwksched.Endpoint {
++		return fwksched.NewEndpoint(&fwkdl.EndpointMetadata{ID: types.NamespacedName{Name: name, Namespace: "ns"}, Name: name, Address: address, Port: "8000", Labels: map[string]string{"app.kubernetes.io/component": role}}, nil, fwkdl.NewAttributes())
++	}
++	result := &fwksched.SchedulingResult{PrimaryProfileName: "decode", ProfileResults: map[string]*fwksched.ProfileRunResult{
++		"decode":  {TargetEndpoints: []fwksched.Endpoint{makeEndpoint("decoder", "192.0.2.1", "decode-role")}},
++		"prefill": {TargetEndpoints: []fwksched.Endpoint{makeEndpoint("prefiller", "192.0.2.2", "prefill-role")}},
++	}}
++	director, ctx := newConditionalDecodeDirector(t, result)
++	o := observer.New(emptyObservedStore{}, func() bool { return true })
++	req := &handlers.RequestContext{ObserverWindow: o.Begin(), Request: &handlers.Request{Headers: map[string]string{":path": "/v1/completions"}, RawBody: []byte(`{"model":"m","prompt":"p"}`)}, Parser: openai.NewOpenAIParser()}
++	defer req.ObserverWindow.Finish()
++	parsed, err := req.Parser.ParseRequest(ctx, req.Request.RawBody, req.Request.Headers)
++	if err != nil {
++		t.Fatal(err)
++	}
++	returned, err := director.HandleRequest(ctx, req, parsed.Body)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if returned.TargetPod == nil || returned.TargetPod.Name != "decoder" {
++		t.Fatal("native primary routing was changed")
++	}
++	req.ObserverWindow.Finish()
++	recorder := httptest.NewRecorder()
++	o.ServeHTTP(recorder, httptest.NewRequest("GET", observer.Path, nil))
++	var observed struct {
++		Workers []struct {
++			Pod     string `json:"pod_hint"`
++			LastJob struct {
++				Recent bool `json:"recent_dispatch"`
++			} `json:"last_job"`
++		} `json:"workers"`
++	}
++	if err := json.Unmarshal(recorder.Body.Bytes(), &observed); err != nil {
++		t.Fatal(err)
++	}
++	if recorder.Code != 200 || len(observed.Workers) != 2 {
++		t.Fatalf("native primary/auxiliary target lost: %d %s", recorder.Code, recorder.Body.String())
++	}
++	for _, worker := range observed.Workers {
++		if !worker.LastJob.Recent {
++			t.Fatal("native target has no dispatch evidence")
++		}
++	}
++}
+diff --git a/pkg/epp/server/runserver.go b/pkg/epp/server/runserver.go
+index 0982639..ab0cedb 100644
+--- a/pkg/epp/server/runserver.go
++++ b/pkg/epp/server/runserver.go
+@@ -45,11 +45,13 @@ import (
+ 	fwkfc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/flowcontrol"
+ 	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
+ 	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
++	"github.com/llm-d/llm-d-router/pkg/epp/observer"
+ 	"github.com/llm-d/llm-d-router/pkg/epp/requestcontrol"
+ )
+ 
+ // ExtProcServerRunner provides methods to manage an external process server.
+ type ExtProcServerRunner struct {
++	Observer *observer.Observer
+ 	GrpcPort int
+ 	// GrpcListener is an optional pre-bound listener for the ext_proc server.
+ 	// When set, GrpcPort is ignored. Reserving the port in advance of this
+@@ -231,6 +233,7 @@ func (r *ExtProcServerRunner) AsRunnable(logger logr.Logger) manager.Runnable {
+ 			poolCap = 4 * 1024 * 1024 // gRPC default 4MB
+ 		}
+ 		extProcServer := handlers.NewStreamingServer(r.Datastore, r.Director, r.ParserRegistry, poolCap)
++		extProcServer.SetObserver(r.Observer)
+ 		extProcServer.SetEmitEndpointScores(r.EmitEndpointScores)
+ 		if r.EvictChannelLookup != nil {
+ 			extProcServer.SetEvictChannelLookup(r.EvictChannelLookup)

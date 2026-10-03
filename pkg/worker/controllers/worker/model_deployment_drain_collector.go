@@ -5,12 +5,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
@@ -69,9 +71,17 @@ type modelDeploymentDrainExec func(
 // remembered sample, so a controller restart cannot lose it and there is no mutex to get wrong.
 // The cost of that choice is stated where it is paid, at the restart check below.
 type modelDeploymentDrainCollector struct {
-	// client resolves the target Pod by UID and re-reads it afterwards, so both answers come from
-	// the same cache that the protocol already watches rather than from a second source of truth.
+	// client locates the target Pod. Its field index is a LOCATOR and not an authority: it answers
+	// which namespace and name carry a member UID, and the object it returns is the one the
+	// controller's cache last saw, which may predate a restart, a replacement or a relabel.
 	client ctrlcli.Client
+
+	// fresh is the authority the locator's answer is checked against. Every fact this read acts on
+	// is taken from a live read rather than from the cache, and it is taken twice, once before the
+	// exec and once after, because a container can be replaced under a stable Pod while the stream
+	// is open. A nil fresh reader is a hold rather than a fallback to the cache: a read that cannot
+	// prove what it is measuring has not measured it.
+	fresh ctrlcli.Reader
 
 	// restConfig and clientset carry the exec. They are separate because the REST client is what
 	// builds the subresource URL and the executor is what upgrades it to a stream.
@@ -87,10 +97,12 @@ type modelDeploymentDrainCollector struct {
 // newModelDeploymentDrainCollector builds the production reader. A nil exec installs the real one,
 // so a test can supply its own and a production caller cannot accidentally get a nil.
 func newModelDeploymentDrainCollector(
-	client ctrlcli.Client, restConfig *rest.Config, core corev1client.CoreV1Interface,
+	client ctrlcli.Client, fresh ctrlcli.Reader, restConfig *rest.Config,
+	core corev1client.CoreV1Interface,
 ) *modelDeploymentDrainCollector {
 	collector := &modelDeploymentDrainCollector{
 		client:     client,
+		fresh:      fresh,
 		restConfig: restConfig,
 		core:       core,
 	}
@@ -153,7 +165,14 @@ func (c *modelDeploymentDrainCollector) Drain(
 		return modelDeploymentDrainHold(modelDeploymentDrainUnsupported, reason), nil
 	}
 
-	before, ok := modelDeploymentDrainContainerStatus(pod, target.Container)
+	if drift := modelDeploymentDrainExpectedIdentity(pod, target, target.Container); drift != "" {
+		return modelDeploymentDrainHold(modelDeploymentDrainUnknown, drift), nil
+	}
+
+	// The first live read is kept whole rather than reduced to a container status, because the
+	// comparison after the exec is against the member as it was and not against one field of it.
+	beforePod := pod
+	before, ok := modelDeploymentDrainContainerStatus(beforePod, target.Container)
 	if !ok {
 		return modelDeploymentDrainHold(modelDeploymentDrainUnknown,
 			fmt.Sprintf("member %s reports no status for container %q", pod.Name, target.Container)), nil
@@ -205,7 +224,126 @@ func (c *modelDeploymentDrainCollector) Drain(
 			fmt.Sprintf("container %q was replaced while it was being read", target.Container)), nil
 	}
 
+	// THE TWO BOOKENDS MUST BE ABOUT THE SAME MEMBER, and a container ID is the smallest part of
+	// that. Everything else this read acted on is compared here as well, because each is a way the
+	// member under the read can stop being the member the reservation bound: an owner that changed
+	// is a Pod that has been adopted, a role that changed is a member re-seated or relabelled, an
+	// address that changed is a member that has moved, and a metrics endpoint that changed is a
+	// different process being read. A read whose subject moved cannot answer about the work the
+	// protocol is accounting for, whatever the numbers say.
+	if drift := modelDeploymentDrainIdentityDrift(beforePod, after, target.Container); drift != "" {
+		return modelDeploymentDrainHold(modelDeploymentDrainUnknown, drift), nil
+	}
+
 	return modelDeploymentDrainAnswerFromBody(body, expected), nil
+}
+
+// modelDeploymentDrainIdentityDrift names what changed about the member between the two live reads,
+// or the empty string when nothing this read depends on did.
+//
+// THE ROLE IS COMPARED AGAINST THE TARGET AND NOT ONLY AGAINST ITSELF, because a role that changed
+// from one value to another is still a change, and a role that is not the one the reservation names
+// is a member this operation never bound. The label is read through the tree's own accessor rather
+// than by a key written here, so there is one answer to "which role is this Pod" in the tree.
+func modelDeploymentDrainIdentityDrift(
+	before, after *corev1.Pod, container string,
+) string {
+	if before.UID != after.UID {
+		return fmt.Sprintf("member %s was replaced while it was being read", after.Name)
+	}
+
+	if owner := modelDeploymentDrainControllerOf(before); owner != modelDeploymentDrainControllerOf(after) {
+		return fmt.Sprintf("member %s changed controller while it was being read", after.Name)
+	}
+
+	if role := modelDeploymentPodRole(after); role != modelDeploymentPodRole(before) {
+		return fmt.Sprintf("member %s changed role from %q to %q while it was being read",
+			after.Name, modelDeploymentPodRole(before), role)
+	}
+
+	if before.Status.PodIP != after.Status.PodIP {
+		return fmt.Sprintf("member %s changed address while it was being read", after.Name)
+	}
+
+	if before.Annotations["prometheus.io/port"] != after.Annotations["prometheus.io/port"] ||
+		before.Annotations["prometheus.io/scheme"] != after.Annotations["prometheus.io/scheme"] ||
+		before.Annotations["prometheus.io/path"] != after.Annotations["prometheus.io/path"] {
+		return fmt.Sprintf("member %s changed its metrics endpoint while it was being read", after.Name)
+	}
+
+	beforeStatus, beforeFound := modelDeploymentDrainContainerStatus(before, container)
+	afterStatus, afterFound := modelDeploymentDrainContainerStatus(after, container)
+	if !beforeFound || !afterFound {
+		return fmt.Sprintf("member %s reported no status for container %q across the read",
+			after.Name, container)
+	}
+
+	// A restart count that moved is a restart that happened during the read, and the gauges now
+	// served come from a process that did not exist when the read began.
+	if beforeStatus.RestartCount != afterStatus.RestartCount {
+		return fmt.Sprintf("container %q restarted while it was being read", container)
+	}
+
+	return ""
+}
+
+// modelDeploymentDrainControllerOf is the Pod's controlling owner, which is what binds a replica to
+// the deployment that declared it.
+// modelDeploymentDrainControllerOf is the Pod's controlling owner as an identity.
+//
+// THE UID IS PART OF IT, and leaving it out made the comparison vacuous in two ways at once: a Pod
+// whose owner was deleted and recreated under the same name compared equal to itself, and two Pods
+// with no owner at all compared equal to each other. A name is not an identity for the same reason
+// a member's name is not.
+func modelDeploymentDrainControllerOf(pod *corev1.Pod) string {
+	owner := metav1.GetControllerOf(pod)
+	if owner == nil {
+		return ""
+	}
+
+	return owner.Kind + "/" + owner.Name + "/" + string(owner.UID)
+}
+
+// modelDeploymentDrainExpectedIdentity is what the live Pod must still be for this read to be about
+// the member the reservation bound.
+//
+// EVERY FIELD IS CHECKED BECAUSE EVERY ONE CAN BE ABSENT. An empty expected value and an empty
+// observed value are not agreement, so a target that names no deployment, or a live Pod with no
+// controller, is refused rather than passed. A read that cannot say which deployment it is measuring
+// is a read of nothing in particular.
+func modelDeploymentDrainExpectedIdentity(
+	pod *corev1.Pod, target modelDeploymentDrainTarget, container string,
+) string {
+	if target.DeploymentUID == "" {
+		return "the read names no deployment to check the member against"
+	}
+
+	controller := modelDeploymentDrainControllerOf(pod)
+	if controller == "" {
+		return fmt.Sprintf("member %s has no controlling owner", pod.Name)
+	}
+	if !strings.HasSuffix(controller, "/"+string(target.DeploymentUID)) {
+		return fmt.Sprintf("member %s is owned by %s rather than the operation's deployment %s",
+			pod.Name, controller, target.DeploymentUID)
+	}
+
+	// The role is read through the tree's own accessor, so there is one answer to which role a Pod
+	// is rather than two that can drift.
+	if role := modelDeploymentPodRole(pod); role != target.Role {
+		return fmt.Sprintf("member %s is role %q rather than %q", pod.Name, role, target.Role)
+	}
+
+	status, found := modelDeploymentDrainContainerStatus(pod, container)
+	if !found {
+		return fmt.Sprintf("member %s reports no status for container %q", pod.Name, container)
+	}
+	// AN EMPTY CONTAINER IDENTITY IS NOT A MATCHING ONE. The kubelet has not yet reported which
+	// container this is, and two empty identities agree with each other while saying nothing.
+	if status.ContainerID == "" {
+		return fmt.Sprintf("member %s reports no container identity for %q", pod.Name, container)
+	}
+
+	return ""
 }
 
 // read runs the collector script and returns whatever envelope it managed to produce.
@@ -230,6 +368,16 @@ func (c *modelDeploymentDrainCollector) read(
 // The lookup is by UID through a field index rather than a list, so a read costs one cache lookup
 // instead of a sweep of every Pod in the cluster. It refuses when more than one Pod carries the UID,
 // which cannot happen and is refused rather than resolved to the first of them.
+// THE CACHE LOCATES, THE SERVER AUTHORIZES. The index is how this reader learns which namespace
+// and name carry a member UID, because a UID is an identity and a name is not; it is not how the
+// read is answered, because the cached object is whatever the watch last delivered and a member that
+// has restarted, been replaced or been relabelled since then is still in it. The name the locator
+// found is therefore used to read the object live, and the live object's own UID is matched against
+// the frozen target, because a Pod deleted and recreated under the same name answers with a new UID
+// and is a different member.
+//
+// A Pod UID field selector would read more cheaply and would be refused: the API server does not
+// index that field, so a reader that used one would depend on a scan it cannot ask for.
 func (c *modelDeploymentDrainCollector) resolveMember(
 	ctx context.Context, target modelDeploymentDrainTarget, phase string,
 ) (*corev1.Pod, *modelDeploymentDrainAnswer) {
@@ -244,20 +392,48 @@ func (c *modelDeploymentDrainCollector) resolveMember(
 	}
 
 	switch len(pods.Items) {
-	case 1:
-		return &pods.Items[0], nil
 	case 0:
 		hold := modelDeploymentDrainHold(modelDeploymentDrainUnknown,
 			fmt.Sprintf("member could not be %s: no pod carries member uid %s", phase, target.PodUID))
 
 		return nil, &hold
 	default:
+		if len(pods.Items) > 1 {
+			hold := modelDeploymentDrainHold(modelDeploymentDrainUnknown,
+				fmt.Sprintf("member could not be %s: %d pods carry member uid %s",
+					phase, len(pods.Items), target.PodUID))
+
+			return nil, &hold
+		}
+	}
+
+	if c.fresh == nil {
 		hold := modelDeploymentDrainHold(modelDeploymentDrainUnknown,
-			fmt.Sprintf("member could not be %s: %d pods carry member uid %s",
-				phase, len(pods.Items), target.PodUID))
+			fmt.Sprintf("member could not be %s: no live reader is configured to confirm it", phase))
 
 		return nil, &hold
 	}
+
+	key := ctrlcli.ObjectKeyFromObject(&pods.Items[0])
+	pod := new(corev1.Pod)
+	if err := c.fresh.Get(ctx, key, pod); err != nil {
+		hold := modelDeploymentDrainHold(modelDeploymentDrainUnknown,
+			fmt.Sprintf("member %s could not be %s: %v", phase, "read live", err))
+
+		return nil, &hold
+	}
+
+	// The name the locator reported may now belong to another member entirely. A live read that
+	// does not carry the frozen UID is a different Pod, whatever its name.
+	if pod.UID != target.PodUID {
+		hold := modelDeploymentDrainHold(modelDeploymentDrainUnknown,
+			fmt.Sprintf("member could not be %s: %s/%s now carries uid %s rather than %s",
+				phase, pod.Namespace, pod.Name, pod.UID, target.PodUID))
+
+		return nil, &hold
+	}
+
+	return pod, nil
 }
 
 // execInto is the real transport: an SPDY stream into the container, bounded on both time and size.
@@ -347,14 +523,20 @@ func modelDeploymentDrainArgv(url string, expected []string) []string {
 	// A sample it cannot parse is reported as unreadable rather than dropped, so a name this read
 	// asked for and could not understand reaches the caller as a broken envelope instead of as an
 	// absent one. Dropping it would leave a partial sum looking like a complete zero.
-	script := fmt.Sprintf(`import sys, urllib.request
+	// A REQUIRED SAMPLE IS NEVER DROPPED AND NEVER CANCELED. A gauge the engine splits by label
+	// is several rows, and a row this script cannot read is still that gauge being reported and
+	// missed; summing the sibling it did read would report a number the engine never wrote, and
+	// letting the sibling stand would report a total the engine never meant. A value that is not a
+	// count, or is not finite, or is below zero, refuses the gauge the same way an unreadable row
+	// does, so there is no path by which bad evidence becomes a zero.
+	script := fmt.Sprintf(`import math, sys, urllib.request
 names = [%s]
 try:
     body = urllib.request.urlopen(%s, timeout=%d).read(%d).decode("utf-8", "replace")
 except Exception:
     sys.exit(0)
 totals = {}
-broken = set()
+refused = set()
 for line in body.splitlines():
     if not line or line.startswith("#"):
         continue
@@ -362,14 +544,31 @@ for line in body.splitlines():
     if name not in names:
         continue
     sample = line.rsplit("}", 1)[1] if "{" in line else line[len(name):]
+    fields = sample.split()
+    if not fields:
+        refused.add(name)
+        continue
     try:
-        totals[name] = totals.get(name, 0.0) + float(sample.split()[0])
-    except (IndexError, ValueError):
-        broken.add(name)
-for name in sorted(totals):
-    sys.stdout.write("%%s\t%%.6f\n" %% (name, totals[name]))
-for name in sorted(broken.difference(totals)):
+        value = float(fields[0])
+    except ValueError:
+        refused.add(name)
+        continue
+    if not math.isfinite(value) or value < 0.0:
+        refused.add(name)
+        continue
+    total = totals.get(name, 0.0) + value
+    if not math.isfinite(total):
+        refused.add(name)
+        continue
+    totals[name] = total
+for name in sorted(refused):
     sys.stdout.write("%%s\tunreadable\n" %% name)
+for name in sorted(totals):
+    if name in refused:
+        continue
+    # repr round-trips the value exactly. A fixed format would round a count that is small but
+    # real down to a zero, and a queue holding one request would be reported as holding none.
+    sys.stdout.write("%%s\t%%s\n" %% (name, repr(totals[name])))
 sys.exit(0)
 `,
 		strings.Join(names, ", "),
@@ -406,9 +605,11 @@ func modelDeploymentDrainAnswerFromBody(
 			continue
 		}
 		value, err := strconv.ParseFloat(strings.TrimSpace(sample), 64)
-		if err != nil {
-			// A name this transport asked for, carrying something that is not a number, is a
+		if err != nil || !modelDeploymentDrainActivityValue(value) {
+			// A name this transport asked for, carrying something that is not a usable count, is a
 			// broken envelope rather than an absent one. It is recorded so the reason says which.
+			// Parsing into a float succeeds for NaN and the infinities, so the value is judged as
+			// well as parsed, and a negative count is refused for the same reason.
 			if modelDeploymentDrainExpected(name, expected) {
 				unparsable = append(unparsable, name)
 			}
@@ -438,6 +639,15 @@ func modelDeploymentDrainAnswerFromBody(
 	total := 0.0
 	for _, value := range series {
 		total += value
+	}
+	// The values are each finite and nonnegative, so the only way the sum stops being a count is an
+	// overflow. It is refused rather than reported, because an engine serving counts this large is
+	// not describing a queue this protocol can reason about.
+	if math.IsInf(total, 0) || math.IsNaN(total) {
+		return modelDeploymentDrainAnswer{
+			State:  modelDeploymentDrainUnknown,
+			Reason: "the engine's in-flight total is not a finite count",
+		}
 	}
 	if total > 0 {
 		return modelDeploymentDrainAnswer{

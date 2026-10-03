@@ -1023,7 +1023,7 @@ index d765800..798eab7 100644
 +        );
 +        pod.metadata.uid = Some(uid.to_string());
 +        if labelled {
-+            pod.metadata.labels = Some(HashMap::from([(
++            pod.metadata.labels = Some(std::collections::BTreeMap::from([(
 +                "app".to_string(),
 +                "worker".to_string(),
 +            )]));
