@@ -57,6 +57,7 @@ order:
     - views
   /docs/modules/model-deployment/:
     - deployment
+    - elastic-ep
     - engine-versions
     - prefill-decode
     - routing
@@ -111,6 +112,7 @@ labels:
   /docs/modules/model-delivery/operations/: Operations
   /docs/modules/model-delivery/views/: API reference
   /docs/modules/model-deployment/deployment/: Configuration
+  /docs/modules/model-deployment/elastic-ep/: Elastic EP
   /docs/modules/model-deployment/engine-versions/: Engine versions
   /docs/modules/model-deployment/prefill-decode/: Prefill and decode
   /docs/modules/model-deployment/routing/: Routing

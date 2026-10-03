@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"time"
 
@@ -85,9 +86,12 @@ type elasticOperation struct {
 	Width elasticWidth `json:"width"`
 	// Workers is the captured set this operation may act on. The master is named separately
 	// because it is a worker that is never a retirement candidate.
-	Workers []elasticCapturedIdentity `json:"workers"`
-	Master  elasticCapturedIdentity   `json:"master"`
-	State   elasticOperationState     `json:"state"`
+	Workers []elasticCapturedIdentity         `json:"workers"`
+	Master  elasticCapturedIdentity           `json:"master"`
+	Head    elasticCapturedIdentity           `json:"head,omitempty"`
+	Members []elasticCapturedIdentity         `json:"members,omitempty"`
+	Release *modelDeploymentRetirementRelease `json:"release,omitempty"`
+	State   elasticOperationState             `json:"state"`
 	// CommandIntent is what this operation asked the engine to do, written before the ask. A
 	// resumed or reconstructed record carries it, which is what stops the same command being
 	// issued twice after an ambiguous answer.
@@ -122,6 +126,9 @@ func (eo *elasticOperation) SentState() bool {
 // Changing any of them through an update would be a second operation wearing the first one's name, and
 // a caller that could retarget a stored operation could aim a resize the cluster never admitted.
 func (eo *elasticOperation) envelopeDrift(next *elasticOperation) string {
+	if eo.Head != next.Head || !reflect.DeepEqual(eo.Members, next.Members) || !reflect.DeepEqual(eo.Release, next.Release) {
+		return "the captured runtime and allocation identities cannot change"
+	}
 	if eo.DeploymentUID != next.DeploymentUID {
 		return "the record cannot be moved to another deployment"
 	}
@@ -514,12 +521,23 @@ func (s *elasticOperationStore) Update(ctx context.Context, op *elasticOperation
 
 // Delete removes the record, which is the only way a deployment's operation stops being unresolved.
 func (s *elasticOperationStore) Delete(ctx context.Context, op *elasticOperation) error {
-	stored := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      elasticOperationRecordName(op.DeploymentUID),
-			Namespace: op.Namespace,
-		},
+	if s.client == nil || op == nil || op.ResourceVersion == "" {
+		return fmt.Errorf("%w: deletion requires a read record", errElasticOperation)
 	}
-
-	return s.client.Delete(ctx, stored)
+	stored := new(corev1.ConfigMap)
+	if err := s.client.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: op.Namespace, Name: elasticOperationRecordName(op.DeploymentUID),
+	}, stored); err != nil {
+		return err
+	}
+	if err := elasticControllingOwnerIs(stored, op.Name, op.DeploymentUID); err != nil {
+		return err
+	}
+	if stored.ResourceVersion != op.ResourceVersion {
+		return apierrors.NewConflict(corev1.Resource("configmaps"), stored.Name,
+			fmt.Errorf("the operation record changed before deletion"))
+	}
+	return s.client.Delete(ctx, stored, ctrlcli.Preconditions{
+		UID: &stored.UID, ResourceVersion: &op.ResourceVersion,
+	})
 }

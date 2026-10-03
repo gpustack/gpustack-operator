@@ -670,7 +670,8 @@ and therefore neither locates its window.
 ---
 
 **See also** — [KV Cache Pool](../kv-cache/pool.md) for the Binding that grants the quota and declares
-the domain · [Model Deployment Prefill and Decode](prefill-decode.md) for
+the domain · [Elastic EP](elastic-ep.md) for the profile that resizes one serving instance's collective
+instead of adding replicas · [Model Deployment Prefill and Decode](prefill-decode.md) for
 what pairs a prefill role with a decode role · [Accelerator Requests](../devices/requests.md) for the request fields
 `roles[].resources` mirrors · [Admission](../devices/admission.md) for the gates a replica passes
 as an ordinary Pod · [Model Deployment Status](status.md) for what each condition
