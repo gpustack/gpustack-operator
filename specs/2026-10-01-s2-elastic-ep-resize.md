@@ -1,9 +1,43 @@
 # Spec: ModelDeployment S2 — Elastic EP Resize (vLLM Ray): Four-Layer Elastic Realization, Engine Resize Lifecycle, and Continuity/Observation Separation
 
 Status: Building
-Blocked on: E7/E9/E10 native physical acceptance and the remaining integration work. Offline source implementation is authorized.
+Blocked on: E7/E9/E10 native physical acceptance, S1 integration validation and final delivery. Offline implementation is complete.
 Type: Feature
 Owning program: dp-ep-router-and-scaling (S2 formal stage, D11-delegated)
+
+## Delivery checkpoint and next gates
+
+Draft PR #714 contains the source implementation and owning guides.
+T1, T2, T3 and T4p have passed their offline gates.
+T4 realization and T5 recovery also have accepted source tests.
+Their task boxes remain unchecked because their physical criteria are not established.
+Whole-source lint, generation without drift and affected-package race tests pass.
+The reviewed source head passes eight CI checks. Manifest and release jobs are skipped.
+Three of four effective feedback rounds are consumed. No actionable finding remains on that reviewed head.
+A later documentation commit requires its own current-head check and review readback before merge.
+
+An earlier native width-two baseline completed real rank forwards with a temporary shared-memory workaround.
+It issued no width mutation.
+The later product-default fixture mounts isolated 512 MiB shared memory on each GPU member.
+It admits two separate width-two deployments and observes their Ray GPU capacity.
+Model loading is interrupted by the user's closeout instruction before native effective width is established.
+This outcome is interrupted and unaccepted; it is not a native product failure.
+No product `2→4→2` cycle, continuity result or resource-return proof is established.
+
+Before another paid window, validate fixture dependency order and all evidence collectors offline.
+Keep failed campaign drivers and incomplete client runs as failed or inconclusive evidence.
+Do not edit them until they appear to pass.
+Register any new experiment before execution, with fixed predicates, time limits and stop rules.
+First establish native width two, actual rank forwards and identity-bound Ray membership.
+Then execute product `2→4→2` with master/survivor identity and GPU/Kueue return evidence.
+Next run failure/recovery, probe, streaming and all-three-Router cells from T6.
+Repeatability and same-SLO capacity/GPU-hour candidates remain unmeasured.
+
+Issue #713 has source fixes here; close it only after S2 delivery and regression readback.
+Issue #717 affects named InstanceType prefetch placement.
+Fix it before a fixture depends on that placement; the current fixture uses explicit GPU node labels.
+Issues #715 and #716 are bounded follow-ups after the S2 delivery tranche.
+They cannot replace any required physical acceptance cell.
 
 ## Summary
 
@@ -46,11 +80,12 @@ separation of continuity claims from instance-interruption characterization.
 
 1. **E7/E9/E10 native physical gate has NOT passed.** vLLM Ray 2→4→2 elastic EP with real EP
    inference, identity-verified retirement, and release verification is still unproven:
-   **MEASURED** — E7 is FAILED FIXTURE / INCONCLUSIVE (the official pinned vLLM image lacks Ray;
+   **MEASURED** — the initial E7 attempt is FAILED FIXTURE / INCONCLUSIVE (the official pinned vLLM image lacks Ray;
    a hash-pinned Ray 2.56.1 overlay was prepared under the program's dependency-and-bounded-
    verification ruling, but the node was preempted before any overlay Job ran — recorded in the
    program's PoC disposition table); E9 is PARTIAL (whole-GPU admission captured; the
-   allocation/actor/release ledger unverified); E10 is NOT RUN. No section of this spec may be
+   allocation/actor/release ledger unverified); E10 is NOT RUN. The delivery checkpoint records later baseline attempts.
+   No section of this spec may be
    read as claiming those results.
 2. **Source implementation is authorized.** The program owner approved proceeding with S2
    implementation after opening the S1 PR, carrying remaining S1 tests and validation into S2.
@@ -416,7 +451,8 @@ successful-inference evidence — Pod count, startup argv, or an API 200 are ins
 substitutes (**READ**: the program's runtime-parallelism analysis, which defines what may count as
 an effective-width observation). Its public wire form (name, type, defaults, `+optional`
 treatment) is frozen at the S2 my-plan gate under the S1 precedent, and only if the evidence
-supports it; until then nothing in `api/` changes and this spec creates no wire.
+supports it; until then no public observational effective-width field is added to `api/`.
+The elastic request fields above have their own accepted contract.
 
 **Booleans and config readouts are not states.** `is_scaling_elastic_ep` and `/server_info` may
 appear in controller logic but never satisfy a state field, never authorize retirement (AC-2.6),
@@ -430,9 +466,9 @@ and never stand in for a missing observation (**READ**: pinned vLLM v0.29.0 API 
 - AC-4.2 Each field renders Unknown for its own missing/stale/unattributable observation while
   other fields keep values; no field inherits or imputes another's value; known zero and Unknown
   are distinct renderings.
-- AC-4.3 The public API surface is unchanged by this spec: no new CRD field exists until its own
-  freeze gate; the observational effective concept is documented as non-frozen wherever it is
-  described.
+- AC-4.3 No public observational effective-width field is added before its own freeze gate.
+  The observational effective concept remains non-frozen wherever it is described.
+  This restriction does not remove the accepted elastic request fields.
 
 ## User Stories
 
@@ -476,10 +512,21 @@ and never stand in for a missing observation (**READ**: pinned vLLM v0.29.0 API 
   inference (E7); four-layer runtime accounting incl. actor→Pod mapping and release (E9 runtime);
   completion/timeout/restart recovery behavior (E10); the 503 window's actual duration and probe
   interaction; prepared-state leftovers after drain timeout; commit-exception boolean residue;
-  KubeRay (or any controller) presence/version in the target cluster; sliced/partitioned
+  sliced/partitioned
   allocation modes; all performance candidate thresholds; Qwen3-30B-A3B fit and NIXL/kernel
   behavior on target GPUs. None of these may be upgraded by wording anywhere in this spec; they
   gate physical acceptance and any evidence-dependent API freeze.
+
+- **MEASURED (later baseline and setup attempts):** stock vLLM 0.29.0 with full Ray 2.56.1
+  establishes width-two inference only with the earlier temporary shared-memory workaround.
+  Its native rank-zero and rank-one requests complete; no width change is issued.
+  The product-default attempt verifies the deployed operator through its owning Deployment,
+  ReplicaSet, Pod image digest and full binary revision.
+  A fixed-revision 61,084,187,391-byte model cache becomes Ready with the expected manifest digest.
+  Both native deployments receive width-two admission, allocation and registered Ray GPU capacity.
+  Each cluster exposes two placement groups with co-located GPU and CPU bundles.
+  Native effective width remains Unknown when the user requests closeout during model loading.
+  No later inference, resize, continuity or release acceptance follows from those setup observations.
 
 ## Constraints and Boundaries
 

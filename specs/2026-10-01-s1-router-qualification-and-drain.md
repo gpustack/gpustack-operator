@@ -1,8 +1,23 @@
 # Spec: ModelDeployment S1 — Router Endpoint Qualification, Serving Confirmation, and Abortable Fixed-Instance Retirement
 
-Status: Building
-Blocked on: root staged-gate acceptance of the working-copy diff before commit (per-task gates below; a task stays unchecked until its gate accepts it)
+Status: Shipped
+Blocked on: None for the merged source delivery. Remaining physical validation belongs to S2 T6.
 Type: Feature
+
+## Delivery and remaining validation
+
+PR #711 merged the S1 source and documentation. All implementation tasks below are complete.
+The measured local Router event matrix covers the five runnable discovery cells.
+Its corrected observation timing meets the thirty-second bound.
+Failed-Add re-list and failed-Remove retry remain unverified under the recorded production-hook restriction.
+Their next gate is real-cluster validation in S2 T6.
+Streaming drain, GPU/quota release and native all-three-Router composition also remain in S2 T6.
+Shipped source does not establish these physical outcomes.
+
+S2 T3 repairs serving-observation and drain identity checks found during integration.
+Its source regression tests cover Router owner replacement, terminating processes and fresh member identities.
+These fixes remain in draft PR #714 until its delivery gates pass.
+Issue #713 closes after that delivery and regression readback.
 
 ## Summary
 
@@ -172,9 +187,8 @@ unchanged.
 - AC-2.5 Negative: a worker registered-and-healthy but rejected by the actual selection predicate
   (circuit breaker open / availability false) is not counted as serving (vLLM Router, gateway).
 - AC-2.6 An unconfigured router reports NotConfigured; no serving number is synthesized.
-- AC-2.7 (acceptance pending) The observation mechanism is as built, but its measured observation
-  latency under full-matrix conditions has not yet met the 30 s budget and the ruling on that is
-  outstanding; the timeliness of the serving observation stays unverified until it is met.
+- AC-2.7 The instrumented local discovery cells meet the thirty-second observation budget, as described in T6.
+  Native all-three-Router composition remains a separate physical validation gate in S2 T6.
 
 ### Feature 3 — Whole-instance health gate with an observable group predicate
 
