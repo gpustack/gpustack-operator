@@ -11,8 +11,8 @@ Elastic expert-parallel width changes inside one vLLM Ray serving instance are a
 problem from S1's fixed-instance scaling: the engine itself reconfigures a collective (prepare →
 drain → commit) while Kubernetes, Kueue, Ray, and the accelerator ledger must stay reconciled
 around it. This spec defines that capability in four features: (1) the elastic workload
-realization — one ModelDeployment instance as one RayCluster with a CPU head, one GPU per worker
-Pod, and a four-layer reconciliation (desired spec, admitted Pods, Ray members, engine-effective
+realization — one ModelDeployment instance as one dedicated logical Ray cluster with a CPU head,
+one GPU per worker Pod, and a four-layer reconciliation (desired spec, admitted Pods, Ray members, engine-effective
 world) where scale-down retires only captured, runtime-proven actor-free Pod identities; (2) the
 engine resize lifecycle with its failure and recovery contract — explicit orderings in both
 directions, the resize 503 window as a measured outage to be quantified, probe coordination, a
@@ -130,9 +130,10 @@ separation of continuity claims from instance-interruption characterization.
   the Ray recipes in `pkg/parallel/parallel.py`, the Elastic EP API router, and the native serving
   benchmark). SGLang v0.5.18 commit `71de97b264b04dcd514cf904003028aefe9775c8` (referenced for
   Non-Goals only). Kueue: packaged v0.18.10, Go dependency v0.17.1 — versions must not be mixed
-  when proving runtime capability (the program's resource-accounting analysis). KubeRay v1.7.1 is
-  the current controller *candidate*, read at upstream source; presence in any cluster is
-  **NOT-established**.
+  when proving runtime capability (the program's resource-accounting analysis). The operator owns
+  the Ray head and worker Pods directly.
+  KubeRay v1.7.1 was evaluated and rejected because its deletion paths do not carry captured
+  Pod UID preconditions. No KubeRay installation is required by this profile.
 - **Engine mode constraints.** vLLM v0.29.0 Elastic EP requires Internal mode, Ray backend, EPLB,
   PP=1, and collapses API server count >1 to 1; External/Hybrid are rejected (**READ**: pinned
   vLLM v0.29.0 source).
@@ -176,7 +177,8 @@ separation of continuity claims from instance-interruption characterization.
 
 ### Feature 1 — Elastic workload realization with four-layer resource reconciliation (E9 / T07)
 
-**Shape.** One ModelDeployment instance maps to exactly one RayCluster. The Ray head is CPU-only
+**Shape.** One ModelDeployment instance maps to one dedicated logical Ray cluster. The operator
+creates and owns its head and worker Pods. The Ray head is CPU-only
 and carries only the Ray control plane. Each worker Pod holds exactly one GPU with
 `numOfHosts=1`. The vLLM API/DP-master role is pinned to a reserved GPU worker Pod with explicit
 `data_parallel_size_local=1` in Internal mode (strict placement requires a positive local size on
@@ -185,7 +187,7 @@ zero ranks elsewhere and is kept as a configuration negative, not a profile — 
 program's elastic placement analysis, consistent with pinned vLLM v0.29.0 strict-placement rules).
 The API/DP-master worker Pod is never in the retirement set; it retires only with the whole
 instance. Single writer per resource: exactly one resize controller (Feature 2) writes the Ray
-worker dimension; Kueue, KubeRay defaults, T06, and any autoscaler are non-writers of width.
+worker dimension; Kueue, T06 and any autoscaler are non-writers of width.
 
 **Four layers, reconciled as distinct states.** The controller reconciles and reports four states
 separately, and an engine-level action is permitted only when the layers below it agree:
@@ -198,10 +200,9 @@ after Kueue admission, real allocation, and Ray registration are observed; scale
 unadmitted capacity is forbidden (**READ**: the program's E9 four-layer design).
 
 **Scale-down retires only captured, actor-free identities.** A retirement candidate must be (a)
-captured by identity — Pod name + UID recorded before the operation, expressed through the
-controller's targeted retirement interface (KubeRay `WorkersToDelete` is the current candidate
-mechanism and selects names before any count fallback — **READ**: KubeRay v1.7.1 controller
-source); (b) proven actor-free at runtime after the engine commit (the actor→Pod mapping is read,
+captured by identity — Pod name + UID recorded before the operation, deleted by the
+operator with a UID precondition; (b) proven actor-free at runtime after the engine commit
+(the actor→Pod mapping is read,
 not assumed); and (c) not the API/DP-master member. "Worker count now equals the target" is an
 observation, never a retirement condition. A captured identity that still holds actors at
 retirement time blocks the retirement and is reported.
@@ -461,8 +462,7 @@ and never stand in for a missing observation (**READ**: pinned vLLM v0.29.0 API 
 - **Ask first (root ruling):** D07 whole-GPU vs sliced/partitioned scope; acceptance or revision
   of any pre-registered candidate threshold after the native campaign; the public wire freeze for
   the observational effective field; whether cloud node provisioning 2→4 becomes a chartered case
-  (currently Non-Goal); the actual controller choice (KubeRay candidate) once cluster presence is
-  proven.
+  (currently Non-Goal); any change to the selected operator-owned realization.
 - **Never (boundary violations this spec explicitly forbids):**
   - deleting workers by count instead of by captured identity;
   - treating `is_scaling=false` as a retirement credential;
@@ -561,6 +561,26 @@ disposition rather than opening another general review or automatic retry.
       serving status carries a count. Same-name apps owner replacement controls now read
       fresh UIDs and fail when either identity comparison is removed. CPU checks do not prove physical EP behavior;
       native Router placement, drain and resource-release validation remain in T6.
+- [ ] **T4p · Native observation protocol spike and client tracer**
+      Blocked by: T1
+      Gate: review
+      Owns: `pkg/worker/elasticengine/effective_observation*.go` and the package description
+      in `pkg/worker/elasticengine/client.go`
+      Acceptance: verify the pinned native rank-header validation and error serialization.
+      The candidate sends a non-streaming completion with `X-data-parallel-rank: -1`.
+      A strict native out-of-range response observes the frontend rank bound independently
+      from desired width. It is insufficient by itself. Completion requires real forwards
+      for every expected rank, another equal boundary read, captured master identity and a
+      complete Ray rank-to-member map. The client reports native observations only; the
+      controller owns the identity and mapping checks. Generic errors, ignored headers,
+      changed bounds, incomplete forwards and unsupported schemas refuse confirmation.
+      Prepared TCPStore keys, config readouts and actor counts cannot replace this protocol.
+      First gate: reached pinned-source producer and error-handler controls before Go edits.
+      If that gate fails, retain the exact blocker and do not implement an invented endpoint.
+      Offline acceptance: focused HTTP negative controls, bounded calls, no resize replay,
+      actual package build and race tests. Physical acceptance remains in T6; source fixtures
+      do not prove a native engine or satisfy AC-2.6.
+      Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -count=1 -race ./pkg/worker/elasticengine/...`
 - [ ] **T4 · Ray workload, admission and identity-safe retirement realization**
       Blocked by: T2, T3
       Owns: `pkg/worker/controllers/worker/model_deployment_elastic_workload*.go` and
@@ -654,8 +674,8 @@ Resolved here and not open: the four-feature decomposition; scale-up/scale-down 
 Never list; whole-GPU initial scope (pending D07 only for any widening); SGLang and E8 as
 Non-Goals; source implementation authorized; physical acceptance and public-wire freeze remain evidence-gated.
 
-1. Actual controller/framework/version for the elastic realization, once cluster presence is
-   proven (KubeRay v1.7.1 is the candidate — **NOT-established** in any cluster).
+1. Native observation protocol and the exact operator build that realizes the cluster.
+   The CPU protocol spike and physical campaign must establish these before support is claimed.
 2. The native campaign's measured 503-window shape and probe interaction (AC-2.3/2.4 inputs).
 3. Drain-timeout leftovers: prepared state, actors, and second-target refusal behavior in the
    pinned engine (explicit E10 cells before any timeout policy freezes).
