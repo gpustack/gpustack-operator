@@ -261,7 +261,8 @@ func TestModelDeploymentStatusEligibilityWireSurvivesJSONRoundTrip(t *testing.T)
 	assert.Equal(t, int64(7), got.Retirement.ObservedGeneration)
 	assert.Equal(t, ModelDeploymentRetirementStateAborted, got.Retirement.State)
 	assert.Equal(t, []string{"member-uid"}, got.Retirement.TargetMemberUIDs)
-	assert.Equal(t, now, got.Retirement.StartedAt)
+	// The rendering preserves the instant, not the location, so equality compares instants.
+	assert.Equal(t, now.UTC(), got.Retirement.StartedAt.UTC())
 }
 
 // TestModelDeploymentRoleEndpointsNilAndZeroStayDistinct pins the pair a consumer of a
