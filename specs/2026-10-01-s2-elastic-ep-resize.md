@@ -533,7 +533,7 @@ disposition rather than opening another general review or automatic retry.
       bounded responses, classify resize 503 and ambiguous failures, and never retry mutation
       automatically. Neither status false nor HTTP 200 proves effective width.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -count=1 -race ./pkg/worker/elasticengine/...`
-- [ ] **T2 · Durable operation and four-layer transition kernel**
+- [x] **T2 · Durable operation and four-layer transition kernel**
       Blocked by: None
       Owns: `pkg/worker/controllers/worker/model_deployment_elastic_operation*.go`
       Acceptance: an internal operation is bound to deployment UID, generation and captured
