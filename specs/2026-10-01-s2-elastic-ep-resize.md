@@ -558,8 +558,8 @@ disposition rather than opening another general review or automatic retry.
       Offline source integration is complete. Uncached caller and membership guards, live
       Router ownership, terminating-process coverage, physical per-role counts and post-exec
       drain identity checks pass focused controls and the full package race suite. Only Confirmed
-      serving status carries a count. Same-name apps owner replacement fixtures remain a
-      separate regression follow-up in T4. CPU checks do not prove physical EP behavior;
+      serving status carries a count. Same-name apps owner replacement controls now read
+      fresh UIDs and fail when either identity comparison is removed. CPU checks do not prove physical EP behavior;
       native Router placement, drain and resource-release validation remain in T6.
 - [ ] **T4 · Ray workload, admission and identity-safe retirement realization**
       Blocked by: T2, T3

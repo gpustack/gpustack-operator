@@ -1548,6 +1548,7 @@ func TestARouterProcessIsHeldUnlessEveryChainHopIsTheRenderedOne(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		mutate  func(t *testing.T, cli ctrlcli.Client)
+		replace *chainReplacement
 		wantErr string
 	}{
 		{
@@ -1589,14 +1590,28 @@ func TestARouterProcessIsHeldUnlessEveryChainHopIsTheRenderedOne(t *testing.T) {
 			wantErr: "could not be read uncached",
 		},
 		{
+			// A ReplicaSet deleted and recreated under its own name is what a rollout or a
+			// retirement leaves behind: the read still succeeds, and the identity the Pod's
+			// controlling reference carries is the only thing left to tell the two apart.
 			name: "a replica set that changed identity is held",
-			mutate: func(_ *testing.T, cli ctrlcli.Client) {
-				require.NoError(t, cli.Delete(context.Background(),
-					&appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{
-						Name: "router-zero-rs", Namespace: md.Namespace,
-					}}))
+			replace: &chainReplacement{
+				object:   func() ctrlcli.Object { return new(appsv1.ReplicaSet) },
+				key:      ctrlcli.ObjectKey{Namespace: md.Namespace, Name: "router-zero-rs"},
+				freshUID: types.UID("rs-uid-router-zero-replacement"),
 			},
-			wantErr: "could not be read uncached",
+			wantErr: "ReplicaSet changed identity during observation",
+		},
+		{
+			// The workload Deployment is the far end of the apps chain, and it is replaced the
+			// same way: the same name, a read that still succeeds, and an identity comparison
+			// that is the only thing left holding the process.
+			name: "a Deployment that changed identity is held",
+			replace: &chainReplacement{
+				object:   func() ctrlcli.Object { return new(appsv1.Deployment) },
+				key:      ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"},
+				freshUID: types.UID("deployment-uid-router-replacement"),
+			},
+			wantErr: "Deployment changed identity during observation",
 		},
 		{
 			name: "a replica set with no controlling Deployment is held",
@@ -1627,6 +1642,9 @@ func TestARouterProcessIsHeldUnlessEveryChainHopIsTheRenderedOne(t *testing.T) {
 			r := faithful(t)
 			if tc.mutate != nil {
 				tc.mutate(t, r.Client)
+			}
+			if tc.replace != nil {
+				replaceChainHop(t, r.Client, *tc.replace)
 			}
 			// The pod is read back from the client, because what the row mutated is the object the
 			// collection would find, not the fixture's own copy of it.
@@ -1667,6 +1685,50 @@ func rewriteOwner(t *testing.T, cli ctrlcli.Client, name, kind, apiVersion, owne
 		Controller: ptr.To(true),
 	}}
 	require.NoError(t, cli.Update(context.Background(), pod))
+}
+
+// chainReplacement states that one object of the rendered chain is replaced in place: the object
+// keeps its namespace and name and is given another UID, the shape a rollout or a retirement
+// leaves behind.
+type chainReplacement struct {
+	object func() ctrlcli.Object
+	key    ctrlcli.ObjectKey
+	// freshUID is the identity the replacement carries. It has to differ from the identity the
+	// chain's controlling reference still names, or the row would verify nothing.
+	freshUID types.UID
+}
+
+// replaceChainHop deletes the named object of the rendered chain and recreates it under the same
+// namespace and name with another UID, changing nothing else about it, and then asserts that the
+// object the reconciler will read is that replacement. The read therefore succeeds, so the row is
+// only ever held by the identity comparison, and the assertion is what proves the row reached it
+// rather than a missing-object path.
+func replaceChainHop(t *testing.T, cli ctrlcli.Client, hop chainReplacement) {
+	t.Helper()
+
+	live := hop.object()
+	require.NoError(t, cli.Get(context.Background(), hop.key, live))
+	assert.NotEqual(t, live.GetUID(), hop.freshUID,
+		"a replacement reusing the rendered identity would verify nothing")
+
+	removed := hop.object()
+	removed.SetNamespace(hop.key.Namespace)
+	removed.SetName(hop.key.Name)
+	require.NoError(t, cli.Delete(context.Background(), removed))
+
+	live.SetUID(hop.freshUID)
+	// A READ OBJECT CARRIES THE VERSION OF THE ONE THAT WAS DELETED. A create names no version,
+	// so the replacement is written without one, exactly as the API server would store it.
+	live.SetResourceVersion("")
+	require.NoError(t, cli.Create(context.Background(), live))
+
+	// THE REPLACEMENT IS THE OBJECT THE CHAIN READS. This reads it back rather than trusting the
+	// write, so a row that failed to establish a fresh identity is reported as a broken fixture
+	// instead of passing against the read failure it did not mean to exercise.
+	replaced := hop.object()
+	require.NoError(t, cli.Get(context.Background(), hop.key, replaced))
+	assert.Equal(t, hop.freshUID, replaced.GetUID(),
+		"the chain must read the replacement, so the identity comparison is what holds it")
 }
 
 // TestATerminatingRouterProcessIsStillAProcess pins the coverage rule: a Router Pod that is
