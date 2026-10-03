@@ -1,7 +1,8 @@
 // Package elasticengine is the operator's client for the engine's own elastic width endpoints.
 //
-// It talks to a pinned vLLM's two native routes and nothing else. The native contract, read from
-// v0.29.0's serve/elastic_ep router, is:
+// It talks to a pinned vLLM's native routes and nothing else: the two resize routes below, plus
+// the one completion route ObserveNativeWorld probes to measure the world the frontend actually
+// enforces. The native contract, read from v0.29.0's serve/elastic_ep router, is:
 //
 //	POST /scale_elastic_ep      {"new_data_parallel_size": positive int, "drain_timeout": positive int}
 //	                            200 {"message": ...} | 400 | 408 | 500
@@ -12,6 +13,12 @@
 // it believes it is at, and that is a claim about itself; only a request actually served afterwards
 // is evidence that it serves. The same is true of the scaling flag, which is a statement that a
 // resize is in progress and never a statement that a worker is free to remove.
+//
+// ObserveNativeWorld is the one native observation this package adds: the frontend's own rank
+// validation, bookended around one real forward per expected rank. It measures the bound the
+// engine enforces and which ranks served a token. It is not a membership proof, it names no Pod
+// or actor, and equal bookends cannot exclude a change across the forwards; a controller pairs it
+// with its own identity reads before it may act on it.
 //
 // Nothing here retries. A resize is a mutation of a collective, and a mutation that is replayed
 // against a request that may already have been applied is how a collective ends up at an unintended

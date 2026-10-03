@@ -175,6 +175,27 @@ separation of continuity claims from instance-interruption characterization.
 
 ## Proposal
 
+### Elastic request contract
+
+The managed profile adds optional `roles[].elasticEp` with two required fields:
+
+| Field | Meaning | Update rule |
+| --- | --- | --- |
+| `width` | Total GPU engines, including the reserved API/DP-master; integer from 2 through 64. | Mutable. |
+| `headInstanceType` | Name of an existing CPU-only InstanceType for the Ray head. | Immutable. |
+
+Profile presence is immutable. The deployment has one managed vLLM Server role, with
+`replicas=1` and `size=1`. Those fields retain their existing meanings. This profile
+supports the pinned vLLM release, TP=1, PP=1 and one whole GPU per member.
+Command takeover, slicing, partitioning and fabric interface requests are refused.
+Arguments or environment values that override operator-owned elastic settings are refused.
+
+The head uses its CPU InstanceType's unit resources and independent CPU queue admission.
+It consumes no GPU width. Only the reserved master supplies API endpoints and serving status.
+Initial boot width is retained separately from the mutable target. A target or deployment
+annotation change cannot replace a serving master. A smaller target alone cannot delete workers.
+This request contract does not freeze a public effective-width status field or prove native support.
+
 ### Feature 1 — Elastic workload realization with four-layer resource reconciliation (E9 / T07)
 
 **Shape.** One ModelDeployment instance maps to one dedicated logical Ray cluster. The operator
@@ -561,7 +582,7 @@ disposition rather than opening another general review or automatic retry.
       serving status carries a count. Same-name apps owner replacement controls now read
       fresh UIDs and fail when either identity comparison is removed. CPU checks do not prove physical EP behavior;
       native Router placement, drain and resource-release validation remain in T6.
-- [ ] **T4p · Native observation protocol spike and client tracer**
+- [x] **T4p · Native observation protocol spike and client tracer**
       Blocked by: T1
       Gate: review
       Owns: `pkg/worker/elasticengine/effective_observation*.go` and the package description
