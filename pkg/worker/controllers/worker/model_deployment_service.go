@@ -2,6 +2,7 @@ package worker
 
 import (
 	"maps"
+	"slices"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -100,7 +101,9 @@ func renderModelDeploymentReplicaService(
 func renderModelDeploymentService(md *workercore.ModelDeployment) *core.Service {
 	svc := renderModelDeploymentServiceFor(md, &md.Spec.Roles[0], md.Name)
 	modelDeploymentFrontLeadersOnly(svc, &md.Spec.Roles[0])
-	modelDeploymentSelectEligibleEndpoints(svc)
+	if modelDeploymentEligibilitySelectorActive(md, &md.Spec.Roles[0], nil, modelDeploymentEligibilityDecided(md)) {
+		modelDeploymentSelectEligibleEndpoints(svc)
+	}
 
 	return svc
 }
@@ -125,6 +128,31 @@ func modelDeploymentFrontLeadersOnly(svc *core.Service, role *workercore.ModelDe
 	svc.Spec.Selector[modelDeploymentMemberIndexLabel] = strconvx.Itoa(modelDeploymentLeaderMemberIndex)
 }
 
+// modelDeploymentGroupForwardActivatable reports whether this role's group-forward capability
+// can ever reach Verified or NotApplicable — the two states that activate eligibility. A shape
+// the operator has not verified (an unlisted engine version, or a prefill/decode role) answers
+// Unsupported by construction and can never activate, so an eligibility selector on its Services
+// would select zero endpoints forever: those Services render WITHOUT the term, preserving the
+// routing a deployment had before first enable.
+func modelDeploymentGroupForwardActivatable(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	engine, known := modelDeploymentGroupForwardEngines[md.Spec.Engine.Name]
+	if !known {
+		return false
+	}
+	if !slices.Contains(engine.VerifiedVersions, md.Spec.Engine.Version) {
+		return false
+	}
+	if len(role.Command) > 0 {
+		return false
+	}
+	kind := ModelDeploymentEffectiveRoleKind(role)
+
+	return kind != workercore.ModelDeploymentRoleKindPrefill &&
+		kind != workercore.ModelDeploymentRoleKindDecode
+}
+
 // modelDeploymentSelectEligibleEndpoints narrows an ordinary Service to the endpoints the
 // reconciler has marked eligible, by the same equality every selector that names endpoints
 // carries. The term rides ON TOP of the identity selector and the leader narrowing -- it gates
@@ -138,6 +166,56 @@ func modelDeploymentFrontLeadersOnly(svc *core.Service, role *workercore.ModelDe
 // A REPLICA'S HEADLESS SERVICE NEVER TAKES THE TERM. That Service exists to publish every member
 // to its peers with unready addresses included; eligibility is about who may ANSWER, and the
 // peers' collective needs every member's record regardless of who answers.
+
+// modelDeploymentEligibilityDecided reports whether a pass has actually answered the whole-group
+// predicate: the EndpointEligibility condition is True (qualified -- narrow and let the labels
+// admit) or False (revoked -- narrow and let the labels withdraw). A decided condition is the
+// operator's own act, so acting on it -- including against legacy routing that predates the gate
+// -- is not a regression the reviewer traced. An Unknown or absent condition has decided nothing,
+// and a from-scratch render on it never narrows.
+func modelDeploymentEligibilityDecided(md *workercore.ModelDeployment) bool {
+	for i := range md.Status.Conditions {
+		condition := &md.Status.Conditions[i]
+		if condition.Type == string(ModelDeploymentConditionEndpointEligibility) {
+			return condition.Status == meta.ConditionTrue || condition.Status == meta.ConditionFalse
+		}
+	}
+
+	return false
+}
+
+// modelDeploymentEligibilitySelectorActive is the ONE decision for whether a surface names
+// endpoint-eligible endpoints. Three halves, all required:
+//
+// STATIC: the shape must be able to activate at all -- a verified engine version whose roles are
+// ordinary server roles with the operator's own command. An unverified version, a prefill/decode
+// role, or a role with a replaced command can never be qualified, so its surfaces never narrow.
+//
+// ACTIVATION: a pass must have recorded a decided predicate -- True (qualified) or False
+// (revoked). Narrowing on first enable before any pass has answered would select zero endpoints
+// and strand whatever routing the deployment already had; a decided False narrows precisely so a
+// definite fault withdraws all affected members instead of leaving them serving behind a legacy
+// selector that never reads the labels.
+//
+// RETENTION: once a surface carries the term, the live selector keeps it while the shape stays
+// activatable. A later Unknown holds and a definite fault revokes through the per-pod label; the
+// selector itself does not churn back, or a quiet probe would hand old routing a zero-endpoint
+// Service. liveSelector is nil when rendering from scratch.
+func modelDeploymentEligibilitySelectorActive(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	liveSelector map[string]string, passDecided bool,
+) bool {
+	if !modelDeploymentGroupForwardActivatable(md, role) {
+		return false
+	}
+	if passDecided || modelDeploymentEligibilityDecided(md) {
+		return true
+	}
+
+	return liveSelector != nil &&
+		liveSelector[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue
+}
+
 func modelDeploymentSelectEligibleEndpoints(svc *core.Service) {
 	svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
 }
@@ -169,7 +247,9 @@ func renderModelDeploymentRoleService(
 ) *core.Service {
 	svc := renderModelDeploymentServiceFor(md, role, md.Name+"-"+role.Name)
 	modelDeploymentFrontLeadersOnly(svc, role)
-	modelDeploymentSelectEligibleEndpoints(svc)
+	if modelDeploymentEligibilitySelectorActive(md, role, nil, modelDeploymentEligibilityDecided(md)) {
+		modelDeploymentSelectEligibleEndpoints(svc)
+	}
 	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
 		for _, port := range inject.KVEventsPorts() {
 			svc.Spec.Ports = append(svc.Spec.Ports, core.ServicePort{
