@@ -106,10 +106,9 @@ func TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide(t *testing.T) 
 	// request served by another team.s model, not an error. The eligibility term rides beside
 	// them: an ordinary Service answers only for members the reconciler has marked eligible.
 	assert.Equal(t, map[string]string{
-		modelDeploymentLabelKeyName:             modelDeploymentLabelValueName,
-		modelDeploymentLabelKeyInstance:         "qwen",
-		modelDeploymentLabelKeyComponent:        "decode",
-		modelDeploymentLabelKeyEndpointEligible: modelDeploymentEndpointEligibleValue,
+		modelDeploymentLabelKeyName:      modelDeploymentLabelValueName,
+		modelDeploymentLabelKeyInstance:  "qwen",
+		modelDeploymentLabelKeyComponent: "decode",
 	}, byName["qwen-decode"].Spec.Selector)
 
 	// The deployment-wide one still fronts the FIRST role, unchanged. It is not a router and must
@@ -321,6 +320,16 @@ func TestRenderModelDeploymentServices_SelectEligibleEndpoints(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			// The ordinary Services narrow only once a real pass has qualified the group: the
+			// activatable fixtures are qualified here through the real probe and recorded through
+			// the real status observation. A p/d pair can never qualify, so it renders term-less.
+			if modelDeploymentGroupForwardActivatable(tc.md, &tc.md.Spec.Roles[0]) {
+				pods := []core.Pod{healthPod(tc.md.Spec.Roles[0].Name, 0, 0, healthBool(true), "uid-a")}
+				qs := qualifyModelDeploymentInstances(context.Background(), tc.md, pods,
+					modelDeploymentPendingReplacement{}, boundProbeFetch)
+				require.NotEmpty(t, qs)
+				observeModelDeploymentEndpointEligibility(tc.md, qs)
+			}
 			svcs := renderModelDeploymentServices(tc.md, nil)
 			require.NotEmpty(t, svcs)
 
@@ -912,4 +921,151 @@ func TestModelDeploymentReconciler_RefusesAServiceItDoesNotOwn(t *testing.T) {
 
 	kept := getModelDeploymentService(t, cli)
 	assert.Equal(t, map[string]string{"app": "something-else"}, kept.Spec.Selector)
+}
+
+// TestEndpointEligibleSelectorActivation pins the first-enable repair at the three rendered
+// surfaces. A shape that can never qualify -- an unverified engine version, a prefill role, a
+// replaced command -- renders no eligibility term whatever any pass says. A shape that can
+// qualify does not narrow until a real pass records the predicate satisfied; the condition here
+// is computed by the real qualifier and the real status observation, never set by hand. Once a
+// selector carries the term, a quiet pass retains it, and a definite fault still withdraws.
+func TestEndpointEligibleSelectorActivation(t *testing.T) {
+	unverified := healthDeployment(2)
+	unverified.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	unverified.Spec.Engine.Version = "0.0.0-not-verified"
+
+	prefill := healthDeployment(2)
+	prefill.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	for i := range prefill.Spec.Roles {
+		prefill.Spec.Roles[i].Kind = workercore.ModelDeploymentRoleKindPrefill
+	}
+
+	takeOver := healthDeployment(2)
+	takeOver.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	takeOver.Spec.Roles[0].Command = []string{"custom-server"}
+
+	healthy := healthDeployment(2)
+	healthy.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	healthyPods := []core.Pod{
+		healthPod("server", 0, 0, healthBool(true), "uid-a"),
+		healthPod("server", 0, 1, healthBool(true), "uid-b"),
+	}
+
+	for name, md := range map[string]*workercore.ModelDeployment{
+		"unverified engine version": unverified,
+		"prefill role":              prefill,
+		"replaced command":          takeOver,
+	} {
+		t.Run(name+" renders no narrowing", func(t *testing.T) {
+			front := renderModelDeploymentService(md)
+			_, has := front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
+			assert.False(t, has, "front Service must not narrow a never-activating shape")
+			roleSvc := renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil)
+			_, has = roleSvc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
+			assert.False(t, has, "role Service must not narrow a never-activating shape")
+			published, err := renderModelDeploymentRouterObjects(context.Background(), md,
+				map[string]string{md.Spec.Roles[0].Name: "manufacturer"}, false)
+			require.NoError(t, err)
+			_, has = published.Contract.Roles[0].Selector[modelDeploymentLabelKeyEndpointEligible]
+			assert.False(t, has, "router discovery must not narrow a never-activating shape")
+			assert.NotContains(t, published.ConfigMap.Data[modelDeploymentRouterConfigKey],
+				modelDeploymentLabelKeyEndpointEligible+"="+modelDeploymentEndpointEligibleValue,
+				"router discovery config must not narrow a never-activating shape")
+		})
+	}
+
+	t.Run("quiet first enable keeps routing, activation narrows, quiet passes retain", func(t *testing.T) {
+		quiet := func(context.Context, string, []byte) ([]byte, error) {
+			return nil, context.DeadlineExceeded
+		}
+
+		first := qualifyModelDeploymentInstances(context.Background(), healthy, healthyPods,
+			modelDeploymentPendingReplacement{}, quiet)
+		require.Len(t, first, 1)
+		require.False(t, first[0].Activated(), "setup requires an unavailable first observation")
+		observeModelDeploymentEndpointEligibility(healthy, first)
+		assert.False(t, modelDeploymentEligibilityDecided(healthy), "no activation fact exists yet")
+		front := renderModelDeploymentService(healthy)
+		_, has := front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
+		assert.False(t, has, "first enable with an unavailable observation must not narrow")
+
+		working := qualifyModelDeploymentInstances(context.Background(), healthy, healthyPods,
+			modelDeploymentPendingReplacement{}, boundProbeFetch)
+		require.Len(t, working, 1)
+		require.True(t, working[0].Activated(), "setup requires an available observation")
+		observeModelDeploymentEndpointEligibility(healthy, working)
+		assert.True(t, modelDeploymentEligibilityDecided(healthy), "a real pass recorded the predicate")
+		front = renderModelDeploymentService(healthy)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible], "activation narrows")
+
+		again := qualifyModelDeploymentInstances(context.Background(), healthy, healthyPods,
+			modelDeploymentPendingReplacement{}, quiet)
+		observeModelDeploymentEndpointEligibility(healthy, again)
+		assert.False(t, modelDeploymentEligibilityDecided(healthy), "a quiet pass only holds")
+		retained := modelDeploymentEligibilitySelectorActive(healthy, &healthy.Spec.Roles[0],
+			map[string]string{modelDeploymentLabelKeyEndpointEligible: modelDeploymentEndpointEligibleValue}, false)
+		assert.True(t, retained, "an already-narrowed selector survives a quiet pass")
+		fresh := renderModelDeploymentService(healthy)
+		_, has = fresh.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
+		assert.False(t, has, "a from-scratch render never fabricates the term")
+	})
+
+	t.Run("a definite fault still withdraws the replica", func(t *testing.T) {
+		broken := []core.Pod{
+			healthPod("server", 0, 0, healthBool(true), "uid-a"),
+			healthPod("server", 0, 1, healthBool(false), "uid-b"),
+		}
+		qs := qualifyModelDeploymentInstances(context.Background(), healthy, broken,
+			modelDeploymentPendingReplacement{}, boundProbeFetch)
+		require.Len(t, qs, 1)
+		assert.True(t, qs[0].HasFailure(), "the readiness fault is definite")
+		assert.False(t, qs[0].Eligible(), "a definite fault withdraws regardless of the probe")
+	})
+}
+
+func TestAdmissionFirstEnableUnknownPreservesExistingRouting(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		custom bool
+	}{
+		{name: "supported engine without an available native observation"},
+		{name: "custom command without its required serving annotation", custom: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := healthDeployment(2)
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			pods := []core.Pod{
+				healthPod("server", 0, 0, healthBool(true), "uid-a"),
+				healthPod("server", 0, 1, healthBool(true), "uid-b"),
+			}
+			if tc.custom {
+				md.Spec.Roles[0].Command = []string{"custom-server"}
+				for i := range pods {
+					delete(pods[i].Annotations, "prometheus.io/port")
+				}
+			}
+			qs := qualifyModelDeploymentInstances(context.Background(), md, pods,
+				modelDeploymentPendingReplacement{},
+				func(context.Context, string, []byte) ([]byte, error) { return nil, context.DeadlineExceeded })
+			require.Len(t, qs, 1)
+			require.False(t, qs[0].Activated(), "setup requires unavailable first-enable observation")
+			require.False(t, qs[0].HasFailure(), "setup requires healthy existing members")
+			for i := range pods {
+				require.False(t, modelDeploymentPodEligible(md, &md.Spec.Roles[0], &pods[i], qs[0], true),
+					"first enable must not fabricate eligibility")
+			}
+			for _, svc := range []*core.Service{
+				renderModelDeploymentService(md), renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil),
+			} {
+				_, narrowed := svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
+				assert.False(t, narrowed, "unavailable first-enable observation must preserve Service selection")
+			}
+			router, err := renderModelDeploymentRouterObjects(context.Background(), md, map[string]string{"server": "manufacturer"}, false)
+			require.NoError(t, err)
+			require.NotEmpty(t, router.Contract.Roles)
+			_, narrowed := router.Contract.Roles[0].Selector[modelDeploymentLabelKeyEndpointEligible]
+			assert.False(t, narrowed, "unavailable first-enable observation must preserve router discovery")
+		})
+	}
 }

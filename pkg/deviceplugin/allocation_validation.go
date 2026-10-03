@@ -104,6 +104,13 @@ func validateDeviceInventory(devs *workercore.Devices) error {
 // pod and the container it came from, because the whole point of holding is that an operator has to
 // be able to find the thing that is wrong.
 func validatePodAllocationRecord(pod *core.Pod, devs *workercore.Devices) error {
+	// A record whose whole value is the JSON literal null is not a missing record: json.Unmarshal
+	// decodes it into a nil map without error, and reading that as "no record at all" would
+	// launder a present-but-empty claim past the explicit-null hold below. This operator never
+	// writes a bare null, so one on a pod is an invalid record.
+	if pod.Annotations[AllocatedAcceleratorAnnoKey] == "null" {
+		return fmt.Errorf("pod %s: allocation record is null", ctrlcli.ObjectKeyFromObject(pod))
+	}
 	allocations, err := AllocatedAcceleratorsOf(pod)
 	if err != nil {
 		return fmt.Errorf("pod %s: read its allocation record: %w", ctrlcli.ObjectKeyFromObject(pod), err)
@@ -171,6 +178,10 @@ func nullContainersIn(pod *core.Pod) string {
 
 // podDeclaresContainer reports whether the pod really has the container a record names. A record
 // for a container that does not exist cannot be reconciled against anything.
+//
+// Ephemeral containers are not consulted, on purpose: Kubernetes forbids resources (requests or
+// limits) on them, so a debug container cannot ask for accelerators and the device plugin is
+// never asked to Allocate for one. A record naming only an ephemeral container stays an error.
 func podDeclaresContainer(pod *core.Pod, container string) bool {
 	for i := range pod.Spec.Containers {
 		if pod.Spec.Containers[i].Name == container {

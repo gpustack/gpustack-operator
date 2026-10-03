@@ -257,7 +257,9 @@ func initDesiredStatus(devs *workercore.Devices) workercore.DevicesStatus {
 // and the cost of that is that an unreadable pod drops out and its cards read free. A caller asking
 // whether capacity was RELEASED cannot be answered by a ledger that may be missing a holder, so it
 // gets the same arithmetic and the error. The arithmetic is not reimplemented here, and
-// BuildDesiredStatus is this function with the errors discarded, so the two cannot drift.
+// BuildDesiredStatus is this function with the errors discarded. The lockstep is documentary
+// plus a differential test over both bodies; treat any edit to one merge without the other as
+// a defect the test is expected to catch.
 func mergePodAllocationsStrict(
 	devs *workercore.Devices, podList *core.PodList,
 ) (workercore.DevicesStatus, []string, error) {

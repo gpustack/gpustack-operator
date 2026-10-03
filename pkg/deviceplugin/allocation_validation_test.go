@@ -371,3 +371,19 @@ func TestBuildDesiredStatusStrict_PreservesTheOrdinaryRebuild(t *testing.T) {
 	assert.Equal(t, want, got, "the strict rebuild agrees with the ordinary one on valid input")
 	assert.Equal(t, wantLive, gotLive)
 }
+
+// TestATopLevelNullAllocationRecordIsRejected pins that a whole-record JSON null is an invalid
+// record rather than "no record at all": json.Unmarshal decodes null into a nil map without
+// error, which would otherwise bypass the explicit-null hold.
+func TestATopLevelNullAllocationRecordIsRejected(t *testing.T) {
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:        "holder",
+			Namespace:   "default",
+			Annotations: map[string]string{AllocatedAcceleratorAnnoKey: "null"},
+		},
+	}
+	err := validatePodAllocationRecord(pod, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "allocation record is null")
+}

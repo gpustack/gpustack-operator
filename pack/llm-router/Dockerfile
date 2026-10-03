@@ -229,8 +229,9 @@ RUN <<EOF
     cd /src
     git apply /tmp/patches/*.patch
 
-    # Fail the build if the patch did not actually land in the file this stage compiles.
-    grep -q "fn pod_uid" sgl-model-gateway/src/service_discovery.rs
+    # Fail the build if the observer patch did not actually land: observer.rs is a file
+    # patch 0002 itself creates, so an unpatched tree has neither the file nor the type.
+    grep -q "struct ObserverRouter" sgl-model-gateway/src/observer.rs
 
     rm -rf /tmp/patches
 EOF

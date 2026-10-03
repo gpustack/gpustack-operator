@@ -914,3 +914,42 @@ func TestObserverTransportCancelsStalledHeadersAndBody(t *testing.T) {
 		})
 	}
 }
+
+// TestRouterViewCollectedAtIsStampedAfterItsOwnRead pins the per-view stamp (I10) without any
+// timing guess: the reconciler's injected clock advances once per read, so a slow first read is
+// visible as a strictly earlier stamp on the first view than on the second. A stamp taken once
+// before the loop would make the two views equal here, and a slow first fetch would pre-age the
+// last view toward the freshness edge in production.
+func TestRouterViewCollectedAtIsStampedAfterItsOwnRead(t *testing.T) {
+	md, router := retirementRouterFixture(newRenderDeployment())
+	routerTwo := retirementRouterPod("router-one", "10.0.9.2")
+	routerTwo.UID = "router-uid-two"
+	base := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(md, router, routerTwo).Build()
+
+	tick := 0
+	baseNow := time.Now()
+	r := &ModelDeploymentReconciler{
+		Client: base, APIReader: base,
+		clock: func() time.Time {
+			tick++
+			return baseNow.Add(time.Duration(tick) * time.Minute)
+		},
+		servingViewFetch: func(_ context.Context, _ string) ([]byte, error) {
+			return []byte(`{"router":{"boot_generation":1,"now_ms":2},"registry_revision":1,"workers":[]}`), nil
+		},
+	}
+
+	observations, failure := r.collectModelDeploymentRouterObservations(
+		context.Background(), md,
+		[]*corev1.Pod{retirementRouterPod("router-zero", "10.0.9.1"), func() *corev1.Pod {
+			pod := retirementRouterPod("router-one", "10.0.9.2")
+			pod.UID = "router-uid-two"
+			return pod
+		}()},
+	)
+	require.Empty(t, failure)
+	require.Len(t, observations, 2)
+	assert.True(t, observations[0].CollectedAt.Before(observations[1].CollectedAt),
+		"each view is stamped after its own read, not from one pre-loop timestamp: %v vs %v",
+		observations[0].CollectedAt, observations[1].CollectedAt)
+}

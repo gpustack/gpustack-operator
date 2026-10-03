@@ -1427,9 +1427,10 @@ func (r *ModelDeploymentReconciler) consumeModelDeploymentRetry(
 
 // clearModelDeploymentRetirementRetry removes the directive annotation.
 //
-// It is a merge patch on the object as it was read rather than a blind write, so a directive
-// somebody else has just replaced is not deleted out from under them. A missing annotation is
-// success, because the only outcome this function exists to produce is its absence.
+// It is a merge patch carrying the resourceVersion of the object as it was read, so a directive
+// somebody else has just replaced is not deleted out from under them: the patch conflicts, the
+// pass retries, and the replacement survives. A missing annotation is success, because the only
+// outcome this function exists to produce is its absence.
 func (r *ModelDeploymentReconciler) clearModelDeploymentRetirementRetry(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) error {
@@ -1439,7 +1440,8 @@ func (r *ModelDeploymentReconciler) clearModelDeploymentRetirementRetry(
 
 	patched := md.DeepCopy()
 	delete(patched.Annotations, modelDeploymentRetirementRetryAnnotation)
-	if err := r.Client.Patch(ctx, patched, ctrlcli.MergeFrom(md)); err != nil {
+	if err := r.Client.Patch(ctx, patched, ctrlcli.MergeFromWithOptions(
+		md, ctrlcli.MergeFromWithOptimisticLock{})); err != nil {
 		return fmt.Errorf("clear the retirement retry directive: %w", err)
 	}
 	md.Annotations = patched.Annotations

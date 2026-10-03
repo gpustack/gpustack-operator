@@ -386,7 +386,7 @@ func (c *modelDeploymentDrainCollector) resolveMember(
 		ctrlcli.MatchingFields{modelDeploymentDrainIndexPodUID: string(target.PodUID)},
 	); err != nil {
 		hold := modelDeploymentDrainHold(modelDeploymentDrainUnknown,
-			fmt.Sprintf("member %s could not be %s: %v", phase, "looked up", err))
+			fmt.Sprintf("the member could not be %s: the lookup failed: %v", phase, err))
 
 		return nil, &hold
 	}
@@ -418,7 +418,7 @@ func (c *modelDeploymentDrainCollector) resolveMember(
 	pod := new(corev1.Pod)
 	if err := c.fresh.Get(ctx, key, pod); err != nil {
 		hold := modelDeploymentDrainHold(modelDeploymentDrainUnknown,
-			fmt.Sprintf("member %s could not be %s: %v", phase, "read live", err))
+			fmt.Sprintf("the member could not be %s: the live read failed: %v", phase, err))
 
 		return nil, &hold
 	}

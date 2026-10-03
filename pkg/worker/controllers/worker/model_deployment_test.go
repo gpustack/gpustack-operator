@@ -172,6 +172,18 @@ func reconcileModelDeployment(t *testing.T, cli ctrlcli.Client) (ctrl.Result, er
 	})
 }
 
+// reconcileModelDeploymentActivated runs a pass whose group-forward probe answers bound: the
+// qualification activates for real, through the same collector the reconciler uses, so the
+// eligibility condition and the selector narrowing below it are observed facts of this pass.
+func reconcileModelDeploymentActivated(t *testing.T, cli ctrlcli.Client) (ctrl.Result, error) {
+	t.Helper()
+
+	return reconcileModelDeploymentWith(t, &ModelDeploymentReconciler{
+		Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
+		groupForwardFetch: boundProbeFetch,
+	})
+}
+
 func reconcileModelDeploymentWith(t *testing.T, r *ModelDeploymentReconciler) (ctrl.Result, error) {
 	t.Helper()
 
@@ -1997,7 +2009,7 @@ func TestModelDeploymentReconciler_BackfillsEligibilityBeforeTheSelectorsNarrow(
 
 	writes := new(modelDeploymentWrites)
 	cli = endpointEligibilityCountingClient(t, writes, cli)
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentActivated(t, cli)
 	require.NoError(t, err)
 
 	for _, pod := range endpointEligibilityPods(t, cli) {
@@ -2070,7 +2082,7 @@ func TestModelDeploymentReconciler_TheKeyRestoresThroughDerivationWithoutFlappin
 	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentActivated(t, cli)
 	require.NoError(t, err)
 
 	selector := endpointEligibilityOrdinarySelector(t, cli)
@@ -2348,7 +2360,7 @@ func TestModelDeploymentReconciler_AHeldReplicaLeavesAnExistingLabelUntouched(t 
 
 	writes := new(modelDeploymentWrites)
 	cli = endpointEligibilityCountingClient(t, writes, cli)
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentActivated(t, cli)
 	require.NoError(t, err)
 
 	assert.Zero(t, writes.patches,

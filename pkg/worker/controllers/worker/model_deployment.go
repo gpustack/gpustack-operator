@@ -1129,11 +1129,13 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	)
 	qualificationByMember := modelDeploymentQualificationsByMember(qualifications)
 
-	if err = r.convergeModelDeploymentEndpointEligibility(ctx, md, qualificationByMember); err != nil {
+	eligibilityDecided := modelDeploymentQualificationsDecided(qualifications)
+
+	if err = r.convergeModelDeploymentEndpointEligibility(ctx, md, actual, qualificationByMember); err != nil {
 		logger.Error(err, "converge endpoint eligibility")
 		return ctrl.Result{}, err
 	}
-	if err = r.syncModelDeploymentService(ctx, md); err != nil {
+	if err = r.syncModelDeploymentService(ctx, md, eligibilityDecided); err != nil {
 		logger.Error(err, "sync service")
 		return ctrl.Result{}, err
 	}
@@ -1141,7 +1143,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// the cause is projected onto the status written below, and returning here would skip the one
 	// write that says what is wrong. The error is still returned after that write, so the pass is
 	// retried exactly as if it had failed here.
-	routerErr := r.syncModelDeploymentRouter(ctx, md)
+	routerErr := r.syncModelDeploymentRouter(ctx, md, eligibilityDecided)
 	if routerErr != nil {
 		logger.Error(routerErr, "sync router")
 	}
@@ -1254,14 +1256,9 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
 // next pass re-derives from what then exists. Nothing is written blind: the diff is computed
 // against the object as it was read.
 func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
-	ctx context.Context, md *workercore.ModelDeployment,
+	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
 	qualificationByMember map[types.UID]modelDeploymentInstanceQualification,
 ) error {
-	pods, err := r.listModelDeploymentPods(ctx, md)
-	if err != nil {
-		return err
-	}
-
 	roles := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		roles[md.Spec.Roles[i].Name] = &md.Spec.Roles[i]
@@ -1376,6 +1373,10 @@ func modelDeploymentRoleExternalDP(
 		md.Spec.Engine.Name, role.ExtraArgs, role.Env,
 	)
 	if err != nil {
+		// A scan error answers leader-only. Admission parses the same stream, so the two
+		// readers are expected to agree; if they ever diverge this default would narrow an
+		// External-DP role to its leader without any signal. Surfacing the error instead is
+		// an accepted error-path semantics change, deliberately kept for a reviewed change.
 		return false
 	}
 	shape, _ := modelDeploymentLoadBalance(reading.declared.Wiring)
@@ -1393,9 +1394,39 @@ func modelDeploymentRoleExternalDP(
 // a Service is NOT rebuilt when the group is: the group's shape decides which Pods exist, and the
 // address they answer on must survive that.
 func (r *ModelDeploymentReconciler) syncModelDeploymentService(
-	ctx context.Context, md *workercore.ModelDeployment,
+	ctx context.Context, md *workercore.ModelDeployment, eligibilityDecided bool,
 ) error {
 	rendered := renderModelDeploymentServices(md, r.modelDeploymentRoleManufacturers(ctx, md))
+	// RETENTION: an eligibility term a previous pass narrowed onto a live Service is cluster
+	// state this pass must not un-write just because the newest observation went quiet. Enrich
+	// the rendered expectation from the live object; the static activatability half still
+	// governs, so a shape that stopped being activatable loses the term on this pass.
+	liveServices := new(core.ServiceList)
+	if err := r.Client.List(ctx, liveServices,
+		ctrlcli.InNamespace(md.Namespace),
+		ctrlcli.MatchingLabels{
+			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+			modelDeploymentLabelKeyInstance: md.Name,
+		}); err != nil {
+		return err
+	}
+	liveByName := make(map[string]*core.Service, len(liveServices.Items))
+	for i := range liveServices.Items {
+		liveByName[liveServices.Items[i].Name] = &liveServices.Items[i]
+	}
+	for i := range rendered {
+		live := liveByName[rendered[i].GetName()]
+		if live == nil {
+			continue
+		}
+		role := modelDeploymentServiceRoleOf(md, rendered[i].GetName())
+		if role == nil {
+			continue
+		}
+		if modelDeploymentEligibilitySelectorActive(md, role, live.Spec.Selector, eligibilityDecided) {
+			modelDeploymentSelectEligibleEndpoints(rendered[i])
+		}
+	}
 	expected := make([]ctrlcli.Object, len(rendered))
 	for i := range rendered {
 		expected[i] = rendered[i]
@@ -1417,6 +1448,24 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentService(
 		ModelDeploymentResourceNoteRole,
 		"service",
 	)
+}
+
+// modelDeploymentServiceRoleOf resolves which role a rendered Service was rendered for: the
+// front Service names the deployment itself and fronts the first role; a role Service is named
+// deployment-role.
+func modelDeploymentServiceRoleOf(
+	md *workercore.ModelDeployment, serviceName string,
+) *workercore.ModelDeploymentRole {
+	if serviceName == md.Name {
+		return &md.Spec.Roles[0]
+	}
+	for i := range md.Spec.Roles {
+		if serviceName == md.Name+"-"+md.Spec.Roles[i].Name {
+			return &md.Spec.Roles[i]
+		}
+	}
+
+	return nil
 }
 
 // syncModelDeploymentOwnedChildren creates, aligns and prunes one kind of rendered child.

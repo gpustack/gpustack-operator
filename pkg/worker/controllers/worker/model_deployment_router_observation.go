@@ -619,7 +619,6 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 		fetch = defaultServingViewFetch
 	}
 
-	now := time.Now()
 	observations := make([]RouterServingObservation, 0, len(routerPods.Items))
 	for i := range routerPods.Items {
 		routerPod := &routerPods.Items[i]
@@ -637,7 +636,11 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 
 			continue
 		}
-		observation.CollectedAt = now
+		// Stamped per view, after that view's own read: one timestamp taken before the loop
+		// would age every later view by however long the earlier reads ran, and a slow first
+		// fetch could push the last view's recorded age to the freshness edge before the
+		// aggregate ever judged it. The freshness gate in the aggregate is unchanged.
+		observation.CollectedAt = r.modelDeploymentNow()
 		observation.Bound, err = bindRouterObservationView(observation.View, live)
 		if err != nil {
 			observation.Err = err
