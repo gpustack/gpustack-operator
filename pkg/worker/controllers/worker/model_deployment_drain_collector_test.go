@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os/exec"
 	"strings"
 	"testing"
@@ -18,6 +19,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -1495,4 +1498,34 @@ func TestAContainerThatStopsDuringTheReadIsNotThisMember(t *testing.T) {
 	assert.Equal(t, modelDeploymentDrainUnknown, answer.State, answer.Reason)
 	assert.Contains(t, answer.Reason, "rather than running",
 		"a container that stopped mid-read answered a different question")
+}
+
+// Check the production request on the wire so an omitted stdout channel fails.
+func TestModelDeploymentDrainExecIntoAsksForStdoutOnTheWire(t *testing.T) {
+	var seen *url.URL
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.URL
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	core, err := corev1client.NewForConfig(&rest.Config{Host: server.URL})
+	require.NoError(t, err, "the production exec transport could not be built")
+
+	collector := newModelDeploymentDrainCollector(nil, nil, &rest.Config{Host: server.URL}, core)
+
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "models", Name: "member-a"}}
+	_, execErr := collector.execInto(t.Context(), pod, "engine", []string{"python3", "-c", "pass"})
+	require.Error(t, execErr, "the server refused the upgrade, so the transport did dial it")
+	require.NotNil(t, seen, "no exec request reached the apiserver")
+
+	query := seen.Query()
+	assert.Equal(t, "true", query.Get("stdout"),
+		"the exec request must declare the stream its answer is written to")
+	assert.NotEqual(t, "true", query.Get("stderr"),
+		"standard error stays unstreamed so a talking engine cannot grow the response")
+	assert.NotEqual(t, "true", query.Get("tty"), "the read is not a terminal session")
+	assert.Empty(t, query.Get("stdin"), "the read never opens standard input")
+	assert.Equal(t, "engine", query.Get("container"))
 }

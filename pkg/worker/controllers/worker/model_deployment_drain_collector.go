@@ -568,8 +568,10 @@ func (c *modelDeploymentDrainCollector) execInto(
 		VersionedParams(&corev1.PodExecOptions{
 			Container: container,
 			Command:   argv,
-			Stderr:    false,
-			TTY:       false,
+			// Declare stdout so the exec stream can deliver the bounded response below.
+			Stdout: true,
+			Stderr: false,
+			TTY:    false,
 		}, scheme.ParameterCodec)
 
 	executor, err := remotecommand.NewSPDYExecutor(c.restConfig, "POST", request.URL())
