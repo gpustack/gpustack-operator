@@ -8,12 +8,19 @@ import (
 	"strconv"
 
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+)
+
+const (
+	modelDeploymentElasticSharedMemoryPath   = "/dev/shm"
+	modelDeploymentElasticSharedMemoryVolume = "elastic-shm"
+	modelDeploymentElasticSharedMemorySize   = "512Mi"
 )
 
 func modelDeploymentElasticHeadName(md *workercore.ModelDeployment) string {
@@ -102,6 +109,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 			c.LivenessProbe = nil
 			c.Lifecycle = nil
 		}
+		modelDeploymentElasticSharedMemory(pod)
 		pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentPodSpecHash(pod)
 	}
 	head := gpu.DeepCopy()
@@ -130,6 +138,32 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 	headPod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentPodSpecHash(headPod)
 	desired[head.Name] = heads[head.Name]
 	return desired, nil
+}
+
+// modelDeploymentElasticSharedMemory gives each GPU member an isolated shared-memory volume.
+// Preserve an explicit mount, whose backing and capacity remain the user's responsibility.
+func modelDeploymentElasticSharedMemory(pod *core.Pod) {
+	if len(pod.Spec.Containers) == 0 {
+		return
+	}
+	container := &pod.Spec.Containers[0]
+	for _, m := range container.VolumeMounts {
+		if m.MountPath == modelDeploymentElasticSharedMemoryPath {
+			return
+		}
+	}
+	size := resource.MustParse(modelDeploymentElasticSharedMemorySize)
+	pod.Spec.Volumes = append(pod.Spec.Volumes, core.Volume{
+		Name: modelDeploymentElasticSharedMemoryVolume,
+		VolumeSource: core.VolumeSource{EmptyDir: &core.EmptyDirVolumeSource{
+			Medium:    core.StorageMediumMemory,
+			SizeLimit: &size,
+		}},
+	})
+	container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
+		Name:      modelDeploymentElasticSharedMemoryVolume,
+		MountPath: modelDeploymentElasticSharedMemoryPath,
+	})
 }
 
 func renderModelDeploymentElasticHeadService(md *workercore.ModelDeployment) *core.Service {

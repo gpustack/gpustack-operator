@@ -92,6 +92,97 @@ func TestElasticConvergenceCreatesChildren(t *testing.T) {
 	}
 }
 
+func TestElasticGPUMembersCarryIsolatedSharedMemory(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		additional   []workercore.ModelDeploymentAdditionalVolume
+		ordinary     bool
+		wantEmptyDir string
+	}{
+		{name: "default isolated emptyDir", wantEmptyDir: "512Mi"},
+		{name: "ordinary render is unchanged", ordinary: true},
+		{
+			name: "explicit mount is preserved",
+			additional: []workercore.ModelDeploymentAdditionalVolume{{
+				MountPath: "/dev/shm",
+				ConfigMap: &core.LocalObjectReference{Name: "user-shm"},
+			}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			md.Spec.KVCache = nil
+			md.Spec.Roles[0].Replicas = 1
+			if !tc.ordinary {
+				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2, HeadInstanceType: "cpu"}
+			}
+			md.Spec.Roles[0].AdditionalVolumes = tc.additional
+			cpu := newRenderInstanceType(func(it *worker.InstanceType) { it.Name = "cpu"; it.Spec.Acceleratable = false })
+			cli := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
+			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+			_, err := r.convergeModelDeployment(context.Background(), md)
+			require.NoError(t, err)
+			pods := new(core.PodList)
+			require.NoError(t, cli.List(context.Background(), pods, ctrlcli.InNamespace(md.Namespace)))
+
+			require.NotEmpty(t, pods.Items)
+			members := 0
+			for i := range pods.Items {
+				pod := &pods.Items[i]
+				container := pod.Spec.Containers[0]
+				var shmNames []string
+				seen := map[string]bool{}
+				for _, m := range container.VolumeMounts {
+					require.False(t, seen[m.MountPath], "%s mounts %s twice", pod.Name, m.MountPath)
+					seen[m.MountPath] = true
+					if m.MountPath == "/dev/shm" {
+						shmNames = append(shmNames, m.Name)
+					}
+				}
+				if tc.ordinary {
+					require.Empty(t, shmNames, "%s is an ordinary render, not an elastic member", pod.Name)
+					continue
+				}
+				if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(md) {
+					// Explicit role mounts also reach the CPU head. Only the default must stay absent.
+					if tc.additional == nil {
+						require.Empty(t, shmNames, "the CPU head gains no shared memory of its own")
+					}
+					continue
+				}
+				members++
+				require.Len(t, shmNames, 1, "%s must mount /dev/shm exactly once", pod.Name)
+				var backing *core.Volume
+				for j := range pod.Spec.Volumes {
+					require.Nil(t, pod.Spec.Volumes[j].HostPath, "%s reaches the host filesystem", pod.Name)
+					if pod.Spec.Volumes[j].Name == shmNames[0] {
+						backing = &pod.Spec.Volumes[j]
+					}
+				}
+				require.NotNil(t, backing, "%s backs /dev/shm with a declared volume", pod.Name)
+				volumes := map[string]bool{}
+				for _, v := range pod.Spec.Volumes {
+					require.False(t, volumes[v.Name], "%s declares volume %s twice", pod.Name, v.Name)
+					volumes[v.Name] = true
+				}
+				if tc.wantEmptyDir == "" {
+					require.NotNil(t, backing.ConfigMap, "%s keeps the mount its role declared", pod.Name)
+					continue
+				}
+				require.Nil(t, backing.ConfigMap)
+				require.NotNil(t, backing.EmptyDir, "%s backs /dev/shm with an emptyDir", pod.Name)
+				require.Equal(t, core.StorageMediumMemory, backing.EmptyDir.Medium, "%s backs shared memory in RAM", pod.Name)
+				require.NotNil(t, backing.EmptyDir.SizeLimit)
+				require.Zero(t, backing.EmptyDir.SizeLimit.Cmp(resource.MustParse(tc.wantEmptyDir)),
+					"%s declares %s, not %s", pod.Name, backing.EmptyDir.SizeLimit, tc.wantEmptyDir)
+			}
+			if !tc.ordinary {
+				require.Equal(t, 2, members, "the master and its worker each carry their own shared memory")
+			}
+		})
+	}
+}
+
 func TestElasticUnknownBootstrapRetainsMembers(t *testing.T) {
 	for _, raw := range []string{"", "bad", "1", "65"} {
 		t.Run("boot="+raw, func(t *testing.T) {

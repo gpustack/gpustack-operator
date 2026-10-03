@@ -262,6 +262,15 @@ whole-GPU admission only; Ray/elastic realization **NOT-established**).
   layers are derived from objects that realization created (negative: a fixture that only counts
   Pods cannot satisfy any four-layer check).
 
+**Per-member shared memory is a realization prerequisite.**
+**MEASURED** — the pinned native profile failed before inference: its `/dev/shm` buffer required 160 MiB, with 64 MiB available.
+Each GPU member, including the master, therefore renders a separate memory-backed `EmptyDir` at `/dev/shm`, limited to 512 MiB.
+The realization loop adds it after ordinary rendering and before the Pod spec hash.
+An explicit `/dev/shm` mount takes precedence; its capacity and backing remain the user's responsibility.
+CPU head and ordinary rendering remain unchanged. No host path is introduced.
+**NOT-established** — 512 MiB covers the observed buffer requirement; full engine sufficiency still needs physical validation.
+No native resize pass is claimed.
+
 ### Feature 2 — Engine resize lifecycle with failure and recovery contract (E7 / E10 / T08)
 
 **One authoritative resize controller.** Exactly one controller owns a resize operation, bound to
