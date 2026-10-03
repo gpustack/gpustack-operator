@@ -367,7 +367,9 @@ func TestModelDeploymentStatusEligibilityWireSurvivesProtoRoundTrip(t *testing.T
 	assert.Equal(t, int64(7), got.Status.Retirement.ObservedGeneration)
 	assert.Equal(t, ModelDeploymentRetirementStateAborted, got.Status.Retirement.State)
 	assert.Equal(t, []string{"member-uid"}, got.Status.Retirement.TargetMemberUIDs)
-	assert.Equal(t, now, got.Status.Retirement.StartedAt)
+	// The proto rendering preserves the retirement start instant, not the wall-clock
+	// location the unmarshalled time carries, so equality is judged on instants.
+	assert.Equal(t, now.UTC(), got.Status.Retirement.StartedAt.UTC())
 }
 
 // TestModelDeploymentStatusDeepCopyCutsReferenceFields pins that a copied status shares no
