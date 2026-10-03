@@ -1055,3 +1055,26 @@ func TestModelDeploymentDegreeSlotsComplete(t *testing.T) {
 		}
 	}
 }
+
+// TestModelDeploymentDegreeSlotsMatchTheirSlots pins the slot table's literal order to the
+// slot constants it is indexed by: the table's correctness depends on entry i describing the
+// slot named modelDeploymentSlot<i>, and nothing else in the compile enforces it.
+func TestModelDeploymentDegreeSlotsMatchTheirSlots(t *testing.T) {
+	expected := [modelDeploymentDegreeSlotCount]string{
+		modelDeploymentSlotTensorParallel:           "--tensor-parallel-size",
+		modelDeploymentSlotPipelineParallel:         "--pipeline-parallel-size",
+		modelDeploymentSlotDataParallel:             "--data-parallel-size",
+		modelDeploymentSlotDataParallelLocal:        "--data-parallel-size-local",
+		modelDeploymentSlotPrefillContextParallel:   "--prefill-context-parallel-size",
+		modelDeploymentSlotDecodeContextParallel:    "--decode-context-parallel-size",
+		modelDeploymentSlotExpertParallel:           "--ep-size",
+		modelDeploymentSlotAttentionContextParallel: "--attn-cp-size",
+		modelDeploymentSlotMoEDPSize:                "--moe-dp-size",
+		modelDeploymentSlotDWDPSize:                 "--dwdp-size",
+	}
+	require.Len(t, modelDeploymentDegreeSlots[:], int(modelDeploymentDegreeSlotCount))
+	for slot, entry := range modelDeploymentDegreeSlots {
+		assert.Equal(t, expected[modelDeploymentDegreeSlot(slot)], entry.name,
+			"slot %d carries the wrong flag; the table order diverged from the constants", slot)
+	}
+}
