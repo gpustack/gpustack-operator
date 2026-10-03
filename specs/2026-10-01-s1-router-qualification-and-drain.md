@@ -172,6 +172,9 @@ unchanged.
 - AC-2.5 Negative: a worker registered-and-healthy but rejected by the actual selection predicate
   (circuit breaker open / availability false) is not counted as serving (vLLM Router, gateway).
 - AC-2.6 An unconfigured router reports NotConfigured; no serving number is synthesized.
+- AC-2.7 (acceptance pending) The observation mechanism is as built, but its measured observation
+  latency under full-matrix conditions has not yet met the 30 s budget and the ruling on that is
+  outstanding; the timeliness of the serving observation stays unverified until it is met.
 
 ### Feature 3 — Whole-instance health gate with an observable group predicate
 
