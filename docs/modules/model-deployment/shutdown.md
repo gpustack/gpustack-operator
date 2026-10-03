@@ -177,11 +177,11 @@ member is recognized by its data-parallel balance flags, and an SGLang member by
   other members serve no metrics, so their hooks return after the first 5 s, and they receive SIGTERM
   while the leader is still draining. The protocol reads the members whose answer stands for the whole
   replica, which on a leader-served replica is the leader alone.
-- **Selecting the leader does not narrow the deletion.** The reservation still binds every member the
-  replica is made of, so the followers are deleted with the leader and the operation completes only
-  once all of them are gone. A replica whose answering member cannot be named is held — none of its
-  members carries the leader index, more than one does, its members disagree on the shape, or its
-  role says a size the replica does not have — and the `reason` names which.
+- **A replica whose answering member cannot be named is held** — none of its members carries the
+  leader index, more than one does, its members disagree on the shape, or its role says a size the
+  replica does not have — and the `reason` names which. Selecting the leader does not narrow the
+  deletion: as [the protocol above](#the-retirement-protocol) states, it still covers every member
+  the reservation bound.
 - **A prefill or decode replica is refused by the protocol**, so it is never deleted through one.
   The [drain window](#the-drain-window) still applies to it once something else deletes its Pod.
 - **A direct decoder on a cluster below Kubernetes 1.29** runs its routing proxy as a classic
