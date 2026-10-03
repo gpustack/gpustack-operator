@@ -550,8 +550,8 @@ func (c *modelDeploymentDrainCollector) resolveMember(
 //
 // The command is the image's own python3, for the reason the preStop hook uses it: both engines are
 // Python programs, so the interpreter is there, and inventing a second binary dependency for a
-// read would be a new thing to trust. Standard error is not streamed, so an engine that talks
-// cannot grow the response.
+// read would be a new thing to trust. Standard error is declared and discarded, so an engine
+// that talks is read rather than blocked, and it still cannot grow the bounded response.
 func (c *modelDeploymentDrainCollector) execInto(
 	ctx context.Context, pod *corev1.Pod, container string, argv []string,
 ) (string, error) {
@@ -570,7 +570,8 @@ func (c *modelDeploymentDrainCollector) execInto(
 			Command:   argv,
 			// Declare stdout so the exec stream can deliver the bounded response below.
 			Stdout: true,
-			Stderr: false,
+			// Declare stderr because the client drains that stream below.
+			Stderr: true,
 			TTY:    false,
 		}, scheme.ParameterCodec)
 
@@ -581,8 +582,9 @@ func (c *modelDeploymentDrainCollector) execInto(
 
 	// The bound is enforced while the stream is running rather than after it, so an endpoint that
 	// keeps writing is cut off at the cap instead of being allowed to grow the response and then
-	// measured. Standard error is discarded into the same bounded writer: an engine that talks must
-	// not be able to consume the budget the answer needs.
+	// measured.
+	//
+	// Drain stderr without adding it to the bounded stdout response.
 	stdout := &modelDeploymentDrainBounded{limit: modelDeploymentDrainMaxBodyBytes}
 	if err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdout: stdout,

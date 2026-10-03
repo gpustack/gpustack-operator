@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,8 +20,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	remotecommandconsts "k8s.io/apimachinery/pkg/util/remotecommand"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/remotecommand"
+	kubeletexec "k8s.io/kubelet/pkg/cri/streaming/remotecommand"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -1523,9 +1527,113 @@ func TestModelDeploymentDrainExecIntoAsksForStdoutOnTheWire(t *testing.T) {
 	query := seen.Query()
 	assert.Equal(t, "true", query.Get("stdout"),
 		"the exec request must declare the stream its answer is written to")
-	assert.NotEqual(t, "true", query.Get("stderr"),
-		"standard error stays unstreamed so a talking engine cannot grow the response")
+	assert.Equal(t, "true", query.Get("stderr"),
+		"standard error is declared because it is drained, and declaring it is what makes the "+
+			"server open the stream the discard writer reads")
 	assert.NotEqual(t, "true", query.Get("tty"), "the read is not a terminal session")
 	assert.Empty(t, query.Get("stdin"), "the read never opens standard input")
 	assert.Equal(t, "engine", query.Get("container"))
+}
+
+// drainExecTestExecutor supplies a command result to the real kubelet stream server.
+type drainExecTestExecutor struct{}
+
+func (drainExecTestExecutor) ExecInContainer(
+	ctx context.Context, name string, uid types.UID, container string, cmd []string,
+	in io.Reader, out, stderr io.WriteCloser, tty bool,
+	resize <-chan remotecommand.TerminalSize, timeout time.Duration,
+) error {
+	_, err := io.WriteString(out, "member-observation\n")
+	return err
+}
+
+func TestModelDeploymentDrainExecIntoCompletesDeclaredStreams(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		requested := func(name string) bool {
+			value, err := strconv.ParseBool(query.Get(name))
+			return err == nil && value
+		}
+		options := &kubeletexec.Options{
+			Stdin: requested("stdin"), Stdout: requested("stdout"),
+			Stderr: requested("stderr"), TTY: requested("tty"),
+		}
+		kubeletexec.ServeExec(w, r, drainExecTestExecutor{}, "member", "member-uid", query.Get("container"),
+			query["command"], options, time.Second, time.Second,
+			[]string{remotecommandconsts.StreamProtocolV4Name})
+	}))
+	defer server.Close()
+	config := &rest.Config{Host: server.URL}
+	core, err := corev1client.NewForConfig(config)
+	require.NoError(t, err)
+	collector := &modelDeploymentDrainCollector{core: core, restConfig: config}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	body, err := collector.execInto(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "models", Name: "member", UID: "member-uid",
+	}}, "main", []string{"python3", "-c", "print('member-observation')"})
+	require.NoError(t, err)
+	assert.Equal(t, "member-observation\n", body)
+}
+
+// drainExecVerboseStderrExecutor writes stderr before returning the observation.
+type drainExecVerboseStderrExecutor struct {
+	stderrUndeclared bool
+}
+
+func (e *drainExecVerboseStderrExecutor) ExecInContainer(
+	ctx context.Context, name string, uid types.UID, container string, cmd []string,
+	in io.Reader, out, stderr io.WriteCloser, tty bool,
+	resize <-chan remotecommand.TerminalSize, timeout time.Duration,
+) error {
+	if stderr == nil {
+		e.stderrUndeclared = true
+	} else {
+		if _, err := io.WriteString(stderr, strings.Repeat("engine-chatter\n", 64)); err != nil {
+			return err
+		}
+	}
+
+	_, err := io.WriteString(out, "member-observation\n")
+	return err
+}
+
+// A verbose standard error must be drained rather than merely absent, and draining it must leave
+// the answer exact.
+func TestModelDeploymentDrainExecIntoDrainsVerboseStderrAndKeepsStdoutExact(t *testing.T) {
+	executor := &drainExecVerboseStderrExecutor{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		requested := func(name string) bool {
+			value, err := strconv.ParseBool(query.Get(name))
+			return err == nil && value
+		}
+		options := &kubeletexec.Options{
+			Stdin: requested("stdin"), Stdout: requested("stdout"),
+			Stderr: requested("stderr"), TTY: requested("tty"),
+		}
+		kubeletexec.ServeExec(w, r, executor, "member", "member-uid", query.Get("container"),
+			query["command"], options, time.Second, time.Second,
+			[]string{remotecommandconsts.StreamProtocolV4Name})
+	}))
+	defer server.Close()
+
+	config := &rest.Config{Host: server.URL}
+	core, err := corev1client.NewForConfig(config)
+	require.NoError(t, err)
+	collector := &modelDeploymentDrainCollector{core: core, restConfig: config}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	body, err := collector.execInto(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "models", Name: "member", UID: "member-uid",
+	}}, "main", []string{"python3", "-c", "print('member-observation')"})
+
+	require.NoError(t, err)
+	assert.False(t, executor.stderrUndeclared,
+		"the exec must declare the standard error stream it drains")
+	assert.Equal(t, "member-observation\n", body,
+		"drained standard error must not reach the bounded response the answer is parsed from")
 }
