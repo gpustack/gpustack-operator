@@ -39,15 +39,47 @@ func twoRoleDeployment(mutate ...func(*workercore.ModelDeployment)) *workercore.
 	}, mutate...)...)
 }
 
-// replicaPods lists the replicas the deployment owns, unsorted, for the cases that read metadata off
-// them rather than names.
+// replicaPods lists the serving replicas the deployment owns, unsorted, for the cases that read
+// metadata off them rather than names.
+//
+// A Router pod is not one. It is discovered in the same namespace and carries the deployment's
+// labels, but it is not a Kueue-managed member of a serving group: production renders it with the
+// name, instance and router labels only, no group label, and the production readers that walk a
+// group skip it the same way. Leaving it in would let a fixture count a router as a seat on a
+// replica, or compose a Workload for a group the router does not belong to.
 func replicaPods(t *testing.T, cli ctrlcli.Client) []core.Pod {
 	t.Helper()
 
 	podList := new(core.PodList)
 	require.NoError(t, cli.List(context.Background(), podList, ctrlcli.InNamespace("team-a")))
 
-	return podList.Items
+	pods := make([]core.Pod, 0, len(podList.Items))
+	for i := range podList.Items {
+		if _, isRouter := podList.Items[i].Labels[modelDeploymentRouterLabelKey]; isRouter {
+			continue
+		}
+		pods = append(pods, podList.Items[i])
+	}
+
+	return pods
+}
+
+// routerPods lists the deployment's Router pods, which the serving-replica helpers above exclude.
+func routerPods(t *testing.T, cli ctrlcli.Client) []core.Pod {
+	t.Helper()
+
+	podList := new(core.PodList)
+	require.NoError(t, cli.List(context.Background(), podList, ctrlcli.InNamespace("team-a")))
+
+	pods := make([]core.Pod, 0, len(podList.Items))
+	for i := range podList.Items {
+		if _, isRouter := podList.Items[i].Labels[modelDeploymentRouterLabelKey]; !isRouter {
+			continue
+		}
+		pods = append(pods, podList.Items[i])
+	}
+
+	return pods
 }
 
 // groupTotals collects the group total every live replica declares, so a case can assert the SET
@@ -196,9 +228,13 @@ func TestModelDeployment_ScaleUpKeepsTheSurvivorsAndAddsTheMissingOrdinal(t *tes
 // with nothing erroring anywhere.
 func TestModelDeployment_ScaleDownRemovesTheDepartingOrdinalsWorkload(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	// Router-backed: this case is about which replicas a removal leaves behind, and a removal
+	// only completes when the withdrawal can be observed. A deployment declaring no router
+	// holds instead, which is the contract the dedicated no-Router test covers.
+	md, router := retirementRouterFixture(twoRoleDeployment())
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
@@ -219,6 +255,9 @@ func TestModelDeployment_ScaleDownRemovesTheDepartingOrdinalsWorkload(t *testing
 
 		wl := &kueue.Workload{}
 		wl.Name, wl.Namespace = "wl-"+pod.Name, pod.Namespace
+		// A real UID, because the release capture records the Workload set by UID and an
+		// unidentified object is one the predicate cannot speak about.
+		wl.UID = types.UID("wl-uid-" + pod.Name)
 		wl.OwnerReferences = []meta.OwnerReference{{
 			APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: live.UID,
 		}}
@@ -229,7 +268,7 @@ func TestModelDeployment_ScaleDownRemovesTheDepartingOrdinalsWorkload(t *testing
 	shrunk.Spec.Roles[0].Replicas = 1
 	require.NoError(t, cli.Update(ctx, shrunk))
 
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 
 	// One prefill survivor keeps its object; the departing ordinal's Pod AND its Workload are both
@@ -277,9 +316,13 @@ func TestModelDeployment_ScaleDownRemovesTheDepartingOrdinalsWorkload(t *testing
 // declares, so losing a sibling renames nothing and rolls nothing.
 func TestModelDeployment_RoleSetChangeSweepsTheRemovedRoleAlone(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	// Router-backed: this case is about which replicas a removal leaves behind, and a removal
+	// only completes when the withdrawal can be observed. A deployment declaring no router
+	// holds instead, which is the contract the dedicated no-Router test covers.
+	md, router := retirementRouterFixture(twoRoleDeployment())
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
@@ -306,7 +349,7 @@ func TestModelDeployment_RoleSetChangeSweepsTheRemovedRoleAlone(t *testing.T) {
 	shrunk.Spec.Roles = shrunk.Spec.Roles[:1]
 	require.NoError(t, cli.Update(ctx, shrunk))
 
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"prefill": 2}, replicaRoleCounts(t, cli),
 		"the removed role's replicas go in the first pass, and the survivor's are nobody's business")
@@ -1140,9 +1183,13 @@ func TestModelDeployment_AFailedMemberTurnsItsReplicaOver(t *testing.T) {
 // departing and an arriving replica to share any more.
 func TestModelDeployment_RedistributingReplicasMovesEachRolesOwnOrdinals(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	// Router-backed: this case is about which replicas a removal leaves behind, and a removal
+	// only completes when the withdrawal can be observed. A deployment declaring no router
+	// holds instead, which is the contract the dedicated no-Router test covers.
+	md, router := retirementRouterFixture(twoRoleDeployment())
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
@@ -1158,7 +1205,7 @@ func TestModelDeployment_RedistributingReplicasMovesEachRolesOwnOrdinals(t *test
 	moved.Spec.Roles[1].Replicas = 3
 	require.NoError(t, cli.Update(ctx, moved))
 
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"decode": 3, "prefill": 1}, replicaRoleCounts(t, cli),
 		"both moves land in the SAME pass: the shed slot and the gained slot are different "+
@@ -1180,9 +1227,13 @@ func TestModelDeployment_RedistributingReplicasMovesEachRolesOwnOrdinals(t *test
 // TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds covers the other shape change that
 // moves neither the total nor any count: the same numbers under a different role name.
 func TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds(t *testing.T) {
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	// Router-backed: this case is about which replicas a removal leaves behind, and a removal
+	// only completes when the withdrawal can be observed. A deployment declaring no router
+	// holds instead, which is the contract the dedicated no-Router test covers.
+	md, router := retirementRouterFixture(twoRoleDeployment())
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
@@ -1190,7 +1241,7 @@ func TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds(t *testing.T
 	renamed.Spec.Roles[1].Name = "decoder"
 	require.NoError(t, cli.Update(context.Background(), renamed))
 
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"decoder": 2, "prefill": 2}, replicaRoleCounts(t, cli),
 		"a renamed role names its replicas to groups nothing forms any more, so they are swept and "+
@@ -1456,4 +1507,64 @@ func TestModelDeployment_AReplicaShortOneMemberIsRepaired(t *testing.T) {
 		"the role never returned to two Members: an ordinal holding one Member of two is owed no "+
 			"create, and the rollout that was to repair it cannot run while the incomplete group "+
 			"has no admitted Workload -- so the role serves nothing and no later spec edit can roll")
+}
+
+// TestTheRouterIsNeverAServingReplica pins the boundary the fixture corrections turned on.
+//
+// This is the non-vacuous version of the direct-Service negative. That one declares no Router at
+// all, so it cannot show what happens when a Router stands beside a real replica: the question is
+// not "is a Router treated as a replica" in the abstract but "does the Kueue stand-in, given a
+// namespace that really contains both, compose a Workload for the Router". It must compose
+// exactly the replica's own group, and nothing owned by or grouped with the Router.
+func TestTheRouterIsNeverAServingReplica(t *testing.T) {
+	ctx := context.Background()
+	md, router := retirementRouterFixture(newRenderDeployment())
+	replica := realSurplusReplicaAt(t, md, "qwen-server-zero", 0, "")
+	// A UID of its own, because the Workload is asserted to be owned by THIS member: the Router's
+	// UID is the other one in the namespace, and the two must not be confusable.
+	replica.UID = "replica-uid"
+
+	// The premise, stated before the assertion: a Router and a real replica really do sit in one
+	// namespace, the Router really has no group of its own, and both are really there to be found.
+	require.Empty(t, router.Labels[kueuepodconst.GroupNameLabel],
+		"the production Router carries no Kueue group: it is not a serving replica")
+	require.NotEmpty(t, replica.Labels[kueuepodconst.GroupNameLabel],
+		"and the real replica carries one, which is what the stand-in composes from")
+
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), replica, router)
+	standInForKueue(t, cli, true)
+
+	// The Router is still there, unchanged, because nothing about standing beside it is a defect.
+	routers := routerPods(t, cli)
+	require.Len(t, routers, 1, "the Router is in the same namespace and is still present")
+	assert.Equal(t, router.Name, routers[0].Name)
+
+	// And the replica set is non-empty and holds the replica, not the Router.
+	replicas := replicaPods(t, cli)
+	require.NotEmpty(t, replicas, "the serving replica set is not empty")
+	require.Len(t, replicas, 1)
+	assert.Equal(t, replica.Name, replicas[0].Name)
+
+	// The Workload set is non-empty too, and every entry belongs to the genuine replica: named by
+	// its group, and owned by that replica's UID. A Router owner or a Router-named group would be
+	// the invented quota this whole correction removed.
+	workloads := new(kueue.WorkloadList)
+	require.NoError(t, cli.List(ctx, workloads, ctrlcli.InNamespace("team-a")))
+	require.NotEmpty(t, workloads.Items, "the stand-in composes at least the replica's group Workload")
+	group := replica.Labels[kueuepodconst.GroupNameLabel]
+	composed := 0
+	for i := range workloads.Items {
+		workload := &workloads.Items[i]
+		assert.NotContains(t, workload.Name, "router",
+			"no Workload is named for the Router, and the Router claims no quota")
+		assert.NotEqual(t, "router-uid", string(workload.OwnerReferences[0].UID),
+			"and no Workload is owned by the Router")
+		if workload.Name == group {
+			composed++
+			require.Len(t, workload.OwnerReferences, 1)
+			assert.Equal(t, replica.UID, workload.OwnerReferences[0].UID,
+				"the composed Workload is the genuine replica's own group, by its actual member UID")
+		}
+	}
+	assert.Equal(t, 1, composed, "exactly the replica's group is composed, once")
 }

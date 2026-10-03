@@ -1494,10 +1494,20 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentModelApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentModelStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentModelStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentParallelismDeclaredStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentParallelismDeclaredStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentParallelismSourceStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentParallelismSourceStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentPort"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentPortApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRetirementStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRetirementStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRole"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleEndpointsStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleEndpointsStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleParallelismStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleParallelismStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleResources"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleResourcesApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleStatus"):
@@ -1514,6 +1524,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRouterRoleStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRouterStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRouterStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentServingStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentServingStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentSpec"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentStatus"):

@@ -13,6 +13,7 @@ import (
 	app "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	rbac "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,6 +61,7 @@ type ModelDeploymentRouterObjects struct {
 
 func renderModelDeploymentRouterObjects(
 	ctx context.Context, md *workercore.ModelDeployment, manufacturers map[string]string,
+	retainedEligibility bool,
 ) (ModelDeploymentRouterObjects, error) {
 	name := md.Name + "-router"
 	labels := map[string]string{
@@ -131,6 +133,14 @@ func renderModelDeploymentRouterObjects(
 		selector := modelDeploymentSelectorLabels(md, role)
 		selector[modelDeploymentLabelKeyRoleKind] = roles[i].Kind
 		selector[modelDeploymentMemberIndexLabel] = strconvx.Itoa(modelDeploymentLeaderMemberIndex)
+		// The eligibility term rides on the published selector beside the leader term, so a router
+		// configured from it can only ever reach endpoints the reconciler has marked eligible. It
+		// narrows the same set the terms above already name; it never widens one. A shape whose
+		// group-forward capability can never activate renders WITHOUT the term: a selector no pass
+		// would ever satisfy would hand the router zero endpoints and call it discovery.
+		if modelDeploymentEligibilitySelectorActive(md, role, nil, retainedEligibility) {
+			selector[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		}
 		// The renderer is handed the SAME map that is published, rather than one built beside it,
 		// because a router configured by argv discovers each role by these labels: two derivations
 		// of one answer would let what a user reads and what the router matches drift apart.
@@ -164,6 +174,24 @@ func renderModelDeploymentRouterObjects(
 		modelDeploymentLabelKeyInstance: md.Name,
 		modelDeploymentMemberIndexLabel: strconvx.Itoa(modelDeploymentLeaderMemberIndex),
 	}
+	// The eligibility equality rides beside the leader term for the same reason it rides on the
+	// published selector: a member whose eligibility the reconciler has not written is not an
+	// endpoint a request may reach, however much its peers need its record. A deployment in which
+	// NO role's group-forward capability can ever activate renders WITHOUT it — a selector no
+	// pass would ever satisfy would hand the router zero endpoints and call it discovery — while
+	// a deployment with any activatable role keeps it, because once activation is possible the
+	// observation states govern the per-pod label, not this selector.
+	endpointActivatable := false
+	for i := range md.Spec.Roles {
+		if modelDeploymentGroupForwardActivatable(md, &md.Spec.Roles[i]) {
+			endpointActivatable = true
+
+			break
+		}
+	}
+	if endpointActivatable && (modelDeploymentEligibilityDecided(md) || retainedEligibility) {
+		endpointLabels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+	}
 	// The router's own Pod carries the first two labels and NOT the member index, so the equalities
 	// already exclude it. The negation is kept in the expression, where it costs nothing and says
 	// out loud what the index term achieves by arithmetic.
@@ -171,12 +199,17 @@ func renderModelDeploymentRouterObjects(
 	// The terms are listed rather than sorted out of the map because their ORDER IS RENDERED: this
 	// string is a ConfigMap value and the Pod's configuration hash is taken over it, so reordering
 	// it would roll every router in the cluster for a change nothing reads.
-	endpointSelector := strings.Join([]string{
+	endpointSelectorTerms := []string{
 		modelDeploymentLabelKeyName + "=" + endpointLabels[modelDeploymentLabelKeyName],
 		modelDeploymentLabelKeyInstance + "=" + endpointLabels[modelDeploymentLabelKeyInstance],
 		modelDeploymentMemberIndexLabel + "=" + endpointLabels[modelDeploymentMemberIndexLabel],
-		"!" + modelDeploymentRouterLabelKey,
-	}, ",")
+	}
+	if len(endpointLabels[modelDeploymentLabelKeyEndpointEligible]) > 0 {
+		endpointSelectorTerms = append(endpointSelectorTerms,
+			modelDeploymentLabelKeyEndpointEligible+"="+endpointLabels[modelDeploymentLabelKeyEndpointEligible])
+	}
+	endpointSelectorTerms = append(endpointSelectorTerms, "!"+modelDeploymentRouterLabelKey)
+	endpointSelector := strings.Join(endpointSelectorTerms, ",")
 	routerInput := router.Input{
 		Roles: roles, Metrics: metrics, ModelName: md.Spec.Model.Name,
 		TokenizerEndpoint: modelDeploymentRoleEndpoint(md, modelDeploymentTokenizerRole(md)),
@@ -516,13 +549,52 @@ func modelDeploymentRouterEndpoint(service *core.Service) string {
 }
 
 func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
-	ctx context.Context, md *workercore.ModelDeployment,
+	ctx context.Context, md *workercore.ModelDeployment, eligibilityDecided bool,
 ) error {
 	var rendered ModelDeploymentRouterObjects
 	if md.Spec.Router != nil {
-		var err error
+		// RETENTION: the discovery equality, once published, survives a quiet pass on EVERY
+		// shipped profile. The llm-d profile publishes the ConfigMap; the vllm-router and
+		// sglang-gateway profiles configure by argv and render none, so absence of a ConfigMap is
+		// not proof a surface was never narrowed -- the live router Deployment's args and env are
+		// read too. The static activatability half still governs: a deployment whose shapes
+		// stopped being activatable loses the term on this pass.
+		needle := modelDeploymentLabelKeyEndpointEligible + "=" + modelDeploymentEndpointEligibleValue
+		retained := false
+		liveConfig := new(core.ConfigMap)
+		err := r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}, liveConfig)
+		switch {
+		case err == nil:
+			retained = strings.Contains(liveConfig.Data[modelDeploymentRouterSelectorKey], needle)
+		case apierrors.IsNotFound(err):
+		default:
+			return err
+		}
+		if !retained {
+			liveDeployment := new(app.Deployment)
+			err = r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}, liveDeployment)
+			switch {
+			case err == nil:
+				for _, container := range liveDeployment.Spec.Template.Spec.Containers {
+					for _, arg := range container.Args {
+						if strings.Contains(arg, needle) {
+							retained = true
+						}
+					}
+					for _, env := range container.Env {
+						if strings.Contains(env.Value, needle) {
+							retained = true
+						}
+					}
+				}
+			case apierrors.IsNotFound(err):
+			default:
+				return err
+			}
+		}
+
 		rendered, err = renderModelDeploymentRouterObjects(
-			ctx, md, r.modelDeploymentRoleManufacturers(ctx, md))
+			ctx, md, r.modelDeploymentRoleManufacturers(ctx, md), retained || eligibilityDecided)
 		if err != nil {
 			return err
 		}

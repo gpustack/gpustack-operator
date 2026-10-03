@@ -133,8 +133,12 @@ func modelDeploymentDrainHook(
 // moment its prefill is computed, while the decoder's pull of that KV starts just after; the second
 // read is the margin for that pull to begin.
 //
-// It always exits 0. A failing hook only records an event and lets the kubelet go on to SIGTERM, so
-// a non-zero exit would add noise and change nothing.
+// It always exits 0, and that is a statement about the exit code alone: a non-zero exit would
+// record a Failed lifecycle event and would not hold anything, because the kubelet sends SIGTERM
+// once the hook returns either way. What the hook returns is not the last word on a departing
+// replica -- a deletion is intercepted by the retirement protocol, which holds at Draining until a
+// drain reader reports the member idle twice -- so an early return here narrows what the hook can
+// observe, never what the replica is allowed to lose.
 func modelDeploymentDrainScript(url string, metrics []string, settleSeconds, deadlineSeconds int64) string {
 	names := make([]string, 0, len(metrics))
 	for _, m := range metrics {

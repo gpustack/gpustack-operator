@@ -179,7 +179,7 @@ func TestComputeModelDeploymentStatus_Phase(t *testing.T) {
 			}
 
 			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(objs...)}
-			status, err := r.computeModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil)
+			status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, pods, nil, nil, nil, nil)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.wantPhase, status.Phase)
@@ -202,7 +202,7 @@ func TestComputeModelDeploymentStatus_Roles(t *testing.T) {
 	}
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
 
-	status, err := r.computeModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil)
+	status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, pods, nil, nil, nil, nil)
 	require.NoError(t, err)
 
 	require.Len(t, status.Roles, 1)
@@ -214,7 +214,7 @@ func TestComputeModelDeploymentStatus_Roles(t *testing.T) {
 }
 
 func TestProjectModelDeploymentRouterStatus_FollowsTheRender(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil, false)
 	require.NoError(t, err)
 	objects.Contract.Endpoint = "http://perturbed-router.test:8081"
 	objects.Contract.Metrics.QueuedRequests = "perturbed_queue_metric"
@@ -233,7 +233,7 @@ func TestProjectModelDeploymentRouterStatus_FollowsTheRender(t *testing.T) {
 
 func TestRenderModelDeploymentRouterStatus_RoleSetIsExact(t *testing.T) {
 	md := routedModelDeployment()
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	want := make([]string, 0, len(md.Spec.Roles))
@@ -253,7 +253,7 @@ func TestRenderModelDeploymentRouterStatus_RoleSetIsExact(t *testing.T) {
 
 func TestComputeModelDeploymentRouterStatus_ProjectsPoolClientEndpoint(t *testing.T) {
 	md := routedModelDeployment()
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 	pool := &workercore.KVCachePool{
 		ObjectMeta: meta.ObjectMeta{Name: "pool-a"},
@@ -264,7 +264,7 @@ func TestComputeModelDeploymentRouterStatus_ProjectsPoolClientEndpoint(t *testin
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, objects.Deployment, pool)}
 	domain := &modelDeploymentDomain{KVCache: &workercore.ModelDeploymentKVCacheStatus{Pool: pool.Name}}
 
-	status, err := r.computeModelDeploymentStatus(context.Background(), md, nil, domain, nil, nil)
+	status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, nil, domain, nil, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, status.Router)
 	assert.Equal(t, pool.Status.ClientEndpoint, status.Router.PoolEndpoint)
@@ -273,7 +273,7 @@ func TestComputeModelDeploymentRouterStatus_ProjectsPoolClientEndpoint(t *testin
 func TestComputeModelDeploymentStatus_RouterReadinessControlsEndpointAndPhase(t *testing.T) {
 	md := routedModelDeployment()
 	pods := readyRouterRolePods(md)
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -310,7 +310,7 @@ func TestComputeModelDeploymentStatus_RouterReadinessControlsEndpointAndPhase(t 
 			deployment.Status.ReadyReplicas = tc.readyReplicas
 			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, deployment)}
 
-			status, err := r.computeModelDeploymentStatus(context.Background(), md, observedPods, nil, nil, nil)
+			status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, observedPods, nil, nil, nil, nil)
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantEndpoint, status.Endpoint)
 			assert.Equal(t, tc.wantPhase, status.Phase)
@@ -344,7 +344,7 @@ func TestComputeModelDeploymentStatus_Unmanaged(t *testing.T) {
 	})
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
 
-	status, err := r.computeModelDeploymentStatus(context.Background(), md, nil, nil, nil, nil)
+	status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, nil, nil, nil, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, status.Roles, 1)
 	assert.True(t, status.Roles[0].Unmanaged)
@@ -1085,7 +1085,7 @@ func TestSyncModelDeploymentStatus_RebuiltWholesale(t *testing.T) {
 	cli := newModelDeploymentClient(md, newRenderInstanceType())
 	r := &ModelDeploymentReconciler{Client: cli}
 
-	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil))
+	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil, nil))
 
 	stored := getModelDeployment(t, cli)
 	assert.Equal(t, ModelDeploymentPhaseDegraded, stored.Status.Phase)
@@ -1109,10 +1109,10 @@ func TestSyncModelDeploymentStatus_WritesNothingWhenUnchanged(t *testing.T) {
 	r := &ModelDeploymentReconciler{Client: cli}
 
 	pods := []core.Pod{*readyReplica(md, 0, true), *readyReplica(md, 1, true)}
-	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil))
+	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil, nil))
 	require.Equal(t, 1, writes.statusUpdates)
 
-	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil))
+	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil, nil))
 	assert.Equal(t, 1, writes.statusUpdates, "an unchanged status must not be written again")
 }
 
@@ -1148,14 +1148,14 @@ func TestSyncModelDeploymentStatus_AFailingListWritesNoStatus(t *testing.T) {
 		Build()
 
 	stuck := &ModelDeploymentReconciler{Client: failing}
-	require.Error(t, stuck.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil))
+	require.Error(t, stuck.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil, nil))
 
 	stored := getModelDeployment(t, failing)
 	require.Empty(t, stored.Status.Roles,
 		"a failed Workload list writes no status at all, rather than a zero that reads as observed")
 
 	healthy := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
-	require.NoError(t, healthy.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil))
+	require.NoError(t, healthy.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil, nil))
 
 	stored = getModelDeployment(t, healthy.Client)
 	require.Len(t, stored.Status.Roles, 1)
@@ -1174,7 +1174,7 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 	md := newRenderDeployment()
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
 
-	status, err := r.computeModelDeploymentStatus(context.Background(), md, nil, nil, nil, nil)
+	status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, nil, nil, nil, nil, nil)
 	require.NoError(t, err)
 
 	declared := make([]string, 0, len(status.Conditions))
@@ -1193,6 +1193,9 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 		string(ModelDeploymentConditionRouterReady),
 		// NotApplicable for a deployment naming no artifact, on the router's terms.
 		string(ModelDeploymentConditionWeightsReady),
+		// Declared on every pass like the others: Unknown-NotObserved until endpoint
+		// qualification exists, which is an answer about the reading, not an absence.
+		string(ModelDeploymentConditionEndpointEligibility),
 	}, declared)
 	assert.NotContains(t, declared, string(ModelDeploymentConditionDomainRegistered),
 		"this pass was handed no reading of the Binding, and a pass that did not look must not report")
@@ -1477,12 +1480,16 @@ func observeQuotaOver(
 }
 
 // roleStatusesOver is the same resolution for the per-role view, for the same reason.
+//
+// It passes no qualifications, because the callers are quota tests that make no eligibility
+// claim: every role's eligible count stays nil, which is the same unobserved answer the role
+// endpoints carried before the health predicate existed.
 func roleStatusesOver(
 	md *workercore.ModelDeployment, pods []core.Pod, wls []*kueue.Workload,
 ) []workercore.ModelDeploymentRoleStatus {
 	wlByReplica := modelDeploymentReplicaWorkloads(pods, wls)
 
-	return modelDeploymentRoleStatuses(md, pods, wlByReplica)
+	return modelDeploymentRoleStatuses(md, pods, wlByReplica, nil)
 }
 
 // TestObserveModelDeploymentQuota_OneGroupReservedIsNotTheDeployment is the regression the cluster
@@ -2478,4 +2485,294 @@ func TestObserveModelDeploymentQuota_OwnershipIsAKindAndAUIDTogether(t *testing.
 		"a reference that does not name a Pod must not answer for one")
 	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder), "have no workload yet",
 		"and the replica reads as one nothing has composed a Workload for")
+}
+
+// TestComputeModelDeploymentStatus_NoQualificationObservation pins what a pass that has observed
+// no endpoint qualification writes: every role answers honestly instead of fabricating figures
+// (a nil eligible count, no serving value, no declared degree, Unknown where nothing was
+// derived, and NotConfigured when no Router exists to answer at all), an existing retirement
+// reservation is carried forward untouched, and the deployment-level condition reads
+// Unknown-NotObserved rather than a False no pass earned.
+func TestComputeModelDeploymentStatus_NoQualificationObservation(t *testing.T) {
+	testCases := []struct {
+		name             string
+		routed           bool
+		retirement       *workercore.ModelDeploymentRetirementStatus
+		wantServingState workercore.ModelDeploymentServingState
+	}{
+		{
+			name:             "no router configured reports NotConfigured",
+			routed:           false,
+			wantServingState: workercore.ModelDeploymentServingStateNotConfigured,
+		},
+		{
+			name:             "router configured but unobserved reports Unknown",
+			routed:           true,
+			wantServingState: workercore.ModelDeploymentServingStateUnknown,
+		},
+		{
+			name: "an existing retirement reservation is carried forward untouched",
+			retirement: &workercore.ModelDeploymentRetirementStatus{
+				RoleName:           "server",
+				ReplicaOrdinal:     1,
+				ObservedGeneration: 3,
+				TargetMemberUIDs:   []string{"member-uid"},
+				TargetWorkloadUID:  "workload-uid",
+				State:              workercore.ModelDeploymentRetirementStateWithdrawing,
+				StartedAt:          meta.Now().Rfc3339Copy(),
+				Deadline:           meta.Now().Rfc3339Copy(),
+				PhaseStartedAt:     meta.Now().Rfc3339Copy(),
+			},
+			wantServingState: workercore.ModelDeploymentServingStateNotConfigured,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			if tc.routed {
+				md = routedModelDeployment()
+			}
+			if tc.retirement != nil {
+				md.Status.Retirement = tc.retirement
+			}
+
+			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+			status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, nil, nil, nil, nil, nil)
+			require.NoError(t, err)
+
+			require.NotEmpty(t, status.Roles)
+			for _, role := range status.Roles {
+				require.Nil(t, role.Endpoints.Eligible,
+					"no qualified observation exists yet, so the count is nil, not zero")
+				require.Nil(t, role.Endpoints.Serving.Value,
+					"an unconfirmed serving state never carries a value to misread")
+				assert.Equal(t, tc.wantServingState, role.Endpoints.Serving.State)
+
+				// The fixtures declare no degree, so the read stays honest: nothing is present
+				// even though the arguments themselves were read completely.
+				assert.Nil(t, role.Parallelism.Declared.TensorParallel,
+					"a degree nothing declares is absent, never the engine default")
+				assert.Nil(t, role.Parallelism.Declared.DataParallelLocal)
+				assert.Empty(t, role.Parallelism.Modes)
+				assert.Equal(t, workercore.ModelDeploymentLoadBalanceInternal, role.Parallelism.LoadBalance)
+				assert.Equal(t, workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					role.Parallelism.Source.Kind)
+				assert.True(t, role.Parallelism.Source.Complete)
+				assert.Empty(t, role.Parallelism.Source.UnreadableReason)
+			}
+
+			assert.Equal(t, "Unknown", ModelDeploymentConditionEndpointEligibility.GetStatus(status))
+			assert.Equal(t, "NotObserved", ModelDeploymentConditionEndpointEligibility.GetReason(status))
+
+			if tc.retirement == nil {
+				assert.Nil(t, status.Retirement, "a pass with no reservation to carry writes none")
+
+				return
+			}
+			require.NotNil(t, status.Retirement, "an existing reservation is retained, never cleared")
+			assert.Equal(t, md.Status.Retirement, status.Retirement)
+			assert.NotSame(t, md.Status.Retirement, status.Retirement,
+				"the carried reservation is a deep copy, not the stored object itself")
+		})
+	}
+}
+
+// TestComputeModelDeploymentStatus_ReadsRoleParallelism pins the producer wiring: every
+// role's status carries the read of its own argument stream -- degrees present only where
+// declared, modes as present-only booleans, the balance shape derived -- and a role that
+// replaced its command line carries the unmanaged refusal instead of any degree at all.
+func TestComputeModelDeploymentStatus_ReadsRoleParallelism(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name      string
+		command   []string
+		extraArgs []string
+		env       []workercore.ModelDeploymentEnvVar
+		want      workercore.ModelDeploymentRoleParallelismStatus
+		// secondRole and wantSecond extend the fixture to two roles and pin that each
+		// role's status carries its own reading, never a sibling's.
+		secondRole *workercore.ModelDeploymentRole
+		wantSecond *workercore.ModelDeploymentRoleParallelismStatus
+	}{
+		{
+			name:      "a declared degree and mode reach the role status with their exact values",
+			extraArgs: []string{"--tensor-parallel-size", "3", "--enable-expert-parallel"},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel: ptr.To(int32(3)),
+				},
+				Modes:       map[string]bool{"expertParallel": true},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:      "each role's status carries its own arguments' reading",
+			extraArgs: []string{"--tensor-parallel-size", "2"},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel: ptr.To(int32(2)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+			secondRole: &workercore.ModelDeploymentRole{
+				Name:      "second",
+				Replicas:  2,
+				ExtraArgs: []string{"--pipeline-parallel-size", "2"},
+			},
+			wantSecond: &workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					PipelineParallel: ptr.To(int32(2)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name: "an environment declaration reaches the role status through the producer",
+			env:  []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "4"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					DataParallel: ptr.To(int32(4)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:    "a role that replaced its command line is reported unmanaged, never read",
+			command: []string{"vllm", "serve", "--tensor-parallel-size", "8"},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceUnknown,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:             workercore.ModelDeploymentParallelismSourceKindUnknown,
+					UnreadableReason: modelDeploymentReasonUnmanaged,
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			md := newRenderDeployment()
+			md.Spec.Roles[0].Command = tc.command
+			md.Spec.Roles[0].ExtraArgs = tc.extraArgs
+			md.Spec.Roles[0].Env = tc.env
+			if tc.secondRole != nil {
+				md.Spec.Roles = append(md.Spec.Roles, *tc.secondRole)
+			}
+
+			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+			status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, nil, nil, nil, nil, nil)
+			require.NoError(t, err)
+
+			require.NotEmpty(t, status.Roles)
+			assert.Equal(t, tc.want, status.Roles[0].Parallelism)
+			if tc.wantSecond != nil {
+				require.Len(t, status.Roles, 2)
+				assert.Equal(t, *tc.wantSecond, status.Roles[1].Parallelism)
+			}
+		})
+	}
+}
+
+// TestEligibilityDecisionMirrorsTheRecordedCondition requires the pass-decision helper and the
+// recorded condition to agree across qualified, held, unsupported, fault, and empty replicas.
+func TestEligibilityDecisionMirrorsTheRecordedCondition(t *testing.T) {
+	leg := func(verdict modelDeploymentLegVerdict) modelDeploymentQualificationLeg {
+		return modelDeploymentQualificationLeg{
+			Name:    modelDeploymentLegGroupForward,
+			Verdict: verdict,
+		}
+	}
+	unsupported := func() modelDeploymentInstanceQualification {
+		return modelDeploymentInstanceQualification{
+			Observed: true,
+			GroupForward: modelDeploymentGroupForward{
+				State: modelDeploymentGroupForwardUnsupported,
+			},
+			Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegUnknown)},
+		}
+	}
+
+	for _, tc := range []struct {
+		name           string
+		qualifications []modelDeploymentInstanceQualification
+		wantDecided    bool
+		wantCondition  string
+	}{
+		{
+			name: "every observed replica qualified decides True",
+			qualifications: []modelDeploymentInstanceQualification{
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegVerified)}},
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegVerified)}},
+			},
+			wantDecided: true, wantCondition: "True",
+		},
+		{
+			name: "a qualified replica beside a held one decides nothing",
+			qualifications: []modelDeploymentInstanceQualification{
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegVerified)}},
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegUnknown)}},
+			},
+			wantDecided: false, wantCondition: "Unknown",
+		},
+		{
+			name: "a qualified replica beside an unsupported one decides nothing",
+			qualifications: []modelDeploymentInstanceQualification{
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegVerified)}},
+				unsupported(),
+			},
+			wantDecided: false, wantCondition: "Unknown",
+		},
+		{
+			name: "a definite fault decides False beside a held one",
+			qualifications: []modelDeploymentInstanceQualification{
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegFailed)}},
+				{Observed: true, Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegUnknown)}},
+			},
+			wantDecided: true, wantCondition: "False",
+		},
+		{
+			name:           "no observed replica decides nothing",
+			qualifications: []modelDeploymentInstanceQualification{{Legs: []modelDeploymentQualificationLeg{leg(modelDeploymentLegUnknown)}}},
+			wantDecided:    false, wantCondition: "Unknown",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			holder := new(workercore.ModelDeployment)
+			observeModelDeploymentEndpointEligibility(holder, tc.qualifications)
+
+			condition := ""
+			for i := range holder.Status.Conditions {
+				if holder.Status.Conditions[i].Type == string(ModelDeploymentConditionEndpointEligibility) {
+					condition = string(holder.Status.Conditions[i].Status)
+				}
+			}
+			assert.Equal(t, tc.wantCondition, condition, "recorded condition")
+
+			decided := modelDeploymentEligibilityDecided(holder)
+			assert.Equal(t, tc.wantDecided, decided, "from the recorded condition")
+			assert.Equal(t, tc.wantDecided,
+				modelDeploymentQualificationsDecided(tc.qualifications),
+				"from the raw qualifications")
+		})
+	}
 }

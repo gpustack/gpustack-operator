@@ -70,6 +70,25 @@ const (
 	// modelDeploymentLeaderMemberIndex is the member every replica has and the only one the role's
 	// Service fronts. A replica of size one is all leader; above that, the others serve no API.
 	modelDeploymentLeaderMemberIndex = 0
+
+	// modelDeploymentLabelKeyEndpointEligible marks a Pod whose endpoints a Router or an ordinary
+	// Service may select: "true" on exactly the members that serve -- the leader alone for a
+	// leader-served role, every rank-carrying member for an External-DP-shaped one -- and absent
+	// otherwise. Absence is the disqualification, so there is no "false" to misread.
+	//
+	// IT IS WRITTEN BY THE RECONCILER AT RUNTIME, never rendered: inside the template it would be
+	// part of the spec-hash and removing it to disqualify would roll the very replica a drain
+	// means to keep. The Pod's own identity labels above are rendered; this one is the reconciler's
+	// level-based answer to what the Pod is doing.
+	//
+	// IT IS BUILT FROM systemname.LabelPrefix like every label above, because it must be matchable
+	// by a Service selector in the same domain those selectors already name.
+	modelDeploymentLabelKeyEndpointEligible = "modeldeployment." + systemname.LabelPrefix + "endpoint-eligible"
+
+	// modelDeploymentEndpointEligibleValue is the only value the eligibility key carries. A label
+	// selector is a conjunction of equalities, so the term is present-or-absent; the value exists
+	// because a selector needs one, and "true" states what presence means.
+	modelDeploymentEndpointEligibleValue = "true"
 )
 
 // ModelDeploymentPodGroupMeta is the Kueue group metadata one replica's Pod carries.
@@ -155,6 +174,97 @@ func modelDeploymentRoleSize(role *workercore.ModelDeploymentRole) int {
 	}
 
 	return int(role.ReplicaSize)
+}
+
+// modelDeploymentAnsweringShape names which members of a replica can answer an in-flight read.
+//
+// IT IS ONE ENUM FOR TWO CALLERS THAT HOLD DIFFERENT FACTS. Endpoint eligibility reads the shape from
+// the role; the retirement drain reads it from the member Pods, because a replica whose role the spec
+// has already dropped has no role to read. They share this vocabulary and the function below so the
+// rule is written once, and neither caller can reinterpret what the other means by a shape.
+type modelDeploymentAnsweringShape int
+
+const (
+	// modelDeploymentAnsweringUnknown is a shape this operator could not establish. It never appears
+	// from the derivation, only from a drain that cannot agree with itself, and it holds.
+	modelDeploymentAnsweringUnknown modelDeploymentAnsweringShape = iota
+	// modelDeploymentAnsweringAll is an External-DP replica: every member carries a rank and runs its
+	// own engine listener, so every member answers.
+	modelDeploymentAnsweringAll
+	// modelDeploymentAnsweringLeader is a leader-served replica of several Pods: the followers join a
+	// collective and serve no metrics endpoint, so only the leader answers.
+	modelDeploymentAnsweringLeader
+	// modelDeploymentAnsweringSole is a replica of one Pod, which is its own leader.
+	modelDeploymentAnsweringSole
+)
+
+// modelDeploymentAnsweringShapeOf derives the shape from the only two facts that decide it.
+//
+// THE DERIVATION NEVER RETURNS UNKNOWN, because both inputs here are concrete: a caller that has not
+// established them does not call this. A drain that holds for not knowing the shape says so with its
+// own reason, and that reason names the disagreement rather than a shape nobody could read.
+func modelDeploymentAnsweringShapeOf(externalDP bool, size int) modelDeploymentAnsweringShape {
+	if externalDP {
+		return modelDeploymentAnsweringAll
+	}
+	if size <= 1 {
+		return modelDeploymentAnsweringSole
+	}
+
+	return modelDeploymentAnsweringLeader
+}
+
+// modelDeploymentAnsweringMemberLeader reports whether a Pod is the member a leader-served replica's
+// answer comes from.
+//
+// THE LABEL IS READ DIRECTLY AND NOT THROUGH modelDeploymentPodMemberIndex, and that is the whole
+// point of this function. That helper defaults a missing or unparsable label to the leader index,
+// which is right for a pre-label single-member Pod and catastrophic here: a multi-member replica with
+// no member-index labels would report EVERY member as the leader, and the selection would be the one
+// this protocol already gets wrong by reading every member.
+func modelDeploymentAnsweringMemberLeader(pod *core.Pod) bool {
+	index, ok := pod.Labels[modelDeploymentMemberIndexLabel]
+
+	return ok && index == strconvx.Itoa(modelDeploymentLeaderMemberIndex)
+}
+
+// modelDeploymentAnsweringMembers is the set of members whose answer stands for the replica, or the
+// reason no set can be named.
+//
+// EVERY FAILURE IS A HOLD WITH ITS SHAPE NAMED, because an operator reading a held reservation has to
+// be able to tell a replica whose leader is unidentifiable from one whose shape could not be read.
+func modelDeploymentAnsweringMembers(
+	shape modelDeploymentAnsweringShape, members []*core.Pod,
+) ([]*core.Pod, string) {
+	if shape == modelDeploymentAnsweringUnknown {
+		return nil, "the replica's shape could not be established, so no member can answer for it"
+	}
+
+	// External-DP and the single-member replica are both the whole set, and a sole replica is its own
+	// leader, so both shapes return every member. That is what makes a size-one replica byte-identical
+	// to a drain that walked the member set.
+	if shape == modelDeploymentAnsweringAll || shape == modelDeploymentAnsweringSole {
+		return members, ""
+	}
+
+	leaders := make([]*core.Pod, 0, 1)
+	for _, member := range members {
+		if modelDeploymentAnsweringMemberLeader(member) {
+			leaders = append(leaders, member)
+		}
+	}
+
+	switch len(leaders) {
+	case 1:
+		return leaders, ""
+	case 0:
+		return nil, "a leader-served replica of several Pods has no member carrying the leader index, " +
+			"so no member can answer for it"
+	default:
+		return nil, fmt.Sprintf(
+			"a leader-served replica of several Pods has %d members carrying the leader index, "+
+				"so no member can answer for it", len(leaders))
+	}
 }
 
 // ModelDeploymentPodGroup returns the group metadata for ONE member of ONE replica of a role: the

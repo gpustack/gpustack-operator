@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
@@ -76,6 +77,29 @@ type ModelDeploymentReconciler struct {
 	// today: the concrete per-engine reader is not written, and inventing a metric name would be the
 	// exact assumption the condition exists to refuse.
 	CacheScraper ModelDeploymentCacheScraper
+
+	// servingViewFetch reads one Router Pod's observer view. It is a function rather
+	// than a dial this reconciler makes, for the same reason CacheScraper is: the
+	// states the serving answer has to get right are failures, and a real dial cannot
+	// be made to fail on demand. A nil fetch means the production transport.
+	servingViewFetch routerViewFetch
+
+	// groupForwardFetch asks one member's engine whether the replica's forward path carries a
+	// request. A nil fetch means the production transport, and a member that cannot be asked is
+	// Unknown, which holds: the probe is only ever run to lift a hold, so a transport that cannot
+	// answer leaves the group exactly as held as it was before.
+	groupForwardFetch modelDeploymentGroupForwardFetch
+
+	// drainReader reads one member's engine in-flight activity for the retirement protocol. A nil
+	// reader is the production transport, which is a refusal until a collector lands behind the
+	// seam: the protocol then holds at Draining and deletes nothing, which is the safe direction
+	// for a measurement that does not exist yet.
+	drainReader modelDeploymentDrainReader
+
+	// clock reads the retirement protocol's budgets. It is a field rather than a call to time.Now
+	// so a test can place a phase's start and its expiry at moments of its choosing instead of
+	// waiting for them, which is the only way a budget assertion can be about the budget.
+	clock func() time.Time
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelDeploymentReconciler)(nil)
@@ -133,7 +157,11 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 			// Deleting rather than the last Ready it happened to reach. The Binding is deliberately
 			// not re-read: a teardown pass has no question to ask it, and the domain a replica is
 			// still writing into is the one that was last observed.
-			if err = r.syncModelDeploymentStatus(ctx, md, pods, nil, nil, nil); err != nil {
+			// A teardown pass evaluates no health predicate, so it passes no qualifications and
+			// the endpoint answer stays the unobserved one rather than a verdict this pass never made.
+			if err = r.syncModelDeploymentStatus(
+				ctx, md, pods, nil, nil, nil, nil,
+			); err != nil {
 				// The predicate drops status-only and metadata-only updates, so the change behind a
 				// conflict may deliver no event: requeue rather than wait for one.
 				return objectWriteResult(logger, err, "update model deployment status to deleting",
@@ -144,6 +172,19 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 				if pods[i].DeletionTimestamp != nil {
 					continue
 				}
+				// TEARDOWN IS DELIBERATELY NOT INTERCEPTED BY THE RETIREMENT RESERVATION, and this is
+				// where that decision is recorded so it reads as a decision rather than as a path
+				// somebody forgot. A reservation holds its replica so the retirement protocol can
+				// withdraw it cleanly, and that reason expires the moment the owner stops asking for the
+				// deployment to exist: a DeletionTimestamp is the owner taking everything, not a request
+				// to keep one replica serving. Holding capacity against it would also be a deadlock and
+				// not merely wrong, because the finalizer below is only released once the last replica
+				// has left, so a reservation refusing to let it leave would hold the object in Deleting
+				// forever with nothing erroring anywhere.
+				//
+				// The preStop hook remains the post-delete last line, which is the graceful part of
+				// this: a replica being torn down still drains its own engine on the way out. What is
+				// given up is the controller-side withdrawal protocol, for a deployment being removed.
 				if err = r.Client.Delete(ctx, &pods[i]); err != nil && !kerrors.IsNotFound(err) {
 					logger.Error(err, "delete replica", "pod", pods[i].Name)
 					return ctrl.Result{}, err
@@ -256,7 +297,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			return ctrl.Result{}, listErr
 		}
 
-		if err = r.syncModelDeploymentStatus(ctx, md, pods, domain, nil, weights); err != nil {
+		// The weights are still resolving, so this pass has not reached the replicas and makes no
+		// qualification claim; the endpoint answer stays unobserved until a pass that has.
+		if err = r.syncModelDeploymentStatus(
+			ctx, md, pods, domain, nil, weights, nil,
+		); err != nil {
 			// The predicate drops status-only updates, so the change behind a conflict may deliver
 			// no event: requeue rather than wait for one.
 			return objectWriteResult(logger, err, "sync status while the weights resolve", _requeueAfterConflict)
@@ -286,6 +331,28 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	if err != nil {
 		logger.Error(err, "list replicas")
 		return ctrl.Result{}, err
+	}
+
+	// THE RETIREMENT RESERVATION IS EVALUATED ONCE, HERE, BEFORE ANY DELETE DECISION IS TAKEN, and
+	// every path below consults the plan rather than the reservation. A path that read
+	// md.Status.Retirement itself would be re-deriving an answer the protocol has already reached,
+	// and the two answers could differ: this one has already advanced the state, applied the
+	// budget and resolved the target to live members, while a fresh read would see the state as it
+	// was written at the end of the last pass.
+	//
+	// WITH NO RESERVATION IN FLIGHT THIS IS THE EMPTY PLAN, and every path below then behaves
+	// exactly as it did before the protocol existed. That is the property the whole feature rests
+	// on, and it is asserted per path in the tests rather than stated here.
+	retirement := r.planModelDeploymentRetirement(ctx, md, actual)
+	// The state this pass reached is persisted HERE, before any delete decision, so the rest of the
+	// pass and the object's own status sync both see the operation as it now stands. It is a
+	// separate write rather than a field set on the object, because the pass's status sync compares
+	// the derived status with the observed one before writing and would find a field assigned in
+	// place already equal to itself.
+	if err = r.persistModelDeploymentRetirement(ctx, md, md.Status.Retirement, retirement); err != nil {
+		// The predicate drops status-only updates, so the change behind a conflict may deliver no
+		// event: requeue rather than wait for one.
+		return objectWriteResult(logger, err, "persist the retirement reservation", _requeueAfterConflict)
 	}
 
 	// A REPLICA IS A SCHEDULING UNIT OF ITS OWN: its Kueue group is the one-member group derived
@@ -343,7 +410,20 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 		role := modelDeploymentPodRole(pod)
 		if _, wanted := desired[role]; !wanted {
-			// Scaled away, or renamed by a role rename.
+			// Scaled away, or renamed by a role rename. THE REMOVAL IS HANDED TO THE RETIREMENT
+			// PROTOCOL RATHER THAN ISSUED, and the helper either starts the protocol on this pass
+			// or refuses the removal because an operation is already in flight. Either way the
+			// replica stays, and it stays counted: a scale-away is exactly the moment a withdrawal
+			// and a drain are worth paying for, and deleting the Pod here is the cut they exist to
+			// prevent.
+			if r.refuseModelDeploymentRemoval(ctx, md, retirement, pod, actual, nil) {
+				logger.V(3).Info("holding a replica of a role no longer in the spec for the retirement",
+					"pod", pod.Name)
+				liveByRole[role] = append(liveByRole[role], pod)
+
+				continue
+			}
+
 			logger.Info("removing replica of a role no longer in the spec", "pod", pod.Name)
 			if err = r.Client.Delete(ctx, pod); err != nil && !kerrors.IsNotFound(err) {
 				logger.Error(err, "delete replica", "pod", pod.Name)
@@ -367,6 +447,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// ordinal reads empty. A Member of a larger replica goes the same way, and its surviving
 		// Members are left short, which the rollout below turns over as a whole.
 		if pod.Status.Phase == core.PodFailed || pod.Status.Phase == core.PodSucceeded {
+			// A TERMINAL POD IS A DEPARTURE THIS OPERATOR DID NOT INITIATE, and one the retirement
+			// protocol cannot retain: the engine has already gone, and the reservation's targets no
+			// longer resolve. The hold is not consulted because there is nothing to hold, and the
+			// protocol learns of it on this same pass, where it records the termination instead of
+			// the clean abort a budget expiry would earn.
 			logger.Info("removing replica in a terminal phase",
 				"pod", pod.Name, "phase", pod.Status.Phase, "reason", pod.Status.Reason)
 			if err = r.Client.Delete(ctx, pod); err != nil && !kerrors.IsNotFound(err) {
@@ -402,11 +487,26 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// replica's Workload, and a serving group's finalizer is released by nothing else -- so without
 	// this the ordinal is held by a Pod that can never leave, and the create gate below never opens
 	// for it. The deletes above cover only what this pass itself sent away.
+	// A RESERVED MEMBER IS NEVER DEPARTING, so the sweep's own rule already protects it: a group
+	// with a member still standing keeps its Workload, and the reservation's target is standing by
+	// definition. That rule is the whole of the protection here, and it is enough: a reserved
+	// member terminated from outside reaches the reservation as an external termination, which the
+	// state machine observes and records, so this sweep has no need of the reservation to tell
+	// those two apart.
 	if err = r.releaseModelDeploymentStrandedWorkloads(ctx, md, actual); err != nil {
 		logger.Error(err, "release the workloads of replicas nothing here sent away")
 		return ctrl.Result{}, err
 	}
 
+	// THE PROTOCOL'S OWN DELETE IS ISSUED HERE, after the paths above have been held and before the
+	// per-role convergence, so the replica the operation is committed to removing goes on the pass
+	// that committed to it rather than a pass later. The convergence below then runs over a
+	// `retirement` that holds the same Pods it is looking at, and skips them for the same reason
+	// every other path does.
+	if err = r.commitModelDeploymentRetirement(ctx, md, retirement, actual); err != nil {
+		logger.Error(err, "delete the retired replica")
+		return ctrl.Result{}, err
+	}
 	// The convergence itself, one role at a time, and THE COUNT MOVES BEFORE THE CURRENCY: a role
 	// short of its declared count does not roll its outdated members in the same breath, because
 	// deleting from a set that is already short widens exactly the gap the create gate below is
@@ -430,6 +530,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	})
 
 	createOrdinals := make(map[string][]int, len(md.Spec.Roles))
+	// The ordinals this pass condemns for replacement, gathered here so the whole-group health
+	// predicate can ask "is this replica on its way out" from the same decision the rollout makes
+	// rather than from a second comparison that could reach a different answer.
+	replacedByRole := make(map[string]map[int]bool, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		live := liveByRole[role.Name]
@@ -459,7 +563,40 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		occupied := make(map[int]bool, declared)
 		orphans := 0
 		for _, pod := range live {
+			// A REPLICA THIS PASS MAY NOT REMOVE IS KEPT BEFORE ANY ARITHMETIC RUNS, and it is kept
+			// in `kept` rather than merely not removed. The two are not the same: `kept` is what the
+			// ordinals are read from and what the count is taken over, so a replica that were only
+			// excluded from `removed` would free the slot below and let the create gate build a
+			// second replica onto the ordinal the protocol is about to take. This is also what makes
+			// a scale to zero hold: the spec declares nothing, the ordinal is past the declared
+			// count, the protocol is admitted, and the capacity stays exactly where it is.
+			//
+			// The removal is handed to the protocol rather than issued, so a scale-down this pass
+			// is the START of a retirement rather than an instantaneous cut of a serving engine.
 			ordinal, ok := modelDeploymentPodOrdinal(pod)
+			keepHeld := func() {
+				kept = append(kept, pod)
+				if ok {
+					occupied[ordinal] = true
+				}
+			}
+
+			if retirement.holds(pod.UID) {
+				keepHeld()
+
+				continue
+			}
+			// A REMOVAL THE SPEC MAKES HERE IS HANDED TO THE PROTOCOL rather than issued, so a
+			// scale-down this pass is the START of a retirement rather than an instantaneous cut of
+			// a serving engine. The hand-off is only made for an ordinal the role no longer
+			// declares; everything else below is the ordinary classification.
+			if ok && ordinal >= declared &&
+				r.refuseModelDeploymentRemoval(ctx, md, retirement, pod, actual, nil) {
+				keepHeld()
+
+				continue
+			}
+
 			switch {
 			case !ok:
 				kept = append(kept, pod)
@@ -484,10 +621,23 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// own choosing on every pass.
 		if surplus := len(kept) - declaredPods; surplus > 0 {
 			shedSurplus := modelDeploymentSurplusReplicas(kept, want, surplus)
-			removed = append(removed, shedSurplus...)
-			kept = slices.DeleteFunc(kept, func(pod *core.Pod) bool {
-				return slices.Contains(shedSurplus, pod)
-			})
+			// THE SHED IS ONE DECISION AND IT IS NOT PARTLY TAKEN. The protocol is handed the
+			// whole set rather than the first member of it, because a replica is removed as a
+			// replica: shedding one member of a set the protocol is about to take as a whole would
+			// leave the group short, which Kueue composes no Workload for at all. A member with no
+			// ordinal is not admitted and not held, and is left to the rollout below.
+			if _, seated := modelDeploymentRetirementShedSeat(shedSurplus); seated &&
+				r.refuseModelDeploymentRemoval(ctx, md, retirement, shedSurplus[0], actual,
+					modelDeploymentShedMembers(shedSurplus)) {
+				logger.V(3).Info("holding a surplus shed for the retirement", "role", role.Name,
+					"members", len(shedSurplus))
+				occupied[modelDeploymentOrdinalOrFloor(shedSurplus[0])] = true
+			} else {
+				removed = append(removed, shedSurplus...)
+				kept = slices.DeleteFunc(kept, func(pod *core.Pod) bool {
+					return slices.Contains(shedSurplus, pod)
+				})
+			}
 		}
 
 		// Highest ordinal first, so the departures are logged -- and issued -- from the top down and
@@ -564,6 +714,17 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				continue
 			}
 
+			// A HELD REPLICA READS CURRENT WHATEVER ITS FINGERPRINT SAYS. It is on its way out on
+			// the protocol's own terms, and condemning it here as well would have the rollout compete
+			// with the protocol for the same replica: this pick takes the highest ordinal, so a held
+			// ordinal would be deleted by whichever of the two ran first and the protocol's careful
+			// withdrawal would have been spent on a Pod the rollout already took. Reading it current
+			// costs nothing -- the fingerprint is still compared for every other replica -- and it
+			// makes the two paths disjoint.
+			if retirement.holds(pod.UID) {
+				continue
+			}
+
 			outdatedByOrdinal[ordinal] = true
 		}
 
@@ -575,11 +736,25 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		seen := make(map[int]int, len(occupied))
 		for _, pod := range kept {
 			if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
+				if retirement.names(role.Name, ordinal) {
+					continue
+				}
 				seen[ordinal]++
 			}
 		}
 		incompleteByOrdinal := make(map[int]bool, len(occupied))
 		for ordinal := range occupied {
+			// AN ORDINAL THE RETIREMENT PROTOCOL OWNS IS NOT THIS RULE'S BUSINESS. The rollout
+			// condemns a replica whose members do not agree with the spec, and while a reservation
+			// is in flight the agreement is not yet decided -- the protocol is removing one member of
+			// a doubled ordinal, which leaves the ordinal looking over-complete to this rule for as
+			// long as the operation takes. Condemning it here would delete the whole ordinal, and
+			// with it the member the surplus rule existed to keep: the rollout would undo the
+			// surplus rule's careful choice with a blunter one, on a state the surplus rule had
+			// already resolved.
+			if retirement.names(role.Name, ordinal) {
+				continue
+			}
 			if seen[ordinal] != size {
 				outdatedByOrdinal[ordinal] = true
 				incompleteByOrdinal[ordinal] = true
@@ -592,6 +767,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			if outdatedByOrdinal[ordinal] {
 				rollout.outdated++
 				outdated = append(outdated, modelDeploymentReplicaMembers(kept, ordinal)...)
+				if replacedByRole[role.Name] == nil {
+					replacedByRole[role.Name] = make(map[int]bool)
+				}
+				replacedByRole[role.Name][ordinal] = true
 			}
 		}
 
@@ -823,6 +1002,20 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 					continue
 				}
 
+				// A SLOT THE RETIREMENT IS EMPTYING STAYS EMPTY until the operation ends. A held
+				// replica keeps itself counted as occupied above, so this only bites after the
+				// protocol's own delete has landed and the Pods are gone from the API server -- at
+				// which point the create gate would otherwise read the ordinal free and build a
+				// replacement onto it, one pass before the reservation is cleared. Filling the slot
+				// the operation is about to release is how a retirement turns into a rollout.
+				if retirement.Reservation != nil &&
+					retirement.Reservation.RoleName == role.Name &&
+					int(retirement.Reservation.ReplicaOrdinal) == ordinal {
+					requeue = true
+
+					continue
+				}
+
 				if taken.Has(modelDeploymentReplicaGroupName(md, role.Name, ordinal)) {
 					// The server holds a Pod for this ordinal the cached list does not account
 					// for: a create whose response was lost, or a departure still draining. The
@@ -837,6 +1030,14 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				createOrdinals[role.Name] = append(createOrdinals[role.Name], ordinal)
 			}
 		}
+	}
+
+	// A RUNNING OPERATION REQUEUES, and it is read HERE rather than beside the delete above because
+	// ADMISSION HAPPENS INSIDE THE LOOP JUST FINISHED. Nothing else wakes a deployment whose
+	// replica is merely waiting for a queue to empty or a Service to converge: no object changes
+	// while it waits, and the event that eventually matters is the one the operation is waiting for.
+	if retirement.InFlight {
+		requeue = true
 	}
 
 	// NO REPLICA IS CREATED WHILE THE WEIGHTS ARE BLOCKED, and none that runs is touched: a revoked
@@ -913,7 +1114,28 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		}
 	}
 
-	if err = r.syncModelDeploymentService(ctx, md); err != nil {
+	// The whole-group health predicate is evaluated ONCE here, before any Service or selector
+	// that carries the eligibility equality, and the same result serves both the label write
+	// below and the status written further down. Regrouping per replica twice is how two
+	// figures come to disagree about what a replica is, and a disagreement here would be silent:
+	// one of the two answers would drive selection and the other would be published.
+	groupForwardFetch := r.groupForwardFetch
+	if groupForwardFetch == nil {
+		groupForwardFetch = defaultGroupForwardFetch
+	}
+	qualifications := qualifyModelDeploymentInstances(
+		ctx, md, actual, modelDeploymentPendingReplacement{ordinals: replacedByRole},
+		groupForwardFetch,
+	)
+	qualificationByMember := modelDeploymentQualificationsByMember(qualifications)
+
+	eligibilityDecided := modelDeploymentQualificationsDecided(qualifications)
+
+	if err = r.convergeModelDeploymentEndpointEligibility(ctx, md, actual, qualificationByMember); err != nil {
+		logger.Error(err, "converge endpoint eligibility")
+		return ctrl.Result{}, err
+	}
+	if err = r.syncModelDeploymentService(ctx, md, eligibilityDecided); err != nil {
 		logger.Error(err, "sync service")
 		return ctrl.Result{}, err
 	}
@@ -921,7 +1143,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// the cause is projected onto the status written below, and returning here would skip the one
 	// write that says what is wrong. The error is still returned after that write, so the pass is
 	// retried exactly as if it had failed here.
-	routerErr := r.syncModelDeploymentRouter(ctx, md)
+	routerErr := r.syncModelDeploymentRouter(ctx, md, eligibilityDecided)
 	if routerErr != nil {
 		logger.Error(routerErr, "sync router")
 	}
@@ -936,7 +1158,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 	r.recordModelDeploymentDepartures(md, actual)
 
-	if err = r.syncModelDeploymentStatus(ctx, md, actual, domain, &rollout, weights); err != nil {
+	if err = r.syncModelDeploymentStatus(
+		ctx, md, actual, domain, &rollout, weights, qualifications,
+	); err != nil {
 		// The predicate drops status-only updates, so the change behind a conflict may deliver no
 		// event: requeue rather than wait for one. The requeued pass also retries a failed create
 		// or router sync, whose errors would otherwise be returned below.
@@ -1013,6 +1237,155 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
 	r.Recorder.Event(md, core.EventTypeWarning, modelDeploymentEventRuntimeVersionSkew, message)
 }
 
+// convergeModelDeploymentEndpointEligibility is the single write path of the eligibility label:
+// every pass re-derives, from the Pods as they exist now, which members serve and patches the key
+// onto exactly those, removing it from any member that stopped qualifying.
+//
+// IT RUNS BEFORE THE SERVICES CONVERGE, in the same pass, because the ordinary Services' selectors
+// carry the eligibility equality: the labels must be on the healthy members of a deployment that
+// predates the feature before any selector gains the term, or the first enable would zero every
+// ordinary Service's endpoints. For a tree already in the new shape the order costs nothing — the
+// pass re-derives what it finds and writes only what differs.
+//
+// THE KEY IS OUTSIDE EVERY RENDERED HASH. It is patched onto running Pods at runtime, never
+// rendered into the template, so gaining or losing it moves no generation, no UID, no stored
+// fingerprint and no replica — eligibility is the one lever that must move without a rollout.
+//
+// A CONFLICT IS OBSERVED STATE. Two writers would be two answers to one question, so nothing
+// else writes the key; a patch that loses a race with some other change fails the pass and the
+// next pass re-derives from what then exists. Nothing is written blind: the diff is computed
+// against the object as it was read.
+func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
+	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
+	qualificationByMember map[types.UID]modelDeploymentInstanceQualification,
+) error {
+	roles := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		roles[md.Spec.Roles[i].Name] = &md.Spec.Roles[i]
+	}
+
+	for i := range pods {
+		pod := &pods[i]
+		role := roles[modelDeploymentPodRole(pod)]
+		if role == nil {
+			continue
+		}
+
+		qualification, evaluated := qualificationByMember[pod.UID]
+		eligible := modelDeploymentPodEligible(md, role, pod, qualification, evaluated)
+		carried := pod.Labels[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue
+		if eligible == carried {
+			continue
+		}
+
+		patched := pod.DeepCopy()
+		if eligible {
+			patched.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		} else {
+			delete(patched.Labels, modelDeploymentLabelKeyEndpointEligible)
+		}
+		if err := r.Client.Patch(ctx, patched, ctrlcli.MergeFrom(pod)); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// modelDeploymentPodEligible is the member rule: a Pod's endpoints may be selected exactly when
+// the whole group it belongs to qualifies and the member itself is one the shape lets answer.
+//
+// THE GROUP IS THE UNIT, NOT THE MEMBER. A replica whose members do not all qualify serves
+// nothing, so a member that is up beside a peer that is down is not a working member of anything
+// and must not be selectable on its own account.
+//
+// WITHDRAWAL IS NOT GATED AND RESTORE IS. Every leg that reports a DEFINITE fault removes the key
+// whatever the group predicate can or cannot see, because a broken group needs no further
+// evidence and a fault that could be masked behind a missing observation would be the one fault
+// worth masking. Restoring is the opposite: putting an endpoint back into selection is the act
+// that must not happen on a signal weaker than the spec requires, so when the group predicate is
+// unavailable the reconciler leaves the key exactly as it found it and the status reports why.
+//
+// THE PER-MEMBER SHAPE TERMS ARE UNCHANGED. Which members answer is still the shape's decision:
+// every rank-carrying member of an External-DP role, only the leader of a leader-served role, and
+// the whole replica at size one. Nothing here widens or narrows that.
+func modelDeploymentPodEligible(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, pod *core.Pod,
+	qualification modelDeploymentInstanceQualification, evaluated bool,
+) bool {
+	// The unconditional half: a member that stopped being ready leaves the pool, and it does so
+	// whether or not this operator can say anything about the group.
+	if !podIsReady(pod) {
+		return false
+	}
+	if !evaluated {
+		// A PASS THAT EVALUATED NO PREDICATE LEAVES THE KEY ALONE, in either direction. The passes
+		// that return before the predicate is built are the ones that pass no qualifications, and
+		// a member missing from the map is a member whose group was never looked at. Reading the
+		// zero value as an empty, therefore eligible, leg set would grant eligibility on no
+		// evidence at all.
+		return pod.Labels[modelDeploymentLabelKeyEndpointEligible] ==
+			modelDeploymentEndpointEligibleValue
+	}
+	if !qualification.Activated() {
+		// A DEFINITE FAULT WITHDRAWS THROUGH THE GATE. The gate is about RESTORE only: a group this
+		// operator cannot verify says nothing about whether a member is healthy, so a key already on
+		// one is left there, but a member the predicate has positively found faulted is taken out of
+		// the pool whatever the group's own leg says. Returning the carried value unconditionally
+		// would leave a NotReady member selectable inside the very replica that is unverifiable.
+		if qualification.HasFailure() {
+			return false
+		}
+		// Nothing to revoke on, and nothing may be restored. The key is left exactly as it was,
+		// which is what makes a first enable over a deployment whose engine cannot be verified
+		// leave existing routing untouched rather than narrow it.
+		return pod.Labels[modelDeploymentLabelKeyEndpointEligible] ==
+			modelDeploymentEndpointEligibleValue
+	}
+	if qualification.HasFailure() {
+		return false
+	}
+	if !qualification.Eligible() {
+		return false
+	}
+
+	// WHICH MEMBERS ANSWER IS THE SHAPE'S DECISION, and it is the one derivation the retirement drain
+	// also uses. This reader happens to hold the role, so it reads the facts from there; the drain
+	// holds the members instead and reads the same facts from the Pods the role rendered. Sharing
+	// the derivation is what keeps the two from answering "which members serve" differently.
+	shape := modelDeploymentAnsweringShapeOf(
+		modelDeploymentRoleExternalDP(md, role), modelDeploymentRoleSize(role))
+	if shape == modelDeploymentAnsweringAll || shape == modelDeploymentAnsweringSole {
+		return true
+	}
+
+	return modelDeploymentAnsweringMemberLeader(pod)
+}
+
+// modelDeploymentRoleExternalDP reads the role's own argument stream for its balance shape: the
+// shapes in which every member carries a rank and answers are the External-DP shapes. The read is
+// the same one the status and the size check make, so three readers cannot disagree about what a
+// role's shape is.
+func modelDeploymentRoleExternalDP(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	reading, err := scanModelDeploymentParallelism(
+		md.Spec.Engine.Name, role.ExtraArgs, role.Env,
+	)
+	if err != nil {
+		// A scan error answers leader-only. Admission parses the same stream, so the two
+		// readers are expected to agree; if they ever diverge this default would narrow an
+		// External-DP role to its leader without any signal. Surfacing the error instead is
+		// an accepted error-path semantics change, deliberately kept for a reviewed change.
+		return false
+	}
+	shape, _ := modelDeploymentLoadBalance(reading.declared.Wiring)
+
+	return shape == workercore.ModelDeploymentLoadBalanceExternal ||
+		shape == workercore.ModelDeploymentLoadBalanceHybrid ||
+		shape == workercore.ModelDeploymentLoadBalanceMultiPort
+}
+
 // syncModelDeploymentService converges every Service the deployment owns: the one it is reached
 // through, and one per role.
 //
@@ -1021,9 +1394,39 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
 // a Service is NOT rebuilt when the group is: the group's shape decides which Pods exist, and the
 // address they answer on must survive that.
 func (r *ModelDeploymentReconciler) syncModelDeploymentService(
-	ctx context.Context, md *workercore.ModelDeployment,
+	ctx context.Context, md *workercore.ModelDeployment, eligibilityDecided bool,
 ) error {
 	rendered := renderModelDeploymentServices(md, r.modelDeploymentRoleManufacturers(ctx, md))
+	// RETENTION: an eligibility term a previous pass narrowed onto a live Service is cluster
+	// state this pass must not un-write just because the newest observation went quiet. Enrich
+	// the rendered expectation from the live object; the static activatability half still
+	// governs, so a shape that stopped being activatable loses the term on this pass.
+	liveServices := new(core.ServiceList)
+	if err := r.Client.List(ctx, liveServices,
+		ctrlcli.InNamespace(md.Namespace),
+		ctrlcli.MatchingLabels{
+			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+			modelDeploymentLabelKeyInstance: md.Name,
+		}); err != nil {
+		return err
+	}
+	liveByName := make(map[string]*core.Service, len(liveServices.Items))
+	for i := range liveServices.Items {
+		liveByName[liveServices.Items[i].Name] = &liveServices.Items[i]
+	}
+	for i := range rendered {
+		live := liveByName[rendered[i].GetName()]
+		if live == nil {
+			continue
+		}
+		role := modelDeploymentServiceRoleOf(md, rendered[i].GetName())
+		if role == nil {
+			continue
+		}
+		if modelDeploymentEligibilitySelectorActive(md, role, live.Spec.Selector, eligibilityDecided) {
+			modelDeploymentSelectEligibleEndpoints(rendered[i])
+		}
+	}
 	expected := make([]ctrlcli.Object, len(rendered))
 	for i := range rendered {
 		expected[i] = rendered[i]
@@ -1045,6 +1448,24 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentService(
 		ModelDeploymentResourceNoteRole,
 		"service",
 	)
+}
+
+// modelDeploymentServiceRoleOf resolves which role a rendered Service was rendered for: the
+// front Service names the deployment itself and fronts the first role; a role Service is named
+// deployment-role.
+func modelDeploymentServiceRoleOf(
+	md *workercore.ModelDeployment, serviceName string,
+) *workercore.ModelDeploymentRole {
+	if serviceName == md.Name {
+		return &md.Spec.Roles[0]
+	}
+	for i := range md.Spec.Roles {
+		if serviceName == md.Name+"-"+md.Spec.Roles[i].Name {
+			return &md.Spec.Roles[i]
+		}
+	}
+
+	return nil
 }
 
 // syncModelDeploymentOwnedChildren creates, aligns and prunes one kind of rendered child.
@@ -1711,10 +2132,43 @@ func modelDeploymentOwnedResource(obj ctrlcli.Object) bool {
 		systemmeta.DescribeResourceNote(obj, modelDeploymentResourceNoteRouter) != ""
 }
 
-func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
+func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
 	r.APIReader = opts.Manager.GetAPIReader()
 	r.Recorder = opts.Manager.GetEventRecorderFor("modeldeployment")
+
+	// The drain reader resolves one member by its UID, and a UID is not a field the cache can be
+	// asked for without an index. Registering it here, before the manager is started, is what keeps
+	// the lookup one cache read instead of a sweep of every Pod in the cluster on every read of
+	// every member of every retiring replica.
+	err := opts.Manager.GetFieldIndexer().IndexField(ctx, &core.Pod{}, modelDeploymentDrainIndexPodUID,
+		func(obj ctrlcli.Object) []string {
+			if obj == nil {
+				return nil
+			}
+			pod := obj.(*core.Pod)
+			if pod.UID == "" {
+				return nil
+			}
+			return []string{string(pod.UID)}
+		})
+	if err != nil {
+		return fmt.Errorf("index pod by uid for the drain reader: %w", err)
+	}
+
+	// THE EXEC TRANSPORT IS BUILT HERE AND NOWHERE ELSE, so the reader a production pass resolves
+	// is the one wired below and not the refusal the seam falls back to. A nil reader is the
+	// refusal; this is what replaces it.
+	coreClient, err := corev1client.NewForConfig(opts.Manager.GetConfig())
+	if err != nil {
+		return fmt.Errorf("build core client for the drain reader: %w", err)
+	}
+	// THE MANAGER'S API READER IS THE AUTHORITY, and the cached client is the locator. Every fact the
+	// drain acts on is read live before and after the exec, because a controller that reads its own
+	// cache cannot tell a member that restarted from one that merely looks the same.
+	r.drainReader = newModelDeploymentDrainCollector(
+		r.Client, opts.Manager.GetAPIReader(), opts.Manager.GetConfig(), coreClient,
+	)
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("modeldeployment").

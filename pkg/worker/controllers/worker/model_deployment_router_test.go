@@ -54,7 +54,7 @@ func routerObjectsAsClients(objects ModelDeploymentRouterObjects) []ctrlcli.Obje
 
 func TestRenderModelDeploymentRouterObjects_OwnedAndDiscoverable(t *testing.T) {
 	md := routedModelDeployment()
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	for _, object := range routerObjectsAsClients(objects) {
@@ -140,7 +140,7 @@ func TestRenderModelDeploymentRouterObjects_BothSelectorsSelectOnlyThePodsThatAn
 				}
 			})
 
-			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 			require.NoError(t, err)
 
 			discovery, err := labels.Parse(objects.ConfigMap.Data[modelDeploymentRouterSelectorKey])
@@ -153,7 +153,9 @@ func TestRenderModelDeploymentRouterObjects_BothSelectorsSelectOnlyThePodsThatAn
 
 			// One member of ordinal zero per declared size, rendered and stamped the way the
 			// converger renders them, so the selectors are matched against what would run rather
-			// than against labels a test wrote by hand.
+			// than against labels a test wrote by hand. The answering member also carries the
+			// eligibility label the reconciler writes at runtime — a member the selectors may
+			// reach is by definition one it has marked eligible.
 			renderMember := func(roleIndex, member int) *core.Pod {
 				t.Helper()
 
@@ -162,6 +164,9 @@ func TestRenderModelDeploymentRouterObjects_BothSelectorsSelectOnlyThePodsThatAn
 				})
 				require.NoError(t, err)
 				stampModelDeploymentPod(pod, md, &md.Spec.Roles[roleIndex], 0, member)
+				if member == 0 {
+					pod.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+				}
 
 				return pod
 			}
@@ -198,7 +203,7 @@ func TestRenderModelDeploymentRouterObjects_BothSelectorsSelectOnlyThePodsThatAn
 }
 
 func TestRenderModelDeploymentRouterObjects_PodStaysOutsideAdmission(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil, false)
 	require.NoError(t, err)
 
 	pod := objects.Deployment.Spec.Template
@@ -209,11 +214,35 @@ func TestRenderModelDeploymentRouterObjects_PodStaysOutsideAdmission(t *testing.
 	}
 }
 
+// TestRenderModelDeploymentRouterObjects_SelectsEligibleEndpoints pins the eligibility term in
+// both surfaces a router is configured from: the published per-role selector and the discovery
+// equalities the router's own configuration is derived from. While a member carries no eligibility
+// label no selector here may match it, and a restored label puts every one of them back.
+func TestRenderModelDeploymentRouterObjects_SelectsEligibleEndpoints(t *testing.T) {
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil, false)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, objects.Contract.Roles)
+	// A prefill/decode pair is a shape whose group-forward capability never activates, so its
+	// published selectors keep the routing a deployment had before first enable: no eligibility
+	// term, because a term no pass would ever satisfy selects zero endpoints forever.
+	for _, role := range objects.Contract.Roles {
+		require.NotNil(t, role.Selector, "%s", role.Name)
+		_, has := role.Selector[modelDeploymentLabelKeyEndpointEligible]
+		assert.False(t, has,
+			"a never-activating role's published selector must not demand a label no pass writes (%s)", role.Name)
+	}
+
+	config := objects.ConfigMap.Data[modelDeploymentRouterConfigKey]
+	assert.NotContains(t, config, modelDeploymentLabelKeyEndpointEligible+"="+modelDeploymentEndpointEligibleValue,
+		"the discovery equalities preserve legacy routing for a never-activating shape")
+}
+
 func TestRenderModelDeploymentRouterObjects_ConfigHashIsDeterministic(t *testing.T) {
 	md := routedModelDeployment()
-	first, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	first, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
-	second, err := renderModelDeploymentRouterObjects(context.Background(), md.DeepCopy(), nil)
+	second, err := renderModelDeploymentRouterObjects(context.Background(), md.DeepCopy(), nil, false)
 	require.NoError(t, err)
 
 	assert.Equal(t, first.ConfigMap.Data, second.ConfigMap.Data)
@@ -222,11 +251,11 @@ func TestRenderModelDeploymentRouterObjects_ConfigHashIsDeterministic(t *testing
 
 func TestRenderModelDeploymentRouterObjects_RoleOrderDoesNotChangeTokenizer(t *testing.T) {
 	md := routedModelDeployment()
-	before, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	before, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	md.Spec.Roles[0], md.Spec.Roles[1] = md.Spec.Roles[1], md.Spec.Roles[0]
-	after, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	after, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	assert.Equal(t, before.ConfigMap.Data, after.ConfigMap.Data)
@@ -245,12 +274,12 @@ func TestHashRouterConfig_IgnoresMapInsertionOrder(t *testing.T) {
 
 func TestRenderModelDeploymentRouterObjects_ScalingDoesNotRoll(t *testing.T) {
 	md := routedModelDeployment()
-	before, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	before, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	md.Spec.Roles[0].Replicas++
 	md.Spec.Roles[1].Replicas += 2
-	after, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	after, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	assert.Equal(t, before.ConfigMap.Data, after.ConfigMap.Data)
@@ -261,11 +290,11 @@ func TestRenderModelDeploymentRouterObjects_ScalingDoesNotRoll(t *testing.T) {
 
 func TestRenderModelDeploymentRouterObjects_ConfigChangeMovesTheHash(t *testing.T) {
 	md := routedModelDeployment()
-	before, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	before, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	md.Spec.Router.ExtraArgs = []string{"--zap-log-level=debug"}
-	after, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	after, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	assert.NotEqual(t,
@@ -275,7 +304,7 @@ func TestRenderModelDeploymentRouterObjects_ConfigChangeMovesTheHash(t *testing.
 }
 
 func TestRenderModelDeploymentRouterObjects_CarriesEngineContracts(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil, false)
 	require.NoError(t, err)
 
 	config := objects.ConfigMap.Data[modelDeploymentRouterConfigKey]
@@ -298,7 +327,7 @@ func TestRenderModelDeploymentRouterObjects_MetricsUseServingPort(t *testing.T) 
 			md.Spec.Roles[i].Ports = []workercore.ModelDeploymentPort{{Port: 8100}}
 		}
 	})
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	assert.Contains(t, objects.ConfigMap.Data[modelDeploymentRouterConfigKey], "port: 8100")
@@ -314,7 +343,7 @@ func TestRenderModelDeploymentRouterObjects_MetricsScrape(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			md := routedModelDeployment()
 			md.Spec.Router.Name = name
-			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 			require.NoError(t, err)
 			annotations := objects.Deployment.Spec.Template.Annotations
 			assert.Equal(t, "true", annotations["prometheus.io/scrape"])
@@ -339,7 +368,7 @@ func TestRenderModelDeploymentRouterObjects_RefusesDifferentServingPorts(t *test
 		md.Spec.Roles[1].Ports = []workercore.ModelDeploymentPort{{Port: 8100}}
 	})
 
-	_, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	_, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.EqualError(t, err, "router requires every role to use the same serving port; got [8000 8100]")
 }
 
@@ -354,17 +383,17 @@ func TestRenderModelDeploymentRouterObjects_TargetsThePortTheEngineOpens(t *test
 		}
 	})
 
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, "9100", objects.ConfigMap.Data[modelDeploymentRouterTargetPortsKey])
 
 	md.Spec.Roles[1].ExtraArgs = nil
-	_, err = renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	_, err = renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.EqualError(t, err, "router requires every role to use the same serving port; got [8000 9100]")
 }
 
 func TestRenderModelDeploymentRouterObjects_ProbesBothRouterContainers(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil, false)
 	require.NoError(t, err)
 
 	envoy := objects.Deployment.Spec.Template.Spec.Containers[0]
@@ -388,7 +417,7 @@ func TestRenderModelDeploymentRouterObjects_PullPolicyReachesBothContainers(t *t
 	md := routedModelDeployment()
 	md.Spec.Router.ImagePullPolicy = core.PullAlways
 
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	containers := objects.Deployment.Spec.Template.Spec.Containers
@@ -410,7 +439,7 @@ func TestRenderModelDeploymentRouterObjects_PullPolicyIsResolvedWhenUndeclared(t
 	md := routedModelDeployment()
 	md.Spec.Router.ImagePullPolicy = ""
 
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	containers := objects.Deployment.Spec.Template.Spec.Containers
@@ -422,7 +451,7 @@ func TestRenderModelDeploymentRouterObjects_PullPolicyIsResolvedWhenUndeclared(t
 }
 
 func TestRenderModelDeploymentRouterObjects_CarriesRuntimeIdentityAndStreamingTrailers(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil, false)
 	require.NoError(t, err)
 
 	epp := objects.Deployment.Spec.Template.Spec.Containers[1]
@@ -466,7 +495,7 @@ func TestRenderModelDeploymentRouterObjects_CarriesRuntimeIdentityAndStreamingTr
 // "fix", and because neither flag is reachable through extraArgs -- so flipping one here would be
 // the only way it could happen, and it would happen silently.
 func TestRenderModelDeploymentRouterObjects_KeepsTrafficManagementEastWest(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil, false)
 	require.NoError(t, err)
 
 	epp := objects.Deployment.Spec.Template.Spec.Containers[1]
@@ -479,7 +508,7 @@ func TestRenderModelDeploymentRouterObjects_UnmanagedProducerPublishesNoKVEvents
 		md.Spec.Roles[0].Command = []string{"vllm", "serve", "custom-model"}
 	})
 
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	assert.Nil(t, objects.Contract.Roles[0].KVEvents)
@@ -489,7 +518,7 @@ func TestRenderModelDeploymentRouterObjects_EndpointUsesRouterTransport(t *testi
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].ExtraArgs = []string{"--ssl-keyfile=/tls/key.pem"}
 	})
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	assert.Equal(t, "http://qwen-router.team-a.svc:8081", objects.Contract.Endpoint)
@@ -657,7 +686,7 @@ func TestRenderModelDeploymentRouterObjects_NamesTheProgramToRun(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			objects, err := renderModelDeploymentRouterObjects(context.Background(), c.md, nil)
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), c.md, nil, false)
 			require.NoError(t, err)
 
 			commands := map[string][]string{}
@@ -724,7 +753,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			objects, err := renderModelDeploymentRouterObjects(context.Background(), c.md, nil)
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), c.md, nil, false)
 			require.NoError(t, err)
 
 			images := map[string]string{}
@@ -761,6 +790,8 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 // digests the failures print.
 func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
+		// The digests moved once when the eligibility equality joined the discovery selector
+		// (the endpoint-eligible term a reconciler writes at runtime); they are pinned again here.
 		"a prefill and decode pair": "4e62baa7a1935f66946a863ee730e551cd23a4f8ffe677051b47e2bf58f8b9a4",
 		"a sole server role":        "052c5cc61b6c6b2c313c8cc743f070dcc9e5eaa2f8cf197ad52affa3fa8dc0cc",
 		"a router declaring its own image, policy, replicas and extra arguments": "a3eb0fce558ed09aa0f41e6b57cf7e9777bc169ed48709a0f2647064532c43cc",
@@ -814,7 +845,7 @@ func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSpli
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			objects, err := renderModelDeploymentRouterObjects(
-				context.Background(), tc.md, tc.manufacturers)
+				context.Background(), tc.md, tc.manufacturers, false)
 			require.NoError(t, err)
 			for i := range objects.Contract.Roles {
 				kind := ModelDeploymentEffectiveRoleKind(&tc.md.Spec.Roles[i])
@@ -908,7 +939,7 @@ func TestRenderModelDeploymentRouterObjects_ArgvRouterRendersNoConfigMap(t *test
 		md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 	})
 
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
 	assert.Nil(t, objects.ConfigMap)
@@ -960,7 +991,7 @@ func TestRenderModelDeploymentRouterObjects_TheGatewayAndTheEngineReadOneField(t
 	// And the other end names nothing, which is what makes the engine's value the only one: the
 	// gateway routes by what workers registered, so a name rendered here would be a second source
 	// for one answer.
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 	require.Len(t, objects.Deployment.Spec.Template.Spec.Containers, 1)
 	for _, arg := range objects.Deployment.Spec.Template.Spec.Containers[0].Args {
@@ -992,7 +1023,7 @@ func TestRenderModelDeploymentRouterObjects_MetricsContractIsThePickersAlone(t *
 				md.Spec.Engine.Name = c.engine
 			})
 
-			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 			require.NoError(t, err)
 
 			if c.want {
@@ -1022,7 +1053,7 @@ func TestRenderModelDeploymentRouterObjects_ProxyTemplateIsAssertedOnItsRendered
 			md.Spec.Router.RequestTimeoutSeconds = ptr.To(int32(90))
 		})
 
-		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 		require.NoError(t, err)
 
 		envoy := objects.ConfigMap.Data[modelDeploymentRouterEnvoyConfigKey]
@@ -1034,7 +1065,7 @@ func TestRenderModelDeploymentRouterObjects_ProxyTemplateIsAssertedOnItsRendered
 
 	t.Run("unset keeps the proxy's own day", func(t *testing.T) {
 		objects, err := renderModelDeploymentRouterObjects(
-			context.Background(), routedModelDeployment(), nil)
+			context.Background(), routedModelDeployment(), nil, false)
 		require.NoError(t, err)
 
 		envoy := objects.ConfigMap.Data[modelDeploymentRouterEnvoyConfigKey]
@@ -1045,7 +1076,7 @@ func TestRenderModelDeploymentRouterObjects_ProxyTemplateIsAssertedOnItsRendered
 
 	t.Run("the access log names the endpoint beside the outcome", func(t *testing.T) {
 		objects, err := renderModelDeploymentRouterObjects(
-			context.Background(), routedModelDeployment(), nil)
+			context.Background(), routedModelDeployment(), nil, false)
 		require.NoError(t, err)
 
 		envoy := objects.ConfigMap.Data[modelDeploymentRouterEnvoyConfigKey]
@@ -1077,7 +1108,7 @@ func TestRenderModelDeploymentRouterObjects_TimeoutAndThresholdReachTheirOwnRout
 			md.Spec.Router.RequestTimeoutSeconds = ptr.To(int32(90))
 		})
 
-		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 		require.NoError(t, err)
 		require.Len(t, objects.Deployment.Spec.Template.Spec.Containers, 1)
 		assert.Contains(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args,
@@ -1089,7 +1120,7 @@ func TestRenderModelDeploymentRouterObjects_TimeoutAndThresholdReachTheirOwnRout
 			md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 		})
 
-		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 		require.NoError(t, err)
 		for _, arg := range objects.Deployment.Spec.Template.Spec.Containers[0].Args {
 			assert.NotContains(t, arg, "--request-timeout-secs",
@@ -1111,7 +1142,7 @@ func TestRenderModelDeploymentRouterObjects_TimeoutAndThresholdReachTheirOwnRout
 				md.Spec.Router.DisaggregationThresholdTokens = tc.threshold
 			})
 
-			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 			require.NoError(t, err)
 			assert.Contains(t, objects.ConfigMap.Data[modelDeploymentRouterConfigKey], tc.want)
 		})

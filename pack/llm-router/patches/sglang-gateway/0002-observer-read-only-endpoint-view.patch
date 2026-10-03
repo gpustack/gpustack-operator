@@ -1,0 +1,525 @@
+Read native registry and effective circuit state without changing request routing state.
+An unstable SGLang circuit sample refuses the complete view.
+
+diff --git a/sgl-model-gateway/src/core/circuit_breaker.rs b/sgl-model-gateway/src/core/circuit_breaker.rs
+index aed00f6..d651dc2 100644
+--- a/sgl-model-gateway/src/core/circuit_breaker.rs
++++ b/sgl-model-gateway/src/core/circuit_breaker.rs
+@@ -1,3 +1,5 @@
++#[cfg(test)]
++use std::sync::atomic::AtomicBool;
+ use std::{
+     sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering},
+     time::{Duration, Instant},
+@@ -113,6 +115,8 @@ pub struct CircuitBreaker {
+     last_state_change_ms: AtomicU64,
+     config: CircuitBreakerConfig,
+     metric_label: String,
++    #[cfg(test)]
++    observer_test_change: AtomicBool,
+ }
+
+ impl CircuitBreaker {
+@@ -135,6 +139,8 @@ impl CircuitBreaker {
+             last_state_change_ms: AtomicU64::new(now_ms()),
+             config,
+             metric_label,
++            #[cfg(test)]
++            observer_test_change: AtomicBool::new(false),
+         }
+     }
+
+@@ -200,6 +206,65 @@ impl CircuitBreaker {
+         current_state
+     }
+
++    /// Read the effective state without changing native routing state.
++    pub fn observe_effective(&self) -> Option<CircuitState> {
++        let before_state_int = self.state.load(Ordering::Acquire);
++        let before_change_ms = self.last_state_change_ms.load(Ordering::Acquire);
++        let elapsed_ms = now_ms().saturating_sub(before_change_ms);
++        let timeout_ms = self.config.timeout_duration.as_millis() as u64;
++        let effective = match CircuitState::from_int(before_state_int) {
++            CircuitState::Open if elapsed_ms >= timeout_ms => CircuitState::HalfOpen,
++            other => other,
++        };
++        #[cfg(test)]
++        if self.observer_test_change.swap(false, Ordering::AcqRel) {
++            self.last_state_change_ms.fetch_add(1, Ordering::AcqRel);
++        }
++        let after_state_int = self.state.load(Ordering::Acquire);
++        let after_change_ms = self.last_state_change_ms.load(Ordering::Acquire);
++        if after_state_int != before_state_int || after_change_ms != before_change_ms {
++            return None;
++        }
++        Some(effective)
++    }
++
++    #[cfg(test)]
++    pub(crate) fn observer_raw_snapshot(&self) -> (u8, u64, u32, u32, u64, u64, u64) {
++        (
++            self.state.load(Ordering::Acquire),
++            self.last_state_change_ms.load(Ordering::Acquire),
++            self.consecutive_failures.load(Ordering::Acquire),
++            self.consecutive_successes.load(Ordering::Acquire),
++            self.total_failures.load(Ordering::Acquire),
++            self.total_successes.load(Ordering::Acquire),
++            self.last_failure_time_ms.load(Ordering::Acquire),
++        )
++    }
++
++    #[cfg(test)]
++    pub(crate) fn observer_prepare_state(&self, state: CircuitState) {
++        self.state.store(state.to_int(), Ordering::Release);
++        self.consecutive_failures.store(
++            if state == CircuitState::Open { 3 } else { 0 },
++            Ordering::Release,
++        );
++        self.consecutive_successes.store(
++            if state == CircuitState::HalfOpen {
++                1
++            } else {
++                0
++            },
++            Ordering::Release,
++        );
++        self.total_failures.store(5, Ordering::Release);
++        self.total_successes.store(7, Ordering::Release);
++    }
++
++    #[cfg(test)]
++    pub(crate) fn observer_change_input_during_next_read(&self) {
++        self.observer_test_change.store(true, Ordering::Release);
++    }
++
+     /// Record the outcome of a request
+     pub fn record_outcome(&self, success: bool) {
+         if success {
+@@ -399,6 +464,8 @@ impl Clone for CircuitBreaker {
+             last_state_change_ms: AtomicU64::new(self.last_state_change_ms.load(Ordering::Acquire)),
+             config: self.config.clone(),
+             metric_label: self.metric_label.clone(),
++            #[cfg(test)]
++            observer_test_change: AtomicBool::new(false),
+         }
+     }
+ }
+diff --git a/sgl-model-gateway/src/core/job_queue.rs b/sgl-model-gateway/src/core/job_queue.rs
+index 1dfc59f..46aaaca 100644
+--- a/sgl-model-gateway/src/core/job_queue.rs
++++ b/sgl-model-gateway/src/core/job_queue.rs
+@@ -415,6 +415,23 @@ impl JobQueue {
+         self.status_map.get(worker_url).map(|entry| entry.clone())
+     }
+ 
++    /// Read-only occupancy snapshot of the per-URL lanes, for the external
++    /// observer: one `(url, busy, waiting)` triple per live lane. Reading never
++    /// mutates a lane and never touches the dispatcher; iteration order follows
++    /// the internal map and is not specified.
++    pub fn lane_occupancy(&self) -> Vec<(String, bool, usize)> {
++        self.url_lanes
++            .iter()
++            .map(|entry| {
++                (
++                    entry.key().clone(),
++                    entry.value().busy,
++                    entry.value().waiting.len(),
++                )
++            })
++            .collect()
++    }
++
+     /// Remove job status (called when worker is deleted)
+     pub fn remove_status(&self, worker_url: &str) {
+         self.status_map.remove(worker_url);
+diff --git a/sgl-model-gateway/src/lib.rs b/sgl-model-gateway/src/lib.rs
+index a4ee2e7..0c9171f 100644
+--- a/sgl-model-gateway/src/lib.rs
++++ b/sgl-model-gateway/src/lib.rs
+@@ -8,6 +8,7 @@ pub mod mcp;
+ pub mod middleware;
+ pub mod multimodal;
+ pub mod observability;
++pub mod observer;
+ pub mod policies;
+ pub mod protocols;
+ pub mod reasoning_parser;
+diff --git a/sgl-model-gateway/src/observer.rs b/sgl-model-gateway/src/observer.rs
+new file mode 100644
+index 0000000..298c27f
+--- /dev/null
++++ b/sgl-model-gateway/src/observer.rs
+@@ -0,0 +1,360 @@
++// Read native registry membership and effective circuit state without changing routing.
++// The selection fields use the native health and circuit predicates.
++// Pod hints are address echoes; the operator binds them to Kubernetes identities.
++// Boot generation is initialized once per process. The view revision changes when
++// the serialized worker array differs from the preceding observer response.
++use std::collections::BTreeMap;
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::sync::{Arc, Mutex, OnceLock};
++use std::time::{SystemTime, UNIX_EPOCH};
++
++use axum::extract::State;
++use axum::http::{HeaderMap, StatusCode};
++use axum::response::{IntoResponse, Response};
++use serde::Serialize;
++
++use crate::app_context::AppContext;
++use crate::core::circuit_breaker::CircuitState as CircuitBreakerState;
++use crate::core::worker::Worker;
++use crate::server::AppState;
++
++/// Process start time in milliseconds. Constant for the life of the process and different
++/// after every restart, which is the property a boot generation needs.
++fn boot_generation() -> u64 {
++    static BOOT: OnceLock<u64> = OnceLock::new();
++    *BOOT.get_or_init(|| {
++        SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .map(|d| d.as_millis() as u64)
++            .unwrap_or(0)
++    })
++}
++
++fn now_ms() -> u64 {
++    SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|d| d.as_millis() as u64)
++        .unwrap_or(0)
++}
++
++#[derive(Serialize)]
++struct ObserverRouter {
++    boot_generation: u64,
++    now_ms: u64,
++}
++
++#[derive(Serialize)]
++struct ObserverLane {
++    busy: bool,
++    waiting: usize,
++}
++
++#[derive(Serialize)]
++struct ObserverSelection {
++    registered: bool,
++    healthy: bool,
++    circuit_open: bool,
++    in_selection: bool,
++}
++
++#[derive(Serialize)]
++struct ObserverWorker {
++    url: String,
++    port: Option<String>,
++    role: String,
++    pod_hint: String,
++    worker_id: String,
++    selection: ObserverSelection,
++    // Gateway-only operational reads; absent on the Rust sibling router's payload by
++    // design, since its control plane keeps no per-URL queue.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    lane: Option<ObserverLane>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    last_job: Option<serde_json::Value>,
++}
++
++#[derive(Serialize)]
++struct ObserverView {
++    router: ObserverRouter,
++    registry_revision: u64,
++    workers: Vec<ObserverWorker>,
++}
++
++/// The URL's host portion, for operator convenience only (see the module header). A URL
++/// the gateway holds in an unexpected shape yields an empty hint rather than a guess.
++fn pod_hint(url: &str) -> String {
++    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
++    let host = without_scheme.split(['/', '?']).next().unwrap_or("");
++    host.to_string()
++}
++
++/// The URL's port portion, when the URL carries one.
++fn url_port(url: &str) -> Option<String> {
++    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
++    let host = without_scheme.split('/').next().unwrap_or("");
++    let (_, port) = host.rsplit_once(':')?;
++    if port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
++        return None;
++    }
++    Some(port.to_string())
++}
++
++/// The role name as the request path uses it.
++fn role_name(worker: &dyn Worker) -> String {
++    match worker.worker_type() {
++        crate::core::worker::WorkerType::Regular => "regular".to_string(),
++        crate::core::worker::WorkerType::Prefill { .. } => "prefill".to_string(),
++        crate::core::worker::WorkerType::Decode => "decode".to_string(),
++    }
++}
++
++fn collect_workers(context: &AppContext) -> Result<Vec<ObserverWorker>, &'static str> {
++    // A BTreeMap keyed by URL gives the serialization a deterministic order regardless of
++    // the registry's internal map iteration order, which is what makes two consecutive
++    // revisions comparable at all.
++    let mut by_url: BTreeMap<String, ObserverWorker> = BTreeMap::new();
++    for (id, worker) in context.worker_registry.get_all_with_ids() {
++        let url = worker.url().to_string();
++        let healthy = worker.is_healthy();
++        // One pure snapshot per worker: the effective state and the request
++        // predicate's would-allow answer, derived without performing the
++        // Open-to-HalfOpen CAS transition, storing anything, clearing counters, or
++        // emitting metrics. An unstable sample surfaces as a whole-view 503.
++        let effective = worker
++            .circuit_breaker()
++            .observe_effective()
++            .ok_or("a router worker's circuit sample was not stable")?;
++        let circuit_open = effective == CircuitBreakerState::Open;
++        let in_selection = healthy && effective != CircuitBreakerState::Open;
++        by_url.insert(
++            url.clone(),
++            ObserverWorker {
++                url: url.clone(),
++                port: url_port(&url),
++                role: role_name(worker.as_ref()),
++                pod_hint: pod_hint(&url),
++                worker_id: id.as_str().to_string(),
++                selection: ObserverSelection {
++                    registered: true,
++                    healthy,
++                    circuit_open,
++                    in_selection,
++                },
++                lane: None,
++                last_job: None,
++            },
++        );
++    }
++    // The queue is optional at runtime (a gateway configured without the discovery
++    // control plane has none); an absent queue simply omits the operational reads.
++    if let Some(queue) = context.worker_job_queue.get() {
++        for (url, busy, waiting) in queue.lane_occupancy() {
++            if let Some(entry) = by_url.get_mut(&url) {
++                entry.lane = Some(ObserverLane { busy, waiting });
++            }
++        }
++        for url in by_url.keys().cloned().collect::<Vec<_>>() {
++            if let Some(status) = queue.get_status(&url) {
++                if let Ok(value) = serde_json::to_value(&status) {
++                    if let Some(entry) = by_url.get_mut(&url) {
++                        entry.last_job = Some(value);
++                    }
++                }
++            }
++        }
++    }
++    Ok(by_url.into_values().collect())
++}
++
++static LAST_WORKERS_JSON: Mutex<Option<String>> = Mutex::new(None);
++static VIEW_REVISION: AtomicU64 = AtomicU64::new(1);
++
++/// One revision per distinct serialized worker array within this boot. Two views with the
++/// same revision are the same registry content; a larger revision is a change the operator
++/// can wait out and re-read.
++fn registry_revision_for(workers_json: &str) -> u64 {
++    let mut last = LAST_WORKERS_JSON
++        .lock()
++        .unwrap_or_else(|poisoned| poisoned.into_inner());
++    if last.as_deref() != Some(workers_json) {
++        *last = Some(workers_json.to_string());
++        VIEW_REVISION.fetch_add(1, Ordering::Relaxed);
++    }
++    VIEW_REVISION.load(Ordering::Relaxed)
++}
++
++/// GET /observer/endpoints — the read-only view this module exists for.
++pub async fn observer_endpoints(
++    State(state): State<Arc<AppState>>,
++    _headers: HeaderMap,
++) -> Response {
++    let workers = match collect_workers(&state.context) {
++        Ok(workers) => workers,
++        Err(reason) => {
++            return (
++                StatusCode::SERVICE_UNAVAILABLE,
++                format!("observer view unavailable: {}", reason),
++            )
++                .into_response()
++        }
++    };
++    let workers_json = match serde_json::to_string(&workers) {
++        Ok(json) => json,
++        Err(_) => {
++            return (
++                StatusCode::INTERNAL_SERVER_ERROR,
++                "observer failed to serialize workers",
++            )
++                .into_response()
++        }
++    };
++    let revision = registry_revision_for(&workers_json);
++    let view = ObserverView {
++        router: ObserverRouter {
++            boot_generation: boot_generation(),
++            now_ms: now_ms(),
++        },
++        registry_revision: revision,
++        workers,
++    };
++    match serde_json::to_string(&view) {
++        Ok(body) => ([(http::header::CONTENT_TYPE, "application/json")], body).into_response(),
++        Err(_) => (
++            StatusCode::INTERNAL_SERVER_ERROR,
++            "observer failed to serialize view",
++        )
++            .into_response(),
++    }
++}
++
++#[cfg(test)]
++mod observer_purity_tests {
++    use super::*;
++    use crate::core::circuit_breaker::CircuitBreakerConfig;
++    use crate::core::worker::{BasicWorker, WorkerType};
++    use crate::core::{BasicWorkerBuilder, Worker};
++    use std::sync::Arc;
++    use std::time::Duration;
++
++    async fn fixture(
++        raw_state: CircuitBreakerState,
++        expired: bool,
++    ) -> (Arc<AppState>, Arc<BasicWorker>) {
++        let context = Arc::new(
++            AppContext::from_config(Default::default(), 5)
++                .await
++                .unwrap(),
++        );
++        let worker = Arc::new(
++            BasicWorkerBuilder::new("http://10.0.0.1:8000")
++                .worker_type(WorkerType::Regular)
++                .circuit_breaker_config(CircuitBreakerConfig {
++                    timeout_duration: if expired {
++                        Duration::ZERO
++                    } else {
++                        Duration::from_secs(30)
++                    },
++                    ..Default::default()
++                })
++                .build(),
++        );
++        worker.circuit_breaker().observer_prepare_state(raw_state);
++        let shared: Arc<dyn Worker> = worker.clone();
++        context.worker_registry.register(shared.clone());
++        assert!(Arc::ptr_eq(
++            &shared,
++            &context.worker_registry.get_by_url(worker.url()).unwrap()
++        ));
++        let router = Arc::new(
++            crate::routers::http::router::Router::new(&context)
++                .await
++                .unwrap(),
++        ) as Arc<dyn crate::routers::RouterTrait>;
++        (
++            Arc::new(AppState {
++                router,
++                context,
++                concurrency_queue_tx: None,
++                router_manager: None,
++            }),
++            worker,
++        )
++    }
++
++    async fn run_case(raw_state: CircuitBreakerState, expired: bool, want_open: bool) {
++        let (state, worker) = fixture(raw_state, expired).await;
++        let recorder = metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
++        let handle = recorder.handle();
++        let breaker = worker.circuit_breaker();
++        let before = breaker.observer_raw_snapshot();
++        assert_eq!(before.0, raw_state.to_int());
++        metrics::with_local_recorder(&recorder, || {
++            let metrics_before = handle.render();
++            for _ in 0..2 {
++                let workers = collect_workers(&state.context).unwrap();
++                assert_eq!(workers.len(), 1);
++                assert!(workers[0].selection.registered);
++                assert!(workers[0].selection.healthy);
++                assert_eq!(workers[0].selection.circuit_open, want_open);
++                assert_eq!(workers[0].selection.in_selection, !want_open);
++                assert_eq!(
++                    breaker.observer_raw_snapshot(),
++                    before,
++                    "actual collector changed raw routing fields"
++                );
++                assert_eq!(
++                    handle.render(),
++                    metrics_before,
++                    "actual collector emitted native routing metrics"
++                );
++            }
++        });
++        let response = observer_endpoints(State(state), HeaderMap::new()).await;
++        assert_eq!(response.status(), StatusCode::OK);
++        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
++            .await
++            .unwrap();
++        let wire: serde_json::Value = serde_json::from_slice(&body).unwrap();
++        assert_eq!(wire["workers"].as_array().unwrap().len(), 1);
++        assert_eq!(wire["workers"][0]["selection"]["circuit_open"], want_open);
++        assert_eq!(wire["workers"][0]["selection"]["in_selection"], !want_open);
++        assert_eq!(
++            breaker.observer_raw_snapshot(),
++            before,
++            "actual handler changed raw routing fields"
++        );
++    }
++
++    #[tokio::test]
++    async fn observer_path_closed() {
++        run_case(CircuitBreakerState::Closed, false, false).await;
++    }
++    #[tokio::test]
++    async fn observer_path_unexpired_open() {
++        run_case(CircuitBreakerState::Open, false, true).await;
++    }
++    #[tokio::test]
++    async fn observer_path_expired_open_at_zero_timeout() {
++        run_case(CircuitBreakerState::Open, true, false).await;
++    }
++    #[tokio::test]
++    async fn observer_path_half_open() {
++        run_case(CircuitBreakerState::HalfOpen, false, false).await;
++    }
++
++    #[tokio::test]
++    async fn observer_path_changed_sample_refuses_whole_view() {
++        let (state, worker) = fixture(CircuitBreakerState::Open, true).await;
++        let before = worker.circuit_breaker().observer_raw_snapshot();
++        worker
++            .circuit_breaker()
++            .observer_change_input_during_next_read();
++        let response = observer_endpoints(State(state), HeaderMap::new()).await;
++        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
++        assert_eq!(
++            worker.circuit_breaker().observer_raw_snapshot().1,
++            before.1 + 1,
++            "the actual sample bookend must have seen the injected input change"
++        );
++    }
++}
+diff --git a/sgl-model-gateway/src/server.rs b/sgl-model-gateway/src/server.rs
+index a549162..4b29223 100644
+--- a/sgl-model-gateway/src/server.rs
++++ b/sgl-model-gateway/src/server.rs
+@@ -608,6 +608,8 @@ pub fn build_app(
+         .route("/wasm", post(add_wasm_module))
+         .route("/wasm/{module_uuid}", delete(remove_wasm_module))
+         .route("/wasm", get(list_wasm_modules))
++        // Read-only external observation of pool membership (see src/observer.rs).
++        .route("/observer/endpoints", get(crate::observer::observer_endpoints))
+         // Tokenizer management endpoints
+         .route(
+             "/v1/tokenizers",

@@ -60,6 +60,16 @@ RUN <<EOF
     git rev-parse HEAD >/tmp/commit
 EOF
 
+# Native observation uses the existing metrics server and preserves routing decisions.
+# A version whose source no longer matches the patch fails before compilation.
+COPY pack/llm-router/patches/llm-d/ /tmp/patches/
+RUN <<EOF
+    set -exo pipefail
+
+    git apply /tmp/patches/*.patch
+    rm -rf /tmp/patches
+EOF
+
 # CGO stays off to match upstream's own build: the picker links nothing from the C world, and a
 # static binary is what lets the runtime stage below be an ordinary base image rather than one
 # chosen to satisfy this binary's loader.
@@ -132,12 +142,18 @@ RUN <<EOF
         https://github.com/vllm-project/router.git .
 EOF
 
-# The patches under pack/llm-router/patches/ repair upstream defects this image cannot wait
-# out; each patch header states the defect it repairs and the upstream reference it was
-# written against. Applied with git apply, which fails the build loudly on a version bump
-# whose hunks no longer match -- that failure is the tripwire, and git is already in the
-# base stage so no package is added for this.
-COPY pack/llm-router/patches/ /tmp/patches/
+# The patches under pack/llm-router/patches/vllm-router/ repair upstream defects this
+# image cannot wait out; each patch header states the defect it repairs and the upstream
+# reference it was written against. The per-router subdirectory is copied rather than the
+# patches root because each Rust stage compiles a different upstream tree: a wildcard
+# applied here would hand the vLLM router's hunks to the SGLang gateway, whose files have
+# the same names but different contents, and the failure would be a confusing reject
+# rather than a missing patch.
+#
+# Applied with git apply, which fails the build loudly on a version bump whose hunks no
+# longer match -- that failure is the tripwire, and git is already in the base stage so no
+# package is added for this.
+COPY pack/llm-router/patches/vllm-router/ /tmp/patches/
 RUN <<EOF
     set -exo pipefail
 
@@ -188,6 +204,36 @@ RUN <<EOF
         https://github.com/sgl-project/sglang.git .
     git sparse-checkout set sgl-model-gateway
     git submodule update --init --recursive --depth 1
+EOF
+
+WORKDIR /src/sgl-model-gateway
+
+# The patch is written with repository-root-relative paths (sgl-model-gateway/src/...),
+# which is how the clone is laid out, so it is applied from the CLONE ROOT. git apply
+# resolves a patch's paths against the repository root, which means applying from this
+# stage's crate directory happens to work today but leaves the correctness of the whole
+# stage resting on git's path-resolution fallback rather than on anything stated here.
+# Applying from /src is the form that follows from the patch's own paths.
+#
+# Note that --directory is NOT used: the paths are already root-relative, so it would
+# prefix them a second time and fail with a path that does not exist.
+#
+# The stage therefore leaves WORKDIR for the cargo step and returns to /src to apply.
+# The grep afterwards is not decoration. git apply already fails loudly on a pin whose
+# hunks no longer match, but a patch skipped for path reasons would not; the grep is
+# what makes that a build failure instead of an unpatched build reporting success.
+COPY pack/llm-router/patches/sglang-gateway/ /tmp/patches/
+RUN <<EOF
+    set -exo pipefail
+
+    cd /src
+    git apply /tmp/patches/*.patch
+
+    # Fail the build if the observer patch did not actually land: observer.rs is a file
+    # patch 0002 itself creates, so an unpatched tree has neither the file nor the type.
+    grep -q "struct ObserverRouter" sgl-model-gateway/src/observer.rs
+
+    rm -rf /tmp/patches
 EOF
 
 WORKDIR /src/sgl-model-gateway

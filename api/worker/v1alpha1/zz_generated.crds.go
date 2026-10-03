@@ -5328,6 +5328,105 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											Description: "PhaseMessage carries the reason for the phase.",
 											Type:        "string",
 										},
+										"retirement": {
+											Description: "Retirement is the persisted reservation of the retirement operation this deployment is\nrunning, at most one at a time. It is ABSENT when no operation exists, rather than present\nand empty: an operation carries its state in the object, so an empty one would be neither.\nIts identity binds the admitting metadata.generation, the role, the replica ordinal and\nthe target member and Workload UIDs, so a controller restart resumes it and a conflicting\noperation cannot silently adopt it.",
+											Type:        "object",
+											Required: []string{
+												"roleName",
+												"replicaOrdinal",
+												"observedGeneration",
+												"targetWorkloadUID",
+												"state",
+												"startedAt",
+												"deadline",
+												"phaseStartedAt",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"deadline": {
+													Description: "Deadline is the overall budget. A phase ends at min(deadline, its own start plus its\nbudget), so no phase outlives the operation.",
+													Type:        "string",
+													Format:      "date-time",
+												},
+												"lastConsumedRetryToken": {
+													Description: "LastConsumedRetryToken is the retry directive token this reservation last consumed. It is\npersisted before the annotation that carried the token is cleared, so a crash between the\ntwo leaves the token consumed and any replay a no-op. Empty means none was consumed.",
+													Type:        "string",
+												},
+												"observedGeneration": {
+													Description: "ObservedGeneration is the metadata.generation whose intent this reservation was admitted\nagainst.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+												"phaseStartedAt": {
+													Description: "PhaseStartedAt is when the current phase began. It is persisted so a controller restart\nnever resets a phase budget that was already running.",
+													Type:        "string",
+													Format:      "date-time",
+												},
+												"reason": {
+													Description: "Reason names what put the reservation at its state, e.g. which step a budget exhausted at.",
+													Type:        "string",
+												},
+												"replicaOrdinal": {
+													Description: "ReplicaOrdinal is the ordinal of the retiring replica within its role. Zero is a real\nposition, the first replica, and is always encoded rather than omitted.",
+													Type:        "integer",
+													Format:      "int32",
+												},
+												"roleName": {
+													Description: "RoleName is the role whose replica is retiring.",
+													Type:        "string",
+												},
+												"startedAt": {
+													Description: "StartedAt is when the operation was admitted.",
+													Type:        "string",
+													Format:      "date-time",
+												},
+												"state": {
+													Description: "State is the protocol step the reservation sits at. Aborted names a budget exhausted\nbefore deletion, where every member and the Workload were retained; it is retained state,\nnot a rollback.",
+													Type:        "string",
+													Enum: []v1.JSON{
+														{
+															Raw: []byte(`"Admitted"`),
+														},
+														{
+															Raw: []byte(`"Disqualified"`),
+														},
+														{
+															Raw: []byte(`"Withdrawing"`),
+														},
+														{
+															Raw: []byte(`"Draining"`),
+														},
+														{
+															Raw: []byte(`"Deleting"`),
+														},
+														{
+															Raw: []byte(`"Settling"`),
+														},
+														{
+															Raw: []byte(`"Aborted"`),
+														},
+														{
+															Raw: []byte(`"Completed"`),
+														},
+													},
+												},
+												"targetMemberUIDs": {
+													Description: "TargetMemberUIDs are the UIDs of the member Pods the reservation holds. A deletion of one\nof them carries its UID as a precondition, so a same-name replacement is never deleted in\nthe target's place.",
+													Type:        "array",
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "string",
+														},
+													},
+													Nullable:  true,
+													XListType: ptr.To[string]("atomic"),
+												},
+												"targetWorkloadUID": {
+													Description: "TargetWorkloadUID is the UID of the Workload the reservation holds.",
+													Type:        "string",
+												},
+											},
+											Nullable: true,
+										},
 										"roleSummary": {
 											Description: "RoleSummary is the current Ready count by role kind, for kubectl's Roles column. R counts\nmanaged router Pods; S, P, and D count server, prefill, and decode instances. A serving\ninstance may contain several Pods, so the engine figures are not Pod counts.",
 											Type:        "string",
@@ -5363,6 +5462,51 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Type:        "integer",
 															Format:      "int32",
 														},
+														"endpoints": {
+															Description: "Endpoints is the role's endpoint eligibility and its actual serving confirmation. The two\nare separate answers that never collapse: eligibility is the set the operator qualified,\nand serving is what Routers were observed to still select. A count that was never\nobserved is nil, and zero is an observed fact only.\nIt is optional like parallelism, and for the same reason: a role stored before this view\nexisted carries neither object, and absence must not reject its next write.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"eligible": {
+																	Description: "Eligible is how many endpoints the role's qualification list holds, set only when that\nlist is complete. It is named for eligibility and never presents itself as serving.",
+																	Type:        "integer",
+																	Format:      "int32",
+																	Nullable:    true,
+																},
+																"serving": {
+																	Description: "Serving is the actual serving confirmation taken over the role's endpoints.",
+																	Type:        "object",
+																	Required: []string{
+																		"state",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"state": {
+																			Description: "State is the confirmation answer. Only Confirmed means the union was observed; the other\nstates differ in WHY no number is offered, and none of them encodes one.",
+																			Type:        "string",
+																			Enum: []v1.JSON{
+																				{
+																					Raw: []byte(`"Confirmed"`),
+																				},
+																				{
+																					Raw: []byte(`"NotConverged"`),
+																				},
+																				{
+																					Raw: []byte(`"Unknown"`),
+																				},
+																				{
+																					Raw: []byte(`"NotConfigured"`),
+																				},
+																			},
+																		},
+																		"value": {
+																			Description: "Value is the confirmed serving count, present only when State is Confirmed, with an\nexplicit zero as real as any other number.",
+																			Type:        "integer",
+																			Format:      "int32",
+																			Nullable:    true,
+																		},
+																	},
+																},
+															},
+														},
 														"kind": {
 															Description: "Kind echoes the role's kind, so reading the status alone answers which half of a\ndisaggregated deployment an entry describes. It is ALWAYS present: every role has a kind,\ndefaulted if the user named none, so an absent value would mean the status was written by\nsomething that did not know about kinds rather than that the role has none.\nThe enum is the same one the spec field carries and has to stay that way: this field is written\nfrom the spec field with the unset case resolved, so a value the writer can produce and this\nlist does not name would make every later status write on the object fail, taking every other\nfigure down with the kind. The marker sits on the field because the type's own enum marker is a\nGo-level one and does not become schema validation.",
 															Type:        "string",
@@ -5381,6 +5525,142 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														"name": {
 															Description: "Name is the role this entry describes.",
 															Type:        "string",
+														},
+														"parallelism": {
+															Description: "Parallelism is the parallelism the role's own arguments declare, with the provenance of\nthe reading. Nothing is defaulted into it: a degree the role never declares is nil, an\nexplicit 1 and an explicit local 0 are preserved as values, and a reading that has not\nhappened yet reports Unknown with a reason rather than a silent 1. The numeric results\nthe prefill/decode transfer document derives from the same arguments are unaffected by\nthis view.\nIt is optional so a role stored before this view existed stays writable: absence names\nthat fact, never a defaulted reading, and the object the operator writes fills it again.",
+															Type:        "object",
+															Required: []string{
+																"loadBalance",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"declared": {
+																	Description: "Declared carries the degrees the role's arguments declare.",
+																	Type:        "object",
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"attentionContextParallel": {
+																			Type:     "integer",
+																			Format:   "int32",
+																			Nullable: true,
+																		},
+																		"dataParallel": {
+																			Type:     "integer",
+																			Format:   "int32",
+																			Nullable: true,
+																		},
+																		"dataParallelLocal": {
+																			Type:     "integer",
+																			Format:   "int32",
+																			Nullable: true,
+																		},
+																		"decodeContextParallel": {
+																			Type:     "integer",
+																			Format:   "int32",
+																			Nullable: true,
+																		},
+																		"dwdpSize": {
+																			Description: "DWDPSize is the role's declared data-within-data parallel size.",
+																			Type:        "integer",
+																			Format:      "int32",
+																			Nullable:    true,
+																		},
+																		"expertParallel": {
+																			Type:     "integer",
+																			Format:   "int32",
+																			Nullable: true,
+																		},
+																		"moeDpSize": {
+																			Description: "MoEDPSize is the role's declared expert-dispatch data parallel size.",
+																			Type:        "integer",
+																			Format:      "int32",
+																			Nullable:    true,
+																		},
+																		"pipelineParallel": {
+																			Type:     "integer",
+																			Format:   "int32",
+																			Nullable: true,
+																		},
+																		"prefillContextParallel": {
+																			Type:     "integer",
+																			Format:   "int32",
+																			Nullable: true,
+																		},
+																		"tensorParallel": {
+																			Type:     "integer",
+																			Format:   "int32",
+																			Nullable: true,
+																		},
+																	},
+																},
+																"loadBalance": {
+																	Description: "LoadBalance is the balance shape the declared degrees derive to. Unknown means not\nderivable from what the role declares; a support judgment is carried in reason fields,\nnever as a mode value here.",
+																	Type:        "string",
+																	Enum: []v1.JSON{
+																		{
+																			Raw: []byte(`"Internal"`),
+																		},
+																		{
+																			Raw: []byte(`"External"`),
+																		},
+																		{
+																			Raw: []byte(`"Hybrid"`),
+																		},
+																		{
+																			Raw: []byte(`"MultiPort"`),
+																		},
+																		{
+																			Raw: []byte(`"Unknown"`),
+																		},
+																	},
+																},
+																"modes": {
+																	Description: "Modes are the parallelism modes present in the role's arguments, keyed by canonical\nengine mode. An observed mode carries its explicit boolean; the absence of a key is not\nfalse. Empty until the arguments have been read.",
+																	Type:        "object",
+																	AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+																		Allows: true,
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "boolean",
+																		},
+																	},
+																	Nullable: true,
+																	XMapType: ptr.To[string]("atomic"),
+																},
+																"source": {
+																	Description: "Source is the provenance of this reading.",
+																	Type:        "object",
+																	Required: []string{
+																		"kind",
+																		"complete",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"complete": {
+																			Description: "Complete is whether the reading covered everything the contract reads. Only a complete\nreading is one the declared degrees above can be trusted from; an incomplete one keeps\nthem nil rather than partial.",
+																			Type:        "boolean",
+																		},
+																		"kind": {
+																			Description: "Kind is where the reading came from. An unreadable source is Unknown with complete=false\nand a reason, never a silently defaulted degree.",
+																			Type:        "string",
+																			Enum: []v1.JSON{
+																				{
+																					Raw: []byte(`"ExtraArgs"`),
+																				},
+																				{
+																					Raw: []byte(`"Command"`),
+																				},
+																				{
+																					Raw: []byte(`"UnmanagedCommand"`),
+																				},
+																				{
+																					Raw: []byte(`"Unknown"`),
+																				},
+																			},
+																		},
+																		"unreadableReason": {
+																			Description: "UnreadableReason names what could not be established, e.g. a reading that has not happened\nyet, or a balance shape the declared flags disagree on. A complete reading can still carry\none when the source was read in full but a derived fact is undecidable.",
+																			Type:        "string",
+																		},
+																	},
+																},
+															},
 														},
 														"quotaReserved": {
 															Description: "QuotaReserved is how many of the role's replicas hold a quota reservation. Each replica is\nits own Kueue workload, so a role sits at any count between zero and Desired while capacity\narrives — where a role that shared one workload passed all-or-nothing and this figure could\nnot exist.\nALWAYS PRESENT, AND ITS ZERO IS AN OBSERVED ONE: the figure is counted from Pod and Workload\nlists that succeeded, and a failed list writes no status at all rather than a zero, because\n\"this pass could not see\" and \"no replica holds quota\" call for opposite actions — one waits,\nthe other investigates — and a zero written for both makes them the same reading.",

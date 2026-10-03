@@ -1,0 +1,393 @@
+Read native registry and effective circuit state without changing request routing state.
+An unstable SGLang circuit sample refuses the complete view.
+
+diff --git a/src/core/circuit_breaker.rs b/src/core/circuit_breaker.rs
+index 5c37423..b6499bb 100644
+--- a/src/core/circuit_breaker.rs
++++ b/src/core/circuit_breaker.rs
+@@ -100,6 +100,54 @@ impl CircuitBreaker {
+         *self.state.read().unwrap()
+     }
+
++    /// Read the effective state without changing native routing state.
++    pub fn observe_effective(&self) -> (CircuitState, bool) {
++        let state_guard = self.state.read().unwrap();
++        let last_change = *self.last_state_change.read().unwrap();
++        let effective = match *state_guard {
++            CircuitState::Open if last_change.elapsed() >= self.config.timeout_duration => {
++                CircuitState::HalfOpen
++            }
++            other => other,
++        };
++        let would_allow = !matches!(effective, CircuitState::Open);
++        (effective, would_allow)
++    }
++
++    #[cfg(test)]
++    pub(crate) fn observer_raw_snapshot(
++        &self,
++    ) -> (CircuitState, Instant, u32, u32, u64, u64, Option<Instant>) {
++        (
++            *self.state.read().unwrap(),
++            *self.last_state_change.read().unwrap(),
++            self.consecutive_failures.load(Ordering::Acquire),
++            self.consecutive_successes.load(Ordering::Acquire),
++            self.total_failures.load(Ordering::Acquire),
++            self.total_successes.load(Ordering::Acquire),
++            *self.last_failure_time.read().unwrap(),
++        )
++    }
++
++    #[cfg(test)]
++    pub(crate) fn observer_prepare_state(&self, state: CircuitState) {
++        *self.state.write().unwrap() = state;
++        self.consecutive_failures.store(
++            if state == CircuitState::Open { 3 } else { 0 },
++            Ordering::Release,
++        );
++        self.consecutive_successes.store(
++            if state == CircuitState::HalfOpen {
++                1
++            } else {
++                0
++            },
++            Ordering::Release,
++        );
++        self.total_failures.store(5, Ordering::Release);
++        self.total_successes.store(7, Ordering::Release);
++    }
++
+     /// Record the outcome of a request
+     pub fn record_outcome(&self, success: bool) {
+         if success {
+diff --git a/src/lib.rs b/src/lib.rs
+index 5c4c406..8388376 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -6,6 +6,7 @@ use std::collections::HashMap;
+ pub mod core;
+ pub mod data_connector;
+ pub mod metrics;
++pub mod observer;
+ pub mod middleware;
+ pub mod otel_http;
+ pub mod otel_trace;
+diff --git a/src/observer.rs b/src/observer.rs
+new file mode 100644
+index 0000000..9c20b98
+--- /dev/null
++++ b/src/observer.rs
+@@ -0,0 +1,298 @@
++// Read native registry membership and effective circuit state without changing routing.
++// The selection fields use the native health and circuit predicates.
++// Pod hints are address echoes; the operator binds them to Kubernetes identities.
++// Boot generation is initialized once per process. The view revision changes when
++// the serialized worker array differs from the preceding observer response.
++use std::collections::BTreeMap;
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::sync::Mutex;
++use std::time::{SystemTime, UNIX_EPOCH};
++
++use axum::extract::State;
++use axum::http::{HeaderMap, StatusCode};
++use axum::response::{IntoResponse, Response};
++use serde::Serialize;
++use std::sync::Arc;
++use std::sync::OnceLock;
++
++use crate::core::circuit_breaker::CircuitState;
++use crate::server::AppState;
++
++/// Process start time in milliseconds. Constant for the life of the process and different
++/// after every restart, which is the property a boot generation needs.
++fn boot_generation() -> u64 {
++    static BOOT: OnceLock<u64> = OnceLock::new();
++    *BOOT.get_or_init(|| {
++        SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .map(|d| d.as_millis() as u64)
++            .unwrap_or(0)
++    })
++}
++
++fn now_ms() -> u64 {
++    SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|d| d.as_millis() as u64)
++        .unwrap_or(0)
++}
++
++#[derive(Serialize)]
++struct ObserverRouter {
++    boot_generation: u64,
++    now_ms: u64,
++}
++
++#[derive(Serialize)]
++struct ObserverSelection {
++    registered: bool,
++    healthy: bool,
++    circuit_open: bool,
++    in_selection: bool,
++}
++
++#[derive(Serialize)]
++struct ObserverWorker {
++    url: String,
++    port: Option<String>,
++    role: String,
++    pod_hint: String,
++    worker_id: String,
++    selection: ObserverSelection,
++}
++
++#[derive(Serialize)]
++struct ObserverView {
++    router: ObserverRouter,
++    registry_revision: u64,
++    workers: Vec<ObserverWorker>,
++}
++
++/// The URL's host portion, for operator convenience only (see the module header). A URL
++/// the router holds in an unexpected shape yields an empty hint rather than a guess.
++fn pod_hint(url: &str) -> String {
++    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
++    let host = without_scheme.split(['/', '?']).next().unwrap_or("");
++    host.to_string()
++}
++
++/// The URL's port portion, when the URL carries one.
++fn url_port(url: &str) -> Option<String> {
++    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
++    let host = without_scheme.split('/').next().unwrap_or("");
++    let (_, port) = host.rsplit_once(':')?;
++    if port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
++        return None;
++    }
++    Some(port.to_string())
++}
++
++/// The role name as the request path uses it. PD roles carry the bootstrap port in their
++/// type; the role NAME is what an observer consumer needs and the port is the endpoint's
++/// own serving port, not the bootstrap port.
++fn role_name(worker: &dyn crate::core::Worker) -> String {
++    match worker.worker_type() {
++        crate::core::WorkerType::Regular => "regular".to_string(),
++        crate::core::WorkerType::Prefill { .. } => "prefill".to_string(),
++        crate::core::WorkerType::Decode { .. } => "decode".to_string(),
++    }
++}
++
++fn collect_workers(state: &AppState) -> Vec<ObserverWorker> {
++    // A BTreeMap keyed by URL gives the serialization a deterministic order regardless of
++    // the registry's internal map iteration order, which is what makes two consecutive
++    // revisions comparable at all.
++    let mut by_url: BTreeMap<String, ObserverWorker> = BTreeMap::new();
++    for (id, worker) in state.context.worker_registry.get_all_with_ids() {
++        let url = worker.url().to_string();
++        let healthy = worker.is_healthy();
++        // One pure snapshot per worker: the effective state and the request
++        // predicate's would-allow answer, derived without performing the
++        // Open-to-HalfOpen transition, storing anything, or resetting counters.
++        let (effective, would_allow) = worker.circuit_breaker().observe_effective();
++        let circuit_open = effective == CircuitState::Open;
++        let in_selection = healthy && would_allow;
++        by_url.insert(
++            url.clone(),
++            ObserverWorker {
++                url: url.clone(),
++                port: url_port(&url),
++                role: role_name(worker.as_ref()),
++                pod_hint: pod_hint(&url),
++                worker_id: id.as_str().to_string(),
++                selection: ObserverSelection {
++                    registered: true,
++                    healthy,
++                    circuit_open,
++                    in_selection,
++                },
++            },
++        );
++    }
++    by_url.into_values().collect()
++}
++
++static LAST_WORKERS_JSON: Mutex<Option<String>> = Mutex::new(None);
++static VIEW_REVISION: AtomicU64 = AtomicU64::new(1);
++
++/// One revision per distinct serialized worker array within this boot. Two views with the
++/// same revision are the same registry content; a larger revision is a change the operator
++/// can wait out and re-read.
++fn registry_revision_for(workers_json: &str) -> u64 {
++    let mut last = LAST_WORKERS_JSON
++        .lock()
++        .unwrap_or_else(|poisoned| poisoned.into_inner());
++    if last.as_deref() != Some(workers_json) {
++        *last = Some(workers_json.to_string());
++        VIEW_REVISION.fetch_add(1, Ordering::Relaxed);
++    }
++    VIEW_REVISION.load(Ordering::Relaxed)
++}
++
++/// GET /observer/endpoints — the read-only view this module exists for.
++pub async fn observer_endpoints(
++    State(state): State<Arc<AppState>>,
++    _headers: HeaderMap,
++) -> Response {
++    let workers = collect_workers(&state);
++    let workers_json = match serde_json::to_string(&workers) {
++        Ok(json) => json,
++        Err(_) => {
++            return (
++                StatusCode::INTERNAL_SERVER_ERROR,
++                "observer failed to serialize workers",
++            )
++                .into_response()
++        }
++    };
++    let revision = registry_revision_for(&workers_json);
++    let view = ObserverView {
++        router: ObserverRouter {
++            boot_generation: boot_generation(),
++            now_ms: now_ms(),
++        },
++        registry_revision: revision,
++        workers,
++    };
++    match serde_json::to_string(&view) {
++        Ok(body) => (
++            [(axum::http::header::CONTENT_TYPE, "application/json")],
++            body,
++        )
++            .into_response(),
++        Err(_) => (
++            StatusCode::INTERNAL_SERVER_ERROR,
++            "observer failed to serialize view",
++        )
++            .into_response(),
++    }
++}
++
++#[cfg(test)]
++mod observer_purity_tests {
++    use super::*;
++    use crate::core::circuit_breaker::CircuitBreakerConfig;
++    use crate::core::worker::{BasicWorker, WorkerType};
++    use crate::core::{Worker, WorkerRegistry};
++    use crate::server::AppContext;
++    use std::sync::Arc;
++    use std::time::Duration;
++
++    async fn run_case(raw_state: CircuitState, expired: bool, want_open: bool) {
++        let config = CircuitBreakerConfig {
++            timeout_duration: if expired {
++                Duration::ZERO
++            } else {
++                Duration::from_secs(30)
++            },
++            ..Default::default()
++        };
++        let worker = Arc::new(
++            BasicWorker::new("http://10.0.0.1:8000".into(), WorkerType::Regular)
++                .with_circuit_breaker_config(config),
++        );
++        let breaker = worker.circuit_breaker();
++        breaker.observer_prepare_state(raw_state);
++        let before = breaker.observer_raw_snapshot();
++        assert_eq!(before.0, raw_state);
++        let registry = Arc::new(WorkerRegistry::new());
++        let shared: Arc<dyn Worker> = worker.clone();
++        registry.register(shared.clone());
++        assert!(Arc::ptr_eq(
++            &shared,
++            &registry.get_by_url(worker.url()).unwrap()
++        ));
++        let router_config = crate::config::RouterConfig {
++            worker_startup_timeout_secs: 1,
++            ..Default::default()
++        };
++        let context = Arc::new(AppContext {
++            client: reqwest::Client::new(),
++            router_config: router_config.clone(),
++            rate_limiter: Arc::new(crate::middleware::TokenBucket::new(1000, 1000)),
++            worker_registry: registry,
++            policy_registry: Arc::new(crate::policies::PolicyRegistry::new(
++                router_config.policy.clone(),
++            )),
++            router_manager: None,
++            response_storage: Arc::new(crate::data_connector::MemoryResponseStorage::new()),
++            api_key_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
++            api_key_validation_urls: Arc::new(Vec::new()),
++        });
++        let router = Arc::new(
++            crate::routers::http::router::Router::new(vec![], &context)
++                .await
++                .unwrap(),
++        ) as Arc<dyn crate::routers::RouterTrait>;
++        let state = Arc::new(crate::server::AppState {
++            router,
++            context,
++            concurrency_queue_tx: None,
++            router_manager: None,
++        });
++        for _ in 0..2 {
++            let workers = collect_workers(&state);
++            assert_eq!(workers.len(), 1);
++            assert!(workers[0].selection.registered);
++            assert!(workers[0].selection.healthy);
++            assert_eq!(workers[0].selection.circuit_open, want_open);
++            assert_eq!(workers[0].selection.in_selection, !want_open);
++            assert_eq!(
++                breaker.observer_raw_snapshot(),
++                before,
++                "actual collector changed raw routing fields"
++            );
++        }
++        let response = observer_endpoints(State(state), HeaderMap::new()).await;
++        assert_eq!(response.status(), StatusCode::OK);
++        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
++            .await
++            .unwrap();
++        let wire: serde_json::Value = serde_json::from_slice(&body).unwrap();
++        assert_eq!(wire["workers"].as_array().unwrap().len(), 1);
++        assert_eq!(wire["workers"][0]["selection"]["circuit_open"], want_open);
++        assert_eq!(wire["workers"][0]["selection"]["in_selection"], !want_open);
++        assert_eq!(
++            breaker.observer_raw_snapshot(),
++            before,
++            "actual handler changed raw routing fields"
++        );
++    }
++
++    #[tokio::test]
++    async fn observer_path_closed() {
++        run_case(CircuitState::Closed, false, false).await;
++    }
++    #[tokio::test]
++    async fn observer_path_unexpired_open() {
++        run_case(CircuitState::Open, false, true).await;
++    }
++    #[tokio::test]
++    async fn observer_path_expired_open_at_zero_timeout() {
++        run_case(CircuitState::Open, true, false).await;
++    }
++    #[tokio::test]
++    async fn observer_path_half_open() {
++        run_case(CircuitState::HalfOpen, false, false).await;
++    }
++}
+diff --git a/src/server.rs b/src/server.rs
+index d7c16df..08d8ac0 100644
+--- a/src/server.rs
++++ b/src/server.rs
+@@ -749,7 +749,9 @@ pub fn build_app_with_request_tracing(
+         .route("/health_generate", get(health_generate))
+         .route("/v1/models", get(v1_models))
+         .route("/get_model_info", get(get_model_info))
+-        .route("/get_server_info", get(get_server_info));
++        .route("/get_server_info", get(get_server_info))
++        // Read-only external observation of pool membership (see src/observer.rs).
++        .route("/observer/endpoints", get(crate::observer::observer_endpoints));
+ 
+     let admin_routes = Router::new()
+         .route("/add_worker", post(add_worker))

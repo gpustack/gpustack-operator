@@ -9,6 +9,7 @@ on a server role; on a prefill/decode pair, where each half is chosen separately
 - [Prefix affinity](#prefix-affinity)
 - [Switching to round robin](#switching-to-round-robin)
 - [llm-d-router takes no policy flag](#llm-d-router-takes-no-policy-flag)
+- [Confirming that a Router serves](#confirming-that-a-router-serves)
 - [Per-worker routing metrics](#per-worker-routing-metrics)
 
 ## Each router's default
@@ -93,6 +94,26 @@ those has been run either.
 **`llm-d-router` cannot be switched through `extraArgs`.** Its scorers and their weights are in the
 configuration document the operator renders and mounts, and `--config-file`, which would point the
 router at another one, is refused there. No field sets them either.
+
+## Confirming that a Router serves
+
+**Which replicas a Router can reach is not the same question as which replicas it is serving, and
+the operator reports both.** The first is the qualification list, and the second is an observation
+of the Router itself; they are published separately in
+[`status.roles[].endpoints`](status.md#status) and never collapse into one number.
+
+The observation is a plain HTTP GET with a short timeout against each Router Pod's own address. It
+deliberately does not go through the Router Service, which would load balance across the Router's
+replicas and report one of them as the whole Router. What `Confirmed` then means is the
+serving-observation contract [`status.roles[].endpoints`](status.md#status) defines once.
+
+**A collected view informs the answer for fifteen seconds.** Past that the answer becomes `Unknown`,
+so a Router that stops being reachable is reported as unobserved and never as serving whatever it
+served last.
+
+> The freshness bound is what keeps a stopped Router from reading as a healthy one. A view that
+> outlived its evidence would report a serving count for a process that is gone, and the only way
+> back would be an edit to the deployment.
 
 ## Per-worker routing metrics
 

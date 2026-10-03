@@ -918,7 +918,118 @@ type ModelDeploymentStatus struct {
 	// reason KVCache is: an empty object here cannot be told apart from an identity whose every
 	// field happens to be empty.
 	Model *ModelDeploymentModelStatus `json:"model,omitempty" protobuf:"bytes,9,opt,name=model"`
+
+	// Retirement is the persisted reservation of the retirement operation this deployment is
+	// running, at most one at a time. It is ABSENT when no operation exists, rather than present
+	// and empty: an operation carries its state in the object, so an empty one would be neither.
+	// Its identity binds the admitting metadata.generation, the role, the replica ordinal and
+	// the target member and Workload UIDs, so a controller restart resumes it and a conflicting
+	// operation cannot silently adopt it.
+	//
+	// +optional
+	Retirement *ModelDeploymentRetirementStatus `json:"retirement,omitempty" protobuf:"bytes,10,opt,name=retirement"`
 }
+
+// ModelDeploymentRetirementStatus is the persisted reservation of one retirement operation.
+//
+// The reservation is the protocol's progress: every step, budget boundary and retry already
+// consumed is carried here, so a controller restart re-enters at the observed state instead of
+// re-deciding one. Phase budgets read deadline and phaseStartedAt together, so a restart never
+// resets a phase that was already running.
+type ModelDeploymentRetirementStatus struct {
+	// RoleName is the role whose replica is retiring.
+	//
+	// +required
+	RoleName string `json:"roleName" protobuf:"bytes,1,name=roleName"`
+
+	// ReplicaOrdinal is the ordinal of the retiring replica within its role. Zero is a real
+	// position, the first replica, and is always encoded rather than omitted.
+	//
+	// +required
+	ReplicaOrdinal int32 `json:"replicaOrdinal" protobuf:"varint,2,name=replicaOrdinal"`
+
+	// ObservedGeneration is the metadata.generation whose intent this reservation was admitted
+	// against.
+	//
+	// +required
+	ObservedGeneration int64 `json:"observedGeneration" protobuf:"varint,3,name=observedGeneration"`
+
+	// TargetMemberUIDs are the UIDs of the member Pods the reservation holds. A deletion of one
+	// of them carries its UID as a precondition, so a same-name replacement is never deleted in
+	// the target's place.
+	//
+	// +optional
+	// +listType=atomic
+	TargetMemberUIDs []string `json:"targetMemberUIDs,omitempty" protobuf:"bytes,4,rep,name=targetMemberUIDs"`
+
+	// TargetWorkloadUID is the UID of the Workload the reservation holds.
+	//
+	// +required
+	TargetWorkloadUID string `json:"targetWorkloadUID" protobuf:"bytes,5,name=targetWorkloadUID"`
+
+	// State is the protocol step the reservation sits at. Aborted names a budget exhausted
+	// before deletion, where every member and the Workload were retained; it is retained state,
+	// not a rollback.
+	//
+	// +required
+	// +k8s:validation:enum=["Admitted","Disqualified","Withdrawing","Draining","Deleting","Settling","Aborted","Completed"]
+	State ModelDeploymentRetirementState `json:"state" protobuf:"bytes,6,name=state,casttype=ModelDeploymentRetirementState"`
+
+	// Reason names what put the reservation at its state, e.g. which step a budget exhausted at.
+	//
+	// +optional
+	Reason string `json:"reason,omitempty" protobuf:"bytes,7,opt,name=reason"`
+
+	// StartedAt is when the operation was admitted.
+	//
+	// +required
+	StartedAt meta.Time `json:"startedAt" protobuf:"bytes,8,name=startedAt"`
+
+	// Deadline is the overall budget. A phase ends at min(deadline, its own start plus its
+	// budget), so no phase outlives the operation.
+	//
+	// +required
+	Deadline meta.Time `json:"deadline" protobuf:"bytes,9,name=deadline"`
+
+	// PhaseStartedAt is when the current phase began. It is persisted so a controller restart
+	// never resets a phase budget that was already running.
+	//
+	// +required
+	PhaseStartedAt meta.Time `json:"phaseStartedAt" protobuf:"bytes,10,name=phaseStartedAt"`
+
+	// LastConsumedRetryToken is the retry directive token this reservation last consumed. It is
+	// persisted before the annotation that carried the token is cleared, so a crash between the
+	// two leaves the token consumed and any replay a no-op. Empty means none was consumed.
+	//
+	// +optional
+	LastConsumedRetryToken string `json:"lastConsumedRetryToken,omitempty" protobuf:"bytes,11,opt,name=lastConsumedRetryToken"`
+}
+
+// ModelDeploymentRetirementState is the protocol step a retirement reservation sits at.
+// +enum
+type ModelDeploymentRetirementState string
+
+const (
+	// ModelDeploymentRetirementStateAdmitted is the reservation as written, before any step ran.
+	ModelDeploymentRetirementStateAdmitted ModelDeploymentRetirementState = "Admitted"
+	// ModelDeploymentRetirementStateDisqualified is after eligibility removal, while Services converge.
+	ModelDeploymentRetirementStateDisqualified ModelDeploymentRetirementState = "Disqualified"
+	// ModelDeploymentRetirementStateWithdrawing waits for actual serving confirmation of the target.
+	ModelDeploymentRetirementStateWithdrawing ModelDeploymentRetirementState = "Withdrawing"
+	// ModelDeploymentRetirementStateDraining reads engine in-flight queues in place, every member retained.
+	ModelDeploymentRetirementStateDraining ModelDeploymentRetirementState = "Draining"
+	// ModelDeploymentRetirementStateDeleting is the committed deletion step.
+	ModelDeploymentRetirementStateDeleting ModelDeploymentRetirementState = "Deleting"
+	// ModelDeploymentRetirementStateSettling observes accelerator release and quota convergence after deletion.
+	ModelDeploymentRetirementStateSettling ModelDeploymentRetirementState = "Settling"
+	// ModelDeploymentRetirementStateAborted is a budget exhausted before deletion: members, Workload
+	// and capacity were retained, and a healthy instance requalifies without a rollout.
+	ModelDeploymentRetirementStateAborted ModelDeploymentRetirementState = "Aborted"
+	// ModelDeploymentRetirementStateCompleted is the terminal transition of a completed
+	// retirement: it is set on the same pass that clears the reservation, so a reader of the
+	// status observes completion as the field's absence and never sees this value stored.
+	ModelDeploymentRetirementStateCompleted ModelDeploymentRetirementState = "Completed"
+)
 
 // ModelDeploymentModelStatus is the resolved weight identity a deployment serves.
 //
@@ -1040,7 +1151,213 @@ type ModelDeploymentRoleStatus struct {
 	// +optional
 	// +listType=atomic
 	AssignedFlavors []string `json:"assignedFlavors,omitempty" protobuf:"bytes,6,rep,name=assignedFlavors"`
+
+	// Parallelism is the parallelism the role's own arguments declare, with the provenance of
+	// the reading. Nothing is defaulted into it: a degree the role never declares is nil, an
+	// explicit 1 and an explicit local 0 are preserved as values, and a reading that has not
+	// happened yet reports Unknown with a reason rather than a silent 1. The numeric results
+	// the prefill/decode transfer document derives from the same arguments are unaffected by
+	// this view.
+	//
+	// It is optional so a role stored before this view existed stays writable: absence names
+	// that fact, never a defaulted reading, and the object the operator writes fills it again.
+	//
+	// +optional
+	Parallelism ModelDeploymentRoleParallelismStatus `json:"parallelism" protobuf:"bytes,8,name=parallelism"`
+
+	// Endpoints is the role's endpoint eligibility and its actual serving confirmation. The two
+	// are separate answers that never collapse: eligibility is the set the operator qualified,
+	// and serving is what Routers were observed to still select. A count that was never
+	// observed is nil, and zero is an observed fact only.
+	//
+	// It is optional like parallelism, and for the same reason: a role stored before this view
+	// existed carries neither object, and absence must not reject its next write.
+	//
+	// +optional
+	Endpoints ModelDeploymentRoleEndpointsStatus `json:"endpoints" protobuf:"bytes,9,name=endpoints"`
 }
+
+// ModelDeploymentRoleParallelismStatus is one role's declared parallelism, read from the
+// command line rendered for it.
+//
+// Until the arguments have been read, every declared degree is nil, the mode set is empty, the
+// balance is Unknown and the source is Unknown with complete=false and a reason — the same
+// honesty the counts above owe an unobserved figure.
+type ModelDeploymentRoleParallelismStatus struct {
+	// Declared carries the degrees the role's arguments declare.
+	//
+	// +optional
+	Declared ModelDeploymentParallelismDeclaredStatus `json:"declared" protobuf:"bytes,1,name=declared"`
+
+	// Modes are the parallelism modes present in the role's arguments, keyed by canonical
+	// engine mode. An observed mode carries its explicit boolean; the absence of a key is not
+	// false. Empty until the arguments have been read.
+	//
+	// +optional
+	// +mapType=atomic
+	Modes map[string]bool `json:"modes,omitempty" protobuf:"bytes,2,rep,name=modes"`
+
+	// LoadBalance is the balance shape the declared degrees derive to. Unknown means not
+	// derivable from what the role declares; a support judgment is carried in reason fields,
+	// never as a mode value here.
+	//
+	// +k8s:validation:enum=["Internal","External","Hybrid","MultiPort","Unknown"]
+	LoadBalance ModelDeploymentLoadBalance `json:"loadBalance" protobuf:"bytes,3,name=loadBalance,casttype=ModelDeploymentLoadBalance"`
+
+	// Source is the provenance of this reading.
+	//
+	// +optional
+	Source ModelDeploymentParallelismSourceStatus `json:"source" protobuf:"bytes,4,name=source"`
+}
+
+// ModelDeploymentParallelismDeclaredStatus carries the degrees a role's arguments declare.
+//
+// A nil field means the role does not declare that degree; it is never read as a zero or a
+// one. An explicit value is preserved exactly, including an explicit local degree of 0, which
+// says something an omitted field cannot.
+type ModelDeploymentParallelismDeclaredStatus struct {
+	// +optional
+	TensorParallel *int32 `json:"tensorParallel,omitempty" protobuf:"varint,1,opt,name=tensorParallel"`
+
+	// +optional
+	PipelineParallel *int32 `json:"pipelineParallel,omitempty" protobuf:"varint,2,opt,name=pipelineParallel"`
+
+	// +optional
+	DataParallel *int32 `json:"dataParallel,omitempty" protobuf:"varint,3,opt,name=dataParallel"`
+
+	// +optional
+	DataParallelLocal *int32 `json:"dataParallelLocal,omitempty" protobuf:"varint,4,opt,name=dataParallelLocal"`
+
+	// +optional
+	PrefillContextParallel *int32 `json:"prefillContextParallel,omitempty" protobuf:"varint,5,opt,name=prefillContextParallel"`
+
+	// +optional
+	DecodeContextParallel *int32 `json:"decodeContextParallel,omitempty" protobuf:"varint,6,opt,name=decodeContextParallel"`
+
+	// +optional
+	ExpertParallel *int32 `json:"expertParallel,omitempty" protobuf:"varint,7,opt,name=expertParallel"`
+
+	// +optional
+	AttentionContextParallel *int32 `json:"attentionContextParallel,omitempty" protobuf:"varint,8,opt,name=attentionContextParallel"`
+
+	// MoEDPSize is the role's declared expert-dispatch data parallel size.
+	//
+	// +optional
+	MoEDPSize *int32 `json:"moeDpSize,omitempty" protobuf:"varint,9,opt,name=moeDpSize"`
+
+	// DWDPSize is the role's declared data-within-data parallel size.
+	//
+	// +optional
+	DWDPSize *int32 `json:"dwdpSize,omitempty" protobuf:"varint,10,opt,name=dwdpSize"`
+}
+
+// ModelDeploymentParallelismSourceStatus is the provenance of a role's parallelism reading.
+type ModelDeploymentParallelismSourceStatus struct {
+	// Kind is where the reading came from. An unreadable source is Unknown with complete=false
+	// and a reason, never a silently defaulted degree.
+	//
+	// +k8s:validation:enum=["ExtraArgs","Command","UnmanagedCommand","Unknown"]
+	Kind ModelDeploymentParallelismSourceKind `json:"kind" protobuf:"bytes,1,name=kind,casttype=ModelDeploymentParallelismSourceKind"`
+
+	// Complete is whether the reading covered everything the contract reads. Only a complete
+	// reading is one the declared degrees above can be trusted from; an incomplete one keeps
+	// them nil rather than partial.
+	Complete bool `json:"complete" protobuf:"varint,2,name=complete"`
+
+	// UnreadableReason names what could not be established, e.g. a reading that has not happened
+	// yet, or a balance shape the declared flags disagree on. A complete reading can still carry
+	// one when the source was read in full but a derived fact is undecidable.
+	//
+	// +optional
+	UnreadableReason string `json:"unreadableReason,omitempty" protobuf:"bytes,3,opt,name=unreadableReason"`
+}
+
+// ModelDeploymentParallelismSourceKind names where a role's parallelism reading came from.
+// +enum
+type ModelDeploymentParallelismSourceKind string
+
+const (
+	// ModelDeploymentParallelismSourceKindExtraArgs reads the owned extra arguments of the role.
+	ModelDeploymentParallelismSourceKindExtraArgs ModelDeploymentParallelismSourceKind = "ExtraArgs"
+	// ModelDeploymentParallelismSourceKindCommand reads a role-supplied full command line.
+	ModelDeploymentParallelismSourceKindCommand ModelDeploymentParallelismSourceKind = "Command"
+	// ModelDeploymentParallelismSourceKindUnmanagedCommand reads a replaced command line the
+	// operator synthesized no argument for.
+	ModelDeploymentParallelismSourceKindUnmanagedCommand ModelDeploymentParallelismSourceKind = "UnmanagedCommand"
+	// ModelDeploymentParallelismSourceKindUnknown means the source produced no trustworthy reading.
+	ModelDeploymentParallelismSourceKindUnknown ModelDeploymentParallelismSourceKind = "Unknown"
+)
+
+// ModelDeploymentLoadBalance is the balance shape declared parallel degrees derive to.
+// +enum
+type ModelDeploymentLoadBalance string
+
+const (
+	// ModelDeploymentLoadBalanceInternal balances inside one engine process.
+	ModelDeploymentLoadBalanceInternal ModelDeploymentLoadBalance = "Internal"
+	// ModelDeploymentLoadBalanceExternal balances outside the engine, e.g. through an
+	// external load balancer the rank layout derives.
+	ModelDeploymentLoadBalanceExternal ModelDeploymentLoadBalance = "External"
+	// ModelDeploymentLoadBalanceHybrid combines an internal and an external leg.
+	ModelDeploymentLoadBalanceHybrid ModelDeploymentLoadBalance = "Hybrid"
+	// ModelDeploymentLoadBalanceMultiPort balances across several engine listeners.
+	ModelDeploymentLoadBalanceMultiPort ModelDeploymentLoadBalance = "MultiPort"
+	// ModelDeploymentLoadBalanceUnknown means the declaration does not derive to a shape.
+	ModelDeploymentLoadBalanceUnknown ModelDeploymentLoadBalance = "Unknown"
+)
+
+// ModelDeploymentRoleEndpointsStatus is one role's endpoint eligibility and actual serving
+// confirmation.
+//
+// nil IS NOT ZERO here, and neither is the reverse: a nil eligible count says the qualified
+// set was never observed, an eligible 0 says it was observed and is empty, and only a
+// Confirmed serving state may carry a value. The condition EndpointEligibility says at the
+// deployment level when the per-role counts below are unobserved rather than empty.
+type ModelDeploymentRoleEndpointsStatus struct {
+	// Eligible is how many endpoints the role's qualification list holds, set only when that
+	// list is complete. It is named for eligibility and never presents itself as serving.
+	//
+	// +optional
+	Eligible *int32 `json:"eligible,omitempty" protobuf:"varint,1,opt,name=eligible"`
+
+	// Serving is the actual serving confirmation taken over the role's endpoints.
+	//
+	// +optional
+	Serving ModelDeploymentServingStatus `json:"serving" protobuf:"bytes,2,name=serving"`
+}
+
+// ModelDeploymentServingStatus is the actual serving confirmation of a role's endpoints: a
+// deduplicated union over complete, identity-bound per-Router views. It is an observation,
+// never a restatement of the eligible count.
+type ModelDeploymentServingStatus struct {
+	// State is the confirmation answer. Only Confirmed means the union was observed; the other
+	// states differ in WHY no number is offered, and none of them encodes one.
+	//
+	// +k8s:validation:enum=["Confirmed","NotConverged","Unknown","NotConfigured"]
+	State ModelDeploymentServingState `json:"state" protobuf:"bytes,1,name=state,casttype=ModelDeploymentServingState"`
+
+	// Value is the confirmed serving count, present only when State is Confirmed, with an
+	// explicit zero as real as any other number.
+	//
+	// +optional
+	Value *int32 `json:"value,omitempty" protobuf:"varint,2,opt,name=value"`
+}
+
+// ModelDeploymentServingState is the confirmation answer of the per-Router serving union.
+// +enum
+type ModelDeploymentServingState string
+
+const (
+	// ModelDeploymentServingStateConfirmed means complete, fresh, identity-matched views agree on Value.
+	ModelDeploymentServingStateConfirmed ModelDeploymentServingState = "Confirmed"
+	// ModelDeploymentServingStateNotConverged means complete views disagree about the target.
+	ModelDeploymentServingStateNotConverged ModelDeploymentServingState = "NotConverged"
+	// ModelDeploymentServingStateUnknown means a required view is missing, stale or indeterminate.
+	ModelDeploymentServingStateUnknown ModelDeploymentServingState = "Unknown"
+	// ModelDeploymentServingStateNotConfigured means the deployment declares no router at all,
+	// so there is no Router process whose answer could be missing.
+	ModelDeploymentServingStateNotConfigured ModelDeploymentServingState = "NotConfigured"
+)
 
 // ModelDeploymentKVCacheStatus is the reuse domain this deployment attached to.
 //
