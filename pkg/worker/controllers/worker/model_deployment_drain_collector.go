@@ -169,6 +169,16 @@ func (c *modelDeploymentDrainCollector) Drain(
 		return modelDeploymentDrainHold(modelDeploymentDrainUnknown, drift), nil
 	}
 
+	// The owning deployment is re-read LIVE rather than trusted from the Pod's owner reference.
+	// A reference is a claim written when the Pod was created, and an object deleted and recreated
+	// under the same name leaves every reference pointing at the name while the UID behind it is
+	// gone; a cached identity would confirm a member the operation no longer holds. It runs after
+	// the captured identity above, so a target that names no deployment at all is refused for that
+	// rather than for a read it never asked for.
+	if drift := c.verifyModelDeploymentIdentity(ctx, pod, target); drift != "" {
+		return modelDeploymentDrainHold(modelDeploymentDrainUnknown, drift), nil
+	}
+
 	// The first live read is kept whole rather than reduced to a container status, because the
 	// comparison after the exec is against the member as it was and not against one field of it.
 	beforePod := pod
@@ -224,6 +234,14 @@ func (c *modelDeploymentDrainCollector) Drain(
 			fmt.Sprintf("container %q was replaced while it was being read", target.Container)), nil
 	}
 
+	// A CONTAINER THAT STOPPED DURING THE READ ANSWERED A DIFFERENT QUESTION. The gauges came from
+	// a process the kubelet has since seen exit, so whether the body is a complete envelope is
+	// beside the point: there is no longer an engine of this member running for the answer to be
+	// about. The same requirement is applied before the exec, so the pair brackets the read.
+	if running, why := modelDeploymentDrainContainerRunning(after, target.Container); !running {
+		return modelDeploymentDrainHold(modelDeploymentDrainUnknown, why), nil
+	}
+
 	// THE TWO BOOKENDS MUST BE ABOUT THE SAME MEMBER, and a container ID is the smallest part of
 	// that. Everything else this read acted on is compared here as well, because each is a way the
 	// member under the read can stop being the member the reservation bound: an owner that changed
@@ -233,6 +251,21 @@ func (c *modelDeploymentDrainCollector) Drain(
 	// protocol is accounting for, whatever the numbers say.
 	if drift := modelDeploymentDrainIdentityDrift(beforePod, after, target.Container); drift != "" {
 		return modelDeploymentDrainHold(modelDeploymentDrainUnknown, drift), nil
+	}
+
+	// THE IDENTITY IS READ AGAIN AFTER THE EXEC, not only before it. The drift check above names
+	// what moved and is the better answer when it fires, so this is the backstop behind it: a
+	// Pod whose controller was re-pointed, or whose owning deployment was deleted and recreated
+	// under the same name while the stream was open, keeps every container identity compared above
+	// and is a different member underneath. The gauges would then answer about a member the
+	// operation no longer holds, so the captured identity is checked again on the live object.
+	if drift := modelDeploymentDrainExpectedIdentity(after, target, target.Container); drift != "" {
+		return modelDeploymentDrainHold(modelDeploymentDrainUnknown, fmt.Sprintf(
+			"member is no longer the member this read began on: %s", drift)), nil
+	}
+	if drift := c.verifyModelDeploymentIdentity(ctx, after, target); drift != "" {
+		return modelDeploymentDrainHold(modelDeploymentDrainUnknown, fmt.Sprintf(
+			"the operation's deployment changed while it was being read: %s", drift)), nil
 	}
 
 	return modelDeploymentDrainAnswerFromBody(body, expected), nil
@@ -318,13 +351,31 @@ func modelDeploymentDrainExpectedIdentity(
 		return "the read names no deployment to check the member against"
 	}
 
-	controller := modelDeploymentDrainControllerOf(pod)
-	if controller == "" {
+	controller := metav1.GetControllerOf(pod)
+	if controller == nil {
 		return fmt.Sprintf("member %s has no controlling owner", pod.Name)
 	}
-	if !strings.HasSuffix(controller, "/"+string(target.DeploymentUID)) {
-		return fmt.Sprintf("member %s is owned by %s rather than the operation's deployment %s",
-			pod.Name, controller, target.DeploymentUID)
+
+	// THE OWNER IS THE MODELDEPLOYMENT ITSELF, because that is the shape the render writes: an
+	// ordinary engine member is controlled directly by its ModelDeployment
+	// (model_deployment_render.go), with no ReplicaSet and no workload Deployment between them.
+	// A check that walked a ReplicaSet and a Deployment would refuse every faithful member, and
+	// the cost of refusing them is that no member is ever drainable.
+	//
+	// THE MATCH IS BY KIND, API VERSION AND UID, never by a suffix of a joined string. A suffix
+	// accepts any owner of any kind whose UID happens to match, so it would read a Pod adopted by
+	// an unrelated object of the same name as this operation's member.
+	if controller.Kind != workercore.SchemeGroupVersionKind("ModelDeployment").Kind {
+		return fmt.Sprintf("member %s is controlled by %q rather than a ModelDeployment",
+			pod.Name, controller.Kind)
+	}
+	if controller.APIVersion != workercore.SchemeGroupVersion.String() {
+		return fmt.Sprintf("member %s is controlled by a ModelDeployment of API version %q rather than %q",
+			pod.Name, controller.APIVersion, workercore.SchemeGroupVersion.String())
+	}
+	if controller.UID != target.DeploymentUID {
+		return fmt.Sprintf("member %s is owned by %s/%s rather than the operation's deployment %s",
+			pod.Name, controller.Kind, controller.Name, target.DeploymentUID)
 	}
 
 	// The role is read through the tree's own accessor, so there is one answer to which role a Pod
@@ -341,6 +392,65 @@ func modelDeploymentDrainExpectedIdentity(
 	// container this is, and two empty identities agree with each other while saying nothing.
 	if status.ContainerID == "" {
 		return fmt.Sprintf("member %s reports no container identity for %q", pod.Name, container)
+	}
+	// THE CONTAINER MUST BE RUNNING, not merely present. A terminated or waiting container has no
+	// engine serving its metrics endpoint, so a body read from it answers about a process that is
+	// not this member's, or answers about a stale socket that some earlier process left behind.
+	if running, why := modelDeploymentDrainContainerRunning(pod, container); !running {
+		return why
+	}
+
+	return ""
+}
+
+// modelDeploymentDrainContainerRunning reports whether the named container is running, and why not
+// when it is not.
+//
+// THE STATE IS READ AND NOT INFERRED. A container status whose State is nil is a container the
+// kubelet has reported nothing about, which is neither running nor stopped, and reading it as
+// running would let a member that never started confirm a zero.
+func modelDeploymentDrainContainerRunning(pod *corev1.Pod, name string) (bool, string) {
+	status, found := modelDeploymentDrainContainerStatus(pod, name)
+	if !found {
+		return false, fmt.Sprintf("member %s reports no status for container %q", pod.Name, name)
+	}
+	if status.State.Running == nil {
+		return false, fmt.Sprintf(
+			"member %s reports container %q in state %q rather than running",
+			pod.Name, name, status.State)
+	}
+
+	return true, ""
+}
+
+// verifyModelDeploymentIdentity re-reads the deployment the member names through the live reader and
+// refuses anything but the object the reservation captured.
+//
+// THE POD'S OWNER REFERENCE IS NOT PROOF. It is a claim written when the Pod was created, and a
+// deployment deleted and recreated under the same name leaves every reference resolving while the
+// UID behind the name is a different object's. Only a live read of the object itself, compared by
+// UID, says whether the operation still holds the deployment its members belong to.
+func (c *modelDeploymentDrainCollector) verifyModelDeploymentIdentity(
+	ctx context.Context, pod *corev1.Pod, target modelDeploymentDrainTarget,
+) string {
+	controller := metav1.GetControllerOf(pod)
+	if controller == nil {
+		return fmt.Sprintf(
+			"member %s has no controlling owner to read the operation's deployment from", pod.Name)
+	}
+
+	if c.fresh == nil {
+		return "no live reader is configured to confirm the operation's deployment"
+	}
+
+	live := new(workercore.ModelDeployment)
+	if err := c.fresh.Get(ctx,
+		ctrlcli.ObjectKey{Namespace: pod.Namespace, Name: controller.Name}, live); err != nil {
+		return fmt.Sprintf("the operation's deployment could not be read live: %v", err)
+	}
+	if live.UID != target.DeploymentUID {
+		return fmt.Sprintf("the operation's deployment is now %s rather than the captured %s",
+			live.UID, target.DeploymentUID)
 	}
 
 	return ""

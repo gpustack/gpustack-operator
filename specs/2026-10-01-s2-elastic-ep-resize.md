@@ -542,10 +542,11 @@ disposition rather than opening another general review or automatic retry.
       engine action, persist command intent before dispatch, reconstruct after ambiguity/restart,
       and only permit captured actor-free non-master identities after effective-plus-forward proof.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -count=1 -race ./pkg/worker/controllers/worker/...`
-- [ ] **T3 · Complete S1 serving and drain integration in the S2 branch**
+- [x] **T3 · Complete S1 serving and drain integration in the S2 branch**
       Blocked by: T2
       Owns: `pkg/worker/controllers/worker/model_deployment_router_observation*.go`,
-      `pkg/worker/controllers/worker/model_deployment_drain_collector*.go`
+      `pkg/worker/controllers/worker/model_deployment_drain_collector*.go`,
+      `pkg/worker/controllers/worker/model_deployment_retirement_test.go`
       Acceptance: uncached deployment and before/after membership observations; complete
       Pod→ReplicaSet→Deployment ownership; terminating-process coverage; custom role, listener
       port and decimal-rank identity binding; physical endpoint union and per-role counting;
@@ -554,10 +555,12 @@ disposition rather than opening another general review or automatic retry.
       identity checks require the expected API kind/version and a running container. No status
       wire or accepted budgets change.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -count=1 -race ./pkg/worker/controllers/worker/...`
-      Completed offline leaf: profile-specific observer listeners and llm-d recent-dispatch
-      consumption. Independent baseline failure and corrected race controls verify this leaf.
-      The remaining ownership, membership, endpoint and drain checks stay open.
-      Full integration remains blocked by T2. CPU checks do not prove physical EP behavior.
+      Offline source integration is complete. Uncached caller and membership guards, live
+      Router ownership, terminating-process coverage, physical per-role counts and post-exec
+      drain identity checks pass focused controls and the full package race suite. Only Confirmed
+      serving status carries a count. Same-name apps owner replacement fixtures remain a
+      separate regression follow-up in T4. CPU checks do not prove physical EP behavior;
+      native Router placement, drain and resource-release validation remain in T6.
 - [ ] **T4 · Ray workload, admission and identity-safe retirement realization**
       Blocked by: T2, T3
       Owns: `pkg/worker/controllers/worker/model_deployment_elastic_workload*.go` and
