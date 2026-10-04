@@ -135,7 +135,7 @@ var (
 		"Indicates the image a managed router runs, when the ModelDeployment does not name one. "+
 			"It carries every router this operator supports; the rendered command chooses which "+
 			"binary runs.",
-		setting.InitializeFromEnv("gpustack/llm-router:v0.1.0"),
+		setting.InitializeFromEnv("gpustack/llm-router:v0.2.0"),
 		setting.AllowContainerImageReference(),
 	)
 

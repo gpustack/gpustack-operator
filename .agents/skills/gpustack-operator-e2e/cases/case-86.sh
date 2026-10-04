@@ -36,7 +36,7 @@
 #              threshold, driven from a throwaway probe Pod. E2E_RP_INSTANCE_TYPE (required),
 #              E2E_RP_NODE_SSH / E2E_RP_NODE_SSH_OPTS (required / optional), E2E_RP_IMAGE (engine,
 #              default quay.io/gpustack/runner:cann9.1-910b-vllm0.23.0-router),
-#              E2E_RP_ROUTER_IMAGE (default docker.io/gpustack/llm-router:v0.1.0), E2E_RP_WEIGHTS
+#              E2E_RP_ROUTER_IMAGE (default docker.io/gpustack/llm-router:v0.2.0), E2E_RP_WEIGHTS
 #              (default /data/models/model_scope/Qwen/Qwen2.5-0.5B-Instruct), E2E_RP_MODEL
 #              (default /models/Qwen2.5-0.5B-Instruct), E2E_RP_TP (default 2),
 #              E2E_RP_GPU_MEM_UTIL (default 0.4), E2E_RP_MAX_MODEL_LEN (default 4096),
@@ -82,7 +82,7 @@ MD=case86-pd
 TP="${E2E_RP_TP:-2}"
 IT="${E2E_RP_INSTANCE_TYPE:-}"
 IMAGE="${E2E_RP_IMAGE:-quay.io/gpustack/runner:cann9.1-910b-vllm0.23.0-router}"
-ROUTER_IMAGE="${E2E_RP_ROUTER_IMAGE:-docker.io/gpustack/llm-router:v0.1.0}"
+ROUTER_IMAGE="${E2E_RP_ROUTER_IMAGE:-docker.io/gpustack/llm-router:v0.2.0}"
 WEIGHTS="${E2E_RP_WEIGHTS:-/data/models/model_scope/Qwen/Qwen2.5-0.5B-Instruct}"
 MODEL="${E2E_RP_MODEL:-/models/Qwen2.5-0.5B-Instruct}"
 MEMUTIL="${E2E_RP_GPU_MEM_UTIL:-0.4}"

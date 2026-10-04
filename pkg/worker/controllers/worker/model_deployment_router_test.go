@@ -729,7 +729,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 			name:      "picker defaults to the image that carries every router",
 			md:        routedModelDeployment(),
 			container: "epp",
-			want:      "gpustack/llm-router:v0.1.0",
+			want:      "gpustack/llm-router:v0.2.0",
 			why:       "the default names a release of this project's own build, not a moving upstream tag",
 		},
 		{
@@ -738,7 +738,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 			}),
 			container: "router",
-			want:      "gpustack/llm-router:v0.1.0",
+			want:      "gpustack/llm-router:v0.2.0",
 			why:       "one setting says where the binaries come from; the command picks which one runs",
 		},
 		{
@@ -785,18 +785,20 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 // when its picker configuration came to name the engine a Pod without an engine-type label is read
 // as, which the vLLM cases pin as unchanged. It moved once more when that configuration came to
 // carry the engine's KV cache capacity, which is rendered beside the approximate producer alone, so
-// the vLLM cases, whose picker runs the precise producer, pin it as unchanged again.
+// the vLLM cases, whose picker runs the precise producer, pin it as unchanged again. The four cases
+// running the default image moved once more when that default advanced from v0.1.0 to v0.2.0; the
+// case naming its own image did not, pinning the move to the setting's value.
 // To re-baseline after an intended rendering change: empty the table, run this case, and pin the
 // digests the failures print.
 func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
 		// The digests moved once when the eligibility equality joined the discovery selector
 		// (the endpoint-eligible term a reconciler writes at runtime); they are pinned again here.
-		"a prefill and decode pair": "4e62baa7a1935f66946a863ee730e551cd23a4f8ffe677051b47e2bf58f8b9a4",
-		"a sole server role":        "052c5cc61b6c6b2c313c8cc743f070dcc9e5eaa2f8cf197ad52affa3fa8dc0cc",
+		"a prefill and decode pair": "99610d32170549ce71bf88c2829f71047299cc740c615df7bbadd4b74963550a",
+		"a sole server role":        "988eb796ec383af6711f20dbd71cdba9047d47896f674cee5a8ebbbf371796d7",
 		"a router declaring its own image, policy, replicas and extra arguments": "a3eb0fce558ed09aa0f41e6b57cf7e9777bc169ed48709a0f2647064532c43cc",
-		"a role whose command the user took over, so it publishes no events":     "cb3bbff686dad17a56b2f26dc9ef12cf3a8fbefb139b31361b76d0b6a92b72d6",
-		"an sglang engine, whose metrics contract differs":                       "37af02b7b5be7a409c87f2638dad71bf43f589ef38137ba4b3f70133bb6c76ba",
+		"a role whose command the user took over, so it publishes no events":     "26194d4837676997b1ca4390167058612440528d25dc1959e123b61f28b3396b",
+		"an sglang engine, whose metrics contract differs":                       "9586aff15c8498972303e7bfd7d947c31b7f0bf43833f99c7d038b932b1afc1a",
 	}
 
 	soleServerRole := func() *workercore.ModelDeployment {
