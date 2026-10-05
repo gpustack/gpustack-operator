@@ -197,12 +197,15 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 		return true, r.reconcileModelDeploymentElasticResize(ctx, md)
 	}
 	for name, ordinals := range desired {
-		taken, err := r.modelDeploymentTakenGroups(ctx, md, name)
+		taken, err := r.modelDeploymentTakenGroups(ctx, md, name, false)
 		if err != nil {
 			return true, err
 		}
 		gpuCount := 0
 		for i := range actual {
+			if actual[i].Status.Phase == core.PodSucceeded || actual[i].Status.Phase == core.PodFailed {
+				continue
+			}
 			if modelDeploymentPodRole(&actual[i]) == role.Name {
 				gpuCount++
 			}
@@ -213,6 +216,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 			}
 			present := false
 			for i := range actual {
+				if actual[i].Status.Phase == core.PodSucceeded || actual[i].Status.Phase == core.PodFailed {
+					continue
+				}
 				if modelDeploymentPodRole(&actual[i]) == name && modelDeploymentOrdinalOrFloor(&actual[i]) == ordinal {
 					present = true
 					break

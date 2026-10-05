@@ -92,6 +92,59 @@ func TestElasticConvergenceCreatesChildren(t *testing.T) {
 	}
 }
 
+func TestElasticDeletingPodReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		phase        core.PodPhase
+		replacements int
+	}{
+		{name: "succeeded", phase: core.PodSucceeded, replacements: 1},
+		{name: "failed", phase: core.PodFailed, replacements: 1},
+		{name: "running drain", phase: core.PodRunning, replacements: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newElasticConvergenceFixture(t)
+			pods := new(core.PodList)
+			require.NoError(t, f.reconciler.Client.List(ctx, pods, ctrlcli.InNamespace(f.md.Namespace)))
+			var member *core.Pod
+			for i := range pods.Items {
+				if modelDeploymentPodRole(&pods.Items[i]) == "server" && modelDeploymentOrdinalOrFloor(&pods.Items[i]) == 1 {
+					member = pods.Items[i].DeepCopy()
+					break
+				}
+			}
+			require.NotNil(t, member)
+			require.NoError(t, f.reconciler.Client.Delete(ctx, member))
+			member.UID = "held-member"
+			member.ResourceVersion = ""
+			member.DeletionTimestamp = nil
+			member.Finalizers = append(member.Finalizers, "kueue.x-k8s.io/managed")
+			member.Status.Phase = tc.phase
+			require.NoError(t, f.reconciler.Client.Create(ctx, member))
+			require.NoError(t, f.reconciler.Client.Delete(ctx, member))
+			require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(member), member))
+			require.NotNil(t, member.DeletionTimestamp)
+			require.Equal(t, tc.phase, member.Status.Phase)
+			require.Contains(t, member.Finalizers, "kueue.x-k8s.io/managed")
+
+			_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+			require.NoError(t, err)
+			require.NoError(t, f.reconciler.Client.List(ctx, pods, ctrlcli.InNamespace(f.md.Namespace)))
+			created := 0
+			for i := range pods.Items {
+				pod := &pods.Items[i]
+				if modelDeploymentPodRole(pod) == "server" && modelDeploymentOrdinalOrFloor(pod) == 1 && pod.UID != member.UID {
+					created++
+				}
+			}
+			require.Equal(t, tc.replacements, created)
+			require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(member), member))
+			require.Contains(t, member.Finalizers, "kueue.x-k8s.io/managed", "replacement must not require finalizer surgery")
+		})
+	}
+}
+
 func TestElasticGPUMembersCarryIsolatedSharedMemory(t *testing.T) {
 	for _, tc := range []struct {
 		name         string

@@ -1021,7 +1021,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// ONE UNCACHED READ FOR THE ROLE, taken before the loop rather than inside it: every
 			// free ordinal asks the same question of the same objects, and asking it per ordinal
 			// cost one list each while a departure drained.
-			taken, takenErr := r.modelDeploymentTakenGroups(ctx, md, role.Name)
+			taken, takenErr := r.modelDeploymentTakenGroups(ctx, md, role.Name, true)
 			if takenErr != nil {
 				logger.Error(takenErr, "read the role's groups on the api server", "role", role.Name)
 				return ctrl.Result{}, takenErr
@@ -1849,7 +1849,7 @@ const kueueWorkloadWaitingForReplacementPods = "WaitingForReplacementPods"
 // earlier incarnation of the same name claims no slot this deployment owes, and the deployment
 // creates around it rather than waiting behind it.
 func (r *ModelDeploymentReconciler) modelDeploymentTakenGroups(
-	ctx context.Context, md *workercore.ModelDeployment, role string,
+	ctx context.Context, md *workercore.ModelDeployment, role string, includeTerminal bool,
 ) (sets.Set[string], error) {
 	podList := new(core.PodList)
 	err := r.APIReader.List(ctx, podList,
@@ -1867,6 +1867,9 @@ func (r *ModelDeploymentReconciler) modelDeploymentTakenGroups(
 	for i := range podList.Items {
 		pod := &podList.Items[i]
 		if !modelDeploymentOwns(pod, md) {
+			continue
+		}
+		if !includeTerminal && (pod.Status.Phase == core.PodSucceeded || pod.Status.Phase == core.PodFailed) {
 			continue
 		}
 		if group := pod.Labels[kueuepodconst.GroupNameLabel]; group != "" {
