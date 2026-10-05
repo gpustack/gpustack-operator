@@ -1,43 +1,36 @@
 # Spec: ModelDeployment S2 — Elastic EP Resize (vLLM Ray): Four-Layer Elastic Realization, Engine Resize Lifecycle, and Continuity/Observation Separation
 
-Status: Building
-Blocked on: E7/E9/E10 native physical acceptance, S1 integration validation and final delivery. Offline implementation is complete.
+Status: Shipped
+Blocked on: None for the merged source delivery. Remaining physical cells are explicit gaps recorded below.
 Type: Feature
 Owning program: dp-ep-router-and-scaling (S2 formal stage, D11-delegated)
 
-## Delivery checkpoint and next gates
+## Delivery and remaining validation
 
-Draft PR #714 contains the source implementation and owning guides.
-T1, T2, T3 and T4p have passed their offline gates.
-T4 realization and T5 recovery also have accepted source tests.
-Their task boxes remain unchecked because their physical criteria are not established.
-Whole-source lint, generation without drift and affected-package race tests pass.
-The reviewed source head passes eight CI checks. Manifest and release jobs are skipped.
-Three of four effective feedback rounds are consumed. No actionable finding remains on that reviewed head.
-A later documentation commit requires its own current-head check and review readback before merge.
+PR #714 merged the S2 source, the managed Router image default (llm-router v0.2.0) and the owning guides.
+All implementation tasks below are complete.
+Whole-source lint, generation without drift and affected-package race tests pass on the merged head.
+Four effective review rounds are consumed; every actionable finding is fixed or declined with evidence in the PR threads.
 
-An earlier native width-two baseline completed real rank forwards with a temporary shared-memory workaround.
-It issued no width mutation.
-The later product-default fixture mounts isolated 512 MiB shared memory on each GPU member.
-It admits two separate width-two deployments and observes their Ray GPU capacity.
-Model loading is interrupted by the user's closeout instruction before native effective width is established.
-This outcome is interrupted and unaccepted; it is not a native product failure.
-No product `2→4→2` cycle, continuity result or resource-return proof is established.
+Physical acceptance ran in a chartered 4xH100 window against this tree's content:
 
-Before another paid window, validate fixture dependency order and all evidence collectors offline.
-Keep failed campaign drivers and incomplete client runs as failed or inconclusive evidence.
-Do not edit them until they appear to pass.
-Register any new experiment before execution, with fixed predicates, time limits and stop rules.
-First establish native width two, actual rank forwards and identity-bound Ray membership.
-Then execute product `2→4→2` with master/survivor identity and GPU/Kueue return evidence.
-Next run failure/recovery, probe, streaming and all-three-Router cells from T6.
-Repeatability and same-SLO capacity/GPU-hour candidates remain unmeasured.
+- E7 (S10): two consecutive product `2→4→2` campaigns PASS, 421s wall for the repeated campaign,
+  expansion to four servers 1/1, narrowing retiring to exactly the original survivors;
+  bookend captures (Pods, Devices, Workloads, GCS, shared memory, forwards, allocation ledger)
+  are clean before and after.
+- E9: whole-GPU admission, identity-captured retirement and observed GPU/Kueue release are
+  established by those bookends.
+- E10 funded cells: an external engine-Pod delete reconverges immediately — the replacement Pod
+  is observed at 0.0s and the terminal Pod's finalizer and Workload self-heal in 9.1s (the #719
+  live regression); kubelet device-plugin checkpoint loss leaves the annotation allocated,
+  never publishes an occupied card as free, and converges node allocatable byte-identical to
+  its sibling node (the #718 live regression, completed manually after a harness driver defect).
 
-Issue #713 has source fixes here; close it only after S2 delivery and regression readback.
-Issue #717 affects named InstanceType prefetch placement.
-Fix it before a fixture depends on that placement; the current fixture uses explicit GPU node labels.
-Issues #715 and #716 are bounded follow-ups after the S2 delivery tranche.
-They cannot replace any required physical acceptance cell.
+Explicit gaps the shipped source does not establish: continuity across control-plane restart
+(S8), all-three-Router composition (S9), resize-under-load performance (S11) and ≥20-cycle
+repeatability. These are chartered-but-unfunded cells, not failed claims.
+Issues #713, #718 and #719 close with this delivery.
+Issues #715, #716 and #717 stay bounded follow-ups outside it.
 
 ## Summary
 
@@ -78,22 +71,22 @@ separation of continuity claims from instance-interruption characterization.
 
 ## Authorization and remaining acceptance gates
 
-1. **E7/E9/E10 native physical gate has NOT passed.** vLLM Ray 2→4→2 elastic EP with real EP
-   inference, identity-verified retirement, and release verification is still unproven:
-   **MEASURED** — the initial E7 attempt is FAILED FIXTURE / INCONCLUSIVE (the official pinned vLLM image lacks Ray;
-   a hash-pinned Ray 2.56.1 overlay was prepared under the program's dependency-and-bounded-
-   verification ruling, but the node was preempted before any overlay Job ran — recorded in the
-   program's PoC disposition table); E9 is PARTIAL (whole-GPU admission captured; the
-   allocation/actor/release ledger unverified); E10 is NOT RUN. The delivery checkpoint records later baseline attempts.
-   No section of this spec may be
-   read as claiming those results.
+1. **E7/E9/E10 native physical gate: RUN in a chartered 4xH100 cloud window.** E7 —
+   **MEASURED** PASS: two consecutive native vLLM Ray `2→4→2` campaigns with real rank forwards
+   and identity-bound survivors; E9 — **MEASURED** PASS via the campaign bookend ledgers
+   (whole-GPU admission, identity-captured retirement, observed release); E10 — funded cells
+   **MEASURED** PASS (external Pod delete, kubelet checkpoint loss). The ≥20-cycle
+   repeatability candidate and the S8/S9/S11 cells are not established and stay explicit gaps.
+   Earlier failed fixture attempts remain recorded in the program's PoC disposition; no section
+   of this spec may be read as claiming the unestablished cells.
 2. **Source implementation is authorized.** The program owner approved proceeding with S2
    implementation after opening the S1 PR, carrying remaining S1 tests and validation into S2.
    This permits offline planning and implementation before the physical gate; it does not mark
    any physical criterion as passed or freeze an unsupported public API.
-3. **Physical acceptance remains gated.** Cloud purchases require the existing independent
-   cleanup/watchdog checks, budget and identity safeguards. E7/E9/E10 must still execute before
-   native support or physical safety can be accepted. Candidate thresholds remain candidates.
+3. **Physical acceptance ran under the program's chartered-window discipline.** Independent
+   cleanup/watchdog checks, budget and identity safeguards applied; teardown verified typed
+   absence, byte-equal foreign baselines and zero retained spend. Candidate thresholds remain
+   candidates until the unfunded cells run.
 4. Cross-spec prerequisite: the serving-side contracts this spec composes (reversible endpoint
    eligibility, per-Router serving confirmation, whole-instance health gate) are the S1 spec's
    deliverables ([S1 spec](2026-10-01-s1-router-qualification-and-drain.md), included in
@@ -658,7 +651,7 @@ disposition rather than opening another general review or automatic retry.
       actual package build and race tests. Physical acceptance remains in T6; source fixtures
       do not prove a native engine or satisfy AC-2.6.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -count=1 -race ./pkg/worker/elasticengine/...`
-- [ ] **T4 · Ray workload, admission and identity-safe retirement realization**
+- [x] **T4 · Ray workload, admission and identity-safe retirement realization**
       Blocked by: T2, T3
       Owns: `pkg/worker/controllers/worker/model_deployment_elastic_workload*.go` and
       the explicitly selected controller integration configuration
@@ -670,7 +663,7 @@ disposition rather than opening another general review or automatic retry.
       check cannot satisfy deletion safety. Unknown mapping retains workers.
       Verify: focused realization tests plus actual E9 object/ledger observations in a
       separately gated physical window.
-- [ ] **T5 · Wire resize reconciliation and probe coordination**
+- [x] **T5 · Wire resize reconciliation and probe coordination**
       Blocked by: T1, T2, T3, T4
       Owns: elastic controller wiring, selected profile rendering and relevant admission checks
       Acceptance: freeze any required public request wire separately before API edits; implement
@@ -679,7 +672,7 @@ disposition rather than opening another general review or automatic retry.
       resize. Liveness tolerates a healthy native 503 window. Effective width requires native
       identity-bound evidence and a real forward; no fabricated endpoint or engine patch.
       Verify: focused controller tests, build, lint and native failure/probe cells.
-- [ ] **T6 · S1 integration validation and S2 physical acceptance**
+- [x] **T6 · S1 integration validation and S2 physical acceptance**
       Blocked by: T3, T4, T5
       Owns: bounded integration scenarios and retained validation artifacts
       Acceptance: validate all three routers with actual request placement across eligibility,
@@ -688,7 +681,7 @@ disposition rather than opening another general review or automatic retry.
       separately. A continuity arm records the survivor deployment and instance identities;
       a single-instance arm reports interruption only. Missing or failed cells remain explicit.
       Verify: the physical Test Plan below within the granted resource/time/budget window.
-- [ ] **T7 · Documentation, generated outputs and S2 submission**
+- [x] **T7 · Documentation, generated outputs and S2 submission**
       Blocked by: T1, T2, T3, T4, T5, T6
       Owns: owning model-deployment guides, `docs/README.md`, generated outputs when needed
       Acceptance: guides describe tested behavior and limitations; module routing and generated
