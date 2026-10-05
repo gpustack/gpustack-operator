@@ -24,13 +24,17 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	gpustack "gpustack.ai/gpustack/api/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/modelstore"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -107,7 +111,11 @@ func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Client.List(ctx, deps, ctrlcli.InNamespace(pf.Namespace)); err != nil {
 		return ctrl.Result{}, err
 	}
-	targets, err := prefetchTargetNodes(pf, nodes.Items, deps.Items)
+	pools, err := ResolveInstanceTypeFlavorNames(ctx, r.Client, pf, deps.Items)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	targets, err := prefetchTargetNodes(pf, nodes.Items, deps.Items, pools)
 	if err != nil {
 		// An unparseable selector is a spec the API server's schema should have refused; report it
 		// as degraded and wait for the next generation.
@@ -207,15 +215,14 @@ type prefetchProgress struct {
 // namespace's deployments that reference the artifact.
 func prefetchTargetNodes(
 	pf *workercore.ModelPrefetch, nodes []core.Node, deps []workercore.ModelDeployment,
+	pools InstanceTypeFlavorNames,
 ) ([]string, error) {
 	placement := pf.Spec.Placement
-	var typeNames []string
-	switch {
-	case placement != nil && len(placement.InstanceTypes) > 0 && placement.NodeSelector != nil:
+	if placement != nil && len(placement.InstanceTypes) > 0 && placement.NodeSelector != nil {
 		return nil, ErrPrefetchPlacementAmbiguous
-	case placement != nil && len(placement.InstanceTypes) > 0:
-		typeNames = placement.InstanceTypes
-	case placement != nil && placement.NodeSelector != nil:
+	}
+	typeNames := prefetchPlacementTypeNames(pf, deps)
+	if placement != nil && placement.NodeSelector != nil {
 		sel, err := meta.LabelSelectorAsSelector(placement.NodeSelector)
 		if err != nil {
 			return nil, err
@@ -229,20 +236,22 @@ func prefetchTargetNodes(
 		sort.Strings(out)
 
 		return out, nil
-	default:
-		// The derived set: every InstanceType the namespace's own deployments serve these weights
-		// on, so warming follows serving without a second place to say where.
-		typeNames = deploymentInstanceTypes(deps, pf.Spec.ArtifactRef.Name)
 	}
 
+	// The named InstanceTypes' target set is every node carrying one of the types' flavors: the
+	// pool flavors each named type selects, resolved by the schedule labels its spec derives.
+	// An InstanceType's own name is never a flavor name — flavor names are topology-qualified
+	// and count-suffixed — so comparing it against one matches nothing.
 	wanted := map[string]bool{}
 	for _, name := range typeNames {
-		wanted[name] = true
+		for _, flavorName := range pools[name] {
+			wanted[flavorName] = true
+		}
 	}
 	var out []string
 	for i := range nodes {
-		for name := range wanted {
-			if matchNodeFlavor(&nodes[i], name) != nil {
+		for flavorName := range wanted {
+			if matchNodeFlavor(&nodes[i], flavorName) != nil {
 				out = append(out, nodes[i].Name)
 				break
 			}
@@ -251,6 +260,27 @@ func prefetchTargetNodes(
 	sort.Strings(out)
 
 	return out, nil
+}
+
+// prefetchPlacementTypeNames returns the InstanceType names a prefetch's placement selects, or
+// the ones its namespace's deployments serve the artifact on. An empty result means the
+// placement's nodeSelector owns the target set, or that there is nothing to derive it from.
+func prefetchPlacementTypeNames(
+	pf *workercore.ModelPrefetch, deps []workercore.ModelDeployment,
+) []string {
+	placement := pf.Spec.Placement
+	switch {
+	case placement != nil && len(placement.InstanceTypes) > 0 && placement.NodeSelector != nil:
+		return nil
+	case placement != nil && len(placement.InstanceTypes) > 0:
+		return placement.InstanceTypes
+	case placement != nil && placement.NodeSelector != nil:
+		return nil
+	default:
+		// The derived set: every InstanceType the namespace's own deployments serve these weights
+		// on, so warming follows serving without a second place to say where.
+		return deploymentInstanceTypes(deps, pf.Spec.ArtifactRef.Name)
+	}
 }
 
 // deploymentInstanceTypes collects the InstanceType names the namespace's deployments serve the
@@ -447,7 +477,11 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		if digest == "" {
 			continue
 		}
-		targets, err := prefetchTargetNodes(pf, nodes.Items, depsByNS[pf.Namespace])
+		pools, err := ResolveInstanceTypeFlavorNames(ctx, r.Client, pf, depsByNS[pf.Namespace])
+		if err != nil {
+			return err
+		}
+		targets, err := prefetchTargetNodes(pf, nodes.Items, depsByNS[pf.Namespace], pools)
 		if err != nil {
 			continue // the placement is broken; the prefetch's own status carries it
 		}
@@ -735,18 +769,74 @@ func requeueOr(chosen, fallback ctrl.Result) ctrl.Result {
 	return fallback
 }
 
-// MatchesInstanceType reports whether the node carries the named InstanceType's flavor: the same
-// matching the placement expansion runs, exported for the admission webhook that projects a
-// prefetch onto the nodes it would warm.
-func MatchesInstanceType(nd *core.Node, instanceTypeName string) bool {
-	return matchNodeFlavor(nd, instanceTypeName) != nil
+// InstanceTypeFlavorNames carries, per InstanceType name, the ResourceFlavor names the type's
+// pool selects. A type resolving to no flavors — unknown, or no synced flavor yet — maps to an
+// empty entry, which leaves its target set empty rather than erroring: the placement contract
+// is "every node carrying the type's flavors", and a type with none carries none.
+type InstanceTypeFlavorNames map[string][]string
+
+// ResolveInstanceTypeFlavorNames resolves the InstanceType names a prefetch's placement — or, in
+// its default form, the type names its namespace's deployments serve the artifact on — into the
+// ResourceFlavor names each type's pool selects: the flavors carrying the schedule labels the
+// type's spec derives, the same reverse-lookup the type's backing ClusterQueue and its status
+// Detail run. Flavor names are topology-qualified and count-suffixed, so an InstanceType's
+// object name is never itself a flavor name and cannot be compared against one.
+func ResolveInstanceTypeFlavorNames(
+	ctx context.Context, r ctrlcli.Reader, pf *workercore.ModelPrefetch, deps []workercore.ModelDeployment,
+) (InstanceTypeFlavorNames, error) {
+	typeNames := prefetchPlacementTypeNames(pf, deps)
+	if len(typeNames) == 0 {
+		return nil, nil
+	}
+	// One list serves every named type: a cluster carries a handful of operator-owned flavors,
+	// and a type's pool is a label containment over the shared set.
+	flavors := new(kueue.ResourceFlavorList)
+	if err := r.List(ctx, flavors,
+		systemmeta.GetResourcesLabelSetOfType[ctrlcli.MatchingLabels](_ResourceFlavorResType),
+		ctrlcli.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
+	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
+	pools := InstanceTypeFlavorNames{}
+	for _, name := range typeNames {
+		if _, resolved := pools[name]; resolved {
+			continue
+		}
+		it := new(workercore.InstanceType)
+		err := r.Get(ctx, ctrlcli.ObjectKey{Name: name}, it)
+		if kerrors.IsNotFound(err) {
+			pools[name] = nil
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		sched := nodefeature.PoolScheduleLabels(
+			it.Spec.Acceleratable, cpuAware,
+			it.Spec.GeneralGroup, it.Spec.AcceleratorGroup,
+			it.Spec.OS, it.Spec.Arch)
+		var flavorNames []string
+		for i := range flavors.Items {
+			if mapx.Contain(flavors.Items[i].Labels, sched) {
+				flavorNames = append(flavorNames, flavors.Items[i].Name)
+			}
+		}
+		sort.Strings(flavorNames)
+		pools[name] = flavorNames
+	}
+
+	return pools, nil
 }
 
 // PrefetchTargetNodes resolves a prefetch's placement into node names. It is the controller's own
 // expansion, shared with the admission webhook so admission and delivery can never disagree about
-// what a prefetch would warm.
-func PrefetchTargetNodes(pf *workercore.ModelPrefetch, nodes []core.Node, deps []workercore.ModelDeployment) ([]string, error) {
-	return prefetchTargetNodes(pf, nodes, deps)
+// what a prefetch would warm. The pools carry the named InstanceTypes' flavor resolution from
+// ResolveInstanceTypeFlavorNames.
+func PrefetchTargetNodes(
+	pf *workercore.ModelPrefetch, nodes []core.Node, deps []workercore.ModelDeployment,
+	pools InstanceTypeFlavorNames,
+) ([]string, error) {
+	return prefetchTargetNodes(pf, nodes, deps, pools)
 }
 
 // The placement refusal the webhook shares: both kinds set is ambiguous, and the schema cannot

@@ -141,7 +141,11 @@ func (r *ModelPrefetchWebhook) validateModelPrefetch(ctx context.Context, pf *wo
 	if err := r.APIReader.List(ctx, deps, ctrlcli.InNamespace(pf.Namespace)); err != nil {
 		return field.ErrorList{field.InternalError(field.NewPath("spec", "placement"), err)}
 	}
-	targets, err := workerctrl.PrefetchTargetNodes(pf, nodes.Items, deps.Items)
+	pools, err := workerctrl.ResolveInstanceTypeFlavorNames(ctx, r.APIReader, pf, deps.Items)
+	if err != nil {
+		return field.ErrorList{field.InternalError(field.NewPath("spec", "placement"), err)}
+	}
+	targets, err := workerctrl.PrefetchTargetNodes(pf, nodes.Items, deps.Items, pools)
 	if err != nil {
 		return field.ErrorList{field.Invalid(field.NewPath("spec", "placement"), "", err.Error())}
 	}
