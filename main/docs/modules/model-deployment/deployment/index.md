@@ -670,7 +670,8 @@ and therefore neither locates its window.
 ---
 
 **See also** — [KV Cache Pool](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md) for the Binding that grants the quota and declares
-the domain · [Model Deployment Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) for
+the domain · [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) for the profile that resizes one serving instance's collective
+instead of adding replicas · [Model Deployment Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) for
 what pairs a prefill role with a decode role · [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) for the request fields
 `roles[].resources` mirrors · [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md) for the gates a replica passes
 as an ordinary Pod · [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md) for what each condition

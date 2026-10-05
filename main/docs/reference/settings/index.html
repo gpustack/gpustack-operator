@@ -343,6 +343,11 @@
     
       
       
+        <a title="Elastic EP" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
         <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
       
     
@@ -593,7 +598,7 @@ picks a new value up on its next reconcile. Fixed means the resource serves
       <tr>
           <td><code>model-deployment-router-image</code></td>
           <td><code>GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE</code></td>
-          <td><code>gpustack/llm-router:v0.1.0</code></td>
+          <td><code>gpustack/llm-router:v0.2.0</code></td>
           <td>Image a managed router runs when the <code>ModelDeployment</code> does not name one in <code>spec.router.image</code>. <strong>It carries every router this operator supports, and which binary runs is decided by the rendered command rather than by the image</strong> — <code>spec.router.name</code> picks the binary, and this setting only says where the binaries come from. Its default is safe for every cluster at once in a way <code>kv-cache-backend-image</code>&rsquo;s is not: it runs no model, so it links no accelerator runtime and cannot be paired with the wrong one. The default is this project&rsquo;s own build rather than an upstream tag, because the three routers are compiled from three separate sources and one of them carries a patch this repository ships, so no upstream image holds them together. An image named on the object is used verbatim and is never redirected to the cluster mirror, because it is the user&rsquo;s own reference.</td>
       </tr>
       <tr>
@@ -1323,7 +1328,7 @@ user-facing knobs, listed for completeness.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/c79e83a98a753e58d1a1ca2ebfc7485c13398619/docs/reference/settings.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/a4e3eb0efa4e32b1a3bb6fd600e04d01e1649521/docs/reference/settings.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/settings.md">Edit this page</a>
             

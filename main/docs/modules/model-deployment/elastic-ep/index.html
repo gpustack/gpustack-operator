@@ -19,9 +19,9 @@
   
   <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
   <meta name="robots" content="noindex, follow">
-  <title>Model Image Source · GPUStack Operator</title>
+  <title>Elastic EP · GPUStack Operator</title>
   
-  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/index.md">
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
   <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
@@ -45,7 +45,7 @@
       
   <details class="picker version-picker" id="version-picker"
     data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
-    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-delivery/image-source/">
+    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/">
     <summary>
       <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
       <span class="visually-hidden">Documentation version: </span><span class="picker-value">main</span>
@@ -280,7 +280,7 @@
           
 
 
-<details class="nav-section" open>
+<details class="nav-section" >
   <summary title="Model Delivery">Model Delivery</summary>
   <div class="nav-children">
     
@@ -294,7 +294,7 @@
     
       
       
-        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" aria-current="page">Image sources</a>
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
       
     
       
@@ -329,7 +329,7 @@
           
 
 
-<details class="nav-section" >
+<details class="nav-section" open>
   <summary title="Model Deployment">Model Deployment</summary>
   <div class="nav-children">
     
@@ -343,7 +343,7 @@
     
       
       
-        <a title="Elastic EP" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+        <a title="Elastic EP" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/" aria-current="page">Elastic EP</a>
       
     
       
@@ -491,199 +491,248 @@
         <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
         
           
-            <a href="/gpustack-operator/main/docs/modules/model-delivery/">Model Delivery</a><span aria-hidden="true">/</span>
+            <a href="/gpustack-operator/main/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
           
         
-        <span aria-current="page">Model Image Source</span>
+        <span aria-current="page">Elastic EP</span>
       </div>
       
       <article>
         
-  <h1 id="model-image-source">Model Image Source</h1>
-<p>A <code>ModelArtifact</code> can deliver weights from an OCI image pinned by digest. Kubernetes mounts the
-image read-only for the workload; packaging and pulling it adds disk and registry costs.</p>
+  <h1 id="elastic-ep">Elastic EP</h1>
+<p>An elastic expert-parallel deployment keeps one vLLM serving instance and changes its GPU collective
+while it runs. The operator adds or removes GPU members inside one Ray cluster.
+The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting converge.</p>
 <h2 id="contents">Contents</h2>
 <ul>
-<li><a href="#the-source-and-its-digest-contract">The source and its digest contract</a>
+<li><a href="#what-the-profile-means">What the profile means</a>
 </li>
-<li><a href="#building-the-image">Building the image</a>
+<li><a href="#requirements">Requirements</a>
 </li>
-<li><a href="#delivery">Delivery</a>
+<li><a href="#shared-memory-for-gpu-members">Shared memory for GPU members</a>
 </li>
-<li><a href="#versions-and-prerequisites">Versions and prerequisites</a>
+<li><a href="#a-minimal-manifest">A minimal manifest</a>
 </li>
-<li><a href="#disk-cost">Disk cost</a>
+<li><a href="#changing-the-width">Changing the width</a>
 </li>
-<li><a href="#image-gc">Image GC</a>
+<li><a href="#what-you-see-while-it-runs">What you see while it runs</a>
 </li>
-<li><a href="#registry-mirrors-and-private-registries">Registry mirrors and private registries</a>
+<li><a href="#when-a-resize-holds">When a resize holds</a>
+</li>
+<li><a href="#interruption-scope">Interruption scope</a>
+</li>
+<li><a href="#diagnosis">Diagnosis</a>
+</li>
+<li><a href="#limits">Limits</a>
 </li>
 </ul>
-<h2 id="the-source-and-its-digest-contract">The source and its digest contract</h2>
+<h2 id="what-the-profile-means">What the profile means</h2>
+<p><code>roles[].elasticEp</code> selects this mode for a role. Two fields matter:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Field</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>width</code></td>
+          <td>Total GPU engines in the collective, counting the reserved master. Mutable, from 2 to 64.</td>
+      </tr>
+      <tr>
+          <td><code>headInstanceType</code></td>
+          <td>The CPU-only InstanceType the Ray control plane runs on. Set once.</td>
+      </tr>
+  </tbody>
+</table>
+<p><code>width</code> counts engines, not Pods you manage. A width of 2 is one master plus one worker, so two GPUs
+in total. Change the width to change the collective; do not use <code>replicas</code> or <code>size</code> for this.</p>
+<p>Once a role carries <code>elasticEp</code>, the profile is fixed for that deployment and the admission webhook
+enforces the rest:</p>
+<ul>
+<li>the deployment has exactly one role, and it is a Server role;</li>
+<li><code>replicas</code> and <code>size</code> are both 1, because each member is exactly one Pod;</li>
+<li>every member asks for one whole unsliced GPU;</li>
+<li>tensor and pipeline parallel sizes stay 1;</li>
+<li>you cannot supply <code>command</code>, because the renderer owns the command line of the managed role;</li>
+<li>there is no initial fabric to declare.</li>
+</ul>
+<p>Adding or removing the profile on an existing role is refused. <code>headInstanceType</code> is also immutable
+after creation, because the head is part of the deployment&rsquo;s identity.</p>
+<p>Only the master serves HTTP. The other members join the Ray cluster and hold collective state. That
+is why the master is counted inside <code>width</code> and is never retired.</p>
+<h2 id="requirements">Requirements</h2>
+<p>The engine image must be a vLLM 0.29.0 image that already contains a full Ray installation. The
+official vLLM image of that version ships without Ray, and the profile will not start on it. The
+pinned requirement in the resize spec is Ray 2.56.1 with the full default closure.</p>
+<p>The Ray control plane needs its own Pod, which is why <code>headInstanceType</code> is required. It names an
+InstanceType that must already exist and must be CPU-only.</p>
+<p>The profile changes the number of GPU members. It does not resize the underlying nodes or claim
+cloud node elasticity, and it does not patch anything upstream in the engine. It drives the engine
+through the resize interface the engine already exposes.</p>
+<h2 id="shared-memory-for-gpu-members">Shared memory for GPU members</h2>
+<p>Each Elastic GPU member gets a separate memory-backed <code>EmptyDir</code> mounted at <code>/dev/shm</code>.
+Its size limit is 512 MiB. This includes the master and workers. The CPU head has no default mount.
+The volume is isolated per Pod and uses the Pod&rsquo;s memory allocation.</p>
+<p>An explicit <code>/dev/shm</code> mount takes precedence. Its capacity and backing remain the user&rsquo;s responsibility.
+Sufficiency at 512 MiB is not established. A workload that needs more must declare its own <code>/dev/shm</code> mount.</p>
+<h2 id="a-minimal-manifest">A minimal manifest</h2>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reference</span><span class="p">:</span><span class="w"> </span><span class="l">registry.example.com/team/qwen@sha256:669ed7b1...48  </span><span class="w"> </span><span class="c"># digest-pinned, required</span></span></span></code></pre></div>
-</div><p>The reference <strong>must pin a digest</strong>. A tag is mutable, so one artifact could deliver different
-weights on different pulls, and the identity a frozen reference pins would be nothing; admission
-refuses a tag with that reason. Patterns are refused too: an image is mounted whole, so there is no
-listing to select from.</p>
-<blockquote>
-<p><strong>Why</strong> — the digest pins the image&rsquo;s manifest bytes. It is not the manifest digest a Hugging
-Face source resolves to, and <code>status.resolved</code> stays empty for an image source, as for a claim:
-the operator never reads the registry, so the reference in the immutable spec is the only record
-of what the artifact delivers, and the KV reuse identity falls back to the artifact&rsquo;s UID. Two
-artifacts naming one image never share KV blocks; that is safe, only not deduplicated.</p>
-</blockquote>
-<p>Creation is <strong>refused on an apiserver older than 1.35</strong>, where the image-volume field would be
-dropped from the Pod silently; the refusal names the floor and the alternatives. On a supported
-apiserver the artifact resolves on its first pass with no network: <code>Resolved=True</code>, <code>resolved</code>
-carrying only <code>resolvedTime</code>, no <code>nodes</code> aggregation, no revalidation.</p>
-<h2 id="building-the-image">Building the image</h2>
-<p>The build&rsquo;s contract: <strong>the weights live at the image&rsquo;s root</strong>, because delivery mounts the root
-whole and offers no sub-path (a sub-path would raise the containerd floor; see
-<a href="#versions-and-prerequisites">Versions</a>
-). A recipe measured end to end, from
-<code>Qwen/Qwen2.5-7B-Instruct</code> at commit <code>a09a3545…</code>, one safetensors shard per layer:</p>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-ep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-30B-A3B</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-30b-a3b-artifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-d-router</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vllm</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="m">0.29.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-gpu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">your-registry/vllm-ray:0.29.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">elasticEp</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">width</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">headInstanceType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-cpu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ports</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">http</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="m">8000</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">TCP</span></span></span></code></pre></div>
+</div><p>Weights reach the members through the same artifact and cache as any other deployment. See
+<a href="/gpustack-operator/main/docs/modules/model-delivery/">Model Delivery</a>
+.</p>
+<h2 id="changing-the-width">Changing the width</h2>
+<p>Change only <code>width</code>. Starting at 2, these two patches request 4 and then 2.
+Wait for the first resize to complete before submitting the second.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="k">for</span> f in *.safetensors tokenizer.json tokenizer_config.json config.json generation_config.json<span class="p">;</span> <span class="k">do</span>
-</span></span><span class="line"><span class="cl">  oras push <span class="s2">&#34;</span><span class="nv">$IMAGE</span><span class="s2">&#34;</span> --artifact-type application/vnd.gpustack.weights <span class="s2">&#34;</span><span class="nv">$f</span><span class="s2">:application/octet-stream&#34;</span>
-</span></span><span class="line"><span class="cl"><span class="k">done</span></span></span></code></pre></div>
-</div><p>The mount is a read-only overlay of the layer snapshots, and every file the engine reads matches the
-Hub copy byte for byte, measured sha256-equal to the LFS oids on Kubernetes 1.35.7 /
-containerd 2.2.6. That equality is a property of the build, which this recipe produces; the operator
-does not verify it.</p>
-<h2 id="delivery">Delivery</h2>
-<p>An image source always delivers <code>Image</code>, whatever <code>model-artifact-delivery-mode</code> says; the Setting
-governs hub sources (Hugging Face and ModelScope). A <code>ModelDeployment</code> renders one image volume per role, mounted
-read-only at <code>/var/lib/gpustack/model</code>, and nothing else: no cache <code>emptyDir</code>, no <code>HF_*</code> or proxy
-environment, no <code>--revision</code>, no ephemeral-storage raise.</p>
-<p>The served path and the <code>--served-model-name</code> rule are the claim&rsquo;s, and the engine-argument
-refusals apply unchanged. A take-over role gets the mount like a claim&rsquo;s.</p>
-<p>An <code>Instance</code> model volume mounts the image read-only and whole, and needs no CSIDriver; the
-node&rsquo;s plugin plays no part. An Instance pinned to a node checks that node before rendering: kubelet
-below 1.35, containerd below 2.1, a runtime that is not containerd, or a version that cannot be read
-holds the Pod with a phase message naming the node and the floor. An unpinned Instance cannot know,
-and waits like a <code>ModelDeployment</code> does.</p>
-<p><code>WeightsReady</code> follows the claim path: <code>WeightsNotMounted</code> until every Pod has started. A failed or
-slow pull keeps that reason; kubelet&rsquo;s own event on the Pod names the pull error, and that event is
-the diagnostic path.</p>
-<h2 id="versions-and-prerequisites">Versions and prerequisites</h2>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl patch modeldeployment qwen3-ep -n gpustack --type<span class="o">=</span>json <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/elasticEp/width&#34;,&#34;value&#34;:4}]&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># After the observations confirm completion:</span>
+</span></span><span class="line"><span class="cl">kubectl patch modeldeployment qwen3-ep -n gpustack --type<span class="o">=</span>json <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/elasticEp/width&#34;,&#34;value&#34;:2}]&#39;</span></span></span></code></pre></div>
+</div><p>The operator keeps the master. It keeps the master&rsquo;s command, its UID and its bootstrap width
+annotation, so the running instance is not replaced. It grows or shrinks the Ray worker members
+around that master.</p>
+<p>Scaling up is refused while the capacity it needs is missing. If Kueue has no quota for the extra
+members, or the members are admitted but hold no GPU allocation, or they have not joined Ray yet,
+the resize holds and the already-serving master keeps serving. An independent width change can wait
+without interrupting what is already running.</p>
+<h2 id="what-you-see-while-it-runs">What you see while it runs</h2>
+<p>The operator observes these values separately:</p>
 <table>
   <thead>
       <tr>
-          <th>Component</th>
-          <th>Floor</th>
-          <th>Why</th>
+          <th>Observation</th>
+          <th>Question it answers</th>
       </tr>
   </thead>
   <tbody>
       <tr>
-          <td>apiserver</td>
-          <td>1.35</td>
-          <td>the <code>ImageVolume</code> feature gate is beta <strong>on by default</strong> from 1.35, GA in 1.36; below that the gate must be opened on the apiserver, which this version does not opt into, and a 1.32 or older apiserver refuses the source at admission</td>
+          <td>desired</td>
+          <td>What width the spec asks for</td>
       </tr>
       <tr>
-          <td>kubelet</td>
-          <td>1.35</td>
-          <td>it mounts the volume; the same gate line applies, checked per pinned node</td>
+          <td>admitted</td>
+          <td>How many members Kubernetes admitted</td>
       </tr>
       <tr>
-          <td>containerd</td>
-          <td>2.1</td>
-          <td>the runtime that mounts image volumes; sub-path mounts would need 2.2, which is why none are offered</td>
+          <td>allocated</td>
+          <td>How many members hold a verified whole GPU allocation</td>
+      </tr>
+      <tr>
+          <td>Ray</td>
+          <td>How many members joined the Ray cluster</td>
+      </tr>
+      <tr>
+          <td>effective</td>
+          <td>What width runtime identities and successful rank requests prove</td>
       </tr>
   </tbody>
 </table>
-<p>PSA is not an obstacle: on an apiserver ≥ 1.33, Restricted admits <code>image</code> volumes
-(kubernetes#130394, fixed in 1.33, not backported); on ≤ 1.32 Restricted refuses them, and
-<code>enforce-version</code> makes no difference either way. Baseline admits wherever the apiserver knows the
-field.</p>
-<p>A private registry is reached with the role&rsquo;s or Instance&rsquo;s existing <code>imagePullSecrets</code>; the image
-volume pull assembles credentials the same way a container image pull does.</p>
-<h2 id="disk-cost">Disk cost</h2>
-<p><strong>A pulled image holds its bytes twice</strong> while <code>discard_unpacked_layers</code> is <code>false</code> (the containerd
-default): the compressed blobs in the content store and the unpacked snapshots. Measured on
-containerd 2.2.6 with a 15,242,807,270-byte model:</p>
-<table>
-  <thead>
-      <tr>
-          <th>Image shape</th>
-          <th>Content store</th>
-          <th>Snapshots</th>
-          <th>Total</th>
-          <th>vs raw weights</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>gzip-compressed layers</td>
-          <td>+12,074,816,089 B</td>
-          <td>+15,242,807,270 B</td>
-          <td>~27.3 GB</td>
-          <td><strong>1.79×</strong></td>
-      </tr>
-      <tr>
-          <td>uncompressed layers</td>
-          <td>+15,242,807,270 B</td>
-          <td>+15,242,807,270 B</td>
-          <td>~30.5 GB</td>
-          <td><strong>2.00×</strong></td>
-      </tr>
-  </tbody>
-</table>
-<p>Uncompressed layers save decompression time, not disk. <strong>Kubelet&rsquo;s own accounting does not see the
-doubling</strong>: the CRI image size is the compressed size, ~12.07 GB where the disk really holds ~27.3
-GB (~2.26× apart). Size a node&rsquo;s disk from the table, never from <code>kubectl</code>&rsquo;s image sizes.</p>
-<p>A node image that ships <code>discard_unpacked_layers = true</code> (the local kind images do) keeps only the
-blobs and does not pay the snapshot copy; do not take that as the fleet default.</p>
-<h2 id="image-gc">Image GC</h2>
-<p>Three rules, verified on 1.35.7 / 2.2.6:</p>
+<p>They legitimately disagree during a resize. More members admitted does not mean more Ray members,
+and a wider engine does not mean more admitted Pods. A layer that was not read is reported as
+unknown rather than as a number borrowed from a neighbour.</p>
+<p>The operator writes these into an internal ConfigMap owned by the deployment, whose data key is
+<code>observation.json</code>. Its top-level fields are lower case and each layer object carries <code>Known</code>,
+<code>Value</code> and <code>Reason</code>. This is diagnostic internal state that the operator writes for its own
+reconciliation. It is not a new public status API, and it is not a field on the deployment&rsquo;s
+status.</p>
+<p>Native resize makes the engine answer 503 on its endpoints for the length of the window. The master
+Pod&rsquo;s liveness probe accepts 200 and 503 so the kubelet does not restart an engine that is
+mid-resize. Readiness still withdraws, which is how traffic is kept away from the window.</p>
+<h2 id="when-a-resize-holds">When a resize holds</h2>
+<p>The operator records its intent before it sends one request to the engine. After that, a <code>500</code>, a
+<code>408</code>, a timeout or a controller restart is not a reason to send another. An unanswered request and
+a request that was never sent look identical from outside, and resending against an engine that
+already applied the change is how a resize gets applied twice.</p>
+<p>A resize can therefore stay unresolved. Common reasons:</p>
+<ul>
+<li>capacity for a wider target is not admitted, allocated or joined to Ray;</li>
+<li>a member&rsquo;s actor state cannot be read, so no member is proven free to remove;</li>
+<li>a later spec generation arrived while the earlier operation was still unresolved;</li>
+<li>the sent intent is ambiguous, so the operator waits rather than guessing.</li>
+</ul>
+<p>A changed generation first triggers fresh native and resource observations. An unsent record can
+clear after its old width is proved, while the desired target remains the same. A sent record clears
+only after its target and any resource return are proved. This observation pass sends no new resize
+and deletes no members. Missing proof keeps the record and capacity. Inspect the observation
+ConfigMap to identify the missing proof and its cause.</p>
+<h2 id="interruption-scope">Interruption scope</h2>
+<p>Narrowing a width first withdraws the master&rsquo;s API and master eligibility through the same writer,
+then confirms the serving side withdrew, and only then asks the engine to shrink. Pods stay alive
+through the engine&rsquo;s prepare, drain and commit phases. A member is removed only after its captured
+identity is proven to hold no actor, and a same-name replacement is never removed in a captured
+member&rsquo;s place.</p>
+<p>The scope of the interruption is the deployment you patched. It does not extend to a separate
+deployment. A second deployment keeps serving its own traffic while the first is resizing, but only
+requests actually observed on the second deployment&rsquo;s own endpoint are evidence of that. The
+number of deployments present says nothing about routing.</p>
+<h2 id="diagnosis">Diagnosis</h2>
 <ol>
-<li>
-<p><strong>In use, not collected.</strong> While any <em>running</em> container mounts the image, kubelet&rsquo;s image GC
-passes over it (the protection needs kubelet ≥ 1.31 and containerd ≥ 2.1). A completed Pod
-counts for nothing.</p>
-</li>
-<li>
-<p><strong>Released, collected in the next round.</strong> After the last referencing Pod goes, the image can be
-collected on the next GC cycle (5 minutes; measured release→collection 4m2s). <code>imageMinimumGCAge</code>
-does not protect it: kubelet compares against the image&rsquo;s first-detected time, not its release.</p>
-<p><strong>Scaling a deployment to zero and back can re-pull a dozen GB</strong> (a first pull measured 12m43s on
-a 2-vCPU node at ~20 MB/s).</p>
-</li>
-<li>
-<p><strong>The 85% cascade.</strong> A model image that pushes the disk past <code>imageGCHighThresholdPercent</code>
-(default 85) drags every other unused image on the node into the same rounds (measured: 18
-unrelated images collected alongside).</p>
-</li>
+<li>Read the deployment status and conditions for admission, startup and serving failures.</li>
+<li>Read the deployment-owned observation ConfigMap. Its <code>reason</code> names an elastic hold.
+A layer with <code>Known</code> false carries its own <code>Reason</code>. Check the observed generation against the deployment.</li>
+<li>Compare the five layers. A width that never became effective, with Ray holding the target width,
+points at the engine. An admitted count that never moved points at quota or scheduling. A Ray
+count that never moved points at members that have not joined.</li>
+<li>On a hold after an ambiguous send, do not resend. Confirm the engine&rsquo;s own reported width first.</li>
 </ol>
-<p>The only retention is another reference: a resident Pod mounting the image keeps it. A deployment&rsquo;s
-replicas are themselves that reference while they run.</p>
-<h2 id="registry-mirrors-and-private-registries">Registry mirrors and private registries</h2>
-<p>The pull is a normal containerd pull, so it rides whatever the node&rsquo;s registry configuration
-resolves: a Harbor pull-through cache, a Spegel peer-to-peer mirror, or Dragonfly as a configured
-containerd mirror. None of these need operator support, and none are measured from here; Dragonfly
-as an operator-integrated prefetcher is future work.</p>
-<p>Two images sharing layer digests share snapshots and the download: measured, a second image whose
-layers overlapped pulled in 112 ms and added 11.8 MB where a cold node paid 2m10s and 7.89 GB.</p>
-<nav class="reading-footer" aria-label="Further reading">
-    <section>
-      <h2>See also</h2>
-      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/">Model Artifact</a>
- for the artifact contract the image
-source joins</li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/node-store/">Node Model Store</a>
- for the plugin chain an image
-source stays out of</li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/">Model Prefetch</a>
- for why there is nothing to
-warm.</li></ul>
-    </section><section class="next-page">
-        <h2>Next</h2>
-        <div><a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/">Model Prefetch</a></div>
-      </section></nav>
+<h2 id="limits">Limits</h2>
+<ul>
+<li>The engine must be a vLLM 0.29.0 image with a full Ray installation supplied by you.</li>
+<li>Width is bounded to 2 through 64.</li>
+<li>The profile cannot be added to or removed from an existing role, and <code>headInstanceType</code> cannot
+change.</li>
+<li>There is one serving instance per deployment. <code>replicas</code> and <code>size</code> are not a width mechanism.</li>
+<li>Only the master serves HTTP.</li>
+<li>No RDMA fabric is requested for this profile.</li>
+<li>Scale-down requires an owned Router with a readable serving view. A routerless deployment holds before narrowing.</li>
+</ul>
+<p><strong>See also</strong> — <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
+ for the role contract ·
+<a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
+ for the other way to split a deployment ·
+<a href="/gpustack-operator/main/docs/modules/model-deployment/routing/">Routing</a>
+ for how replicas are selected and observed ·
+<a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/">Shutdown</a>
+ for retirement and drain ·
+<a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Model Deployment Status</a>
+ for the published fields.</p>
+<p><strong>Next</strong> → <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
+</p>
+
 
       </article>
     </main>
@@ -694,9 +743,9 @@ warm.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a4e3eb0efa4e32b1a3bb6fd600e04d01e1649521/docs/modules/model-delivery/image-source.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/a4e3eb0efa4e32b1a3bb6fd600e04d01e1649521/docs/modules/model-deployment/elastic-ep.md">View page source</a>
             
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/image-source.md">Edit this page</a>
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/elastic-ep.md">Edit this page</a>
             
           </nav>
         
@@ -705,13 +754,16 @@ warm.</li></ul>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#the-source-and-its-digest-contract">The source and its digest contract</a></li>
-    <li><a href="#building-the-image">Building the image</a></li>
-    <li><a href="#delivery">Delivery</a></li>
-    <li><a href="#versions-and-prerequisites">Versions and prerequisites</a></li>
-    <li><a href="#disk-cost">Disk cost</a></li>
-    <li><a href="#image-gc">Image GC</a></li>
-    <li><a href="#registry-mirrors-and-private-registries">Registry mirrors and private registries</a></li>
+    <li><a href="#what-the-profile-means">What the profile means</a></li>
+    <li><a href="#requirements">Requirements</a></li>
+    <li><a href="#shared-memory-for-gpu-members">Shared memory for GPU members</a></li>
+    <li><a href="#a-minimal-manifest">A minimal manifest</a></li>
+    <li><a href="#changing-the-width">Changing the width</a></li>
+    <li><a href="#what-you-see-while-it-runs">What you see while it runs</a></li>
+    <li><a href="#when-a-resize-holds">When a resize holds</a></li>
+    <li><a href="#interruption-scope">Interruption scope</a></li>
+    <li><a href="#diagnosis">Diagnosis</a></li>
+    <li><a href="#limits">Limits</a></li>
   </ul>
 </nav>
         

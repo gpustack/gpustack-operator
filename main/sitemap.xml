@@ -68,6 +68,8 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/deployment/</loc>
   </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/</loc>
+  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/engine-versions/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/metrics/</loc>

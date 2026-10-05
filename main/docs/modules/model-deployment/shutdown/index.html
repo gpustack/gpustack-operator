@@ -343,6 +343,11 @@
     
       
       
+        <a title="Elastic EP" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
         <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
       
     
@@ -614,6 +619,9 @@ surplus replicas, and a replica of a role the spec has dropped. Its progress is 
 <a href="/gpustack-operator/main/docs/modules/model-deployment/status/#status"><code>status.retirement</code> field</a>
 , and the replica stays in place, still counted,
 for as long as the protocol holds it.</p>
+<p>For <code>llm-d-router</code>, withdrawal also waits for recent dispatches reported for a target member.
+This applies after the Router removes that member from selection. These records do not increase
+the serving count. A dispatch to an unrelated survivor does not hold the target.</p>
 <p>Two mechanisms are involved and they answer different questions. The protocol decides <strong>whether the
 Pod may be deleted</strong>; the <a href="#the-drain-window">drain window</a>
  above decides <strong>how long the engine
@@ -785,7 +793,7 @@ reads.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/c79e83a98a753e58d1a1ca2ebfc7485c13398619/docs/modules/model-deployment/shutdown.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/a4e3eb0efa4e32b1a3bb6fd600e04d01e1649521/docs/modules/model-deployment/shutdown.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/shutdown.md">Edit this page</a>
             

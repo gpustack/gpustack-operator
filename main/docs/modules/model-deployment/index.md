@@ -20,6 +20,9 @@ the role contract. [Prefill and Decode](/gpustack-operator/main/docs/modules/mod
 [Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) explain what the running service reports and how requests
 are directed.
 
+`Elastic EP` is its own mode rather than another role shape: it keeps one serving instance and
+changes the size of its collective while it runs.
+
 ---
 
 **See also** — [KV Cache](/gpustack-operator/main/docs/modules/kv-cache/index.md) (shared prefix reuse) ·
