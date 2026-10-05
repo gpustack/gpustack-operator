@@ -35,6 +35,32 @@ func (r *DevicesReconciler) verifiedKubeletPending(ctx context.Context, resource
 	return kubeletPendingFrom(listed, resource), nil
 }
 
+// manufacturableAccelerator is the manufacturer and allocation mode a resource name encodes.
+type manufacturableAccelerator struct {
+	manufacturer string
+	mode         workercore.DeviceAllocationMode
+}
+
+// manufacturableAccelerators indexes every resource name this verification answers to, so one
+// lookup replaces a rebuild of the name for every manufacturer and mode under every reported device.
+// Neither the manufacturers nor the modes vary with the node or with the call, and the names are
+// settled during nodefeature's own initialization, so the table is built once and read thereafter.
+// The base names are distinct and the shared mode appends a suffix no base name carries, so each
+// resource name resolves to exactly one manufacturer and mode.
+var manufacturableAccelerators = func() map[string]manufacturableAccelerator {
+	table := make(map[string]manufacturableAccelerator)
+	for _, manufacturer := range nodefeature.GetKnownAcceleratableManufacturers() {
+		for _, mode := range []workercore.DeviceAllocationMode{
+			workercore.DeviceAllocationModeExclusive, workercore.DeviceAllocationModeShared,
+		} {
+			name := string(nodefeature.GetAcceleratableResourceName(manufacturer, mode))
+			table[name] = manufacturableAccelerator{manufacturer: manufacturer, mode: mode}
+		}
+	}
+
+	return table
+}()
+
 // verifyKubeletAllocations refuses to publish or allocate from records that contradict kubelet.
 // Missing runtime records are preserved: checkpoint loss does not prove that a device is free.
 // Podresources has no Pod UID, so conflicts require operator recovery instead of automatic rewrites.
@@ -51,15 +77,16 @@ func (r *DevicesReconciler) verifyKubeletAllocations(
 	for _, reportedPod := range listed {
 		for _, container := range reportedPod.GetContainers() {
 			for _, devices := range container.GetDevices() {
-				for _, manufacturer := range nodefeature.GetKnownAcceleratableManufacturers() {
-					for _, mode := range []workercore.DeviceAllocationMode{workercore.DeviceAllocationModeExclusive, workercore.DeviceAllocationModeShared} {
-						if devices.GetResourceName() != string(nodefeature.GetAcceleratableResourceName(manufacturer, mode)) || len(devices.GetDeviceIds()) == 0 {
-							continue
-						}
-						if err := verifyKubeletContainer(devs, pods, reportedPod, container.GetName(), devices.GetDeviceIds(), manufacturer, mode); err != nil {
-							return nil, err
-						}
-					}
+				if len(devices.GetDeviceIds()) == 0 {
+					continue
+				}
+				accelerator, ok := manufacturableAccelerators[devices.GetResourceName()]
+				if !ok {
+					continue
+				}
+				if err := verifyKubeletContainer(devs, pods, reportedPod, container.GetName(),
+					devices.GetDeviceIds(), accelerator.manufacturer, accelerator.mode); err != nil {
+					return nil, err
 				}
 			}
 		}

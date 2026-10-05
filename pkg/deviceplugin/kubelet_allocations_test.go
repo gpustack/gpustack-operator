@@ -3,6 +3,7 @@ package deviceplugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlintercept "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
@@ -105,6 +107,66 @@ func TestDevicesReconciler_KubeletConsistentAndLostCheckpoint(t *testing.T) {
 			require.EqualValues(t, nodefeature.ResourceMaxUnits, status.Groups[0].Accelerators[1].Remaining)
 		})
 	}
+}
+
+// TestDevicesReconciler_KubeletConflictStillPaysPendingReleases pins that a kubelet record this node
+// cannot verify blocks the LEDGER and not the node's bookkeeping. The compensating write that hands
+// an accelerator back is owed whatever else kubelet reports, because no event brings this reconciler
+// back for it: the Pod watch fires on the change that is itself failing. A pass that returned the
+// conflict before that write left a device reading as held for as long as the conflict lasted.
+func TestDevicesReconciler_KubeletConflictStillPaysPendingReleases(t *testing.T) {
+	ctx := context.Background()
+	const node = "node-conflict-compensation"
+	// The served pod holds a claim and owes a give-back. It is unrelated to the conflict below.
+	served := concurrentAllocatePod(node, "served", "uid-served", workercore.DeviceAllocationModeExclusive, 1)
+	served.Status.Phase = core.PodRunning
+	served.Annotations = wholeCardAnnotation(t, "dev-0")
+	devs := twoCardDevices(node, workercore.DeviceAllocationModeNone)
+	// Kubelet still holds an accelerator for a pod the API no longer has: the conflict this pass
+	// cannot verify around.
+	vanished := concurrentAllocatePod(node, "vanished", "uid-vanished", workercore.DeviceAllocationModeExclusive, 1)
+
+	failing := false
+	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+		WithObjects(devs, served).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		WithInterceptorFuncs(ctrlintercept.Funcs{
+			Patch: func(
+				ctx context.Context, cli ctrlcli.WithWatch, obj ctrlcli.Object,
+				patch ctrlcli.Patch, opts ...ctrlcli.PatchOption,
+			) error {
+				if failing {
+					return errors.New("the api server is unreachable")
+				}
+				return cli.Patch(ctx, obj, patch, opts...)
+			},
+		}).Build()
+	rec := &DevicesReconciler{NodeName: node, Client: cli, kubeletPods: func(context.Context) ([]*podresources.PodResources, error) {
+		return wholeCardRuntime(vanished, "grp-0:dev-1:0000"), nil
+	}}
+
+	// Seed the give-back the way a refused allocation leaves it: the patch cannot land, so the entry
+	// waits in the pending table for a pass to pay it.
+	failing = true
+	require.Error(t, rec.unpatchAllocatingPod(ctx, served, workloadContainer, nil))
+	require.Equal(t, []string{"uid-served/" + workloadContainer}, pendingReleaseKeys(rec))
+	failing = false
+
+	_, err := rec.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: node}})
+	require.ErrorContains(t, err, "uncached pod", "the conflict is still reported")
+	require.Empty(t, pendingReleaseKeys(rec),
+		"a give-back owed to an unrelated pod must not wait on a conflict about another one")
+	recorded := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(served), recorded))
+	allocations, err := AllocatedAcceleratorsOf(recorded)
+	require.NoError(t, err)
+	require.NotContains(t, allocations, workloadContainer,
+		"the compensation landed during the very pass that refused the ledger")
+	published := new(workercore.Devices)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(devs), published))
+	require.Equal(t, devs.Status, published.Status, "and the conflict still publishes no guessed ledger")
 }
 
 func wholeCardAnnotation(t *testing.T, card string) map[string]string {

@@ -8,9 +8,11 @@ import (
 	"strconv"
 
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
@@ -186,12 +188,76 @@ func renderModelDeploymentElasticHeadService(md *workercore.ModelDeployment) *co
 	return svc
 }
 
+// modelDeploymentTerminalPods returns the members that have already left and that nothing is
+// deleting: a Succeeded or Failed Pod carrying no deletion timestamp. A failed Pod never runs again
+// and Kubernetes never garbage-collects one, so a departure no other path initiates stays behind as an
+// object, with its Workload and its share of the group's quota still held. A Pod already on its way
+// out is not returned, because its departure is in flight and its Workload is released by the
+// protocol that issued the delete.
+func modelDeploymentTerminalPods(pods []core.Pod) []core.Pod {
+	terminal := make([]core.Pod, 0, len(pods))
+	for i := range pods {
+		pod := &pods[i]
+		if pod.Status.Phase != core.PodSucceeded && pod.Status.Phase != core.PodFailed {
+			continue
+		}
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		terminal = append(terminal, *pod)
+	}
+
+	return terminal
+}
+
+// deleteModelDeploymentTerminalPods removes the members that have already left and releases the
+// Workloads that hold them. Both writes are needed: the Pod delete frees the ordinal the create gate
+// reads, and the Workload delete is what releases Kueue's finalizer on the member and the quota its
+// group held. Absence is success on both, because a pass may follow one that already issued them.
+func (r *ModelDeploymentReconciler) deleteModelDeploymentTerminalPods(
+	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
+) error {
+	terminal := modelDeploymentTerminalPods(pods)
+	if len(terminal) == 0 {
+		return nil
+	}
+	for i := range terminal {
+		logger := ctrllog.FromContext(ctx).WithValues("pod", terminal[i].Name,
+			"phase", terminal[i].Status.Phase, "reason", terminal[i].Status.Reason)
+		logger.Info("removing elastic member in a terminal phase")
+		if err := r.Client.Delete(ctx, &terminal[i]); err != nil && !kerrors.IsNotFound(err) {
+			return fmt.Errorf("delete terminal elastic member %s: %w", terminal[i].Name, err)
+		}
+	}
+
+	return r.deleteModelDeploymentGroupWorkload(ctx, md, terminal)
+}
+
 func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.Context, md *workercore.ModelDeployment,
 	actual []core.Pod, desired map[string]map[int][]*core.Pod, weights *modelArtifactWeights,
 ) (bool, error) {
 	role := ModelDeploymentElasticRole(md)
 	if role == nil {
 		return false, nil
+	}
+	// A TERMINAL MEMBER IS A DEPARTURE THIS OPERATOR DID NOT INITIATE, and the elastic path is the
+	// only path that can leave one behind: the fixed desired-set comparison below, which deletes
+	// terminal replicas and their Workloads, is behind this call. Kueue never garbage-collects a
+	// Succeeded or Failed Pod, and the create loop further down deliberately reads a terminal member
+	// as absent so its ordinal can be filled again. Left alone it stays an admitted member of the
+	// group it shares with its own replacement, which Kueue reads as the excess member and deletes
+	// again and again, so the slot never heals. The delete and the Workload that releases the
+	// group's finalizer and quota are issued here instead, on the same terms the fixed path uses.
+	if err := r.deleteModelDeploymentTerminalPods(ctx, md, actual); err != nil {
+		return true, err
+	}
+	// A MEMBER ALREADY ON ITS WAY OUT IS THE OTHER DEPARTURE NOTHING HERE SENT AWAY, and the fixed
+	// path's stranded sweep never reaches this branch, so the sweep runs here. Its Workload is what
+	// holds Kueue's finalizer on the Pod and the group's quota, and the sweep keeps the fixed
+	// path's condition: a Workload that also owns a member still standing is left alone, because
+	// Kueue answers a deleted Workload by stopping the whole group.
+	if err := r.releaseModelDeploymentStrandedWorkloads(ctx, md, actual); err != nil {
+		return true, err
 	}
 	if len(desired) == 0 {
 		return true, r.reconcileModelDeploymentElasticResize(ctx, md)

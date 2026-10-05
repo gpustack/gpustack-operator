@@ -9,9 +9,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
@@ -141,6 +144,166 @@ func TestElasticDeletingPodReplacement(t *testing.T) {
 			require.Equal(t, tc.replacements, created)
 			require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(member), member))
 			require.Contains(t, member.Finalizers, "kueue.x-k8s.io/managed", "replacement must not require finalizer surgery")
+		})
+	}
+}
+
+// elasticTerminalFixtureMember returns the fixture's ordinal-one member, which every case here makes
+// terminal: the ordinal is the one the fixture's width leaves free for a replacement.
+func elasticTerminalFixtureMember(t *testing.T, f *elasticConvergenceFixture) *core.Pod {
+	t.Helper()
+	pods := new(core.PodList)
+	require.NoError(t, f.reconciler.Client.List(context.Background(), pods,
+		ctrlcli.InNamespace(f.md.Namespace)))
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if modelDeploymentPodRole(pod) == "server" && modelDeploymentOrdinalOrFloor(pod) == 1 {
+			return pod.DeepCopy()
+		}
+	}
+	t.Fatal("the fixture has no ordinal-one member")
+
+	return nil
+}
+
+// elasticKueueWorkloadFor is the Workload Kueue admits for one member: one owner reference naming that
+// Pod, which is what the release path matches on.
+func elasticKueueWorkloadFor(md *workercore.ModelDeployment, member *core.Pod) *kueue.Workload {
+	wl := &kueue.Workload{}
+	wl.Name, wl.Namespace = "wl-"+string(member.UID), md.Namespace
+	wl.OwnerReferences = []meta.OwnerReference{
+		{APIVersion: "v1", Kind: "Pod", Name: member.Name, UID: member.UID},
+	}
+
+	return wl
+}
+
+// TestElasticTerminalMemberIsRemoved covers the departure no other elastic path makes: a member that
+// reached a terminal phase with NO deletion timestamp. Kubernetes never garbage-collects such a Pod,
+// and the create loop deliberately reads it as absent so its ordinal can be refilled, so the dead
+// member would otherwise stay behind as an admitted member of the very group its replacement joins.
+func TestElasticTerminalMemberIsRemoved(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		phase core.PodPhase
+	}{
+		{name: "succeeded", phase: core.PodSucceeded},
+		{name: "failed", phase: core.PodFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newElasticConvergenceFixture(t)
+			member := elasticTerminalFixtureMember(t, f)
+			member.Status.Phase = tc.phase
+			require.NoError(t, f.reconciler.Client.Status().Update(ctx, member))
+			require.Nil(t, member.DeletionTimestamp, "the case under test is the one nothing is deleting")
+			wl := elasticKueueWorkloadFor(f.md, member)
+			require.NoError(t, f.reconciler.Client.Create(ctx, wl))
+
+			_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+			require.NoError(t, err)
+
+			err = f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(member), new(core.Pod))
+			require.True(t, kerrors.IsNotFound(err),
+				"a terminal member nothing else deletes must not be left behind")
+			err = f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(wl), new(kueue.Workload))
+			require.True(t, kerrors.IsNotFound(err),
+				"the Workload is what releases the member's finalizer and the group's quota")
+
+			pods := new(core.PodList)
+			require.NoError(t, f.reconciler.Client.List(ctx, pods, ctrlcli.InNamespace(f.md.Namespace)))
+			live := 0
+			for i := range pods.Items {
+				pod := &pods.Items[i]
+				if modelDeploymentPodRole(pod) != "server" || modelDeploymentOrdinalOrFloor(pod) != 1 {
+					continue
+				}
+				if pod.UID == member.UID {
+					continue
+				}
+				live++
+				require.NotEqual(t, core.PodSucceeded, pod.Status.Phase,
+					"a replacement must not be born terminal")
+			}
+			require.Equal(t, 1, live, "the vacated ordinal must be refilled, and the refill must survive the pass")
+		})
+	}
+}
+
+// TestElasticTerminatingMemberWorkloadIsReleased covers a member that is already on its way out
+// behind Kueue's finalizer: the delete came from a hand, a drain or an eviction, so no protocol of
+// this operator issued the Workload delete, and the fixed path's stranded sweep sits behind the
+// elastic return. The Workload is what releases the member's finalizer and the group's quota, and
+// the release keeps the fixed path's safety condition: a Workload that also owns a member still
+// standing is left alone, because Kueue answers a deleted Workload by stopping the whole group.
+func TestElasticTerminatingMemberWorkloadIsReleased(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		liveSibling  bool
+		wantReleased bool
+	}{
+		{name: "the Workload also owns a member still standing", liveSibling: true, wantReleased: false},
+		{name: "the Workload owns only the departing member", liveSibling: false, wantReleased: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newElasticConvergenceFixture(t)
+			pods := new(core.PodList)
+			require.NoError(t, f.reconciler.Client.List(ctx, pods, ctrlcli.InNamespace(f.md.Namespace)))
+			var member, standing *core.Pod
+			for i := range pods.Items {
+				pod := &pods.Items[i]
+				if modelDeploymentPodRole(pod) != "server" {
+					continue
+				}
+				switch modelDeploymentOrdinalOrFloor(pod) {
+				case 0:
+					standing = pod.DeepCopy()
+				case 1:
+					member = pod.DeepCopy()
+				}
+			}
+			require.NotNil(t, member, "the fixture has no ordinal-one member")
+			require.NotNil(t, standing, "the fixture has no ordinal-zero member")
+
+			// The member is rebuilt as terminating on a Running phase, so the terminal-member
+			// removal is out of the picture and only the stranded release can answer for the
+			// Workload: the delete is foreign, the finalizer holds the Pod, nothing replaces it.
+			require.NoError(t, f.reconciler.Client.Delete(ctx, member))
+			member.UID = "terminating-member"
+			member.ResourceVersion = ""
+			member.DeletionTimestamp = nil
+			member.Finalizers = append(member.Finalizers, "kueue.x-k8s.io/managed")
+			member.Status.Phase = core.PodRunning
+			require.NoError(t, f.reconciler.Client.Create(ctx, member))
+			require.NoError(t, f.reconciler.Client.Delete(ctx, member))
+			require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(member), member))
+			require.NotNil(t, member.DeletionTimestamp,
+				"the case under test is a member stuck terminating behind the finalizer")
+
+			wl := elasticKueueWorkloadFor(f.md, member)
+			if tc.liveSibling {
+				wl.OwnerReferences = append(wl.OwnerReferences, meta.OwnerReference{
+					APIVersion: "v1", Kind: "Pod", Name: standing.Name, UID: standing.UID,
+				})
+			}
+			require.NoError(t, f.reconciler.Client.Create(ctx, wl))
+
+			_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+			require.NoError(t, err)
+
+			err = f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(wl), new(kueue.Workload))
+			if tc.wantReleased {
+				require.True(t, kerrors.IsNotFound(err),
+					"a stranded member's Workload must be released: it is what lifts Kueue's finalizer and frees the group's quota")
+			} else {
+				require.NoError(t, err,
+					"a Workload owning a member still standing must be left alone: Kueue answers a deleted Workload by stopping the whole group")
+			}
+			require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(member), member))
+			require.NotNil(t, member.DeletionTimestamp)
+			require.Contains(t, member.Finalizers, "kueue.x-k8s.io/managed",
+				"the release does no finalizer surgery on the member itself")
 		})
 	}
 }

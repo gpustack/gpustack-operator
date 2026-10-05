@@ -171,13 +171,24 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: time.Second}, err
 	}
 
-	if _, err := r.verifyKubeletAllocations(ctx, devs, podList); err != nil {
-		logger.Error(err, "verify device bookkeeping against kubelet")
-		return ctrl.Result{}, err
+	// A KUBELET RECORD THAT CONTRADICTS THE INFORMER BLOCKS THE LEDGER, NOT THE NODE. The
+	// verification runs first because what it refuses is a publish or an allocation, but the error
+	// is carried to the end of the pass rather than returned where it is found: one stale or uncached
+	// kubelet entry must not starve the bookkeeping that does not depend on it, and the compensating
+	// writes below hand an accelerator back for pods this reconciler has nothing to say about. No
+	// event brings this reconciler back for such a write -- the Pod watch fires on the very change
+	// that is failing -- so blocking it until kubelet stops reporting one pod holds a device that
+	// nothing holds for as long as the conflict lasts.
+	_, verifyErr := r.verifyKubeletAllocations(ctx, devs, podList)
+	if verifyErr != nil {
+		logger.Error(verifyErr, "verify device bookkeeping against kubelet")
 	}
 	desiredStatus, livePodUIDs := BuildDesiredStatus(logger, devs, podList)
 
-	if !kubemeta.DeepEqual(devs.Status, desiredStatus) {
+	// The ledger is published only from a verification that passed. Under a conflict nothing is
+	// written, because a ledger rebuilt over a kubelet record this pass could not confirm is a guess,
+	// and refusing to publish a guess is the whole point of the verification.
+	if verifyErr == nil && !kubemeta.DeepEqual(devs.Status, desiredStatus) {
 		devs.Status = desiredStatus
 		err = r.Client.Status().Update(ctx, devs)
 		if err != nil {
@@ -190,6 +201,12 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	r.pruneReservations(livePodUIDs)
 	r.pruneVisibilityGrants(livePodUIDs)
 	r.retryPendingReleases(ctx, logger, podList.Items, livePodUIDs)
+
+	// The conflict is reported once the compensations it would otherwise have blocked have landed,
+	// and before this pass publishes anything derived from a list it could not confirm.
+	if verifyErr != nil {
+		return ctrl.Result{}, verifyErr
+	}
 
 	r.notifiersMutex.Lock()
 	r.lastLivePodUIDs = livePodUIDs
