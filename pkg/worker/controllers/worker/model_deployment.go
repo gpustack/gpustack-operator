@@ -45,6 +45,7 @@ import (
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
+	"gpustack.ai/gpustack/pkg/worker/elasticengine"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -94,7 +95,9 @@ type ModelDeploymentReconciler struct {
 	// reader is the production transport, which is a refusal until a collector lands behind the
 	// seam: the protocol then holds at Draining and deletes nothing, which is the safe direction
 	// for a measurement that does not exist yet.
-	drainReader modelDeploymentDrainReader
+	drainReader     modelDeploymentDrainReader
+	elasticObserver modelDeploymentElasticRayReader
+	elasticClient   func(*core.Pod) (*elasticengine.Client, error)
 
 	// clock reads the retirement protocol's budgets. It is a field rather than a call to time.Now
 	// so a test can place a phase's start and its expiry at moments of its choosing instead of
@@ -396,6 +399,33 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// for ITS ordinal, and how many the spec declares. A Pod already on its way out is counted by
 	// neither side -- it is still a member of its group, but it is not one the spec can keep.
 	liveByRole := make(map[string][]*core.Pod, len(md.Spec.Roles))
+
+	// An ELASTIC DEPLOYMENT LEAVES HERE, BEFORE the fixed desired-set comparison below, because
+	// that comparison answers a question an elastic deployment does not have. It reads the spec's
+	// declared replica and size counts and deletes whatever the spec no longer names; the elastic
+	// members are not replicas of one declared count, and a width decrease must not read as a
+	// replica being scaled away. Letting the fixed path see them would make a member of a group of
+	// one deletable by a count, which is the withdrawal this slice explicitly does not own.
+	//
+	// A fixed-profile deployment is untouched by this branch and keeps the path below unchanged.
+	if elastic, err := r.convergeModelDeploymentElastic(ctx, md, actual, desired, weights); err != nil {
+		return ctrl.Result{}, err
+	} else if elastic {
+		actual, err = r.listModelDeploymentPods(ctx, md)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		masters := modelDeploymentElasticMasters(md, actual)
+		fetch := r.groupForwardFetch
+		if fetch == nil {
+			fetch = defaultGroupForwardFetch
+		}
+		qualifications := qualifyModelDeploymentInstances(ctx, md, masters, modelDeploymentPendingReplacement{}, fetch)
+		if err = r.syncModelDeploymentStatus(ctx, md, masters, domain, nil, weights, qualifications); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
 
 	// A replica of a role the spec no longer names is deleted here, and its Workload with it: the
 	// role was scaled to zero or renamed, and in both cases the departure is permanent rather than
@@ -991,7 +1021,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// ONE UNCACHED READ FOR THE ROLE, taken before the loop rather than inside it: every
 			// free ordinal asks the same question of the same objects, and asking it per ordinal
 			// cost one list each while a departure drained.
-			taken, takenErr := r.modelDeploymentTakenGroups(ctx, md, role.Name)
+			taken, takenErr := r.modelDeploymentTakenGroups(ctx, md, role.Name, true)
 			if takenErr != nil {
 				logger.Error(takenErr, "read the role's groups on the api server", "role", role.Name)
 				return ctrl.Result{}, takenErr
@@ -1313,6 +1343,15 @@ func modelDeploymentPodEligible(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, pod *core.Pod,
 	qualification modelDeploymentInstanceQualification, evaluated bool,
 ) bool {
+	if role.ElasticEP != nil {
+		if pod.Annotations[modelDeploymentElasticWithdrawnAnnotation] == "true" {
+			return false
+		}
+		ordinal, valid := modelDeploymentPodOrdinal(pod)
+		if !valid || ordinal != 0 {
+			return false
+		}
+	}
 	// The unconditional half: a member that stopped being ready leaves the pool, and it does so
 	// whether or not this operator can say anything about the group.
 	if !podIsReady(pod) {
@@ -1397,6 +1436,12 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentService(
 	ctx context.Context, md *workercore.ModelDeployment, eligibilityDecided bool,
 ) error {
 	rendered := renderModelDeploymentServices(md, r.modelDeploymentRoleManufacturers(ctx, md))
+	if ModelDeploymentElasticRole(md) != nil {
+		for _, service := range rendered {
+			service.Spec.Selector[modelDeploymentReplicaOrdinalLabel] = "0"
+		}
+		rendered = append(rendered, renderModelDeploymentElasticHeadService(md))
+	}
 	// RETENTION: an eligibility term a previous pass narrowed onto a live Service is cluster
 	// state this pass must not un-write just because the newest observation went quiet. Enrich
 	// the rendered expectation from the live object; the static activatability half still
@@ -1561,6 +1606,9 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	ctx context.Context, md *workercore.ModelDeployment,
 	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
 ) (map[string]map[int][]*core.Pod, error) {
+	if ModelDeploymentElasticRole(md) != nil {
+		return r.renderModelDeploymentElasticPods(ctx, md, connection, interfaceProtocols, weights)
+	}
 	// The overcommit setting is the Instance path's, deliberately: it decides how a declared
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
 	// does. A second knob for one translation would let the two disagree on one cluster.
@@ -1801,7 +1849,7 @@ const kueueWorkloadWaitingForReplacementPods = "WaitingForReplacementPods"
 // earlier incarnation of the same name claims no slot this deployment owes, and the deployment
 // creates around it rather than waiting behind it.
 func (r *ModelDeploymentReconciler) modelDeploymentTakenGroups(
-	ctx context.Context, md *workercore.ModelDeployment, role string,
+	ctx context.Context, md *workercore.ModelDeployment, role string, includeTerminal bool,
 ) (sets.Set[string], error) {
 	podList := new(core.PodList)
 	err := r.APIReader.List(ctx, podList,
@@ -1819,6 +1867,9 @@ func (r *ModelDeploymentReconciler) modelDeploymentTakenGroups(
 	for i := range podList.Items {
 		pod := &podList.Items[i]
 		if !modelDeploymentOwns(pod, md) {
+			continue
+		}
+		if !includeTerminal && (pod.Status.Phase == core.PodSucceeded || pod.Status.Phase == core.PodFailed) {
 			continue
 		}
 		if group := pod.Labels[kueuepodconst.GroupNameLabel]; group != "" {
@@ -2168,6 +2219,9 @@ func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts co
 	// cache cannot tell a member that restarted from one that merely looks the same.
 	r.drainReader = newModelDeploymentDrainCollector(
 		r.Client, opts.Manager.GetAPIReader(), opts.Manager.GetConfig(), coreClient,
+	)
+	r.elasticObserver = newModelDeploymentElasticObserver(
+		r.Client, r.APIReader, opts.Manager.GetConfig(), coreClient,
 	)
 
 	return ctrl.NewControllerManagedBy(opts.Manager).

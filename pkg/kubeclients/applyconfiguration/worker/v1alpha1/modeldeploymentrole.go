@@ -184,6 +184,19 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// serves; a request that needs longer needs a router that can move it, which no supported
 	// one does.
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
+	// ElasticEP opts this role into the managed elastic-EP profile: the operator then renders
+	// one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head
+	// and one whole-GPU member per engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role
+	// without it renders exactly as it did before this field existed, and a profile that is
+	// turned on and off again describes a different deployment, so the field's presence and
+	// HeadInstanceType are frozen at creation while Width stays editable.
+	//
+	// The profile admits exactly one such role per deployment, running the vLLM engine as a
+	// single Server role of one instance of one Pod. Every member -- the reserved API/DP-master
+	// and every Ray-only worker -- takes one whole, non-sliced, non-partitioned accelerator,
+	// so the role's resources are pinned to that shape at admission. The head is admitted
+	// separately against HeadInstanceType's own queue and never counts toward Width.
+	ElasticEP *ModelDeploymentRoleElasticEPApplyConfiguration `json:"elasticEp,omitempty"`
 }
 
 // ModelDeploymentRoleApplyConfiguration constructs a declarative configuration of the ModelDeploymentRole type for use with
@@ -349,5 +362,13 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithTopology(value *ModelDeploym
 // If called multiple times, the TerminationGracePeriodSeconds field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithTerminationGracePeriodSeconds(value int64) *ModelDeploymentRoleApplyConfiguration {
 	b.TerminationGracePeriodSeconds = &value
+	return b
+}
+
+// WithElasticEP sets the ElasticEP field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ElasticEP field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithElasticEP(value *ModelDeploymentRoleElasticEPApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
+	b.ElasticEP = value
 	return b
 }

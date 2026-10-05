@@ -1873,6 +1873,45 @@ func TestResourceServer_Allocate_RecordsReservation(t *testing.T) {
 	assert.Equal(t, "dev-0", got.Groups[0].Accelerators[0].ID)
 }
 
+func TestResourceServer_Allocate_ConflictingReplayDoesNotOverwriteClaim(t *testing.T) {
+	for _, restart := range []bool{false, true} {
+		t.Run(fmt.Sprintf("restart=%t", restart), func(t *testing.T) {
+			const nodeName = "node-replay"
+			pod := concurrentAllocatePod(nodeName, "served", "uid-served", workercore.DeviceAllocationModeExclusive, 1)
+			devs := twoCardDevices(nodeName, workercore.DeviceAllocationModeNone)
+			cli := nodeFixture(devs, pod)
+			rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+			responder := &recordingResponder{}
+			s := &ResourceServer{
+				Manufacturer: nodefeature.ManufacturerNVIDIA, AllocationMode: workercore.DeviceAllocationModeExclusive,
+				Reconciler: rec, Responder: responder,
+			}
+			allocate := func(id string) error {
+				_, err := s.Allocate(context.Background(), &AllocateRequest{
+					ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: []string{id}}},
+				})
+				return err
+			}
+			require.NoError(t, allocate("grp-0:dev-0:0000"))
+			require.Equal(t, map[Resource]int32{{Group: "grp-0", Device: "dev-0"}: nodefeature.ResourceMaxUnits}, responder.gotAllocated)
+			if restart {
+				rec = &DevicesReconciler{NodeName: nodeName, Client: cli}
+				s.Reconciler = rec
+			}
+			// The served pod is still Pending in the informer when another request arrives.
+			err := allocate("grp-0:dev-1:0000")
+			require.Equal(t, grpccodes.FailedPrecondition, grpcstatus.Code(err))
+			got := new(core.Pod)
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
+			allocations, err := AllocatedAcceleratorsOf(got)
+			require.NoError(t, err)
+			require.Equal(t, []string{"grp-0:dev-0:0000"}, allocations[workloadContainer].DeviceIDs)
+			require.Equal(t, "dev-0", allocations[workloadContainer].Devices.Groups[0].Accelerators[0].ID)
+			require.NoError(t, allocate("grp-0:dev-0:0000"), "an unchanged replay remains idempotent")
+		})
+	}
+}
+
 // physicalActuatorResponder is a stubResponder that also implements PhysicalSlicedResponder,
 // returning a canned partition allocation, so the server's physical-slice branch (detect →
 // actuate → fold placement → patch → return the actuator response) is tested without NVML.

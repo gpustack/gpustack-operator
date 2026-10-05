@@ -556,6 +556,11 @@ func (in ModelDeploymentRole) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRoleElasticEP) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleElasticEP"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentRoleEndpointsStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleEndpointsStatus"
 }

@@ -558,6 +558,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	md := obj.(*workercore.ModelDeployment)
 
 	errs := validateModelDeployment(md, nil)
+	errs = append(errs, r.ValidateModelDeploymentElasticEP(ctx, md, nil)...)
 	errs = append(errs, validateModelDeploymentHostAccess(nil, md,
 		hostAccessAllowed(ctx, settings.InstancePrivilegedAllowed),
 		hostAccessAllowed(ctx, settings.InstanceHostPathVolumeAllowed))...)
@@ -610,6 +611,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	// too long could never be shortened, and every later edit -- including one that removes the
 	// offending role -- would be refused. That is worse than the reconcile failure the rule prevents.
 	errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj))
+	errs = append(errs, r.ValidateModelDeploymentElasticEP(ctx, md, old)...)
 	errs = append(errs, validateModelDeploymentHostAccess(old, md,
 		hostAccessAllowed(ctx, settings.InstancePrivilegedAllowed),
 		hostAccessAllowed(ctx, settings.InstanceHostPathVolumeAllowed))...)

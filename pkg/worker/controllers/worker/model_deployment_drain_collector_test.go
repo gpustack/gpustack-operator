@@ -8,7 +8,9 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	remotecommandconsts "k8s.io/apimachinery/pkg/util/remotecommand"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/remotecommand"
+	kubeletexec "k8s.io/kubelet/pkg/cri/streaming/remotecommand"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -83,6 +90,10 @@ func drainTestPod(mutate ...func(*corev1.Pod)) *corev1.Pod {
 				Name:        drainTestContainer,
 				ContainerID: drainTestContainerI,
 				Ready:       true,
+				// THE CONTAINER IS RUNNING, because a member this read may act on is one whose
+				// engine is serving. A fixture with no container state measures the hold an
+				// unstarted member produces rather than the drain it is here to exercise.
+				State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
 			}},
 		},
 	}
@@ -114,7 +125,9 @@ type drainTestReader struct {
 }
 
 // newDrainTestReader wires a fake client, the real collector, and a scripted exec.
-func newDrainTestReader(pod *corev1.Pod, bodies ...string) *drainTestReader {
+func newDrainTestReader(t *testing.T, pod *corev1.Pod, bodies ...string) *drainTestReader {
+	t.Helper()
+
 	indexed := func(obj ctrlcli.Object) []string {
 		if obj == nil {
 			return nil
@@ -126,10 +139,19 @@ func newDrainTestReader(pod *corev1.Pod, bodies ...string) *drainTestReader {
 		return []string{string(p.UID)}
 	}
 
+	// THE DEPLOYMENT IS SEEDED BESIDE THE POD, because the read proves the operation still holds
+	// it by reading the object live rather than trusting the Pod's owner reference. A fixture that
+	// seeded only the Pod measures the hold an unreadable deployment produces, not the drain.
+	deployment := &workercore.ModelDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "qwen", Namespace: "default", UID: drainTestDeployUID,
+		},
+	}
+
 	build := func() ctrlcli.Client {
 		return ctrlfake.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithObjects(pod.DeepCopy()).
+			WithObjects(pod.DeepCopy(), deployment.DeepCopy()).
 			WithIndex(&corev1.Pod{}, modelDeploymentDrainIndexPodUID, indexed).
 			Build()
 	}
@@ -410,7 +432,7 @@ func TestDrainCollectorFixtureMatrix(t *testing.T) {
 			if engine == "" {
 				engine = drainTestEngine
 			}
-			reader := newDrainTestReader(tc.pod, tc.bodies...)
+			reader := newDrainTestReader(t, tc.pod, tc.bodies...)
 			reader.err = tc.execErr
 			reader.during = tc.during
 
@@ -551,7 +573,7 @@ func TestDrainCollectorRefusesEveryAnswerWithNoNumber(t *testing.T) {
 	})
 
 	t.Run("an empty target is unobserved rather than every member", func(t *testing.T) {
-		reader := newDrainTestReader(drainTestPod(), vllmZero())
+		reader := newDrainTestReader(t, drainTestPod(), vllmZero())
 		answer := reader.drain(t, func(target *modelDeploymentDrainTarget) {
 			target.PodUID = ""
 		})
@@ -726,7 +748,7 @@ func TestDrainCollectorURLIsReadFromThePod(t *testing.T) {
 // refusal names the empty UID, because that is the difference between "the protocol asked about
 // nobody" and "the member we hold could not be found", and only the first is a caller bug.
 func TestDrainCollectorFailsClosedOnAnUnnamedTarget(t *testing.T) {
-	reader := newDrainTestReader(drainTestPod(), vllmZero())
+	reader := newDrainTestReader(t, drainTestPod(), vllmZero())
 
 	answer := reader.drain(t, func(target *modelDeploymentDrainTarget) {
 		target.PodUID = ""
@@ -750,7 +772,7 @@ func TestDrainCollectorFailsClosedOnAnUnnamedTarget(t *testing.T) {
 // the whole protection, which is why there is no UID comparison beside it: comparing a UID against
 // the value it was looked up by could never fail.
 func TestDrainCollectorHoldsAMemberThatVanishedMidRead(t *testing.T) {
-	reader := newDrainTestReader(drainTestPod(), vllmZero())
+	reader := newDrainTestReader(t, drainTestPod(), vllmZero())
 	reader.during = func(ctx context.Context, r *drainTestReader) {
 		if err := r.client.Delete(ctx, r.pod); err != nil {
 			panic(err)
@@ -803,7 +825,7 @@ func TestTheDrainTargetCarriesTheEngineContainer(t *testing.T) {
 // A wedged kubelet is the case the bound exists for, and asserting the constant is set to a number
 // would not catch a bound that is no longer applied to the read.
 func TestDrainReadIsBoundedInTime(t *testing.T) {
-	reader := newDrainTestReader(drainTestPod(), vllmZero())
+	reader := newDrainTestReader(t, drainTestPod(), vllmZero())
 	reader.collector.exec = func(
 		ctx context.Context, _ *corev1.Pod, _ string, _ []string,
 	) (string, error) {
@@ -1147,7 +1169,7 @@ func TestTheReadIsAboutTheMemberItJustReRead(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fired := false
-			reader := newDrainTestReader(drainTestPod(), vllmZero())
+			reader := newDrainTestReader(t, drainTestPod(), vllmZero())
 			reader.during = func(ctx context.Context, r *drainTestReader) {
 				mutated := r.pod.DeepCopy()
 				tc.mutate(mutated)
@@ -1177,7 +1199,7 @@ func TestTheReadIsAboutTheMemberItJustReRead(t *testing.T) {
 	}
 
 	t.Run("the member is gone from the authoritative reader", func(t *testing.T) {
-		reader := newDrainTestReader(drainTestPod(), vllmZero())
+		reader := newDrainTestReader(t, drainTestPod(), vllmZero())
 		reader.during = func(ctx context.Context, r *drainTestReader) {
 			require.NoError(t, r.fresh.Delete(ctx, r.pod))
 		}
@@ -1188,7 +1210,7 @@ func TestTheReadIsAboutTheMemberItJustReRead(t *testing.T) {
 	})
 
 	t.Run("no authoritative reader leaves the member unobserved", func(t *testing.T) {
-		reader := newDrainTestReader(drainTestPod(), vllmZero())
+		reader := newDrainTestReader(t, drainTestPod(), vllmZero())
 		reader.collector = newModelDeploymentDrainCollector(reader.client, nil, nil, nil)
 
 		answer, err := reader.collector.Drain(context.Background(), drainTestTarget())
@@ -1338,7 +1360,7 @@ func TestTheReadIsRefusedAMemberItCannotProveItOwns(t *testing.T) {
 			if tc.pod != nil {
 				tc.pod(pod)
 			}
-			reader := newDrainTestReader(pod, vllmZero())
+			reader := newDrainTestReader(t, pod, vllmZero())
 			target := drainTestTarget()
 			if tc.target != nil {
 				target = tc.target(target)
@@ -1352,10 +1374,266 @@ func TestTheReadIsRefusedAMemberItCannotProveItOwns(t *testing.T) {
 	}
 
 	t.Run("a member the operation still owns is read", func(t *testing.T) {
-		reader := newDrainTestReader(drainTestPod(), vllmZero())
+		reader := newDrainTestReader(t, drainTestPod(), vllmZero())
 		answer, err := reader.collector.Drain(context.Background(), drainTestTarget())
 		require.NoError(t, err)
 		assert.Equal(t, modelDeploymentDrainIdle, answer.State, "reason=%s", answer.Reason)
 		assert.True(t, reader.calls > 0, "and the read actually reached the transport")
 	})
+}
+
+// TestAMemberIsReadOnlyThroughItsOwnDirectModelDeployment pins the member's ownership shape:
+// an ordinary engine member is controlled DIRECTLY by its ModelDeployment, which is what the
+// renderer writes, and every part of that claim is checked by kind, API version and identity.
+//
+// A chain that invented a ReplicaSet and a workload Deployment in between would refuse every
+// faithful member, so no member would ever be drainable. A check that accepted a chain carrying
+// them would accept a Pod this operator never rendered. The member is read through the real
+// collector, its real exec seam and the real live reader, so this is the collection's answer and
+// not a helper's return value.
+func TestAMemberIsReadOnlyThroughItsOwnDirectModelDeployment(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		mutate   func(*corev1.Pod)
+		live     func(*workercore.ModelDeployment)
+		wantHeld string
+	}{
+		{
+			name: "a member the render owns directly is read",
+		},
+		{
+			name: "a member owned by something other than a ModelDeployment is refused",
+			mutate: func(pod *corev1.Pod) {
+				pod.OwnerReferences[0].Kind = "StatefulSet"
+			},
+			wantHeld: "rather than a ModelDeployment",
+		},
+		{
+			// The group version is part of the identity. A ModelDeployment of another version is
+			// an object this operator does not interpret, so its members are not its members.
+			name: "a member owned by a ModelDeployment of another API version is refused",
+			mutate: func(pod *corev1.Pod) {
+				pod.OwnerReferences[0].APIVersion = "worker.gpustack.ai/v1beta1"
+			},
+			wantHeld: "rather than",
+		},
+		{
+			name: "a member whose owner was recreated under the same name is refused",
+			mutate: func(pod *corev1.Pod) {
+				pod.OwnerReferences[0].UID = "a-different-deployment"
+			},
+			wantHeld: "rather than the operation's deployment",
+		},
+		{
+			name: "a member the captured deployment no longer is, though the name still resolves, is refused",
+			live: func(md *workercore.ModelDeployment) {
+				md.UID = "a-different-deployment"
+			},
+			wantHeld: "rather than the captured",
+		},
+		{
+			name: "a container that is not running is refused before the read",
+			mutate: func(pod *corev1.Pod) {
+				pod.Status.ContainerStatuses[0].State = corev1.ContainerState{
+					Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"},
+				}
+			},
+			wantHeld: "rather than running",
+		},
+		{
+			name: "a container the kubelet has reported no state for is refused",
+			mutate: func(pod *corev1.Pod) {
+				pod.Status.ContainerStatuses[0].State = corev1.ContainerState{}
+			},
+			wantHeld: "rather than running",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := drainTestPod()
+			if tc.mutate != nil {
+				tc.mutate(pod)
+			}
+			reader := newDrainTestReader(t, pod, vllmZero())
+			if tc.live != nil {
+				live := new(workercore.ModelDeployment)
+				require.NoError(t, reader.fresh.Get(context.Background(),
+					ctrlcli.ObjectKey{Namespace: "default", Name: "qwen"}, live))
+				tc.live(live)
+				require.NoError(t, reader.fresh.Update(context.Background(), live))
+			}
+
+			answer := reader.drain(t)
+			if tc.wantHeld == "" {
+				assert.Equal(t, modelDeploymentDrainIdle, answer.State, answer.Reason)
+				assert.Equal(t, 1, reader.calls, "and the read actually reached the transport")
+
+				return
+			}
+			assert.Equal(t, modelDeploymentDrainUnknown, answer.State, answer.Reason)
+			assert.Contains(t, answer.Reason, tc.wantHeld)
+			assert.Zero(t, reader.calls, "a refused member is never entered")
+		})
+	}
+}
+
+// TestAContainerThatStopsDuringTheReadIsNotThisMember pins the second Running requirement: the
+// named container must be running before AND after the exec, because a body read from a container
+// the kubelet has since seen exit answers about a process that is not this member's.
+func TestAContainerThatStopsDuringTheReadIsNotThisMember(t *testing.T) {
+	pod := drainTestPod()
+	reader := newDrainTestReader(t, pod, drainBody(map[string]string{
+		"vllm:num_requests_running": "0", "vllm:num_requests_waiting": "0",
+	}))
+	reader.during = func(ctx context.Context, r *drainTestReader) {
+		// Read, change and write back, because that is the shape a kubelet's own update takes and
+		// a write of the fixture's own copy carries no resource version to match. The status
+		// subresource is written as the kubelet writes it, because a write to the object itself
+		// leaves the status exactly as the tracker already had it.
+		live := new(corev1.Pod)
+		require.NoError(t, r.fresh.Get(ctx,
+			ctrlcli.ObjectKey{Namespace: r.pod.Namespace, Name: r.pod.Name}, live))
+		live.Status.ContainerStatuses[0].State = corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
+		}
+		require.NoError(t, r.fresh.Status().Update(ctx, live))
+	}
+
+	answer := reader.drain(t)
+	assert.Equal(t, modelDeploymentDrainUnknown, answer.State, answer.Reason)
+	assert.Contains(t, answer.Reason, "rather than running",
+		"a container that stopped mid-read answered a different question")
+}
+
+// Check the production request on the wire so an omitted stdout channel fails.
+func TestModelDeploymentDrainExecIntoAsksForStdoutOnTheWire(t *testing.T) {
+	var seen *url.URL
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.URL
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	core, err := corev1client.NewForConfig(&rest.Config{Host: server.URL})
+	require.NoError(t, err, "the production exec transport could not be built")
+
+	collector := newModelDeploymentDrainCollector(nil, nil, &rest.Config{Host: server.URL}, core)
+
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "models", Name: "member-a"}}
+	_, execErr := collector.execInto(t.Context(), pod, "engine", []string{"python3", "-c", "pass"})
+	require.Error(t, execErr, "the server refused the upgrade, so the transport did dial it")
+	require.NotNil(t, seen, "no exec request reached the apiserver")
+
+	query := seen.Query()
+	assert.Equal(t, "true", query.Get("stdout"),
+		"the exec request must declare the stream its answer is written to")
+	assert.Equal(t, "true", query.Get("stderr"),
+		"standard error is declared because it is drained, and declaring it is what makes the "+
+			"server open the stream the discard writer reads")
+	assert.NotEqual(t, "true", query.Get("tty"), "the read is not a terminal session")
+	assert.Empty(t, query.Get("stdin"), "the read never opens standard input")
+	assert.Equal(t, "engine", query.Get("container"))
+}
+
+// drainExecTestExecutor supplies a command result to the real kubelet stream server.
+type drainExecTestExecutor struct{}
+
+func (drainExecTestExecutor) ExecInContainer(
+	ctx context.Context, name string, uid types.UID, container string, cmd []string,
+	in io.Reader, out, stderr io.WriteCloser, tty bool,
+	resize <-chan remotecommand.TerminalSize, timeout time.Duration,
+) error {
+	_, err := io.WriteString(out, "member-observation\n")
+	return err
+}
+
+func TestModelDeploymentDrainExecIntoCompletesDeclaredStreams(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		requested := func(name string) bool {
+			value, err := strconv.ParseBool(query.Get(name))
+			return err == nil && value
+		}
+		options := &kubeletexec.Options{
+			Stdin: requested("stdin"), Stdout: requested("stdout"),
+			Stderr: requested("stderr"), TTY: requested("tty"),
+		}
+		kubeletexec.ServeExec(w, r, drainExecTestExecutor{}, "member", "member-uid", query.Get("container"),
+			query["command"], options, time.Second, time.Second,
+			[]string{remotecommandconsts.StreamProtocolV4Name})
+	}))
+	defer server.Close()
+	config := &rest.Config{Host: server.URL}
+	core, err := corev1client.NewForConfig(config)
+	require.NoError(t, err)
+	collector := &modelDeploymentDrainCollector{core: core, restConfig: config}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	body, err := collector.execInto(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "models", Name: "member", UID: "member-uid",
+	}}, "main", []string{"python3", "-c", "print('member-observation')"})
+	require.NoError(t, err)
+	assert.Equal(t, "member-observation\n", body)
+}
+
+// drainExecVerboseStderrExecutor writes stderr before returning the observation.
+type drainExecVerboseStderrExecutor struct {
+	stderrUndeclared bool
+}
+
+func (e *drainExecVerboseStderrExecutor) ExecInContainer(
+	ctx context.Context, name string, uid types.UID, container string, cmd []string,
+	in io.Reader, out, stderr io.WriteCloser, tty bool,
+	resize <-chan remotecommand.TerminalSize, timeout time.Duration,
+) error {
+	if stderr == nil {
+		e.stderrUndeclared = true
+	} else {
+		if _, err := io.WriteString(stderr, strings.Repeat("engine-chatter\n", 64)); err != nil {
+			return err
+		}
+	}
+
+	_, err := io.WriteString(out, "member-observation\n")
+	return err
+}
+
+// A verbose standard error must be drained rather than merely absent, and draining it must leave
+// the answer exact.
+func TestModelDeploymentDrainExecIntoDrainsVerboseStderrAndKeepsStdoutExact(t *testing.T) {
+	executor := &drainExecVerboseStderrExecutor{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		requested := func(name string) bool {
+			value, err := strconv.ParseBool(query.Get(name))
+			return err == nil && value
+		}
+		options := &kubeletexec.Options{
+			Stdin: requested("stdin"), Stdout: requested("stdout"),
+			Stderr: requested("stderr"), TTY: requested("tty"),
+		}
+		kubeletexec.ServeExec(w, r, executor, "member", "member-uid", query.Get("container"),
+			query["command"], options, time.Second, time.Second,
+			[]string{remotecommandconsts.StreamProtocolV4Name})
+	}))
+	defer server.Close()
+
+	config := &rest.Config{Host: server.URL}
+	core, err := corev1client.NewForConfig(config)
+	require.NoError(t, err)
+	collector := &modelDeploymentDrainCollector{core: core, restConfig: config}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	body, err := collector.execInto(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "models", Name: "member", UID: "member-uid",
+	}}, "main", []string{"python3", "-c", "print('member-observation')"})
+
+	require.NoError(t, err)
+	assert.False(t, executor.stderrUndeclared,
+		"the exec must declare the standard error stream it drains")
+	assert.Equal(t, "member-observation\n", body,
+		"drained standard error must not reach the bounded response the answer is parsed from")
 }

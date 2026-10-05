@@ -230,6 +230,8 @@ func (*ModelDeploymentRetirementStatus) ProtoMessage() {}
 
 func (*ModelDeploymentRole) ProtoMessage() {}
 
+func (*ModelDeploymentRoleElasticEP) ProtoMessage() {}
+
 func (*ModelDeploymentRoleEndpointsStatus) ProtoMessage() {}
 
 func (*ModelDeploymentRoleParallelismStatus) ProtoMessage() {}

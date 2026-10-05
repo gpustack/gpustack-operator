@@ -105,9 +105,9 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `model-deployment`
 - Use for: describing a serving workload's model, engine and roles; prefill/decode pairing; replica routing, status and metrics.
 - Aliases: `ModelDeployment`, `prefill`, `decode`, `router`, `vLLM`, `SGLang`, `replica`
-- Guides: [Model Deployment](modules/model-deployment/_index.md); the role contract in [Model Deployment Configuration](modules/model-deployment/deployment.md); pairing in [Prefill and Decode](modules/model-deployment/prefill-decode.md); replica selection and Router observation in [Routing](modules/model-deployment/routing.md); what a status field means in [Status](modules/model-deployment/status.md); retirement and drain in [Shutdown](modules/model-deployment/shutdown.md).
-- Specs: [consolidation](../specs/2026-09-18-kvcache-and-model-deployment-consolidation.md) · [role replica admission](../specs/2026-09-19-role-replica-admission-unit.md) · [P/D pairing and router](../specs/2026-09-12-model-deployment-pd-pairing-and-router.md) · [router implementations](../specs/2026-09-19-model-deployment-router-implementations.md) · [router qualification and drain](../specs/2026-10-01-s1-router-qualification-and-drain.md)
-- Code: `model_deployment_*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/) · webhooks in [pkg/worker/webhooks/worker](../pkg/worker/webhooks/worker/) · router image under [pack/llm-router](../pack/llm-router/)
+- Guides: [Model Deployment](modules/model-deployment/_index.md); the role contract in [Model Deployment Configuration](modules/model-deployment/deployment.md); pairing in [Prefill and Decode](modules/model-deployment/prefill-decode.md); replica selection and Router observation in [Routing](modules/model-deployment/routing.md); what a status field means in [Status](modules/model-deployment/status.md); retirement and drain in [Shutdown](modules/model-deployment/shutdown.md); in-place collective resize in [Elastic EP](modules/model-deployment/elastic-ep.md).
+- Specs: [consolidation](../specs/2026-09-18-kvcache-and-model-deployment-consolidation.md) · [role replica admission](../specs/2026-09-19-role-replica-admission-unit.md) · [P/D pairing and router](../specs/2026-09-12-model-deployment-pd-pairing-and-router.md) · [router implementations](../specs/2026-09-19-model-deployment-router-implementations.md) · [router qualification and drain](../specs/2026-10-01-s1-router-qualification-and-drain.md) · [elastic EP resize](../specs/2026-10-01-s2-elastic-ep-resize.md)
+- Code: `model_deployment_*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/) · native resize client in [pkg/worker/elasticengine](../pkg/worker/elasticengine/) · webhooks in [pkg/worker/webhooks/worker](../pkg/worker/webhooks/worker/) · router image under [pack/llm-router](../pack/llm-router/)
 - Related: [KV Cache](#kv-cache) (a deployment can attach a shared cache) · [Model Delivery](#model-delivery) (weights reach replicas through an artifact) · [Topology Aware](#topology-aware) (the placement field constrains replicas)
 - Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (serving cases)
 
@@ -219,6 +219,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | [Model Deployment](modules/model-deployment/_index.md) | Start with managed model serving. |
 | [Model Deployment Configuration](modules/model-deployment/deployment.md) | Configure serving roles and overrides. |
 | [Model Deployment Prefill and Decode](modules/model-deployment/prefill-decode.md) | Pair serving roles. |
+| [Elastic EP](modules/model-deployment/elastic-ep.md) | Resize one serving instance's collective in place. |
 | [Engine Versions](modules/model-deployment/engine-versions.md) | Check supported engine versions. |
 | [Model Deployment Routing](modules/model-deployment/routing.md) | Choose a routing policy, confirm a Router serves. |
 | [Model Deployment Metrics](modules/model-deployment/metrics.md) | Read serving metrics. |

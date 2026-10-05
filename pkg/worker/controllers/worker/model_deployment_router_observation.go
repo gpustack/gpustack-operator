@@ -29,10 +29,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -228,12 +232,21 @@ func routerObservedSelectionOf(wire routerObservedSelectionWire) (RouterObserved
 // ServingEndpoint is one bound serving worker: the view said it is in selection, and the
 // operator resolved that worker's address to a live Pod at collection time.
 type ServingEndpoint struct {
-	PodUID  types.UID
-	Member  string
-	Role    string
-	URL     string
-	Port    string
-	Serving bool
+	PodUID types.UID
+	Member string
+	// Role and Rank come from the bound Pod's own workload identity: the component label the
+	// render stamps and the decimal member index. The observer's registry role and worker_id
+	// are registry identities and are never copied here, because a router can call an endpoint
+	// whatever it likes and the workload is the authority on what the endpoint is.
+	Role string
+	Rank string
+	// Listener is the declared container port the bound URL targets. Virtual ranks that share
+	// one physical endpoint share this listener and the PodUID above, so counting distinct
+	// physical listeners by role folds them by construction.
+	Listener int32
+	URL      string
+	Port     string
+	Serving  bool
 }
 
 // RouterServingObservation is one Router process's answer: the parsed view plus the
@@ -244,7 +257,14 @@ type RouterServingObservation struct {
 	// on the operator's clock, not the router's.
 	CollectedAt time.Time
 	Bound       []ServingEndpoint
-	Err         error
+	// RecentDispatch is the journal of workers this router recently dispatched to, bound to the
+	// same Pod identity as Bound and kept deliberately OUT of it. These workers are no longer in
+	// the selection, so folding them into Bound would raise the serving count for workers the
+	// router has already stopped selecting. The journal answers a different question, which only
+	// the retirement residual asks: did a dispatch reach this target recently enough that
+	// releasing it now would be releasing a member that may still be serving.
+	RecentDispatch []ServingEndpoint
+	Err            error
 }
 
 // Empty reports a view that was never read. A transport failure produces an Empty
@@ -257,6 +277,21 @@ func (o RouterServingObservation) Empty() bool {
 // observerURL is the endpoint the observer patches serve, on the router's existing
 // listener.
 const observerURLPath = "/observer/endpoints"
+
+// modelDeploymentRouterObserverPort is the listener the owning profile serves the observer on.
+//
+// llm-d attaches the observer to the admin handler it already runs, which is the management
+// listener where its metrics live. The other two profiles serve it on the request port their
+// Service already targets, so their contract is unchanged. The value is read from the profile
+// rather than discovered from a Pod, because a Pod port is what a container happens to have open
+// and not something a caller may read a view from.
+func modelDeploymentRouterObserverPort(profile string) int32 {
+	if profile == workercore.ModelDeploymentRouterLLMD {
+		return modelDeploymentRouterMetricsPort
+	}
+
+	return modelDeploymentRouterHTTPPort
+}
 
 // modelDeploymentObserverMaxBodyBytes caps one observer body. It is generous for a membership view
 // of a few hundred workers and small enough that a Router misbehaving cannot grow the response into
@@ -344,8 +379,8 @@ func collectRouterServingView(
 // Workers outside the selection are never bound and never refuse the view: they are the
 // workers the router itself already refused.
 func bindRouterObservationView(
-	view RouterServingView, pods []*corev1.Pod,
-) ([]ServingEndpoint, error) {
+	view RouterServingView, pods []*corev1.Pod, journal bool,
+) ([]ServingEndpoint, []ServingEndpoint, error) {
 	byIP := make(map[string][]*corev1.Pod, len(pods))
 	for _, pod := range pods {
 		if ip := pod.Status.PodIP; ip != "" {
@@ -354,35 +389,199 @@ func bindRouterObservationView(
 	}
 
 	bound := make([]ServingEndpoint, 0)
+	dispatched := make([]ServingEndpoint, 0)
 	for _, worker := range view.Workers {
-		if !worker.Selection.InSelection {
+		// A worker outside the selection is not counted as serving, whether or not it appears in
+		// the journal. The journal is separate evidence, not a promotion back into Bound.
+		inSelection := worker.Selection.InSelection
+
+		// The journal is asked only of the profile that publishes it. The other two publish the
+		// gateway's own last_job shape under that key, which this operator does not interpret, and
+		// a block this operator cannot read is a block it must not read as "no recent dispatch".
+		recent := false
+		if !inSelection && journal {
+			failure := error(nil)
+			recent, failure = recentDispatchFromLastJob(worker.LastJob)
+			if failure != nil {
+				return nil, nil, failure
+			}
+		}
+
+		endpoint, err := bindRouterObservationWorker(worker, byIP)
+		if err != nil {
+			// A SELECTABLE worker the operator cannot place is an indeterminate binding, and one
+			// indeterminate binding makes the whole view unusable: a number built on a partial
+			// binding would be a guess wearing a confirmation's clothes.
+			//
+			// A worker the router ITSELF already refused is different. It is not counted either
+			// way, so an unplaceable one contributes no evidence rather than a reason to refuse
+			// the view, and the view's own contradiction checks simply have nothing from it.
+			if inSelection {
+				return nil, nil, err
+			}
+
+			// A JOURNAL ROW THAT CANNOT BE PLACED IS UNAVAILABLE EVIDENCE, NOT NO EVIDENCE. The
+			// dispatch journal is the only thing standing between a target with a recent dispatch
+			// and a member that may still be serving it, so a row whose member cannot be resolved
+			// has to fail closed: dropping it would read as a cleared journal and release a member
+			// on the strength of a row this operator could not place.
+			if !inSelection && recent {
+				return nil, nil, err
+			}
+
 			continue
 		}
-		host := workerHost(worker.URL)
-		if host == "" {
-			return nil, fmt.Errorf("binding indeterminate: worker URL %q has no address", worker.URL)
+
+		// BOTH SELECTIONS ARE KEPT, because the aggregate's only contradiction checks live on the
+		// union: a physical endpoint one router selects and another refuses, or one view both
+		// selects and refuses, is a disagreement that is invisible while the refused rows are
+		// dropped on the way in. The Serving flag below is what separates the two.
+		bound = append(bound, endpoint)
+		if !inSelection && recent {
+			dispatched = append(dispatched, endpoint)
 		}
-		candidates := byIP[host]
-		if len(candidates) != 1 {
-			return nil, fmt.Errorf(
-				"binding indeterminate: %s resolves to %d live pods, not one", host, len(candidates))
-		}
-		pod := candidates[0]
-		if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
-			return nil, fmt.Errorf(
-				"binding indeterminate: %s is pod %s which is not live", host, pod.Name)
-		}
-		bound = append(bound, ServingEndpoint{
-			PodUID:  pod.UID,
-			Member:  pod.Name,
-			Role:    worker.Role,
-			URL:     worker.URL,
-			Port:    worker.Port,
-			Serving: true,
-		})
 	}
 
-	return bound, nil
+	return bound, dispatched, nil
+}
+
+// bindRouterObservationWorker resolves one worker row to the live Pod its address names, and derives
+// the workload identity it is counted under. The address and the live Pod decide what it is; nothing
+// the registry says about the row contributes to that.
+func bindRouterObservationWorker(
+	worker RouterObservedWorker, byIP map[string][]*corev1.Pod,
+) (ServingEndpoint, error) {
+	host := workerHost(worker.URL)
+	if host == "" {
+		return ServingEndpoint{},
+			fmt.Errorf("binding indeterminate: worker URL %q has no address", worker.URL)
+	}
+	candidates := byIP[host]
+	if len(candidates) != 1 {
+		return ServingEndpoint{}, fmt.Errorf(
+			"binding indeterminate: %s resolves to %d live pods, not one", host, len(candidates))
+	}
+	pod := candidates[0]
+	if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
+		return ServingEndpoint{}, fmt.Errorf(
+			"binding indeterminate: %s is pod %s which is not live", host, pod.Name)
+	}
+	identity, err := modelDeploymentEndpointIdentityOf(pod, worker.Port)
+	if err != nil {
+		return ServingEndpoint{}, err
+	}
+
+	return ServingEndpoint{
+		PodUID:   pod.UID,
+		Member:   pod.Name,
+		Role:     identity.role,
+		Rank:     identity.rank,
+		Listener: identity.listener,
+		URL:      worker.URL,
+		Port:     worker.Port,
+		Serving:  worker.Selection.InSelection,
+	}, nil
+}
+
+// modelDeploymentEndpointIdentity is the workload identity one bound endpoint is counted under. All
+// three fields come from the bound Pod's own rendered labels and ports, and every one of them is
+// required, because a count built on a partly-identified endpoint cannot be attributed to a member.
+type modelDeploymentEndpointIdentity struct {
+	role     string
+	rank     string
+	listener int32
+}
+
+// modelDeploymentEndpointIdentityOf reads that identity off the live Pod.
+//
+// THE OBSERVER'S OWN worker_id IS NOT A SOURCE HERE. It is an opaque native registry identity the
+// router mints for its own bookkeeping, and on a data-parallel member it enumerates VIRTUAL ranks
+// that all share ONE physical listener. Reading it as a member rank would turn one engine into as
+// many endpoints as it has shards, which is a number about the router's registry rather than about
+// the pool. The rank comes from the member-index label the render stamps, which is this operator's
+// own count of which member of its replica a Pod is.
+//
+// EACH FIELD IS VALIDATED RATHER THAN STORED, and an endpoint that carries none of them is refused
+// instead of counted. A missing role names no workload, a non-decimal rank is not the ordinal the
+// render writes, and a port the Pod never declared is not a listener it can be serving on: a count
+// that included any of them would be reporting something the Pod does not say about itself.
+func modelDeploymentEndpointIdentityOf(pod *corev1.Pod, urlPort string) (modelDeploymentEndpointIdentity, error) {
+	role := modelDeploymentPodRole(pod)
+	if role == "" {
+		return modelDeploymentEndpointIdentity{}, fmt.Errorf(
+			"binding indeterminate: member %s carries no workload role", pod.Name)
+	}
+
+	rank := pod.Labels[modelDeploymentMemberIndexLabel]
+	if rank == "" {
+		return modelDeploymentEndpointIdentity{}, fmt.Errorf(
+			"binding indeterminate: member %s carries no member rank", pod.Name)
+	}
+	// A MEMBER INDEX COUNTS FROM ZERO, so it is read as an unsigned decimal. ParseUint refuses a
+	// sign, a base prefix and any surrounding space, all of which are shapes the render never
+	// writes and all of which would be a different meaning read as this one.
+	if _, err := strconv.ParseUint(rank, 10, 32); err != nil {
+		return modelDeploymentEndpointIdentity{}, fmt.Errorf(
+			"binding indeterminate: member %s carries member rank %q rather than a decimal index",
+			pod.Name, rank)
+	}
+
+	listener := modelDeploymentDeclaredListenerOf(pod, urlPort)
+	if listener == 0 {
+		return modelDeploymentEndpointIdentity{}, fmt.Errorf(
+			"binding indeterminate: member %s declares no container port for %q", pod.Name, urlPort)
+	}
+
+	return modelDeploymentEndpointIdentity{role: role, rank: rank, listener: listener}, nil
+}
+
+// modelDeploymentDeclaredListenerOf returns the declared container port the bound URL targets,
+// or 0 when the pod declares no such port. The declared port is the listener contract the render
+// wrote; a port the pod never declared is not a listener this operator can count.
+func modelDeploymentDeclaredListenerOf(pod *corev1.Pod, urlPort string) int32 {
+	port, err := strconv.Atoi(urlPort)
+	if err != nil {
+		return 0
+	}
+	for i := range pod.Spec.Containers {
+		for _, declared := range pod.Spec.Containers[i].Ports {
+			if int(declared.ContainerPort) == port {
+				return declared.ContainerPort
+			}
+		}
+	}
+
+	return 0
+}
+
+// recentDispatchFromLastJob reads the journal field the shipped llm-d observer writes.
+//
+// The producer omits last_job entirely for a worker it never dispatched to, so an absent block is
+// the absence of a recent dispatch rather than a missing required field. Requiring it would make
+// every untouched worker an error. A block that is present must carry recent_dispatch as a boolean,
+// because the producer emits it only to mark a dispatch. A block without it, or with it as anything
+// else, is a shape this operator does not understand, and it is refused rather than read as false:
+// a decoder default would turn a journal it could not read into a confirmed absence of a dispatch,
+// which is the one reading this field must never get.
+//
+// A worker outside the selection with no journal block is left to the caller. The other two
+// routers publish the gateway's own last_job shape there, which this operator does not interpret.
+func recentDispatchFromLastJob(raw json.RawMessage) (bool, error) {
+	if len(raw) == 0 {
+		return false, nil
+	}
+	var job struct {
+		Recent *bool `json:"recent_dispatch"`
+	}
+	if err := json.Unmarshal(raw, &job); err != nil {
+		return false, fmt.Errorf("the dispatch journal is not readable: %w", err)
+	}
+	if job.Recent == nil {
+		return false, fmt.Errorf(
+			"the dispatch journal carries no recent_dispatch boolean, so it cannot be read")
+	}
+
+	return *job.Recent, nil
 }
 
 // workerHost extracts the address portion of a worker URL: scheme-stripped, path-stripped.
@@ -413,6 +612,19 @@ type ServingAnswer struct {
 	State  workercore.ModelDeploymentServingState
 	Value  *int32
 	Reason string
+	// ByRole is the same union counted per workload role, over the very endpoints Value sums.
+	// It exists so a role's own status field is not filled with the deployment-wide number: a
+	// prefill role reporting "two" because a decode role has two serving endpoints is a status
+	// that reads as its own pool and is not. A role with no endpoint is an explicit zero, which
+	// is why the map is built for every role the union names and the reader supplies the rest.
+	ByRole map[string]int32
+}
+
+// modelDeploymentPhysicalEndpoint is what the union counts: one declared listener on one Pod. Every
+// virtual row the router registers for that listener folds onto this one key.
+type modelDeploymentPhysicalEndpoint struct {
+	podUID   types.UID
+	listener int32
 }
 
 // aggregateModelDeploymentServing is the Feature 2 state machine. `configured` is whether
@@ -473,30 +685,60 @@ func aggregateModelDeploymentServing(
 	// forms. Views are never intersected (one lagging replica would zero the answer and
 	// hide exactly the leak the union exists to show) and never summed (the same endpoint
 	// seen by two replicas is one endpoint).
-	serving := map[types.UID]ServingEndpoint{}
+	//
+	// THE FOLD KEY IS THE PHYSICAL LISTENER, NOT THE ROW. One member's engine can appear in a
+	// view as several rows, because a data-parallel member registers one entry per virtual rank
+	// and they all share the single listener that member actually serves. Counting rows would
+	// report the router's registry size rather than the pool's serving members, so the rows that
+	// name one Pod and one declared port fold into one endpoint. The role is checked on the folded
+	// endpoint rather than added to the key, so two views that seat the same listener in
+	// different roles are caught as a contradiction instead of counted as two.
+	physical := map[modelDeploymentPhysicalEndpoint]ServingEndpoint{}
 	for _, observation := range observations {
 		for _, endpoint := range observation.Bound {
-			previous, seen := serving[endpoint.PodUID]
-			if seen && previous.Serving != endpoint.Serving {
-				return ServingAnswer{
-					State:  workercore.ModelDeploymentServingStateNotConverged,
-					Reason: fmt.Sprintf("views disagree about pod %s", endpoint.PodUID),
+			key := modelDeploymentPhysicalEndpoint{
+				podUID:   endpoint.PodUID,
+				listener: endpoint.Listener,
+			}
+			previous, seen := physical[key]
+			if seen {
+				if previous.Serving != endpoint.Serving {
+					return ServingAnswer{
+						State: workercore.ModelDeploymentServingStateNotConverged,
+						Reason: fmt.Sprintf(
+							"views disagree about whether pod %s listener %d is selected",
+							endpoint.PodUID, endpoint.Listener),
+					}
+				}
+				if previous.Role != endpoint.Role {
+					return ServingAnswer{
+						State: workercore.ModelDeploymentServingStateNotConverged,
+						Reason: fmt.Sprintf("views seat pod %s listener %d as both %q and %q",
+							endpoint.PodUID, endpoint.Listener, previous.Role, endpoint.Role),
+					}
 				}
 			}
-			serving[endpoint.PodUID] = endpoint
+			physical[key] = endpoint
 		}
 	}
 
+	// THE GLOBAL COUNT AND THE PER-ROLE COUNTS COME FROM THE SAME FOLD, in one pass over it, so
+	// they cannot describe different pools. Counting the union twice would be two answers to one
+	// question, and they would drift the first time a role's endpoints changed.
 	count := int32(0)
-	for uid := range serving {
-		if serving[uid].Serving {
-			count++
+	byRole := make(map[string]int32, len(physical))
+	for _, endpoint := range physical {
+		if !endpoint.Serving {
+			continue
 		}
+		count++
+		byRole[endpoint.Role]++
 	}
 
 	return ServingAnswer{
-		State: workercore.ModelDeploymentServingStateConfirmed,
-		Value: &count,
+		State:  workercore.ModelDeploymentServingStateConfirmed,
+		Value:  &count,
+		ByRole: byRole,
 	}
 }
 
@@ -594,7 +836,7 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentServing(
 // observation, so the aggregate answers Unknown and the residual holds, rather than a read
 // silently becoming an empty registry.
 func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
-	ctx context.Context, md *workercore.ModelDeployment, live []*corev1.Pod,
+	ctx context.Context, md *workercore.ModelDeployment, _ []*corev1.Pod,
 ) ([]RouterServingObservation, string) {
 	collectCtx, cancel := r.modelDeploymentRouterObservationContext(ctx, md)
 	defer cancel()
@@ -602,8 +844,37 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 		return nil, fmt.Sprintf("the router observation budget is exhausted: %v", err)
 	}
 
+	// THE COLLECTION IS BOUNDED BY THE LIVE OBJECTS, not by the snapshot this pass started
+	// from. The deployment and its membership are read through the uncached reader before and
+	// after the views are collected; a changed UID, generation, owner or membership means the
+	// views describe a pool this pass no longer sees, and confirmed absence from an earlier
+	// snapshot would be a lie about the current one.
+	// EVERY FRESH READ SHARES THE COLLECTION BUDGET. The bookends are part of this pass, and a
+	// guard read on the caller's own context could outlive the pass it is bounding.
+	//
+	// THE FIRST BOOKEND IS TAKEN BEFORE ANY DISCOVERY. It is the state the pass is defined
+	// against, so a Router that appears or a member that leaves after it is a change underneath
+	// this collection, which is exactly what the closing bookend is there to catch.
+	before, guardErr := r.snapshotModelDeploymentObservationGuard(collectCtx, md)
+	if guardErr != nil {
+		return nil, guardErr.Error()
+	}
+	// THE FIRST BOOKEND IS ALSO COMPARED WITH THE CALLER. Two equal fresh snapshots are a fact
+	// about the two reads alone, so a caller holding a REPLACED deployment would see the same
+	// before and after and read its own stale object as an unchanged one. The caller's UID and
+	// generation are the claim this collection has to be about.
+	if !before.matchesCaller(md) {
+		return nil, fmt.Sprintf(
+			"the caller read deployment %s at generation %d but the deployment is now %s at "+
+				"generation %d; the views would describe an object this pass was not asked about",
+			md.UID, md.Generation, before.deploymentUID, before.generation)
+	}
+
+	// DISCOVERY READS LIVE. The Router processes this pass will bind are the ones the API server
+	// still holds, not the ones the watch last delivered: a Router that rolled between the cache
+	// and this read would otherwise be read at an address the collection can no longer prove.
 	routerPods := &corev1.PodList{}
-	if err := r.Client.List(collectCtx, routerPods,
+	if err := r.APIReader.List(collectCtx, routerPods,
 		ctrlcli.InNamespace(md.Namespace),
 		ctrlcli.MatchingLabels{
 			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
@@ -614,22 +885,53 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 		return nil, fmt.Sprintf("the router's pods could not be listed: %v", err)
 	}
 
+	// BINDING USES THE SAME FRESH OBJECTS, not the caller's list. The endpoints a view binds to
+	// are resolved against Pods this pass re-read, so a member that was replaced, relabelled or
+	// replaced in place since the caller listed them cannot be counted as the member it claims.
+	live, err := r.listFreshModelDeploymentPods(collectCtx, md)
+	if err != nil {
+		return nil, fmt.Sprintf("the deployment's pods could not be listed uncached: %v", err)
+	}
+
 	fetch := r.servingViewFetch
 	if fetch == nil {
 		fetch = defaultServingViewFetch
 	}
 
+	// The observer is served on the listener the owning profile already runs. llm-d serves it on
+	// its management listener, which is where its metrics and admin endpoints already are; the
+	// other two serve it on the request port their Service targets. The port comes from the
+	// profile, never from an arbitrary Pod port, because a Pod port is not a contract.
+	port := modelDeploymentRouterObserverPort(md.Spec.Router.Name)
+	// The dispatch journal is read only from the profile that publishes it. The other two publish
+	// the gateway's own last_job shape under that key, which this operator does not interpret.
+	journal := md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD
 	observations := make([]RouterServingObservation, 0, len(routerPods.Items))
 	for i := range routerPods.Items {
 		routerPod := &routerPods.Items[i]
-		if routerPod.Status.PodIP == "" || routerPod.DeletionTimestamp != nil {
+		// A terminating Router process is still a running Router process: it holds an address
+		// and its observer still answers, and dropping it here would read a shutdown as a
+		// converged empty registry. Coverage ends only when the process loses its address.
+		if routerPod.Status.PodIP == "" {
+			continue
+		}
+		// The view is only about this deployment when the Pod's owning chain is: each Router
+		// process is verified live, through the uncached reader, to be controlled by a
+		// ReplicaSet owned by this deployment. A process whose chain is missing or unreadable
+		// holds the observation rather than narrowing it.
+		if err := r.verifyRouterPodOwnership(collectCtx, md, routerPod); err != nil {
+			observations = append(observations, RouterServingObservation{
+				Err: fmt.Errorf("router process %s is not verified for this deployment: %w",
+					routerPod.Name, err),
+			})
+
 			continue
 		}
 		observation, err := collectRouterServingView(collectCtx, func(
 			callCtx context.Context, path string,
 		) ([]byte, error) {
 			return fetch(callCtx, fmt.Sprintf("http://%s:%d%s",
-				routerPod.Status.PodIP, modelDeploymentRouterHTTPPort, path))
+				routerPod.Status.PodIP, port, path))
 		}, routerPod.UID)
 		if err != nil {
 			observations = append(observations, observation)
@@ -641,7 +943,7 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 		// fetch could push the last view's recorded age to the freshness edge before the
 		// aggregate ever judged it. The freshness gate in the aggregate is unchanged.
 		observation.CollectedAt = r.modelDeploymentNow()
-		observation.Bound, err = bindRouterObservationView(observation.View, live)
+		observation.Bound, observation.RecentDispatch, err = bindRouterObservationView(observation.View, live, journal)
 		if err != nil {
 			observation.Err = err
 		}
@@ -652,7 +954,249 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 		return nil, fmt.Sprintf("the router observation budget is exhausted: %v", err)
 	}
 
+	after, guardErr := r.snapshotModelDeploymentObservationGuard(collectCtx, md)
+	if guardErr != nil {
+		return nil, guardErr.Error()
+	}
+	if before != after {
+		return nil, fmt.Sprintf(
+			"the deployment or its membership changed while the routers were being observed; " +
+				"the collected views describe an earlier snapshot and cannot confirm absence")
+	}
+
 	return observations, ""
+}
+
+// listFreshModelDeploymentPods reads the deployment's own Pods through the uncached reader.
+//
+// IT IS THE CACHED LISTING'S SHAPE WITH THE UNCACHED READER, and that is deliberate: the ownership
+// filter the cache applies is the one that decides which Pods this deployment may count at all, and
+// re-deriving it here would be a second answer to "which Pods are mine" that could drift from it.
+func (r *ModelDeploymentReconciler) listFreshModelDeploymentPods(
+	ctx context.Context, md *workercore.ModelDeployment,
+) ([]*corev1.Pod, error) {
+	pods := new(corev1.PodList)
+	if err := r.APIReader.List(ctx, pods,
+		ctrlcli.InNamespace(md.Namespace),
+		ctrlcli.MatchingLabels{
+			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+			modelDeploymentLabelKeyInstance: md.Name,
+		},
+	); err != nil {
+		return nil, err
+	}
+
+	owned := make([]*corev1.Pod, 0, len(pods.Items))
+	for i := range pods.Items {
+		if !modelDeploymentOwns(&pods.Items[i], md) {
+			continue
+		}
+		owned = append(owned, &pods.Items[i])
+	}
+
+	return owned, nil
+}
+
+// modelDeploymentObservationGuard is the uncached identity this collection is bounded by: the
+// deployment's UID, generation and controlling owner, plus the member UIDs it currently has.
+type modelDeploymentObservationGuard struct {
+	deploymentUID string
+	generation    int64
+	ownerUIDs     string
+	memberUIDs    string
+	// memberFacts and routerFacts are the per-Pod identities the bindings acted on. They are
+	// separate strings rather than folded into memberUIDs so a failure names which of the two
+	// changed, and memberUIDs keeps answering the plain membership question.
+	memberFacts string
+	routerFacts string
+}
+
+// snapshotModelDeploymentObservationGuard reads that identity through the uncached reader.
+func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
+	ctx context.Context, md *workercore.ModelDeployment,
+) (modelDeploymentObservationGuard, error) {
+	live := new(workercore.ModelDeployment)
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(md), live); err != nil {
+		return modelDeploymentObservationGuard{},
+			fmt.Errorf("the deployment could not be re-read uncached during observation: %w", err)
+	}
+	ownerUIDs := make([]string, 0, len(live.OwnerReferences))
+	for _, owner := range live.OwnerReferences {
+		ownerUIDs = append(ownerUIDs, string(owner.UID))
+	}
+	sort.Strings(ownerUIDs)
+
+	members := new(corev1.PodList)
+	if err := r.APIReader.List(ctx, members,
+		ctrlcli.InNamespace(md.Namespace),
+		ctrlcli.MatchingLabels{
+			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+			modelDeploymentLabelKeyInstance: md.Name,
+		},
+	); err != nil {
+		return modelDeploymentObservationGuard{},
+			fmt.Errorf("the membership could not be re-read uncached during observation: %w", err)
+	}
+	// EVERY FACT A BINDING ACTED ON IS IN THE BOOKEND, not only the membership. A member that kept
+	// its UID while its controlling owner, its role, its member rank or the listener it declares
+	// changed is a different member wearing the same name, and a UID-only comparison would read it
+	// as unchanged and confirm absence about it.
+	//
+	// The identity labels above are a prefilter, so the controller reference is confirmed here the
+	// same way listFreshModelDeploymentPods confirms it. A Pod that carries the labels but is not
+	// owned by this deployment is not a fact any binding can act on, and keeping it out is what makes
+	// the guard describe exactly the set the bindings read: otherwise one such Pod's churn refuses the
+	// whole collection over a member this deployment does not have.
+	owned := make([]corev1.Pod, 0, len(members.Items))
+	for i := range members.Items {
+		if modelDeploymentOwns(&members.Items[i], md) {
+			owned = append(owned, members.Items[i])
+		}
+	}
+	memberUIDs := make([]string, 0, len(owned))
+	memberFacts := make([]string, 0, len(owned))
+	for i := range owned {
+		memberUIDs = append(memberUIDs, string(owned[i].UID))
+		memberFacts = append(memberFacts, modelDeploymentMemberFact(&owned[i]))
+	}
+	sort.Strings(memberUIDs)
+	sort.Strings(memberFacts)
+
+	// The Router processes are read under the same snapshot for the same reason: a process that
+	// lost its address or changed owner is no longer the process this pass read.
+	routers := &corev1.PodList{}
+	if err := r.APIReader.List(ctx, routers,
+		ctrlcli.InNamespace(md.Namespace),
+		ctrlcli.MatchingLabels{
+			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+			modelDeploymentLabelKeyInstance: md.Name,
+			modelDeploymentRouterLabelKey:   md.Spec.Router.Name,
+		},
+	); err != nil {
+		return modelDeploymentObservationGuard{},
+			fmt.Errorf("the routers could not be re-read uncached during observation: %w", err)
+	}
+	routerFacts := make([]string, 0, len(routers.Items))
+	for i := range routers.Items {
+		routerFacts = append(routerFacts, modelDeploymentMemberFact(&routers.Items[i]))
+	}
+	sort.Strings(routerFacts)
+
+	return modelDeploymentObservationGuard{
+		deploymentUID: string(live.UID),
+		generation:    live.Generation,
+		ownerUIDs:     strings.Join(ownerUIDs, ","),
+		memberUIDs:    strings.Join(memberUIDs, ","),
+		memberFacts:   strings.Join(memberFacts, ";"),
+		routerFacts:   strings.Join(routerFacts, ";"),
+	}, nil
+}
+
+// matchesCaller reports whether the first uncached read is still the object the caller passed in.
+//
+// A CACHED OBJECT IS A CLAIM ABOUT THE PAST, and this collection is defined against what the
+// deployment is now. The caller's copy can be from a pass that started before a replacement, and
+// comparing only the two fresh snapshots would accept it, because both reads would agree on the
+// replacement and the disagreement is between the caller and both of them.
+func (g modelDeploymentObservationGuard) matchesCaller(md *workercore.ModelDeployment) bool {
+	return g.deploymentUID == string(md.UID) && g.generation == md.Generation
+}
+
+// modelDeploymentMemberFact is the identity a binding about this Pod would have read: its own UID,
+// its controlling owner as an identity, the workload role and member rank it declares, the
+// listeners it declares, whether it is running, and whether it is terminating. Two snapshots that
+// carry the same fact describe the same member; two that differ describe a member that moved.
+func modelDeploymentMemberFact(pod *corev1.Pod) string {
+	owner := "none"
+	if ref := meta.GetControllerOf(pod); ref != nil {
+		owner = ref.APIVersion + "/" + ref.Kind + "/" + ref.Name + "/" + string(ref.UID)
+	}
+	listeners := make([]string, 0, len(pod.Spec.Containers))
+	for i := range pod.Spec.Containers {
+		for _, declared := range pod.Spec.Containers[i].Ports {
+			listeners = append(listeners, strconv.Itoa(int(declared.ContainerPort)))
+		}
+	}
+	sort.Strings(listeners)
+	terminating := pod.DeletionTimestamp != nil
+
+	return strings.Join([]string{
+		string(pod.UID),
+		owner,
+		pod.Status.PodIP,
+		modelDeploymentPodRole(pod),
+		pod.Labels[modelDeploymentMemberIndexLabel],
+		strings.Join(listeners, "+"),
+		string(pod.Status.Phase),
+		strconv.FormatBool(terminating),
+	}, "|")
+}
+
+// verifyRouterPodOwnership checks the live controlling-owner chain of one Router process: the Pod
+// is controlled by a ReplicaSet that still exists with that identity, and that ReplicaSet is
+// controlled by this deployment. The read goes through the uncached reader, because a cached
+// answer is the snapshot this collection is defined against.
+func (r *ModelDeploymentReconciler) verifyRouterPodOwnership(
+	ctx context.Context, md *workercore.ModelDeployment, pod *corev1.Pod,
+) error {
+	// THE POD ITSELF IS RE-READ. The object handed in came from a listing, and a listing is a
+	// snapshot; this check is the one that says the chain is live, so it may not be answered from
+	// a copy of the Pod taken before the collection started. A Router that was adopted or
+	// replaced since that listing is only visible here.
+	live := new(corev1.Pod)
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(pod), live); err != nil {
+		return fmt.Errorf("the router process could not be re-read uncached: %w", err)
+	}
+	if live.UID != pod.UID {
+		return fmt.Errorf("the router process changed identity during observation")
+	}
+
+	ref := meta.GetControllerOf(live)
+	if ref == nil {
+		return fmt.Errorf("the router process has no controlling owner")
+	}
+	if ref.Kind != "ReplicaSet" || ref.APIVersion != appsv1.SchemeGroupVersion.String() {
+		return fmt.Errorf("the router process is controlled by %s (%s) rather than a ReplicaSet",
+			ref.Kind, ref.APIVersion)
+	}
+	replicaSet := new(appsv1.ReplicaSet)
+	if err := r.APIReader.Get(ctx,
+		ctrlcli.ObjectKey{Namespace: live.Namespace, Name: ref.Name}, replicaSet); err != nil {
+		return fmt.Errorf("the router process's ReplicaSet could not be read uncached: %w", err)
+	}
+	if replicaSet.UID != ref.UID {
+		return fmt.Errorf("the router process's ReplicaSet changed identity during observation")
+	}
+	// The chain continues through the workload Deployment the ReplicaSet scales, and ends at
+	// this deployment: kind, API version and identity at every hop.
+	deploymentRef := meta.GetControllerOf(replicaSet)
+	if deploymentRef == nil {
+		return fmt.Errorf("the router process's ReplicaSet has no controlling Deployment")
+	}
+	if deploymentRef.Kind != "Deployment" ||
+		deploymentRef.APIVersion != appsv1.SchemeGroupVersion.String() {
+		return fmt.Errorf("the router process's ReplicaSet is controlled by %s (%s) rather than a Deployment",
+			deploymentRef.Kind, deploymentRef.APIVersion)
+	}
+	deployment := new(appsv1.Deployment)
+	if err := r.APIReader.Get(ctx,
+		ctrlcli.ObjectKey{Namespace: live.Namespace, Name: deploymentRef.Name}, deployment); err != nil {
+		return fmt.Errorf("the router process's Deployment could not be read uncached: %w", err)
+	}
+	if deployment.UID != deploymentRef.UID {
+		return fmt.Errorf("the router process's Deployment changed identity during observation")
+	}
+	modelOwner := meta.GetControllerOf(deployment)
+	if modelOwner == nil {
+		return fmt.Errorf("the router process's Deployment has no controlling ModelDeployment")
+	}
+	if modelOwner.Kind != workercore.SchemeGroupVersionKind("ModelDeployment").Kind ||
+		modelOwner.APIVersion != workercore.SchemeGroupVersion.String() || modelOwner.UID != md.UID {
+		return fmt.Errorf("the router process's Deployment is owned by %s (%s) rather than this deployment",
+			modelOwner.Kind, modelOwner.APIVersion)
+	}
+
+	return nil
 }
 
 // applyModelDeploymentServing writes the observed answer onto every role's serving field.
@@ -667,7 +1211,19 @@ func applyModelDeploymentServing(
 	for i := range status.Roles {
 		status.Roles[i].Endpoints.Serving = workercore.ModelDeploymentServingStatus{
 			State: answer.State,
-			Value: answer.Value,
 		}
+		// ONLY A CONFIRMED ANSWER CARRIES A NUMBER. Unknown, NotConverged and NotConfigured all
+		// state that no count was established, and the API carries that as an absent value: a
+		// zero written into a state that never measured anything is a measurement of zero, which
+		// is the false zero this whole path exists to refuse.
+		if answer.State != workercore.ModelDeploymentServingStateConfirmed {
+			continue
+		}
+		// A ROLE WITH NO ENDPOINT IN THE UNION IS ZERO, not the deployment's total. The count is
+		// read from the answer's own per-role map, and a role the map does not name has none, so
+		// the field says what this role is serving rather than what the deployment is. The value
+		// is per role and is a copy, so two roles never share one addressable count.
+		roleValue := answer.ByRole[status.Roles[i].Name]
+		status.Roles[i].Endpoints.Serving.Value = &roleValue
 	}
 }

@@ -550,8 +550,9 @@ func TestRestartResumesFromThePersistedState(t *testing.T) {
 	md = reserve(md, resumed)
 	// The pods are seeded because the router view binds each worker's address to a live Pod; with
 	// nothing on the server the view is refused as indeterminate and every row asserts a hold.
-	seeded := make([]ctrlcli.Object, 0, 2+len(pods))
-	seeded = append(seeded, md.DeepCopy(), retirementRouterPod("router-zero", "10.0.9.1"))
+	seeded := make([]ctrlcli.Object, 0, 4+len(pods))
+	router, routerRS, routerDeployment := ownedRouterFixture(md)
+	seeded = append(seeded, md.DeepCopy(), router, routerRS, routerDeployment)
 	for i := range pods {
 		seeded = append(seeded, pods[i].DeepCopy())
 	}
@@ -877,8 +878,8 @@ func TestTheProtocolCompletesTheWholeProtocol(t *testing.T) {
 			"member-1": {idleDrain(), idleDrain()},
 		},
 	}
-	cli := newModelDeploymentClient(
-		md, newRenderInstanceType(), target, retirementRouterPod("router-zero", "10.0.9.1"))
+	cli := newModelDeploymentClient(append(
+		[]ctrlcli.Object{md, newRenderInstanceType(), target}, ownedRouterObjects(md)...)...)
 	r := retirementRouterReconciler(cli, reader, time.Now(), pods)
 
 	states := make([]workercore.ModelDeploymentRetirementState, 0, 8)
@@ -1030,8 +1031,8 @@ func TestAScaleDownRunsTheWholeProtocolFromNoReservation(t *testing.T) {
 	kept.Status.Phase = core.PodRunning
 	kept.Status.PodIP = "10.0.4.2"
 	pods := []core.Pod{*kept, *target}
-	cli := newModelDeploymentClient(
-		md, newRenderInstanceType(), kept, target, retirementRouterPod("router-zero", "10.0.9.1"))
+	cli := newModelDeploymentClient(append(
+		[]ctrlcli.Object{md, newRenderInstanceType(), kept, target}, ownedRouterObjects(md)...)...)
 	r := retirementRouterReconciler(cli, &scriptedDrainReader{
 		answers: map[types.UID][]modelDeploymentDrainAnswer{"member-1": {idleDrain(), idleDrain()}},
 	}, time.Now(), pods)
@@ -1410,7 +1411,7 @@ func TestNoReservationLeavesEveryPathUnchanged(t *testing.T) {
 			// that hold. The router reports no member of the target still served, so the removal
 			// the path wanted is carried out by the protocol rather than refused forever.
 			md = retirementRouterBacked(md)
-			objs = append(objs, retirementRouterPod("router-zero", "10.0.9.1"))
+			objs = append(objs, ownedRouterObjects(md)...)
 			cli := newModelDeploymentClient(append(objs, md)...)
 			standInForKueue(t, cli, true)
 
@@ -1568,9 +1569,9 @@ func TestARouterResidualBlocksDeletion(t *testing.T) {
 			// each worker's address to a live Pod. With no Pod on the server the view is refused as
 			// indeterminate, every case would hold, and the "no residual" rows would be asserting
 			// a refusal rather than the absence they are about.
-			seeded := make([]ctrlcli.Object, 0, len(pods)+2)
-			seeded = append(seeded, md.DeepCopy(), newRenderInstanceType(),
-				retirementRouterPod("router-zero", "10.0.9.1"))
+			seeded := make([]ctrlcli.Object, 0, len(pods)+4)
+			seeded = append(seeded, md.DeepCopy(), newRenderInstanceType())
+			seeded = append(seeded, ownedRouterObjects(md)...)
 			for i := range pods {
 				seeded = append(seeded, pods[i].DeepCopy())
 			}
@@ -1601,10 +1602,15 @@ func TestARouterResidualBlocksDeletion(t *testing.T) {
 // renderModelDeploymentRouterObjects gives the Router the name, instance and router labels and
 // nothing else, because the Router is not a Kueue-managed member of a serving group. A group label
 // here would invent Router quota the real object never asks for.
+//
+// ITS UID IS DERIVED FROM ITS NAME, because two Router processes are two Pods and a Pod's UID is
+// what the observation collection groups their per-process boot generations by. One shared literal
+// made a multi-router fixture report two independent processes as one, which is the exact
+// disagreement the generation rules exist to catch.
 func retirementRouterPod(name, ip string) *core.Pod {
 	return &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
-			Name: name, Namespace: "team-a", UID: types.UID("router-uid"),
+			Name: name, Namespace: "team-a", UID: types.UID("router-uid-" + name),
 			Labels: map[string]string{
 				modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
 				modelDeploymentLabelKeyInstance: "qwen",
@@ -1728,6 +1734,7 @@ func (r retirementIdleReader) Drain(
 func reconcileModelDeploymentDraining(t *testing.T, cli ctrlcli.Client) (ctrl.Result, error) {
 	t.Helper()
 	retirementAssignPodUIDs(t, cli)
+	seedHealthyRouterOwnership(t, cli, getModelDeployment(t, cli))
 
 	return reconcileModelDeploymentWith(t, &ModelDeploymentReconciler{
 		Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
@@ -1861,8 +1868,8 @@ func TestASecondRemovalIntentIsRefusedWhileOneIsInFlight(t *testing.T) {
 	first.UID = "first"
 	second := surplusReplicaAt(t, md, "qwen-server-two", 2, "")
 	second.UID = "second"
-	cli := newModelDeploymentClient(
-		md, newRenderInstanceType(), first, second, retirementRouterPod("router-zero", "10.0.9.1"))
+	cli := newModelDeploymentClient(append(
+		[]ctrlcli.Object{md, newRenderInstanceType(), first, second}, ownedRouterObjects(md)...)...)
 	standInForKueue(t, cli, true)
 	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
 	r.servingViewFetch = func(_ context.Context, _ string) ([]byte, error) {
@@ -2378,6 +2385,13 @@ func retirementRouterReconciler(
 	served ...string,
 ) *ModelDeploymentReconciler {
 	r := holdReconciler(cli, reader, now)
+	// The Router process this fixture seeded carries its live controlling chain, because the
+	// collection verifies every hop of it through the uncached reader before it reads a byte. A
+	// fixture that seeded only the Pod measures the hold an unplaceable process produces, so every
+	// "no residual" row would be asserting that hold rather than the absence it is about.
+	if md := liveModelDeploymentFor(cli); md != nil && md.Spec.Router != nil {
+		_ = seedRouterOwnership(cli, md)
+	}
 	r.servingViewFetch = func(_ context.Context, _ string) ([]byte, error) {
 		return retirementRouterView(served, pods), nil
 	}
@@ -2411,8 +2425,8 @@ func TestAReservedPodIsHeldEvenWhenItsOrdinalLabelIsGone(t *testing.T) {
 		}))
 	before := md.Status.Retirement.DeepCopy()
 
-	cli := newModelDeploymentClient(
-		md, newRenderInstanceType(), retained, keeper, retirementRouterPod("router-zero", "10.0.9.1"))
+	cli := newModelDeploymentClient(append(
+		[]ctrlcli.Object{md, newRenderInstanceType(), retained, keeper}, ownedRouterObjects(md)...)...)
 	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*retained, *keeper})
 
 	plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{*retained, *keeper})
@@ -2463,8 +2477,8 @@ func TestAnUnseatedPodTheReservationDoesNotHoldIsStillNotFrozen(t *testing.T) {
 		workercore.ModelDeploymentRetirementStateAborted, "server", 1, []string{"gone-uid"},
 		func(res *workercore.ModelDeploymentRetirementStatus) { res.Reason = "aborted and retained" }))
 
-	cli := newModelDeploymentClient(
-		md, newRenderInstanceType(), unseated, keeper, retirementRouterPod("router-zero", "10.0.9.1"))
+	cli := newModelDeploymentClient(append(
+		[]ctrlcli.Object{md, newRenderInstanceType(), unseated, keeper}, ownedRouterObjects(md)...)...)
 	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*unseated, *keeper})
 	pods := []core.Pod{*unseated, *keeper}
 

@@ -20,6 +20,9 @@ the role contract. [Prefill and Decode](prefill-decode.md) covers split roles.
 [Routing](routing.md) explain what the running service reports and how requests
 are directed.
 
+`Elastic EP` is its own mode rather than another role shape: it keeps one serving instance and
+changes the size of its collective while it runs.
+
 ---
 
 **See also** — [KV Cache](../kv-cache/_index.md) (shared prefix reuse) ·

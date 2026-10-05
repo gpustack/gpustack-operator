@@ -20,6 +20,7 @@ API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,DeviceT
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,InstanceTypeCPUCache,L1D
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,InstanceTypeCPUCache,L1I
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,ModelDeploymentParallelismDeclaredStatus,MoEDPSize
+API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,ModelDeploymentRole,ElasticEP
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,ModelDeploymentRole,ReplicaSize
 API rule violation: names_match,k8s.io/api/core/v1,AzureDiskVolumeSource,DataDiskURI
 API rule violation: names_match,k8s.io/api/core/v1,ContainerStatus,LastTerminationState
