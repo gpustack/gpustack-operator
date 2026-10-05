@@ -2175,6 +2175,9 @@ func modelDeploymentOwns(obj ctrlcli.Object, md *workercore.ModelDeployment) boo
 }
 
 func modelDeploymentOwnedResource(obj ctrlcli.Object) bool {
+	if obj.GetLabels()[elasticOperationLabel] == "true" || obj.GetLabels()[elasticObservationLabel] == "true" {
+		return true
+	}
 	if !systemmeta.MatchResource(obj, ModelDeploymentResourceType) {
 		return false
 	}
