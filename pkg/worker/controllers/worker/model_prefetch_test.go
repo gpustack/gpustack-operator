@@ -19,6 +19,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/modelstore"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 var testDigest = "sha256:" + strings.Repeat("7", 64)
@@ -471,6 +472,152 @@ func TestDeploymentInstanceTypesCollectsServingPools(t *testing.T) {
 	}
 
 	assert.ElementsMatch(t, []string{"h100-8", "mi300-8"}, deploymentInstanceTypes(deps, "model"))
+}
+
+// newPrefetchInstanceTypeEnv builds a fake client carrying the given nodes and InstanceTypes plus
+// the ResourceFlavors the nodes genuinely contribute to — reconciled through the NodeFlavor
+// reconciler, so the flavors' names and labels are the production ones, never hand-written.
+func newPrefetchInstanceTypeEnv(
+	t *testing.T, nodes []*core.Node, types ...*workercore.InstanceType,
+) ctrlcli.Client {
+	t.Helper()
+	objs := make([]ctrlcli.Object, 0, len(nodes)+len(types))
+	for _, nd := range nodes {
+		objs = append(objs, nd)
+	}
+	for _, it := range types {
+		objs = append(objs, it)
+	}
+	cli := buildNodeFlavorClient(objs...)
+	for _, nd := range nodes {
+		for _, f := range nodefeature.ExtractNodeFlavors(nd) {
+			reconcileNodeFlavor(t, cli,
+				topologyQualifiedFlavorName(f.Name, nd.Labels[TopologyProfileLabel]))
+		}
+	}
+
+	return cli
+}
+
+// resolvePrefetchTargets runs the placement resolution the admission webhook runs: the pool
+// resolver over the client, then the shared target expansion.
+func resolvePrefetchTargets(
+	t *testing.T, cli ctrlcli.Client, pf *workercore.ModelPrefetch,
+	nodes []core.Node, deps []workercore.ModelDeployment,
+) []string {
+	t.Helper()
+	pools, err := ResolveInstanceTypeFlavorNames(context.Background(), cli, pf, deps)
+	require.NoError(t, err)
+	targets, err := PrefetchTargetNodes(pf, nodes, deps, pools)
+	require.NoError(t, err)
+
+	return targets
+}
+
+// testElasticInstanceType is the issue's shape: an admin-authored accelerated InstanceType with
+// a custom name over the nvidia-h100-80gb-hbm3 pool.
+func testElasticInstanceType() *workercore.InstanceType {
+	return &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: "elastic-cpu-gpu"},
+		Spec: workercore.InstanceTypeSpec{
+			Acceleratable:    true,
+			GeneralGroup:     "generic",
+			AcceleratorGroup: "nvidia-h100-80gb-hbm3",
+			OS:               "linux",
+			Arch:             "amd64",
+		},
+	}
+}
+
+func TestPrefetchPlacementNamedInstanceTypeResolvesThePool(t *testing.T) {
+	// #717: a custom accelerated InstanceType, Active with capacity, selected by
+	// spec.placement.instanceTypes, resolves the nodes carrying the type's flavors — through the
+	// same resolution the admission webhook runs — not zero. A CPU-only node in the cluster is
+	// the negative control.
+	gpu1 := newManagedAccelNodeOf("gpu-node-1", 8, "nvidia-h100-80gb-hbm3", "NVIDIA-H100-80GB-HBM3")
+	gpu2 := newManagedAccelNodeOf("gpu-node-2", 8, "nvidia-h100-80gb-hbm3", "NVIDIA-H100-80GB-HBM3")
+	cpu := newManagedCPUNode("cpu-node-1", 16, 64, 200)
+	cli := newPrefetchInstanceTypeEnv(t, []*core.Node{gpu1, gpu2, cpu}, testElasticInstanceType())
+	pf := testPrefetch("warm", func(pf *workercore.ModelPrefetch) {
+		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
+			InstanceTypes: []string{"elastic-cpu-gpu"},
+		}
+	})
+
+	targets := resolvePrefetchTargets(t, cli, pf, []core.Node{*gpu1, *gpu2, *cpu}, nil)
+	assert.Equal(t, []string{"gpu-node-1", "gpu-node-2"}, targets,
+		"the named custom InstanceType's pool nodes are the targets")
+}
+
+func TestPrefetchPlacementDerivedInstanceTypeResolvesThePool(t *testing.T) {
+	// #717: the default placement derives the target set from the namespace deployments' own
+	// InstanceType names; a custom name resolves the same way as an explicit one.
+	gpu1 := newManagedAccelNodeOf("gpu-node-1", 8, "nvidia-h100-80gb-hbm3", "NVIDIA-H100-80GB-HBM3")
+	cli := newPrefetchInstanceTypeEnv(t, []*core.Node{gpu1}, testElasticInstanceType())
+	pf := testPrefetch("warm", func(pf *workercore.ModelPrefetch) {
+		pf.Spec.Placement = nil
+	})
+	dep := workercore.ModelDeployment{
+		ObjectMeta: meta.ObjectMeta{Name: "served", Namespace: "team-a"},
+		Spec: workercore.ModelDeploymentSpec{
+			Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "model"}},
+			Roles: []workercore.ModelDeploymentRole{{InstanceType: "elastic-cpu-gpu"}},
+		},
+	}
+
+	targets := resolvePrefetchTargets(t, cli, pf, []core.Node{*gpu1}, []workercore.ModelDeployment{dep})
+	assert.Equal(t, []string{"gpu-node-1"}, targets,
+		"the deployment's custom InstanceType's pool node is a target")
+}
+
+func TestPrefetchPlacementFollowsTheTypeAcrossTopologyProfiles(t *testing.T) {
+	// The same hardware in two topology profiles publishes two flavors; the named type's pool
+	// selects both, and the target set follows the flavors rather than one qualified name.
+	gpuA := newManagedAccelNodeOf("gpu-node-a", 8, "nvidia-h100-80gb-hbm3", "NVIDIA-H100-80GB-HBM3")
+	gpuB := newManagedAccelNodeOf("gpu-node-b", 8, "nvidia-h100-80gb-hbm3", "NVIDIA-H100-80GB-HBM3")
+	gpuB.Labels[TopologyProfileLabel] = topologyProfile([]string{
+		core.LabelHostname,
+		"topology.kubernetes.io/zone",
+	})
+	cli := newPrefetchInstanceTypeEnv(t, []*core.Node{gpuA, gpuB}, testElasticInstanceType())
+	pf := testPrefetch("warm", func(pf *workercore.ModelPrefetch) {
+		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
+			InstanceTypes: []string{"elastic-cpu-gpu"},
+		}
+	})
+
+	targets := resolvePrefetchTargets(t, cli, pf, []core.Node{*gpuA, *gpuB}, nil)
+	assert.Equal(t, []string{"gpu-node-a", "gpu-node-b"}, targets,
+		"both profiles' flavors resolve into the target set")
+}
+
+func TestPrefetchPlacementUnknownInstanceTypeResolvesNoNodes(t *testing.T) {
+	// The placement contract is "every node carrying the type's flavors": a name nothing
+	// publishes carries none, so the target set is empty and the minReady admission check
+	// explains the shortfall — no error, no invented targets.
+	gpu1 := newManagedAccelNodeOf("gpu-node-1", 8, "nvidia-h100-80gb-hbm3", "NVIDIA-H100-80GB-HBM3")
+	cli := newPrefetchInstanceTypeEnv(t, []*core.Node{gpu1})
+	pf := testPrefetch("warm", func(pf *workercore.ModelPrefetch) {
+		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
+			InstanceTypes: []string{"no-such-type"},
+		}
+	})
+
+	targets := resolvePrefetchTargets(t, cli, pf, []core.Node{*gpu1}, nil)
+	assert.Empty(t, targets, "an unknown InstanceType name contributes no nodes")
+}
+
+func TestPrefetchPlacementAmbiguousStillRefuses(t *testing.T) {
+	// Both placement kinds set is refused before any resolution runs.
+	pf := testPrefetch("warm", func(pf *workercore.ModelPrefetch) {
+		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
+			InstanceTypes: []string{"elastic-cpu-gpu"},
+			NodeSelector:  &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}},
+		}
+	})
+
+	_, err := prefetchTargetNodes(pf, nil, nil, nil)
+	assert.ErrorIs(t, err, ErrPrefetchPlacementAmbiguous)
 }
 
 func nodeNameFor(i int) string {

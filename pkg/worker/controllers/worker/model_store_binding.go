@@ -123,7 +123,12 @@ func (r *ModelStoreBindingReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 		sizes[resolved.ManifestDigest] = resolved.SizeBytes
 
-		targets, err := PrefetchTargetNodes(pf, nodes.Items, deps.Items)
+		pools, err := ResolveInstanceTypeFlavorNames(ctx, r.Client, pf, deps.Items)
+		if err != nil {
+			measured = false
+			continue
+		}
+		targets, err := PrefetchTargetNodes(pf, nodes.Items, deps.Items, pools)
 		if err != nil {
 			// The prefetch's own status carries the broken placement, but its bytes cannot be
 			// counted either, so the figure is not a measurement.
