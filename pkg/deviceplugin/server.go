@@ -678,8 +678,13 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "unconfigured responder")
 	}
 
+	kubelet, err := s.Reconciler.verifiedKubeletPending(ctx, s.ResourceName())
+	if err != nil {
+		s.Logger.Error(err, "verify device bookkeeping before allocation")
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "verify kubelet device assignments: %v", err)
+	}
 	if s.AllocationMode == workercore.DeviceAllocationModeVisibility {
-		return s.allocateVisibility(ctx, req)
+		return s.allocateVisibility(ctx, req, kubelet)
 	}
 
 	ctrReq := req.GetContainerRequests()[0]
@@ -704,10 +709,6 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 	// here so the two calls cannot disagree about whether this responder places at all.
 	logicalPlacer, placesLogical := s.Responder.(LogicalSlicedResponder)
 	placesLogical = placesLogical && s.AllocationMode == workercore.DeviceAllocationModeSliced
-
-	// Asked before the mutex: kubelet is blocked on this very call, so its answer cannot change
-	// while the call waits for the mutex, and a lookup is I/O the serialized section must not do.
-	kubelet := s.Reconciler.kubeletPending(ctx, s.ResourceName())
 
 	// Identify the pod, enforce the cross-mode invariant, and reserve the accelerators under the
 	// node allocate mutex (see DevicesReconciler.allocateMutex). Holding it across the whole
@@ -828,6 +829,22 @@ func (s *ResourceServer) decideAllocation(
 		s.Logger.Error(err, "get allocating pod for allocation")
 		return d, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for allocation: %v", err)
 	}
+	d.PriorClaim = s.priorClaimOf(d.Pod, d.Container.Name)
+	if d.PriorClaim != nil && s.AllocationMode != workercore.DeviceAllocationModePartitioned {
+		priorCards := sets.New[Resource]()
+		for _, group := range d.PriorClaim.Devices.Groups {
+			for _, acc := range group.Accelerators {
+				priorCards.Insert(Resource{Group: group.ID, Device: acc.ID})
+			}
+		}
+		if !priorCards.Equal(sets.KeySet(tokensByCard)) {
+			err := grpcstatus.Errorf(grpccodes.FailedPrecondition,
+				"refusing conflicting replay for pod %s container %q: prior allocation differs from kubelet device IDs %v",
+				kubemeta.GetNamespacedNameKey(d.Pod), d.Container.Name, deviceIDs)
+			s.Logger.Error(err, "allocation identity conflict")
+			return d, err
+		}
+	}
 
 	unitsPerToken, unitsRequested := s.requestedUnits(d.Container)
 
@@ -869,11 +886,6 @@ func (s *ResourceServer) decideAllocation(
 		// actuator runs. The post-actuation call below records what the hardware actually gave.
 		applyPhysicalPlacements(&d.Status, d.Profile, placements, nil)
 	}
-
-	// What this container already holds, captured before the reservation below overwrites it: a
-	// refusal after the durable patch has to put exactly this back, and by then neither record still
-	// carries it.
-	d.PriorClaim = s.priorClaimOf(d.Pod, d.Container.Name)
 
 	// Reserve the accelerators in-process before releasing the mutex: the accelerator is taken the
 	// instant the check passes, so the next serialized Allocate observes it (the cross-mode check
@@ -1756,12 +1768,12 @@ func (s *ResourceServer) releaseAllocation(
 // (via the Responder), consuming no ledger units and writing no allocation status. It fails
 // closed when no allocation can be resolved, rather than emitting an empty visible-devices env
 // a runtime could interpret as "all devices".
-func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRequest) (*AllocateResponse, error) {
+func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRequest, kubelet *_KubeletPending) (*AllocateResponse, error) {
 	ctrReq := req.GetContainerRequests()[0]
 
 	resName := s.ResourceName()
 	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
-	pod, ctr, err := s.claimVisibilityContainer(ctx, resName, resQuantity, s.Reconciler.kubeletPending(ctx, resName))
+	pod, ctr, err := s.claimVisibilityContainer(ctx, resName, resQuantity, kubelet)
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for visibility allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for visibility allocation: %v", err)

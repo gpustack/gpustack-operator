@@ -171,6 +171,10 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: time.Second}, err
 	}
 
+	if _, err := r.verifyKubeletAllocations(ctx, devs, podList); err != nil {
+		logger.Error(err, "verify device bookkeeping against kubelet")
+		return ctrl.Result{}, err
+	}
 	desiredStatus, livePodUIDs := BuildDesiredStatus(logger, devs, podList)
 
 	if !kubemeta.DeepEqual(devs.Status, desiredStatus) {
@@ -198,6 +202,9 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// pass while any remain.
 	if r.hasPendingReleases() {
 		return ctrl.Result{RequeueAfter: pendingReleaseRetryPeriod}, nil
+	}
+	if r.kubeletPods != nil {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -1033,9 +1040,8 @@ func (r *DevicesReconciler) getAllocatingPod(
 // device of the resource. kubelet admits one pod at a time, so normally exactly one is left, and it is
 // the container this call serves even where the heuristic would have picked an older pod.
 //
-// When none is left the tiers come back whole: kubelet and the informer disagree — a pod kubelet
-// holds that the informer has not delivered yet, say — and the heuristic's guess is better than no
-// answer. When several are left the heuristic chooses among them only.
+// If no candidate remains, refuse the request until the informer catches up. Guessing would write
+// this request's devices onto a different pod. If several remain, choose only among them.
 //
 // With no candidate at all there is nothing to narrow and nothing is logged: the informer has not
 // delivered the Pod kubelet is admitting yet, and the caller retries until it has.
@@ -1055,11 +1061,10 @@ func narrowToKubeletPending(
 
 	switch n := len(narrowedFeasible) + len(narrowedInfeasible) + len(narrowedClaimed); {
 	case n == 0:
-		logger.Info("kubelet reports no pending candidate as waiting for this resource; "+
-			"identifying the allocating container by the pending-Pod heuristic",
+		logger.Info("kubelet reports no pending candidate as waiting for this resource; refusing to guess the allocating container",
 			"resource", match.ResourceName,
 			"candidates", len(feasible)+len(infeasible)+len(claimed))
-		return feasible, infeasible, claimed
+		return nil, nil, nil
 	case n > 1:
 		logger.Info("kubelet reports several candidates as waiting for this resource; "+
 			"choosing among them by the pending-Pod heuristic",

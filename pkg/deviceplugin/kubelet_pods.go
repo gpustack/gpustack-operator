@@ -27,7 +27,7 @@ const (
 	IdentifyByKubeletEnv = "GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET"
 
 	// kubeletPodResourcesTimeout bounds one lookup. kubelet is blocked on the Allocate that asks,
-	// so a lookup that cannot answer quickly is abandoned for the heuristic rather than waited on.
+	// so a lookup that cannot answer quickly refuses allocation rather than blocking indefinitely.
 	kubeletPodResourcesTimeout = 2 * time.Second
 )
 
@@ -36,7 +36,7 @@ const (
 type kubeletPodLister func(ctx context.Context) ([]*podresources.PodResources, error)
 
 // newKubeletPodLister returns a lister that asks kubelet over the pod-resources socket. It dials on
-// every call: a lookup is made only on the allocation path, and a connection held between calls
+// every call: a connection held between calls
 // would outlive a kubelet restart that replaces the socket.
 func newKubeletPodLister(socket string) kubeletPodLister {
 	return func(ctx context.Context) ([]*podresources.PodResources, error) {
@@ -87,6 +87,10 @@ func (r *DevicesReconciler) kubeletPending(ctx context.Context, resName core.Res
 		return nil
 	}
 
+	return kubeletPendingFrom(listed, resName)
+}
+
+func kubeletPendingFrom(listed []*podresources.PodResources, resName core.ResourceName) *_KubeletPending {
 	pending := &_KubeletPending{pods: make(map[types.NamespacedName]map[string]bool, len(listed))}
 	for _, p := range listed {
 		ctrs := make(map[string]bool, len(p.GetContainers()))

@@ -440,8 +440,7 @@ func TestResourceServer_SlicedOccupancyOnlyForSliced(t *testing.T) {
 
 // TestResourceServer_Allocate_IdentifiesByKubelet pins how an Allocate finds the container it serves
 // when kubelet can be asked: the one container kubelet reports as waiting for a device wins, whatever
-// the pending-Pod heuristic would have picked; and every way the lookup can come up empty falls back
-// to that heuristic rather than failing.
+// the pending-Pod heuristic would have picked. An unavailable lookup refuses allocation.
 func TestResourceServer_Allocate_IdentifiesByKubelet(t *testing.T) {
 	older60, newer50 := slicedPodFixture{name: "a", units: pct(60), age: 2}, slicedPodFixture{name: "b", units: pct(50)}
 	cases := []slicedAllocateCase{
@@ -478,19 +477,19 @@ func TestResourceServer_Allocate_IdentifiesByKubelet(t *testing.T) {
 			},
 		},
 		{
-			name:    "kubelet unreachable falls back to the oldest Pending Pod",
+			name:    "kubelet unreachable refuses allocation",
 			cards:   []string{"card-x"},
 			pods:    []slicedPodFixture{older60, newer50},
 			kubelet: kubeletUnavailable,
-			calls:   []slicedCall{{card: "card-x", wantCode: grpccodes.OK, wantHolder: "a", wantUnits: pct(60)}},
+			calls:   []slicedCall{{card: "card-x", wantCode: grpccodes.FailedPrecondition}},
 		},
 		{
-			// kubelet and the informer disagree; the heuristic's guess beats no answer.
-			name:    "kubelet naming no candidate falls back to the oldest Pending Pod",
+			// kubelet and the informer disagree; refuse to write onto an unrelated pod.
+			name:    "kubelet naming no candidate refuses to guess",
 			cards:   []string{"card-x"},
 			pods:    []slicedPodFixture{older60, newer50},
 			kubelet: kubeletReports(map[string]map[string]bool{"unknown": {workloadContainer: false}}),
-			calls:   []slicedCall{{card: "card-x", wantCode: grpccodes.OK, wantHolder: "a", wantUnits: pct(60)}},
+			calls:   []slicedCall{{card: "card-x", wantCode: grpccodes.Internal}},
 		},
 		{
 			// The heuristic chooses among the containers kubelet names, never outside them.
@@ -747,7 +746,7 @@ func TestNarrowToKubeletPending_Logs(t *testing.T) {
 	}{
 		{name: "no candidate yet", kubelet: waiting("a"), wantLeft: 0},
 		{name: "kubelet names one candidate", feasible: []_AllocatingCandidate{candidate("a"), candidate("b")}, kubelet: waiting("b"), wantLeft: 1},
-		{name: "kubelet names none of the candidates", feasible: []_AllocatingCandidate{candidate("a")}, kubelet: waiting("x"), wantLeft: 1, wantLogged: "kubelet reports no pending candidate"},
+		{name: "kubelet names none of the candidates", feasible: []_AllocatingCandidate{candidate("a")}, kubelet: waiting("x"), wantLeft: 0, wantLogged: "kubelet reports no pending candidate"},
 		{name: "kubelet names several candidates", feasible: []_AllocatingCandidate{candidate("a"), candidate("b")}, kubelet: waiting("a", "b"), wantLeft: 2, wantLogged: "kubelet reports several candidates"},
 	}
 	for _, c := range cases {
