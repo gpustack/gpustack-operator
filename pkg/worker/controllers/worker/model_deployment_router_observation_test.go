@@ -2284,3 +2284,72 @@ func TestTheRouterOwningChainIsHeldWhenAnOwnerIsReplacedMidCollection(t *testing
 	require.NotEmpty(t, failure, "a replaced chain must refuse the collection")
 	assert.Contains(t, failure, "owning chain changed")
 }
+
+// TestTheRouterOwningChainIsHeldWhenItsReplicaSetMovesMidCollection is the same refusal one hop
+// down: the shared ReplicaSet is reparented to another ModelDeployment while the collection runs.
+// A reparent keeps the ReplicaSet's own UID, so identity alone still verifies; the owner is the
+// fact the bookend has to compare.
+func TestTheRouterOwningChainIsHeldWhenItsReplicaSetMovesMidCollection(t *testing.T) {
+	md, seeded := routerChainFixture(t, 3)
+
+	reparented, chainRead := false, false
+	var cli ctrlcli.Client
+	r, _ := routerChainReconciler(seeded, func(_ int, obj any) {
+		switch obj.(type) {
+		case *appsv1.ReplicaSet:
+			chainRead = true
+		case *corev1.Pod:
+			if !chainRead || reparented || cli == nil {
+				return
+			}
+			reparented = true
+			live := new(appsv1.ReplicaSet)
+			require.NoError(t, cli.Get(context.Background(),
+				ctrlcli.ObjectKey{Namespace: md.Namespace, Name: "router-0-rs"}, live))
+			live.OwnerReferences[0].UID = "another-model-deployment"
+			require.NoError(t, cli.Update(context.Background(), live))
+		}
+	})
+	cli = r.Client
+
+	_, failure := r.collectModelDeploymentRouterObservations(context.Background(), md, nil)
+
+	require.True(t, reparented, "the case did not reparent the replica set, so it proves nothing")
+	require.NotEmpty(t, failure, "a chain that moved under the collection must refuse it")
+	assert.Contains(t, failure, "owning chain changed")
+	assert.Contains(t, failure, "changed owner",
+		"the refusal names the owner change, not the replacement identity")
+}
+
+// TestTheRouterOwningChainSurvivesASameOwnerReplicaSetWrite is the control for the refusal above:
+// a ReplicaSet that is written without changing hands is not a moved chain, and the collection
+// still returns its views.
+func TestTheRouterOwningChainSurvivesASameOwnerReplicaSetWrite(t *testing.T) {
+	md, seeded := routerChainFixture(t, 3)
+
+	touched, chainRead := false, false
+	var cli ctrlcli.Client
+	r, _ := routerChainReconciler(seeded, func(_ int, obj any) {
+		switch obj.(type) {
+		case *appsv1.ReplicaSet:
+			chainRead = true
+		case *corev1.Pod:
+			if !chainRead || touched || cli == nil {
+				return
+			}
+			touched = true
+			live := new(appsv1.ReplicaSet)
+			require.NoError(t, cli.Get(context.Background(),
+				ctrlcli.ObjectKey{Namespace: md.Namespace, Name: "router-0-rs"}, live))
+			live.Labels = map[string]string{"touched-mid-collection": "true"}
+			require.NoError(t, cli.Update(context.Background(), live))
+		}
+	})
+	cli = r.Client
+
+	observations, failure := r.collectModelDeploymentRouterObservations(context.Background(), md, nil)
+
+	require.True(t, touched, "the case did not touch the replica set, so it controls nothing")
+	require.Empty(t, failure, "an owner that did not change hands is not a moved chain")
+	require.Len(t, observations, 3)
+}
