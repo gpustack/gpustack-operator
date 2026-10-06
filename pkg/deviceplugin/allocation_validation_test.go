@@ -107,6 +107,26 @@ func withAllocation(mutate ...func(map[string]ContainerAllocation)) func(*core.P
 	}
 }
 
+// releaseTestPodWithoutRecord is a pod on the node that holds no allocation record at all: one that
+// has not been allocated yet. The annotation is deleted after the builder runs, because that builder
+// writes its default record into any pod left without one.
+func releaseTestPodWithoutRecord(mutate ...func(*core.Pod)) *core.Pod {
+	pod := releaseTestPod(mutate...)
+	delete(pod.Annotations, AllocatedAcceleratorAnnoKey)
+
+	return pod
+}
+
+// podListOf builds the list form both public entry points take.
+func podListOf(pods ...*core.Pod) *core.PodList {
+	podList := new(core.PodList)
+	for _, pod := range pods {
+		podList.Items = append(podList.Items, *pod)
+	}
+
+	return podList
+}
+
 func TestBuildDesiredStatusStrict_Rejects(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -297,10 +317,7 @@ func TestBuildDesiredStatusStrict_Rejects(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			podList := new(core.PodList)
-			for _, pod := range tc.pods {
-				podList.Items = append(podList.Items, *pod)
-			}
+			podList := podListOf(tc.pods...)
 
 			status, _, err := BuildDesiredStatusStrict(logr.Discard(), tc.devs, podList)
 
@@ -359,17 +376,169 @@ func TestBuildDesiredStatusStrict_KeepsTerminatingAndOtherNamespaces(t *testing.
 
 // TestBuildDesiredStatusStrict_PreservesTheOrdinaryRebuild is the check that the strict path is the
 // same arithmetic and not a second implementation of it.
+//
+// Every case runs both public entry points over one inventory and one Pod list. Where the strict path
+// accepts the list, the two ledgers and the two live sets must be identical. Where it refuses, the
+// ordinary rebuild's ledger must still be the ledger the strict path produces over exactly the Pods
+// it accepted — that is what proves the two paths run one fold and differ only in what they do with
+// a failure — and the refused Pod must remain in the ordinary live set, or its cards would read free
+// and be leased twice.
 func TestBuildDesiredStatusStrict_PreservesTheOrdinaryRebuild(t *testing.T) {
-	devs := releaseTestDevices()
-	podList := new(core.PodList)
-	podList.Items = append(podList.Items, *releaseTestPod())
+	testCases := []struct {
+		name string
+		// pods is the list both entry points are handed.
+		pods []*core.Pod
+		// mergeable is the subset strict rebuild accepts for this case; nil means every pod, which
+		// is the case for a list the strict path does not refuse.
+		mergeable []*core.Pod
+		// wantErrs is what the strict path must say about a list it refuses; nil means it accepts.
+		wantErrs []string
+		// droppedUIDs are the pods the strict path refuses. The ordinary rebuild keeps them live.
+		droppedUIDs []string
+		// wantLiveUIDs is the live set both entry points must publish for an accepted list.
+		wantLiveUIDs []string
+	}{
+		{
+			name:         "one valid holder is charged by both paths alike",
+			pods:         []*core.Pod{releaseTestPod()},
+			wantLiveUIDs: []string{"pod-1"},
+		},
+		{
+			name: "two holders that agree on one card are charged once each",
+			pods: []*core.Pod{
+				releaseTestPod(),
+				releaseTestPod(func(pod *core.Pod) {
+					pod.Name = "qwen-server-two"
+					pod.UID = "pod-2"
+				}),
+			},
+			wantLiveUIDs: []string{"pod-1", "pod-2"},
+		},
+		{
+			// A Pod with no record at all is one that has not been allocated yet. It is charged
+			// nothing by either path and stays live by both, so a card a later Allocate records
+			// against it cannot collide with a claim the ledger already dropped.
+			name: "a pod holding no record is live and charges nothing",
+			pods: []*core.Pod{
+				releaseTestPod(),
+				releaseTestPodWithoutRecord(func(pod *core.Pod) {
+					pod.Name = "qwen-server-two"
+					pod.UID = "pod-2"
+				}),
+			},
+			wantLiveUIDs: []string{"pod-1", "pod-2"},
+		},
+		{
+			name: "a record the rebuild cannot decode is absorbed by the ledger and refused by the predicate",
+			pods: []*core.Pod{
+				releaseTestPod(),
+				releaseTestPod(func(pod *core.Pod) {
+					pod.Name = "qwen-server-two"
+					pod.UID = "pod-2"
+					pod.Annotations[AllocatedAcceleratorAnnoKey] = "{not json"
+				}),
+			},
+			mergeable:   []*core.Pod{releaseTestPod()},
+			wantErrs:    []string{"read its allocation record"},
+			droppedUIDs: []string{"pod-2"},
+		},
+		{
+			name: "a record naming a card the inventory does not have is absorbed and refused",
+			pods: []*core.Pod{
+				releaseTestPod(),
+				releaseTestPod(
+					func(pod *core.Pod) {
+						pod.Name = "qwen-server-two"
+						pod.UID = "pod-2"
+					},
+					withAllocation(func(entries map[string]ContainerAllocation) {
+						record := releaseTestAllocation()
+						record.Devices.Groups[0].Accelerators[0].ID = "GPU-zzz"
+						entries["vllm"] = record
+					})),
+			},
+			mergeable:   []*core.Pod{releaseTestPod()},
+			wantErrs:    []string{"which the inventory does not have"},
+			droppedUIDs: []string{"pod-2"},
+		},
+		{
+			// An explicit null is the one record that decodes into nothing at all, so the ordinary
+			// rebuild reads it as a Pod holding nothing rather than as one it could not read.
+			name: "an explicit null container record is absorbed and refused",
+			pods: []*core.Pod{
+				releaseTestPod(),
+				releaseTestPod(func(pod *core.Pod) {
+					pod.Name = "qwen-server-two"
+					pod.UID = "pod-2"
+					pod.Annotations[AllocatedAcceleratorAnnoKey] = `{"vllm":null}`
+				}),
+			},
+			mergeable:   []*core.Pod{releaseTestPod()},
+			wantErrs:    []string{"is null"},
+			droppedUIDs: []string{"pod-2"},
+		},
+		{
+			// Every record here is valid on its own, so validation lets both pods through and the
+			// fold is what refuses: this is the case where the two paths meet the arithmetic itself
+			// rather than the input.
+			name: "two holders claiming one card in different modes is absorbed and refused",
+			pods: []*core.Pod{
+				releaseTestPod(),
+				releaseTestPod(
+					func(pod *core.Pod) {
+						pod.Name = "qwen-server-two"
+						pod.UID = "pod-2"
+					},
+					withAllocation(func(entries map[string]ContainerAllocation) {
+						record := releaseTestAllocation()
+						record.Devices.Groups[0].Accelerators[0].Mode = workercore.DeviceAllocationModeShared
+						entries["vllm"] = record
+					})),
+			},
+			mergeable:   []*core.Pod{releaseTestPod()},
+			wantErrs:    []string{"conflicting allocation mode"},
+			droppedUIDs: []string{"pod-2"},
+		},
+	}
 
-	want, wantLive := BuildDesiredStatus(logr.Discard(), devs, podList)
-	got, gotLive, err := BuildDesiredStatusStrict(logr.Discard(), devs, podList)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			devs := releaseTestDevices()
+			ordinaryStatus, ordinaryLive := BuildDesiredStatus(logr.Discard(), devs, podListOf(tc.pods...))
+			status, live, err := BuildDesiredStatusStrict(logr.Discard(), devs, podListOf(tc.pods...))
 
-	require.NoError(t, err)
-	assert.Equal(t, want, got, "the strict rebuild agrees with the ordinary one on valid input")
-	assert.Equal(t, wantLive, gotLive)
+			if len(tc.wantErrs) == 0 {
+				require.NoError(t, err, "the strict path must accept every record this case lists")
+				assert.Equal(t, ordinaryStatus, status,
+					"the strict rebuild agrees with the ordinary one on input it accepts")
+				assert.Equal(t, tc.wantLiveUIDs, ordinaryLive,
+					"both paths publish the same live set, refusals aside")
+				assert.Equal(t, ordinaryLive, live)
+
+				return
+			}
+
+			require.Error(t, err, "the strict path must refuse what the ordinary one absorbs")
+			for _, want := range tc.wantErrs {
+				assert.Contains(t, err.Error(), want)
+			}
+			assert.Nil(t, status.Groups, "no ledger is returned with a refusal, so a caller cannot "+
+				"mistake a dropped holder for a free card")
+			assert.Nil(t, live)
+
+			mergeable := tc.mergeable
+			if mergeable == nil {
+				mergeable = tc.pods
+			}
+			mergedStatus, mergedLive, mergeErr := BuildDesiredStatusStrict(logr.Discard(), devs, podListOf(mergeable...))
+			require.NoError(t, mergeErr, "every pod the case names mergeable must pass the strict path")
+			assert.Equal(t, mergedStatus, ordinaryStatus, "the ordinary rebuild absorbed exactly the "+
+				"records the strict one refused, and folded the rest the same way")
+			assert.Subset(t, ordinaryLive, mergedLive, "a pod whose record merged stays live")
+			assert.Subset(t, ordinaryLive, tc.droppedUIDs, "a pod whose record did not merge is still "+
+				"live, or its cards read free and can be leased again")
+		})
+	}
 }
 
 // TestATopLevelNullAllocationRecordIsRejected pins that a whole-record JSON null is an invalid
