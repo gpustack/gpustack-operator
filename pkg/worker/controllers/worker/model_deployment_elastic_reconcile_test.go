@@ -1588,3 +1588,73 @@ func TestAnUnansweredScaleCommandIsNotARefusal(t *testing.T) {
 	require.Equal(t, int32(1), f.scaleCalls.Load())
 	require.Equal(t, "the engine has not reported the new width yet", f.observation(t).Reason)
 }
+
+// TestAnUnansweredRetryStillEscalatesTheBackoff pins the schedule's treatment of a re-issued
+// command whose answer never arrives: the refusal bound consumes nothing — the engine never
+// declined — but the backoff still moves, so a persistently unreachable engine is probed on the
+// doubling schedule the definite refusals earned instead of on a fixed hot cadence. The recorded
+// refusal text survives every unanswered re-issue.
+func TestAnUnansweredRetryStillEscalatesTheBackoff(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.scaleStatus.Store(500)
+	now := time.Now()
+	f.reconciler.clock = func() time.Time { return now }
+
+	recordDoc := func(t *testing.T) map[string]any {
+		t.Helper()
+		record := new(core.ConfigMap)
+		require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKey{
+			Namespace: f.md.Namespace, Name: elasticOperationRecordName(f.md.UID),
+		}, record))
+		var doc map[string]any
+		require.NoError(t, json.Unmarshal([]byte(record.Data[elasticOperationDataKey]), &doc))
+		return doc
+	}
+
+	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	f.admitMembers(t)
+
+	// The first send earns a definite refusal: the bound has one spent attempt and a 15s wait.
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), f.scaleCalls.Load(), f.observation(t).Reason)
+	doc := recordDoc(t)
+	require.Equal(t, float64(1), doc["scaleAttempts"])
+	require.NotContains(t, doc, "scaleAmbiguousAttempts")
+
+	// The re-issue's answer never arrives: the engine takes the command and returns an
+	// acknowledgement that says nothing.
+	f.scaleMalformed.Store(true)
+	now = now.Add(16 * time.Second)
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), f.scaleCalls.Load(), f.observation(t).Reason)
+	doc = recordDoc(t)
+	require.Equal(t, float64(1), doc["scaleAttempts"], "an unanswered re-issue spends no bound")
+	require.Equal(t, float64(1), doc["scaleAmbiguousAttempts"])
+	require.Contains(t, doc["scaleLastError"], "status 500",
+		"the last definite refusal survives an unanswered re-issue")
+
+	// The wait doubled: sixteen seconds in, the next attempt is not due yet.
+	now = now.Add(16 * time.Second)
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), f.scaleCalls.Load(), f.observation(t).Reason)
+
+	// Once the doubled wait has run, the command is re-issued again — and a second silence moves
+	// the schedule once more without touching the refusal bound.
+	now = now.Add(15 * time.Second)
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(3), f.scaleCalls.Load(), f.observation(t).Reason)
+	doc = recordDoc(t)
+	require.Equal(t, float64(1), doc["scaleAttempts"])
+	require.Equal(t, float64(2), doc["scaleAmbiguousAttempts"])
+	require.Contains(t, doc["scaleLastError"], "status 500")
+}

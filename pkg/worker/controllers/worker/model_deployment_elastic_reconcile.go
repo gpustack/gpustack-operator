@@ -446,13 +446,15 @@ func (r *ModelDeploymentReconciler) recordElasticResizeCondition(
 }
 
 // elasticScaleRetryDue says how long the next refused-command attempt still owes, from the bound
-// the record states: attempt n+1 waits min(15s*2^(n-1), 4m) after refusal n. Zero means due now.
+// the record states: attempt n+1 waits min(15s*2^(n-1), 4m) after failure n, where n counts the
+// definite refusals AND the re-issued commands whose answer never arrived — an unanswered
+// re-issue moves the schedule without consuming the refusal bound.
 func elasticScaleRetryDue(op *elasticOperation, now time.Time) time.Duration {
 	if op.ScaleLastFailedAt == nil {
 		return 0
 	}
 	wait := elasticScaleRetryBase
-	for i := max(op.ScaleAttempts, 1); i > 1 && wait < elasticScaleRetryCap; i-- {
+	for i := max(op.ScaleAttempts+op.ScaleAmbiguousAttempts, 1); i > 1 && wait < elasticScaleRetryCap; i-- {
 		wait *= 2
 	}
 	wait = min(wait, elasticScaleRetryCap)
@@ -791,6 +793,7 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 				op.ScaleLastError = err.Error()
 				op.ScaleLastFailedAt = &failedAt
 			} else {
+				op.ScaleAmbiguousAttempts++
 				op.ScaleLastFailedAt = &failedAt
 			}
 			if err := store.Update(ctx, op); err != nil {
@@ -803,6 +806,7 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 		// word: the record clears it and the ordinary observation decides the outcome.
 		op.ScaleLastError = ""
 		op.ScaleLastFailedAt = nil
+		op.ScaleAmbiguousAttempts = 0
 		if err := store.Update(ctx, op); err != nil {
 			return err
 		}

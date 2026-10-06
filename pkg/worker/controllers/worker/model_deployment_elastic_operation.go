@@ -111,6 +111,12 @@ type elasticOperation struct {
 	// ScaleLastFailedAt anchors the backoff: the next attempt is owed only after the schedule has
 	// run from this moment. A nil means the last attempt is not owed a wait.
 	ScaleLastFailedAt *time.Time `json:"scaleLastFailedAt,omitempty"`
+	// ScaleAmbiguousAttempts counts re-issued commands whose answer never arrived — a transport
+	// loss, a caller timeout, an unreadable acknowledgement. They consume none of the refusal
+	// bound (the engine never declined), but they still escalate the backoff schedule, so a
+	// persistently unreachable engine is probed at an increasing interval up to the cap instead
+	// of on a fixed hot cadence.
+	ScaleAmbiguousAttempts int `json:"scaleAmbiguousAttempts,omitempty"`
 	// ResourceVersion is the stored object's version, carried so an update is against the object
 	// this record was read from rather than against whatever is current.
 	ResourceVersion string `json:"resourceVersion"`

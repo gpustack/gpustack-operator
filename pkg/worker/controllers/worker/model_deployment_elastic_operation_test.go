@@ -425,6 +425,7 @@ func TestARecordFromBeforeTheRetryBoundStillReads(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, elasticStateCommandSent, read.State)
 		assert.Equal(t, 0, read.ScaleAttempts)
+		assert.Zero(t, read.ScaleAmbiguousAttempts)
 		assert.Empty(t, read.ScaleLastError)
 		assert.Nil(t, read.ScaleLastFailedAt)
 	})
@@ -438,7 +439,7 @@ func TestARecordFromBeforeTheRetryBoundStillReads(t *testing.T) {
 
 		document, err := json.Marshal(op)
 		require.NoError(t, err)
-		for _, field := range []string{"scaleAttempts", "scaleLastError", "scaleLastFailedAt"} {
+		for _, field := range []string{"scaleAttempts", "scaleAmbiguousAttempts", "scaleLastError", "scaleLastFailedAt"} {
 			assert.NotContains(t, string(document), field,
 				"a record the old schema could express must decode as it always did")
 		}
