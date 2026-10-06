@@ -906,6 +906,9 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 	// The dispatch journal is read only from the profile that publishes it. The other two publish
 	// the gateway's own last_job shape under that key, which this operator does not interpret.
 	journal := md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD
+	// The chain behind the Router processes is read once per collection, not once per process.
+	// It lives and dies with this pass, so the next one reads it again from the API server.
+	owners := newRouterOwnerChain(r.APIReader)
 	observations := make([]RouterServingObservation, 0, len(routerPods.Items))
 	for i := range routerPods.Items {
 		routerPod := &routerPods.Items[i]
@@ -919,7 +922,7 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 		// process is verified live, through the uncached reader, to be controlled by a
 		// ReplicaSet owned by this deployment. A process whose chain is missing or unreadable
 		// holds the observation rather than narrowing it.
-		if err := r.verifyRouterPodOwnership(collectCtx, md, routerPod); err != nil {
+		if err := r.verifyRouterPodOwnership(collectCtx, md, routerPod, owners); err != nil {
 			observations = append(observations, RouterServingObservation{
 				Err: fmt.Errorf("router process %s is not verified for this deployment: %w",
 					routerPod.Name, err),
@@ -952,6 +955,15 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 
 	if err := collectCtx.Err(); err != nil {
 		return nil, fmt.Sprintf("the router observation budget is exhausted: %v", err)
+	}
+
+	// THE CHAIN IS BOOKENDED, like the deployment's own identity above. The owners were read
+	// once and shared by every process, so this pass re-reads each of them and refuses the whole
+	// collection if one moved while the views were being read. Without it, sharing the read would
+	// have meant a reparent after the first process went unnoticed by every later one.
+	if err := owners.verify(collectCtx); err != nil {
+		return nil, fmt.Sprintf("the routers' owning chain changed while the routers were being "+
+			"observed; the collected views describe an owner this pass can no longer stand behind: %v", err)
 	}
 
 	after, guardErr := r.snapshotModelDeploymentObservationGuard(collectCtx, md)
@@ -1132,12 +1144,136 @@ func modelDeploymentMemberFact(pod *corev1.Pod) string {
 	}, "|")
 }
 
+// routerOwnerChain holds the OWNING objects one collection verified, and only that
+// collection's.
+//
+// A Pod's controlling chain is immutable for the lifetime of that Pod, so every Router process
+// seated in one ReplicaSet verifies the same two objects. Reading them once per collection
+// instead of once per process turns a cost that grew with the replica count into a constant
+// one, and it is safe to do so HERE and nowhere else: verify re-reads every one of them before
+// the collection ends, so the answers were given against a chain that provably did not move
+// while the collection was running.
+//
+// IT IS NOT A PROCESS-LIFETIME CACHE. It is built by the collection, used by it and discarded
+// with it. A reparented owner, a replaced owner and a same-name replacement are all read afresh
+// by the next collection, and a same-name replacement is refused inside this one.
+type routerOwnerChain struct {
+	reader      ctrlcli.Reader
+	replicaSets map[ctrlcli.ObjectKey]*appsv1.ReplicaSet
+	deployments map[ctrlcli.ObjectKey]*appsv1.Deployment
+}
+
+// newRouterOwnerChain opens the per-collection record of what the chain's objects are, read
+// through the uncached reader because a cached answer is the snapshot this collection is
+// defined against.
+func newRouterOwnerChain(reader ctrlcli.Reader) routerOwnerChain {
+	return routerOwnerChain{
+		reader:      reader,
+		replicaSets: map[ctrlcli.ObjectKey]*appsv1.ReplicaSet{},
+		deployments: map[ctrlcli.ObjectKey]*appsv1.Deployment{},
+	}
+}
+
+// replicaSet reads one ReplicaSet through the uncached reader, once per collection. Every
+// process asking for the same ReplicaSet gets the object this collection verified.
+func (c routerOwnerChain) replicaSet(
+	ctx context.Context, key ctrlcli.ObjectKey,
+) (*appsv1.ReplicaSet, error) {
+	if verified, seen := c.replicaSets[key]; seen {
+		return verified, nil
+	}
+	replicaSet := new(appsv1.ReplicaSet)
+	if err := c.reader.Get(ctx, key, replicaSet); err != nil {
+		return nil, err
+	}
+	c.replicaSets[key] = replicaSet
+
+	return replicaSet, nil
+}
+
+// deployment reads one Deployment through the uncached reader, once per collection, under the
+// same rule as replicaSet.
+func (c routerOwnerChain) deployment(
+	ctx context.Context, key ctrlcli.ObjectKey,
+) (*appsv1.Deployment, error) {
+	if verified, seen := c.deployments[key]; seen {
+		return verified, nil
+	}
+	deployment := new(appsv1.Deployment)
+	if err := c.reader.Get(ctx, key, deployment); err != nil {
+		return nil, err
+	}
+	c.deployments[key] = deployment
+
+	return deployment, nil
+}
+
+// verify re-reads every object this collection judged a chain by, and reports the first one that
+// moved underneath it. A ReplicaSet or Deployment replaced, recreated or reparented while the
+// collection was running describes a chain the processes behind it were not verified against,
+// and confirming an observation from it would be confirming about an owner nobody re-checked.
+//
+// THE COST IS CONSTANT IN THE PROCESS COUNT: two reads to share the chain and two to prove it
+// did not move, whatever the number of Router processes, where each process verified its own
+// chain and spent two reads on the owners.
+func (c routerOwnerChain) verify(ctx context.Context) error {
+	for key, verified := range c.replicaSets {
+		fresh := new(appsv1.ReplicaSet)
+		if err := c.reader.Get(ctx, key, fresh); err != nil {
+			return fmt.Errorf("the router process's ReplicaSet %q could not be re-read uncached: %w",
+				key.Name, err)
+		}
+		if fresh.UID != verified.UID {
+			return fmt.Errorf("the router process's ReplicaSet %q was replaced while the routers "+
+				"were being observed", key.Name)
+		}
+	}
+	for key, verified := range c.deployments {
+		fresh := new(appsv1.Deployment)
+		if err := c.reader.Get(ctx, key, fresh); err != nil {
+			return fmt.Errorf("the router process's Deployment %q could not be re-read uncached: %w",
+				key.Name, err)
+		}
+		// IDENTITY AND OWNER, because they move independently: a Deployment deleted and recreated
+		// under the same name keeps its name and loses its UID, and one reparented to another
+		// ModelDeployment keeps its UID and loses the owner this collection verified.
+		if fresh.UID != verified.UID {
+			return fmt.Errorf("the router process's Deployment %q was replaced while the routers "+
+				"were being observed", key.Name)
+		}
+		if ownerIdentity(fresh) != ownerIdentity(verified) {
+			return fmt.Errorf("the router process's Deployment %q changed owner while the routers "+
+				"were being observed", key.Name)
+		}
+	}
+
+	return nil
+}
+
+// ownerIdentity is one object's controlling owner at full identity, or the word none when it has
+// no controller. Two reads carrying the same owner identity are the same owner.
+func ownerIdentity(obj ctrlcli.Object) string {
+	ref := meta.GetControllerOf(obj)
+	if ref == nil {
+		return "none"
+	}
+
+	return strings.Join([]string{
+		ref.APIVersion, ref.Kind, ref.Name, string(ref.UID),
+	}, "/")
+}
+
 // verifyRouterPodOwnership checks the live controlling-owner chain of one Router process: the Pod
 // is controlled by a ReplicaSet that still exists with that identity, and that ReplicaSet is
 // controlled by this deployment. The read goes through the uncached reader, because a cached
 // answer is the snapshot this collection is defined against.
+//
+// THE POD IS READ FOR EVERY PROCESS, WHILE THE OWNERS ARE READ ONCE PER COLLECTION. That split
+// is deliberate. The Pod is the object this collection is about, so a replaced one has to be
+// seen here and now; the owners behind it are one shared chain whose identity each process then
+// checks against its own Pod's claim, so one read answers every process asking.
 func (r *ModelDeploymentReconciler) verifyRouterPodOwnership(
-	ctx context.Context, md *workercore.ModelDeployment, pod *corev1.Pod,
+	ctx context.Context, md *workercore.ModelDeployment, pod *corev1.Pod, owners routerOwnerChain,
 ) error {
 	// THE POD ITSELF IS RE-READ. The object handed in came from a listing, and a listing is a
 	// snapshot; this check is the one that says the chain is live, so it may not be answered from
@@ -1159,11 +1295,14 @@ func (r *ModelDeploymentReconciler) verifyRouterPodOwnership(
 		return fmt.Errorf("the router process is controlled by %s (%s) rather than a ReplicaSet",
 			ref.Kind, ref.APIVersion)
 	}
-	replicaSet := new(appsv1.ReplicaSet)
-	if err := r.APIReader.Get(ctx,
-		ctrlcli.ObjectKey{Namespace: live.Namespace, Name: ref.Name}, replicaSet); err != nil {
+	replicaSet, err := owners.replicaSet(ctx,
+		ctrlcli.ObjectKey{Namespace: live.Namespace, Name: ref.Name})
+	if err != nil {
 		return fmt.Errorf("the router process's ReplicaSet could not be read uncached: %w", err)
 	}
+	// THE IDENTITY CHECK IS NOT THE READ. The Pod's own owner reference is this process's claim
+	// about its chain, and it is compared to the owner this collection verified for every
+	// process, so a Pod pointing at a chain this collection never read is refused here.
 	if replicaSet.UID != ref.UID {
 		return fmt.Errorf("the router process's ReplicaSet changed identity during observation")
 	}
@@ -1178,9 +1317,9 @@ func (r *ModelDeploymentReconciler) verifyRouterPodOwnership(
 		return fmt.Errorf("the router process's ReplicaSet is controlled by %s (%s) rather than a Deployment",
 			deploymentRef.Kind, deploymentRef.APIVersion)
 	}
-	deployment := new(appsv1.Deployment)
-	if err := r.APIReader.Get(ctx,
-		ctrlcli.ObjectKey{Namespace: live.Namespace, Name: deploymentRef.Name}, deployment); err != nil {
+	deployment, err := owners.deployment(ctx,
+		ctrlcli.ObjectKey{Namespace: live.Namespace, Name: deploymentRef.Name})
+	if err != nil {
 		return fmt.Errorf("the router process's Deployment could not be read uncached: %w", err)
 	}
 	if deployment.UID != deploymentRef.UID {

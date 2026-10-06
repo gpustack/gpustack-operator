@@ -3,8 +3,10 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,6 +20,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
 // The cases here are behavioral: a fake server carrying the production annotation shape,
@@ -856,4 +859,294 @@ func TestCaptureModelDeploymentElasticRelease(t *testing.T) {
 		_, ok = r.observeReleaseAcceleratorsReturned(context.Background(), record)
 		assert.True(t, ok, "the ledger now agrees with the node's records")
 	})
+}
+
+// uncachedReadCounter is the uncached reader the read-amplification contracts run against. It
+// counts every read it serves, so a case can assert how many round trips a pass costs, and it
+// can move the objects behind those reads part way through, so a case can say "the claim
+// changes on the fourth read" and observe what the reconciler does about it.
+//
+// The count is the point of the reader: a reconciler that reaches the same answer through a
+// cached object is cheaper but is answering about a different state, and these cases exist to
+// keep the answer honest while making it cheaper.
+type uncachedReadCounter struct {
+	ctrlcli.Reader
+	gets, lists int
+	// beforeRead runs before every read, with the number of reads already served and the object
+	// about to be filled. A case that needs the world to move mid-collection mutates the client
+	// from here, on the one read it chose.
+	beforeRead func(served int, obj any)
+}
+
+func (c *uncachedReadCounter) Get(
+	ctx context.Context, key ctrlcli.ObjectKey, obj ctrlcli.Object, opts ...ctrlcli.GetOption,
+) error {
+	if c.beforeRead != nil {
+		c.beforeRead(c.gets+c.lists, obj)
+	}
+	c.gets++
+
+	return c.Reader.Get(ctx, key, obj, opts...)
+}
+
+func (c *uncachedReadCounter) List(
+	ctx context.Context, list ctrlcli.ObjectList, opts ...ctrlcli.ListOption,
+) error {
+	if c.beforeRead != nil {
+		c.beforeRead(c.gets+c.lists, list)
+	}
+	c.lists++
+
+	return c.Reader.List(ctx, list, opts...)
+}
+
+// reads is the whole uncached cost of one pass: every Get and every List, however many times
+// either object was asked for.
+func (c *uncachedReadCounter) reads() int { return c.gets + c.lists }
+
+// groupedAllocationDevices is the node ledger the grouped accounting cases run against: five
+// cards, four of which the members below allocate and one of which stays free so a member can
+// claim a card the published accounting never allocated.
+func groupedAllocationDevices() *workercore.Devices {
+	return releaseDevices(func(devs *workercore.Devices) {
+		devs.Spec.Groups[0].Accelerators = append(devs.Spec.Groups[0].Accelerators,
+			workercore.Accelerator{ID: "GPU-def", Index: 1},
+			workercore.Accelerator{ID: "GPU-ghi", Index: 5},
+			workercore.Accelerator{ID: "GPU-jkl", Index: 6},
+			workercore.Accelerator{ID: "GPU-sss", Index: 9},
+		)
+	})
+}
+
+// allocationCardMember is one seated member claiming exactly the card named, so a case states
+// which member holds which accelerator without restating the allocator's record shape.
+func allocationCardMember(
+	t *testing.T, md *workercore.ModelDeployment, name, uid string, ordinal int,
+	cardID string, index uint32, mutate ...func(*core.Pod),
+) *core.Pod {
+	t.Helper()
+
+	return allocationMember(t, md, name, uid, ordinal, func(pod *core.Pod) {
+		pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = allocationCardAnnotation(
+			t, modelDeploymentMainContainerName, cardID, index,
+			workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits)
+		for _, m := range mutate {
+			m(pod)
+		}
+	})
+}
+
+// TestObserveModelDeploymentElasticAllocation_GroupedLedgerReads proves the grouping changes how
+// many times the ledger is read and nothing else: four members on one node reach the same answer
+// as four independent verifications would, out of one node read instead of four.
+//
+// THE COUNT IS THE CONTRACT. One workload listing, one fresh read per member and ONE
+// bookended pass over the node -- the ledger, the node's pods, and the same two again -- is
+// nine reads. A pass that verified each member against its own node read would spend twenty-one,
+// which is the cost this issue set out to remove, and a pass that spent more than nine has added
+// a read nobody asked for.
+func TestObserveModelDeploymentElasticAllocation_GroupedLedgerReads(t *testing.T) {
+	md := allocationDeployment()
+	devs := groupedAllocationDevices()
+	members := []*core.Pod{
+		allocationCardMember(t, md, "m1", "uid-1", 1, "GPU-abc", 0),
+		allocationCardMember(t, md, "m2", "uid-2", 2, "GPU-def", 1),
+		allocationCardMember(t, md, "m3", "uid-3", 3, "GPU-ghi", 5),
+		allocationCardMember(t, md, "m4", "uid-4", 4, "GPU-jkl", 6),
+	}
+	supplied := make([]core.Pod, 0, len(members))
+	for _, member := range members {
+		supplied = append(supplied, *member)
+	}
+
+	cli := newModelDeploymentClient(allocationObjects(md, devs, members)...)
+	allocationPublishLedger(t, cli, devs)
+	reader := &uncachedReadCounter{Reader: cli}
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: reader}
+
+	_, allocated := r.observeModelDeploymentElasticAllocation(context.Background(), md, supplied)
+
+	require.True(t, allocated.Known, "reason: %s", allocated.Reason)
+	assert.Equal(t, len(members), allocated.Value)
+	assert.Empty(t, allocated.Reason)
+	assert.Equal(t, 9, reader.reads(),
+		"one workload listing, one read per member, one bookended pass over the node")
+}
+
+// TestObserveModelDeploymentElasticAllocation_GroupedAccountingKeepsIndividualUnknowns proves
+// the grouping did not turn into a vote. Four members share one node read, one of their cards
+// disagrees with the node's published accounting, and the layer holds on THAT member's reason
+// alone: the other three are still counted, and none of them is dragged down with it.
+func TestObserveModelDeploymentElasticAllocation_GroupedAccountingKeepsIndividualUnknowns(t *testing.T) {
+	md := allocationDeployment()
+	devs := groupedAllocationDevices()
+	agreeing := []*core.Pod{
+		allocationCardMember(t, md, "m1", "uid-1", 1, "GPU-abc", 0),
+		allocationCardMember(t, md, "m2", "uid-2", 2, "GPU-def", 1),
+		allocationCardMember(t, md, "m3", "uid-3", 3, "GPU-ghi", 5),
+	}
+	// THE FOURTH MEMBER HOLDS NOTHING WHEN THE LEDGER IS PUBLISHED, and claims a free card
+	// afterwards. The card is in the node's inventory, so this is not an unknown device: it is a
+	// card the published accounting says nobody holds, which is exactly the disagreement one
+	// member can carry while its neighbors are clean.
+	latecomer := allocationCardMember(t, md, "m4", "uid-4", 4, "GPU-jkl", 6,
+		func(pod *core.Pod) { pod.Annotations = nil })
+	seated := make([]*core.Pod, 0, len(agreeing)+1)
+	seated = append(seated, agreeing...)
+	seated = append(seated, latecomer)
+	cli := newModelDeploymentClient(allocationObjects(md, devs, seated)...)
+	allocationPublishLedger(t, cli, devs)
+
+	claimKey := deviceplugin.AllocatedAcceleratorAnnoKey
+	held := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: "m4"}, held))
+	held.Annotations = map[string]string{claimKey: allocationCardAnnotation(
+		t, modelDeploymentMainContainerName, "GPU-sss", 9,
+		workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits)}
+	require.NoError(t, cli.Update(context.Background(), held))
+	// THE SUPPLIED MEMBERS ARE THE THREE THAT AGREED PLUS THE CLAIM THE SERVER NOW HOLDS. The
+	// latecomer fixture is the same Pod before its claim moved, so it is not supplied twice.
+	supplied := make([]core.Pod, 0, len(agreeing)+1)
+	for _, member := range append(agreeing[:len(agreeing):len(agreeing)], held) {
+		supplied = append(supplied, *member)
+	}
+
+	reader := &uncachedReadCounter{Reader: cli}
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: reader}
+
+	_, allocated := r.observeModelDeploymentElasticAllocation(context.Background(), md, supplied)
+
+	require.False(t, allocated.Known, "one disagreeing card holds the allocation layer")
+	// THE REFUSAL NAMES THE DISAGREEING MEMBER'S CARD, and no other. A grouped read that handed
+	// every member on the node one verdict would fail here by naming a neighbour's card instead.
+	assert.Contains(t, allocated.Reason, "GPU-sss")
+	for _, member := range agreeing {
+		assert.NotContains(t, allocated.Reason, allocationCardOf(t, member).DeviceID,
+			"a member whose own card agrees was refused by its neighbour's disagreement")
+	}
+	assert.Equal(t, 9, reader.reads(),
+		"the node is read once per pass whether its members agree or not")
+}
+
+// allocationObjects collects a case's deployment, its node ledger and its members into the one
+// object list the fake server is built from, so a case names its members once and hands them
+// over in the order it declared them.
+func allocationObjects(md *workercore.ModelDeployment, devs *workercore.Devices, members []*core.Pod) []ctrlcli.Object {
+	objs := make([]ctrlcli.Object, 0, len(members)+2)
+	objs = append(objs, md, devs)
+	for _, member := range members {
+		objs = append(objs, member)
+	}
+
+	return objs
+}
+
+// allocationCardOf reads the single accelerator a member's record names, for the assertions that
+// name which member a refusal belongs to.
+func allocationCardOf(t *testing.T, pod *core.Pod) modelDeploymentRetirementReleaseCard {
+	t.Helper()
+
+	card, reason, held := elasticWholeCardOf(pod)
+	require.True(t, held, "member %q holds no whole card: %s", pod.Name, reason)
+
+	return card
+}
+
+// TestObserveModelDeploymentElasticAllocation_GroupedReadsHoldWhenTheNodeMoves proves the node
+// read is still bookended now that it is shared. A member's claim changes after the ledger has
+// been read and rebuilt, so the closing pod list disagrees with the opening one, and the pass
+// holds rather than answering from the state it started with.
+func TestObserveModelDeploymentElasticAllocation_GroupedReadsHoldWhenTheNodeMoves(t *testing.T) {
+	md := allocationDeployment()
+	devs := groupedAllocationDevices()
+	members := []*core.Pod{
+		allocationCardMember(t, md, "m1", "uid-1", 1, "GPU-abc", 0),
+		allocationCardMember(t, md, "m2", "uid-2", 2, "GPU-def", 1),
+	}
+	supplied := make([]core.Pod, 0, len(members))
+	for _, member := range members {
+		supplied = append(supplied, *member)
+	}
+
+	cli := newModelDeploymentClient(allocationObjects(md, devs, members)...)
+	allocationPublishLedger(t, cli, devs)
+
+	// THE SECOND MEMBER'S CLAIM MOVES ONCE, BETWEEN THE NODE'S TWO POD LISTINGS. The mutation is
+	// applied to the server's copy of the Pod, which is what the node's own listing reads, so the
+	// closing bookend sees a different node than the opening one did. Two listings have been
+	// served by then -- the namespace's Workloads and the node's opening pod list -- so the next
+	// read is that closing bookend and nothing else.
+	moved, podLists := false, 0
+	reader := &uncachedReadCounter{
+		Reader: cli,
+		beforeRead: func(_ int, obj any) {
+			if _, isPodList := obj.(*core.PodList); !isPodList {
+				return
+			}
+			podLists++
+			if moved || podLists != 2 {
+				return
+			}
+			moved = true
+			live := new(core.Pod)
+			require.NoError(t, cli.Get(context.Background(),
+				ctrlcli.ObjectKey{Namespace: md.Namespace, Name: "m2"}, live))
+			live.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = allocationCardAnnotation(
+				t, modelDeploymentMainContainerName, "GPU-jkl", 6,
+				workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits)
+			require.NoError(t, cli.Update(context.Background(), live))
+		},
+	}
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: reader}
+
+	_, allocated := r.observeModelDeploymentElasticAllocation(context.Background(), md, supplied)
+
+	require.True(t, moved, "the case did not move the claim, so it proves nothing")
+	require.False(t, allocated.Known, "a node that moved under its own read must hold")
+	assert.Contains(t, allocated.Reason, "changed while their ledger was being read")
+}
+
+// TestObserveModelDeploymentElasticAllocation_WideGroupingHoldsAtTheProfileMaximum measures the
+// allocation layer at the widest width the elastic profile supports, which is the width the
+// reconcile hot path requeues every fifteen seconds.
+//
+// THE LEDGER COST IS THE SAME AT WIDTH 2 AND AT WIDTH 64: four reads for the node, whatever
+// seats on it. A pass that verified each member against its own node read spent four per member,
+// so this width cost 256 reads of the ledger alone against the 4 it costs now -- 69 uncached
+// reads in total against 321. The elapsed time is reported rather than asserted, because a
+// duration is a property of the host and not a contract; the read count is the contract.
+func TestObserveModelDeploymentElasticAllocation_WideGroupingHoldsAtTheProfileMaximum(t *testing.T) {
+	const width = elasticprofile.WidthMax
+
+	md := allocationDeployment()
+	devs := releaseDevices()
+	members := make([]*core.Pod, 0, width)
+	supplied := make([]core.Pod, 0, width)
+	for i := range width {
+		// THE INDEXES START ABOVE THE ONE CARD THE SHARED LEDGER FIXTURE ALREADY CARRIES, because
+		// a group may not declare one index twice.
+		cardID, index := fmt.Sprintf("GPU-wide-%02d", i), uint32(i+1)
+		devs.Spec.Groups[0].Accelerators = append(devs.Spec.Groups[0].Accelerators,
+			workercore.Accelerator{ID: cardID, Index: index})
+		name := fmt.Sprintf("m%02d", i)
+		member := allocationCardMember(t, md, name, "uid-"+name, i+1, cardID, index)
+		members = append(members, member)
+		supplied = append(supplied, *member)
+	}
+
+	cli := newModelDeploymentClient(allocationObjects(md, devs, members)...)
+	allocationPublishLedger(t, cli, devs)
+	reader := &uncachedReadCounter{Reader: cli}
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: reader}
+
+	started := time.Now()
+	_, allocated := r.observeModelDeploymentElasticAllocation(context.Background(), md, supplied)
+	elapsed := time.Since(started)
+
+	require.True(t, allocated.Known, "reason: %s", allocated.Reason)
+	assert.Equal(t, width, allocated.Value)
+	// ONE WORKLOAD LISTING, ONE FRESH READ PER MEMBER, ONE BOOKENDED PASS OVER THE ONE NODE.
+	assert.Equal(t, 1+width+4, reader.reads())
+	t.Logf("width %d: %d uncached reads in %s", width, reader.reads(), elapsed)
 }

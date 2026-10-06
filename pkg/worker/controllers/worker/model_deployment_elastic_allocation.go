@@ -183,17 +183,35 @@ func elasticMemberAdmitted(wl *kueue.Workload, groupOfOne bool) (bool, string) {
 	return true, ""
 }
 
+// elasticNodeLedgerVerify judges claimed cards against ONE read of a node's own records. It
+// runs between the ledger's two bookend reads, at the position the card agreement has always
+// run in, so a verdict it returns describes exactly the state the bookends prove did not move
+// while it was being judged. The rebuilt and published accounting of that one read are passed
+// to it whole: a member is judged on its own card, not on its neighbours', so one disagreeing
+// card refuses that member alone.
+//
+// A refusal holds the node read itself, which is what an unreadable node means. A caller that
+// answers each member separately returns no refusal and records the per-member verdicts on its
+// own values, so a member that disagrees never drags a node's other members down with it.
+type elasticNodeLedgerVerify func(
+	rebuilt, published workercore.DevicesStatus,
+) (string, bool)
+
 // elasticNodeLedgerAgrees verifies the claimed cards against the node's own ledger: the
 // cards are in the current inventory, the node's records rebuild strictly, and the PUBLISHED
-// accounting agrees with that rebuild card for card. The node's pods and the ledger are
-// bookended around the reads, so an input that moved while it was being judged holds rather
-// than answers. The Devices object the verification read is returned, because a capture
-// freezes its identity and inventory beside the cards. It is an accounting assertion, not a
-// physical measurement, the same way it is for the retirement release.
+// accounting agrees with that rebuild, card for card, as verify judges them. The node's pods
+// and the ledger are bookended around the reads, so an input that moved while it was being
+// judged holds rather than answers. The Devices object the verification read is returned,
+// because a capture freezes its identity and inventory beside the cards. It is an accounting
+// assertion, not a physical measurement, the same way it is for the retirement release.
+//
+// ONE CALL IS ONE READ OF ONE NODE. A caller with members seated on many nodes, or several
+// members on one node, reads the node once and judges every one of its cards against that one
+// snapshot; it is the reader, not this function, that decides how many members share a read.
 func (r *ModelDeploymentReconciler) elasticNodeLedgerAgrees(
 	ctx context.Context, nodeName string,
 	cards []modelDeploymentRetirementReleaseCard,
-	membersRecheck func() (string, bool),
+	verify elasticNodeLedgerVerify,
 ) (devices *workercore.Devices, reason string, ok bool) {
 	hold := func(format string, args ...any) (*workercore.Devices, string, bool) {
 		return nil, fmt.Sprintf(format, args...), false
@@ -219,11 +237,8 @@ func (r *ModelDeploymentReconciler) elasticNodeLedgerAgrees(
 	if err != nil {
 		return hold("the node's allocation cannot be read strictly: %v", err)
 	}
-	if reason, ok := releaseCardsAgree(cards, rebuilt, devices.Status); !ok {
-		return nil, reason, false
-	}
-	if membersRecheck != nil {
-		if reason, ok := membersRecheck(); !ok {
+	if verify != nil {
+		if reason, ok := verify(rebuilt, devices.Status); !ok {
 			return nil, reason, false
 		}
 	}
@@ -249,6 +264,33 @@ func (r *ModelDeploymentReconciler) elasticNodeLedgerAgrees(
 	return devices, "", true
 }
 
+// elasticMemberClaim is one seated member's whole-card claim, waiting for its node's ledger to
+// be read. It carries the member's OWN answer: refusal is empty while the node is unjudged,
+// and holds this member's reason once the node's one read has answered it.
+type elasticMemberClaim struct {
+	node    string
+	card    modelDeploymentRetirementReleaseCard
+	refusal string
+}
+
+// elasticMemberClaimsByNode groups the pass's claims by the node each member sits on and
+// returns those nodes in name order, so a pass reads its ledgers in the same order whatever
+// order the members arrived in. The grouping is a read schedule only: the claims themselves
+// stay separate values, so each one is still answered on its own.
+func elasticMemberClaimsByNode(claims []*elasticMemberClaim) ([]string, map[string][]*elasticMemberClaim) {
+	byNode := map[string][]*elasticMemberClaim{}
+	for _, claim := range claims {
+		byNode[claim.node] = append(byNode[claim.node], claim)
+	}
+	nodes := make([]string, 0, len(byNode))
+	for node := range byNode {
+		nodes = append(nodes, node)
+	}
+	slices.Sort(nodes)
+
+	return nodes, byNode
+}
+
 // observeModelDeploymentElasticAllocation reads the two capacity layers the elastic kernel
 // decides from. THE LAYERS NEVER BORROW EACH OTHER'S ANSWER: a member whose Workload claim
 // cannot be decided holds the admission layer and nothing else, a member whose node ledger
@@ -257,6 +299,11 @@ func (r *ModelDeploymentReconciler) elasticNodeLedgerAgrees(
 // condition or an annotation, and an allocation is never inferred from an admitted Workload.
 // A member whose Pod is gone or replaced between reads is a member this pass counts no
 // longer, on either layer, and that is an ordinary state a resize pass observes.
+//
+// EACH NODE'S LEDGER IS READ ONCE FOR THE WHOLE PASS, and every member seated on it is judged
+// on that one bookended read of its own card. At width 64 the allocation layer costs four reads
+// per distinct node rather than four per member, and a member whose card disagrees still holds
+// the layer on its own reason.
 func (r *ModelDeploymentReconciler) observeModelDeploymentElasticAllocation(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
 ) (elasticLayer, elasticLayer) {
@@ -283,6 +330,9 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentElasticAllocation(
 		admittedUnknown = fmt.Sprintf("listing workloads: %v", err)
 	}
 	admittedCount, allocatedCount := 0, 0
+	// claims holds every member that states one whole card, in the order the members were
+	// supplied, for the node reads below to answer one at a time.
+	claims := make([]*elasticMemberClaim, 0, len(pods))
 	seen := map[types.UID]struct{}{}
 	for i := range pods {
 		pod := &pods[i]
@@ -328,7 +378,8 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentElasticAllocation(
 
 		// THE ALLOCATION LAYER, answered without ever reading the Workload above. No record
 		// at all is a member pending allocation: a known zero contribution, never a
-		// borrowed answer.
+		// borrowed answer. A member that states a whole card JOINS THE PASS'S CLAIMS and is
+		// judged by the node read below, rather than reading that node's ledger for itself.
 		if allocatedUnknown == "" {
 			card, reason, held := elasticWholeCardOf(actual)
 			switch {
@@ -336,13 +387,61 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentElasticAllocation(
 				allocatedUnknown = reason
 			case !held:
 			default:
-				if _, ledgerReason, ok := r.elasticNodeLedgerAgrees(ctx, actual.Spec.NodeName,
-					[]modelDeploymentRetirementReleaseCard{card}, nil); !ok {
-					allocatedUnknown = ledgerReason
-				} else {
-					allocatedCount++
+				claims = append(claims, &elasticMemberClaim{node: actual.Spec.NodeName, card: card})
+			}
+		}
+	}
+
+	// GROUPED ACCOUNTING, ONE NODE READ AT A TIME. The members that stated a card are grouped
+	// by the node they sit on, and each distinct node's ledger is read exactly once for the
+	// whole pass. The node's inventory, its pods and its own published accounting are one
+	// state shared by every member seated on it, and the read's bookends prove that state did
+	// not move while it was being judged, so one read answers all of them.
+	//
+	// EACH MEMBER STILL RECEIVES ITS OWN VERDICT from that one snapshot. A member whose card
+	// the accounting disagrees with is that member's Unknown and no other member's, and a node
+	// that cannot be read holds exactly the members that sit on it. Nothing is averaged,
+	// merged or majority-voted: grouping changes how many times the ledger is read, never how
+	// a member is judged.
+	nodes, byNode := elasticMemberClaimsByNode(claims)
+	for _, node := range nodes {
+		seated := byNode[node]
+		cards := make([]modelDeploymentRetirementReleaseCard, 0, len(seated))
+		for _, claim := range seated {
+			cards = append(cards, claim.card)
+		}
+		_, reason, ok := r.elasticNodeLedgerAgrees(ctx, node, cards,
+			func(rebuilt, published workercore.DevicesStatus) (string, bool) {
+				for _, claim := range seated {
+					cardReason, agreed := releaseCardsAgree(
+						[]modelDeploymentRetirementReleaseCard{claim.card}, rebuilt, published)
+					if !agreed {
+						claim.refusal = cardReason
+					}
+				}
+
+				return "", true
+			})
+		if !ok {
+			for _, claim := range seated {
+				if claim.refusal == "" {
+					claim.refusal = reason
 				}
 			}
+		}
+	}
+
+	// THE MEMBERS ANSWER IN THE ORDER THEY WERE SUPPLIED, so the refusal a hold reports is
+	// still the first member's refusal in pod order rather than whichever node happened to be
+	// read first.
+	for _, claim := range claims {
+		switch {
+		case claim.refusal != "":
+			if allocatedUnknown == "" {
+				allocatedUnknown = claim.refusal
+			}
+		default:
+			allocatedCount++
 		}
 	}
 
@@ -491,7 +590,14 @@ func (r *ModelDeploymentReconciler) captureModelDeploymentElasticRelease(
 	// the retirement capture runs -- the same evidence, read under the same rules.
 	recheck := func() (string, bool) { return r.releaseMembersUnchanged(ctx, md, record) }
 	for _, node := range recordNodesOf(record) {
-		devices, reason, ok := r.elasticNodeLedgerAgrees(ctx, node.NodeName, node.Cards, recheck)
+		devices, reason, ok := r.elasticNodeLedgerAgrees(ctx, node.NodeName, node.Cards,
+			func(rebuilt, published workercore.DevicesStatus) (string, bool) {
+				if reason, ok := releaseCardsAgree(node.Cards, rebuilt, published); !ok {
+					return reason, false
+				}
+
+				return recheck()
+			})
 		if !ok {
 			return nil, fmt.Errorf("the members' release cannot be captured: %s", reason)
 		}
