@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,6 +21,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
 func TestElasticConvergenceCreatesChildren(t *testing.T) {
@@ -469,5 +471,49 @@ func TestElasticWithdrawalWithoutRouterRetainsCapacity(t *testing.T) {
 		retained := new(core.Pod)
 		require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(&before[i]), retained))
 		require.Equal(t, before[i].UID, retained.UID)
+	}
+}
+
+// TestModelDeploymentElasticBootstrapFromMasterWidthBounds is the rendering half of the elastic
+// profile contract: a bootstrap width the profile declares is retained, and a width on either
+// side of that range holds reconciliation.
+//
+// THE RANGE IS ASKED FOR, NEVER RESTATED. The widths below come from the shared profile, so a
+// bound written into the renderer instead of read from it is what this test catches: it would
+// retain or hold one of these widths the other way round.
+func TestModelDeploymentElasticBootstrapFromMasterWidthBounds(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		width int32
+		want  bool
+	}{
+		{name: "the narrowest profile width", width: elasticprofile.WidthMin, want: true},
+		{name: "the widest profile width", width: elasticprofile.WidthMax, want: true},
+		{name: "one below the profile", width: elasticprofile.WidthMin - 1},
+		{name: "one above the profile", width: elasticprofile.WidthMax + 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{
+					Width: tc.width, HeadInstanceType: "cpu",
+				}
+			})
+
+			// A new master takes the width from the request; a live one takes it from the
+			// record it wrote. Both are the renderer's own answer, so both are held to the
+			// shared profile.
+			retained, ok := ModelDeploymentElasticBootstrapFromMaster("", "", md)
+			require.Equal(t, tc.want, ok, "a new master at width %d", tc.width)
+			require.Equal(t, tc.want, retained == tc.width, "retained width %d", retained)
+
+			recorded := strconv.FormatInt(int64(tc.width), 10)
+			_, ok = ModelDeploymentElasticBootstrapFromMaster("master-uid", recorded, md)
+			require.Equal(t, tc.want, ok, "a live master recording width %d", tc.width)
+		})
 	}
 }

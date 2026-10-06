@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
 // boundaryBody is the pinned frontend's exact out-of-range answer for a width of n.
@@ -293,6 +295,91 @@ func TestObserveNativeWorldBoundRefusals(t *testing.T) {
 				t.Fatalf("refused observation sent %d requests", calls)
 			}
 		})
+	}
+}
+
+// TestObserveNativeWorldElasticProfileWidths is the cross-package half of the elastic profile
+// contract: every width the profile supports is measurable here, and the first width above it
+// is refused before a single request is sent.
+//
+// THE MAXIMUM IS THE SHARED ONE, so widening the profile widens this bound with it. A copy of
+// the number written into this package instead is exactly what this test catches: the observer
+// would go on refusing a width admission had already begun to allow, and no other test in this
+// package would notice, because every other one measures a width inside both ranges.
+func TestObserveNativeWorldElasticProfileWidths(t *testing.T) {
+	for width := elasticprofile.WidthMin; width <= elasticprofile.WidthMax; width++ {
+		p := &probeServer{
+			boundBody: fixedBound(http.StatusBadRequest, boundaryBody(width)),
+			forward:   fixedForward(http.StatusOK, forwardBody),
+		}
+		server := httptest.NewServer(p.handler(t))
+		obs, oerr := observe(t, server, width)
+		server.Close()
+		if oerr != nil {
+			t.Fatalf("profile width %d refused: %v", width, oerr)
+		}
+		if obs.ObservedWidth != width || len(obs.Forwards) != width {
+			t.Fatalf("profile width %d measured %d ranks over bound %d",
+				width, len(obs.Forwards), obs.ObservedWidth)
+		}
+	}
+
+	cases := []struct {
+		name  string
+		width int
+	}{
+		{name: "the narrowest profile width is measurable", width: elasticprofile.WidthMin},
+		{name: "the widest profile width is measurable", width: elasticprofile.WidthMax},
+		{name: "one above the profile is refused", width: elasticprofile.WidthMax + 1},
+		{name: "an empty world is refused", width: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls int
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				calls++
+			}))
+			defer server.Close()
+			client, cerr := New(server.URL, time.Second)
+			if cerr != nil {
+				t.Fatalf("client construction failed: %v", cerr)
+			}
+			obs, oerr := client.ObserveNativeWorld(context.Background(), "m", "p", tc.width)
+			measurable := tc.width >= elasticprofile.WidthMin && tc.width <= elasticprofile.WidthMax
+			if measurable {
+				// The engine never answered, so the measurement fails on its evidence. What
+				// matters here is that it failed there and not at the width bound.
+				if oerr != nil && strings.Contains(oerr.Detail, "outside the bounded range") {
+					t.Fatalf("profile width %d refused by the bound: %v", tc.width, oerr)
+				}
+
+				return
+			}
+			if oerr == nil {
+				t.Fatalf("width %d outside the profile was accepted: %+v", tc.width, obs)
+			}
+			if !strings.Contains(oerr.Detail, "outside the bounded range") {
+				t.Fatalf("width %d refused for the wrong reason: %v", tc.width, oerr)
+			}
+			if calls != 0 {
+				t.Fatalf("refused width %d still sent %d requests", tc.width, calls)
+			}
+		})
+	}
+}
+
+// TestObserveNativeWorldProbeFloorIsNotTheProfileFloor records why this package states its own
+// narrowest world: a single-rank world is real, so measuring one is not an error, and the
+// profile's wider floor is a property of the profile rather than of an observation. The rule
+// that does bind is that the floor may never rise above the profile's, or a profile-legal
+// width would become unmeasurable.
+func TestObserveNativeWorldProbeFloorIsNotTheProfileFloor(t *testing.T) {
+	if minObservedWorldWidth != 1 {
+		t.Fatalf("the probe floor is 1, this package declares %d", minObservedWorldWidth)
+	}
+	if minObservedWorldWidth > elasticprofile.WidthMin {
+		t.Fatalf("the probe floor %d is above the profile floor %d, so a profile-legal width "+
+			"would be unmeasurable", minObservedWorldWidth, elasticprofile.WidthMin)
 	}
 }
 

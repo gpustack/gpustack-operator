@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
 // ModelDeploymentElasticBootWidthAnnotation records the bootstrap width on the master Pod.
@@ -44,6 +45,10 @@ func ModelDeploymentElasticRole(md *workercore.ModelDeployment) *workercore.Mode
 
 // ModelDeploymentElasticBootstrapFromMaster retains a live master's captured bootstrap width.
 // Missing or invalid live records hold reconciliation. A new master uses the current request.
+//
+// The width is held against the shared elastic profile bounds rather than numbers of its own,
+// so a rendered bootstrap can never sit outside the range admission accepts or native
+// observation can measure.
 func ModelDeploymentElasticBootstrapFromMaster(masterUID, raw string, md *workercore.ModelDeployment) (int32, bool) {
 	width := int64(0)
 	if masterUID != "" {
@@ -55,7 +60,7 @@ func ModelDeploymentElasticBootstrapFromMaster(masterUID, raw string, md *worker
 	} else if role := ModelDeploymentElasticRole(md); role != nil {
 		width = int64(role.ElasticEP.Width)
 	}
-	if width < 2 || width > 64 {
+	if width < elasticprofile.WidthMin || width > elasticprofile.WidthMax {
 		return 0, false
 	}
 	return int32(width), true

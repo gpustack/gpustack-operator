@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
 const (
@@ -20,9 +22,18 @@ const (
 	// sentinelRank is outside every nonzero world, so asking for it makes the frontend
 	// state the bound it currently enforces.
 	sentinelRank = -1
+	// minObservedWorldWidth is the narrowest world this observer will measure. It is a probe
+	// budget floor, not the elastic profile's own floor: a single-rank world is a real world
+	// and refusing to measure it would say nothing true about it. It is stated here rather than
+	// read from elasticprofile for that reason, and the contract test holds it to the one rule
+	// that matters -- every width the elastic profile supports is measurable here, so widening
+	// the profile never leaves this observer refusing a width a deployment may ask for.
+	minObservedWorldWidth = 1
 	// maxObservedWorldWidth bounds how many rank forwards one observation may make. An
-	// untrusted answer never decides how much probe traffic this client generates.
-	maxObservedWorldWidth = 64
+	// untrusted answer never decides how much probe traffic this client generates. It is the
+	// elastic profile's own widest width, read from the one place that declares it, because
+	// this client must never generate probe traffic for a world the operator does not support.
+	maxObservedWorldWidth = elasticprofile.WidthMax
 	// forwardTokens is the one token each rank forward asks for.
 	forwardTokens = 1
 )
@@ -82,10 +93,10 @@ func (c *Client) ObserveNativeWorld(
 ) (*NativeWorldObservation, *Error) {
 	const op = "observe native world"
 
-	if expectedWidth < 1 || expectedWidth > maxObservedWorldWidth {
+	if expectedWidth < minObservedWorldWidth || expectedWidth > maxObservedWorldWidth {
 		return nil, invalid(op,
-			"the expected width %d is outside the bounded range [1, %d]",
-			expectedWidth, maxObservedWorldWidth)
+			"the expected width %d is outside the bounded range [%d, %d]",
+			expectedWidth, minObservedWorldWidth, maxObservedWorldWidth)
 	}
 	if model == "" {
 		return nil, invalid(op, "the model name is required")

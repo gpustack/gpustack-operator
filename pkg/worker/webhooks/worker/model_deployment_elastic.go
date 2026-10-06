@@ -25,13 +25,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
-)
-
-// modelDeploymentElasticWidthMin and modelDeploymentElasticWidthMax bound the elastic
-// collective's total engine width, reserved API/DP-master included.
-const (
-	modelDeploymentElasticWidthMin = 2
-	modelDeploymentElasticWidthMax = 64
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
 // modelDeploymentElasticOwnedFlags are the engine flags the elastic renderer writes itself.
@@ -160,11 +154,11 @@ func validateModelDeploymentElasticShape(
 		}
 		rolePath := rolesPath.Index(i)
 
-		if role.ElasticEP.Width < modelDeploymentElasticWidthMin || role.ElasticEP.Width > modelDeploymentElasticWidthMax {
+		if role.ElasticEP.Width < elasticprofile.WidthMin || role.ElasticEP.Width > elasticprofile.WidthMax {
 			errs = append(errs, field.Invalid(
 				rolePath.Child("elasticEp", "width"), role.ElasticEP.Width,
 				fmt.Sprintf("total GPU engines including the reserved master must be between %d and %d",
-					modelDeploymentElasticWidthMin, modelDeploymentElasticWidthMax),
+					elasticprofile.WidthMin, elasticprofile.WidthMax),
 			))
 		}
 		if role.ElasticEP.HeadInstanceType == "" {
