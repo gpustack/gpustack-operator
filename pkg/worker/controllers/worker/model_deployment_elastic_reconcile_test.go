@@ -989,6 +989,196 @@ func TestAPartialNodeLossStillHolds(t *testing.T) {
 	require.Zero(t, f.scaleCalls.Load())
 }
 
+// stageLostUpscaleWorld drives the fixture to the record-loss wedge scene: an upscale stood at
+// width 4 natively, the desired width came back to 2, and the operation record is deleted, so the
+// next pass reads an empty store against a live world wider than the bookkeeping width.
+func (f *elasticConvergenceFixture) stageLostUpscaleWorld(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	f.admitMembers(t)
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	// The engine followed the command before the record was lost.
+	f.nativeWidth.Store(4)
+	record := new(core.ConfigMap)
+	require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: f.md.Namespace, Name: elasticOperationRecordName(f.md.UID),
+	}, record), "the staged world must hold a record before it is lost")
+	require.NoError(t, f.reconciler.Client.Delete(ctx, record))
+	f.md.Spec.Roles[0].ElasticEP.Width = 2
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+}
+
+// TestALostRecordOverAWiderLiveWorldCreatesTheDownscale pins the wedge: with no operation record
+// and a live Ray cluster wider than the bookkeeping width, the pass must prove the live world at
+// its own width and let the ordinary corrective block create the downscale, instead of failing
+// the rank-map check at the stale bookkeeping width forever.
+func TestALostRecordOverAWiderLiveWorldCreatesTheDownscale(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.stageLostUpscaleWorld(t)
+	scalesBefore := f.scaleCalls.Load()
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	op, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr, "the pass must create the corrective downscale; observation says: %s",
+		f.observation(t).Reason)
+	require.Equal(t, elasticStateRecorded, op.State)
+	require.Equal(t, elasticWidth{Old: 4, Target: 2}, op.Width, "the live width is the proven old width")
+	require.Len(t, op.Workers, 2, "the two members beyond the desired width are the retirement")
+	require.NotEmpty(t, op.Head.Name)
+	require.NotEmpty(t, op.Master.Name)
+	require.NotNil(t, op.Release)
+	require.Equal(t, scalesBefore, f.scaleCalls.Load(),
+		"the corrective operation is recorded; the ordinary flow sends it on a later pass")
+	require.Equal(t, 4, f.observation(t).StableWidth, "the proven live width heals the stale bookkeeping")
+}
+
+// TestOpNilAtTheBookkeepingWidthStillConverges is the unchanged guard: with no record and no live
+// drift, the bookkeeping width still proves and the pass still converges without any operation.
+func TestOpNilAtTheBookkeepingWidthStillConverges(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.True(t, apierrors.IsNotFound(readErr))
+	observed := f.observation(t)
+	require.Equal(t, "native ranks and forwards agree", observed.Reason)
+	require.Equal(t, 2, observed.StableWidth)
+	require.Zero(t, f.scaleCalls.Load())
+}
+
+// TestOpNilUnderANarrowerLiveWorldKeepsHolding pins the edge the recovery does not cross: a live
+// world narrower than the bookkeeping width is a degraded scene the width hint cannot speak for,
+// so the pass keeps today's behavior — an unknown effective layer and no synthesized operation.
+func TestOpNilUnderANarrowerLiveWorldKeepsHolding(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+
+	// The bookkeeping width climbs to 4 while the live world drops to one member: the stale-high
+	// bookkeeping a lost downscale would leave behind.
+	cm, err := f.reconciler.elasticObservationDocument(ctx, f.md)
+	require.NoError(t, err)
+	require.NotNil(t, cm)
+	var observed modelDeploymentElasticStatus
+	require.NoError(t, json.Unmarshal([]byte(cm.Data["observation.json"]), &observed))
+	observed.StableWidth = 4
+	body, err := json.Marshal(observed)
+	require.NoError(t, err)
+	cm.Data = map[string]string{"observation.json": string(body)}
+	require.NoError(t, f.reconciler.Client.Update(ctx, cm))
+
+	pods, err := f.reconciler.elasticLiveMembers(ctx, f.md)
+	require.NoError(t, err)
+	for i := range pods {
+		pod := &pods[i]
+		if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(f.md) {
+			continue
+		}
+		ordinal, valid := modelDeploymentPodOrdinal(pod)
+		if valid && ordinal == 1 {
+			require.NoError(t, f.reconciler.Client.Delete(ctx, pod))
+		}
+	}
+	f.nativeWidth.Store(1)
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.True(t, apierrors.IsNotFound(readErr),
+		"a narrower live world synthesizes no corrective operation")
+	require.Equal(t, "native rank identities are unknown", f.observation(t).Reason)
+	require.Zero(t, f.scaleCalls.Load())
+}
+
+// TestTheLiveWidthReprobeStillOwesTheForwardProof pins the proof discipline of the re-probe: it
+// is the same rank and forward proof at the live width, so a live width whose native forwards
+// fail still creates no operation and reports the forward failure, not the stale-width one.
+func TestTheLiveWidthReprobeStillOwesTheForwardProof(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.stageLostUpscaleWorld(t)
+	f.forwardsFail.Store(true)
+	scalesBefore := f.scaleCalls.Load()
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.True(t, apierrors.IsNotFound(readErr),
+		"a live width that fails its forward proof synthesizes no operation")
+	require.Positive(t, f.forwardCalls.Load(),
+		"the re-probe must have run the native forward proof at the live width")
+	require.NotEqual(t, "native rank identities are unknown", f.observation(t).Reason,
+		"the reported failure is the re-probe's, not the stale bookkeeping probe's")
+	require.Equal(t, scalesBefore, f.scaleCalls.Load(),
+		"an unproven live width issues no corrective command")
+}
+
+// TestTheReprobeDoesNotDependOnTheObservationBooks pins the live-surgery lesson: the stableWidth
+// override is gated on the recorded master identity, so a master that moved since the last
+// persisted observation silently reads the bootstrap width instead, and the surgery's edited
+// width is ignored outright. The recovery must not depend on those books: the admitted live world
+// alone names the wider world to re-prove.
+func TestTheReprobeDoesNotDependOnTheObservationBooks(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.stageLostUpscaleWorld(t)
+
+	// The books are stale twice over: the stable width is wrong and the recorded master is
+	// foreign, so the width override cannot be applied at all.
+	cm, err := f.reconciler.elasticObservationDocument(ctx, f.md)
+	require.NoError(t, err)
+	require.NotNil(t, cm)
+	var observed modelDeploymentElasticStatus
+	require.NoError(t, json.Unmarshal([]byte(cm.Data["observation.json"]), &observed))
+	observed.MasterUID = "a-master-that-no-longer-exists"
+	body, err := json.Marshal(observed)
+	require.NoError(t, err)
+	cm.Data = map[string]string{"observation.json": string(body)}
+	require.NoError(t, f.reconciler.Client.Update(ctx, cm))
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	op, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr, "the re-prove must not depend on the observation books: %s",
+		f.observation(t).Reason)
+	require.Equal(t, elasticWidth{Old: 4, Target: 2}, op.Width)
+}
+
+// TestAnUnreadableRayWorldStillCreatesNoOperation pins the floor under the re-probe: when the Ray
+// document itself cannot be joined to the captured members, no width proves, the re-probe fails
+// with the same honest unknown, and no operation is synthesized from a world the observer cannot
+// see. The rank-identity proof stays the safety floor no width hint may bypass.
+func TestAnUnreadableRayWorldStillCreatesNoOperation(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.stageLostUpscaleWorld(t)
+	f.rayMalformed.Store(true)
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.True(t, apierrors.IsNotFound(readErr),
+		"an unprovable Ray world synthesizes no operation")
+	require.Equal(t, "native rank identities are unknown", f.observation(t).Reason)
+}
+
 // elasticWatchedReader records the options every List reached the API server with and can be made
 // to fail one, so a test can see what a reconcile-hot-path read asked for instead of inferring it
 // from the objects it happened to return.

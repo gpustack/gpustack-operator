@@ -493,6 +493,30 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 		status.Ray = unknownLayer(ray.RegisteredGPUUnknownReason)
 	}
 	if op == nil {
+		// THE BOOKKEEPING WIDTH IS A HINT, NOT A GATE. A live world wider than the bookkeeping
+		// width — an interrupted upscale whose record was lost — fails the rank-map check at the
+		// bookkeeping width by construction: the rank proof is bounded by the width it is asked
+		// for, so ranks beyond it are a width hold and the probe cannot even name the wider
+		// world. Without a re-probe the pass would hold on that unknown forever. The admitted
+		// member count is the live world's own claim, so when it names a wider world, re-prove at
+		// that width: the same rank and forward proofs, run against the world that actually
+		// exists, and the proven live width becomes the old width the ordinary corrective block
+		// below works from. A narrower or unknown live world keeps today's behavior — a shrunken
+		// cluster is a degraded scene the width hint cannot speak for.
+		if !proven && status.Admitted.Known && status.Admitted.Value > width {
+			live := status.Admitted.Value
+			effective, ray, proven = r.elasticEffective(ctx, md, pods, captured, master, client, live)
+			status.Effective = effective
+			if ray.RegisteredGPUKnown {
+				status.Ray = knownLayer(ray.RegisteredGPU)
+			} else {
+				status.Ray = unknownLayer(ray.RegisteredGPUUnknownReason)
+			}
+			if !proven {
+				return finish(status.Effective.Reason)
+			}
+			width = live
+		}
 		if !proven {
 			return finish(status.Effective.Reason)
 		}
