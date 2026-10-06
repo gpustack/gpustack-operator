@@ -593,11 +593,13 @@ func TestElasticGenerationDriftReconstructs(t *testing.T) {
 		native        int32
 		identity      bool
 		retire        bool
+		desiredOld    bool
 	}{
 		{name: "sent upward whose target is proven retires", native: 4, retire: true},
 		{name: "sent upward with a failed forward is held", native: 4, failedForward: true},
 		{name: "sent upward still scaling is held", native: 4, scaling: true},
 		{name: "sent upward at its old width is held", native: 2},
+		{name: "sent upward at its old width recovers when desired returns", native: 2, desiredOld: true},
 		{name: "sent upward with drifted identity is held", native: 4, identity: true},
 	} {
 		t.Run(failure.name, func(t *testing.T) {
@@ -645,6 +647,9 @@ func TestElasticGenerationDriftReconstructs(t *testing.T) {
 			if failure.failedForward {
 				f.forwardsFail.Store(true)
 			}
+			if failure.desiredOld {
+				f.md.Spec.Roles[0].ElasticEP.Width = 2
+			}
 			f.md.Generation++
 			require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 
@@ -652,6 +657,18 @@ func TestElasticGenerationDriftReconstructs(t *testing.T) {
 			require.NoError(t, err)
 			_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
 			require.NoError(t, err)
+
+			if failure.desiredOld {
+				recovered, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+					ctx, f.md.Namespace, f.md.Name, f.md.UID)
+				require.NoError(t, readErr)
+				require.Equal(t, elasticStateReleased, recovered.State)
+				require.Equal(t, elasticWidth{Old: 4, Target: 2}, recovered.Width)
+				require.Len(t, recovered.Workers, 2)
+				require.Equal(t, 2, f.observation(t).StableWidth)
+				require.Contains(t, f.observation(t).Reason, "recovered")
+				return
+			}
 
 			// Nothing is dispatched, in this pass or in a following pass at the same target.
 			require.Zero(t, f.scaleCalls.Load(), f.observation(t).Reason)

@@ -644,6 +644,15 @@ func (r *ModelDeploymentReconciler) reconstructElasticGeneration(
 	}
 	status.State = op.State
 	status.StableWidth = 0
+	if !proven {
+		if reason, recovered, err := r.recoverElasticUpscaleAfterGenerationChange(
+			ctx, md, status, pods, captured, master, client, store, op,
+		); err != nil {
+			return err
+		} else if recovered {
+			return finish(reason)
+		}
+	}
 
 	reason, safe := r.elasticGenerationExit(ctx, md, status, client, ray, proven, op)
 	if !safe {
@@ -665,6 +674,115 @@ func (r *ModelDeploymentReconciler) reconstructElasticGeneration(
 		return err
 	}
 	return store.Delete(ctx, op)
+}
+
+// recoverElasticUpscaleAfterGenerationChange handles the one stale-intent case that ordinary
+// reconstruction cannot retire: an upward command was recorded, the spec was then returned to the
+// proven old width, and the engine still proves that old world. The target width is deliberately not
+// treated as reached. Instead, the old proof establishes that the command did not advance the native
+// world, and the extra admitted members are placed in a fresh, release-only record. That record is
+// marked Released because its native target is already observed; it still requires the ordinary
+// withdrawal, actor-free and allocation-return proofs before deleting anything.
+func (r *ModelDeploymentReconciler) recoverElasticUpscaleAfterGenerationChange(
+	ctx context.Context, md *workercore.ModelDeployment, status *modelDeploymentElasticStatus,
+	pods []core.Pod, captured []modelDeploymentElasticCapturedMember, master *core.Pod,
+	client *elasticengine.Client, store *elasticOperationStore, op *elasticOperation,
+) (string, bool, error) {
+	if !op.Width.Upward() || !status.Desired.Known || status.Desired.Value != op.Width.Old {
+		return "", false, nil
+	}
+
+	oldEffective, oldRay, oldProven := r.elasticEffective(
+		ctx, md, pods, captured, master, client, op.Width.Old,
+	)
+	if !oldProven {
+		return "", false, nil
+	}
+	status.Effective = oldEffective
+	if oldRay.RegisteredGPUKnown {
+		status.Ray = knownLayer(oldRay.RegisteredGPU)
+	} else {
+		status.Ray = unknownLayer(oldRay.RegisteredGPUUnknownReason)
+	}
+	if !oldRay.ActorsComplete {
+		return "", false, nil
+	}
+	scaling, err := client.IsScaling(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	if scaling {
+		return "", false, nil
+	}
+
+	ranked := sets.New[types.UID]()
+	for _, uid := range oldRay.RankToPodUID {
+		ranked.Insert(uid)
+	}
+	role := ModelDeploymentElasticRole(md)
+	var retiring []core.Pod
+	var gpuMembers []core.Pod
+	var headIdentity, masterIdentity elasticCapturedIdentity
+	for i := range pods {
+		pod := &pods[i]
+		if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(md) {
+			headIdentity = elasticCapturedIdentity{Name: pod.Name, UID: pod.UID}
+			continue
+		}
+		if modelDeploymentPodRole(pod) != role.Name {
+			continue
+		}
+		gpuMembers = append(gpuMembers, *pod)
+		identity := elasticCapturedIdentity{Name: pod.Name, UID: pod.UID}
+		ordinal, valid := modelDeploymentPodOrdinal(pod)
+		if valid && ordinal == 0 {
+			masterIdentity = identity
+		}
+		if !ranked.Has(pod.UID) {
+			retiring = append(retiring, *pod)
+		}
+	}
+	if len(retiring) == 0 {
+		if err := store.Delete(ctx, op); err != nil {
+			return "", false, err
+		}
+		status.StableWidth = op.Width.Old
+		status.State = elasticStateCompleted
+		return "the interrupted upscale never left the proven old native width; the stale record was retired", true, nil
+	}
+	if len(gpuMembers) <= op.Width.Old || masterIdentity.UID == "" || headIdentity.UID == "" {
+		return "", false, nil
+	}
+	release, err := r.captureModelDeploymentElasticRelease(ctx, md, retiring)
+	if err != nil {
+		return "", false, err
+	}
+	recovered := &elasticOperation{
+		Name: md.Name, Namespace: md.Namespace, DeploymentUID: md.UID, Generation: md.Generation,
+		Width:  elasticWidth{Old: len(gpuMembers), Target: op.Width.Old},
+		Master: masterIdentity, Head: headIdentity, Release: release,
+		State: elasticStateReleased, CommandSent: true,
+		CommandIntent: fmt.Sprintf("recovered at already observed native width %d", op.Width.Old),
+	}
+	for _, member := range captured {
+		identity := elasticCapturedIdentity{Name: member.PodName, UID: member.PodUID}
+		if member.Role != modelDeploymentElasticRoleHead {
+			recovered.Members = append(recovered.Members, identity)
+		}
+	}
+	for _, pod := range retiring {
+		recovered.Workers = append(recovered.Workers,
+			elasticCapturedIdentity{Name: pod.Name, UID: pod.UID})
+	}
+	if err := store.Delete(ctx, op); err != nil {
+		return "", false, err
+	}
+	if _, err := store.Create(ctx, recovered); err != nil {
+		return "", false, err
+	}
+	status.State = recovered.State
+	status.StableWidth = op.Width.Old
+	return "the interrupted upscale was recovered at the proven old native width; excess members await the normal release proofs", true, nil
 }
 
 // elasticGenerationExit is the whole decision of the reconstruction pass: a reason for every case
