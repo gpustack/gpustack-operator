@@ -1227,6 +1227,13 @@ func (c routerOwnerChain) verify(ctx context.Context) error {
 			return fmt.Errorf("the router process's ReplicaSet %q was replaced while the routers "+
 				"were being observed", key.Name)
 		}
+		// IDENTITY AND OWNER, as for the Deployment below: the two move independently, and a
+		// ReplicaSet reparented to another ModelDeployment keeps its UID while the chain every
+		// process was verified against names the old owner.
+		if ownerIdentity(fresh) != ownerIdentity(verified) {
+			return fmt.Errorf("the router process's ReplicaSet %q changed owner while the routers "+
+				"were being observed", key.Name)
+		}
 	}
 	for key, verified := range c.deployments {
 		fresh := new(appsv1.Deployment)
