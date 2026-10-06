@@ -90,7 +90,7 @@ run() {
 expect_hit() {
   local label="$1" needle="$2"
   run
-  if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qF -- "$needle"; then
+  if [ "$rc" -ne 0 ] && grep -qF -- "$needle" <<< "$out"; then
     pass "$label"
   else
     fail "$label (rc=$rc)
@@ -202,7 +202,7 @@ cat >> "$SPEC" <<'EOF'
 **THIS IS NOT RE-RUNNABLE, BY DESIGN.** The oracle was temporary and T12 deleted it.
 EOF
 run
-if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'exempt:.*TestThingWasDeletedByT12'; then
+if [ "$rc" -eq 0 ] && grep -q 'exempt:.*TestThingWasDeletedByT12' <<< "$out"; then
   pass "the marked command passes, and the exemption is printed rather than silent"
 else
   fail "expected exit 0 with a printed exemption; rc=$rc out=$out"
@@ -263,7 +263,7 @@ echo "=== no command is exempted by a marker the document does not contain ==="
 build
 subst "$SPEC" "./pkg/thing/ " ""
 run
-if printf '%s' "$out" | grep -q 'exempt:'; then
+if grep -q 'exempt:' <<< "$out"; then
   fail "a command was exempted although the spec contains no NOT RE-RUNNABLE marker -- got: $out"
 else
   pass "no marker in the file, no exemption"
@@ -281,7 +281,7 @@ build
 mkdir -p "$MINI/tree/docs"
 printf '# Doc\n' > "$MINI/tree/docs/a doc with spaces.md"
 run
-if printf '%s' "$out" | grep -q 'which is not a file'; then
+if grep -q 'which is not a file' <<< "$out"; then
   pass "a space-containing path is reported, not silently skipped"
 else
   fail "the split path was skipped silently -- got: $out"
@@ -295,7 +295,7 @@ echo "=== a spec path with a space is reported too, and does not abort the run =
 build
 cp "$SPEC" "$MINI/tree/specs/a spec with spaces.md"
 run
-if printf '%s' "$out" | grep -q 'which is not a file' && printf '%s' "$out" | grep -q 'go test -run patterns'; then
+if grep -q 'which is not a file' <<< "$out" && grep -q 'go test -run patterns' <<< "$out"; then
   pass "the fragment is reported and the run continues to the next rule"
 else
   fail "the run aborted or stayed silent -- got: $out"
