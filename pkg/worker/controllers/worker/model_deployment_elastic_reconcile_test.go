@@ -27,6 +27,7 @@ import (
 	workerapi "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
 )
@@ -1417,4 +1418,124 @@ func TestANativeReadFailureIsNotAWidthTheEngineHasNotReported(t *testing.T) {
 	require.NotContains(t, status.Reason, "the engine has not reported the new width yet",
 		"a transport failure is not the engine declining to answer")
 	require.NotEmpty(t, status.Reason)
+}
+
+// TestElasticConvergenceRetriesARefusedScaleCommand pins the whole life of a refused scale
+// command: the record carries the engine's own refusal, the command is re-issued on a bounded
+// backoff while the bound holds, the bound's end is a terminal refusal in the observation reason
+// and on the deployment's condition — never a silent AwaitingWidth — and a spec that returns to
+// the old width still retires the abandoned record through the ordinary recovery.
+func TestElasticConvergenceRetriesARefusedScaleCommand(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.scaleStatus.Store(500)
+	now := time.Now()
+	f.reconciler.clock = func() time.Time { return now }
+
+	recordDoc := func(t *testing.T) map[string]any {
+		t.Helper()
+		record := new(core.ConfigMap)
+		require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKey{
+			Namespace: f.md.Namespace, Name: elasticOperationRecordName(f.md.UID),
+		}, record))
+		var doc map[string]any
+		require.NoError(t, json.Unmarshal([]byte(record.Data[elasticOperationDataKey]), &doc))
+		return doc
+	}
+	elasticCondition := kubeapistatus.ConditionType("ElasticResize")
+	liveCondition := func(t *testing.T) (status, reason, message string) {
+		t.Helper()
+		live := new(workercore.ModelDeployment)
+		require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(f.md), live))
+		return elasticCondition.GetStatus(live), elasticCondition.GetReason(live),
+			elasticCondition.GetMessage(live)
+	}
+
+	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	f.admitMembers(t)
+
+	// The first send is refused. The record keeps the engine's own refusal, and the observation
+	// says what the engine said rather than that the width is merely unreported.
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), f.scaleCalls.Load(), f.observation(t).Reason)
+	doc := recordDoc(t)
+	require.Contains(t, doc["scaleLastError"], "status 500",
+		"the record must keep the engine's own refusal")
+	require.Equal(t, float64(1), doc["scaleAttempts"])
+	require.Contains(t, f.observation(t).Reason, "status 500", f.observation(t).Reason)
+	require.Equal(t, "CommandSent", doc["state"], "a refused command is not an unreported width")
+
+	// Inside the backoff the command is not re-issued, and the wait still names the refusal.
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), f.scaleCalls.Load())
+	require.Contains(t, f.observation(t).Reason, "status 500", f.observation(t).Reason)
+	status, reason, _ := liveCondition(t)
+	require.NotEqual(t, "False", status,
+		"a refusal still inside its retry bound is not terminal")
+	require.Equal(t, "NoRefusal", reason)
+
+	// Each elapsed backoff re-issues the command, until the bound is spent.
+	for _, step := range []struct {
+		advance  time.Duration
+		attempts float64
+	}{
+		{20 * time.Second, 2}, {31 * time.Second, 3}, {61 * time.Second, 4}, {121 * time.Second, 5},
+	} {
+		now = now.Add(step.advance)
+		_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+		require.NoError(t, err)
+		doc = recordDoc(t)
+		require.Equal(t, step.attempts, doc["scaleAttempts"], f.observation(t).Reason)
+		require.Contains(t, doc["scaleLastError"], "status 500")
+	}
+	require.Equal(t, int32(5), f.scaleCalls.Load())
+
+	// The bound's end is terminal: the record is abandoned, and the refusal reaches both the
+	// observation reason and the deployment's condition with the engine text intact.
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, "Abandoned", recordDoc(t)["state"], f.observation(t).Reason)
+	require.Contains(t, f.observation(t).Reason, "status 500", f.observation(t).Reason)
+	status, reason, message := liveCondition(t)
+	require.Equal(t, "False", status, "a spent retry bound is a terminal refusal")
+	require.Equal(t, "ScaleRefused", reason)
+	require.Contains(t, message, "status 500")
+
+	// Terminal means terminal: no pass re-issues the command and the refusal does not fade.
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(5), f.scaleCalls.Load())
+	require.Equal(t, "Abandoned", recordDoc(t)["state"])
+	status, _, message = liveCondition(t)
+	require.Equal(t, "False", status)
+	require.Contains(t, message, "status 500")
+
+	// The escape is the ordinary one: a spec returned to the proven old width recovers the
+	// abandoned record. Two members beyond the old width are still admitted, so the recovery
+	// swaps the record for the release-only retirement they owe — and no refusal stands.
+	f.md.Spec.Roles[0].ElasticEP.Width = 2
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	recovered, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr, "recovery keeps the retirement the excess members owe: %v",
+		f.observation(t).Reason)
+	require.Equal(t, elasticStateReleased, recovered.State)
+	require.Equal(t, elasticWidth{Old: 4, Target: 2}, recovered.Width)
+	require.Len(t, recovered.Workers, 2)
+	observed := f.observation(t)
+	require.Equal(t, 2, observed.StableWidth)
+	status, reason, _ = liveCondition(t)
+	require.Equal(t, "True", status, "recovery leaves no refusal standing")
+	require.Equal(t, "NoRefusal", reason)
+	require.Equal(t, int32(5), f.scaleCalls.Load(), "recovery proves; it issues no command")
 }

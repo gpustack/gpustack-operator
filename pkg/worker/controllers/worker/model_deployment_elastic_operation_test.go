@@ -296,6 +296,155 @@ func TestACommandThatHasLeftIsNeverSentAgain(t *testing.T) {
 	}
 }
 
+// TestARecordedRefusalIsRetriedWithinItsBound is the one answer that is not a guess: the engine
+// answered with a refusal and the record kept its text. Each case is one follow-up question about
+// that refusal — whether an ordinary wait still applies, whether the engine is free to be asked
+// again, and what happens when the bound is spent.
+func TestARecordedRefusalIsRetriedWithinItsBound(t *testing.T) {
+	refused := func() *elasticOperation {
+		op := elasticTestOperation(
+			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+		op.State = elasticStateCommandSent
+		op.CommandSent = true
+		op.ScaleAttempts = 1
+		op.ScaleLastError = "elastic engine /scale_elastic_ep: engine reported failure (status 500)"
+
+		return op
+	}
+	// The engine answered the is-scaling question and is idle, which is the only engine a refused
+	// command is re-issued to.
+	idle := elasticCompleteFacts(4)
+	idle.ScalingKnown = true
+
+	for _, tc := range []struct {
+		name      string
+		attempts  int
+		state     elasticOperationState
+		noRefusal bool
+		facts     func() elasticFacts
+		action    elasticAction
+		state2    elasticOperationState
+	}{
+		{
+			name: "a record without a refusal still waits the ordinary way", attempts: 1, noRefusal: true,
+			facts:  func() elasticFacts { return elasticCompleteFacts(4) },
+			action: elasticActionAwaitNative, state2: elasticStateAwaitingWidth,
+		},
+		{
+			name: "a refusal to an idle engine is issued again", attempts: 1,
+			facts:  func() elasticFacts { return idle },
+			action: elasticActionRetryScale, state2: elasticStateCommandSent,
+		},
+		{
+			name: "the last attempt before the bound is still issued again", attempts: 4,
+			facts:  func() elasticFacts { return idle },
+			action: elasticActionRetryScale, state2: elasticStateCommandSent,
+		},
+		{
+			name: "a scaling engine is not asked again mid-flight", attempts: 1,
+			facts:  func() elasticFacts { f := idle; f.Scaling = true; return f },
+			action: elasticActionHold, state2: elasticStateCommandSent,
+		},
+		{
+			name: "an engine that did not answer is not assumed idle", attempts: 1,
+			facts:  func() elasticFacts { f := idle; f.ScalingKnown = false; return f },
+			action: elasticActionHold, state2: elasticStateCommandSent,
+		},
+		{
+			name: "the bound's end abandons the operation", attempts: 5,
+			facts:  func() elasticFacts { return idle },
+			action: elasticActionHold, state2: elasticStateAbandoned,
+		},
+		{
+			name: "an abandoned record keeps holding at the same answer", attempts: 5,
+			state:  elasticStateAbandoned,
+			facts:  func() elasticFacts { return idle },
+			action: elasticActionHold, state2: elasticStateAbandoned,
+		},
+		{
+			name: "a refusal the engine satisfied completes instead of retrying", attempts: 1,
+			facts: func() elasticFacts {
+				f := idle
+				f.NativeComplete = true
+				f.Effective = knownLayer(4)
+				f.ForwardProven = true
+				return f
+			},
+			action: elasticActionComplete, state2: elasticStateCompleted,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			op := refused()
+			if tc.state != "" {
+				op.State = tc.state
+			}
+			op.ScaleAttempts = tc.attempts
+			if tc.noRefusal {
+				op.ScaleLastError = ""
+			}
+
+			decision := decideElasticOperation(op, tc.facts())
+			assert.Equal(t, tc.action, decision.Action, "reason=%s", decision.Reason)
+			assert.Equal(t, tc.state2, decision.State, "reason=%s", decision.Reason)
+			// Every refusal answer carries the engine's own text, so no pass of a refused command
+			// is left reporting only that a width is unreported. The one completion here is the
+			// engine's own success answer, which speaks for itself.
+			if !tc.noRefusal && decision.Action != elasticActionComplete {
+				assert.Contains(t, decision.Reason, "status 500", "reason=%s", decision.Reason)
+			}
+		})
+	}
+}
+
+// TestARecordFromBeforeTheRetryBoundStillReads pins the record schema's one-way compatibility: a
+// document the previous operator version wrote carries none of the retry fields, and this version
+// must read it as the ordinary sent record it always was — and must write nothing new back into a
+// record that never carried a refusal, so its documents stay byte-for-byte what they were.
+func TestARecordFromBeforeTheRetryBoundStillReads(t *testing.T) {
+	legacy := `{"name":"qwen","deploymentUID":"deployment-uid","namespace":"default","generation":1,` +
+		`"width":{"old":2,"target":4},"master":{"name":"qwen-ray-0","uid":"worker-master"},` +
+		`"commandIntent":"scale to 4","commandSent":true,"state":"CommandSent"}`
+	ctx := context.Background()
+
+	t.Run("a legacy document reads as the sent record it is", func(t *testing.T) {
+		cli := elasticTestClient()
+		stored := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      elasticOperationRecordName(elasticTestDeployUID),
+				Namespace: elasticTestNamespace,
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: workercore.GroupVersion.String(), Kind: "ModelDeployment",
+					Name: elasticTestDeployNm, UID: elasticTestDeployUID, Controller: elasticControllerRef(),
+				}},
+			},
+			Data: map[string]string{elasticOperationDataKey: legacy},
+		}
+		require.NoError(t, cli.Create(ctx, stored))
+
+		read, err := newElasticOperationStore(cli).Read(ctx, elasticTestNamespace, elasticTestDeployNm, elasticTestDeployUID)
+		require.NoError(t, err)
+		assert.Equal(t, elasticStateCommandSent, read.State)
+		assert.Equal(t, 0, read.ScaleAttempts)
+		assert.Empty(t, read.ScaleLastError)
+		assert.Nil(t, read.ScaleLastFailedAt)
+	})
+
+	t.Run("a refusal-free record writes none of the retry fields", func(t *testing.T) {
+		op := elasticTestOperation(
+			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+		op.State = elasticStateCommandSent
+		op.CommandSent = true
+		op.CommandIntent = "scale to 4"
+
+		document, err := json.Marshal(op)
+		require.NoError(t, err)
+		for _, field := range []string{"scaleAttempts", "scaleLastError", "scaleLastFailedAt"} {
+			assert.NotContains(t, string(document), field,
+				"a record the old schema could express must decode as it always did")
+		}
+	})
+}
+
 // TestNothingIsRemovedUntilEveryWorkerIsProvenActorFree is the direction that deletes, so each case
 // removes exactly one proof and each refusal names it.
 func TestNothingIsRemovedUntilEveryWorkerIsProvenActorFree(t *testing.T) {

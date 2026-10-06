@@ -99,6 +99,16 @@ type elasticOperation struct {
 	// CommandSent records that the intent left. It is set with the intent, so its presence means
 	// the engine may already have it.
 	CommandSent bool `json:"commandSent"`
+	// ScaleAttempts counts how many times the scale command has left, the in-flight one included.
+	// It is the retry bound's counter: the kernel abandons the operation once it names the bound.
+	ScaleAttempts int `json:"scaleAttempts,omitempty"`
+	// ScaleLastError is the engine's own refusal text from the last attempt. It is kept until the
+	// command is accepted or the retry bound is spent, so the refusal survives the passes that
+	// would otherwise overwrite it with a wait.
+	ScaleLastError string `json:"scaleLastError,omitempty"`
+	// ScaleLastFailedAt anchors the backoff: the next attempt is owed only after the schedule has
+	// run from this moment. A nil means the last attempt is not owed a wait.
+	ScaleLastFailedAt *time.Time `json:"scaleLastFailedAt,omitempty"`
 	// ResourceVersion is the stored object's version, carried so an update is against the object
 	// this record was read from rather than against whatever is current.
 	ResourceVersion string `json:"resourceVersion"`
@@ -110,10 +120,13 @@ type elasticOperation struct {
 // carries both, and a writer that trusts the copy can be handed a record whose state says a command
 // left while its boolean says it did not. The state is what was written before the request went, so
 // the state is what is read.
+//
+// Abandoned is here because its command also left: the state ends the operation on the spent retry
+// bound instead of re-deriving what a sent record awaits.
 func (eo *elasticOperation) SentState() bool {
 	switch eo.State {
 	case elasticStateCommandSent, elasticStateAwaitingWidth, elasticStateNativeDone,
-		elasticStateWithdrawn, elasticStateReleased, elasticStateCompleted:
+		elasticStateWithdrawn, elasticStateReleased, elasticStateCompleted, elasticStateAbandoned:
 		return true
 	default:
 		return false

@@ -782,7 +782,8 @@ func modelDeploymentRetirementDeleteSet(view modelDeploymentReplicaView) []core.
 }
 
 // modelDeploymentNow reads the clock, which is a field rather than a call to time.Now so a test
-// can place a reservation's phases at a moment of its choosing instead of waiting for one.
+// can place a budget — a reservation's phases or an elastic retry's backoff — at a moment of its
+// choosing instead of waiting for one.
 func (r *ModelDeploymentReconciler) modelDeploymentNow() time.Time {
 	if r.clock == nil {
 		return time.Now()
