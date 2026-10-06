@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1652,7 +1653,8 @@ func TestARouterProcessIsHeldUnlessEveryChainHopIsTheRenderedOne(t *testing.T) {
 			require.NoError(t, r.Client.Get(context.Background(),
 				ctrlcli.ObjectKey{Namespace: "team-a", Name: "router-zero"}, pod))
 
-			err := r.verifyRouterPodOwnership(context.Background(), md, pod)
+			err := r.verifyRouterPodOwnership(context.Background(), md, pod,
+				newRouterOwnerChain(r.APIReader))
 			if tc.wantErr == "" {
 				require.NoError(t, err, "the rendered chain is the one the render produces")
 
@@ -2103,4 +2105,182 @@ func TestOnlyAConfirmedAnswerCarriesACount(t *testing.T) {
 			}
 		})
 	}
+}
+
+// routerChainReconciler builds a reconciler over a seeded cluster whose uncached reads are
+// counted, so a case can assert what one collection cost and move the world while it runs.
+func routerChainReconciler(
+	objs []ctrlcli.Object, beforeRead func(served int, obj any),
+) (*ModelDeploymentReconciler, *uncachedReadCounter) {
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(objs...).
+		WithIndex(&corev1.Pod{}, "spec.nodeName", func(ctrlcli.Object) []string { return nil }).
+		Build()
+	reader := &uncachedReadCounter{Reader: cli, beforeRead: beforeRead}
+
+	return &ModelDeploymentReconciler{
+		Client: cli, APIReader: reader,
+		clock:            time.Now,
+		servingViewFetch: healthyServingViewFetch,
+	}, reader
+}
+
+// healthyServingViewFetch answers every view read with the healthy observer payload, so a case
+// about the cluster's reads is never also a case about an unreachable router.
+func healthyServingViewFetch(context.Context, string) ([]byte, error) {
+	return []byte(observerHealthyPayload), nil
+}
+
+// sharedChainRouterObjects gives every Router process the ONE ReplicaSet and Deployment a real
+// render produces, rather than the per-process ReplicaSet the single-hop ownership cases mutate
+// one at a time. A scaled Deployment's replicas share one ReplicaSet, so this is the shape a
+// collection actually meets, and it is the shape in which the chain behind the processes is one
+// object rather than one per process.
+func sharedChainRouterObjects(
+	md *workercore.ModelDeployment, pods ...*corev1.Pod,
+) []ctrlcli.Object {
+	controller := true
+	replicaSet, deployment := ownedRouterChain(pods[0], md)
+	objects := make([]ctrlcli.Object, 0, 2+len(pods))
+	objects = append(objects, &replicaSet, &deployment)
+	for _, pod := range pods {
+		pod.OwnerReferences = []metav1.OwnerReference{{
+			APIVersion: appsv1.SchemeGroupVersion.String(),
+			Kind:       "ReplicaSet",
+			Name:       replicaSet.Name,
+			UID:        replicaSet.UID,
+			Controller: &controller,
+		}}
+		objects = append(objects, pod)
+	}
+
+	return objects
+}
+
+// routerChainFixture seeds the deployment, one shared chain behind every Router process, and the
+// one member pod the collected views bind to.
+func routerChainFixture(t *testing.T, count int) (*workercore.ModelDeployment, []ctrlcli.Object) {
+	t.Helper()
+
+	md, _ := retirementRouterFixture(newRenderDeployment())
+	md.Generation = 1
+	addresses := []string{"10.0.9.1", "10.0.9.2", "10.0.9.3", "10.0.9.4"}
+	routers := make([]*corev1.Pod, 0, count)
+	for i := range count {
+		router := retirementRouterPod("router-"+strconv.Itoa(i), addresses[i])
+		router.Status.PodIP = addresses[i]
+		routers = append(routers, router)
+	}
+	seeded := sharedChainRouterObjects(md, routers...)
+	seeded = append(seeded, observationLivePod("server-0", "10.0.0.5", "pod-uid-1", true))
+
+	return md, append([]ctrlcli.Object{md}, seeded...)
+}
+
+// TestTheRouterOwningChainIsReadOncePerCollection is the read-amplification contract for the
+// other half of this issue: every Router process shares one reading of the chain behind them,
+// and the collection pays two more reads to prove that chain did not move underneath it.
+//
+// THE COUNTS ARE THE CONTRACT. Three processes sharing one ReplicaSet and one Deployment spent
+// SIX reads on the chain, two per process, and now spend FOUR whatever the process count: two to
+// read the chain once, two to read it again. The Pod reads stay one per process on purpose,
+// because the Pod is the object the collection is about, and they are counted separately here so
+// the saving is not credited to a check that was never shared.
+func TestTheRouterOwningChainIsReadOncePerCollection(t *testing.T) {
+	md, seeded := routerChainFixture(t, 3)
+
+	// THE READS ARE COUNTED BY KIND, so the assertions below are about the chain's objects and
+	// not about the collection's other traffic.
+	ownerReads, podReads := 0, 0
+	r, _ := routerChainReconciler(seeded, func(_ int, obj any) {
+		switch obj.(type) {
+		case *appsv1.ReplicaSet, *appsv1.Deployment:
+			ownerReads++
+		case *corev1.Pod:
+			podReads++
+		}
+	})
+
+	observations, failure := r.collectModelDeploymentRouterObservations(
+		context.Background(), md, nil)
+	require.Empty(t, failure, "three processes answer the same view: %s", failure)
+	require.Len(t, observations, 3)
+
+	assert.Equal(t, 4, ownerReads,
+		"one ReplicaSet and one Deployment read, then one re-read of each to prove neither moved")
+	assert.Equal(t, 3, podReads, "every Router process is still read live for itself")
+}
+
+// TestTheRouterOwningChainIsHeldWhenItMovesMidCollection is the case a shared read could have
+// broken. The chain is verified for the first process, the Deployment is reparented to another
+// ModelDeployment while the collection is still running, and the collection must refuse. Read
+// once per process, the second process would have seen the reparent itself; read once per
+// collection, nothing but the closing bookend stands between it and a confirmed answer.
+func TestTheRouterOwningChainIsHeldWhenItMovesMidCollection(t *testing.T) {
+	md, seeded := routerChainFixture(t, 3)
+
+	// THE REPARENT LANDS AFTER THE CHAIN HAS BEEN READ AND THE COLLECTION HAS MOVED ON. The
+	// next Router process is the one whose read would have covered for the reparent, so the
+	// mutation waits for exactly that read.
+	reparented, chainRead := false, false
+	var cli ctrlcli.Client
+	r, _ := routerChainReconciler(seeded, func(_ int, obj any) {
+		switch obj.(type) {
+		case *appsv1.Deployment:
+			chainRead = true
+		case *corev1.Pod:
+			if !chainRead || reparented || cli == nil {
+				return
+			}
+			reparented = true
+			live := new(appsv1.Deployment)
+			require.NoError(t, cli.Get(context.Background(),
+				ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}, live))
+			live.OwnerReferences[0].UID = "another-model-deployment"
+			require.NoError(t, cli.Update(context.Background(), live))
+		}
+	})
+	cli = r.Client
+
+	_, failure := r.collectModelDeploymentRouterObservations(context.Background(), md, nil)
+
+	require.True(t, reparented, "the case did not reparent the owner, so it proves nothing")
+	require.NotEmpty(t, failure, "a chain that moved under the collection must refuse it")
+	assert.Contains(t, failure, "owning chain changed")
+}
+
+// TestTheRouterOwningChainIsHeldWhenAnOwnerIsReplacedMidCollection is the same refusal for the
+// other way an owner moves: the same name under a new identity. A same-name replacement is the
+// shape that a name-keyed read cannot notice, so it is the one the bookend has to catch.
+func TestTheRouterOwningChainIsHeldWhenAnOwnerIsReplacedMidCollection(t *testing.T) {
+	md, seeded := routerChainFixture(t, 3)
+
+	replaced, chainRead := false, false
+	var cli ctrlcli.Client
+	r, _ := routerChainReconciler(seeded, func(_ int, obj any) {
+		switch obj.(type) {
+		case *appsv1.Deployment:
+			chainRead = true
+		case *corev1.Pod:
+			if !chainRead || replaced || cli == nil {
+				return
+			}
+			replaced = true
+			key := ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}
+			live := new(appsv1.Deployment)
+			require.NoError(t, cli.Get(context.Background(), key, live))
+			require.NoError(t, cli.Delete(context.Background(), live.DeepCopy()))
+			live.SetUID("a-fresh-router-deployment")
+			live.SetResourceVersion("")
+			require.NoError(t, cli.Create(context.Background(), live))
+		}
+	})
+	cli = r.Client
+
+	_, failure := r.collectModelDeploymentRouterObservations(context.Background(), md, nil)
+
+	require.True(t, replaced, "the case did not replace the owner, so it proves nothing")
+	require.NotEmpty(t, failure, "a replaced chain must refuse the collection")
+	assert.Contains(t, failure, "owning chain changed")
 }
