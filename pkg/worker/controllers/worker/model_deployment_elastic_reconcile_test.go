@@ -862,6 +862,133 @@ func TestTheRecoverySwapIsRetryableWhenItsWriteFails(t *testing.T) {
 	require.Zero(t, f.scaleCalls.Load())
 }
 
+// TestANodeLossRecoversFromTheLiveWorldInsteadOfHolding pins the scene where every captured
+// member dies with its node: the mismatch never heals (replacements carry new identities), the
+// pending retirement has no work left, and the pass recovers from the live world — the stale
+// record retires on the proven live width, the observation completes at it, and no native command
+// is issued, because recovery proves rather than scales.
+func TestANodeLossRecoversFromTheLiveWorldInsteadOfHolding(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.stageRecovery(t, true)
+
+	// The node takes every captured member with it.
+	pods, err := f.reconciler.elasticLiveMembers(ctx, f.md)
+	require.NoError(t, err)
+	require.NotEmpty(t, pods, "the fixture must have captured members for a node loss to mean anything")
+	for i := range pods {
+		require.NoError(t, f.reconciler.Client.Delete(ctx, &pods[i]))
+	}
+
+	// The workload is recreated at the desired width with fresh identities, and the next pass
+	// reads only replacements.
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.True(t, apierrors.IsNotFound(readErr),
+		"a record whose members are all gone must retire, not hold: %v", f.observation(t).Reason)
+	observed := f.observation(t)
+	require.Equal(t, 2, observed.StableWidth)
+	require.Equal(t, elasticStateCompleted, observed.State)
+	require.Contains(t, observed.Reason, "never left the proven old native width")
+	require.Zero(t, f.scaleCalls.Load(), "recovery proves the live world; it issues no native command")
+}
+
+// TestTheSameGenerationMemberDriftStillHolds is the deliberate hold the node-loss recovery must
+// not swallow: pods replaced while the spec is untouched stay an in-flight scene the record may
+// still describe, so the identity mismatch keeps holding until the spec itself moves on.
+func TestTheSameGenerationMemberDriftStillHolds(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	f.admitMembers(t)
+
+	// The record is captured at the generation that is still current: no spec edit follows.
+	pods, err := f.reconciler.elasticLiveMembers(ctx, f.md)
+	require.NoError(t, err)
+	op := &elasticOperation{
+		Name: f.md.Name, Namespace: f.md.Namespace, DeploymentUID: f.md.UID,
+		Generation: f.md.Generation, Width: elasticWidth{Old: 2, Target: 4},
+		State: elasticStateCommandSent, CommandSent: true, CommandIntent: "scale to 4",
+	}
+	for i := range pods {
+		pod := &pods[i]
+		id := elasticCapturedIdentity{Name: pod.Name, UID: pod.UID}
+		if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(f.md) {
+			op.Head = id
+		} else {
+			op.Members = append(op.Members, id)
+			if modelDeploymentOrdinalOrFloor(pod) == 0 {
+				op.Master = id
+			}
+		}
+	}
+	_, err = newElasticOperationStore(f.reconciler.Client).Create(ctx, op)
+	require.NoError(t, err)
+
+	// Every captured pod is replaced at the same generation.
+	for i := range pods {
+		require.NoError(t, f.reconciler.Client.Delete(ctx, &pods[i]))
+	}
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	held, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr, "a same-generation drift keeps the record")
+	require.Equal(t, elasticStateCommandSent, held.State)
+	require.Equal(t, "a captured member identity no longer matches; the operation holds",
+		f.observation(t).Reason)
+	require.Zero(t, f.scaleCalls.Load())
+}
+
+// TestAPartialNodeLossStillHolds pins the other edge of the recovery gate: as long as one
+// captured member is still the pod it was recorded against, the retirement may still have work to
+// do, so even a generation-stale record holds on the identity mismatch instead of recovering.
+func TestAPartialNodeLossStillHolds(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.stageRecovery(t, true)
+
+	// The node takes two of the four captured members; the master and one member survive.
+	pods, err := f.reconciler.elasticLiveMembers(ctx, f.md)
+	require.NoError(t, err)
+	lost := 0
+	for i := range pods {
+		pod := &pods[i]
+		if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(f.md) {
+			continue
+		}
+		ordinal, valid := modelDeploymentPodOrdinal(pod)
+		if valid && (ordinal == 1 || ordinal == 3) {
+			require.NoError(t, f.reconciler.Client.Delete(ctx, pod))
+			lost++
+		}
+	}
+	require.Equal(t, 2, lost, "the case must lose captured members to mean anything")
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	held, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr, "a partial survival keeps the record")
+	require.Equal(t, elasticStateCommandSent, held.State)
+	require.Equal(t, "a captured member identity no longer matches; the operation holds",
+		f.observation(t).Reason)
+	require.Zero(t, f.scaleCalls.Load())
+}
+
 // elasticWatchedReader records the options every List reached the API server with and can be made
 // to fail one, so a test can see what a reconcile-hot-path read asked for instead of inferring it
 // from the objects it happened to return.

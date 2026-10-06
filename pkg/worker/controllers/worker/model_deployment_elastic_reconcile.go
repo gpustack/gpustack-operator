@@ -346,6 +346,23 @@ func (r *ModelDeploymentReconciler) elasticWithdrawal(ctx context.Context, md *w
 	return drain.Complete && drain.State == modelDeploymentDrainIdle, drain.Reason
 }
 
+// elasticOperationMemberSurvives says whether any captured identity is still the live pod it was
+// recorded against. It is the line between a mismatch the record can still act on and one whose
+// world is gone: a node loss empties the record permanently, because replacement pods carry new
+// identities no pass can ever match again.
+func elasticOperationMemberSurvives(op *elasticOperation, pods []core.Pod) bool {
+	byName := map[string]types.UID{}
+	for i := range pods {
+		byName[pods[i].Name] = pods[i].UID
+	}
+	for _, member := range append(slices.Clone(op.Members), op.Master, op.Head) {
+		if member.UID != "" && byName[member.Name] == member.UID {
+			return true
+		}
+	}
+	return false
+}
+
 func elasticOperationMembersMatch(op *elasticOperation, pods []core.Pod) bool {
 	byName := map[string]types.UID{}
 	for i := range pods {
@@ -419,8 +436,22 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 		op = nil
 	}
 	if op != nil && !elasticOperationMembersMatch(op, pods) {
-		status.State = op.State
-		return finish("a captured member identity no longer matches; the operation holds")
+		// A MISMATCH IS ONLY A WEDGE WHEN THE RECORD STILL DESCRIBES THE WORLD. Node loss empties
+		// the record permanently — replacement pods carry new identities, so no later pass can
+		// ever match again — and the pending retirement has no work left, because the pods it
+		// would retire are already gone. When no captured identity is still live and the spec has
+		// moved on since the record was written, the pass recovers from the live world instead of
+		// holding: reconstruction re-proves the native width over the live members through the
+		// ordinary rank and forward proofs before any record moves, so no removal proof is
+		// bypassed. A partial survival keeps the hold — some captured member still live means the
+		// retirement may still have work to do. A same-generation drift keeps the hold too —
+		// pods replaced while the spec is unchanged is an in-flight scene the record may still
+		// describe, and only the spec edit proves the world it captured is not the one wanted.
+		if op.Generation == md.Generation || elasticOperationMemberSurvives(op, pods) {
+			status.State = op.State
+			return finish("a captured member identity no longer matches; the operation holds")
+		}
+		return r.reconstructElasticGeneration(ctx, md, &status, finish, pods, captured, master, client, store, op)
 	}
 	if op != nil && op.Generation != md.Generation {
 		return r.reconstructElasticGeneration(ctx, md, &status, finish, pods, captured, master, client, store, op)
