@@ -22,12 +22,30 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/kubeapistatus"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
 )
 
 const (
 	modelDeploymentElasticWithdrawnAnnotation = "modeldeployment.gpustack.ai/elastic-withdrawn"
 	elasticObservationLabel                   = "gpustack.ai/elastic-observation"
+
+	// ModelDeploymentConditionElasticResize reports whether an elastic scale command stands
+	// terminally refused. It is declared beside the convergence that decides it, like every other
+	// condition whose vocabulary sits with the code that can observe it. It is False with
+	// ScaleRefused only while the durable record says the retry bound is spent, and True with
+	// NoRefusal the rest of the time: a refusal still inside its bound is not terminal and must
+	// not read as one.
+	ModelDeploymentConditionElasticResize kubeapistatus.ConditionType = "ElasticResize"
+
+	// modelDeploymentReasonScaleRefused is ElasticResize's False reason: the record is abandoned
+	// and its message carries the engine's own last refusal.
+	modelDeploymentReasonScaleRefused = "ScaleRefused"
+
+	// modelDeploymentReasonNoScaleRefusal is ElasticResize's True reason: no record stands
+	// refused, whether none exists, one is in flight, or one has just completed.
+	modelDeploymentReasonNoScaleRefusal = "NoRefusal"
 )
 
 // The internal observation document preserves independent values and a last proven width.
@@ -389,6 +407,76 @@ func elasticOperationMembersMatch(op *elasticOperation, pods []core.Pod) bool {
 	return true
 }
 
+// recordElasticResizeCondition levels the deployment's ElasticResize condition with the durable
+// record: False with the preserved refusal while a record stands abandoned, True with NoRefusal
+// otherwise — including when no record exists, so a refusal never outlives the record it came
+// from. The pass hands over the record as it stands after its own writes; a caller whose record
+// was just deleted hands over nil.
+//
+// IT IS ITS OWN WRITE rather than a field set before the pass's status sync, for the same reason
+// the retirement reservation is: the sync compares the derived status with the observed one and
+// would find an assigned field equal to itself. The patch is optimistic and asserts only this
+// condition, and the in-memory status takes the server's response so the same pass's later status
+// sync rebuilds from what the server now holds. An unchanged condition writes nothing.
+func (r *ModelDeploymentReconciler) recordElasticResizeCondition(
+	ctx context.Context, md *workercore.ModelDeployment, op *elasticOperation,
+) error {
+	refused := op != nil && op.State == elasticStateAbandoned
+	reason, message := modelDeploymentReasonNoScaleRefusal, "no elastic scale command stands refused"
+	if refused {
+		reason, message = modelDeploymentReasonScaleRefused, elasticScaleRefusalMessage(op)
+	}
+	base := md.DeepCopy()
+	candidate := base.DeepCopy()
+	if refused {
+		ModelDeploymentConditionElasticResize.False(candidate, reason, message)
+	} else {
+		ModelDeploymentConditionElasticResize.True(candidate, reason, message)
+	}
+	if kubemeta.DeepEqual(base.Status, candidate.Status) {
+		return nil
+	}
+	optimistic := ctrlcli.MergeFromWithOptions(base, ctrlcli.MergeFromWithOptimisticLock{})
+	if err := r.Client.Status().Patch(ctx, candidate, optimistic); err != nil {
+		return err
+	}
+	md.ResourceVersion = candidate.ResourceVersion
+	md.Status = candidate.Status
+	return nil
+}
+
+// elasticScaleRetryDue says how long the next refused-command attempt still owes, from the bound
+// the record states: attempt n+1 waits min(15s*2^(n-1), 4m) after failure n, where n counts the
+// definite refusals AND the re-issued commands whose answer never arrived — an unanswered
+// re-issue moves the schedule without consuming the refusal bound.
+func elasticScaleRetryDue(op *elasticOperation, now time.Time) time.Duration {
+	if op.ScaleLastFailedAt == nil {
+		return 0
+	}
+	wait := elasticScaleRetryBase
+	for i := max(op.ScaleAttempts+op.ScaleAmbiguousAttempts, 1); i > 1 && wait < elasticScaleRetryCap; i-- {
+		wait *= 2
+	}
+	wait = min(wait, elasticScaleRetryCap)
+	if due := op.ScaleLastFailedAt.Add(wait); now.Before(due) {
+		return due.Sub(now)
+	}
+	return 0
+}
+
+// elasticScaleAnswerIsRefusal says whether a Scale error is an engine answer that declined the
+// command — a 408 or 5xx that reached the engine, its own busy 503, or a malformed request it
+// rejected. Those are definite refusals the record may keep and the bound may re-issue. A
+// transport loss, a caller timeout and an unreadable acknowledgement are not answers: whether the
+// engine applied the command is not known from them, so they are reported and left to observation,
+// exactly like a command whose answer never came back at all.
+func elasticScaleAnswerIsRefusal(err error) bool {
+	var engineErr *elasticengine.Error
+	return errors.As(err, &engineErr) &&
+		engineErr.Kind != elasticengine.KindAmbiguous &&
+		engineErr.Kind != elasticengine.KindMalformed
+}
+
 // reconcileModelDeploymentElasticResize is the only native mutation caller.
 // The durable record precedes the request. A resumed sent record only observes.
 func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx context.Context, md *workercore.ModelDeployment) error {
@@ -428,12 +516,23 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 		return finish(err.Error())
 	}
 	store := newElasticOperationStore(r.Client)
-	op, err := store.Read(ctx, md.Namespace, md.Name, md.UID)
+	var op *elasticOperation
+	op, err = store.Read(ctx, md.Namespace, md.Name, md.UID)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return finish(err.Error())
 	}
 	if apierrors.IsNotFound(err) {
 		op = nil
+	}
+	// From here the pass has read the record, so every verdict it finishes also levels the
+	// deployment's condition with the record's refusal. The holds above asserted nothing about
+	// the record and leave the condition exactly as the last record-reading pass left it.
+	finish = func(reason string) error {
+		status.Reason = reason
+		if err := r.persistElasticObservation(ctx, md, status); err != nil {
+			return err
+		}
+		return r.recordElasticResizeCondition(ctx, md, op)
 	}
 	if op != nil && !elasticOperationMembersMatch(op, pods) {
 		// A MISMATCH IS ONLY A WEDGE WHEN THE RECORD STILL DESCRIBES THE WORLD. Node loss empties
@@ -585,6 +684,21 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 			nativeReadFailure = readErr
 		}
 		facts.NativeComplete = readErr == nil && !scaling
+		// The same answer is carried as the scaling facts, so a record carrying a refusal whose
+		// target world is proven is decided from what the engine actually said rather than from
+		// an answer this block would otherwise leave looking unread.
+		facts.ScalingKnown = readErr == nil
+		facts.Scaling = scaling
+	} else if op.SentState() && op.ScaleLastError != "" {
+		// A record carrying a refusal is asked the same question even though its target world is
+		// not proven: a retry is owed to an idle engine and to nothing else, so a refusal is never
+		// re-issued into a resize that is already running.
+		scaling, readErr := client.IsScaling(ctx)
+		if readErr != nil {
+			nativeReadFailure = readErr
+		}
+		facts.ScalingKnown = readErr == nil
+		facts.Scaling = scaling
 	}
 	for uid, fact := range ray.ActorFree {
 		facts.ActorFree[uid] = fact.ActorFree
@@ -638,8 +752,63 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 			return err
 		}
 		if err := client.Scale(ctx, op.Width.Target, 120*time.Second); err != nil {
+			// Only a definite answer is a refusal the bound may re-issue, and it is recorded in
+			// one write after the answer, so a crash mid-call leaves the count honest: the pass
+			// reports whatever the engine said and observation decides the outcome either way.
+			if elasticScaleAnswerIsRefusal(err) {
+				failedAt := r.modelDeploymentNow()
+				op.ScaleAttempts++
+				op.ScaleLastError = err.Error()
+				op.ScaleLastFailedAt = &failedAt
+				if err := store.Update(ctx, op); err != nil {
+					return err
+				}
+			}
 			status.State = op.State
 			return finish(err.Error())
+		}
+		status.State = op.State
+		return finish("native command recorded and sent; completion unobserved")
+	case elasticActionRetryScale:
+		// The same identity re-check the first send makes: a command re-issued to a world that
+		// moved since the observations is a command about members this pass cannot vouch for.
+		live, err := r.elasticLiveMembers(ctx, md)
+		if err != nil || !elasticSameRuntime(pods, live) {
+			return finish("identity changed before the refused scale command is re-issued")
+		}
+		// The bound is the kernel's decision; when the attempt is due is this clock's question.
+		if wait := elasticScaleRetryDue(op, r.modelDeploymentNow()); wait > 0 {
+			return finish(fmt.Sprintf(
+				"the engine refused the scale command to width %d; the next attempt backs off %s; the recorded refusal: %s",
+				op.Width.Target, wait.Truncate(time.Second), op.ScaleLastError))
+		}
+		if err := client.Scale(ctx, op.Width.Target, 120*time.Second); err != nil {
+			// The same single write after the answer as the first send. An answer that is not a
+			// refusal still moves the backoff anchor — an attempt was made and its answer never
+			// arrived — but consumes none of the bound and does not overwrite the last definite
+			// refusal the record keeps.
+			failedAt := r.modelDeploymentNow()
+			if elasticScaleAnswerIsRefusal(err) {
+				op.ScaleAttempts++
+				op.ScaleLastError = err.Error()
+				op.ScaleLastFailedAt = &failedAt
+			} else {
+				op.ScaleAmbiguousAttempts++
+				op.ScaleLastFailedAt = &failedAt
+			}
+			if err := store.Update(ctx, op); err != nil {
+				return err
+			}
+			status.State = op.State
+			return finish(err.Error())
+		}
+		// The re-issued command was accepted, so the refusal it follows is no longer the last
+		// word: the record clears it and the ordinary observation decides the outcome.
+		op.ScaleLastError = ""
+		op.ScaleLastFailedAt = nil
+		op.ScaleAmbiguousAttempts = 0
+		if err := store.Update(ctx, op); err != nil {
+			return err
 		}
 		status.State = op.State
 		return finish("native command recorded and sent; completion unobserved")
@@ -660,7 +829,12 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 		if err := r.elasticSetWithdrawn(ctx, md, master, false); err != nil {
 			return err
 		}
-		return store.Delete(ctx, op)
+		if err := store.Delete(ctx, op); err != nil {
+			return err
+		}
+		// The record is gone, so no refusal can stand: the condition is leveled from that fact
+		// rather than from the in-memory record this pass deleted.
+		return r.recordElasticResizeCondition(ctx, md, nil)
 	default:
 		if op.State != decision.State {
 			op.State = decision.State
@@ -705,6 +879,10 @@ func (r *ModelDeploymentReconciler) reconstructElasticGeneration(
 		); err != nil {
 			return err
 		} else if recovered {
+			// The recovery either retired the record or swapped it for a release-only one, and
+			// both outcomes leave no refusal standing, so the condition is leveled from a
+			// completed record rather than from the one this pass entered with.
+			op.State = elasticStateCompleted
 			return finish(reason)
 		}
 	}
@@ -728,7 +906,12 @@ func (r *ModelDeploymentReconciler) reconstructElasticGeneration(
 	if err := r.elasticSetWithdrawn(ctx, md, master, false); err != nil {
 		return err
 	}
-	return store.Delete(ctx, op)
+	if err := store.Delete(ctx, op); err != nil {
+		return err
+	}
+	// The record this pass held was deleted, so no refusal can stand, whatever state the record
+	// carried: the condition is leveled from the deletion rather than from the in-memory copy.
+	return r.recordElasticResizeCondition(ctx, md, nil)
 }
 
 // recoverElasticUpscaleAfterGenerationChange handles the one stale-intent case that ordinary

@@ -27,6 +27,7 @@ import (
 	workerapi "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
 )
@@ -66,6 +67,7 @@ type elasticConvergenceFixture struct {
 	forwardsFail      atomic.Bool
 	scaling           atomic.Bool
 	scaleStatus       atomic.Int32
+	scaleMalformed    atomic.Bool
 	intentObserved    atomic.Bool
 	commitBeforeError atomic.Bool
 }
@@ -158,6 +160,13 @@ func newElasticConvergenceFixture(t *testing.T) *elasticConvergenceFixture {
 			}
 			op, err := newElasticOperationStore(cli).Read(req.Context(), md.Namespace, md.Name, md.UID)
 			f.intentObserved.Store(err == nil && op.State == elasticStateCommandSent && op.CommandSent && op.Width.Target == payload.Target && op.Generation == md.Generation)
+			if f.scaleMalformed.Load() {
+				// A 200 whose body is not the acknowledgement the route promises: the answer
+				// arrived and said nothing, which the client classifies as malformed.
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"unexpected":true}`))
+				return
+			}
 			code := int(f.scaleStatus.Load())
 			if code == 200 || f.commitBeforeError.Load() {
 				f.nativeWidth.Store(int32(payload.Target))
@@ -1417,4 +1426,235 @@ func TestANativeReadFailureIsNotAWidthTheEngineHasNotReported(t *testing.T) {
 	require.NotContains(t, status.Reason, "the engine has not reported the new width yet",
 		"a transport failure is not the engine declining to answer")
 	require.NotEmpty(t, status.Reason)
+}
+
+// TestElasticConvergenceRetriesARefusedScaleCommand pins the whole life of a refused scale
+// command: the record carries the engine's own refusal, the command is re-issued on a bounded
+// backoff while the bound holds, the bound's end is a terminal refusal in the observation reason
+// and on the deployment's condition — never a silent AwaitingWidth — and a spec that returns to
+// the old width still retires the abandoned record through the ordinary recovery.
+func TestElasticConvergenceRetriesARefusedScaleCommand(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.scaleStatus.Store(500)
+	now := time.Now()
+	f.reconciler.clock = func() time.Time { return now }
+
+	recordDoc := func(t *testing.T) map[string]any {
+		t.Helper()
+		record := new(core.ConfigMap)
+		require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKey{
+			Namespace: f.md.Namespace, Name: elasticOperationRecordName(f.md.UID),
+		}, record))
+		var doc map[string]any
+		require.NoError(t, json.Unmarshal([]byte(record.Data[elasticOperationDataKey]), &doc))
+		return doc
+	}
+	elasticCondition := kubeapistatus.ConditionType("ElasticResize")
+	liveCondition := func(t *testing.T) (status, reason, message string) {
+		t.Helper()
+		live := new(workercore.ModelDeployment)
+		require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(f.md), live))
+		return elasticCondition.GetStatus(live), elasticCondition.GetReason(live),
+			elasticCondition.GetMessage(live)
+	}
+
+	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	f.admitMembers(t)
+
+	// The first send is refused. The record keeps the engine's own refusal, and the observation
+	// says what the engine said rather than that the width is merely unreported.
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), f.scaleCalls.Load(), f.observation(t).Reason)
+	doc := recordDoc(t)
+	require.Contains(t, doc["scaleLastError"], "status 500",
+		"the record must keep the engine's own refusal")
+	require.Equal(t, float64(1), doc["scaleAttempts"])
+	require.Contains(t, f.observation(t).Reason, "status 500", f.observation(t).Reason)
+	require.Equal(t, "CommandSent", doc["state"], "a refused command is not an unreported width")
+
+	// Inside the backoff the command is not re-issued, and the wait still names the refusal.
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), f.scaleCalls.Load())
+	require.Contains(t, f.observation(t).Reason, "status 500", f.observation(t).Reason)
+	status, reason, _ := liveCondition(t)
+	require.NotEqual(t, "False", status,
+		"a refusal still inside its retry bound is not terminal")
+	require.Equal(t, "NoRefusal", reason)
+
+	// Each elapsed backoff re-issues the command, until the bound is spent.
+	for _, step := range []struct {
+		advance  time.Duration
+		attempts float64
+	}{
+		{20 * time.Second, 2}, {31 * time.Second, 3}, {61 * time.Second, 4}, {121 * time.Second, 5},
+	} {
+		now = now.Add(step.advance)
+		_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+		require.NoError(t, err)
+		doc = recordDoc(t)
+		require.Equal(t, step.attempts, doc["scaleAttempts"], f.observation(t).Reason)
+		require.Contains(t, doc["scaleLastError"], "status 500")
+	}
+	require.Equal(t, int32(5), f.scaleCalls.Load())
+
+	// The bound's end is terminal: the record is abandoned, and the refusal reaches both the
+	// observation reason and the deployment's condition with the engine text intact.
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, "Abandoned", recordDoc(t)["state"], f.observation(t).Reason)
+	require.Contains(t, f.observation(t).Reason, "status 500", f.observation(t).Reason)
+	status, reason, message := liveCondition(t)
+	require.Equal(t, "False", status, "a spent retry bound is a terminal refusal")
+	require.Equal(t, "ScaleRefused", reason)
+	require.Contains(t, message, "status 500")
+
+	// Terminal means terminal: no pass re-issues the command and the refusal does not fade.
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(5), f.scaleCalls.Load())
+	require.Equal(t, "Abandoned", recordDoc(t)["state"])
+	status, _, message = liveCondition(t)
+	require.Equal(t, "False", status)
+	require.Contains(t, message, "status 500")
+
+	// The escape is the ordinary one: a spec returned to the proven old width recovers the
+	// abandoned record. Two members beyond the old width are still admitted, so the recovery
+	// swaps the record for the release-only retirement they owe — and no refusal stands.
+	f.md.Spec.Roles[0].ElasticEP.Width = 2
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	recovered, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr, "recovery keeps the retirement the excess members owe: %v",
+		f.observation(t).Reason)
+	require.Equal(t, elasticStateReleased, recovered.State)
+	require.Equal(t, elasticWidth{Old: 4, Target: 2}, recovered.Width)
+	require.Len(t, recovered.Workers, 2)
+	observed := f.observation(t)
+	require.Equal(t, 2, observed.StableWidth)
+	status, reason, _ = liveCondition(t)
+	require.Equal(t, "True", status, "recovery leaves no refusal standing")
+	require.Equal(t, "NoRefusal", reason)
+	require.Equal(t, int32(5), f.scaleCalls.Load(), "recovery proves; it issues no command")
+}
+
+// TestAnUnansweredScaleCommandIsNotARefusal pins the line between an answer and a silence: a 200
+// whose acknowledgement never arrived says nothing about whether the command was applied, so the
+// record keeps no refusal, the bound consumes nothing, and no pass re-issues the command — the
+// world the engine actually proves is what decides, exactly as it did before the retry bound.
+func TestAnUnansweredScaleCommandIsNotARefusal(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.scaleMalformed.Store(true)
+	now := time.Now()
+	f.reconciler.clock = func() time.Time { return now }
+
+	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	f.admitMembers(t)
+
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), f.scaleCalls.Load(), f.observation(t).Reason)
+
+	// The record carries no refusal and no spent attempt: the answer said nothing.
+	record := new(core.ConfigMap)
+	require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: f.md.Namespace, Name: elasticOperationRecordName(f.md.UID),
+	}, record))
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal([]byte(record.Data[elasticOperationDataKey]), &doc))
+	require.NotContains(t, doc, "scaleLastError")
+	require.NotContains(t, doc, "scaleAttempts")
+
+	// The command is not re-issued however long the pass waits: only observation completes it.
+	now = now.Add(10 * time.Minute)
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), f.scaleCalls.Load())
+	require.Equal(t, "the engine has not reported the new width yet", f.observation(t).Reason)
+}
+
+// TestAnUnansweredRetryStillEscalatesTheBackoff pins the schedule's treatment of a re-issued
+// command whose answer never arrives: the refusal bound consumes nothing — the engine never
+// declined — but the backoff still moves, so a persistently unreachable engine is probed on the
+// doubling schedule the definite refusals earned instead of on a fixed hot cadence. The recorded
+// refusal text survives every unanswered re-issue.
+func TestAnUnansweredRetryStillEscalatesTheBackoff(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.scaleStatus.Store(500)
+	now := time.Now()
+	f.reconciler.clock = func() time.Time { return now }
+
+	recordDoc := func(t *testing.T) map[string]any {
+		t.Helper()
+		record := new(core.ConfigMap)
+		require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKey{
+			Namespace: f.md.Namespace, Name: elasticOperationRecordName(f.md.UID),
+		}, record))
+		var doc map[string]any
+		require.NoError(t, json.Unmarshal([]byte(record.Data[elasticOperationDataKey]), &doc))
+		return doc
+	}
+
+	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	f.admitMembers(t)
+
+	// The first send earns a definite refusal: the bound has one spent attempt and a 15s wait.
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), f.scaleCalls.Load(), f.observation(t).Reason)
+	doc := recordDoc(t)
+	require.Equal(t, float64(1), doc["scaleAttempts"])
+	require.NotContains(t, doc, "scaleAmbiguousAttempts")
+
+	// The re-issue's answer never arrives: the engine takes the command and returns an
+	// acknowledgement that says nothing.
+	f.scaleMalformed.Store(true)
+	now = now.Add(16 * time.Second)
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), f.scaleCalls.Load(), f.observation(t).Reason)
+	doc = recordDoc(t)
+	require.Equal(t, float64(1), doc["scaleAttempts"], "an unanswered re-issue spends no bound")
+	require.Equal(t, float64(1), doc["scaleAmbiguousAttempts"])
+	require.Contains(t, doc["scaleLastError"], "status 500",
+		"the last definite refusal survives an unanswered re-issue")
+
+	// The wait doubled: sixteen seconds in, the next attempt is not due yet.
+	now = now.Add(16 * time.Second)
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), f.scaleCalls.Load(), f.observation(t).Reason)
+
+	// Once the doubled wait has run, the command is re-issued again — and a second silence moves
+	// the schedule once more without touching the refusal bound.
+	now = now.Add(15 * time.Second)
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(3), f.scaleCalls.Load(), f.observation(t).Reason)
+	doc = recordDoc(t)
+	require.Equal(t, float64(1), doc["scaleAttempts"])
+	require.Equal(t, float64(2), doc["scaleAmbiguousAttempts"])
+	require.Contains(t, doc["scaleLastError"], "status 500")
 }
