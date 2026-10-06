@@ -67,6 +67,7 @@ type elasticConvergenceFixture struct {
 	forwardsFail      atomic.Bool
 	scaling           atomic.Bool
 	scaleStatus       atomic.Int32
+	scaleMalformed    atomic.Bool
 	intentObserved    atomic.Bool
 	commitBeforeError atomic.Bool
 }
@@ -159,6 +160,13 @@ func newElasticConvergenceFixture(t *testing.T) *elasticConvergenceFixture {
 			}
 			op, err := newElasticOperationStore(cli).Read(req.Context(), md.Namespace, md.Name, md.UID)
 			f.intentObserved.Store(err == nil && op.State == elasticStateCommandSent && op.CommandSent && op.Width.Target == payload.Target && op.Generation == md.Generation)
+			if f.scaleMalformed.Load() {
+				// A 200 whose body is not the acknowledgement the route promises: the answer
+				// arrived and said nothing, which the client classifies as malformed.
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"unexpected":true}`))
+				return
+			}
 			code := int(f.scaleStatus.Load())
 			if code == 200 || f.commitBeforeError.Load() {
 				f.nativeWidth.Store(int32(payload.Target))
@@ -1538,4 +1546,45 @@ func TestElasticConvergenceRetriesARefusedScaleCommand(t *testing.T) {
 	require.Equal(t, "True", status, "recovery leaves no refusal standing")
 	require.Equal(t, "NoRefusal", reason)
 	require.Equal(t, int32(5), f.scaleCalls.Load(), "recovery proves; it issues no command")
+}
+
+// TestAnUnansweredScaleCommandIsNotARefusal pins the line between an answer and a silence: a 200
+// whose acknowledgement never arrived says nothing about whether the command was applied, so the
+// record keeps no refusal, the bound consumes nothing, and no pass re-issues the command — the
+// world the engine actually proves is what decides, exactly as it did before the retry bound.
+func TestAnUnansweredScaleCommandIsNotARefusal(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.scaleMalformed.Store(true)
+	now := time.Now()
+	f.reconciler.clock = func() time.Time { return now }
+
+	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	f.admitMembers(t)
+
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), f.scaleCalls.Load(), f.observation(t).Reason)
+
+	// The record carries no refusal and no spent attempt: the answer said nothing.
+	record := new(core.ConfigMap)
+	require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: f.md.Namespace, Name: elasticOperationRecordName(f.md.UID),
+	}, record))
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal([]byte(record.Data[elasticOperationDataKey]), &doc))
+	require.NotContains(t, doc, "scaleLastError")
+	require.NotContains(t, doc, "scaleAttempts")
+
+	// The command is not re-issued however long the pass waits: only observation completes it.
+	now = now.Add(10 * time.Minute)
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), f.scaleCalls.Load())
+	require.Equal(t, "the engine has not reported the new width yet", f.observation(t).Reason)
 }

@@ -462,6 +462,19 @@ func elasticScaleRetryDue(op *elasticOperation, now time.Time) time.Duration {
 	return 0
 }
 
+// elasticScaleAnswerIsRefusal says whether a Scale error is an engine answer that declined the
+// command — a 408 or 5xx that reached the engine, its own busy 503, or a malformed request it
+// rejected. Those are definite refusals the record may keep and the bound may re-issue. A
+// transport loss, a caller timeout and an unreadable acknowledgement are not answers: whether the
+// engine applied the command is not known from them, so they are reported and left to observation,
+// exactly like a command whose answer never came back at all.
+func elasticScaleAnswerIsRefusal(err error) bool {
+	var engineErr *elasticengine.Error
+	return errors.As(err, &engineErr) &&
+		engineErr.Kind != elasticengine.KindAmbiguous &&
+		engineErr.Kind != elasticengine.KindMalformed
+}
+
 // reconcileModelDeploymentElasticResize is the only native mutation caller.
 // The durable record precedes the request. A resumed sent record only observes.
 func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx context.Context, md *workercore.ModelDeployment) error {
@@ -669,6 +682,11 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 			nativeReadFailure = readErr
 		}
 		facts.NativeComplete = readErr == nil && !scaling
+		// The same answer is carried as the scaling facts, so a record carrying a refusal whose
+		// target world is proven is decided from what the engine actually said rather than from
+		// an answer this block would otherwise leave looking unread.
+		facts.ScalingKnown = readErr == nil
+		facts.Scaling = scaling
 	} else if op.SentState() && op.ScaleLastError != "" {
 		// A record carrying a refusal is asked the same question even though its target world is
 		// not proven: a retry is owed to an idle engine and to nothing else, so a refusal is never
@@ -728,18 +746,21 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 		op.State = elasticStateCommandSent
 		op.CommandSent = true
 		op.CommandIntent = fmt.Sprintf("scale to %d", op.Width.Target)
-		op.ScaleAttempts = 1
 		if err := store.Update(ctx, op); err != nil {
 			return err
 		}
 		if err := client.Scale(ctx, op.Width.Target, 120*time.Second); err != nil {
-			// The engine answered with a refusal, which is an answer: the record keeps its text
-			// and the after-command passes turn it into a bounded retry or a terminal abandon.
-			failedAt := r.modelDeploymentNow()
-			op.ScaleLastError = err.Error()
-			op.ScaleLastFailedAt = &failedAt
-			if err := store.Update(ctx, op); err != nil {
-				return err
+			// Only a definite answer is a refusal the bound may re-issue, and it is recorded in
+			// one write after the answer, so a crash mid-call leaves the count honest: the pass
+			// reports whatever the engine said and observation decides the outcome either way.
+			if elasticScaleAnswerIsRefusal(err) {
+				failedAt := r.modelDeploymentNow()
+				op.ScaleAttempts++
+				op.ScaleLastError = err.Error()
+				op.ScaleLastFailedAt = &failedAt
+				if err := store.Update(ctx, op); err != nil {
+					return err
+				}
 			}
 			status.State = op.State
 			return finish(err.Error())
@@ -759,14 +780,19 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 				"the engine refused the scale command to width %d; the next attempt backs off %s; the recorded refusal: %s",
 				op.Width.Target, wait.Truncate(time.Second), op.ScaleLastError))
 		}
-		op.ScaleAttempts++
-		if err := store.Update(ctx, op); err != nil {
-			return err
-		}
 		if err := client.Scale(ctx, op.Width.Target, 120*time.Second); err != nil {
+			// The same single write after the answer as the first send. An answer that is not a
+			// refusal still moves the backoff anchor — an attempt was made and its answer never
+			// arrived — but consumes none of the bound and does not overwrite the last definite
+			// refusal the record keeps.
 			failedAt := r.modelDeploymentNow()
-			op.ScaleLastError = err.Error()
-			op.ScaleLastFailedAt = &failedAt
+			if elasticScaleAnswerIsRefusal(err) {
+				op.ScaleAttempts++
+				op.ScaleLastError = err.Error()
+				op.ScaleLastFailedAt = &failedAt
+			} else {
+				op.ScaleLastFailedAt = &failedAt
+			}
 			if err := store.Update(ctx, op); err != nil {
 				return err
 			}

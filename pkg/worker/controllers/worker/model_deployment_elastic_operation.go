@@ -99,12 +99,14 @@ type elasticOperation struct {
 	// CommandSent records that the intent left. It is set with the intent, so its presence means
 	// the engine may already have it.
 	CommandSent bool `json:"commandSent"`
-	// ScaleAttempts counts how many times the scale command has left, the in-flight one included.
-	// It is the retry bound's counter: the kernel abandons the operation once it names the bound.
+	// ScaleAttempts counts the definite refusals the engine has answered with, which is the retry
+	// bound's counter: the kernel abandons the operation once it names the bound. An attempt whose
+	// answer never arrived is not counted — whether it landed is not known, so it consumes
+	// nothing.
 	ScaleAttempts int `json:"scaleAttempts,omitempty"`
-	// ScaleLastError is the engine's own refusal text from the last attempt. It is kept until the
-	// command is accepted or the retry bound is spent, so the refusal survives the passes that
-	// would otherwise overwrite it with a wait.
+	// ScaleLastError is the engine's own refusal text from the last definite answer. It is kept
+	// until the command is accepted or the retry bound is spent, so the refusal survives the
+	// passes that would otherwise overwrite it with a wait.
 	ScaleLastError string `json:"scaleLastError,omitempty"`
 	// ScaleLastFailedAt anchors the backoff: the next attempt is owed only after the schedule has
 	// run from this moment. A nil means the last attempt is not owed a wait.
