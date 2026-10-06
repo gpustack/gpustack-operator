@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers hardware, shapes accelerator capacity, and helps Kubernetes place workloads where that capacity is available.
 
-Documentation version: main. Source revision: 3be7768a975b7893346432e6d2f143d6250df542.
+Documentation version: main. Source revision: 01799b3c9033564cca2df945365fec4333645b75.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -92,6 +92,6 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/3be7768a975b7893346432e6d2f143d6250df542/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/01799b3c9033564cca2df945365fec4333645b75/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.
