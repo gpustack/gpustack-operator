@@ -699,6 +699,169 @@ func TestElasticGenerationDriftReconstructs(t *testing.T) {
 	}
 }
 
+// stageRecovery drives the fixture into the recovery pass: a sent upward record at an older
+// generation whose target the engine never reached, with the desired width back at the record's
+// own old width. withExcess decides between the recovery's two exits: without excess members the
+// stale record retires outright, with them it swaps for a release-only record at the proven old
+// width.
+func (f *elasticConvergenceFixture) stageRecovery(t *testing.T, withExcess bool) {
+	t.Helper()
+	ctx := context.Background()
+	if withExcess {
+		f.md.Spec.Roles[0].ElasticEP.Width = 4
+		f.md.Generation++
+		require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+		_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+		require.NoError(t, err)
+		f.startMembers(t)
+		f.admitMembers(t)
+		// The desired width returns to the record's own old width, which is what makes the
+		// recorded upward command stale.
+		f.md.Spec.Roles[0].ElasticEP.Width = 2
+	} else {
+		f.startMembers(t)
+	}
+	pods, err := f.reconciler.elasticLiveMembers(ctx, f.md)
+	require.NoError(t, err)
+	op := &elasticOperation{
+		Name: f.md.Name, Namespace: f.md.Namespace, DeploymentUID: f.md.UID,
+		Generation: f.md.Generation, Width: elasticWidth{Old: 2, Target: 4},
+		State: elasticStateCommandSent, CommandSent: true, CommandIntent: "scale to 4",
+	}
+	for i := range pods {
+		pod := &pods[i]
+		id := elasticCapturedIdentity{Name: pod.Name, UID: pod.UID}
+		if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(f.md) {
+			op.Head = id
+		} else {
+			op.Members = append(op.Members, id)
+			if modelDeploymentOrdinalOrFloor(pod) == 0 {
+				op.Master = id
+			}
+		}
+	}
+	_, err = newElasticOperationStore(f.reconciler.Client).Create(ctx, op)
+	require.NoError(t, err)
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+}
+
+// TestRecoveryWithoutExcessMembersRetiresTheStaleRecord pins the exit where the interrupted
+// upscale never left its old width: the stale record retires on the proven old world, and the
+// observation reads a completed deployment at that width.
+func TestRecoveryWithoutExcessMembersRetiresTheStaleRecord(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.stageRecovery(t, false)
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.True(t, apierrors.IsNotFound(readErr))
+	observed := f.observation(t)
+	require.Equal(t, 2, observed.StableWidth)
+	require.Equal(t, elasticStateCompleted, observed.State)
+	require.Contains(t, observed.Reason, "never left the proven old native width")
+}
+
+// TestTheRecoveryRetirementSurvivesAFailedObservationWrite pins the recovery exits' ordering: the
+// observation claiming the outcome is written BEFORE the record moves, so a pass that could not
+// make its proof durable leaves the stale record holding the deployment instead of deleting or
+// swapping it behind an observation nothing backs.
+func TestTheRecoveryRetirementSurvivesAFailedObservationWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		withExcess bool
+		exitReason string
+	}{
+		{
+			name: "no retiring members", withExcess: false,
+			exitReason: "never left the proven old native width",
+		},
+		{
+			name: "retiring members", withExcess: true,
+			exitReason: "recovered at the proven old native width",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newElasticConvergenceFixture(t)
+			f.stageRecovery(t, tc.withExcess)
+
+			var attempted string
+			f.reconciler.Client = ctrlinterceptor.NewClient(f.reconciler.Client.(ctrlcli.WithWatch),
+				ctrlinterceptor.Funcs{
+					Update: func(ctx context.Context, cli ctrlcli.WithWatch, obj ctrlcli.Object,
+						opts ...ctrlcli.UpdateOption,
+					) error {
+						if cm, ok := obj.(*core.ConfigMap); ok &&
+							cm.Name == modelDeploymentElasticObservationName(f.md) {
+							attempted = cm.Data["observation.json"]
+							return fmt.Errorf("the observation write is unavailable")
+						}
+						return cli.Update(ctx, obj, opts...)
+					},
+				})
+
+			require.Error(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+			require.NotEmpty(t, attempted,
+				"the pass never attempted the recovery exit, so it proves nothing")
+			require.Contains(t, attempted, tc.exitReason,
+				"the write the pass could not make is the recovery exit's own claim")
+
+			op, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+				ctx, f.md.Namespace, f.md.Name, f.md.UID)
+			require.NoError(t, readErr, "a failed proof leaves the record holding the deployment")
+			require.Equal(t, elasticStateCommandSent, op.State)
+			require.Equal(t, elasticWidth{Old: 2, Target: 4}, op.Width)
+		})
+	}
+}
+
+// TestTheRecoverySwapIsRetryableWhenItsWriteFails pins the swap's failure shape: a failed
+// recovery write leaves the stale record byte-for-byte intact, and the next pass with a healthy
+// store completes the same swap without a new command and without losing the retirement.
+func TestTheRecoverySwapIsRetryableWhenItsWriteFails(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.stageRecovery(t, true)
+
+	plain := f.reconciler.Client
+	f.reconciler.Client = ctrlinterceptor.NewClient(plain.(ctrlcli.WithWatch),
+		ctrlinterceptor.Funcs{
+			Update: func(ctx context.Context, cli ctrlcli.WithWatch, obj ctrlcli.Object,
+				opts ...ctrlcli.UpdateOption,
+			) error {
+				if cm, ok := obj.(*core.ConfigMap); ok &&
+					cm.Name == elasticOperationRecordName(f.md.UID) {
+					return fmt.Errorf("the record write is unavailable")
+				}
+				return cli.Update(ctx, obj, opts...)
+			},
+		})
+	require.Error(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	op, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr, "the stale record survives a failed swap")
+	require.Equal(t, elasticStateCommandSent, op.State)
+	require.Equal(t, elasticWidth{Old: 2, Target: 4}, op.Width)
+	require.Equal(t, "scale to 4", op.CommandIntent)
+
+	// The next pass writes through a healthy store: the same recovery completes, still without
+	// any native command, and the record it leaves is the release-only one.
+	f.reconciler.Client = plain
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+	recovered, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr)
+	require.Equal(t, elasticStateReleased, recovered.State)
+	require.Equal(t, elasticWidth{Old: 4, Target: 2}, recovered.Width)
+	require.Len(t, recovered.Workers, 2)
+	require.Zero(t, f.scaleCalls.Load())
+}
+
 // elasticWatchedReader records the options every List reached the API server with and can be made
 // to fail one, so a test can see what a reconcile-hot-path read asked for instead of inferring it
 // from the objects it happened to return.

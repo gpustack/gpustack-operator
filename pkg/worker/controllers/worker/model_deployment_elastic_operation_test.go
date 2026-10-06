@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -861,4 +862,134 @@ func TestAWriteAgainstTheRightOwnerStillWrites(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, read.CommandSent)
 	assert.Equal(t, elasticStateCommandSent, read.State)
+}
+
+// elasticRecoveryRecords builds the two records one interrupted-upscale recovery swaps between:
+// the stale sent upward command the pass decided against, and the release-only record recovery
+// retires it into at the proven old width.
+func elasticRecoveryRecords() (current, recovered *elasticOperation) {
+	current = elasticTestOperation(
+		elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+	current.State = elasticStateCommandSent
+	current.CommandSent = true
+
+	recovered = elasticTestOperation(
+		elasticWidth{Old: 4, Target: 2}, elasticWorkerTwo, elasticWorkerThree)
+	recovered.State = elasticStateReleased
+	recovered.CommandSent = true
+	recovered.CommandIntent = "recovered at already observed native width 2"
+	recovered.Release = &modelDeploymentRetirementRelease{
+		ModelDeploymentUID: elasticTestDeployUID, ObservedGeneration: 1, RoleName: "server",
+	}
+
+	return current, recovered
+}
+
+// TestTheRecoverySwapIsOneAtomicWrite covers the store's one envelope-moving transition: the
+// stale interrupted record is replaced by its recovery record in a single write, so no crash and
+// no failed write can leave the deployment with no record between the two, and every refusal
+// leaves the stale record exactly as the pass read it.
+func TestTheRecoverySwapIsOneAtomicWrite(t *testing.T) {
+	recordKey := ctrlcli.ObjectKey{
+		Namespace: elasticTestNamespace, Name: elasticOperationRecordName(elasticTestDeployUID),
+	}
+
+	t.Run("the recovery record replaces the stale one in place", func(t *testing.T) {
+		ctx := context.Background()
+		client := elasticTestClient()
+		store := newElasticOperationStore(client)
+		current, err := store.Create(ctx, elasticTestOperation(
+			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree))
+		require.NoError(t, err)
+		_, recovered := elasticRecoveryRecords()
+		before := new(corev1.ConfigMap)
+		require.NoError(t, client.Get(ctx, recordKey, before))
+
+		require.NoError(t, store.RecoverInterrupted(ctx, current, recovered))
+
+		after := new(corev1.ConfigMap)
+		require.NoError(t, client.Get(ctx, recordKey, after))
+		assert.Equal(t, before.Name, after.Name, "the swap reuses the stale record's object")
+		assert.NotEqual(t, before.Data, after.Data, "the swap wrote the recovery record")
+		read, err := store.Read(ctx, elasticTestNamespace, elasticTestDeployNm, elasticTestDeployUID)
+		require.NoError(t, err)
+		assert.Equal(t, elasticWidth{Old: 4, Target: 2}, read.Width)
+		assert.Equal(t, elasticStateReleased, read.State)
+		assert.Equal(t, "recovered at already observed native width 2", read.CommandIntent)
+		assert.Len(t, read.Workers, 2)
+		assert.NotNil(t, read.Release)
+		assert.Equal(t, after.ResourceVersion, recovered.ResourceVersion,
+			"the swap leaves the caller the version it can retry against")
+	})
+
+	t.Run("a failed swap write leaves the stale record in place", func(t *testing.T) {
+		ctx := context.Background()
+		client := ctrlfake.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Update: func(ctx context.Context, cli ctrlcli.WithWatch, obj ctrlcli.Object,
+					opts ...ctrlcli.UpdateOption,
+				) error {
+					if _, ok := obj.(*corev1.ConfigMap); ok {
+						return fmt.Errorf("the record write is unavailable")
+					}
+					return cli.Update(ctx, obj, opts...)
+				},
+			}).
+			Build()
+		store := newElasticOperationStore(client)
+		toStore, recovered := elasticRecoveryRecords()
+		current, err := store.Create(ctx, toStore)
+		require.NoError(t, err)
+		staleVersion := current.ResourceVersion
+
+		err = store.RecoverInterrupted(ctx, current, recovered)
+		require.Error(t, err)
+
+		read, err := store.Read(ctx, elasticTestNamespace, elasticTestDeployNm, elasticTestDeployUID)
+		require.NoError(t, err, "the stale record survives a failed swap")
+		assert.Equal(t, elasticStateCommandSent, read.State)
+		assert.Equal(t, elasticWidth{Old: 2, Target: 4}, read.Width)
+		assert.Equal(t, "set the collective width", read.CommandIntent)
+		assert.Equal(t, staleVersion, read.ResourceVersion, "the stale record moved not at all")
+		assert.Empty(t, recovered.ResourceVersion,
+			"a failed write leaves the recovery record nothing to retry against")
+	})
+
+	t.Run("a stale record that moved underneath is refused", func(t *testing.T) {
+		ctx := context.Background()
+		client := elasticTestClient()
+		store := newElasticOperationStore(client)
+		current, err := store.Create(ctx, elasticTestOperation(
+			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree))
+		require.NoError(t, err)
+
+		// The stored record is rewritten to a different operation under the same name, and the
+		// caller's version is refreshed to match, so the version check alone would pass and the
+		// envelope comparison is what stands between the swap and a record it never decided on.
+		stored := new(corev1.ConfigMap)
+		require.NoError(t, client.Get(ctx, recordKey, stored))
+		moved := elasticTestOperation(
+			elasticWidth{Old: 4, Target: 6}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+		moved.State = elasticStateCommandSent
+		moved.CommandSent = true
+		raw, err := json.Marshal(moved)
+		require.NoError(t, err)
+		stored.Data = map[string]string{elasticOperationDataKey: string(raw)}
+		require.NoError(t, client.Update(ctx, stored))
+		require.NoError(t, client.Get(ctx, recordKey, stored))
+		before := stored.DeepCopy()
+		current.ResourceVersion = stored.ResourceVersion
+
+		_, recovered := elasticRecoveryRecords()
+		err = store.RecoverInterrupted(ctx, current, recovered)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "retargeted to another width")
+
+		after := new(corev1.ConfigMap)
+		require.NoError(t, client.Get(ctx, recordKey, after))
+		assert.Equal(t, before.Data, after.Data, "a refused swap must not change the stored bytes")
+		assert.Equal(t, before.ResourceVersion, after.ResourceVersion,
+			"a refused swap must not bump the object")
+	})
 }

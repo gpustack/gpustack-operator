@@ -743,12 +743,20 @@ func (r *ModelDeploymentReconciler) recoverElasticUpscaleAfterGenerationChange(
 		}
 	}
 	if len(retiring) == 0 {
+		// THE PROOF OUTLIVES THE RECORD, not the other way around: the observation claiming the
+		// completed old width is written before the stale record is retired, so a failed write
+		// or a crash in between leaves the record holding the deployment rather than a deleted
+		// record behind an observation nothing backs.
+		status.StableWidth = op.Width.Old
+		status.State = elasticStateCompleted
+		status.Reason = "the interrupted upscale never left the proven old native width; the stale record was retired"
+		if err := r.persistElasticObservation(ctx, md, *status); err != nil {
+			return "", false, err
+		}
 		if err := store.Delete(ctx, op); err != nil {
 			return "", false, err
 		}
-		status.StableWidth = op.Width.Old
-		status.State = elasticStateCompleted
-		return "the interrupted upscale never left the proven old native width; the stale record was retired", true, nil
+		return status.Reason, true, nil
 	}
 	if len(gpuMembers) <= op.Width.Old || masterIdentity.UID == "" || headIdentity.UID == "" {
 		return "", false, nil
@@ -774,15 +782,20 @@ func (r *ModelDeploymentReconciler) recoverElasticUpscaleAfterGenerationChange(
 		recovered.Workers = append(recovered.Workers,
 			elasticCapturedIdentity{Name: pod.Name, UID: pod.UID})
 	}
-	if err := store.Delete(ctx, op); err != nil {
-		return "", false, err
-	}
-	if _, err := store.Create(ctx, recovered); err != nil {
-		return "", false, err
-	}
+	// The observation is written before the swap, and the swap itself is one write: a Delete
+	// followed by a Create over the same name would leave the deployment with no record at all
+	// between them, and a crash or a failed Create there would lose both the stale intent and
+	// the retirement it owed.
 	status.State = recovered.State
 	status.StableWidth = op.Width.Old
-	return "the interrupted upscale was recovered at the proven old native width; excess members await the normal release proofs", true, nil
+	status.Reason = "the interrupted upscale was recovered at the proven old native width; excess members await the normal release proofs"
+	if err := r.persistElasticObservation(ctx, md, *status); err != nil {
+		return "", false, err
+	}
+	if err := store.RecoverInterrupted(ctx, op, recovered); err != nil {
+		return "", false, err
+	}
+	return status.Reason, true, nil
 }
 
 // elasticGenerationExit is the whole decision of the reconstruction pass: a reason for every case

@@ -519,6 +519,76 @@ func (s *elasticOperationStore) Update(ctx context.Context, op *elasticOperation
 	return nil
 }
 
+// RecoverInterrupted replaces one interrupted record with its recovery record in a single write.
+//
+// THE ENVELOPE MOVES ON THIS ONE TRANSITION, BY DESIGN, which is why it does not go through
+// envelopeDrift like every other write. The record being replaced is a generation-stale upward
+// command that never advanced the native world: recovery re-proves that command's old width and
+// retires the stale intent into a release-only record at the proven width, so the widths, the
+// captured workers and the release identities all differ between the two records. The recovery
+// record removes nothing by itself — every worker it captured still owes the ordinary withdrawal,
+// actor-free and allocation-return proofs before any deletion — so the envelope move never
+// shortcuts a proof. Everything else about Update's optimism is kept: the stored object is read
+// fresh, the version and the owner are re-checked, and the stored envelope is compared against
+// the record the caller decided against, so a record that moved since that decision is a
+// refusal rather than an overwrite.
+func (s *elasticOperationStore) RecoverInterrupted(
+	ctx context.Context, current, recovered *elasticOperation,
+) error {
+	if err := current.validate(); err != nil {
+		return err
+	}
+	if err := recovered.validate(); err != nil {
+		return err
+	}
+	if recovered.Name != current.Name || recovered.Namespace != current.Namespace ||
+		recovered.DeploymentUID != current.DeploymentUID {
+		return fmt.Errorf("%w: the recovery record is not this deployment's", errElasticOperation)
+	}
+	if s.client == nil {
+		return fmt.Errorf("%w: no client is configured", errElasticOperation)
+	}
+
+	stored := new(corev1.ConfigMap)
+	if err := s.client.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: current.Namespace, Name: elasticOperationRecordName(current.DeploymentUID),
+	}, stored); err != nil {
+		return err
+	}
+	if current.ResourceVersion == "" {
+		return fmt.Errorf(
+			"%w: the record was not read, so it carries no version to write against", errElasticOperation)
+	}
+	if stored.ResourceVersion != current.ResourceVersion {
+		return apierrors.NewConflict(
+			corev1.Resource("configmaps"), elasticOperationRecordName(current.DeploymentUID),
+			fmt.Errorf("the record moved from %s to %s", current.ResourceVersion, stored.ResourceVersion))
+	}
+	if err := elasticControllingOwnerIs(stored, current.Name, current.DeploymentUID); err != nil {
+		return err
+	}
+	storedRecord, err := elasticOperationFromData(stored.Data[elasticOperationDataKey])
+	if err != nil {
+		return err
+	}
+	if reason := storedRecord.envelopeDrift(current); reason != "" {
+		return fmt.Errorf("%w: %s", errElasticOperation, reason)
+	}
+
+	document, err := json.Marshal(recovered)
+	if err != nil {
+		return fmt.Errorf("encode the elastic resize record: %w", err)
+	}
+	stored.Data = map[string]string{elasticOperationDataKey: string(document)}
+
+	if err := s.client.Update(ctx, stored); err != nil {
+		return err
+	}
+	recovered.ResourceVersion = stored.ResourceVersion
+
+	return nil
+}
+
 // Delete removes the record, which is the only way a deployment's operation stops being unresolved.
 func (s *elasticOperationStore) Delete(ctx context.Context, op *elasticOperation) error {
 	if s.client == nil || op == nil || op.ResourceVersion == "" {
