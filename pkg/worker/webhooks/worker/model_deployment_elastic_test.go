@@ -26,6 +26,7 @@ import (
 	fakecli "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
 func elasticRole(mutate func(*workercore.ModelDeploymentRole)) workercore.ModelDeploymentRole {
@@ -72,17 +73,17 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 		name: "valid minimal elastic profile admitted",
 		md:   func() *workercore.ModelDeployment { return elasticMD() },
 	}, {
-		name: "width at upper bound 64 admitted",
+		name: "width at upper bound admitted",
 		md: func() *workercore.ModelDeployment {
 			return elasticMD(elasticRole(func(r *workercore.ModelDeploymentRole) {
-				r.ElasticEP.Width = 64
+				r.ElasticEP.Width = elasticprofile.WidthMax
 			}))
 		},
 	}, {
 		name: "width below minimum refused",
 		md: func() *workercore.ModelDeployment {
 			return elasticMD(elasticRole(func(r *workercore.ModelDeploymentRole) {
-				r.ElasticEP.Width = 1
+				r.ElasticEP.Width = elasticprofile.WidthMin - 1
 			}))
 		},
 		wantErr: []string{"width"},
@@ -90,7 +91,7 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 		name: "width above maximum refused",
 		md: func() *workercore.ModelDeployment {
 			return elasticMD(elasticRole(func(r *workercore.ModelDeploymentRole) {
-				r.ElasticEP.Width = 65
+				r.ElasticEP.Width = elasticprofile.WidthMax + 1
 			}))
 		},
 		wantErr: []string{"width"},
@@ -297,6 +298,58 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 				if !contains(joined, want) {
 					t.Fatalf("want error mentioning %q, got:\n%s", want, joined)
 				}
+			}
+		})
+	}
+}
+
+// TestValidateModelDeploymentElasticEPWidthBounds is the admission half of the elastic profile
+// contract: every width the profile declares is admitted here, and the first width on each
+// side of that range is refused.
+//
+// THE RANGE IS ASKED FOR, NEVER RESTATED. A bound written into this file instead of read from
+// the shared profile is what this test catches, because the widths it asks about come from the
+// profile and a webhook carrying a different pair would admit or refuse one of them.
+func TestValidateModelDeploymentElasticEPWidthBounds(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	if err := workercore.AddToScheme(scheme); err != nil {
+		t.Fatalf("build scheme: %v", err)
+	}
+	cli := fakecli.NewClientBuilder().WithScheme(scheme).WithObjects(&workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: "cpu-head"},
+	}).Build()
+	webhook := &ModelDeploymentWebhook{APIReader: cli}
+
+	cases := []struct {
+		name     string
+		width    int32
+		wantRefu bool
+	}{
+		{name: "the narrowest profile width", width: elasticprofile.WidthMin},
+		{name: "the widest profile width", width: elasticprofile.WidthMax},
+		{name: "one below the profile", width: elasticprofile.WidthMin - 1, wantRefu: true},
+		{name: "one above the profile", width: elasticprofile.WidthMax + 1, wantRefu: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			md := elasticMD(elasticRole(func(r *workercore.ModelDeploymentRole) {
+				r.ElasticEP.Width = tc.width
+			}))
+			errs := webhook.ValidateModelDeploymentElasticEP(context.Background(), md, nil)
+
+			widthRefused := false
+			for _, e := range errs {
+				if e.Field == "spec.roles[0].elasticEp.width" {
+					widthRefused = true
+				}
+			}
+			if widthRefused != tc.wantRefu {
+				t.Fatalf("width %d refused=%t, want refused=%t (errors: %v)",
+					tc.width, widthRefused, tc.wantRefu, errs)
 			}
 		})
 	}
