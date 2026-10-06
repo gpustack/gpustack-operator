@@ -25,7 +25,10 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
 )
 
-const modelDeploymentElasticWithdrawnAnnotation = "modeldeployment.gpustack.ai/elastic-withdrawn"
+const (
+	modelDeploymentElasticWithdrawnAnnotation = "modeldeployment.gpustack.ai/elastic-withdrawn"
+	elasticObservationLabel                   = "gpustack.ai/elastic-observation"
+)
 
 // The internal observation document preserves independent values and a last proven width.
 // A previous value only selects the next observation. It never authorizes an engine action.
@@ -98,6 +101,7 @@ func (r *ModelDeploymentReconciler) persistElasticObservation(
 		cm = &core.ConfigMap{
 			ObjectMeta: meta.ObjectMeta{
 				Name: modelDeploymentElasticObservationName(md), Namespace: md.Namespace,
+				Labels: map[string]string{elasticObservationLabel: "true"},
 				OwnerReferences: []meta.OwnerReference{{
 					APIVersion: workercore.GroupVersion.String(), Kind: "ModelDeployment",
 					Name: md.Name, UID: md.UID, Controller: elasticControllerRef(),

@@ -277,9 +277,13 @@ func TestModelDeploymentOwnedResourceRequiresAResourceNote(t *testing.T) {
 	systemmeta.NoteResource(withoutNote, ModelDeploymentResourceType, nil)
 	wrongType := role.DeepCopy()
 	systemmeta.NoteResource(wrongType, "instances", nil)
+	elasticOperation := &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Labels: map[string]string{elasticOperationLabel: "true"}}}
+	elasticObservation := &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Labels: map[string]string{elasticObservationLabel: "true"}}}
 
 	assert.True(t, modelDeploymentOwnedResource(role))
 	assert.True(t, modelDeploymentOwnedResource(router))
+	assert.True(t, modelDeploymentOwnedResource(elasticOperation))
+	assert.True(t, modelDeploymentOwnedResource(elasticObservation))
 	assert.False(t, modelDeploymentOwnedResource(withoutNote))
 	assert.False(t, modelDeploymentOwnedResource(wrongType))
 }
