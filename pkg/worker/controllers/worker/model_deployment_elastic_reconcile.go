@@ -31,17 +31,24 @@ const (
 	modelDeploymentElasticWithdrawnAnnotation = "modeldeployment.gpustack.ai/elastic-withdrawn"
 	elasticObservationLabel                   = "gpustack.ai/elastic-observation"
 
-	// ModelDeploymentConditionElasticResize reports whether an elastic scale command stands
+	// ModelDeploymentConditionElasticResize reports whether an elastic scale stands blocked or
 	// terminally refused. It is declared beside the convergence that decides it, like every other
 	// condition whose vocabulary sits with the code that can observe it. It is False with
-	// ScaleRefused only while the durable record says the retry bound is spent, and True with
-	// NoRefusal the rest of the time: a refusal still inside its bound is not terminal and must
-	// not read as one.
+	// ScaleRefused only while the durable record says the retry bound is spent, Unknown with
+	// WorldUnprovable while no record exists and the live width disagrees with the spec without
+	// proving itself, and True with NoRefusal the rest of the time: a refusal still inside its
+	// bound is not terminal and must not read as one, and an unprovable world is not a refusal.
 	ModelDeploymentConditionElasticResize kubeapistatus.ConditionType = "ElasticResize"
 
 	// modelDeploymentReasonScaleRefused is ElasticResize's False reason: the record is abandoned
 	// and its message carries the engine's own last refusal.
 	modelDeploymentReasonScaleRefused = "ScaleRefused"
+
+	// modelDeploymentReasonWorldUnprovable is ElasticResize's Unknown reason: no record exists,
+	// the live width disagrees with the spec or cannot be named, and the corrective scale is
+	// blocked until a pass proves the world it would have to act on. Its message carries the
+	// desired width, the observed width and the proof that failed.
+	modelDeploymentReasonWorldUnprovable = "WorldUnprovable"
 
 	// modelDeploymentReasonNoScaleRefusal is ElasticResize's True reason: no record stands
 	// refused, whether none exists, one is in flight, or one has just completed.
@@ -412,27 +419,31 @@ func elasticOperationMembersMatch(op *elasticOperation, pods []core.Pod) bool {
 // otherwise — including when no record exists, so a refusal never outlives the record it came
 // from. The pass hands over the record as it stands after its own writes; a caller whose record
 // was just deleted hands over nil.
+func (r *ModelDeploymentReconciler) recordElasticResizeCondition(
+	ctx context.Context, md *workercore.ModelDeployment, op *elasticOperation,
+) error {
+	target, reason, message := string(meta.ConditionTrue),
+		modelDeploymentReasonNoScaleRefusal, "no elastic scale command stands refused"
+	if op != nil && op.State == elasticStateAbandoned {
+		target, reason, message = string(meta.ConditionFalse),
+			modelDeploymentReasonScaleRefused, elasticScaleRefusalMessage(op)
+	}
+	return r.writeElasticResizeCondition(ctx, md, target, reason, message)
+}
+
+// writeElasticResizeCondition patches the deployment's ElasticResize condition to one outcome.
 //
 // IT IS ITS OWN WRITE rather than a field set before the pass's status sync, for the same reason
 // the retirement reservation is: the sync compares the derived status with the observed one and
 // would find an assigned field equal to itself. The patch is optimistic and asserts only this
 // condition, and the in-memory status takes the server's response so the same pass's later status
 // sync rebuilds from what the server now holds. An unchanged condition writes nothing.
-func (r *ModelDeploymentReconciler) recordElasticResizeCondition(
-	ctx context.Context, md *workercore.ModelDeployment, op *elasticOperation,
+func (r *ModelDeploymentReconciler) writeElasticResizeCondition(
+	ctx context.Context, md *workercore.ModelDeployment, status, reason, message string,
 ) error {
-	refused := op != nil && op.State == elasticStateAbandoned
-	reason, message := modelDeploymentReasonNoScaleRefusal, "no elastic scale command stands refused"
-	if refused {
-		reason, message = modelDeploymentReasonScaleRefused, elasticScaleRefusalMessage(op)
-	}
 	base := md.DeepCopy()
 	candidate := base.DeepCopy()
-	if refused {
-		ModelDeploymentConditionElasticResize.False(candidate, reason, message)
-	} else {
-		ModelDeploymentConditionElasticResize.True(candidate, reason, message)
-	}
+	ModelDeploymentConditionElasticResize.Status(candidate, status, reason, message)
 	if kubemeta.DeepEqual(base.Status, candidate.Status) {
 		return nil
 	}
@@ -443,6 +454,36 @@ func (r *ModelDeploymentReconciler) recordElasticResizeCondition(
 	md.ResourceVersion = candidate.ResourceVersion
 	md.Status = candidate.Status
 	return nil
+}
+
+// finishElasticWorldUnprovable parks an unprovable world loudly. With no record, a world the pass
+// cannot prove blocks the corrective scale — acting on unproven ranks is unsafe by design — and a
+// live width that disagrees with the spec, or cannot be named at all, must not read as health
+// while the engine and the pod set hold the wider quota. The observation keeps the proof's own
+// failure, and the condition turns Unknown with the block and a message carrying the desired
+// width, the observed width and the failed proof. A live width that agrees with the spec owes no
+// corrective scale, so its park stays as quiet as before. Recovery is ordinary: a later pass that
+// proves the world reaches the corrective block and levels the condition through the
+// record-driven writer.
+func (r *ModelDeploymentReconciler) finishElasticWorldUnprovable(
+	ctx context.Context, md *workercore.ModelDeployment, status *modelDeploymentElasticStatus,
+	finish func(string) error, desired int,
+) error {
+	if status.Ray.Known && status.Ray.Value == desired {
+		return finish(status.Effective.Reason)
+	}
+	status.Reason = status.Effective.Reason
+	if err := r.persistElasticObservation(ctx, md, *status); err != nil {
+		return err
+	}
+	ray := strconv.Itoa(status.Ray.Value)
+	if !status.Ray.Known {
+		ray = "unknown"
+	}
+	return r.writeElasticResizeCondition(ctx, md, string(meta.ConditionUnknown),
+		modelDeploymentReasonWorldUnprovable,
+		fmt.Sprintf("the corrective scale from the live width %s to the desired width %d is blocked: the live world cannot be proven (%s)",
+			ray, desired, status.Effective.Reason))
 }
 
 // elasticScaleRetryDue says how long the next refused-command attempt still owes, from the bound
@@ -612,12 +653,12 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 				status.Ray = unknownLayer(ray.RegisteredGPUUnknownReason)
 			}
 			if !proven {
-				return finish(status.Effective.Reason)
+				return r.finishElasticWorldUnprovable(ctx, md, &status, finish, int(role.ElasticEP.Width))
 			}
 			width = live
 		}
 		if !proven {
-			return finish(status.Effective.Reason)
+			return r.finishElasticWorldUnprovable(ctx, md, &status, finish, int(role.ElasticEP.Width))
 		}
 		status.StableWidth = width
 		if width == int(role.ElasticEP.Width) {

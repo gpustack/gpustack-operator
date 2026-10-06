@@ -1188,6 +1188,106 @@ func TestAnUnreadableRayWorldStillCreatesNoOperation(t *testing.T) {
 	require.Equal(t, "native rank identities are unknown", f.observation(t).Reason)
 }
 
+// TestAnUnprovableWorldSurfacesTheBlockedDrive pins the loud park: with no operation record and a
+// live world this pass cannot prove, the corrective scale is blocked — no pass may act without the
+// rank proof — and the deployment's condition must say so instead of reading healthy while the
+// engine and the pod set hold more quota than the spec asks for. The observation keeps the proof's
+// own failure, and the park synthesizes no operation, issues no command and retires no member.
+func TestAnUnprovableWorldSurfacesTheBlockedDrive(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		liveWidth  string
+		blockProof func(f *elasticConvergenceFixture)
+	}{
+		{
+			name: "the live width is unknown", liveWidth: "unknown",
+			blockProof: func(f *elasticConvergenceFixture) { f.rayMalformed.Store(true) },
+		},
+		{
+			name: "the live width fails its forward proof", liveWidth: "4",
+			blockProof: func(f *elasticConvergenceFixture) { f.forwardsFail.Store(true) },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newElasticConvergenceFixture(t)
+			f.stageLostUpscaleWorld(t)
+			tc.blockProof(f)
+			scalesBefore := f.scaleCalls.Load()
+			members := func() map[string]types.UID {
+				pods := new(core.PodList)
+				require.NoError(t, f.reconciler.Client.List(ctx, pods))
+				live := map[string]types.UID{}
+				for i := range pods.Items {
+					live[pods.Items[i].Name] = pods.Items[i].UID
+				}
+				return live
+			}
+			before := members()
+
+			require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+			_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+				ctx, f.md.Namespace, f.md.Name, f.md.UID)
+			require.True(t, apierrors.IsNotFound(readErr),
+				"an unprovable world synthesizes no operation")
+			require.Equal(t, scalesBefore, f.scaleCalls.Load(),
+				"an unprovable world issues no corrective command")
+			require.Equal(t, before, members(), "an unprovable world retires no member")
+			observed := f.observation(t)
+			elasticCondition := kubeapistatus.ConditionType("ElasticResize")
+			live := new(workercore.ModelDeployment)
+			require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(f.md), live))
+			require.Equal(t, "Unknown", elasticCondition.GetStatus(live),
+				"an unprovable world must not read as a healthy one: %s", observed.Reason)
+			require.Equal(t, "WorldUnprovable", elasticCondition.GetReason(live))
+			message := elasticCondition.GetMessage(live)
+			require.Contains(t, message, "desired width 2", message)
+			require.Contains(t, message, "live width "+tc.liveWidth, message)
+			require.Contains(t, message, observed.Reason, message)
+		})
+	}
+}
+
+// TestTheBlockedDriveLevelsBackOnceTheWorldProves pins the recovery: the blocked surfacing is a
+// state of the world, not a verdict — once a pass proves the live width again, the ordinary
+// corrective block creates the downscale and the condition levels back to True/NoRefusal.
+func TestTheBlockedDriveLevelsBackOnceTheWorldProves(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.stageLostUpscaleWorld(t)
+	f.rayMalformed.Store(true)
+	scalesBefore := f.scaleCalls.Load()
+	elasticCondition := kubeapistatus.ConditionType("ElasticResize")
+	liveCondition := func(t *testing.T) (status, reason string) {
+		t.Helper()
+		live := new(workercore.ModelDeployment)
+		require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(f.md), live))
+		return elasticCondition.GetStatus(live), elasticCondition.GetReason(live)
+	}
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+	status, reason := liveCondition(t)
+	require.Equal(t, "Unknown", status, "the unprovable world must surface the blocked drive")
+	require.Equal(t, "WorldUnprovable", reason)
+
+	f.rayMalformed.Store(false)
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+
+	op, readErr := newElasticOperationStore(f.reconciler.Client).Read(
+		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr, "a proven world reaches the ordinary corrective block: %s",
+		f.observation(t).Reason)
+	require.Equal(t, elasticStateRecorded, op.State)
+	require.Equal(t, elasticWidth{Old: 4, Target: 2}, op.Width)
+	require.Equal(t, 4, f.observation(t).StableWidth)
+	status, reason = liveCondition(t)
+	require.Equal(t, "True", status, "a proven world leaves no block standing")
+	require.Equal(t, "NoRefusal", reason)
+	require.Equal(t, scalesBefore, f.scaleCalls.Load(),
+		"the corrective operation is recorded; the ordinary flow sends it on a later pass")
+}
+
 // elasticWatchedReader records the options every List reached the API server with and can be made
 // to fail one, so a test can see what a reconcile-hot-path read asked for instead of inferring it
 // from the objects it happened to return.
