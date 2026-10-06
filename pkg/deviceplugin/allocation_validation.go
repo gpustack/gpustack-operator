@@ -21,10 +21,10 @@ import (
 // was released. This path runs the same arithmetic over the same inputs and returns the error
 // instead of swallowing it, so an incomplete input holds the operation rather than clearing it.
 //
-// Nothing here re-derives the accounting. heldAllocation, applyAllocatedStatus,
-// accumulatePhysicalOccupied and foldPhysicalLedger are the existing functions, called the same way
-// the ordinary rebuild calls them, so a strict result and a published ledger cannot disagree
-// because of arithmetic that exists twice.
+// Nothing here re-derives the accounting. The strict path runs the ordinary path's own fold
+// (foldPodAllocations) with a failure handler that stops it, so heldAllocation, applyAllocatedStatus,
+// accumulatePhysicalOccupied and foldPhysicalLedger are the same functions called the same way and a
+// strict result and a published ledger cannot disagree because of arithmetic that exists twice.
 
 // BuildDesiredStatusStrict is BuildDesiredStatus for a caller that must not be told a half-answer.
 //

@@ -270,61 +270,43 @@ func initDesiredStatus(devs *workercore.Devices) workercore.DevicesStatus {
 	return desiredStatus
 }
 
-// mergePodAllocations merges every Pod's annotation-recorded allocation into desiredStatus, folds
-// the per-accelerator physical-slice profile ledger into the same pass (never a second, stompable
-// write), and collects the live pod-UID set the sliced per-pod working-dir GC consumes (empty/nil ⇒
-// no pods; non-sliced consumers ignore the payload).
-// mergePodAllocationsStrict is mergePodAllocations with its errors returned instead of logged.
+// foldStep names the stage of the shared allocation fold that failed on one Pod. The stages cost the
+// ledger different things, so the ordinary rebuild reports them differently: a record it cannot read
+// drops that Pod's whole claim out of the ledger, while a claim that conflicts with the ledger leaves
+// the ledger exactly as it was.
+type foldStep int
+
+const (
+	// readFoldStep is the step that decodes one Pod's allocation record.
+	readFoldStep foldStep = iota
+	// mergeFoldStep is the step that folds one decoded claim into the ledger.
+	mergeFoldStep
+)
+
+// foldPodAllocations is the one allocation fold both device status rebuilds run.
 //
-// The two differ only in what happens to a failure, which is the whole point: the ordinary rebuild
-// cannot fail, because a pod it cannot read must still leave a ledger kubelet can be answered from,
-// and the cost of that is that an unreadable pod drops out and its cards read free. A caller asking
-// whether capacity was RELEASED cannot be answered by a ledger that may be missing a holder, so it
-// gets the same arithmetic and the error. The arithmetic is not reimplemented here, and
-// BuildDesiredStatus is this function with the errors discarded. The lockstep is documentary
-// plus a differential test over both bodies; treat any edit to one merge without the other as
-// a defect the test is expected to catch.
-func mergePodAllocationsStrict(
-	devs *workercore.Devices, podList *core.PodList,
+// It merges every Pod's annotation-recorded allocation into desiredStatus, folds the per-accelerator
+// physical-slice profile ledger into the same pass (never a second, stompable write), and collects
+// the live pod-UID set the sliced per-pod working-dir GC consumes (empty/nil ⇒ no pods; non-sliced
+// consumers ignore the payload). desiredStatus is the caller's seed, normally initDesiredStatus.
+//
+// The two rebuilds differ only in what happens to a failure, which is all onFailure decides.
+// Returning true drops that Pod's claim and keeps folding; returning false stops the fold and hands
+// the error back.
+//
+// The ordinary rebuild cannot fail, because a Pod it cannot read must still leave a ledger kubelet
+// can be answered from, and the cost of that is that an unreadable Pod drops out and its cards read
+// free. A caller asking whether capacity was RELEASED cannot be answered by a ledger that may be
+// missing a holder, so it gets the same arithmetic and the error. The arithmetic is here once and
+// both entry points run it unchanged; the lockstep is documentary plus a differential test over both
+// public entry points, and any edit to this fold that one path can reach and the other cannot is a
+// defect TestBuildDesiredStatusStrict_PreservesTheOrdinaryRebuild is expected to catch.
+func foldPodAllocations(
+	devs *workercore.Devices,
+	podList *core.PodList,
+	desiredStatus workercore.DevicesStatus,
+	onFailure func(step foldStep, pod *core.Pod, err error) (keepFolding bool),
 ) (workercore.DevicesStatus, []string, error) {
-	physicalOccupied := make(Placements)
-	physicalAllocated := make(map[Resource]map[string]int32)
-	livePodUIDs := make([]string, 0, len(podList.Items))
-	desiredStatus := initDesiredStatus(devs)
-
-	for i := range podList.Items {
-		pod := &podList.Items[i]
-		// Terminating and terminal pods stay in the live set and in the merge, exactly as in the
-		// ordinary rebuild: their containers can still be running with the hardware still carved.
-		livePodUIDs = append(livePodUIDs, string(pod.UID))
-
-		podStatus, err := allocatedStatusOf(pod)
-		if err != nil {
-			return workercore.DevicesStatus{}, nil, fmt.Errorf(
-				"pod %s: read the allocation it holds: %w", ctrlcli.ObjectKeyFromObject(pod), err)
-		}
-		podStatus = heldAllocation(pod, podStatus)
-
-		// THE REDUCER'S OWN ERROR IS PROPAGATED. A mode conflict between two holders of one card is
-		// produced here and nowhere else, and swallowing it would let the very conflict the ledger
-		// exists to surface read as a clean card.
-		desiredStatus, err = applyAllocatedStatus(podStatus, desiredStatus)
-		if err != nil {
-			return workercore.DevicesStatus{}, nil, fmt.Errorf(
-				"pod %s: merge its allocation: %w", ctrlcli.ObjectKeyFromObject(pod), err)
-		}
-		accumulatePhysicalOccupied(podStatus, physicalOccupied, physicalAllocated)
-	}
-
-	foldPhysicalLedger(devs, &desiredStatus, physicalOccupied, physicalAllocated)
-
-	return desiredStatus, livePodUIDs, nil
-}
-
-// mergePodAllocations is the best-effort rebuild, unchanged for every existing caller.
-func mergePodAllocations(
-	logger logr.Logger, devs *workercore.Devices, podList *core.PodList, desiredStatus workercore.DevicesStatus,
-) (workercore.DevicesStatus, []string) {
 	// physicalOccupied/physicalAllocated reconstruct each physical-slice accelerator's occupied
 	// placement intervals and per-profile instance counts from the same Pod annotations, keyed by
 	// accelerator, to feed the placement-aware ledger fold below (pure arithmetic, no device
@@ -332,6 +314,7 @@ func mergePodAllocations(
 	physicalOccupied := make(Placements)
 	physicalAllocated := make(map[Resource]map[string]int32)
 	livePodUIDs := make([]string, 0, len(podList.Items))
+
 	for i := range podList.Items {
 		pod := &podList.Items[i]
 		// Keep terminating pods (DeletionTimestamp != nil) in the live set AND in the allocation
@@ -344,25 +327,30 @@ func mergePodAllocations(
 
 		podStatus, err := allocatedStatusOf(pod)
 		if err != nil {
-			// An unreadable record is the one failure this rebuild cannot absorb: the pod's
-			// accelerators drop out of the ledger and read FREE while its containers still hold
-			// them, which is how an opposite-mode pod lands on an occupied accelerator. Nothing
-			// here can recover the occupancy, so say loudly what is at stake. The reachable cause
-			// is an annotation an older device-manager wrote in a shape this one no longer reads —
-			// pre-release formats are a clean break, so drain a node before upgrading it.
-			logger.Error(err, "cannot read the allocation this pod holds; its cards will be "+
-				"reported free while it still occupies them — drain the node before upgrading "+
-				"the device manager",
-				"pod", ctrlcli.ObjectKeyFromObject(pod))
+			readErr := fmt.Errorf("pod %s: read the allocation it holds: %w",
+				ctrlcli.ObjectKeyFromObject(pod), err)
+			if !onFailure(readFoldStep, pod, readErr) {
+				return workercore.DevicesStatus{}, nil, readErr
+			}
 			continue
 		}
 		podStatus = heldAllocation(pod, podStatus)
 
-		desiredStatus, err = applyAllocatedStatus(podStatus, desiredStatus)
+		// The reducer's own error is reported to the caller rather than dropped, because a mode
+		// conflict between two holders of one card is produced here and nowhere else, and a caller
+		// told the ledger is complete must not be handed one that hides it. A caller that absorbs
+		// the failure keeps the ledger exactly as it was: applyAllocatedStatus returns the status it
+		// was given when it reports a conflict.
+		mergedStatus, err := applyAllocatedStatus(podStatus, desiredStatus)
 		if err != nil {
-			logger.Error(err, "merge allocated accelerators into devices status", "pod", ctrlcli.ObjectKeyFromObject(pod))
+			mergeErr := fmt.Errorf("pod %s: merge its allocation: %w",
+				ctrlcli.ObjectKeyFromObject(pod), err)
+			if !onFailure(mergeFoldStep, pod, mergeErr) {
+				return workercore.DevicesStatus{}, nil, mergeErr
+			}
 			continue
 		}
+		desiredStatus = mergedStatus
 
 		accumulatePhysicalOccupied(podStatus, physicalOccupied, physicalAllocated)
 	}
@@ -373,7 +361,56 @@ func mergePodAllocations(
 	// aggregated output bridge lives in foldPhysicalLedger.
 	foldPhysicalLedger(devs, &desiredStatus, physicalOccupied, physicalAllocated)
 
-	return desiredStatus, livePodUIDs
+	return desiredStatus, livePodUIDs, nil
+}
+
+// mergePodAllocationsStrict is the fail-closed rebuild: every failure the shared fold reports stops
+// it and is returned, so an incomplete input holds the operation rather than clearing it.
+func mergePodAllocationsStrict(
+	devs *workercore.Devices, podList *core.PodList,
+) (workercore.DevicesStatus, []string, error) {
+	return foldPodAllocations(devs, podList, initDesiredStatus(devs), stopAtFoldFailure)
+}
+
+// stopAtFoldFailure ends the shared fold and hands the error the fold built back to its caller, which
+// is how the strict rebuild refuses to answer with a ledger a failure left incomplete.
+func stopAtFoldFailure(_ foldStep, _ *core.Pod, _ error) bool { return false }
+
+// mergePodAllocations is the best-effort rebuild, unchanged for every existing caller. Its fold never
+// stops, so the error the shared fold returns is unreachable here and the two results are dropped
+// together rather than one at a time.
+func mergePodAllocations(
+	logger logr.Logger, devs *workercore.Devices, podList *core.PodList, desiredStatus workercore.DevicesStatus,
+) (workercore.DevicesStatus, []string) {
+	mergedStatus, livePodUIDs, _ := foldPodAllocations(devs, podList, desiredStatus, absorbFoldFailure(logger))
+
+	return mergedStatus, livePodUIDs
+}
+
+// absorbFoldFailure reports what the shared fold could not merge and lets it carry on, which is the
+// ordinary rebuild's whole contract: kubelet is answered from this ledger whether or not one Pod's
+// record can be read.
+func absorbFoldFailure(logger logr.Logger) func(step foldStep, pod *core.Pod, err error) bool {
+	return func(step foldStep, pod *core.Pod, err error) bool {
+		if step == readFoldStep {
+			// An unreadable record is the one failure this rebuild cannot absorb: the pod's
+			// accelerators drop out of the ledger and read FREE while its containers still hold
+			// them, which is how an opposite-mode pod lands on an occupied accelerator. Nothing
+			// here can recover the occupancy, so say loudly what is at stake. The reachable cause
+			// is an annotation an older device-manager wrote in a shape this one no longer reads —
+			// pre-release formats are a clean break, so drain a node before upgrading it.
+			logger.Error(err, "cannot read the allocation this pod holds; its cards will be "+
+				"reported free while it still occupies them — drain the node before upgrading "+
+				"the device manager",
+				"pod", ctrlcli.ObjectKeyFromObject(pod))
+			return true
+		}
+
+		logger.Error(err, "merge allocated accelerators into devices status",
+			"pod", ctrlcli.ObjectKeyFromObject(pod))
+
+		return true
+	}
 }
 
 // notifyListeners broadcasts the last live-pod-UID sweep to every ListAndWatch subscriber,
