@@ -1,7 +1,6 @@
 # Spec: ModelDeployment S1 — Router Endpoint Qualification, Serving Confirmation, and Abortable Fixed-Instance Retirement
 
 Status: Shipped
-Blocked on: None for the merged source delivery. Remaining physical validation belongs to S2 T6.
 Type: Feature
 
 ## Delivery and remaining validation
@@ -16,8 +15,10 @@ Shipped source does not establish these physical outcomes.
 
 S2 T3 repairs serving-observation and drain identity checks found during integration.
 Its source regression tests cover Router owner replacement, terminating processes and fresh member identities.
-These fixes remain in draft PR #714 until its delivery gates pass.
-Issue #713 closes after that delivery and regression readback.
+These fixes merged in PR #714. Issue #713 is closed after that delivery and regression readback.
+
+Elastic EP scale-down is outside this spec and the current release; it is tracked by [S2 issue
+#741](https://github.com/gpustack/gpustack-operator/issues/741).
 
 ## Summary
 

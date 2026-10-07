@@ -316,6 +316,12 @@ func validateModelDeploymentElasticIdentity(
 			"the elastic profile must stay on the role it was created with: "+modelDeploymentIdentityMessage,
 		))
 	}
+	if newElastic.ElasticEP.Width < oldElastic.ElasticEP.Width {
+		errs = append(errs, field.Forbidden(
+			modelDeploymentElasticRolePath(md, newElastic).Child("elasticEp", "width"),
+			"elastic-EP scale-down is not supported in this release; keep width unchanged or increase it",
+		))
+	}
 
 	return errs
 }

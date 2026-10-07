@@ -189,7 +189,8 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// and one whole-GPU member per engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role
 	// without it renders exactly as it did before this field existed, and a profile that is
 	// turned on and off again describes a different deployment, so the field's presence and
-	// HeadInstanceType are frozen at creation while Width stays editable.
+	// HeadInstanceType are frozen at creation. Width is editable for scale-up; scale-down is
+	// refused by admission in this release.
 	//
 	// The profile admits exactly one such role per deployment, running the vLLM engine as a
 	// single Server role of one instance of one Pod. Every member -- the reserved API/DP-master

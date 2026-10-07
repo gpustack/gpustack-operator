@@ -3878,7 +3878,8 @@ message ModelDeploymentRole {
   // and one whole-GPU member per engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role
   // without it renders exactly as it did before this field existed, and a profile that is
   // turned on and off again describes a different deployment, so the field's presence and
-  // HeadInstanceType are frozen at creation while Width stays editable.
+  // HeadInstanceType are frozen at creation. Width is editable for scale-up; scale-down is
+  // refused by admission in this release.
   //
   // The profile admits exactly one such role per deployment, running the vLLM engine as a
   // single Server role of one instance of one Pod. Every member -- the reserved API/DP-master
@@ -3892,10 +3893,11 @@ message ModelDeploymentRole {
 
 // ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.
 //
-// Width is the ONLY mutable field: it answers how large the collective currently should be,
-// which is a running-state question. Presence and HeadInstanceType answer which deployment
-// this is and where its control plane lives, which is identity, and are frozen with the rest
-// of the identity fields.
+// Width is the only mutable field: it answers how large the collective currently should be,
+// which is a running-state question. This release accepts increases and unchanged values;
+// admission refuses a decrease until Elastic EP scale-down support is complete. Presence and
+// HeadInstanceType answer which deployment this is and where its control plane lives, which is
+// identity, and are frozen with the rest of the identity fields.
 message ModelDeploymentRoleElasticEP {
   // Width is the total number of GPU engines in the elastic collective, INCLUDING the
   // reserved API/DP-master member; width-1 of them are Ray-only workers. It is the total

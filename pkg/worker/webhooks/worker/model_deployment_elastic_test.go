@@ -104,6 +104,22 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 		},
 		old: func() *workercore.ModelDeployment { return elasticMD() },
 	}, {
+		name: "unchanged width on update admitted",
+		md:   func() *workercore.ModelDeployment { return elasticMD() },
+		old:  func() *workercore.ModelDeployment { return elasticMD() },
+	}, {
+		name: "width decrease on update refused",
+		md: func() *workercore.ModelDeployment {
+			md := elasticMD()
+			return md
+		},
+		old: func() *workercore.ModelDeployment {
+			old := elasticMD()
+			old.Spec.Roles[0].ElasticEP.Width = 4
+			return old
+		},
+		wantErr: []string{"width", "scale-down is not supported"},
+	}, {
 		name: "presence removed on update refused",
 		md: func() *workercore.ModelDeployment {
 			md := elasticMD()

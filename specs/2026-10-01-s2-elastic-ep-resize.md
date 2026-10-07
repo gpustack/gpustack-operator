@@ -1,7 +1,6 @@
 # Spec: ModelDeployment S2 — Elastic EP Resize (vLLM Ray): Four-Layer Elastic Realization, Engine Resize Lifecycle, and Continuity/Observation Separation
 
 Status: Shipped
-Blocked on: None for the merged source delivery. Remaining physical cells are explicit gaps recorded below.
 Type: Feature
 Owning program: dp-ep-router-and-scaling (S2 formal stage, D11-delegated)
 
@@ -12,7 +11,11 @@ All implementation tasks below are complete.
 Whole-source lint, generation without drift and affected-package race tests pass on the merged head.
 Four effective review rounds are consumed; every actionable finding is fixed or declined with evidence in the PR threads.
 
-Physical acceptance ran in a chartered 4xH100 window against this tree's content:
+Physical acceptance ran in a chartered 4xH100 window against the earlier bidirectional source
+surface. That evidence remains historical; the current API rejects Elastic EP scale-down until
+issue #741 is resolved.
+
+Physical acceptance evidence:
 
 - E7 (S10): two consecutive product `2→4→2` campaigns PASS, 421s wall for the repeated campaign,
   expansion to four servers 1/1, narrowing retiring to exactly the original survivors;
@@ -26,11 +29,22 @@ Physical acceptance ran in a chartered 4xH100 window against this tree's content
   never publishes an occupied card as free, and converges node allocatable byte-identical to
   its sibling node (the #718 live regression, completed manually after a harness driver defect).
 
-Explicit gaps the shipped source does not establish: continuity across control-plane restart
-(S8), all-three-Router composition (S9), resize-under-load performance (S11) and ≥20-cycle
-repeatability. These are chartered-but-unfunded cells, not failed claims.
+Explicit gaps the shipped source does not establish: all-three-Router composition (S9),
+resize-under-load performance (S11) and ≥20-cycle repeatability. S8 now has a measured
+W10 PASS-5 result rather than an unrun result: the 2→4 leg passed, but the 4→2 patch
+failed with `503 ServiceUnavailable` while the operator extension APIService restarted
+after the scheduled operator-pod deletion. The independent survivor completed 10/10
+first attempts, with a maximum 10.119-second gap against the 30-second candidate budget.
+The S8 retry was not run because recovery left a `Recorded`, `commandSent=false` operation
+holding the deleted member identities; rebuilding the primary Pods did not clear it. The
+operation remained held with `ElasticResize=NoRefusal` and the observation reason
+`a captured member identity no longer matches; the operation holds`. Therefore S8 is a
+banked **FAIL**, not a continuity pass. S9, S11, R20 and the post-bookend remain unrun.
+The same PASS-5 engine-log review found no #736 `KeyError`, `exc_info` or traceback
+signature. These observations do not establish the unrun cells or turn the control-plane
+503 into an engine refusal.
 Issues #713, #718 and #719 close with this delivery.
-Issues #715, #716 and #717 stay bounded follow-ups outside it.
+Issues #715, #716 and #717 were bounded follow-ups outside it and are now closed.
 
 ## Summary
 
@@ -49,12 +63,18 @@ whole-service continuity claims, which require an independent surviving instance
 observability reporting desired / admitted / Ray / effective as distinct fields where Unknown is an
 explicit value. Every load-bearing engine or hardware claim below is graded: **READ** (pinned
 source or program analysis), **MEASURED** (observed in a program PoC activity, described in words),
-or **NOT-established** (open risk carried deliberately). The native physical gate — vLLM Ray 2→4→2
-with real EP inference and release verification — has not run; this document encodes the design so
-it can be reviewed and gated, and freezes nothing that evidence has not earned. Where this spec
+or **NOT-established** (open risk carried deliberately). The current shipped API's scale-down
+physical gate — vLLM Ray 2→4→2 with real EP inference and release verification against this API
+surface — has not run. The earlier bidirectional evidence listed above is historical and does not
+validate scale-down for the current API. This document encodes the design so it can be reviewed
+and gated, and freezes nothing that evidence has not earned. Where this spec
 describes program-local observations, the substance a reader needs is stated in the sentence or in
 the "Evidence grades and measurement limits" appendix; program evidence itself is retained
 program-side and is intentionally not linked here.
+
+The current shipped API deliberately narrows this design surface: Elastic EP updates may keep the
+current width or increase it, while a decrease is rejected by ModelDeployment admission. The
+scale-down lifecycle below remains the design and follow-up scope for [issue #741](https://github.com/gpustack/gpustack-operator/issues/741), not a current user-visible capability.
 
 **Program labels used in this document** (each defined by this document's own content, referencing
 nothing external): E7, E9, and E10 are the program's three gate checks this spec is blocked on —
@@ -72,11 +92,16 @@ separation of continuity claims from instance-interruption characterization.
 ## Authorization and remaining acceptance gates
 
 1. **E7/E9/E10 native physical gate: RUN in a chartered 4xH100 cloud window.** E7 —
-   **MEASURED** PASS: two consecutive native vLLM Ray `2→4→2` campaigns with real rank forwards
-   and identity-bound survivors; E9 — **MEASURED** PASS via the campaign bookend ledgers
-   (whole-GPU admission, identity-captured retirement, observed release); E10 — funded cells
-   **MEASURED** PASS (external Pod delete, kubelet checkpoint loss). The ≥20-cycle
-   repeatability candidate and the S8/S9/S11 cells are not established and stay explicit gaps.
+   **HISTORICAL MEASURED** PASS on the earlier bidirectional source: two consecutive native vLLM
+   Ray `2→4→2` campaigns with real rank forwards and identity-bound survivors; E9 —
+   **HISTORICAL MEASURED** PASS via the campaign bookend ledgers (whole-GPU admission,
+   identity-captured retirement, observed release); E10 — funded cells **HISTORICAL MEASURED**
+   PASS (external Pod delete, kubelet checkpoint loss). The ≥20-cycle
+   repeatability candidate and the S9/S11 cells are not established and stay explicit gaps.
+   S8 is a measured banked FAIL from PASS-5: its 4→2 command raced the operator
+   extension APIService restart, and the subsequent stale-member operation held without
+   a corrective drive. The independent survivor stayed healthy, but that does not make
+   the resizing instance's control-plane recovery a pass.
    Earlier failed fixture attempts remain recorded in the program's PoC disposition; no section
    of this spec may be read as claiming the unestablished cells.
 2. **Source implementation is authorized.** The program owner approved proceeding with S2
@@ -123,6 +148,9 @@ separation of continuity claims from instance-interruption characterization.
 
 ### Non-Goals
 
+- **Current API scale-down.** The shipped ModelDeployment API accepts Elastic EP width increases
+  and unchanged values only. A decrease is rejected at admission; safe scale-down remains the
+  follow-up tracked by [issue #741](https://github.com/gpustack/gpustack-operator/issues/741).
 - **SGLang elastic scale-down.** Pinned SGLang v0.5.18 supports merged scale-up only; scale-down
   has no merged contract and is never claimed here or anywhere in this program (**READ**: the
   pinned SGLang v0.5.18 upstream — merged scale-up only; the S2 formal-stage charter). SGLang
