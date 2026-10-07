@@ -547,7 +547,10 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
   </tbody>
 </table>
 <p><code>width</code> counts engines, not Pods you manage. A width of 2 is one master plus one worker, so two GPUs
-in total. Change the width to change the collective; do not use <code>replicas</code> or <code>size</code> for this.</p>
+in total. Change the width to grow the collective; do not use <code>replicas</code> or <code>size</code> for this. This
+release accepts scale-up and unchanged width only. The admission webhook rejects a width decrease;
+safe scale-down is tracked in <a href="https://github.com/gpustack/gpustack-operator/issues/741">issue #741</a>
+.</p>
 <p>Once a role carries <code>elasticEp</code>, the profile is fixed for that deployment and the admission webhook
 enforces the rest:</p>
 <ul>
@@ -568,7 +571,7 @@ official vLLM image of that version ships without Ray, and the profile will not 
 pinned requirement in the resize spec is Ray 2.56.1 with the full default closure.</p>
 <p>The Ray control plane needs its own Pod, which is why <code>headInstanceType</code> is required. It names an
 InstanceType that must already exist and must be CPU-only.</p>
-<p>The profile changes the number of GPU members. It does not resize the underlying nodes or claim
+<p>The profile increases the number of GPU members. It does not resize the underlying nodes or claim
 cloud node elasticity, and it does not patch anything upstream in the engine. It drives the engine
 through the resize interface the engine already exposes.</p>
 <h2 id="shared-memory-for-gpu-members">Shared memory for GPU members</h2>
@@ -613,18 +616,16 @@ Sufficiency at 512 MiB is not established. A workload that needs more must decla
 <a href="/gpustack-operator/main/docs/modules/model-delivery/">Model Delivery</a>
 .</p>
 <h2 id="changing-the-width">Changing the width</h2>
-<p>Change only <code>width</code>. Starting at 2, these two patches request 4 and then 2.
-Wait for the first resize to complete before submitting the second.</p>
+<p>Change only <code>width</code>. Starting at 2, this patch requests 4. Wait for the resize to complete before
+submitting another change. A patch that lowers the current width is rejected by the admission
+webhook in this release; it does not reach the engine.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl patch modeldeployment qwen3-ep -n gpustack --type<span class="o">=</span>json <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/elasticEp/width&#34;,&#34;value&#34;:4}]&#39;</span>
-</span></span><span class="line"><span class="cl"><span class="c1"># After the observations confirm completion:</span>
-</span></span><span class="line"><span class="cl">kubectl patch modeldeployment qwen3-ep -n gpustack --type<span class="o">=</span>json <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/elasticEp/width&#34;,&#34;value&#34;:2}]&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/elasticEp/width&#34;,&#34;value&#34;:4}]&#39;</span></span></span></code></pre></div>
 </div><p>The operator keeps the master. It keeps the master&rsquo;s command, its UID and its bootstrap width
-annotation, so the running instance is not replaced. It grows or shrinks the Ray worker members
-around that master.</p>
+annotation, so the running instance is not replaced. In this release it grows the Ray worker
+members around that master; it does not shrink them.</p>
 <p>Scaling up is refused while the capacity it needs is missing. If Kueue has no quota for the extra
 members, or the members are admitted but hold no GPU allocation, or they have not joined Ray yet,
 the resize holds and the already-serving master keeps serving. An independent width change can wait
@@ -704,14 +705,15 @@ member — replacement Pods carrying identities the record can never match — i
 live world once the spec has moved on, with the native width proved over live members before any
 record moves.</p>
 <p>A partial survival still holds, because the captured member that lived may still have retirement
-work pending. A same-generation replacement also holds, because only a spec edit proves the
-captured world is not the wanted one.</p>
+work pending. A same-generation replacement keeps the hold for sent or upward records, which may
+still describe an in-flight operation. An unsent downward record with no captured members can
+recover after the live world proves the current width.</p>
 <h2 id="interruption-scope">Interruption scope</h2>
-<p>Narrowing a width first withdraws the master&rsquo;s API and master eligibility through the same writer,
-then confirms the serving side withdrew, and only then asks the engine to shrink. Pods stay alive
-through the engine&rsquo;s prepare, drain and commit phases. A member is removed only after its captured
-identity is proven to hold no actor, and a same-name replacement is never removed in a captured
-member&rsquo;s place.</p>
+<p>New scale-down requests are not available in this release. The API rejects a width decrease before
+reconciliation. An in-flight narrowing operation carried over from an earlier accepted request may
+still complete through the controller. The safe withdrawal, actor-free retirement and
+accelerator-return flow remains tracked in <a href="https://github.com/gpustack/gpustack-operator/issues/741">issue #741</a>
+.</p>
 <p>The scope of the interruption is the deployment you patched. It does not extend to a separate
 deployment. A second deployment keeps serving its own traffic while the first is resizing, but only
 requests actually observed on the second deployment&rsquo;s own endpoint are evidence of that. The
@@ -741,7 +743,8 @@ change.</li>
 <li>There is one serving instance per deployment. <code>replicas</code> and <code>size</code> are not a width mechanism.</li>
 <li>Only the master serves HTTP.</li>
 <li>No RDMA fabric is requested for this profile.</li>
-<li>Scale-down requires an owned Router with a readable serving view. A routerless deployment holds before narrowing.</li>
+<li>Scale-down is not supported. A width decrease is rejected by admission; see <a href="https://github.com/gpustack/gpustack-operator/issues/741">issue #741</a>
+.</li>
 </ul>
 <p><strong>See also</strong> — <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
  for the role contract ·
@@ -766,7 +769,7 @@ change.</li>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/28fb769f85af0f4841bf4a8c28f5443f6e7fa648/docs/modules/model-deployment/elastic-ep.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/73e353cc696fa518ee035e9427383a4414616b6c/docs/modules/model-deployment/elastic-ep.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/elastic-ep.md">Edit this page</a>
             
