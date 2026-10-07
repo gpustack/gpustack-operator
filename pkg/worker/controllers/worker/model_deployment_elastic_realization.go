@@ -25,6 +25,19 @@ const (
 	modelDeploymentElasticSharedMemorySize   = "512Mi"
 )
 
+// ModelDeploymentElasticTensorParallelSize reads the fixed TP degree from extraArgs.
+// Non-elastic roles retain their ordinary accelerator default of one.
+func ModelDeploymentElasticTensorParallelSize(role *workercore.ModelDeploymentRole) (int, error) {
+	if role == nil || role.ElasticEP == nil {
+		return 1, nil
+	}
+	declared, err := ParseModelDeploymentDeclaredParallelism(workercore.ModelDeploymentEngineVLLM, role.ExtraArgs, role.Env)
+	if err != nil {
+		return 0, fmt.Errorf("elastic member parallelism is unreadable: %w", err)
+	}
+	return declared.TensorParallel, nil
+}
+
 func modelDeploymentElasticHeadName(md *workercore.ModelDeployment) string {
 	return md.Name + "-elastic-head"
 }
@@ -44,6 +57,10 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 	connection *ModelDeploymentConnectorInput, protocols []string, weights *modelArtifactWeights,
 ) (map[string]map[int][]*core.Pod, error) {
 	role := ModelDeploymentElasticRole(md)
+	tpSize, err := ModelDeploymentElasticTensorParallelSize(role)
+	if err != nil {
+		return nil, err
+	}
 	boot := role.ElasticEP.Width
 	pods, err := r.listModelDeploymentPods(ctx, md)
 	if err != nil {
@@ -88,13 +105,14 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 			}},
 			core.EnvVar{Name: "VLLM_RAY_DP_PACK_STRATEGY", Value: "strict"},
 		)
+		tp := strconv.Itoa(tpSize)
 		join := "ray start --node-ip-address=\"$GPUSTACK_ELASTIC_POD_IP\" --address=" + address +
-			" --num-gpus=1 --labels=" + ModelDeploymentElasticRayNodeIdentityLabel + "=\"$GPUSTACK_ELASTIC_POD_UID\""
+			" --num-gpus=" + tp + " --labels=" + ModelDeploymentElasticRayNodeIdentityLabel + "=\"$GPUSTACK_ELASTIC_POD_UID\""
 
 		if ordinal == 0 {
 			argv := slices.Clone(c.Command)
 			argv = append(argv, "--data-parallel-backend", "ray", "--data-parallel-size", strconv.Itoa(int(boot)),
-				"--data-parallel-size-local", "1", "--tensor-parallel-size", "1", "--pipeline-parallel-size", "1",
+				"--data-parallel-size-local", "1",
 				"--enable-expert-parallel", "--enable-eplb", "--enable-elastic-ep")
 			c.Command = append([]string{"/bin/sh", "-c", "set -e; " + join +
 				"; exec \"$@\" --data-parallel-address \"$GPUSTACK_ELASTIC_POD_IP\"", "elastic-serve"}, argv...)

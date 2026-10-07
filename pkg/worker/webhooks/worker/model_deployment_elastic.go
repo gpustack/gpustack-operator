@@ -25,6 +25,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
@@ -40,8 +41,6 @@ var modelDeploymentElasticOwnedFlags = sets.New(
 	"--data-parallel-size-local",
 	"--enable-elastic-ep",
 	"--enable-eplb",
-	"--tensor-parallel-size",
-	"--pipeline-parallel-size",
 	"--distributed-executor-backend",
 	"--ray-address",
 )
@@ -161,6 +160,16 @@ func validateModelDeploymentElasticShape(
 					elasticprofile.WidthMin, elasticprofile.WidthMax),
 			))
 		}
+		declared, err := workerctrl.ParseModelDeploymentDeclaredParallelism(md.Spec.Engine.Name, role.ExtraArgs, role.Env)
+		if err != nil {
+			errs = append(errs, field.Invalid(rolePath.Child("extraArgs"), role.ExtraArgs, err.Error()))
+		} else {
+			if declared.PipelineParallel != 1 || declared.PrefillContextParallel != 1 {
+				errs = append(errs, field.Invalid(rolePath.Child("extraArgs"), role.ExtraArgs,
+					"each elastic member holds one TP group; pipeline and prefill context parallel sizes must be one"))
+			}
+			errs = append(errs, validateModelDeploymentElasticResources(role, rolePath, declared.TensorParallel)...)
+		}
 		if role.ElasticEP.HeadInstanceType == "" {
 			errs = append(errs, field.Required(
 				rolePath.Child("elasticEp", "headInstanceType"),
@@ -191,17 +200,16 @@ func validateModelDeploymentElasticShape(
 				"the elastic renderer owns the argv of the managed role; a taken-over command has no elastic rendering",
 			))
 		}
-		errs = append(errs, validateModelDeploymentElasticResources(role, rolePath)...)
 		errs = append(errs, validateModelDeploymentElasticOwnedKeys(role, rolePath)...)
 	}
 
 	return errs
 }
 
-// validateModelDeploymentElasticResources pins the member accelerator request to one whole,
-// non-sliced, non-partitioned accelerator with no fabric interface.
+// validateModelDeploymentElasticResources requires the complete fixed TP group per member.
+// Every accelerator is whole, unsliced and unpartitioned, with no fabric interface.
 func validateModelDeploymentElasticResources(
-	role *workercore.ModelDeploymentRole, rolePath *field.Path,
+	role *workercore.ModelDeploymentRole, rolePath *field.Path, tp int,
 ) field.ErrorList {
 	var errs field.ErrorList
 	res := role.Resources
@@ -210,10 +218,10 @@ func validateModelDeploymentElasticResources(
 	}
 	resPath := rolePath.Child("resources")
 
-	if res.Accelerator != nil && res.Accelerator.CmpInt64(1) != 0 {
+	if res.Accelerator != nil && res.Accelerator.CmpInt64(int64(tp)) != 0 {
 		errs = append(errs, field.Invalid(
 			resPath.Child("accelerator"), res.Accelerator.String(),
-			"each elastic member takes exactly one whole accelerator per Pod",
+			fmt.Sprintf("each elastic member takes exactly %d whole accelerators per Pod", tp),
 		))
 	}
 	if res.AcceleratorSlicedMemoryPercentage != 0 {
@@ -308,6 +316,14 @@ func validateModelDeploymentElasticIdentity(
 		errs = append(errs, field.Invalid(
 			modelDeploymentElasticRolePath(md, newElastic).Child("elasticEp", "headInstanceType"),
 			newElastic.ElasticEP.HeadInstanceType, modelDeploymentIdentityMessage,
+		))
+	}
+	oldTP, oldErr := workerctrl.ModelDeploymentElasticTensorParallelSize(oldElastic)
+	newTP, newErr := workerctrl.ModelDeploymentElasticTensorParallelSize(newElastic)
+	if oldErr != nil || newErr != nil || oldTP != newTP {
+		errs = append(errs, field.Invalid(
+			modelDeploymentElasticRolePath(md, newElastic).Child("extraArgs"),
+			newElastic.ExtraArgs, "tensor parallel size is fixed at creation; "+modelDeploymentIdentityMessage,
 		))
 	}
 	if oldElastic.Name != newElastic.Name {

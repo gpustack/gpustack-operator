@@ -405,7 +405,7 @@ func TestValidateElasticNodeIdentityEnv(t *testing.T) {
 }
 
 func TestElasticNativeBootstrapFlags(t *testing.T) {
-	for _, flag := range []string{"--data-parallel-backend=mp", "--data-parallel-address=127.0.0.1", "--enable-expert-parallel=false", "-dp=8", "-dpl=0", "-dpb=mp", "-dpa=127.0.0.1", "-tp=2", "-pp=2"} {
+	for _, flag := range []string{"--data-parallel-backend=mp", "--data-parallel-address=127.0.0.1", "--enable-expert-parallel=false", "-dp=8", "-dpl=0", "-dpb=mp", "-dpa=127.0.0.1"} {
 		t.Run(flag, func(t *testing.T) {
 			role := &workercore.ModelDeploymentRole{ExtraArgs: []string{flag}}
 			errs := validateModelDeploymentElasticOwnedKeys(role, field.NewPath("spec", "roles").Index(0))

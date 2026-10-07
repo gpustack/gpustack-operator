@@ -10045,7 +10045,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"elasticEp": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ElasticEP opts this role into the managed elastic-EP profile: the operator then renders one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head and one whole-GPU member per engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role without it renders exactly as it did before this field existed, and a profile that is turned on and off again describes a different deployment, so the field's presence and HeadInstanceType are frozen at creation. Width is editable for scale-up; scale-down is refused by admission in this release.\n\nThe profile admits exactly one such role per deployment, running the vLLM engine as a single Server role of one instance of one Pod. Every member -- the reserved API/DP-master and every Ray-only worker -- takes one whole, non-sliced, non-partitioned accelerator, so the role's resources are pinned to that shape at admission. The head is admitted separately against HeadInstanceType's own queue and never counts toward Width.",
+							Description: "ElasticEP opts this role into the managed elastic-EP profile: the operator then renders one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head and one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role without it renders exactly as it did before this field existed, and a profile that is turned on and off again describes a different deployment, so the field's presence and HeadInstanceType are frozen at creation. Width is editable for scale-up; scale-down is refused by admission in this release.\n\nThe profile admits exactly one such role per deployment, running the vLLM engine as a single Server role of one instance of one Pod. Every member -- the reserved API/DP-master and every Ray-only worker -- takes a complete TP group declared through ExtraArgs. All GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP. The head uses HeadInstanceType's own queue and never counts toward Width.",
 							Ref:         ref(v1alpha1.ModelDeploymentRoleElasticEP{}.OpenAPIModelName()),
 						},
 					},
@@ -10062,7 +10062,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleElasticEP(ref common
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.\n\nWidth is the only mutable field: it answers how large the collective currently should be, which is a running-state question. This release accepts increases and unchanged values; admission refuses a decrease until Elastic EP scale-down support is complete. Presence and HeadInstanceType answer which deployment this is and where its control plane lives, which is identity, and are frozen with the rest of the identity fields.",
+				Description: "ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.\n\nWidth is the only mutable field: it answers how large the collective currently should be, which is a running-state question. This release accepts increases and unchanged values; admission refuses a decrease until Elastic EP scale-down support is complete. Profile presence, HeadInstanceType and the TP degree in ExtraArgs are fixed at creation.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"width": {

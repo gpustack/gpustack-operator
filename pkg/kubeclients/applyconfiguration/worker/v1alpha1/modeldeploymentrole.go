@@ -186,7 +186,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
 	// ElasticEP opts this role into the managed elastic-EP profile: the operator then renders
 	// one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head
-	// and one whole-GPU member per engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role
+	// and one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role
 	// without it renders exactly as it did before this field existed, and a profile that is
 	// turned on and off again describes a different deployment, so the field's presence and
 	// HeadInstanceType are frozen at creation. Width is editable for scale-up; scale-down is
@@ -194,9 +194,9 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	//
 	// The profile admits exactly one such role per deployment, running the vLLM engine as a
 	// single Server role of one instance of one Pod. Every member -- the reserved API/DP-master
-	// and every Ray-only worker -- takes one whole, non-sliced, non-partitioned accelerator,
-	// so the role's resources are pinned to that shape at admission. The head is admitted
-	// separately against HeadInstanceType's own queue and never counts toward Width.
+	// and every Ray-only worker -- takes a complete TP group declared through ExtraArgs.
+	// All GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP.
+	// The head uses HeadInstanceType's own queue and never counts toward Width.
 	ElasticEP *ModelDeploymentRoleElasticEPApplyConfiguration `json:"elasticEp,omitempty"`
 }
 

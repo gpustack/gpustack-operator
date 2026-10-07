@@ -180,7 +180,11 @@ func (r *ModelDeploymentWebhook) Default(ctx context.Context, obj runtime.Object
 		if role.Resources == nil {
 			role.Resources = new(workercore.ModelDeploymentRoleResources)
 		}
-		role.Resources.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
+		tp, err := workerctrl.ModelDeploymentElasticTensorParallelSize(role)
+		if err != nil {
+			return err
+		}
+		role.Resources.Accelerator = resource.NewQuantity(int64(tp), resource.DecimalSI)
 	}
 
 	return nil

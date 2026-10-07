@@ -53,7 +53,7 @@ problem from S1's fixed-instance scaling: the engine itself reconfigures a colle
 drain → commit) while Kubernetes, Kueue, Ray, and the accelerator ledger must stay reconciled
 around it. This spec defines that capability in four features: (1) the elastic workload
 realization — one ModelDeployment instance as one dedicated logical Ray cluster with a CPU head,
-one GPU per worker Pod, and a four-layer reconciliation (desired spec, admitted Pods, Ray members, engine-effective
+one fixed TP group per worker Pod, and a four-layer reconciliation (desired spec, admitted Pods, Ray members, engine-effective
 world) where scale-down retires only captured, runtime-proven actor-free Pod identities; (2) the
 engine resize lifecycle with its failure and recovery contract — explicit orderings in both
 directions, the resize 503 window as a measured outage to be quantified, probe coordination, a
@@ -242,7 +242,9 @@ The managed profile adds optional `roles[].elasticEp` with two required fields:
 
 Profile presence is immutable. The deployment has one managed vLLM Server role, with
 `replicas=1` and `size=1`. Those fields retain their existing meanings. This profile
-supports the pinned vLLM release, TP=1, PP=1 and one whole GPU per member.
+supports the pinned vLLM release with PP=1 and prefill context parallel size one.
+TP is read from `extraArgs` and stays fixed while DP width changes.
+Each member requests the whole GPU count of its TP group; omitted TP defaults to one.
 Command takeover, slicing, partitioning and fabric interface requests are refused.
 Arguments or environment values that override operator-owned elastic settings are refused.
 
@@ -256,7 +258,7 @@ This request contract does not freeze a public effective-width status field or p
 
 **Shape.** One ModelDeployment instance maps to one dedicated logical Ray cluster. The operator
 creates and owns its head and worker Pods. The Ray head is CPU-only
-and carries only the Ray control plane. Each worker Pod holds exactly one GPU with
+and carries only the Ray control plane. Each worker Pod holds one complete TP group with
 `numOfHosts=1`. The vLLM API/DP-master role is pinned to a reserved GPU worker Pod with explicit
 `data_parallel_size_local=1` in Internal mode (strict placement requires a positive local size on
 a GPU-bearing node; a CPU head hosting the API master with strict placement and `local=0` allocates

@@ -350,7 +350,7 @@ func TestObserveModelDeploymentElasticAllocation_Holds(t *testing.T) {
 				pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = record
 			},
 			wantAdmitted:  knownLayer(1),
-			wantAllocated: unknownLayer("holds exactly one"),
+			wantAllocated: unknownLayer("requires exactly 1"),
 		},
 		{
 			name: "a card outside the node's inventory holds allocation",
@@ -1047,10 +1047,10 @@ func allocationObjects(md *workercore.ModelDeployment, devs *workercore.Devices,
 func allocationCardOf(t *testing.T, pod *core.Pod) modelDeploymentRetirementReleaseCard {
 	t.Helper()
 
-	card, reason, held := elasticWholeCardOf(pod)
+	cards, reason, held := elasticWholeCardsOf(pod, 1)
 	require.True(t, held, "member %q holds no whole card: %s", pod.Name, reason)
 
-	return card
+	return cards[0]
 }
 
 // TestObserveModelDeploymentElasticAllocation_GroupedReadsHoldWhenTheNodeMoves proves the node

@@ -231,7 +231,7 @@ func TestJoinModelDeploymentElasticRayIdentity(t *testing.T) {
 
 	t.Run("happy width two with rank map and actor facts", func(t *testing.T) {
 		doc := observerHappyDocument(t)
-		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2)
+		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2, 1)
 
 		assert.True(t, obs.WidthKnown, "reason: %s", obs.WidthUnknownReason)
 		assert.Equal(t, 2, obs.RayWidth)
@@ -253,14 +253,14 @@ func TestJoinModelDeploymentElasticRayIdentity(t *testing.T) {
 		doc.Nodes = &[]elasticRayNodeWire{
 			observerTestNode("11", true, map[string]string{observerTestLabelKey: "head-uid"}),
 		}
-		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2)
+		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2, 1)
 		assert.False(t, obs.WidthKnown)
 		assert.Equal(t, 0, obs.RayWidth)
 	})
 
 	t.Run("duplicate captured member uid refuses the whole join", func(t *testing.T) {
 		dup := append(observerMembers(), observerMembers()[2])
-		obs := joinModelDeploymentElasticRayIdentity(observerHappyDocument(t), dup, 2)
+		obs := joinModelDeploymentElasticRayIdentity(observerHappyDocument(t), dup, 2, 1)
 		assert.False(t, obs.WidthKnown)
 		assert.Contains(t, obs.WidthUnknownReason, "repeat Pod UID")
 	})
@@ -381,11 +381,11 @@ func TestJoinModelDeploymentElasticRayIdentity(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			baseline := joinModelDeploymentElasticRayIdentity(observerHappyDocument(t), members, 2)
+			baseline := joinModelDeploymentElasticRayIdentity(observerHappyDocument(t), members, 2, 1)
 			require.True(t, baseline.WidthKnown)
 			doc := observerHappyDocument(t)
 			tc.mutateDoc(doc)
-			obs := joinModelDeploymentElasticRayIdentity(doc, members, 2)
+			obs := joinModelDeploymentElasticRayIdentity(doc, members, 2, 1)
 			assert.False(t, obs.WidthKnown, "expected Unknown, got width %d (%s)", obs.RayWidth, obs.WidthUnknownReason)
 			assert.Contains(t, obs.WidthUnknownReason, tc.wantReason)
 			assert.NotEmpty(t, obs.UnknownReasons)
@@ -440,7 +440,7 @@ func TestJoinModelDeploymentElasticRayIdentity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			doc := observerScaleDownDocument(t)
 			tc.mutateDoc(doc)
-			obs := joinModelDeploymentElasticRayIdentity(doc, members, 1)
+			obs := joinModelDeploymentElasticRayIdentity(doc, members, 1, 1)
 			fact, known := obs.ActorFree[tc.uid]
 			require.True(t, known)
 			assert.Equal(t, tc.wantFree, fact.ActorFree, "reason: %s", fact.Reason)
@@ -451,7 +451,7 @@ func TestJoinModelDeploymentElasticRayIdentity(t *testing.T) {
 	}
 
 	t.Run("scale-down world still proves width one", func(t *testing.T) {
-		obs := joinModelDeploymentElasticRayIdentity(observerScaleDownDocument(t), members, 1)
+		obs := joinModelDeploymentElasticRayIdentity(observerScaleDownDocument(t), members, 1, 1)
 		assert.True(t, obs.WidthKnown, "reason: %s", obs.WidthUnknownReason)
 		assert.Equal(t, 1, obs.RayWidth)
 		assert.Empty(t, obs.UnknownReasons)
@@ -781,7 +781,7 @@ func observerScaleUpWorld(t *testing.T) (*elasticRayDocumentWire, []modelDeploym
 func TestJoinRegisteredGPUAndHistory(t *testing.T) {
 	t.Run("scale-up observes registered 4 and native width 2 independently", func(t *testing.T) {
 		doc, members := observerScaleUpWorld(t)
-		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2)
+		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2, 1)
 		assert.True(t, obs.WidthKnown, "width reason: %s", obs.WidthUnknownReason)
 		assert.Equal(t, 2, obs.RayWidth)
 		assert.True(t, obs.RegisteredGPUKnown, "registered reason: %s", obs.RegisteredGPUUnknownReason)
@@ -794,7 +794,7 @@ func TestJoinRegisteredGPUAndHistory(t *testing.T) {
 		headOnly := []modelDeploymentElasticCapturedMember{
 			{PodUID: "head-uid", PodName: "elastic-head", Container: observerTestContainer, Role: modelDeploymentElasticRoleHead},
 		}
-		obs := joinModelDeploymentElasticRayIdentity(doc, headOnly, 0)
+		obs := joinModelDeploymentElasticRayIdentity(doc, headOnly, 0, 1)
 		assert.True(t, obs.RegisteredGPUKnown)
 		assert.Equal(t, 0, obs.RegisteredGPU)
 	})
@@ -808,7 +808,7 @@ func TestJoinRegisteredGPUAndHistory(t *testing.T) {
 			}
 		}
 		*doc.Nodes = kept
-		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2)
+		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2, 1)
 		assert.False(t, obs.RegisteredGPUKnown)
 		assert.Contains(t, obs.RegisteredGPUUnknownReason, "gpu-worker-2")
 	})
@@ -835,7 +835,7 @@ func TestJoinRegisteredGPUAndHistory(t *testing.T) {
 					}
 				}
 			}
-			obs := joinModelDeploymentElasticRayIdentity(doc, members, 2)
+			obs := joinModelDeploymentElasticRayIdentity(doc, members, 2, 1)
 			assert.False(t, obs.RegisteredGPUKnown, "reason: %s", obs.RegisteredGPUUnknownReason)
 		})
 	}
@@ -843,7 +843,7 @@ func TestJoinRegisteredGPUAndHistory(t *testing.T) {
 	t.Run("historical DEAD same-UID node does not duplicate the restarted Pod", func(t *testing.T) {
 		doc, members := observerScaleUpWorld(t)
 		*doc.Nodes = append(*doc.Nodes, observerDeadNode("66", map[string]string{observerTestLabelKey: "worker-uid-2"}))
-		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2)
+		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2, 1)
 		assert.True(t, obs.WidthKnown, "reason: %s", obs.WidthUnknownReason)
 		assert.True(t, obs.RegisteredGPUKnown, "reason: %s", obs.RegisteredGPUUnknownReason)
 		assert.Equal(t, 4, obs.RegisteredGPU)
@@ -856,7 +856,7 @@ func TestJoinRegisteredGPUAndHistory(t *testing.T) {
 		*doc.Actors = append(*doc.Actors,
 			observerTestActor("old0", elasticRayActorDead, modelDeploymentElasticActorClassEngineCore, "77", "aa"),
 			observerTestActor("old1", elasticRayActorDead, "Leftover", "77", "bb"))
-		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2)
+		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2, 1)
 		assert.True(t, obs.WidthKnown, "reason: %s", obs.WidthUnknownReason)
 		assert.True(t, obs.RegisteredGPUKnown, "reason: %s", obs.RegisteredGPUUnknownReason)
 		assert.Empty(t, obs.UnknownReasons)
@@ -865,7 +865,7 @@ func TestJoinRegisteredGPUAndHistory(t *testing.T) {
 	t.Run("ALIVE foreign node still holds", func(t *testing.T) {
 		doc, members := observerScaleUpWorld(t)
 		*doc.Nodes = append(*doc.Nodes, observerGPUNode("77", map[string]string{observerTestLabelKey: "not-captured"}, "1"))
-		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2)
+		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2, 1)
 		assert.False(t, obs.WidthKnown)
 		assert.Contains(t, obs.WidthUnknownReason, "foreign Pod UID")
 	})
@@ -874,7 +874,7 @@ func TestJoinRegisteredGPUAndHistory(t *testing.T) {
 		doc, members := observerScaleUpWorld(t)
 		*doc.Nodes = append(*doc.Nodes, observerDeadNode("77", map[string]string{observerTestLabelKey: "retired-foreign-uid"}))
 		*doc.Actors = append(*doc.Actors, observerTestActor("old0", elasticRayActorAlive, "Leftover", "77", "aa"))
-		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2)
+		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2, 1)
 		assert.False(t, obs.WidthKnown)
 		assert.Contains(t, obs.WidthUnknownReason, "nonterminal actor old0")
 	})
@@ -882,7 +882,7 @@ func TestJoinRegisteredGPUAndHistory(t *testing.T) {
 	t.Run("duplicate ALIVE claim blocks actor-free and registered capacity for that uid", func(t *testing.T) {
 		doc, members := observerScaleUpWorld(t)
 		*doc.Nodes = append(*doc.Nodes, observerGPUNode("66", map[string]string{observerTestLabelKey: "worker-uid-2"}, "1"))
-		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2)
+		obs := joinModelDeploymentElasticRayIdentity(doc, members, 2, 1)
 		assert.False(t, obs.RegisteredGPUKnown)
 		assert.Contains(t, obs.RegisteredGPUUnknownReason, "gpu-worker-2")
 		fact := obs.ActorFree["worker-uid-2"]
@@ -896,7 +896,7 @@ func TestElasticPlacementGroupHistory(t *testing.T) {
 			doc := observerHappyDocument(t)
 			old := observerTestPG("cc", "dp_rank_0", state)
 			*doc.PlacementGroups = append(*doc.PlacementGroups, old)
-			obs := joinModelDeploymentElasticRayIdentity(doc, observerMembers(), 2)
+			obs := joinModelDeploymentElasticRayIdentity(doc, observerMembers(), 2, 1)
 			require.Equal(t, state == elasticRayPGRemoved, obs.WidthKnown, "removed history must not conflict with a current rank; duplicate current ranks must hold: %s", obs.WidthUnknownReason)
 		})
 	}

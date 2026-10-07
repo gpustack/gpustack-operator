@@ -9,9 +9,8 @@ package v1alpha1
 //
 // Width is the only mutable field: it answers how large the collective currently should be,
 // which is a running-state question. This release accepts increases and unchanged values;
-// admission refuses a decrease until Elastic EP scale-down support is complete. Presence and
-// HeadInstanceType answer which deployment this is and where its control plane lives, which is
-// identity, and are frozen with the rest of the identity fields.
+// admission refuses a decrease until Elastic EP scale-down support is complete.
+// Profile presence, HeadInstanceType and the TP degree in ExtraArgs are fixed at creation.
 type ModelDeploymentRoleElasticEPApplyConfiguration struct {
 	// Width is the total number of GPU engines in the elastic collective, INCLUDING the
 	// reserved API/DP-master member; width-1 of them are Ray-only workers. It is the total

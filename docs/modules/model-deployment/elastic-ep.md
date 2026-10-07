@@ -26,9 +26,13 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
 | `width` | Total GPU engines in the collective, counting the reserved master. Mutable, from 2 to 64. |
 | `headInstanceType` | The CPU-only InstanceType the Ray control plane runs on. Set once. |
 
-`width` counts engines, not Pods you manage. A width of 2 is one master plus one worker, so two GPUs
-in total. Change the width to grow the collective; do not use `replicas` or `size` for this. This
-release accepts scale-up and unchanged width only. The admission webhook rejects a width decrease;
+`width` counts DP engines, including the master. Each member has its own GPU Pod.
+Set TP through the role's `extraArgs`, using the engine's `--tensor-parallel-size` argument.
+Omitting it uses TP=1. Total GPU demand is `width * TP`.
+For TP=2, width 2 needs four GPUs; width 4 needs eight GPUs.
+
+Change the width to grow the collective; do not use `replicas` or `size` for this.
+This release accepts scale-up and unchanged width only. The admission webhook rejects a width decrease;
 safe scale-down is tracked in [issue #741](https://github.com/gpustack/gpustack-operator/issues/741).
 
 Once a role carries `elasticEp`, the profile is fixed for that deployment and the admission webhook
@@ -36,13 +40,16 @@ enforces the rest:
 
 - the deployment has exactly one role, and it is a Server role;
 - `replicas` and `size` are both 1, because each member is exactly one Pod;
-- every member asks for one whole unsliced GPU;
-- tensor and pipeline parallel sizes stay 1;
+- every member asks for exactly TP whole unsliced GPUs;
+- each member's TP group stays inside one Pod and one Ray node;
+- pipeline and prefill context parallel sizes stay 1;
 - you cannot supply `command`, because the renderer owns the command line of the managed role;
 - there is no initial fabric to declare.
 
-Adding or removing the profile on an existing role is refused. `headInstanceType` is also immutable
-after creation, because the head is part of the deployment's identity.
+Adding or removing the profile on an existing role is refused.
+`headInstanceType` and the effective TP value are fixed after creation.
+Equivalent TP argument spellings are accepted. Omitting TP and explicitly setting TP=1 are equivalent.
+A width change adjusts DP and EP while preserving TP. Online TP changes are refused.
 
 Only the master serves HTTP. The other members join the Ray cluster and hold collective state. That
 is why the master is counted inside `width` and is never retired.
@@ -52,6 +59,9 @@ is why the master is counted inside `width` and is never retired.
 The engine image must be a vLLM 0.29.0 image that already contains a full Ray installation. The
 official vLLM image of that version ships without Ray, and the profile will not start on it. The
 pinned requirement in the resize spec is Ray 2.56.1 with the full default closure.
+
+The TP size must fit the selected MoE model, engine kernels, and GPUs available on one node.
+The operator does not limit TP to the size used by a particular test.
 
 The Ray control plane needs its own Pod, which is why `headInstanceType` is required. It names an
 InstanceType that must already exist and must be CPU-only.
@@ -105,6 +115,10 @@ spec:
 
 Weights reach the members through the same artifact and cache as any other deployment. See
 [Model Delivery](../model-delivery/_index.md).
+
+To use TP=2, add `extraArgs: ["--tensor-parallel-size", "2"]` and request `resources.accelerator: "2"`.
+If the accelerator quantity is omitted, admission defaults it to the TP size.
+Explicit quantities must equal the TP size. Each member's CPU and memory scale with its GPU count.
 
 ## Changing the width
 

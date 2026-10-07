@@ -128,8 +128,9 @@ type elasticRayActorWire struct {
 }
 
 type elasticRayBundleWire struct {
-	BundleIndex *int   `json:"bundle_index"`
-	NodeIDHex   string `json:"node_id_hex"`
+	BundleIndex   *int              `json:"bundle_index"`
+	NodeIDHex     string            `json:"node_id_hex"`
+	UnitResources map[string]string `json:"unit_resources,omitempty"`
 }
 
 type elasticRayPGWire struct {
@@ -396,6 +397,7 @@ func joinModelDeploymentElasticRayIdentity(
 	doc *elasticRayDocumentWire,
 	members []modelDeploymentElasticCapturedMember,
 	expectedWidth int32,
+	tensorParallelSize int,
 ) modelDeploymentElasticObservation {
 	obs := modelDeploymentElasticObservation{
 		SchemaVersion:  *doc.SchemaVersion,
@@ -507,10 +509,10 @@ func joinModelDeploymentElasticRayIdentity(
 			obs.RegisteredGPUKnown = false
 			obs.RegisteredGPUUnknownReason = fmt.Sprintf(
 				"registered GPU capacity unknown: node %s GPU resource is not finite", nodeHex)
-		case value != 1:
+		case value != float64(tensorParallelSize):
 			obs.RegisteredGPUKnown = false
 			obs.RegisteredGPUUnknownReason = fmt.Sprintf(
-				"registered GPU capacity unknown: node %s carries %v GPUs, not exactly one", nodeHex, value)
+				"registered GPU capacity unknown: node %s carries %v GPUs, not exactly %d", nodeHex, value, tensorParallelSize)
 		default:
 			obs.RegisteredGPU++
 		}
@@ -629,6 +631,12 @@ func joinModelDeploymentElasticRayIdentity(
 		if alive != 1 || proofUID == "" {
 			addWidthReason(fmt.Sprintf("rank %d has no single alive native actor at a captured GPU member", rank))
 			continue
+		}
+		if tensorParallelSize > 1 {
+			if reason := elasticTPBundlesAgree(pg, nodeHexByUID[proofUID], tensorParallelSize); reason != "" {
+				addWidthReason(fmt.Sprintf("rank %d: %s", rank, reason))
+				continue
+			}
 		}
 		obs.RankToPodUID[rank] = proofUID
 	}
@@ -819,7 +827,11 @@ func (o *modelDeploymentElasticObserver) Observe(
 		}
 	}
 
-	return joinModelDeploymentElasticRayIdentity(doc, members, expectedWidth), nil
+	tp, err := ModelDeploymentElasticTensorParallelSize(ModelDeploymentElasticRole(md))
+	if err != nil {
+		return unknownElasticObservation(err.Error()), nil
+	}
+	return joinModelDeploymentElasticRayIdentity(doc, members, expectedWidth, tp), nil
 }
 
 // liveIdentity reads the deployment uncached and, when expected is non-nil, refuses a
@@ -888,6 +900,37 @@ func headContainerOf(members []modelDeploymentElasticCapturedMember) string {
 		if member.Role == modelDeploymentElasticRoleHead {
 			return member.Container
 		}
+	}
+	return ""
+}
+
+// elasticTPBundlesAgree requires the complete TP group on the engine actor's node.
+func elasticTPBundlesAgree(pg *elasticRayPGWire, nodeID string, expected int) string {
+	seen := map[int]bool{}
+	gpus := 0
+	for _, bundle := range pg.Bundles {
+		if bundle.BundleIndex == nil || *bundle.BundleIndex < 0 || seen[*bundle.BundleIndex] {
+			return "TP placement contains missing or duplicate bundle indices"
+		}
+		seen[*bundle.BundleIndex] = true
+		if len(bundle.UnitResources) == 0 {
+			return "TP placement bundle states no resources"
+		}
+		raw, gpu := bundle.UnitResources["GPU"]
+		if !gpu {
+			continue
+		}
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value != 1 {
+			return "TP placement requires unit-GPU bundles"
+		}
+		if nodeID == "" || bundle.NodeIDHex != nodeID {
+			return "TP placement spans nodes or differs from the native actor's node"
+		}
+		gpus++
+	}
+	if gpus != expected {
+		return fmt.Sprintf("TP placement carries %d GPU bundles, expected %d", gpus, expected)
 	}
 	return ""
 }
