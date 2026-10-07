@@ -11,7 +11,7 @@ the user enter the workload container.
 
 ## Instance configuration
 
-The [Usage](https://github.com/gpustack/gpustack-operator/blob/e9d9c47c3b8baa1e6289d484daf0f092a0f93b4c/README.md#usage) example creates a sliced Instance. [Accelerator
+The [Usage](https://github.com/gpustack/gpustack-operator/blob/4765e0482be9b66a49d8c80530ce884529682c00/README.md#usage) example creates a sliced Instance. [Accelerator
 Requests](../devices/requests.md#requesting-through-the-instance-api) explains how
 `spec.resources` maps to the accelerator resource families.
 
@@ -27,4 +27,4 @@ visibility resource to enter the same workspace without acquiring a second accel
 **See also** — [Heterogeneous Devices](/gpustack-operator/main/docs/modules/devices/index.md) (resource families) ·
 [Model Delivery](/gpustack-operator/main/docs/modules/model-delivery/index.md) (mounting model weights)
 
-**Next** → [Usage](https://github.com/gpustack/gpustack-operator/blob/e9d9c47c3b8baa1e6289d484daf0f092a0f93b4c/README.md#usage) — launch a sliced Instance.
+**Next** → [Usage](https://github.com/gpustack/gpustack-operator/blob/4765e0482be9b66a49d8c80530ce884529682c00/README.md#usage) — launch a sliced Instance.
