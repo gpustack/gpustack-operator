@@ -7,10 +7,11 @@ package v1alpha1
 //
 // ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.
 //
-// Width is the ONLY mutable field: it answers how large the collective currently should be,
-// which is a running-state question. Presence and HeadInstanceType answer which deployment
-// this is and where its control plane lives, which is identity, and are frozen with the rest
-// of the identity fields.
+// Width is the only mutable field: it answers how large the collective currently should be,
+// which is a running-state question. This release accepts increases and unchanged values;
+// admission refuses a decrease until Elastic EP scale-down support is complete. Presence and
+// HeadInstanceType answer which deployment this is and where its control plane lives, which is
+// identity, and are frozen with the rest of the identity fields.
 type ModelDeploymentRoleElasticEPApplyConfiguration struct {
 	// Width is the total number of GPU engines in the elastic collective, INCLUDING the
 	// reserved API/DP-master member; width-1 of them are Ray-only workers. It is the total

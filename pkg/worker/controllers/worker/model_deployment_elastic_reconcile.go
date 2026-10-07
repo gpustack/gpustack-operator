@@ -25,6 +25,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
 const (
@@ -414,6 +415,60 @@ func elasticOperationMembersMatch(op *elasticOperation, pods []core.Pod) bool {
 	return true
 }
 
+// recoverElasticUnsentMemberDrift retires the one identity mismatch that cannot represent an
+// in-flight native action: a Recorded operation whose command has not been sent and whose captured
+// world has disappeared completely. A replacement world may have the same names with new UIDs, but
+// it is not safe to send the old operation into it. Prove the replacement world first, then remove
+// the stale record so the ordinary pass can either converge at the desired width or create a fresh
+// operation from the replacement identities.
+func (r *ModelDeploymentReconciler) recoverElasticUnsentMemberDrift(
+	ctx context.Context, md *workercore.ModelDeployment, status *modelDeploymentElasticStatus,
+	pods []core.Pod, captured []modelDeploymentElasticCapturedMember,
+	master *core.Pod, client *elasticengine.Client, store *elasticOperationStore, op *elasticOperation,
+) (bool, error) {
+	if op.State != elasticStateRecorded || op.CommandSent || op.Width.Upward() ||
+		!status.Desired.Known || status.Desired.Value != op.Width.Target ||
+		elasticOperationMemberSurvives(op, pods) {
+		return false, nil
+	}
+	currentWidth := len(captured) - 1
+	if currentWidth < elasticprofile.WidthMin || currentWidth > elasticprofile.WidthMax {
+		return false, nil
+	}
+	if !status.Admitted.Known || status.Admitted.Value != currentWidth ||
+		!status.Allocated.Known || status.Allocated.Value != currentWidth {
+		return false, nil
+	}
+	effective, ray, proven := r.elasticEffective(ctx, md, pods, captured, master, client, currentWidth)
+	status.Effective = effective
+	if ray.RegisteredGPUKnown {
+		status.Ray = knownLayer(ray.RegisteredGPU)
+	} else {
+		status.Ray = unknownLayer(ray.RegisteredGPUUnknownReason)
+	}
+	if !proven {
+		return false, nil
+	}
+
+	status.StableWidth = currentWidth
+	status.State = elasticStateCompleted
+	status.Reason = fmt.Sprintf(
+		"the unsent operation held replaced member identities; the current native world proves width %d and the stale record is retired",
+		currentWidth)
+	if err := r.persistElasticObservation(ctx, md, *status); err != nil {
+		return false, err
+	}
+	if currentWidth == status.Desired.Value && master.Annotations[modelDeploymentElasticWithdrawnAnnotation] == "true" {
+		if err := r.elasticSetWithdrawn(ctx, md, master, false); err != nil {
+			return false, err
+		}
+	}
+	if err := store.Delete(ctx, op); err != nil {
+		return false, err
+	}
+	return true, r.recordElasticResizeCondition(ctx, md, nil)
+}
+
 // recordElasticResizeCondition levels the deployment's ElasticResize condition with the durable
 // record: False with the preserved refusal while a record stands abandoned, True with NoRefusal
 // otherwise — including when no record exists, so a refusal never outlives the record it came
@@ -576,6 +631,13 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 		return r.recordElasticResizeCondition(ctx, md, op)
 	}
 	if op != nil && !elasticOperationMembersMatch(op, pods) {
+		if recovered, err := r.recoverElasticUnsentMemberDrift(
+			ctx, md, &status, pods, captured, master, client, store, op,
+		); err != nil {
+			return err
+		} else if recovered {
+			return nil
+		}
 		// A MISMATCH IS ONLY A WEDGE WHEN THE RECORD STILL DESCRIBES THE WORLD. Node loss empties
 		// the record permanently — replacement pods carry new identities, so no later pass can
 		// ever match again — and the pending retirement has no work left, because the pods it
@@ -584,9 +646,9 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 		// holding: reconstruction re-proves the native width over the live members through the
 		// ordinary rank and forward proofs before any record moves, so no removal proof is
 		// bypassed. A partial survival keeps the hold — some captured member still live means the
-		// retirement may still have work to do. A same-generation drift keeps the hold too —
-		// pods replaced while the spec is unchanged is an in-flight scene the record may still
-		// describe, and only the spec edit proves the world it captured is not the one wanted.
+		// retirement may still have work to do. Residual same-generation drift keeps the hold too —
+		// sent or upward records can still describe an in-flight scene, while the unsent downward
+		// full-replacement case was handled by recoverElasticUnsentMemberDrift above.
 		if op.Generation == md.Generation || elasticOperationMemberSurvives(op, pods) {
 			status.State = op.State
 			return finish("a captured member identity no longer matches; the operation holds")

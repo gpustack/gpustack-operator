@@ -962,6 +962,166 @@ func TestTheSameGenerationMemberDriftStillHolds(t *testing.T) {
 	require.Zero(t, f.scaleCalls.Load())
 }
 
+// TestAnUnsentOperationWithNoLiveCapturedMembersIsRebuiltFromTheCurrentWorld pins the PASS-5
+// wedge: the record was durable before the command, every captured Pod was replaced, and the
+// current world is already at the desired width. Keeping the same-generation record would retain
+// identities no future pass can match and would never allow ordinary convergence to resume.
+func TestAnUnsentOperationWithNoLiveCapturedMembersIsRebuiltFromTheCurrentWorld(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+
+	oldPods, err := f.reconciler.elasticLiveMembers(ctx, f.md)
+	require.NoError(t, err)
+	for i := range oldPods {
+		require.NoError(t, f.reconciler.Client.Delete(ctx, &oldPods[i]))
+	}
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	f.admitMembers(t)
+
+	op := &elasticOperation{
+		Name: f.md.Name, Namespace: f.md.Namespace, DeploymentUID: f.md.UID,
+		Generation: f.md.Generation, Width: elasticWidth{Old: 4, Target: 2},
+		State: elasticStateRecorded, CommandSent: false,
+		Head:   elasticCapturedIdentity{Name: "stale-head", UID: types.UID("stale-head-uid")},
+		Master: elasticCapturedIdentity{Name: "stale-server-0", UID: types.UID("stale-server-0-uid")},
+		Members: []elasticCapturedIdentity{
+			{Name: "stale-server-0", UID: types.UID("stale-server-0-uid")},
+			{Name: "stale-server-1", UID: types.UID("stale-server-1-uid")},
+			{Name: "stale-server-2", UID: types.UID("stale-server-2-uid")},
+			{Name: "stale-server-3", UID: types.UID("stale-server-3-uid")},
+		},
+	}
+	_, err = newElasticOperationStore(f.reconciler.Client).Create(ctx, op)
+	require.NoError(t, err)
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.True(t, apierrors.IsNotFound(readErr), "stale unsent operation must be retired: %s", f.observation(t).Reason)
+	require.Equal(t, 2, f.observation(t).StableWidth)
+	require.Zero(t, f.scaleCalls.Load())
+}
+
+// TestRetiringAnUnsentDriftRecordRebuildsTheCurrentScaleDown pins the other recovery exit:
+// clearing a stale unsent record must not claim that a wider live world already matches the
+// desired width. The following ordinary pass must capture the replacement identities and send a
+// new scale-down command against them.
+func TestRetiringAnUnsentDriftRecordRebuildsTheCurrentScaleDown(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "llm-d-router"}
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	f.admitMembers(t)
+	f.nativeWidth.Store(4)
+	for _, obj := range ownedRouterObjects(f.md) {
+		if wanted, ok := obj.(*apps.Deployment); ok {
+			actual := new(apps.Deployment)
+			require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(wanted), actual))
+			actual.UID = wanted.UID
+			require.NoError(t, f.reconciler.Client.Update(ctx, actual))
+			continue
+		}
+		if err := f.reconciler.Client.Create(ctx, obj); err != nil {
+			require.True(t, apierrors.IsAlreadyExists(err), "router object create failed: %v", err)
+		}
+	}
+
+	// The desired width moves back to two while the proven native world remains four.
+	f.md.Spec.Roles[0].ElasticEP.Width = 2
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+	stale := &elasticOperation{
+		Name: f.md.Name, Namespace: f.md.Namespace, DeploymentUID: f.md.UID,
+		Generation: f.md.Generation, Width: elasticWidth{Old: 4, Target: 2},
+		State: elasticStateRecorded, CommandSent: false,
+		Head:   elasticCapturedIdentity{Name: "stale-head", UID: types.UID("stale-head-uid")},
+		Master: elasticCapturedIdentity{Name: "stale-server-0", UID: types.UID("stale-server-0-uid")},
+		Members: []elasticCapturedIdentity{
+			{Name: "stale-server-0", UID: types.UID("stale-server-0-uid")},
+			{Name: "stale-server-1", UID: types.UID("stale-server-1-uid")},
+			{Name: "stale-server-2", UID: types.UID("stale-server-2-uid")},
+			{Name: "stale-server-3", UID: types.UID("stale-server-3-uid")},
+		},
+	}
+	_, err = newElasticOperationStore(f.reconciler.Client).Create(ctx, stale)
+	require.NoError(t, err)
+
+	// Recovery proves the current width and retires only the stale record.
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.True(t, apierrors.IsNotFound(readErr))
+	require.Equal(t, 4, f.observation(t).StableWidth)
+	require.Zero(t, f.scaleCalls.Load())
+
+	// Install the serving-side drain proof used by a normal scale-down pass.
+	f.reconciler.servingViewFetch = func(context.Context, string) ([]byte, error) { return retirementRouterView(nil, nil), nil }
+	collector := newModelDeploymentDrainCollector(f.reconciler.Client, f.reconciler.APIReader, nil, nil)
+	collector.exec = func(context.Context, *core.Pod, string, []string) (string, error) { return vllmZero(), nil }
+	f.reconciler.drainReader = collector
+
+	// The next ordinary pass reconstructs a fresh downscale operation from the live identities.
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+	fresh, readErr := newElasticOperationStore(f.reconciler.Client).Read(ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr)
+	require.Equal(t, elasticWidth{Old: 4, Target: 2}, fresh.Width)
+	require.Equal(t, elasticStateCommandSent, fresh.State)
+	require.True(t, fresh.CommandSent)
+	require.NotEqual(t, types.UID("stale-server-0-uid"), fresh.Master.UID)
+	require.Equal(t, int32(1), f.scaleCalls.Load())
+}
+
+// TestAnUnsentDownwardRecordWithPartialSurvivalStillHolds ensures recovery does not retire a
+// record while any captured identity remains live and may still need retirement work.
+func TestAnUnsentDownwardRecordWithPartialSurvivalStillHolds(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.stageRecovery(t, true)
+
+	store := newElasticOperationStore(f.reconciler.Client)
+	op, err := store.Read(ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, err)
+	op.State = elasticStateRecorded
+	op.CommandSent = false
+	op.CommandIntent = ""
+	op.Width = elasticWidth{Old: 4, Target: 2}
+	require.NoError(t, store.Delete(ctx, op))
+	_, err = store.Create(ctx, op)
+	require.NoError(t, err)
+
+	pods, err := f.reconciler.elasticLiveMembers(ctx, f.md)
+	require.NoError(t, err)
+	lost := 0
+	for i := range pods {
+		pod := &pods[i]
+		if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(f.md) {
+			continue
+		}
+		ordinal, valid := modelDeploymentPodOrdinal(pod)
+		if valid && (ordinal == 1 || ordinal == 3) {
+			require.NoError(t, f.reconciler.Client.Delete(ctx, pod))
+			lost++
+		}
+	}
+	require.Equal(t, 2, lost)
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+	held, readErr := store.Read(ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr, "partial survival must keep an unsent downward record")
+	require.Equal(t, elasticStateRecorded, held.State)
+	require.Equal(t, elasticWidth{Old: 4, Target: 2}, held.Width)
+	require.Equal(t, "a captured member identity no longer matches; the operation holds",
+		f.observation(t).Reason)
+	require.Zero(t, f.scaleCalls.Load())
+}
+
 // TestAPartialNodeLossStillHolds pins the other edge of the recovery gate: as long as one
 // captured member is still the pod it was recorded against, the retirement may still have work to
 // do, so even a generation-stale record holds on the identity mismatch instead of recovering.
