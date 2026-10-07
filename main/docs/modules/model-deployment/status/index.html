@@ -741,8 +741,8 @@ operation occupies.</p>
 <p>The drain step is where a replica still holding requests is caught before anything is cut; it is
 described in <a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/#the-retirement-protocol">Model Deployment Shutdown</a>
 .</p>
-<p>Nine conditions carry the axes a single phase cannot. They are independent: &ldquo;quota reserved but
-cache not attached&rdquo; is a real and actionable state. Eight are described below; <code>WeightsReady</code> is
+<p>Ten conditions carry the axes a single phase cannot. They are independent: &ldquo;quota reserved but
+cache not attached&rdquo; is a real and actionable state. Nine are described below; <code>WeightsReady</code> is
 described with the artifact it reports on, in <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#status">Model Artifact</a>
 .</p>
 <p><strong><code>DomainRegistered</code></strong> — whether the referenced Binding resolved and its domain was read.</p>
@@ -1139,6 +1139,38 @@ saw, and no pass that reports this has seen any.</p>
       </tr>
   </tbody>
 </table>
+<p><strong><code>ElasticResize</code></strong> — whether an elastic scale stands blocked or terminally refused. It is
+written only for a deployment with an <code>elasticEp</code> role; <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/">Elastic EP</a>
+ owns the
+resize lifecycle it reports on.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Reason</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>NoRefusal</code></td>
+          <td>no elastic scale command stands refused, whether none exists, one is in flight, or one has just completed</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>ScaleRefused</code></td>
+          <td>the engine&rsquo;s definite refusals spent the retry bound and the operation was abandoned; the message carries the engine&rsquo;s own last refusal</td>
+      </tr>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>WorldUnprovable</code></td>
+          <td>the operation record is gone and the live width disagrees with the spec or cannot be named, so no corrective scale can start; the message carries the desired width, the observed width and the proof that failed</td>
+      </tr>
+  </tbody>
+</table>
+<p>A refusal still inside its retry bound stays <code>True</code>: it is not terminal yet. <code>WorldUnprovable</code>
+levels back to <code>True</code> on its own once a later pass proves the live world again.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
@@ -1161,7 +1193,7 @@ distinguish from the operator&rsquo;s own.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/f8416e80f65e56ffc5279a826d6621ddf659ac37/docs/modules/model-deployment/status.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/28fb769f85af0f4841bf4a8c28f5443f6e7fa648/docs/modules/model-deployment/status.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/status.md">Edit this page</a>
             

@@ -245,8 +245,8 @@ operation occupies.
 The drain step is where a replica still holding requests is caught before anything is cut; it is
 described in [Model Deployment Shutdown](/gpustack-operator/main/docs/modules/model-deployment/shutdown/index.md#the-retirement-protocol).
 
-Nine conditions carry the axes a single phase cannot. They are independent: "quota reserved but
-cache not attached" is a real and actionable state. Eight are described below; `WeightsReady` is
+Ten conditions carry the axes a single phase cannot. They are independent: "quota reserved but
+cache not attached" is a real and actionable state. Nine are described below; `WeightsReady` is
 described with the artifact it reports on, in [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#status).
 
 **`DomainRegistered`** — whether the referenced Binding resolved and its domain was read.
@@ -433,6 +433,19 @@ saw, and no pass that reports this has seen any.
 | Value | Reason | Meaning |
 |---|---|---|
 | `Unknown` | `NotObserved` | no endpoint qualification has been observed for any role yet; the per-role `endpoints.eligible` counts are `null`, not zero |
+
+**`ElasticResize`** — whether an elastic scale stands blocked or terminally refused. It is
+written only for a deployment with an `elasticEp` role; [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) owns the
+resize lifecycle it reports on.
+
+| Value | Reason | Meaning |
+|---|---|---|
+| `True` | `NoRefusal` | no elastic scale command stands refused, whether none exists, one is in flight, or one has just completed |
+| `False` | `ScaleRefused` | the engine's definite refusals spent the retry bound and the operation was abandoned; the message carries the engine's own last refusal |
+| `Unknown` | `WorldUnprovable` | the operation record is gone and the live width disagrees with the spec or cannot be named, so no corrective scale can start; the message carries the desired width, the observed width and the proof that failed |
+
+A refusal still inside its retry bound stays `True`: it is not terminal yet. `WorldUnprovable`
+levels back to `True` on its own once a later pass proves the live world again.
 
 ---
 

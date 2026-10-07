@@ -159,6 +159,17 @@ The operator records its intent before it sends one request to the engine. After
 a request that was never sent look identical from outside, and resending against an engine that
 already applied the change is how a resize gets applied twice.
 
+A definite refusal is a different answer. When the engine answers and declines — a `408`, a `5xx`,
+its own busy `503`, or a command it rejected — the record keeps that refusal and the operator
+re-issues the command with backoff: the first retry waits 15 seconds, each later one doubles up to
+a 4-minute ceiling, and the bound is five attempts. A retry goes only to an engine that answered it
+is not mid-resize.
+
+When the bound is spent the operation is abandoned, and the deployment's `ElasticResize` condition
+turns `False` with reason `ScaleRefused`, carrying the engine's own last refusal. An answer that
+never arrived is still never resent: it consumes none of the bound, and the outcome is decided by
+observation.
+
 A resize can therefore stay unresolved. Common reasons:
 
 - capacity for a wider target is not admitted, allocated or joined to Ray;
@@ -171,6 +182,16 @@ clear after its old width is proved, while the desired target remains the same. 
 only after its target and any resource return are proved. This observation pass sends no new resize
 and deletes no members. Missing proof keeps the record and capacity. Inspect the observation
 ConfigMap to identify the missing proof and its cause.
+
+Two stale shapes recover on their own. A narrower spec arriving behind an unresolved widening
+retires the stale record instead of parking behind it. A node loss that takes every captured
+member — replacement Pods carrying identities the record can never match — is re-derived from the
+live world once the spec has moved on, with the native width proved over live members before any
+record moves.
+
+A partial survival still holds, because the captured member that lived may still have retirement
+work pending. A same-generation replacement also holds, because only a spec edit proves the
+captured world is not the wanted one.
 
 ## Interruption scope
 
@@ -187,7 +208,12 @@ number of deployments present says nothing about routing.
 
 ## Diagnosis
 
-1. Read the deployment status and conditions for admission, startup and serving failures.
+1. Read the deployment's `ElasticResize` condition: `False` with `ScaleRefused` means the engine's
+   refusals spent the retry bound and the message carries the last refusal; `Unknown` with
+   `WorldUnprovable` means the operation record is gone and the live world cannot be proved, so the
+   corrective scale waits for observation to prove it. [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md) gives
+   the condition vocabulary; read the rest of the status for admission, startup and serving
+   failures.
 2. Read the deployment-owned observation ConfigMap. Its `reason` names an elastic hold.
    A layer with `Known` false carries its own `Reason`. Check the observed generation against the deployment.
 3. Compare the five layers. A width that never became effective, with Ray holding the target width,
