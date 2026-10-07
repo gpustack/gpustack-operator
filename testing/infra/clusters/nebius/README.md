@@ -313,6 +313,83 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 — the CPU node has none unless `cpu_instance_types.public_ip` asks for one
 ([public addresses](#public-addresses)).
 
+### Recovering an interrupted apply
+
+An apply timeout does not prove that creation failed. A node group can exist in
+Nebius before Terraform records its ID. A `NotEnoughResources` event reports a
+VM scheduling failure; it does not establish that the node group is absent.
+
+Before retrying or destroying, stop the original apply process and its children.
+Use the recorded process identity. Keep the original plan, variable file, state,
+and provider responses. If apply did not finish, the project snapshot described
+above may be missing; pass the original variable file explicitly.
+
+Read the state and the cluster's current node groups. Replace the placeholders
+with IDs from this apply's retained records:
+
+```bash
+terraform state list
+terraform output -raw cluster_id
+nebius mk8s cluster get --id <cluster-id> --format json
+nebius mk8s node-group list --parent-id <cluster-id> --format json --all
+nebius mk8s node-group get --id <node-group-id> --format json
+```
+
+If a planned node group exists but its Terraform address is absent, establish
+ownership before import. The cluster ID must belong to this apply, and its
+parent must be the intended project. The node group's parent must be that
+cluster. Match its name, platform, preset, preemptible setting, node count, and
+boot disk settings against the retained plan. Exclude IDs that existed before
+this apply. A matching name or shape alone does not prove ownership. If the
+identity remains uncertain, report the ID and stop before import or deletion.
+
+Import the proven existing group into its planned address. Import records the
+existing object; it does not create a replacement. Use the original map key for
+`<group-key>`:
+
+```bash
+terraform import -var-file=<original-vars.json> \
+  'nebius_mk8s_v1_node_group.this["<group-key>"]' <node-group-id>
+terraform state show 'nebius_mk8s_v1_node_group.this["<group-key>"]'
+```
+
+Before destroy, retain the IDs of owned roots and their managed descendants.
+Managed instances identify their parents through the `mk8s-node-group-id` and
+`mk8s-cluster-id` metadata labels. A disk's `status.managed_by` identifies its
+owning instance. Keep previously proven descendant IDs even if a preempted
+instance has disappeared. An omitted `ready_node_count` is unknown readiness;
+it does not prevent cleanup of a group whose ownership is proven.
+
+Only after saving that ownership checklist, review the destroy plan and remove
+the resources:
+
+```bash
+terraform plan -destroy -var-file=<original-vars.json>
+terraform destroy -var-file=<original-vars.json>
+terraform state list
+```
+
+If a node group stays in `DELETING`, inspect its `status.events`. A `Draining`
+event can name PodDisruptionBudgets that block eviction of the sole CPU node.
+For an isolated test cluster being removed in full, save and remove only those
+blocking budgets. Keep budgets in any cluster that will remain in use. The
+destroy provisioner may already have removed the local context. Fetch
+credentials into a separate kubeconfig before accessing the deleting cluster:
+
+```bash
+KUBECONFIG=<cleanup-kubeconfig> nebius mk8s cluster get-credentials \
+  --id <cluster-id> --external --force --context-name <cleanup-context>
+kubectl --kubeconfig=<cleanup-kubeconfig> --context=<cleanup-context> \
+  get pdb -n kube-system -o yaml
+```
+
+After destroy, confirm that no managed address remains in state. Query every
+recorded cloud ID and require a `NotFound` for that exact ID. Check instances,
+disks, and provider-created network resources as well as the Terraform roots.
+Compare the remaining inventory with the original inventory to confirm that
+pre-existing resources survived. A successful destroy command alone does not
+establish complete cleanup. Report any surviving ID and its deletion error.
+
 ## Variables
 
 | Variable | Description | Default |
