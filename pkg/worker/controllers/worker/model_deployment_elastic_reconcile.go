@@ -25,6 +25,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
 const (
@@ -431,7 +432,7 @@ func (r *ModelDeploymentReconciler) recoverElasticUnsentMemberDrift(
 		return false, nil
 	}
 	currentWidth := len(captured) - 1
-	if currentWidth < 2 || currentWidth > 64 {
+	if currentWidth < elasticprofile.WidthMin || currentWidth > elasticprofile.WidthMax {
 		return false, nil
 	}
 	if !status.Admitted.Known || status.Admitted.Value != currentWidth ||

@@ -1078,6 +1078,50 @@ func TestRetiringAnUnsentDriftRecordRebuildsTheCurrentScaleDown(t *testing.T) {
 	require.Equal(t, int32(1), f.scaleCalls.Load())
 }
 
+// TestAnUnsentDownwardRecordWithPartialSurvivalStillHolds ensures recovery does not retire a
+// record while any captured identity remains live and may still need retirement work.
+func TestAnUnsentDownwardRecordWithPartialSurvivalStillHolds(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.stageRecovery(t, true)
+
+	store := newElasticOperationStore(f.reconciler.Client)
+	op, err := store.Read(ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, err)
+	op.State = elasticStateRecorded
+	op.CommandSent = false
+	op.CommandIntent = ""
+	op.Width = elasticWidth{Old: 4, Target: 2}
+	require.NoError(t, store.Delete(ctx, op))
+	_, err = store.Create(ctx, op)
+	require.NoError(t, err)
+
+	pods, err := f.reconciler.elasticLiveMembers(ctx, f.md)
+	require.NoError(t, err)
+	lost := 0
+	for i := range pods {
+		pod := &pods[i]
+		if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(f.md) {
+			continue
+		}
+		ordinal, valid := modelDeploymentPodOrdinal(pod)
+		if valid && (ordinal == 1 || ordinal == 3) {
+			require.NoError(t, f.reconciler.Client.Delete(ctx, pod))
+			lost++
+		}
+	}
+	require.Equal(t, 2, lost)
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+	held, readErr := store.Read(ctx, f.md.Namespace, f.md.Name, f.md.UID)
+	require.NoError(t, readErr, "partial survival must keep an unsent downward record")
+	require.Equal(t, elasticStateRecorded, held.State)
+	require.Equal(t, elasticWidth{Old: 4, Target: 2}, held.Width)
+	require.Equal(t, "a captured member identity no longer matches; the operation holds",
+		f.observation(t).Reason)
+	require.Zero(t, f.scaleCalls.Load())
+}
+
 // TestAPartialNodeLossStillHolds pins the other edge of the recovery gate: as long as one
 // captured member is still the pod it was recorded against, the retirement may still have work to
 // do, so even a generation-stale record holds on the identity mismatch instead of recovering.
