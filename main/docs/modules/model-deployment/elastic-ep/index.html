@@ -527,7 +527,7 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
 </li>
 </ul>
 <h2 id="what-the-profile-means">What the profile means</h2>
-<p><code>roles[].elasticEp</code> selects this mode for a role. Three fields matter:</p>
+<p><code>roles[].elasticEp</code> selects this mode for a role. Two fields matter:</p>
 <table>
   <thead>
       <tr>
@@ -544,16 +544,14 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
           <td><code>headInstanceType</code></td>
           <td>The CPU-only InstanceType the Ray control plane runs on. Set once.</td>
       </tr>
-      <tr>
-          <td><code>tensorParallelSize</code></td>
-          <td>Whole GPUs per DP member. One or two; defaults to one. Set once.</td>
-      </tr>
   </tbody>
 </table>
 <p><code>width</code> counts DP engines, including the master. Each member has its own GPU Pod.
-Total GPU demand is <code>width * tensorParallelSize</code>.
-For TP=2, width 2 needs four GPUs; width 4 needs eight GPUs. Change the width to grow the collective; do not use <code>replicas</code> or <code>size</code> for this. This
-release accepts scale-up and unchanged width only. The admission webhook rejects a width decrease;
+Set TP through the role&rsquo;s <code>extraArgs</code>, using the engine&rsquo;s <code>--tensor-parallel-size</code> argument.
+Omitting it uses TP=1. Total GPU demand is <code>width * TP</code>.
+For TP=2, width 2 needs four GPUs; width 4 needs eight GPUs.</p>
+<p>Change the width to grow the collective; do not use <code>replicas</code> or <code>size</code> for this.
+This release accepts scale-up and unchanged width only. The admission webhook rejects a width decrease;
 safe scale-down is tracked in <a href="https://github.com/gpustack/gpustack-operator/issues/741">issue #741</a>
 .</p>
 <p>Once a role carries <code>elasticEp</code>, the profile is fixed for that deployment and the admission webhook
@@ -561,25 +559,24 @@ enforces the rest:</p>
 <ul>
 <li>the deployment has exactly one role, and it is a Server role;</li>
 <li><code>replicas</code> and <code>size</code> are both 1, because each member is exactly one Pod;</li>
-<li>every member asks for exactly <code>tensorParallelSize</code> whole unsliced GPUs;</li>
+<li>every member asks for exactly TP whole unsliced GPUs;</li>
 <li>each member&rsquo;s TP group stays inside one Pod and one Ray node;</li>
-<li>pipeline parallel size stays 1;</li>
+<li>pipeline and prefill context parallel sizes stay 1;</li>
 <li>you cannot supply <code>command</code>, because the renderer owns the command line of the managed role;</li>
 <li>there is no initial fabric to declare.</li>
 </ul>
 <p>Adding or removing the profile on an existing role is refused.
-<code>headInstanceType</code> and the effective <code>tensorParallelSize</code> are immutable after creation.
-Omitted TP and explicit TP=1 are equivalent. Removing TP=2 is refused.</p>
+<code>headInstanceType</code> and the effective TP value are fixed after creation.
+Equivalent TP argument spellings are accepted. Omitting TP and explicitly setting TP=1 are equivalent.
+A width change adjusts DP and EP while preserving TP. Online TP changes are refused.</p>
 <p>Only the master serves HTTP. The other members join the Ray cluster and hold collective state. That
 is why the master is counted inside <code>width</code> and is never retired.</p>
 <h2 id="requirements">Requirements</h2>
 <p>The engine image must be a vLLM 0.29.0 image that already contains a full Ray installation. The
 official vLLM image of that version ships without Ray, and the profile will not start on it. The
 pinned requirement in the resize spec is Ray 2.56.1 with the full default closure.</p>
-<p>TP=2 requires a compatible MoE model and engine kernels.
-See the <a href="https://github.com/gpustack/gpustack-operator/blob/dc3efd726874454d6954ffbb5b1a6892389d0bfb/specs/2026-10-07-elastic-ep-tensor-parallel.md#evidence-and-assumptions">tensor parallel spec</a>
-
-for the validation scope.</p>
+<p>The TP size must fit the selected MoE model, engine kernels, and GPUs available on one node.
+The operator does not limit TP to the size used by a particular test.</p>
 <p>The Ray control plane needs its own Pod, which is why <code>headInstanceType</code> is required. It names an
 InstanceType that must already exist and must be CPU-only.</p>
 <p>The profile increases the number of GPU members. It does not resize the underlying nodes or claim
@@ -626,7 +623,7 @@ Sufficiency at 512 MiB is not established. A workload that needs more must decla
 </div><p>Weights reach the members through the same artifact and cache as any other deployment. See
 <a href="/gpustack-operator/main/docs/modules/model-delivery/">Model Delivery</a>
 .</p>
-<p>To use TP=2, set <code>elasticEp.tensorParallelSize: 2</code> and request <code>resources.accelerator: &quot;2&quot;</code>.
+<p>To use TP=2, add <code>extraArgs: [&quot;--tensor-parallel-size&quot;, &quot;2&quot;]</code> and request <code>resources.accelerator: &quot;2&quot;</code>.
 If the accelerator quantity is omitted, admission defaults it to the TP size.
 Explicit quantities must equal the TP size. Each member&rsquo;s CPU and memory scale with its GPU count.</p>
 <h2 id="changing-the-width">Changing the width</h2>
@@ -783,7 +780,7 @@ change.</li>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/dc3efd726874454d6954ffbb5b1a6892389d0bfb/docs/modules/model-deployment/elastic-ep.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/e9d9c47c3b8baa1e6289d484daf0f092a0f93b4c/docs/modules/model-deployment/elastic-ep.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/elastic-ep.md">Edit this page</a>
             
