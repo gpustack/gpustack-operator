@@ -29,6 +29,8 @@
 // operator.
 package elasticprofile
 
+import workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+
 const (
 	// WidthMin is the narrowest elastic collective: the engine world plus the one reserved
 	// API/DP-master member the profile always holds back.
@@ -39,3 +41,12 @@ const (
 	// engine answer must never decide how much probe traffic the operator generates.
 	WidthMax = 64
 )
+
+// TensorParallelSize reads the effective immutable GPU group size.
+// Legacy and non-elastic roles use one.
+func TensorParallelSize(profile *workercore.ModelDeploymentRoleElasticEP) int32 {
+	if profile == nil || profile.TensorParallelSize == nil {
+		return 1
+	}
+	return *profile.TensorParallelSize
+}

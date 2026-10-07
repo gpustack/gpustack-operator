@@ -161,6 +161,11 @@ func validateModelDeploymentElasticShape(
 					elasticprofile.WidthMin, elasticprofile.WidthMax),
 			))
 		}
+		tp := elasticprofile.TensorParallelSize(role.ElasticEP)
+		if tp != 1 && tp != 2 {
+			errs = append(errs, field.Invalid(rolePath.Child("elasticEp", "tensorParallelSize"), tp,
+				"tensor parallel size must be one or two"))
+		}
 		if role.ElasticEP.HeadInstanceType == "" {
 			errs = append(errs, field.Required(
 				rolePath.Child("elasticEp", "headInstanceType"),
@@ -210,10 +215,10 @@ func validateModelDeploymentElasticResources(
 	}
 	resPath := rolePath.Child("resources")
 
-	if res.Accelerator != nil && res.Accelerator.CmpInt64(1) != 0 {
+	if res.Accelerator != nil && res.Accelerator.CmpInt64(int64(elasticprofile.TensorParallelSize(role.ElasticEP))) != 0 {
 		errs = append(errs, field.Invalid(
 			resPath.Child("accelerator"), res.Accelerator.String(),
-			"each elastic member takes exactly one whole accelerator per Pod",
+			fmt.Sprintf("each elastic member takes exactly %d whole accelerators per Pod", elasticprofile.TensorParallelSize(role.ElasticEP)),
 		))
 	}
 	if res.AcceleratorSlicedMemoryPercentage != 0 {
@@ -308,6 +313,12 @@ func validateModelDeploymentElasticIdentity(
 		errs = append(errs, field.Invalid(
 			modelDeploymentElasticRolePath(md, newElastic).Child("elasticEp", "headInstanceType"),
 			newElastic.ElasticEP.HeadInstanceType, modelDeploymentIdentityMessage,
+		))
+	}
+	if elasticprofile.TensorParallelSize(oldElastic.ElasticEP) != elasticprofile.TensorParallelSize(newElastic.ElasticEP) {
+		errs = append(errs, field.Invalid(
+			modelDeploymentElasticRolePath(md, newElastic).Child("elasticEp", "tensorParallelSize"),
+			elasticprofile.TensorParallelSize(newElastic.ElasticEP), modelDeploymentIdentityMessage,
 		))
 	}
 	if oldElastic.Name != newElastic.Name {

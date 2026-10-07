@@ -547,7 +547,7 @@ type ModelDeploymentRole struct {
 
 	// ElasticEP opts this role into the managed elastic-EP profile: the operator then renders
 	// one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head
-	// and one whole-GPU member per engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role
+	// and one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role
 	// without it renders exactly as it did before this field existed, and a profile that is
 	// turned on and off again describes a different deployment, so the field's presence and
 	// HeadInstanceType are frozen at creation. Width is editable for scale-up; scale-down is
@@ -555,7 +555,7 @@ type ModelDeploymentRole struct {
 	//
 	// The profile admits exactly one such role per deployment, running the vLLM engine as a
 	// single Server role of one instance of one Pod. Every member -- the reserved API/DP-master
-	// and every Ray-only worker -- takes one whole, non-sliced, non-partitioned accelerator,
+	// and every Ray-only worker -- takes TensorParallelSize whole, non-sliced, non-partitioned accelerators,
 	// so the role's resources are pinned to that shape at admission. The head is admitted
 	// separately against HeadInstanceType's own queue and never counts toward Width.
 	//
@@ -568,7 +568,7 @@ type ModelDeploymentRole struct {
 // Width is the only mutable field: it answers how large the collective currently should be,
 // which is a running-state question. This release accepts increases and unchanged values;
 // admission refuses a decrease until Elastic EP scale-down support is complete. Presence and
-// HeadInstanceType answer which deployment this is and where its control plane lives, which is
+// HeadInstanceType and TensorParallelSize describe its fixed placement and shape, which is
 // identity, and are frozen with the rest of the identity fields.
 type ModelDeploymentRoleElasticEP struct {
 	// Width is the total number of GPU engines in the elastic collective, INCLUDING the
@@ -590,6 +590,14 @@ type ModelDeploymentRoleElasticEP struct {
 	// +k8s:validation:minLength=1
 	// +k8s:validation:maxLength=253
 	HeadInstanceType string `json:"headInstanceType" protobuf:"bytes,2,name=headInstanceType"`
+
+	// TensorParallelSize is the immutable number of whole GPUs per DP member.
+	// Omitted values use one. Total GPU demand is Width times TensorParallelSize.
+	// +optional
+	// +k8s:validation:minimum=1
+	// +k8s:validation:maximum=2
+	// +k8s:validation:default=1
+	TensorParallelSize *int32 `json:"tensorParallelSize,omitempty" protobuf:"varint,3,opt,name=tensorParallelSize"`
 }
 
 // ModelDeploymentRoleTopology is the topology request for one independent replica group.

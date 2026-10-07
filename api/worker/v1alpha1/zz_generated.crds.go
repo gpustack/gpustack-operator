@@ -4824,7 +4824,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															XListType: ptr.To[string]("atomic"),
 														},
 														"elasticEp": {
-															Description: "ElasticEP opts this role into the managed elastic-EP profile: the operator then renders\none dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head\nand one whole-GPU member per engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role\nwithout it renders exactly as it did before this field existed, and a profile that is\nturned on and off again describes a different deployment, so the field's presence and\nHeadInstanceType are frozen at creation. Width is editable for scale-up; scale-down is\nrefused by admission in this release.\nThe profile admits exactly one such role per deployment, running the vLLM engine as a\nsingle Server role of one instance of one Pod. Every member -- the reserved API/DP-master\nand every Ray-only worker -- takes one whole, non-sliced, non-partitioned accelerator,\nso the role's resources are pinned to that shape at admission. The head is admitted\nseparately against HeadInstanceType's own queue and never counts toward Width.",
+															Description: "ElasticEP opts this role into the managed elastic-EP profile: the operator then renders\none dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head\nand one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role\nwithout it renders exactly as it did before this field existed, and a profile that is\nturned on and off again describes a different deployment, so the field's presence and\nHeadInstanceType are frozen at creation. Width is editable for scale-up; scale-down is\nrefused by admission in this release.\nThe profile admits exactly one such role per deployment, running the vLLM engine as a\nsingle Server role of one instance of one Pod. Every member -- the reserved API/DP-master\nand every Ray-only worker -- takes TensorParallelSize whole, non-sliced, non-partitioned accelerators,\nso the role's resources are pinned to that shape at admission. The head is admitted\nseparately against HeadInstanceType's own queue and never counts toward Width.",
 															Type:        "object",
 															Required: []string{
 																"width",
@@ -4836,6 +4836,17 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																	Type:        "string",
 																	MaxLength:   ptr.To[int64](253),
 																	MinLength:   ptr.To[int64](1),
+																},
+																"tensorParallelSize": {
+																	Description: "TensorParallelSize is the immutable number of whole GPUs per DP member.\nOmitted values use one. Total GPU demand is Width times TensorParallelSize.",
+																	Type:        "integer",
+																	Format:      "int32",
+																	Default: &v1.JSON{
+																		Raw: []byte(`1`),
+																	},
+																	Maximum:  ptr.To[float64](2),
+																	Minimum:  ptr.To[float64](1),
+																	Nullable: true,
 																},
 																"width": {
 																	Description: "Width is the total number of GPU engines in the elastic collective, INCLUDING the\nreserved API/DP-master member; width-1 of them are Ray-only workers. It is the total\nengine world the engine is told to run, not a Pod count and not a rank mapping: which\nmember holds which rank is the engine's own runtime fact and is never implied by this\nnumber.",

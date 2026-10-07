@@ -17,6 +17,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
 const (
@@ -88,13 +89,14 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 			}},
 			core.EnvVar{Name: "VLLM_RAY_DP_PACK_STRATEGY", Value: "strict"},
 		)
+		tp := strconv.Itoa(int(elasticprofile.TensorParallelSize(role.ElasticEP)))
 		join := "ray start --node-ip-address=\"$GPUSTACK_ELASTIC_POD_IP\" --address=" + address +
-			" --num-gpus=1 --labels=" + ModelDeploymentElasticRayNodeIdentityLabel + "=\"$GPUSTACK_ELASTIC_POD_UID\""
+			" --num-gpus=" + tp + " --labels=" + ModelDeploymentElasticRayNodeIdentityLabel + "=\"$GPUSTACK_ELASTIC_POD_UID\""
 
 		if ordinal == 0 {
 			argv := slices.Clone(c.Command)
 			argv = append(argv, "--data-parallel-backend", "ray", "--data-parallel-size", strconv.Itoa(int(boot)),
-				"--data-parallel-size-local", "1", "--tensor-parallel-size", "1", "--pipeline-parallel-size", "1",
+				"--data-parallel-size-local", "1", "--tensor-parallel-size", tp, "--pipeline-parallel-size", "1",
 				"--enable-expert-parallel", "--enable-eplb", "--enable-elastic-ep")
 			c.Command = append([]string{"/bin/sh", "-c", "set -e; " + join +
 				"; exec \"$@\" --data-parallel-address \"$GPUSTACK_ELASTIC_POD_IP\"", "elastic-serve"}, argv...)

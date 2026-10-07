@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,75 +26,89 @@ import (
 )
 
 func TestElasticConvergenceCreatesChildren(t *testing.T) {
-	md := newRenderDeployment()
-	md.Spec.KVCache = nil
-	md.Spec.Engine.Version = "0.29.0"
-	md.Spec.Roles[0].Replicas = 1
-	md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(1, resource.DecimalSI)}
-	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2, HeadInstanceType: "cpu"}
-	cpu := newRenderInstanceType(func(it *worker.InstanceType) {
-		it.Name = "cpu"
-		it.Spec.Acceleratable = false
-		it.Status.Entrance = "cpu-queue"
-	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
-	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
-	_, err := r.convergeModelDeployment(context.Background(), md)
-	require.NoError(t, err)
-	pods := new(core.PodList)
-	require.NoError(t, cli.List(context.Background(), pods, ctrlcli.InNamespace(md.Namespace)))
-	require.Len(t, pods.Items, 3, "two GPU members and a CPU head must exist")
-	gpuResource := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-	groups := map[string]bool{}
-	var master core.Pod
-	for i := range pods.Items {
-		pod := &pods.Items[i]
-		groups[pod.Labels[kueuepodconst.GroupNameLabel]] = true
-		pod.UID = types.UID(fmt.Sprintf("uid-%d", i))
-		c := pod.Spec.Containers[0]
-		if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(md) {
-			require.Equal(t, "cpu-queue", pod.Labels["kueue.x-k8s.io/queue-name"])
-			require.NotContains(t, c.Resources.Limits, gpuResource)
-			require.Contains(t, c.Command[2], "--num-gpus=0")
-		} else {
-			q := c.Resources.Limits[gpuResource]
-			require.Equal(t, int64(1), q.Value())
-			require.Contains(t, c.Command[2], "gpustack-pod-uid=\"$GPUSTACK_ELASTIC_POD_UID\"")
-			if modelDeploymentOrdinalOrFloor(pod) == 0 {
-				master = *pod.DeepCopy()
-				require.Contains(t, c.Command, "--enable-elastic-ep")
+	for _, tp := range []int32{1, 2} {
+		t.Run(fmt.Sprintf("tp-%d", tp), func(t *testing.T) {
+			md := newRenderDeployment()
+			md.Spec.KVCache = nil
+			md.Spec.Engine.Version = "0.29.0"
+			md.Spec.Roles[0].Replicas = 1
+			md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(int64(tp), resource.DecimalSI)}
+			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2, HeadInstanceType: "cpu", TensorParallelSize: &tp}
+			cpu := newRenderInstanceType(func(it *worker.InstanceType) {
+				it.Name = "cpu"
+				it.Spec.Acceleratable = false
+				it.Status.Entrance = "cpu-queue"
+			})
+			cli := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
+			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+			gpuType := new(worker.InstanceType)
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: md.Spec.Roles[0].InstanceType}, gpuType))
+			unitCPU := resource.MustParse(gpuType.Spec.UnitResources.CPU)
+			unitMemory := resource.MustParse(gpuType.Spec.UnitResources.RAM)
+			_, err := r.convergeModelDeployment(context.Background(), md)
+			require.NoError(t, err)
+			pods := new(core.PodList)
+			require.NoError(t, cli.List(context.Background(), pods, ctrlcli.InNamespace(md.Namespace)))
+			require.Len(t, pods.Items, 3, "two GPU members and a CPU head must exist")
+			gpuResource := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+			groups := map[string]bool{}
+			var master core.Pod
+			for i := range pods.Items {
+				pod := &pods.Items[i]
+				groups[pod.Labels[kueuepodconst.GroupNameLabel]] = true
+				pod.UID = types.UID(fmt.Sprintf("uid-%d", i))
+				c := pod.Spec.Containers[0]
+				if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(md) {
+					require.Equal(t, "cpu-queue", pod.Labels["kueue.x-k8s.io/queue-name"])
+					require.NotContains(t, c.Resources.Limits, gpuResource)
+					require.Contains(t, c.Command[2], "--num-gpus=0")
+				} else {
+					q := c.Resources.Limits[gpuResource]
+					require.Equal(t, int64(tp), q.Value())
+					require.Contains(t, c.Command[2], fmt.Sprintf("--num-gpus=%d", tp))
+					require.Equal(t, unitCPU.MilliValue()*int64(tp), c.Resources.Limits.Cpu().MilliValue())
+					require.Equal(t, unitMemory.Value()*int64(tp), c.Resources.Limits.Memory().Value())
+					require.Contains(t, c.Command[2], "gpustack-pod-uid=\"$GPUSTACK_ELASTIC_POD_UID\"")
+					if modelDeploymentOrdinalOrFloor(pod) == 0 {
+						master = *pod.DeepCopy()
+						require.Contains(t, c.Command, "--enable-elastic-ep")
+						tpArg := slices.Index(c.Command, "--tensor-parallel-size")
+						require.GreaterOrEqual(t, tpArg, 0)
+						require.Equal(t, strconv.Itoa(int(tp)), c.Command[tpArg+1])
+					}
+				}
+				require.NoError(t, cli.Update(context.Background(), pod))
 			}
-		}
-		require.NoError(t, cli.Update(context.Background(), pod))
-	}
-	require.Len(t, groups, 3)
-	require.NotEmpty(t, master.Name)
-	services := new(core.ServiceList)
-	require.NoError(t, cli.List(context.Background(), services, ctrlcli.InNamespace(md.Namespace)))
-	require.GreaterOrEqual(t, len(services.Items), 2, "API and Ray head services must exist")
-	for _, service := range services.Items {
-		if service.Name != modelDeploymentElasticHeadName(md) {
-			require.Equal(t, "0", service.Spec.Selector[modelDeploymentReplicaOrdinalLabel])
-		}
-	}
-	for _, width := range []int32{4, 2} {
-		md.Spec.Roles[0].ElasticEP.Width = width
-		md.Annotations = map[string]string{ModelDeploymentElasticBootWidthAnnotation: "63"}
-		_, err = r.convergeModelDeployment(context.Background(), md)
-		require.NoError(t, err)
-		require.NoError(t, cli.List(context.Background(), pods, ctrlcli.InNamespace(md.Namespace)))
-		require.Len(t, pods.Items, 5, "width reduction must retain workers")
-		found := false
-		for _, pod := range pods.Items {
-			if pod.Name == master.Name {
-				found = true
-				require.True(t, reflect.DeepEqual(master.Spec, pod.Spec))
-				require.Equal(t, "2", pod.Annotations[ModelDeploymentElasticMasterBootWidthAnnotation])
-				require.False(t, strings.Contains(pod.Spec.Containers[0].Command[2], "'63'"))
-				require.Equal(t, master.UID, pod.UID)
+			require.Len(t, groups, 3)
+			require.NotEmpty(t, master.Name)
+			services := new(core.ServiceList)
+			require.NoError(t, cli.List(context.Background(), services, ctrlcli.InNamespace(md.Namespace)))
+			require.GreaterOrEqual(t, len(services.Items), 2, "API and Ray head services must exist")
+			for _, service := range services.Items {
+				if service.Name != modelDeploymentElasticHeadName(md) {
+					require.Equal(t, "0", service.Spec.Selector[modelDeploymentReplicaOrdinalLabel])
+				}
 			}
-		}
-		require.True(t, found, "master must survive width edits")
+			for _, width := range []int32{4, 2} {
+				md.Spec.Roles[0].ElasticEP.Width = width
+				md.Annotations = map[string]string{ModelDeploymentElasticBootWidthAnnotation: "63"}
+				_, err = r.convergeModelDeployment(context.Background(), md)
+				require.NoError(t, err)
+				require.NoError(t, cli.List(context.Background(), pods, ctrlcli.InNamespace(md.Namespace)))
+				require.Len(t, pods.Items, 5, "width reduction must retain workers")
+				found := false
+				for _, pod := range pods.Items {
+					if pod.Name == master.Name {
+						found = true
+						require.True(t, reflect.DeepEqual(master.Spec, pod.Spec))
+						require.Equal(t, "2", pod.Annotations[ModelDeploymentElasticMasterBootWidthAnnotation])
+						require.False(t, strings.Contains(pod.Spec.Containers[0].Command[2], "'63'"))
+						require.Equal(t, master.UID, pod.UID)
+					}
+				}
+				require.True(t, found, "master must survive width edits")
+			}
+		})
 	}
 }
 

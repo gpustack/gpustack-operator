@@ -24,6 +24,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
@@ -180,7 +181,7 @@ func (r *ModelDeploymentWebhook) Default(ctx context.Context, obj runtime.Object
 		if role.Resources == nil {
 			role.Resources = new(workercore.ModelDeploymentRoleResources)
 		}
-		role.Resources.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
+		role.Resources.Accelerator = resource.NewQuantity(int64(elasticprofile.TensorParallelSize(role.ElasticEP)), resource.DecimalSI)
 	}
 
 	return nil

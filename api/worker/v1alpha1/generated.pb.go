@@ -6482,6 +6482,11 @@ func (m *ModelDeploymentRoleElasticEP) MarshalToSizedBuffer(dAtA []byte) (int, e
 	_ = i
 	var l int
 	_ = l
+	if m.TensorParallelSize != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.TensorParallelSize))
+		i--
+		dAtA[i] = 0x18
+	}
 	i -= len(m.HeadInstanceType)
 	copy(dAtA[i:], m.HeadInstanceType)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.HeadInstanceType)))
@@ -11430,6 +11435,9 @@ func (m *ModelDeploymentRoleElasticEP) Size() (n int) {
 	n += 1 + sovGenerated(uint64(m.Width))
 	l = len(m.HeadInstanceType)
 	n += 1 + l + sovGenerated(uint64(l))
+	if m.TensorParallelSize != nil {
+		n += 1 + sovGenerated(uint64(*m.TensorParallelSize))
+	}
 	return n
 }
 
@@ -14128,6 +14136,7 @@ func (this *ModelDeploymentRoleElasticEP) String() string {
 	s := strings.Join([]string{`&ModelDeploymentRoleElasticEP{`,
 		`Width:` + fmt.Sprintf("%v", this.Width) + `,`,
 		`HeadInstanceType:` + fmt.Sprintf("%v", this.HeadInstanceType) + `,`,
+		`TensorParallelSize:` + valueToStringGenerated(this.TensorParallelSize) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -34648,6 +34657,26 @@ func (m *ModelDeploymentRoleElasticEP) Unmarshal(dAtA []byte) error {
 			}
 			m.HeadInstanceType = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TensorParallelSize", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.TensorParallelSize = &v
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

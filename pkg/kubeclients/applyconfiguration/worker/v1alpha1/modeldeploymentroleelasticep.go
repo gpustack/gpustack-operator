@@ -10,7 +10,7 @@ package v1alpha1
 // Width is the only mutable field: it answers how large the collective currently should be,
 // which is a running-state question. This release accepts increases and unchanged values;
 // admission refuses a decrease until Elastic EP scale-down support is complete. Presence and
-// HeadInstanceType answer which deployment this is and where its control plane lives, which is
+// HeadInstanceType and TensorParallelSize describe its fixed placement and shape, which is
 // identity, and are frozen with the rest of the identity fields.
 type ModelDeploymentRoleElasticEPApplyConfiguration struct {
 	// Width is the total number of GPU engines in the elastic collective, INCLUDING the
@@ -24,6 +24,9 @@ type ModelDeploymentRoleElasticEPApplyConfiguration struct {
 	// queue: it takes no accelerator, joins no GPU queue at zero charge, and is not a width
 	// member.
 	HeadInstanceType *string `json:"headInstanceType,omitempty"`
+	// TensorParallelSize is the immutable number of whole GPUs per DP member.
+	// Omitted values use one. Total GPU demand is Width times TensorParallelSize.
+	TensorParallelSize *int32 `json:"tensorParallelSize,omitempty"`
 }
 
 // ModelDeploymentRoleElasticEPApplyConfiguration constructs a declarative configuration of the ModelDeploymentRoleElasticEP type for use with
@@ -45,5 +48,13 @@ func (b *ModelDeploymentRoleElasticEPApplyConfiguration) WithWidth(value int32) 
 // If called multiple times, the HeadInstanceType field is set to the value of the last call.
 func (b *ModelDeploymentRoleElasticEPApplyConfiguration) WithHeadInstanceType(value string) *ModelDeploymentRoleElasticEPApplyConfiguration {
 	b.HeadInstanceType = &value
+	return b
+}
+
+// WithTensorParallelSize sets the TensorParallelSize field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the TensorParallelSize field is set to the value of the last call.
+func (b *ModelDeploymentRoleElasticEPApplyConfiguration) WithTensorParallelSize(value int32) *ModelDeploymentRoleElasticEPApplyConfiguration {
+	b.TensorParallelSize = &value
 	return b
 }
