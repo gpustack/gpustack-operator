@@ -20,15 +20,16 @@ func TestElasticTPAllocation(t *testing.T) {
 		name    string
 		ids     []string
 		units   []int32
-		sidecar bool
+		sidecar string
 		valid   bool
 	}{
-		{"complete group", []string{"GPU-abc", "GPU-def"}, []int32{nodefeature.ResourceMaxUnits, nodefeature.ResourceMaxUnits}, false, true},
-		{"missing card", []string{"GPU-abc"}, []int32{nodefeature.ResourceMaxUnits}, false, false},
-		{"duplicate card", []string{"GPU-abc", "GPU-abc"}, []int32{nodefeature.ResourceMaxUnits, nodefeature.ResourceMaxUnits}, false, false},
-		{"partial second card", []string{"GPU-abc", "GPU-def"}, []int32{nodefeature.ResourceMaxUnits, 1}, false, false},
-		{"extra container", []string{"GPU-abc", "GPU-def"}, []int32{nodefeature.ResourceMaxUnits, nodefeature.ResourceMaxUnits}, true, false},
-		{"extra card", []string{"GPU-abc", "GPU-def", "GPU-ghi"}, []int32{nodefeature.ResourceMaxUnits, nodefeature.ResourceMaxUnits, nodefeature.ResourceMaxUnits}, false, false},
+		{"complete group", []string{"GPU-abc", "GPU-def"}, []int32{nodefeature.ResourceMaxUnits, nodefeature.ResourceMaxUnits}, "", true},
+		{"empty sibling record", []string{"GPU-abc", "GPU-def"}, []int32{nodefeature.ResourceMaxUnits, nodefeature.ResourceMaxUnits}, "cpu", true},
+		{"missing card", []string{"GPU-abc"}, []int32{nodefeature.ResourceMaxUnits}, "", false},
+		{"duplicate card", []string{"GPU-abc", "GPU-abc"}, []int32{nodefeature.ResourceMaxUnits, nodefeature.ResourceMaxUnits}, "", false},
+		{"partial second card", []string{"GPU-abc", "GPU-def"}, []int32{nodefeature.ResourceMaxUnits, 1}, "", false},
+		{"extra container", []string{"GPU-abc", "GPU-def"}, []int32{nodefeature.ResourceMaxUnits, nodefeature.ResourceMaxUnits}, "gpu", false},
+		{"extra card", []string{"GPU-abc", "GPU-def", "GPU-ghi"}, []int32{nodefeature.ResourceMaxUnits, nodefeature.ResourceMaxUnits, nodefeature.ResourceMaxUnits}, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -45,8 +46,13 @@ func TestElasticTPAllocation(t *testing.T) {
 			allocation := existing[modelDeploymentMainContainerName]
 			allocation.Devices = main
 			allocations[modelDeploymentMainContainerName] = allocation
-			if tc.sidecar {
+			switch tc.sidecar {
+			case "gpu":
 				allocations["sidecar"] = allocation
+			case "cpu":
+				empty := allocation
+				empty.Devices = workercore.DevicesStatus{}
+				allocations["sidecar"] = empty
 			}
 			pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = mustJSON(t, allocations)
 			cards, reason, held := elasticWholeCardsOf(pod, 2)

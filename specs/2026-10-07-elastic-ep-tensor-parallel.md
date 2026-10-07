@@ -39,6 +39,7 @@ The existing host-resource sizing multiplies CPU and memory by the accelerator q
 Total GPU demand is `width * tensorParallelSize`; all four convergence layers continue to count DP members.
 
 Allocation requires the entire TP group in the main container.
+Empty sibling allocation records are allowed; sibling accelerator allocations are refused.
 Every card must have distinct identity, exclusive mode, full units, and no slices or partition profiles.
 Every card must agree with the same bookended node ledger.
 A complete TP group contributes one member to allocated capacity.
@@ -80,7 +81,8 @@ Physical acceptance remains pending until the new image completes TP=2, DP=2 to 
 
 Use table-driven CPU tests for omitted and explicit TP, invalid sizes, wrong GPU quantities, and immutable updates.
 Verify rendering for both TP sizes, CPU-only head resources, and stable master identity during scale-up.
-Reject missing, duplicated, partial, sliced, and extra-container allocations.
+Reject missing, duplicated, partial, sliced, and extra-container accelerator allocations.
+Accept empty sibling allocation records.
 Verify that two cards contribute one allocated member and that a disagreeing second card holds the layer.
 Reject incorrect registered GPU quantities and incomplete or cross-node TP bundles.
 Preserve existing TP=1 and non-elastic regressions.

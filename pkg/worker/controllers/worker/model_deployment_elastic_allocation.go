@@ -60,9 +60,19 @@ func elasticWholeCardsOf(pod *core.Pod, expected int32) ([]modelDeploymentRetire
 		return nil, "", false
 	}
 	main, recorded := allocations[modelDeploymentMainContainerName]
-	if !recorded || len(allocations) != 1 {
+	if !recorded {
 		return nil, fmt.Sprintf("member %q records its allocation on containers other than %q",
 			pod.Name, modelDeploymentMainContainerName), false
+	}
+	for name, allocation := range allocations {
+		if name == modelDeploymentMainContainerName {
+			continue
+		}
+		for _, group := range allocation.Devices.Groups {
+			if len(group.Accelerators) > 0 {
+				return nil, fmt.Sprintf("member %q records accelerators in sibling container %q", pod.Name, name), false
+			}
+		}
 	}
 	cards := []modelDeploymentRetirementReleaseCard{}
 	seen := map[string]bool{}
