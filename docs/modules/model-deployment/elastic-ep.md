@@ -58,8 +58,8 @@ official vLLM image of that version ships without Ray, and the profile will not 
 pinned requirement in the resize spec is Ray 2.56.1 with the full default closure.
 
 TP=2 requires a compatible MoE model and engine kernels.
-Static vLLM recipe coverage does not establish dynamic TP=2 acceptance.
-Physical TP=2 scale-up validation is pending for this operator change.
+See the [tensor parallel spec](../../../specs/2026-10-07-elastic-ep-tensor-parallel.md#evidence-and-assumptions)
+for the validation scope.
 
 The Ray control plane needs its own Pod, which is why `headInstanceType` is required. It names an
 InstanceType that must already exist and must be CPU-only.
