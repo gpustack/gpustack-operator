@@ -71,7 +71,7 @@ Physical acceptance remains pending until the new image completes TP=2, DP=2 to 
 
 - [x] Task 1: Add the API, defaults, immutable admission, and rendering. Verify legacy defaults and invalid updates.
   Blocked by: None. Owns: API types, shared profile, webhook, renderer, generated output, and their tests.
-- [ ] Task 2: Validate complete TP allocation and Ray placement. Verify member counts and uncertain observations.
+- [x] Task 2: Validate complete TP allocation and Ray placement. Verify member counts and uncertain observations.
   Blocked by: Task 1. Owns: allocation, collector, observer, and their tests.
 - [ ] Task 3: Update the owning guide and index. Run required checks and prepare the reviewed PR.
   Blocked by: Task 2. Owns: model-deployment guide, shared index, and this spec.

@@ -128,6 +128,7 @@ def project_placement_group(row):
         bundles.append(
             {
                 "bundle_index": int(bundle.bundle_id.bundle_index),
+                "unit_resources": {key: str(value) for key, value in bundle.unit_resources.items()},
                 "node_id_hex": bundle.node_id.hex(),
             }
         )

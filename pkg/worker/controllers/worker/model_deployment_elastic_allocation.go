@@ -19,6 +19,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
 // The elastic allocation producer answers the kernel's two capacity layers: how many seated
@@ -48,57 +49,54 @@ func modelDeploymentElasticWorkerOf(
 		owner.APIVersion == workercore.GroupVersion.String() && owner.Name == md.Name
 }
 
-// elasticWholeCardOf reads the one whole unsliced accelerator a member's main container
-// records, in the shape the allocator writes it: exclusive mode, the card's full unit count,
-// no slices or profiles. A POD WITH NO RECORD AT ALL IS UNALLOCATED, not unreadable: an
-// absent record is the state a member not yet allocated carries, and the caller reads it as
-// a member that holds nothing. A record present but saying anything other than exactly one
-// whole card is refused with a reason, because trusting it would count a member that holds
-// something else.
-func elasticWholeCardOf(pod *core.Pod) (card modelDeploymentRetirementReleaseCard, reason string, held bool) {
+// elasticWholeCardsOf reads a member's complete TP group from its main container.
+// An absent record is unallocated. Partial or ambiguous records are refused.
+func elasticWholeCardsOf(pod *core.Pod, expected int32) ([]modelDeploymentRetirementReleaseCard, string, bool) {
 	allocations, err := deviceplugin.AllocatedAcceleratorsOf(pod)
 	if err != nil {
-		return modelDeploymentRetirementReleaseCard{}, fmt.Sprintf("member %q's allocation record is not readable: %v", pod.Name, err), false
+		return nil, fmt.Sprintf("member %q's allocation record is not readable: %v", pod.Name, err), false
 	}
 	if len(allocations) == 0 {
-		return modelDeploymentRetirementReleaseCard{}, "", false
+		return nil, "", false
 	}
 	main, recorded := allocations[modelDeploymentMainContainerName]
-	if !recorded {
-		return modelDeploymentRetirementReleaseCard{}, fmt.Sprintf("member %q records its allocation on containers other than %q",
+	if !recorded || len(allocations) != 1 {
+		return nil, fmt.Sprintf("member %q records its allocation on containers other than %q",
 			pod.Name, modelDeploymentMainContainerName), false
 	}
-	cards := 0
+	cards := []modelDeploymentRetirementReleaseCard{}
+	seen := map[string]bool{}
+	indices := map[string]bool{}
 	for i := range main.Devices.Groups {
 		group := &main.Devices.Groups[i]
 		for j := range group.Accelerators {
 			accelerator := &group.Accelerators[j]
-			cards++
-			card = modelDeploymentRetirementReleaseCard{
-				GroupID: group.ID, Manufacturer: group.Manufacturer,
-				DeviceID: accelerator.ID, Index: accelerator.Index,
+			identity := group.ID + "/" + accelerator.ID
+			index := fmt.Sprintf("%s/%d", group.ID, accelerator.Index)
+			if accelerator.ID == "" || seen[identity] || indices[index] {
+				return nil, fmt.Sprintf("member %q records a missing or duplicate accelerator identity", pod.Name), false
 			}
+			seen[identity], indices[index] = true, true
 			switch {
 			case accelerator.Mode != workercore.DeviceAllocationModeExclusive:
-				return modelDeploymentRetirementReleaseCard{}, fmt.Sprintf("member %q records a non-exclusive allocation on %q", pod.Name, accelerator.ID), false
+				return nil, fmt.Sprintf("member %q records a non-exclusive allocation on %q", pod.Name, accelerator.ID), false
 			case accelerator.Allocated != int32(nodefeature.ResourceMaxUnits):
-				return modelDeploymentRetirementReleaseCard{}, fmt.Sprintf("member %q records %d of %d units on %q, not a whole card",
+				return nil, fmt.Sprintf("member %q records %d of %d units on %q, not a whole card",
 					pod.Name, accelerator.Allocated, nodefeature.ResourceMaxUnits, accelerator.ID), false
-			case accelerator.AllocatedSlices != 0 ||
-				len(accelerator.AllocatedProfiles) != 0 || len(accelerator.RemainingProfiles) != 0:
-				return modelDeploymentRetirementReleaseCard{}, fmt.Sprintf("member %q records a sliced allocation on %q", pod.Name, accelerator.ID), false
+			case accelerator.AllocatedSlices != 0 || len(accelerator.AllocatedProfiles) != 0 || len(accelerator.RemainingProfiles) != 0:
+				return nil, fmt.Sprintf("member %q records a sliced allocation on %q", pod.Name, accelerator.ID), false
 			}
+			cards = append(cards, modelDeploymentRetirementReleaseCard{
+				GroupID: group.ID, Manufacturer: group.Manufacturer,
+				DeviceID: accelerator.ID, Index: accelerator.Index,
+			})
 		}
 	}
-	if cards == 0 {
-		return modelDeploymentRetirementReleaseCard{}, fmt.Sprintf("member %q records an allocation with no accelerator", pod.Name), false
+	if len(cards) != int(expected) {
+		return nil, fmt.Sprintf("member %q records %d accelerators where its TP group requires exactly %d",
+			pod.Name, len(cards), expected), false
 	}
-	if cards > 1 {
-		return modelDeploymentRetirementReleaseCard{}, fmt.Sprintf("member %q records %d accelerators where an elastic member holds exactly one",
-			pod.Name, cards), false
-	}
-
-	return card, "", true
+	return cards, "", true
 }
 
 // elasticMemberWorkload finds the Workload naming this member Pod at full identity: one
@@ -269,7 +267,7 @@ func (r *ModelDeploymentReconciler) elasticNodeLedgerAgrees(
 // and holds this member's reason once the node's one read has answered it.
 type elasticMemberClaim struct {
 	node    string
-	card    modelDeploymentRetirementReleaseCard
+	cards   []modelDeploymentRetirementReleaseCard
 	refusal string
 }
 
@@ -381,13 +379,13 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentElasticAllocation(
 		// borrowed answer. A member that states a whole card JOINS THE PASS'S CLAIMS and is
 		// judged by the node read below, rather than reading that node's ledger for itself.
 		if allocatedUnknown == "" {
-			card, reason, held := elasticWholeCardOf(actual)
+			cards, reason, held := elasticWholeCardsOf(actual, elasticprofile.TensorParallelSize(role.ElasticEP))
 			switch {
 			case reason != "":
 				allocatedUnknown = reason
 			case !held:
 			default:
-				claims = append(claims, &elasticMemberClaim{node: actual.Spec.NodeName, card: card})
+				claims = append(claims, &elasticMemberClaim{node: actual.Spec.NodeName, cards: cards})
 			}
 		}
 	}
@@ -408,13 +406,13 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentElasticAllocation(
 		seated := byNode[node]
 		cards := make([]modelDeploymentRetirementReleaseCard, 0, len(seated))
 		for _, claim := range seated {
-			cards = append(cards, claim.card)
+			cards = append(cards, claim.cards...)
 		}
 		_, reason, ok := r.elasticNodeLedgerAgrees(ctx, node, cards,
 			func(rebuilt, published workercore.DevicesStatus) (string, bool) {
 				for _, claim := range seated {
 					cardReason, agreed := releaseCardsAgree(
-						[]modelDeploymentRetirementReleaseCard{claim.card}, rebuilt, published)
+						claim.cards, rebuilt, published)
 					if !agreed {
 						claim.refusal = cardReason
 					}
@@ -460,7 +458,7 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentElasticAllocation(
 // hold, while they can still be read. It captures EXACTLY the members it was supplied, and
 // refuses a set it cannot stand behind: an empty one, a member without an identity or
 // ordinal, the master, a member this deployment does not fully own, one whose live Pod left
-// or changed under it, one holding anything other than exactly one whole accelerator, or one
+// or changed under it, one holding an incomplete whole-card TP group, or one
 // whose Workload is not a reserved, admitted group of one. The record binds to the
 // deployment and generation it was captured at; the reservation fields the retirement
 // operation owns are deliberately left unset, because an elastic release has none, and
@@ -526,7 +524,7 @@ func (r *ModelDeploymentReconciler) captureModelDeploymentElasticRelease(
 			return nil, fmt.Errorf("member %q now records a different allocation than the supplied member did",
 				pod.Name)
 		}
-		card, reason, held := elasticWholeCardOf(actual)
+		heldCards, reason, held := elasticWholeCardsOf(actual, elasticprofile.TensorParallelSize(role.ElasticEP))
 		if !held {
 			if reason == "" {
 				reason = "it carries no allocation record"
@@ -541,7 +539,7 @@ func (r *ModelDeploymentReconciler) captureModelDeploymentElasticRelease(
 		if err != nil {
 			return nil, fmt.Errorf("read member %q's allocation: %w", pod.Name, err)
 		}
-		if len(cards) != 1 || !sameCardSet(cards, []modelDeploymentRetirementReleaseCard{card}) {
+		if !sameCardSet(cards, heldCards) {
 			return nil, fmt.Errorf("member %q records accelerators outside its main container", pod.Name)
 		}
 		if actual.Spec.NodeName == "" {
