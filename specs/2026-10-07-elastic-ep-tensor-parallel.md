@@ -1,7 +1,7 @@
 # Elastic EP tensor parallel groups
 
-Status: Building
-Blocked on: Implementation and required validation are in progress on the feature branch.
+Status: Shipped
+Blocked on: None. Physical TP=2 acceptance follows merge and the CI image.
 Type: Feature
 
 ## Motivation
@@ -73,7 +73,7 @@ Physical acceptance remains pending until the new image completes TP=2, DP=2 to 
   Blocked by: None. Owns: API types, shared profile, webhook, renderer, generated output, and their tests.
 - [x] Task 2: Validate complete TP allocation and Ray placement. Verify member counts and uncertain observations.
   Blocked by: Task 1. Owns: allocation, collector, observer, and their tests.
-- [ ] Task 3: Update the owning guide and index. Run required checks and prepare the reviewed PR.
+- [x] Task 3: Update the owning guide and index. Run required checks and prepare the reviewed PR.
   Blocked by: Task 2. Owns: model-deployment guide, shared index, and this spec.
 
 ## Test Plan
