@@ -1,6 +1,8 @@
 groups:
   - name: Getting started
     path: /docs/getting-started/
+  - name: Walkthroughs
+    path: /docs/walkthroughs/
   - name: Devices Manager
     path: /docs/modules/devices/
   - name: RDMA Manager
@@ -23,7 +25,20 @@ order:
   /docs/getting-started/:
     - architecture
     - vendor-prerequisites
-    - walkthrough
+  /docs/walkthroughs/:
+    - devices
+    - kv-cache
+    - model-delivery
+    - model-deployment
+  /docs/walkthroughs/devices/:
+    - scheduling
+  /docs/walkthroughs/kv-cache/:
+    - shared-cache
+  /docs/walkthroughs/model-delivery/:
+    - prefetch
+  /docs/walkthroughs/model-deployment/:
+    - elastic-ep
+    - external-dp
   /docs/modules/devices/:
     - preflight
     - discovery
@@ -40,7 +55,6 @@ order:
     - scheduling
     - operations
   /docs/modules/kv-cache/:
-    - walkthrough
     - backend
     - pool
     - injection
@@ -82,9 +96,18 @@ order:
     - development
     - internals
 labels:
+  /docs/walkthroughs/: Walkthroughs
+  /docs/walkthroughs/devices/: Devices
+  /docs/walkthroughs/devices/scheduling/: Scheduling
+  /docs/walkthroughs/kv-cache/: KV Cache
+  /docs/walkthroughs/kv-cache/shared-cache/: Shared cache
+  /docs/walkthroughs/model-delivery/: Model Delivery
+  /docs/walkthroughs/model-delivery/prefetch/: Model prefetch
+  /docs/walkthroughs/model-deployment/: Model Deployment
+  /docs/walkthroughs/model-deployment/elastic-ep/: Elastic EP
+  /docs/walkthroughs/model-deployment/external-dp/: External DP
   /docs/getting-started/architecture/: Architecture
   /docs/getting-started/vendor-prerequisites/: Prerequisites
-  /docs/getting-started/walkthrough/: Walkthrough
   /docs/modules/devices/preflight/: Preflight
   /docs/modules/devices/discovery/: Discovery
   /docs/modules/devices/requests/: Resource requests
@@ -97,7 +120,6 @@ labels:
   /docs/modules/rdma/operations/: Operations
   /docs/modules/topology/scheduling/: Scheduling
   /docs/modules/topology/operations/: Operations
-  /docs/modules/kv-cache/walkthrough/: Walkthrough
   /docs/modules/kv-cache/backend/: Backends
   /docs/modules/kv-cache/pool/: Pools and bindings
   /docs/modules/kv-cache/injection/: Pod injection

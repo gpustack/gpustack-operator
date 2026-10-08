@@ -18,6 +18,8 @@ import (
 // engine's own default of one -- the operator composes no degree of its own, because the
 // transfer document must agree with the engine, and only the author's numbers can be right.
 type ModelDeploymentDeclaredParallelism struct {
+	// NodeCount retains an explicit --nnodes value; zero means absent or unreadable.
+	NodeCount        int
 	TensorParallel   int
 	PipelineParallel int
 	DataParallel     int
@@ -112,6 +114,7 @@ var modelDeploymentParallelFlags = map[string][]modelDeploymentParallelFlag{
 		{names: []string{"--data-parallel-address", "-dpa"}, wiring: true, takesValue: true},
 		{names: []string{"--data-parallel-rpc-port", "-dpp"}, wiring: true, takesValue: true},
 		{names: []string{"--data-parallel-backend", "-dpb"}, wiring: true, takesValue: true},
+		{names: []string{"--headless"}, wiring: true},
 		{names: []string{"--data-parallel-hybrid-lb", "-dph"}, wiring: true},
 		{names: []string{"--data-parallel-external-lb", "-dpe"}, wiring: true},
 		{names: []string{"--data-parallel-multi-port-external-lb", "-dpm"}, wiring: true},
@@ -242,6 +245,10 @@ func scanModelDeploymentParallelism(
 			if flag.takesValue && !hasValue && i+1 < len(extraArgs) &&
 				modelDeploymentConsumableValue(extraArgs[i+1]) {
 				i++
+				value = extraArgs[i]
+			}
+			if canonical == "--nnodes" {
+				declared.NodeCount, _ = modelDeploymentEngineInt(value)
 			}
 		case flag.degree:
 			if !hasValue {
@@ -439,7 +446,7 @@ func ReadModelDeploymentRoleParallelism(
 		return modelDeploymentParallelismUnreadable(overflow)
 	}
 
-	loadBalance, balanceReason := modelDeploymentLoadBalance(reading.declared.Wiring)
+	loadBalance, balanceReason := modelDeploymentLoadBalance(reading.declared)
 
 	return workercore.ModelDeploymentRoleParallelismStatus{
 		Declared:    declared,
@@ -472,7 +479,6 @@ func modelDeploymentParallelismUnreadable(reason string) workercore.ModelDeploym
 var modelDeploymentBalanceShapes = map[string]workercore.ModelDeploymentLoadBalance{
 	"--data-parallel-external-lb":            workercore.ModelDeploymentLoadBalanceExternal,
 	"--data-parallel-rank":                   workercore.ModelDeploymentLoadBalanceExternal,
-	"--data-parallel-start-rank":             workercore.ModelDeploymentLoadBalanceExternal,
 	"--data-parallel-hybrid-lb":              workercore.ModelDeploymentLoadBalanceHybrid,
 	"--data-parallel-multi-port-external-lb": workercore.ModelDeploymentLoadBalanceMultiPort,
 }
@@ -481,19 +487,52 @@ var modelDeploymentBalanceShapes = map[string]workercore.ModelDeploymentLoadBala
 // voting one shape agree (an assigned rank alongside an external balancer is still External);
 // flags voting different shapes are not derivable and name their disagreement.
 func modelDeploymentLoadBalance(
-	wiring []string,
+	declared ModelDeploymentDeclaredParallelism,
 ) (workercore.ModelDeploymentLoadBalance, string) {
+	wiring := declared.Wiring
 	shapes := map[workercore.ModelDeploymentLoadBalance][]string{}
 	for _, flag := range wiring {
 		if shape, ok := modelDeploymentBalanceShapes[flag]; ok {
 			shapes[shape] = append(shapes[shape], flag)
 		}
 	}
+	startRank := slices.Contains(wiring, "--data-parallel-start-rank")
+	if startRank && len(shapes[workercore.ModelDeploymentLoadBalanceExternal]) > 0 {
+		shapes[workercore.ModelDeploymentLoadBalanceHybrid] = append(
+			shapes[workercore.ModelDeploymentLoadBalanceHybrid], "--data-parallel-start-rank")
+	}
 	if len(shapes) == 0 {
+		// Headless ranks belong to an Internal group. A start rank only selects
+		// external routing when the local group is smaller than the global group.
+		if startRank && !slices.Contains(wiring, "--headless") {
+			local := declared.DataParallelLocal
+			if local > 0 && local < declared.DataParallel {
+				if local == 1 {
+					return workercore.ModelDeploymentLoadBalanceExternal, ""
+				}
+				return workercore.ModelDeploymentLoadBalanceHybrid, ""
+			}
+			if local == 0 && slices.Contains(wiring, "--nnodes") && declared.NodeCount != 1 {
+				if declared.NodeCount <= 0 {
+					return workercore.ModelDeploymentLoadBalanceUnknown,
+						"nnodes must be a readable positive integer to derive start-rank routing"
+				}
+				return workercore.ModelDeploymentLoadBalanceUnknown,
+					"start-rank routing requires an explicit data-parallel-size-local when nnodes exceeds 1"
+			}
+		}
 		return workercore.ModelDeploymentLoadBalanceInternal, ""
 	}
 	if len(shapes) == 1 {
 		for shape := range shapes {
+			if shape == workercore.ModelDeploymentLoadBalanceHybrid {
+				if declared.DataParallelLocal == 1 {
+					return workercore.ModelDeploymentLoadBalanceExternal, ""
+				}
+				if declared.DataParallelLocal == declared.DataParallel {
+					return workercore.ModelDeploymentLoadBalanceInternal, ""
+				}
+			}
 			return shape, ""
 		}
 	}

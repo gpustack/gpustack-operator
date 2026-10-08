@@ -416,6 +416,6 @@ AdmissionCheck. The operator never leaves such a queue admitting — see
 
 **See also** — [Accelerator Requests](requests.md) (the normative request contract) ·
 [Device Discovery](discovery.md#the-device-plugin-allocator) (gate 5 in detail) ·
-[Walkthrough](../../getting-started/walkthrough.md) (the four views moving on a live cluster)
+[Walkthrough](../../walkthroughs/devices/scheduling.md) (the four views moving on a live cluster)
 
 **Next** → [Installation Modes](../../operate/installation-modes.md) — how the chain gets deployed.

@@ -397,4 +397,4 @@ user-facing knobs, listed for completeness.
 [Installation Modes](../operate/installation-modes.md) (which flags a mode sets for you) ·
 [High Availability Operations](../operate/high-availability.md)
 
-**Next** → [Walkthrough](../getting-started/walkthrough.md) — a setting flipped on a live cluster, before and after.
+**Next** → [Walkthrough](../walkthroughs/devices/scheduling.md) — a setting flipped on a live cluster, before and after.

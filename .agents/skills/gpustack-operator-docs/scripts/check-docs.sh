@@ -78,7 +78,7 @@ H2_CAP=10           # "##" sections in one page
 
 # Cap exemptions, declared here rather than escaped inline. Each is a space-separated glob list.
 # A recording and a runbook are as long as the hardware makes them.
-LINE_CAP_EXEMPT='docs/getting-started/walkthrough.md docs/operate/* docs/modules/devices/*-mig.md'
+LINE_CAP_EXEMPT='docs/walkthroughs/devices/scheduling.md docs/operate/* docs/modules/devices/*-mig.md'
 # The index is a table of contents and a reference page is a lookup table: both are meant to be flat.
 H2_CAP_EXEMPT='docs/README.md docs/reference/*'
 

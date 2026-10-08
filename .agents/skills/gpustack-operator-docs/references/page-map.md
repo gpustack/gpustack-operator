@@ -176,7 +176,7 @@ backend and links to it. And never the *enforcement* the Binding does not do: th
 it is a grant and not an isolation boundary belongs here, but the mechanism a real boundary would need
 is not this page's to design.
 
-## `docs/modules/kv-cache/walkthrough.md`
+## `docs/walkthroughs/kv-cache/shared-cache.md`
 
 **Owns** — the ORDER, and nothing else: the four objects a working shared cache takes, one pasteable
 manifest each, the check to run after each one, and the three configurations that read as working and
@@ -332,7 +332,7 @@ contract and does not teach.
 
 **Never** — implementation. A rule's *enforcement point* is a link to `admission.md`.
 
-## `docs/getting-started/walkthrough.md`
+## `docs/walkthroughs/devices/scheduling.md`
 
 **Owns** — recorded runs with real `kubectl` output and before/after comparisons.
 
@@ -428,3 +428,30 @@ supersession is recorded that way because it has no new spec to be recorded in. 
 `**Corrected after shipping.**`. A spec naming another spec by file name is the case that forces one:
 when that file leaves the tree the name resolves to nothing, and leaving it alone preserves a pointer
 rather than a record.
+
+## `docs/walkthroughs/model-deployment/elastic-ep.md`
+
+**Owns** — the user sequence for elastic TP2/DP2→4 expansion, captured CR output,
+short inference checks, log inspection, and application release. Distinguishes independent replicas
+from an elastic collective and states which path was measured.
+
+**Never** — private engine code, raw infrastructure identities, or broad support claims inferred from
+one runtime configuration. The Elastic EP guide owns the profile contract; the resize spec owns design analysis.
+
+## `docs/walkthroughs/model-deployment/external-dp.md`
+
+**Owns** — the fixed External DP serving sequence, minimum argument dependencies, captured CR output,
+per-rank inference checks, Router coverage limits, and application cleanup. Links shared model prefetch steps.
+
+**Never** — imply online collective resize from fixed-group inference, or claim all ranks receive Router
+traffic from HTTP success alone. P/D combinations remain with their owning guide and follow-up issue.
+
+## `docs/walkthroughs/model-delivery/prefetch.md`
+
+**Owns** — the shared model preparation example, its fixed model revision and captured artifact,
+prefetch, and node-store output. Model-serving walkthroughs link here before creating workloads.
+
+## `docs/walkthroughs/_index.md`
+
+**Owns** — the walkthrough entry point and module choices. Each module keeps its examples under
+its own directory; capability guides link to the relevant example.

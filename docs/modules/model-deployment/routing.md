@@ -1,16 +1,44 @@
 # Model Deployment Routing
 
-A router only chooses when a role has more than one replica. Every routing choice measured here ran
+A managed router selects among the HTTP endpoints of serving replicas. Every routing choice measured here ran
 on a server role; on a prefill/decode pair, where each half is chosen separately, none has been run.
+
+See [Prefill and Decode](prefill-decode.md) for the External DP boundary within P/D roles.
 
 ## Contents
 
+- [Which Pods receive traffic](#which-pods-receive-traffic)
 - [Each router's default](#each-routers-default)
 - [Prefix affinity](#prefix-affinity)
 - [Switching to round robin](#switching-to-round-robin)
 - [llm-d-router takes no policy flag](#llm-d-router-takes-no-policy-flag)
 - [Confirming that a Router serves](#confirming-that-a-router-serves)
 - [Per-worker routing metrics](#per-worker-routing-metrics)
+
+## Which Pods receive traffic
+
+The engine's LB mode determines the candidate endpoints. The Router policy chooses among those candidates.
+`round_robin` does not change the endpoint selector.
+
+| Deployment shape | HTTP candidates |
+|---|---|
+| Internal Server group | Member 0 of each replica. |
+| Qualified External Server group | Every qualified member; each member serves one DP rank. |
+| Prefill or Decode group | Member 0 of each replica, including groups with `size > 1`. |
+| Unknown mode or unverified group | Keep the existing leader restriction; do not expand discovery. |
+
+For an eligible External Server role, Router discovery and ordinary Services omit `member-index=0`.
+They retain the endpoint eligibility label, so an unhealthy group cannot receive new traffic.
+The replica's headless Service always publishes every member for peer communication.
+
+Known non-Internal modes follow the External selector rule. Status retains the engine's distinct mode name.
+Hybrid GPU behavior remains untested. See [Prefill and Decode](prefill-decode.md) for P/D limitations.
+
+Managed roles expose one fixed HTTP port per Pod, defaulting to 8000.
+All routed roles must use the same serving port. A shared custom port remains supported.
+Admission rejects vLLM's MultiPort mode because it starts endpoints on additional, incremented ports.
+A decoder proxy's internal backend port remains separate from its published HTTP port.
+See the [External DP walkthrough](../../walkthroughs/model-deployment/external-dp.md) for a minimal per-rank configuration.
 
 ## Each router's default
 

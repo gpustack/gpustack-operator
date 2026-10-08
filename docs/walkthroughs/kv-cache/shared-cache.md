@@ -26,7 +26,7 @@ name in the manifests below, then apply them in that order.
 
 The order is fixed because each object names the one above it, so creating them the other way round
 leaves references that resolve to nothing. Why the two scopes split this way is on
-[KV Cache Pool](pool.md#two-kinds-split-by-scope).
+[KV Cache Pool](../../modules/kv-cache/pool.md#two-kinds-split-by-scope).
 
 **The Binding is the authorization point.** A namespace gets access to a store when an administrator
 creates a Binding in it. A user naming a pool is not a path this API has: `poolRef` is a
@@ -54,7 +54,7 @@ spec:
 `spec.image` is left unset on purpose: the cluster-wide `kv-cache-backend-image`
 [Setting](../../reference/settings.md) supplies this project's own build, which is the one that can elect a leader
 later. Naming a published upstream image here works until Step 4 and then does not. See
-[High availability](leader.md#high-availability).
+[High availability](../../modules/kv-cache/leader.md#high-availability).
 
 `capacityPerMember` is charged to each member Pod's host memory request, so it is a claim on the node
 and not a hint. One member Pod runs per node the selector matches.
@@ -62,7 +62,7 @@ and not a hint. One member Pod runs per node the selector matches.
 `leader: {}` takes the field defaults, `multiTenancy` included (it defaults on), so this master keeps
 a per-tenant quota ledger and Steps 2 and 3 read against it. A backend pinned to a store image from
 before Mooncake 0.3.12 is the one exception and declares `multiTenancy: false` out loud. See
-[The project's own build variants](backend.md#the-projects-own-build-variants).
+[The project's own build variants](../../modules/kv-cache/backend.md#the-projects-own-build-variants).
 
 Wait for it, then read what it reports:
 
@@ -117,7 +117,7 @@ the master; the name is what keeps the two apart.
 
 **A quota ceiling is not a reservation.** It is the most this namespace may hold at once, and going
 over it does not fail a write. See
-[Full-quota behavior](pool.md#full-quota-behavior).
+[Full-quota behavior](../../modules/kv-cache/pool.md#full-quota-behavior).
 
 **The ceiling is enforced because the Step-1 leader carries its tenant ledger, which the default
 gave it.** A backend declared `leader.multiTenancy: false` holds no ledger instead: its pool is
@@ -126,7 +126,7 @@ admitted with a warning, the Binding reports `QuotaGranted=True` with reason `Un
 
 **A multi-tenant master refuses a tenant name absent from its ledger.** An engine that ignores the
 injected tenant then needs a second Binding whose domain is `default`, or that leaves `name` out.
-See [Tenant compatibility](injection.md#tenant-compatibility).
+See [Tenant compatibility](../../modules/kv-cache/injection.md#tenant-compatibility).
 
 ## Step 3: the workload
 
@@ -159,12 +159,12 @@ useful comparison to have run once before attributing anything to the pool.
 **The engine is configured by injection, not by anything you write here.** The operator resolves the
 Binding, reads the backend's endpoint and the domain, and injects the store's environment into every
 role's Pod. What is injected per engine, and every refusal, is on
-[KV Cache Injection](injection.md).
+[KV Cache Injection](../../modules/kv-cache/injection.md).
 
 **The store version must match the engine's client.** The engine version above decides the client,
 and Step 1's unset `spec.image` leaves the store on the Settings default. A pair on different lines
 starts healthy and then fails every write, so the version above is a choice. See
-[The store version must match the engine's client](backend.md#the-store-version-must-match-the-engines-client).
+[The store version must match the engine's client](../../modules/kv-cache/backend.md#the-store-version-must-match-the-engines-client).
 
 Check the attachment from the deployment's own status rather than from the Pods:
 
@@ -192,12 +192,12 @@ as the old leader steps down. Both readings are normal.
 
 **Scaling from one to three keeps the first leader Pod and the member templates** because the Lease
 election and accounts were already present at one replica. See
-[the leader Deployment](leader.md#the-deployment-and-the-two-probes) for the
+[the leader Deployment](../../modules/kv-cache/leader.md#the-deployment-and-the-two-probes) for the
 cost of changing `leader.electionBackend`.
 
 **`leader.memberAddressing` chooses how members find the master**, and defaults to
 `Service`. An explicit `Lease` value uses the member's API access to read the current holder. See
-[High availability](leader.md#high-availability) for the measured failover limits.
+[High availability](../../modules/kv-cache/leader.md#high-availability) for the measured failover limits.
 
 These conditions apply at one replica too; the phase does not summarize them:
 
@@ -218,7 +218,7 @@ misses afterwards. Plan for a cold cache after every failover and every leader r
 
 **The store's snapshot is not offered, and its flags are refused in `leader.extraArgs`**, because
 restoring a snapshot can make the cache serve another key's bytes instead of a miss.
-[High availability](leader.md#high-availability) says why.
+[High availability](../../modules/kv-cache/leader.md#high-availability) says why.
 
 ## Failure modes
 
@@ -235,11 +235,11 @@ reading on this page most likely to be escalated as an outage.
 
 ---
 
-**See also** — [KV Cache Backend](backend.md) (every field of the store, and what status reports) ·
-[KV Cache Leader](leader.md) (the election, why there is no snapshot, and the member addressing choice in full) ·
-[KV Cache Pool](pool.md) (quota, domains and what a full quota does) ·
-[Model Deployment](../model-deployment/deployment.md) (roles, prefill/decode, rollout) ·
-[Model Deployment Prefill and Decode](../model-deployment/prefill-decode.md) (router, transfer) ·
-[KV Cache Injection](injection.md) (what a Pod actually receives)
+**See also** — [KV Cache Backend](../../modules/kv-cache/backend.md) (every field of the store, and what status reports) ·
+[KV Cache Leader](../../modules/kv-cache/leader.md) (the election, why there is no snapshot, and the member addressing choice in full) ·
+[KV Cache Pool](../../modules/kv-cache/pool.md) (quota, domains and what a full quota does) ·
+[Model Deployment](../../modules/model-deployment/deployment.md) (roles, prefill/decode, rollout) ·
+[Model Deployment Prefill and Decode](../../modules/model-deployment/prefill-decode.md) (router, transfer) ·
+[KV Cache Injection](../../modules/kv-cache/injection.md) (what a Pod actually receives)
 
-**Next** → [KV Cache Pool](pool.md) — the quota this walkthrough set once and did not explain.
+**Next** → [KV Cache Pool](../../modules/kv-cache/pool.md) — the quota this walkthrough set once and did not explain.

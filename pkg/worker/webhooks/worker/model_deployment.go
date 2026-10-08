@@ -1645,6 +1645,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 
 		errs = append(errs, validateModelDeploymentRoleExtraArgs(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleParallelWidth(md.Spec.Engine.Name, role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleLoadBalance(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleEnv(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleResources(role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(role, rolePath)...)
@@ -1941,6 +1942,28 @@ func validateModelDeploymentRoleExtraArgs(
 	}
 
 	return errs
+}
+
+// validateModelDeploymentRoleLoadBalance keeps managed roles on one HTTP endpoint per Pod.
+func validateModelDeploymentRoleLoadBalance(
+	engine string, role *workercore.ModelDeploymentRole, rolePath *field.Path,
+) field.ErrorList {
+	if len(role.Command) > 0 {
+		return nil
+	}
+	status := workerctrl.ReadModelDeploymentRoleParallelism(engine, role)
+	if status.Source.Kind != workercore.ModelDeploymentParallelismSourceKindExtraArgs {
+		return nil // The degree parser reports unreadable arguments separately.
+	}
+	if status.LoadBalance == workercore.ModelDeploymentLoadBalanceUnknown {
+		return field.ErrorList{field.Invalid(rolePath.Child("extraArgs"), role.ExtraArgs,
+			status.Source.UnreadableReason)}
+	}
+	if status.LoadBalance == workercore.ModelDeploymentLoadBalanceMultiPort {
+		return field.ErrorList{field.Invalid(rolePath.Child("extraArgs"), role.ExtraArgs,
+			"MultiPort load balancing is unsupported; managed roles require one HTTP endpoint per Pod")}
+	}
+	return nil
 }
 
 // validateModelDeploymentRoleParallelWidth is the first check that ever ties a role's declared

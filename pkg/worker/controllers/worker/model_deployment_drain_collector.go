@@ -893,7 +893,10 @@ func modelDeploymentDrainDisaggregated(engine string, container *corev1.Containe
 		return fmt.Sprintf("the member's parallelism could not be read: %v", err), true
 	}
 
-	shape, _ := modelDeploymentLoadBalance(reading.declared.Wiring)
+	shape, reason := modelDeploymentLoadBalance(reading.declared)
+	if shape == workercore.ModelDeploymentLoadBalanceUnknown {
+		return reason, true
+	}
 	switch shape {
 	case workercore.ModelDeploymentLoadBalanceExternal,
 		workercore.ModelDeploymentLoadBalanceHybrid,

@@ -365,7 +365,7 @@ The per-accelerator **AdmissionCheck**, third of the five gates; its behavior is
 
 **See also** — [Device Discovery](discovery.md) (where the capacity signals come from) ·
 [Topology-Aware Scheduling](../topology/scheduling.md) (how topology profiles enter this chain) ·
-[Walkthrough](../../getting-started/walkthrough.md) (the same objects on a live cluster) ·
+[Walkthrough](../../walkthroughs/devices/scheduling.md) (the same objects on a live cluster) ·
 [Settings](../../reference/settings.md#online-adjustable-settings)
 
 **Next** → [Admission](admission.md) — the five gates a request passes.

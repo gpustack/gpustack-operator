@@ -1,7 +1,7 @@
 # Elastic EP
 
 An elastic expert-parallel deployment keeps one vLLM serving instance and changes its GPU collective
-while it runs. The operator adds or removes GPU members inside one Ray cluster.
+while it runs. The operator adds GPU members inside one Ray cluster.
 The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting converge.
 
 ## Contents
@@ -55,13 +55,15 @@ is why the master is counted inside `width` and is never retired.
 
 ## Requirements
 
-The recorded runtime baseline uses a vLLM 0.29.0 image with a full Ray installation. The
-official vLLM image of that version ships without Ray, and the profile will not start on it. The
-pinned requirement in the resize spec is Ray 2.56.1 with the full default closure.
+Use a vLLM image with a full Ray installation. Check the installed engine and Ray versions
+before starting the profile.
 
 The TP size must fit the selected MoE model, engine kernels, and GPUs available on one node.
 The operator does not limit TP to the size used by a particular test.
-Static TP=2 inference has passed; online TP>1 resizing remains under investigation.
+
+The [Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) records successful TP2/DP2 startup and DP2→4
+expansion using the official GPUStack runner and DeepSeek-V2-Lite-Chat on an eight-card RTX PRO 6000 node.
+That result is limited to its pinned software, model, configuration, and short inference checks.
 Admission of TP=2, 4 or 8 does not establish dynamic inference support.
 
 The operator directly manages a separate CPU Ray head Pod and its Service.
@@ -110,7 +112,7 @@ spec:
       replicas: 1
       size: 1
       instanceType: elastic-gpu
-      image: your-registry/vllm-ray:0.29.0
+      image: gpustack/runner:cuda13.0-vllm0.29.0@sha256:1c826749ed16fbd9f9594d7a49f774904662d9c46231e08e32b494e8bac4ee91
       elasticEp:
         width: 2
       ports:
