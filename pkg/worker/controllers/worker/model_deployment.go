@@ -1041,15 +1041,6 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				pick = ungated
 			}
 
-			// A REPLICA ALREADY BEING REPLACED IS THE PREFERRED CANDIDATE, ahead of any healthy old
-			// replica. It holds no admission to spend, and the configuration it was built from can no
-			// longer be admitted at all, so replacing it now costs the deployment nothing while
-			// taking a healthy admitted replica instead would spend a reservation to build what the
-			// spec has already moved past.
-			if held, present := holdingRoles[role.Name]; present && outdatedByOrdinal[held.Ordinal] {
-				pick = modelDeploymentReplicaMembers(pick, held.Ordinal)
-			}
-
 			// A ROLE WHOSE REPLACEMENT IS NOT ADMITTED YET SPENDS NO FURTHER HEALTHY CAPACITY. The
 			// queued replacement holds nothing, so a second deletion behind it would remove another
 			// admitted replica on every pass until the role held none.
@@ -1389,7 +1380,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		logger.Error(err, "converge endpoint eligibility")
 		return ctrl.Result{}, err
 	}
-	if err = r.syncModelDeploymentService(ctx, md, eligibilityDecided, actual); err != nil {
+	servicePods, err := readModelDeploymentPods(ctx, md, r.APIReader)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if err = r.syncModelDeploymentService(ctx, md, eligibilityDecided, servicePods); err != nil {
 		logger.Error(err, "sync service")
 		return ctrl.Result{}, err
 	}
@@ -2566,14 +2561,20 @@ func (r *ModelDeploymentReconciler) getModelDeploymentRuntimeClassName(
 func (r *ModelDeploymentReconciler) listModelDeploymentPods(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) ([]core.Pod, error) {
+	return readModelDeploymentPods(ctx, md, r.Client)
+}
+
+// readModelDeploymentPods filters by identity labels and requires the deployment's owner UID.
+func readModelDeploymentPods(
+	ctx context.Context, md *workercore.ModelDeployment, reader ctrlcli.Reader,
+) ([]core.Pod, error) {
 	podList := new(core.PodList)
-	err := r.Client.List(ctx, podList,
+	err := reader.List(ctx, podList,
 		ctrlcli.InNamespace(md.Namespace),
 		ctrlcli.MatchingLabels{
 			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
 			modelDeploymentLabelKeyInstance: md.Name,
-		},
-		ctrlclix.WithoutQuorum)
+		})
 	if err != nil {
 		return nil, err
 	}

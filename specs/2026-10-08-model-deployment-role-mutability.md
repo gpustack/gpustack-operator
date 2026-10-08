@@ -309,11 +309,14 @@ Qualification distinguishes an outdated replica from a selected replacement.
 Keep old healthy eligibility until selection.
 During command-mode changes, preserve each deployed mode's routing rules.
 Managed replicas keep engine qualification. Takeover replicas keep legacy Service membership and remain Unmanaged.
+Preserve deployed answering selection from the first edit, before the replacement configuration appears.
 If a shared selector needs private routing labels, write those labels before switching the Service.
 Routing membership does not establish engine health or cache qualification.
 Retain peer Services required by actual members, including terminating members.
+Read those members uncached before synchronizing Services, so informer lag cannot retire their peer DNS.
 Keep leader selection valid while old multi-member and new single-member groups coexist.
 Preserve External DP answering-member selection.
+Role-level parallelism remains declared configuration; it does not describe every running replica during replacement.
 
 Revalidate interface and transport inputs when their dependencies change.
 Compare roles by name, so list reordering does not trigger a false dependency change.
@@ -401,7 +404,9 @@ Use fake-client reconciliation sequences for these local integration checks:
 - Replace both roles when command-supplied shared degrees alter both renders.
 - Recover genuine member loss during an active configuration replacement.
 - Recover all active replacement members disappearing before the next pass without losing Workload cleanup authority.
-- Compare complete HTTP Service selectors against deployed answering members, including mixed modes and Unknown observations.
+- Repair an ordinal-less legacy Pod while an active replacement holds its slot.
+- Retain peer DNS when the cache omits standing or terminating members still present on the API server.
+- Compare complete HTTP Service selectors against deployed answering members, including the first edit, mixed modes, qualification revocation, and Unknown observations.
 
 These tests exercise reconciliation and objects. They do not establish runtime engine or Kueue behavior.
 

@@ -1482,7 +1482,7 @@ func TestModelDeploymentReconciler_ATemplateEditRollsOneReplicaAtATime(t *testin
 // cache that would just repeat the list the gate is checking against.
 //
 // Vacancy uses one Pod list and one Workload list per short role, independent of missing count.
-// A settled role needs neither read.
+// A settled role needs neither vacancy read. Service synchronization reads Pods once per pass.
 type countingAPIReader struct {
 	ctrlcli.Reader
 	lists int
@@ -1502,18 +1502,17 @@ func TestModelDeploymentReconciler_TheCreateGateReadsTheAPIServer(t *testing.T) 
 	reader := &countingAPIReader{Reader: cli}
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: reader}
 
-	// One Pod list and one Workload list cover both missing ordinals.
+	// Two vacancy lists cover both missing ordinals. One Pod list supplies current Service members.
 	_, err := reconcileModelDeploymentWith(t, r)
 	require.NoError(t, err)
-	assert.Equal(t, 2, reader.lists,
-		"Pod and Workload vacancy use two lists for the role's two missing ordinals")
+	assert.Equal(t, 3, reader.lists,
+		"two vacancy lists and one Service membership list cover the role's two missing ordinals")
 
-	// A settled pass reads nothing through the API server: every ordinal is accounted for and
-	// no role is rolling.
+	// A settled pass needs only the current Service membership read.
 	reader.lists = 0
 	_, err = reconcileModelDeploymentWith(t, r)
 	require.NoError(t, err)
-	assert.Zero(t, reader.lists, "a settled pass issues no API-server read at all")
+	assert.Equal(t, 1, reader.lists, "a settled pass reads Service members without vacancy reads")
 
 	// A short role reads the missing ordinal through the API server, and the replacement lands
 	// once the ordinal reads empty.

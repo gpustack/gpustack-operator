@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -347,21 +348,9 @@ func (f *lifecycleFixture) interceptReplace(
 	})
 }
 
-// TestRouting_ARevokedManagedReplicaIsWithdrawnWhileTheRoleTurnsOver covers the control the mode
-// transition must not lose: a managed replica that is Ready but whose engine qualification has been
-// revoked, while the role is being turned into a take-over one.
-//
-// Readiness alone would keep it in the pool. The desired command line must not take the eligibility
-// gate away from it either, because the gate is the only thing that withdraws it and the replica
-// carrying the revocation is an old managed one the transition has not replaced yet.
-// TestRouting_ARevokedManagedReplicaKeepsTheGateWhileTheRoleTurnsOver states the half of the
-// transition that must not be lost: a Ready managed replica whose qualification has been revoked,
-// while the role is being turned into a take-over one.
-//
-// Readiness alone would keep it in the pool, and so would the role's own command line -- the gate is
-// the only thing that withdraws it, and a desired command line would hand the gate back on the pass
-// that changed the spec. The revocation is injected as the qualification map the real writer takes,
-// because the engine leg that produces one cannot be driven from this fixture.
+// A Ready managed replica with revoked qualification stays unselected during a command change.
+// Drive the membership writer and compare complete Service selectors.
+// Qualified leaders remain selected; qualification is injected at the writer's input.
 func TestRouting_ARevokedManagedReplicaKeepsTheGateWhileTheRoleTurnsOver(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 2
@@ -402,20 +391,43 @@ func TestRouting_ARevokedManagedReplicaKeepsTheGateWhileTheRoleTurnsOver(t *test
 		modelDeploymentReasonEndpointsQualified, "every group qualified")
 	require.NoError(t, f.cli.Status().Update(context.Background(), published))
 
-	live := make([]core.Pod, 0, len(managed))
-	for _, member := range managed {
-		live = append(live, *member)
+	r := &ModelDeploymentReconciler{Client: f.cli, APIReader: f.cli}
+	cases := []struct {
+		name    string
+		state   modelDeploymentGroupForwardState
+		verdict modelDeploymentLegVerdict
+		want    bool
+	}{
+		{name: "revoked", state: modelDeploymentGroupForwardFailed, verdict: modelDeploymentLegFailed},
+		{name: "qualified", state: modelDeploymentGroupForwardVerified, verdict: modelDeploymentLegVerified, want: true},
 	}
-	svcs := renderModelDeploymentServices(published, nil, live)
-	narrowed := false
-	for _, svc := range svcs {
-		if svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible] ==
-			modelDeploymentEndpointEligibleValue {
-			narrowed = true
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			byMember := make(map[types.UID]modelDeploymentInstanceQualification, len(managed))
+			for _, member := range managed {
+				byMember[member.UID] = modelDeploymentInstanceQualification{
+					GroupForward: modelDeploymentGroupForward{State: tc.state},
+					Legs: []modelDeploymentQualificationLeg{{
+						Name: modelDeploymentLegGroupForward, Verdict: tc.verdict,
+					}},
+				}
+			}
+			require.NoError(t, r.convergeModelDeploymentEndpointEligibility(context.Background(), published,
+				replicaPods(t, f.cli), byMember, nil))
+			actual := replicaPods(t, f.cli)
+			require.NoError(t, r.syncModelDeploymentService(context.Background(), published, true, actual))
+			for _, name := range []string{md.Name, md.Name + "-server"} {
+				svc := new(core.Service)
+				require.NoError(t, f.cli.Get(context.Background(),
+					ctrlcli.ObjectKey{Namespace: md.Namespace, Name: name}, svc))
+				for _, member := range f.live("server", 0) {
+					assert.Equal(t, tc.want && modelDeploymentAnsweringMemberLeader(member),
+						labels.SelectorFromSet(svc.Spec.Selector).Matches(labels.Set(member.Labels)),
+						"%s selects only qualified answering members", name)
+				}
+			}
+		})
 	}
-	assert.True(t, narrowed,
-		"the selector stays narrowed by eligibility while a managed replica is still serving")
 
 	// A Ready, revoked, managed member answers nothing under that gate, whichever mode it runs.
 	view := modelDeploymentReplicaView{Members: managed}

@@ -37,7 +37,7 @@ func renderModelDeploymentServices(
 		svcs = append(svcs,
 			renderModelDeploymentRoleService(md, role, manufacturers,
 				modelDeploymentStandingMembers(pods, role, standing),
-				modelDeploymentMixedCommandMode(pods, md, role)))
+				modelDeploymentNeedsDeployedRouting(pods, md, role)))
 
 		// ONE HEADLESS SERVICE PER REPLICA, AND ONLY WHERE A REPLICA HAS PEERS TO ADDRESS. It is
 		// what publishes the members' names in DNS, so a replica whose members are alone needs none
@@ -191,7 +191,7 @@ func renderModelDeploymentService(
 	svc := renderModelDeploymentServiceFor(md, &md.Spec.Roles[0], md.Name)
 	modelDeploymentFrontLeadersOnly(svc, &md.Spec.Roles[0],
 		modelDeploymentRoleHasMultiMemberReplica(pods, md, &md.Spec.Roles[0]))
-	modelDeploymentSelectAnsweringMembers(svc, modelDeploymentMixedCommandMode(pods, md, &md.Spec.Roles[0]))
+	modelDeploymentSelectAnsweringMembers(svc, modelDeploymentNeedsDeployedRouting(pods, md, &md.Spec.Roles[0]))
 	frontStanding := make([]*core.Pod, 0, len(pods))
 	for i := range pods {
 		frontStanding = append(frontStanding, &pods[i])
@@ -234,17 +234,13 @@ func modelDeploymentFrontLeadersOnly(
 	svc.Spec.Selector[modelDeploymentMemberIndexLabel] = strconvx.Itoa(modelDeploymentLeaderMemberIndex)
 }
 
-// modelDeploymentMixedCommandMode reports whether a role's standing replicas were built under
-// different command modes.
-//
-// It is the condition for narrowing an HTTP Service by routing membership. While it holds, the
-// replicas of each mode keep the routing that mode always had, which one selector cannot express
-// from the spec alone; once it stops holding, the selector is what the spec renders and the term
-// goes with it.
-func modelDeploymentMixedCommandMode(
+// modelDeploymentNeedsDeployedRouting reports whether desired routing differs from a running member.
+// Use observed membership from the first edit, including before a replacement appears.
+func modelDeploymentNeedsDeployedRouting(
 	pods []core.Pod, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) bool {
-	modes := map[modelDeploymentReplicaExecution]bool{}
+	desiredManaged := len(role.Command) == 0
+	desiredExternal := desiredManaged && modelDeploymentRoleExternalDP(md, role)
 	for i := range pods {
 		pod := &pods[i]
 		if !modelDeploymentOwns(pod, md) || modelDeploymentPodRole(pod) != role.Name {
@@ -257,22 +253,22 @@ func modelDeploymentMixedCommandMode(
 		if !readable {
 			continue
 		}
-		if managed {
-			modes[modelDeploymentExecutionManaged] = true
-		} else {
-			modes[modelDeploymentExecutionTakeover] = true
+		if managed != desiredManaged {
+			return true
+		}
+		if managed && modelDeploymentMembersExternalDP([]*core.Pod{pod}, md.Spec.Engine.Name) != desiredExternal {
+			return true
 		}
 	}
 
-	return len(modes) > 1
+	return false
 }
 
 // modelDeploymentSelectAnsweringMembers narrows an HTTP Service to the members whose replicas
 // answer it under the mode they were built with.
 //
-// THE TERM IS ADDED ONLY WHILE A ROLE MIXES MODES. A homogeneous role is already selected by the
-// terms above, and adding one there would bind the Service to a label the reconciler has to keep
-// writing for no gain.
+// Use the term while a running mode or answering shape differs from the desired configuration.
+// Remove it once every member follows the desired routing rule.
 func modelDeploymentSelectAnsweringMembers(
 	svc *core.Service, mixed bool,
 ) {
