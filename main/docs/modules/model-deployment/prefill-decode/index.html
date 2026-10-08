@@ -117,9 +117,60 @@
         <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
       
     
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
       
       
-        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Device Scheduling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
       
     
   </div>
@@ -237,11 +288,6 @@
     
       <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
     
-    
-      
-      
-        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
-      
     
       
       
@@ -524,6 +570,11 @@ decode</a>
 <h2 id="how-a-pair-is-wired">How a pair is wired</h2>
 <p>Without <code>spec.router</code>, <code>kind</code> adds the role discriminator to the engine&rsquo;s shared-store connector and
 nothing pairs the two roles.</p>
+<p>For a multi-Pod P/D replica, managed HTTP routing selects its leader (<code>member-index=0</code>).
+A router policy such as <code>round_robin</code> chooses among those leaders; it does not add non-HTTP members.
+External DP inside a Prefill or Decode role has not been validated.
+<a href="https://github.com/gpustack/gpustack-operator/issues/754">Issue #754</a>
+ tracks that deferred combination.</p>
 <p>With the managed <code>llm-d-router</code>, the connector a native vLLM role runs depends on whether
 <code>spec.kvCache</code> is set; the two settings render two different connector documents, not one document
 with a field toggled:</p>
@@ -857,7 +908,7 @@ each leg</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6a7ec88b8a4905584e393f705c9d27bfc76f2260/docs/modules/model-deployment/prefill-decode.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/5ca7e36bc1d6667654aeb98faa2034cf913e9b37/docs/modules/model-deployment/prefill-decode.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/prefill-decode.md">Edit this page</a>
             

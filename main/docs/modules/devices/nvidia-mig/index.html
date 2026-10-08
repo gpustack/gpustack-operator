@@ -117,9 +117,60 @@
         <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
       
     
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
       
       
-        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Device Scheduling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
       
     
   </div>
@@ -237,11 +288,6 @@
     
       <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
     
-    
-      
-      
-        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
-      
     
       
       
@@ -874,7 +920,7 @@ compute instance covering all of it, and refuses one somebody else subdivided
 ).</p>
 <h2 id="walkthrough-three-mig-configurations-on-one-node">Walkthrough: three MIG configurations on one node</h2>
 <p>A recorded run on a live Kubernetes cluster, in the style of the
-<a href="/gpustack-operator/main/docs/getting-started/walkthrough/">scheduling-chain walkthrough</a>
+<a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/">scheduling-chain walkthrough</a>
 : every command is the real <code>kubectl</code> (or on-node
 <code>nvidia-smi</code>) invocation and its real output, on <code>node-h100</code>, a genericized node of <strong>eight</strong> H100-80GB GPUs
 running operator defaults. Eight is the point: the families are served by <strong>disjoint GPU populations</strong>, so
@@ -1430,7 +1476,7 @@ is back at <a href="#1-all-logical--every-gpu-mig-off">step 1</a>
 (how a partition is placed and reclaimed)</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
-        <div><a href="/gpustack-operator/main/docs/getting-started/walkthrough/">Walkthrough</a>
+        <div><a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/">Walkthrough</a>
  — the logical-slicing counterpart on a live cluster.</div>
       </section></nav>
 
@@ -1443,7 +1489,7 @@ is back at <a href="#1-all-logical--every-gpu-mig-off">step 1</a>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6a7ec88b8a4905584e393f705c9d27bfc76f2260/docs/modules/devices/nvidia-mig.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/5ca7e36bc1d6667654aeb98faa2034cf913e9b37/docs/modules/devices/nvidia-mig.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/nvidia-mig.md">Edit this page</a>
             

@@ -255,6 +255,6 @@ at the top of that file; when either changes, compare the rows here with the pre
 
 **See also** — [Scheduling Chain](/gpustack-operator/main/docs/modules/devices/scheduling/index.md#unit-spec-defaults)
 (where the unit spec is stamped) · [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md#the-instancetype-and-instance-webhooks)
-(what the webhooks enforce on it) · [Walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md#4-managing-a-custom-instancetype)
+(what the webhooks enforce on it) · [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md#4-managing-a-custom-instancetype)
 
 **Next** → [Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) — the switches named on this page.

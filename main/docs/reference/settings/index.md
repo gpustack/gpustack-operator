@@ -397,4 +397,4 @@ user-facing knobs, listed for completeness.
 [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) (which flags a mode sets for you) ·
 [High Availability Operations](/gpustack-operator/main/docs/operate/high-availability/index.md)
 
-**Next** → [Walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md) — a setting flipped on a live cluster, before and after.
+**Next** → [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) — a setting flipped on a live cluster, before and after.

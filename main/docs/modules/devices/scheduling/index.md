@@ -365,7 +365,7 @@ The per-accelerator **AdmissionCheck**, third of the five gates; its behavior is
 
 **See also** — [Device Discovery](/gpustack-operator/main/docs/modules/devices/discovery/index.md) (where the capacity signals come from) ·
 [Topology-Aware Scheduling](/gpustack-operator/main/docs/modules/topology/scheduling/index.md) (how topology profiles enter this chain) ·
-[Walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md) (the same objects on a live cluster) ·
+[Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) (the same objects on a live cluster) ·
 [Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings)
 
 **Next** → [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md) — the five gates a request passes.

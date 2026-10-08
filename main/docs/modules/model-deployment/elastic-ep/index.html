@@ -117,9 +117,60 @@
         <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
       
     
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
       
       
-        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Device Scheduling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
       
     
   </div>
@@ -237,11 +288,6 @@
     
       <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
     
-    
-      
-      
-        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
-      
     
       
       
@@ -501,7 +547,7 @@
         
   <h1 id="elastic-ep">Elastic EP</h1>
 <p>An elastic expert-parallel deployment keeps one vLLM serving instance and changes its GPU collective
-while it runs. The operator adds or removes GPU members inside one Ray cluster.
+while it runs. The operator adds GPU members inside one Ray cluster.
 The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting converge.</p>
 <h2 id="contents">Contents</h2>
 <ul>
@@ -568,12 +614,14 @@ A width change adjusts DP and EP while preserving TP. Online TP changes are refu
 <p>Only the master serves HTTP. The other members join the Ray cluster and hold collective state. That
 is why the master is counted inside <code>width</code> and is never retired.</p>
 <h2 id="requirements">Requirements</h2>
-<p>The recorded runtime baseline uses a vLLM 0.29.0 image with a full Ray installation. The
-official vLLM image of that version ships without Ray, and the profile will not start on it. The
-pinned requirement in the resize spec is Ray 2.56.1 with the full default closure.</p>
+<p>Use a vLLM image with a full Ray installation. Check the installed engine and Ray versions
+before starting the profile.</p>
 <p>The TP size must fit the selected MoE model, engine kernels, and GPUs available on one node.
-The operator does not limit TP to the size used by a particular test.
-Static TP=2 inference has passed; online TP&gt;1 resizing remains under investigation.
+The operator does not limit TP to the size used by a particular test.</p>
+<p>The <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/">Elastic EP Walkthrough</a>
+ records successful TP2/DP2 startup and DP2→4
+expansion using the official GPUStack runner and DeepSeek-V2-Lite-Chat on an eight-card RTX PRO 6000 node.
+That result is limited to its pinned software, model, configuration, and short inference checks.
 Admission of TP=2, 4 or 8 does not establish dynamic inference support.</p>
 <p>The operator directly manages a separate CPU Ray head Pod and its Service.
 The head has no InstanceType or LocalQueue dependency and does not count toward GPU width.
@@ -617,7 +665,7 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#s
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-gpu</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">your-registry/vllm-ray:0.29.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.29.0@sha256:1c826749ed16fbd9f9594d7a49f774904662d9c46231e08e32b494e8bac4ee91</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">elasticEp</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">width</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ports</span><span class="p">:</span><span class="w">
@@ -836,7 +884,7 @@ SGLang supports ordinary replica scaling; its native elastic protocol is not int
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6a7ec88b8a4905584e393f705c9d27bfc76f2260/docs/modules/model-deployment/elastic-ep.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/5ca7e36bc1d6667654aeb98faa2034cf913e9b37/docs/modules/model-deployment/elastic-ep.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/elastic-ep.md">Edit this page</a>
             

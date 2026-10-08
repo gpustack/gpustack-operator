@@ -1,4 +1,4 @@
-# Walkthrough
+# Device Scheduling Walkthrough
 
 This page records a real session: every `kubectl` invocation and its real output, objects as YAML
 trimmed to `metadata.labels` / `spec` / `status`, and a before / after `kubectl get instancetypes`
@@ -17,7 +17,7 @@ shares, not accelerators ([Pre-release breaks](/gpustack-operator/main/docs/modu
 Each accelerator counts in exactly one of `EX`/`SH`/`SL` (unpartitioned) or `PT` (partitioned), so
 `0/0` under `PT` throughout means none is in a partitioning mode. For the all-partitioned and **mixed**
 configurations see the [three-configuration
-walkthrough](../modules/devices/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node).
+walkthrough](../../modules/devices/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node).
 
 ## Contents
 

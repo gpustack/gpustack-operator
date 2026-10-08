@@ -3,6 +3,8 @@
 `ModelArtifact` gives a model version a stable identity. Its delivery can be handled by the engine,
 a node cache, a PVC or an image.
 
+Follow the [Model Prefetch Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) for a complete example with captured CR output.
+
 ## Contents
 
 - [Sources and delivery](#sources-and-delivery)

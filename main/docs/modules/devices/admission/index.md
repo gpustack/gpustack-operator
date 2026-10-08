@@ -416,6 +416,6 @@ AdmissionCheck. The operator never leaves such a queue admitting — see
 
 **See also** — [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) (the normative request contract) ·
 [Device Discovery](/gpustack-operator/main/docs/modules/devices/discovery/index.md#the-device-plugin-allocator) (gate 5 in detail) ·
-[Walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md) (the four views moving on a live cluster)
+[Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) (the four views moving on a live cluster)
 
 **Next** → [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) — how the chain gets deployed.

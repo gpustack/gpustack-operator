@@ -6,7 +6,7 @@ Install the operator, configure a capability, or find the reference for a runnin
 
 - [Architecture](/gpustack-operator/main/docs/getting-started/architecture/index.md) explains the components and scheduling chain.
 - [Vendor Prerequisites](/gpustack-operator/main/docs/getting-started/vendor-prerequisites/index.md) lists the drivers and runtime setup.
-- [Walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md) follows a request through the operator.
+- [Walkthroughs](/gpustack-operator/main/docs/walkthroughs/index.md) groups complete examples by module.
 
 ## Capabilities
 

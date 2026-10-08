@@ -117,9 +117,60 @@
         <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
       
     
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
       
       
-        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Device Scheduling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
       
     
   </div>
@@ -237,11 +288,6 @@
     
       <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
     
-    
-      
-      
-        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
-      
     
       
       
@@ -500,10 +546,14 @@
       <article>
         
   <h1 id="model-deployment-routing">Model Deployment Routing</h1>
-<p>A router only chooses when a role has more than one replica. Every routing choice measured here ran
+<p>A managed router selects among the HTTP endpoints of serving replicas. Every routing choice measured here ran
 on a server role; on a prefill/decode pair, where each half is chosen separately, none has been run.</p>
+<p>See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
+ for the External DP boundary within P/D roles.</p>
 <h2 id="contents">Contents</h2>
 <ul>
+<li><a href="#which-pods-receive-traffic">Which Pods receive traffic</a>
+</li>
 <li><a href="#each-routers-default">Each router&rsquo;s default</a>
 </li>
 <li><a href="#prefix-affinity">Prefix affinity</a>
@@ -517,6 +567,47 @@ on a server role; on a prefill/decode pair, where each half is chosen separately
 <li><a href="#per-worker-routing-metrics">Per-worker routing metrics</a>
 </li>
 </ul>
+<h2 id="which-pods-receive-traffic">Which Pods receive traffic</h2>
+<p>The engine&rsquo;s LB mode determines the candidate endpoints. The Router policy chooses among those candidates.
+<code>round_robin</code> does not change the endpoint selector.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Deployment shape</th>
+          <th>HTTP candidates</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Internal Server group</td>
+          <td>Member 0 of each replica.</td>
+      </tr>
+      <tr>
+          <td>Qualified External Server group</td>
+          <td>Every qualified member; each member serves one DP rank.</td>
+      </tr>
+      <tr>
+          <td>Prefill or Decode group</td>
+          <td>Member 0 of each replica, including groups with <code>size &gt; 1</code>.</td>
+      </tr>
+      <tr>
+          <td>Unknown mode or unverified group</td>
+          <td>Keep the existing leader restriction; do not expand discovery.</td>
+      </tr>
+  </tbody>
+</table>
+<p>For an eligible External Server role, Router discovery and ordinary Services omit <code>member-index=0</code>.
+They retain the endpoint eligibility label, so an unhealthy group cannot receive new traffic.
+The replica&rsquo;s headless Service always publishes every member for peer communication.</p>
+<p>Known non-Internal modes follow the External selector rule. Status retains the engine&rsquo;s distinct mode name.
+Hybrid GPU behavior remains untested. See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
+ for P/D limitations.</p>
+<p>Managed roles expose one fixed HTTP port per Pod, defaulting to 8000.
+All routed roles must use the same serving port. A shared custom port remains supported.
+Admission rejects vLLM&rsquo;s MultiPort mode because it starts endpoints on additional, incremented ports.
+A decoder proxy&rsquo;s internal backend port remains separate from its published HTTP port.
+See the <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP walkthrough</a>
+ for a minimal per-rank configuration.</p>
 <h2 id="each-routers-default">Each router&rsquo;s default</h2>
 <p><strong><code>vllm-router</code> and <code>sglang-gateway</code> route by <code>cache_aware</code>, and <code>llm-d-router</code> scores every
 candidate for each request.</strong> The operator renders no policy flag for the first two, so each runs its
@@ -734,7 +825,7 @@ counters a deployment&rsquo;s snapshot reads.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6a7ec88b8a4905584e393f705c9d27bfc76f2260/docs/modules/model-deployment/routing.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/5ca7e36bc1d6667654aeb98faa2034cf913e9b37/docs/modules/model-deployment/routing.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/routing.md">Edit this page</a>
             
@@ -745,6 +836,7 @@ counters a deployment&rsquo;s snapshot reads.</li></ul>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
+    <li><a href="#which-pods-receive-traffic">Which Pods receive traffic</a></li>
     <li><a href="#each-routers-default">Each router&rsquo;s default</a></li>
     <li><a href="#prefix-affinity">Prefix affinity</a></li>
     <li><a href="#switching-to-round-robin">Switching to round robin</a></li>

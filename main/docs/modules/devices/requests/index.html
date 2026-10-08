@@ -117,9 +117,60 @@
         <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
       
     
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
       
       
-        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Device Scheduling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
       
     
   </div>
@@ -237,11 +288,6 @@
     
       <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
     
-    
-      
-      
-        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
-      
     
       
       
@@ -560,7 +606,7 @@ four separate <code>InstanceType</code> views (<code>EX</code> / <code>SH</code>
 no <code>.partitioned*</code> keys at all.</p>
 <h2 id="the-resource-keys">The resource keys</h2>
 <p><code>&lt;base&gt;</code> is the manufacturer&rsquo;s device resource (<code>nvidia.com/gpu</code>, <code>huawei.com/npu</code>, … — see
-<a href="https://github.com/gpustack/gpustack-operator/blob/6a7ec88b8a4905584e393f705c9d27bfc76f2260/README.md#accelerator-support">Accelerator support</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/5ca7e36bc1d6667654aeb98faa2034cf913e9b37/README.md#accelerator-support">Accelerator support</a>
 ).</p>
 <table>
   <thead>
@@ -1101,7 +1147,7 @@ some places and N accelerators in others; it is N distinct accelerators on one n
 A manifest asking <code>&quot;3&quot;</code> for a heavier share of one accelerator now needs a node with three.</p>
 <p><code>InstanceType.status.acceleratorShared.onceMaxRequest</code> moved with it: it counts a node&rsquo;s accelerators
 with a free share, where it used to sum their shares. Output recorded before the change, in the
-<a href="/gpustack-operator/main/docs/getting-started/walkthrough/">Walkthrough</a>
+<a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/">Walkthrough</a>
  and <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
 , still shows the
 old reading under <code>SH</code> — <code>10/10</code> on one free accelerator now reads <code>1/10</code>.</p>
@@ -1192,7 +1238,7 @@ served)</li><li><a href="/gpustack-operator/main/docs/modules/rdma/operations/">
 accelerators, and the kubelet policy that aligns the two sides)</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
-        <div><a href="/gpustack-operator/main/docs/getting-started/walkthrough/">Walkthrough</a>
+        <div><a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/">Walkthrough</a>
  — the same requests on a live cluster.</div>
       </section></nav>
 
@@ -1205,7 +1251,7 @@ accelerators, and the kubelet policy that aligns the two sides)</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6a7ec88b8a4905584e393f705c9d27bfc76f2260/docs/modules/devices/requests.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/5ca7e36bc1d6667654aeb98faa2034cf913e9b37/docs/modules/devices/requests.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/requests.md">Edit this page</a>
             

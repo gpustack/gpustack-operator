@@ -344,7 +344,7 @@ It does create and destroy the instances backing scheduled workloads
 ## Walkthrough: three MIG configurations on one node
 
 A recorded run on a live Kubernetes cluster, in the style of the
-[scheduling-chain walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md): every command is the real `kubectl` (or on-node
+[scheduling-chain walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md): every command is the real `kubectl` (or on-node
 `nvidia-smi`) invocation and its real output, on `node-h100`, a genericized node of **eight** H100-80GB GPUs
 running operator defaults. Eight is the point: the families are served by **disjoint GPU populations**, so
 partitioning *some* GPUs moves exactly those.
@@ -782,4 +782,4 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
 "what can I still get") · [Device Discovery](/gpustack-operator/main/docs/modules/devices/discovery/index.md#the-partitioned-family-fungible-tokens)
 (how a partition is placed and reclaimed)
 
-**Next** → [Walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md) — the logical-slicing counterpart on a live cluster.
+**Next** → [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) — the logical-slicing counterpart on a live cluster.

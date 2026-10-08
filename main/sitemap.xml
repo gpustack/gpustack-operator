@@ -10,8 +10,6 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/getting-started/vendor-prerequisites/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/getting-started/walkthrough/</loc>
-  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/admission/</loc>
@@ -45,8 +43,6 @@
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/pool/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/walkthrough/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/</loc>
   </url><url>
@@ -113,6 +109,20 @@
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/reference/instance-type-unit-resources/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/reference/settings/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/devices/scheduling/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/</loc>
   </url><url>

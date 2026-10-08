@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers hardware, shapes accelerator capacity, and helps Kubernetes place workloads where that capacity is available.
 
-Documentation version: main. Source revision: 6a7ec88b8a4905584e393f705c9d27bfc76f2260.
+Documentation version: main. Source revision: 5ca7e36bc1d6667654aeb98faa2034cf913e9b37.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -39,7 +39,6 @@ documentation and code for your release. This index routes questions; follow its
 - [KV Cache Local Disk Tier](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md): Configure local disk storage.
 - [KV Cache on Disk-Heavy Nodes](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/index.md): Size memory on disk-heavy nodes.
 - [KV Cache Pool](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/pool/index.md): Grant and limit cache use.
-- [KV Cache Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/walkthrough/index.md): Create a working cache from backend to workload.
 - [KV Cache Injection Reference](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/injection/index.md): Attach a Pod to a pool.
 
 ## Model delivery
@@ -70,10 +69,19 @@ documentation and code for your release. This index routes questions; follow its
 - [Accelerated Instances](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/instances/index.md): Start an accelerator-backed workspace.
 - [Instance Metrics Reference](https://docs.gpustack.ai/gpustack-operator/main/docs/reference/instance-metrics/index.md): Read an Instance’s resource use.
 
+## Walkthroughs
+
+- [Walkthroughs](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/index.md): Choose a complete example by module.
+- [Device Scheduling Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md): Follow a recorded accelerator scheduling run.
+- [KV Cache Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md): Create a shared cache from backend to workload.
+- [Model Prefetch Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md): Cache weights and verify captured model CR output.
+- [Model Deployment Walkthroughs](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md): Choose a serving shape and prepare GPUs.
+- [Elastic EP Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md): Grow DP width with TP fixed and verify inference.
+- [External DP Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md): Verify per-rank inference and Router coverage.
+
 ## Start here
 
 - [Architecture](https://docs.gpustack.ai/gpustack-operator/main/docs/getting-started/architecture/index.md): See the operator’s four-stage path.
-- [Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/getting-started/walkthrough/index.md): Follow a recorded cluster run.
 - [Vendor Prerequisites](https://docs.gpustack.ai/gpustack-operator/main/docs/getting-started/vendor-prerequisites/index.md): Prepare each manufacturer’s driver.
 
 ## Cluster operations and upgrades
@@ -92,6 +100,6 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/6a7ec88b8a4905584e393f705c9d27bfc76f2260/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/5ca7e36bc1d6667654aeb98faa2034cf913e9b37/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.

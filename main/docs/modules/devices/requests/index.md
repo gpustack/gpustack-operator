@@ -37,7 +37,7 @@ no `.partitioned*` keys at all.
 ## The resource keys
 
 `<base>` is the manufacturer's device resource (`nvidia.com/gpu`, `huawei.com/npu`, … — see
-[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/6a7ec88b8a4905584e393f705c9d27bfc76f2260/README.md#accelerator-support)).
+[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/5ca7e36bc1d6667654aeb98faa2034cf913e9b37/README.md#accelerator-support)).
 
 | Key | Served by | Eligible accelerators | Request value | Node value |
 |---|---|---|---|---|
@@ -529,7 +529,7 @@ A manifest asking `"3"` for a heavier share of one accelerator now needs a node 
 
 `InstanceType.status.acceleratorShared.onceMaxRequest` moved with it: it counts a node's accelerators
 with a free share, where it used to sum their shares. Output recorded before the change, in the
-[Walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md) and [NVIDIA MIG Operations](/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md), still shows the
+[Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) and [NVIDIA MIG Operations](/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md), still shows the
 old reading under `SH` — `10/10` on one free accelerator now reads `1/10`.
 
 ## Limitations
@@ -596,4 +596,4 @@ partitioning) · [Admission](/gpustack-operator/main/docs/modules/devices/admiss
 served) · [RDMA Operations](/gpustack-operator/main/docs/modules/rdma/operations/index.md) (how many RDMA endpoints to ask for beside N
 accelerators, and the kubelet policy that aligns the two sides)
 
-**Next** → [Walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md) — the same requests on a live cluster.
+**Next** → [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) — the same requests on a live cluster.

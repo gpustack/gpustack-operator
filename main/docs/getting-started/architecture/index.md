@@ -106,7 +106,7 @@ allocation. [Admission](/gpustack-operator/main/docs/modules/devices/admission/i
 its failure behavior.
 
 InstanceType status reports the remaining capacity as workloads allocate and release devices. Use
-`kubectl get instancetype -w` to watch those changes. The [Walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md) shows the
+`kubectl get instancetype -w` to watch those changes. The [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) shows the
 request and its resulting Kubernetes resources.
 
 ## Vocabulary
@@ -126,7 +126,7 @@ The hardware terms Device, Accelerator and Resource are defined in
 
 ## Related documentation
 
-- [Walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md) — submit a workload and inspect the scheduling chain.
+- [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) — submit a workload and inspect the scheduling chain.
 - [GPU Instances](/gpustack-operator/main/docs/modules/instances/index.md) — configure an interactive container and SSH access.
 - [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) — configure inference engines and replicas.
 - [Model Delivery](/gpustack-operator/main/docs/modules/model-delivery/index.md) — resolve, cache and mount model weights.
@@ -136,6 +136,6 @@ The hardware terms Device, Accelerator and Resource are defined in
 ---
 
 **See also** — [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) ·
-[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/6a7ec88b8a4905584e393f705c9d27bfc76f2260/docs/README.md)
+[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/5ca7e36bc1d6667654aeb98faa2034cf913e9b37/docs/README.md)
 
-**Next** → [Walkthrough](/gpustack-operator/main/docs/getting-started/walkthrough/index.md) — follow a workload from submission to allocation.
+**Next** → [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) — follow a workload from submission to allocation.
