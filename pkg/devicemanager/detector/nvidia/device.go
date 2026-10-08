@@ -21,8 +21,13 @@ const Manufacturer = nodefeature.ManufacturerNVIDIA
 
 // hbmMemoryBusWidthBits is the memory bus width (bits) at or above which a GPU is HBM rather
 // than GDDR. Data-center HBM stacks are >=1024-bit (e.g. A30 3072, A100/H100 5120) while GDDR
-// data-center parts top out at 384-bit, so the threshold separates them with a wide margin.
+// parts top out at 512-bit (GDDR7 included), so the threshold separates them with a wide margin.
 const hbmMemoryBusWidthBits = 1024
+
+// gddr7ComputeCapabilityMajor is the first generation whose GDDR memory keeps ECC inside the
+// DRAM die (GDDR7 on RTX Blackwell) instead of trading ~1/16 of the framebuffer for ECC-mode
+// parity, which the restore in DetectAccelerator compensates on earlier GDDR generations.
+const gddr7ComputeCapabilityMajor = 12
 
 var _PciVendor string
 
@@ -132,6 +137,10 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			continue
 		}
 
+		// Read before the memory block: the ECC capacity rule below gates on the generation, and
+		// the group fields after the block reuse the same reading.
+		ccMajor, ccMinor, ccRet := dev.GetCudaComputeCapability()
+
 		var (
 			memory          uint64
 			memoryUnhealthy bool
@@ -146,18 +155,27 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 					continue
 				}
 			}
+			// NVML reports the total with the current ECC mode already applied.
 			memory = device.ConvertBytesToMiB(memInfo.Total)
 
-			// ECC parity bits are carved out of user-visible memory only on GDDR
-			// GPUs; HBM keeps ECC in a hardware-reserved region and already reports
-			// full capacity. The memory bus width is the NVML-native discriminator —
-			// data-center HBM stacks are >=1024-bit (H100 5120, A100 5120, A30 3072)
-			// while GDDR parts are <=384-bit — so restore the ~1/16 ECC loss (to the
-			// physical/marketing size) only on a narrow (GDDR) bus with ECC enabled.
-			// When the bus width is unreadable (older driver) no restore is applied.
+			// Enabling ECC mode costs user-visible capacity on GDDR parts that keep ECC parity
+			// outside the framebuffer: since Turing, professional GDDR cards give ~1/16 of memory
+			// to parity when the mode is on, so restore the nominal size (x16/15) there. Two
+			// boundaries keep the rule honest. HBM never restores: its ECC lives in
+			// hardware-reserved regions and NVML always reports full capacity, and data-center HBM
+			// stacks are >=1024-bit (A30 3072, A100/H100 5120) while GDDR parts top out at 512-bit.
+			// And GDDR7 never restores: its ECC is built into the DRAM die (NVIDIA RTX Blackwell
+			// GPU Architecture whitepaper v1.1), so an ECC-enabled RTX PRO 6000 Blackwell Server
+			// Edition reports its 96 GB nominal as 97887 MiB total -- measured, driver 580.173.02
+			// -- which the restore would inflate to 104412 MiB. RTX Blackwell is compute capability
+			// 12.0, so the restore applies only below that major. A reading the detector cannot
+			// classify -- bus width, ECC mode, or compute capability unreadable -- keeps the
+			// driver-reported total rather than a capacity the driver did not report.
 			if bw, ret := dev.GetMemoryBusWidth(); ret.IsSuccess() && bw > 0 && bw < hbmMemoryBusWidthBits {
 				if cur, _, ret := dev.GetEccMode(); ret.IsSuccess() && cur == nvml.FEATURE_ENABLED {
-					memory = memory * 16 / 15
+					if ccRet.IsSuccess() && ccMajor < gddr7ComputeCapabilityMajor {
+						memory = memory * 16 / 15
+					}
 				}
 			}
 
@@ -170,8 +188,6 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				memoryUnhealthy = true
 			}
 		}
-
-		ccMajor, ccMinor, _ := dev.GetCudaComputeCapability()
 
 		grpIndex := slices.IndexFunc(grpList, func(grp device.DevicesGroup) bool {
 			return grp.Name == name && grp.Memory == memory
