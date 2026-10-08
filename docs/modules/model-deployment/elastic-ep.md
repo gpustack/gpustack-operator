@@ -8,7 +8,7 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
 
 - [What the profile means](#what-the-profile-means)
 - [Requirements](#requirements)
-- [Shared memory for GPU members](#shared-memory-for-gpu-members)
+- [Shared memory](#shared-memory)
 - [A minimal manifest](#a-minimal-manifest)
 - [Changing the width](#changing-the-width)
 - [What you see while it runs](#what-you-see-while-it-runs)
@@ -70,14 +70,15 @@ The profile increases the number of GPU members. It does not resize the underlyi
 cloud node elasticity, and it does not patch anything upstream in the engine. It drives the engine
 through the resize interface the engine already exposes.
 
-## Shared memory for GPU members
+## Shared memory
 
-Each Elastic GPU member gets a separate memory-backed `EmptyDir` mounted at `/dev/shm`.
-Its size limit is 512 MiB. This includes the master and workers. The CPU head has no default mount.
-The volume is isolated per Pod and uses the Pod's memory allocation.
+The CPU head, master and GPU workers each get a separate memory-backed `EmptyDir` at `/dev/shm`.
+The role's `shmSize` sets its capacity; omission renders `16Gi`.
+The volume is isolated per Pod and uses the main container's memory allocation.
 
 An explicit `/dev/shm` mount takes precedence. Its capacity and backing remain the user's responsibility.
-Sufficiency at 512 MiB is not established. A workload that needs more must declare its own `/dev/shm` mount.
+Changing `shmSize` affects new or replacement members; existing members keep their mounts.
+See [Shared memory](deployment.md#shared-memory) for precedence and memory budgeting.
 
 ## A minimal manifest
 

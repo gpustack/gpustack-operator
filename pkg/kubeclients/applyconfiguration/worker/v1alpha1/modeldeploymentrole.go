@@ -6,6 +6,7 @@ import (
 	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
 	corev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/core/v1"
 	v1 "k8s.io/api/core/v1"
+	resource "k8s.io/apimachinery/pkg/api/resource"
 )
 
 // ModelDeploymentRoleApplyConfiguration represents a declarative configuration of the ModelDeploymentRole type for use
@@ -128,6 +129,11 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	Ports []ModelDeploymentPortApplyConfiguration `json:"ports,omitempty"`
 	// AdditionalVolumes are volumes mounted into the container alongside the operator's own.
 	AdditionalVolumes []ModelDeploymentAdditionalVolumeApplyConfiguration `json:"additionalVolumes,omitempty"`
+	// ShmSize limits the memory-backed /dev/shm volume in each role Pod. It must be positive.
+	// Omission renders 16Gi. An explicit /dev/shm mount in AdditionalVolumes takes precedence.
+	// Used shared memory counts toward the container's memory limit; this is not a reservation.
+	// Existing elastic members keep their mounts; new and replacement Pods use the current value.
+	ShmSize *resource.Quantity `json:"shmSize,omitempty"`
 	// Command replaces the whole argv, which is the TAKE-OVER tier: the user owns the whole
 	// command line, the operator synthesizes no engine argument and no client environment, the
 	// role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command;
@@ -314,6 +320,14 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithAdditionalVolumes(values ...
 		}
 		b.AdditionalVolumes = append(b.AdditionalVolumes, *values[i])
 	}
+	return b
+}
+
+// WithShmSize sets the ShmSize field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ShmSize field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithShmSize(value resource.Quantity) *ModelDeploymentRoleApplyConfiguration {
+	b.ShmSize = &value
 	return b
 }
 

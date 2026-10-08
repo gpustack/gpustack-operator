@@ -320,13 +320,18 @@ whole-GPU admission only; Ray/elastic realization **NOT-established**).
   layers are derived from objects that realization created (negative: a fixture that only counts
   Pods cannot satisfy any four-layer check).
 
-**Per-member shared memory is a realization prerequisite.**
+**Shared memory is a realization prerequisite.**
 **MEASURED** — the pinned native profile failed before inference: its `/dev/shm` buffer required 160 MiB, with 64 MiB available.
-Each GPU member, including the master, therefore renders a separate memory-backed `EmptyDir` at `/dev/shm`, limited to 512 MiB.
-The realization loop adds it after ordinary rendering and before the Pod spec hash.
+Ordinary role rendering provides each Pod with a memory-backed `EmptyDir` at `/dev/shm`.
+`roles[].shmSize` is an optional positive Kubernetes quantity. Omission renders `16Gi`.
+The common path covers ordinary roles, take-over roles, Elastic GPU members and the CPU head.
+The volume enters the Pod spec hash. Its capacity does not reserve RAM or raise the memory request.
+Only the main container mounts it; used shared memory counts toward that container's memory limit.
 An explicit `/dev/shm` mount takes precedence; its capacity and backing remain the user's responsibility.
-CPU head and ordinary rendering remain unchanged. No host path is introduced.
-**NOT-established** — 512 MiB covers the observed buffer requirement; full engine sufficiency still needs physical validation.
+An ordinary capacity change follows recreate rollout. Existing Elastic members remain unchanged;
+new or replacement members use the current role value. No host path is introduced.
+The default replaces the earlier fixed 512 MiB member volume. It is a project choice, not an upstream engine guarantee.
+**NOT-established** — full engine sufficiency and the dynamic TP>1 failure's root cause still need physical validation.
 No native resize pass is claimed.
 
 ### Feature 2 — Engine resize lifecycle with failure and recovery contract (E7 / E10 / T08)

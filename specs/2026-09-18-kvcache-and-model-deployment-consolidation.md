@@ -616,6 +616,13 @@ together with the role's own `InstanceType`.
 role. `template.env` merges into `roles[].env`. `template.resources` is deleted outright, and
 `template` itself ceases to exist.
 
+The role also owns `shmSize`, an optional positive Kubernetes quantity.
+Ordinary rendering supplies a per-Pod memory-backed `/dev/shm` volume, defaulting to `16Gi`.
+An explicit `/dev/shm` additional volume takes precedence. The limit does not reserve RAM.
+Only the main container mounts it; used pages count toward that container's memory limit.
+Changing the rendered capacity changes the Pod hash and follows recreate rollout.
+Elastic members use the same rendering path but retain existing Pods during a capacity edit.
+
 - **`resources` is deleted rather than moved.** It has no behavior but refusal, which its own comment
   states. The refusal it produced is replaced by strict decoding's unknown-field error, which is a
   worse message for a better reason: a field kept solely to improve one error message is a promise

@@ -5060,6 +5060,20 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															},
 															Nullable: true,
 														},
+														"shmSize": {
+															Description: "ShmSize limits the memory-backed /dev/shm volume in each role Pod. It must be positive.\nOmission renders 16Gi. An explicit /dev/shm mount in AdditionalVolumes takes precedence.\nUsed shared memory counts toward the container's memory limit; this is not a reservation.\nExisting elastic members keep their mounts; new and replacement Pods use the current value.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
 														"size": {
 															Description: "ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they\nstart together, they are replaced together, and none of them serves alone — the instance,\nnot the Pod, is the unit that appears and disappears.\nTHIS NUMBER IS FIXED AT CREATION AND CANNOT BE CHANGED. An instance's size is the shape of the\ninstance, not a dial on it: the Pods a running instance is made of are not the Pods a different\nsize asks for. Scaling is what replicas is for, and it leaves every running instance alone. To\nserve at a different size, create a deployment that declares it.\nABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods\nis rendered with stable names and publishes the first Pod's address, this instance's size and\neach Pod's own rank to every container. What an engine does with those facts -- which\nparallelism it turns on, and over how many ranks -- stays the author's to say.\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and\nGo forbids a field and a method sharing a name; the API field is size.\nTHE UPPER BOUND IS THE SAME LIMIT REPLICAS CARRIES, AND IT MULTIPLIES WITH IT: this number is\nhow many Pods one instance is rendered as, so a pass renders replicas times this many before it\nwrites any of them. It is set far above the sizes an accelerator topology makes sense at, and\nfar below the range that turns one accepted field value into an out-of-memory worker.",
 															Type:        "integer",

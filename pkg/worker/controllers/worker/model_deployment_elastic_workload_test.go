@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
@@ -404,17 +405,25 @@ func TestElasticTerminatingMemberWorkloadIsReleased(t *testing.T) {
 	}
 }
 
-func TestElasticGPUMembersCarryIsolatedSharedMemory(t *testing.T) {
+func TestModelDeploymentRolesSharedMemory(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		additional   []workercore.ModelDeploymentAdditionalVolume
 		ordinary     bool
+		engine       string
+		shmSize      string
+		takeOver     bool
 		wantEmptyDir string
 	}{
-		{name: "default isolated emptyDir", wantEmptyDir: "512Mi"},
-		{name: "ordinary render is unchanged", ordinary: true},
+		{name: "elastic default", wantEmptyDir: "16Gi"},
+		{name: "elastic custom", shmSize: "32Gi", wantEmptyDir: "32Gi"},
+		{name: "ordinary vllm default", ordinary: true, wantEmptyDir: "16Gi"},
+		{name: "ordinary sglang default", ordinary: true, engine: workercore.ModelDeploymentEngineSGLang, wantEmptyDir: "16Gi"},
+		{name: "ordinary custom", ordinary: true, shmSize: "32Gi", wantEmptyDir: "32Gi"},
+		{name: "take over default", ordinary: true, takeOver: true, wantEmptyDir: "16Gi"},
 		{
-			name: "explicit mount is preserved",
+			name:    "explicit mount overrides custom size",
+			shmSize: "32Gi",
 			additional: []workercore.ModelDeploymentAdditionalVolume{{
 				MountPath: "/dev/shm",
 				ConfigMap: &core.LocalObjectReference{Name: "user-shm"},
@@ -429,6 +438,15 @@ func TestElasticGPUMembersCarryIsolatedSharedMemory(t *testing.T) {
 				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2, HeadInstanceType: "cpu"}
 			}
 			md.Spec.Roles[0].AdditionalVolumes = tc.additional
+			if tc.engine != "" {
+				md.Spec.Engine.Name = tc.engine
+			}
+			if tc.shmSize != "" {
+				md.Spec.Roles[0].ShmSize = ptr.To(resource.MustParse(tc.shmSize))
+			}
+			if tc.takeOver {
+				md.Spec.Roles[0].Command = []string{"custom-server"}
+			}
 			cpu := newRenderInstanceType(func(it *worker.InstanceType) { it.Name = "cpu"; it.Spec.Acceleratable = false })
 			cli := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
@@ -451,18 +469,9 @@ func TestElasticGPUMembersCarryIsolatedSharedMemory(t *testing.T) {
 						shmNames = append(shmNames, m.Name)
 					}
 				}
-				if tc.ordinary {
-					require.Empty(t, shmNames, "%s is an ordinary render, not an elastic member", pod.Name)
-					continue
+				if modelDeploymentPodRole(pod) != modelDeploymentElasticHeadName(md) {
+					members++
 				}
-				if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(md) {
-					// Explicit role mounts also reach the CPU head. Only the default must stay absent.
-					if tc.additional == nil {
-						require.Empty(t, shmNames, "the CPU head gains no shared memory of its own")
-					}
-					continue
-				}
-				members++
 				require.Len(t, shmNames, 1, "%s must mount /dev/shm exactly once", pod.Name)
 				var backing *core.Volume
 				for j := range pod.Spec.Volumes {
@@ -493,6 +502,67 @@ func TestElasticGPUMembersCarryIsolatedSharedMemory(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestElasticSharedMemoryEditRetainsExistingMembers(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	pods := new(core.PodList)
+	require.NoError(t, f.reconciler.Client.List(ctx, pods))
+	original := make(map[string]types.UID, len(pods.Items))
+	for _, pod := range pods.Items {
+		original[pod.Name] = pod.UID
+	}
+	require.Len(t, original, 3)
+	assertRetained := func() {
+		t.Helper()
+		for name, uid := range original {
+			index := slices.IndexFunc(pods.Items, func(pod core.Pod) bool { return pod.Name == name })
+			require.NotEqual(t, -1, index, "original Pod %s must remain", name)
+			pod := &pods.Items[index]
+			require.Equal(t, uid, pod.UID, name)
+			for _, volume := range pod.Spec.Volumes {
+				if volume.EmptyDir != nil && volume.EmptyDir.Medium == core.StorageMediumMemory {
+					require.NotNil(t, volume.EmptyDir.SizeLimit)
+					require.Zero(t, volume.EmptyDir.SizeLimit.Cmp(resource.MustParse("16Gi")), name)
+				}
+			}
+		}
+	}
+
+	f.md.Spec.Roles[0].ShmSize = ptr.To(resource.MustParse("32Gi"))
+	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.NoError(t, f.reconciler.Client.List(ctx, pods))
+	require.Len(t, pods.Items, 3)
+	assertRetained()
+
+	f.md.Spec.Roles[0].ElasticEP.Width = 3
+	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	require.NoError(t, f.reconciler.Client.List(ctx, pods))
+	require.Len(t, pods.Items, 4)
+	assertRetained()
+	newMembers := 0
+	for _, pod := range pods.Items {
+		want := "32Gi"
+		if uid, exists := original[pod.Name]; exists {
+			require.Equal(t, uid, pod.UID)
+			want = "16Gi"
+		} else {
+			newMembers++
+		}
+		found := false
+		for _, volume := range pod.Spec.Volumes {
+			if volume.EmptyDir != nil && volume.EmptyDir.Medium == core.StorageMediumMemory {
+				found = true
+				require.NotNil(t, volume.EmptyDir.SizeLimit)
+				require.Zero(t, volume.EmptyDir.SizeLimit.Cmp(resource.MustParse(want)), pod.Name)
+			}
+		}
+		require.True(t, found, pod.Name)
+	}
+	require.Equal(t, 1, newMembers)
 }
 
 func TestElasticUnknownBootstrapRetainsMembers(t *testing.T) {
