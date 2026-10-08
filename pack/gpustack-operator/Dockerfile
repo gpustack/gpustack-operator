@@ -13,8 +13,8 @@ ARG UBUNTU_IMAGE="ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49
 
 # Logical-slicing preload-library sources, cloned inline per build stage at a pinned
 # commit (no git submodule). Bump the commit to update; the ARG busts the build cache.
-ARG LIB_UBS_VIRT_ENPU_COMMIT="bac3d461c9312acfaa388bed89e9ed2a61971d1a"
-ARG LIB_HAMI_CORE_COMMIT="5496322f2fb3e71bf1eca014fba3c9bc59ab8ffd"
+ARG LIB_UBS_VIRT_ENPU_COMMIT="19a817e58e4c68bbfef6f4e2326e4877db9fc5f3"
+ARG LIB_HAMI_CORE_COMMIT="ec5d85a3d709e5ed138a1668ebfefd366c05ca1e"
 
 # =============================================================================
 # Stage: tools
@@ -229,7 +229,7 @@ RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.s
     bash /build-libvnpu.sh /tmp/ubs-virt/ubs-virt-enpu/vcann-rt /out
 EOF
 
-FROM quay.io/ascend/cann:9.1.0-beta.3-910b-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-910b
+FROM quay.io/ascend/cann:9.1.0-910b-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-910b
 ARG LIB_UBS_VIRT_ENPU_COMMIT
 RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh \
     --mount=type=bind,src=pack/gpustack-operator/external/ascend/vcann-rt,target=/vcann-rt-patches <<EOF
@@ -242,7 +242,7 @@ RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.s
     bash /build-libvnpu.sh /tmp/ubs-virt/ubs-virt-enpu/vcann-rt /out
 EOF
 
-FROM quay.io/ascend/cann:9.1.0-beta.3-a3-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-910c
+FROM quay.io/ascend/cann:9.1.0-a3-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-910c
 ARG LIB_UBS_VIRT_ENPU_COMMIT
 RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh \
     --mount=type=bind,src=pack/gpustack-operator/external/ascend/vcann-rt,target=/vcann-rt-patches <<EOF
@@ -255,7 +255,7 @@ RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.s
     bash /build-libvnpu.sh /tmp/ubs-virt/ubs-virt-enpu/vcann-rt /out
 EOF
 
-FROM quay.io/ascend/cann:9.1.0-beta.3-950-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-950
+FROM quay.io/ascend/cann:9.1.0-950-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-950
 ARG LIB_UBS_VIRT_ENPU_COMMIT
 RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh \
     --mount=type=bind,src=pack/gpustack-operator/external/ascend/vcann-rt,target=/vcann-rt-patches <<EOF
@@ -268,7 +268,7 @@ RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.s
     bash /build-libvnpu.sh /tmp/ubs-virt/ubs-virt-enpu/vcann-rt /out
 EOF
 
-FROM quay.io/ascend/cann:9.1.0-beta.3-310p-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-310p
+FROM quay.io/ascend/cann:9.1.0-310p-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-310p
 ARG LIB_UBS_VIRT_ENPU_COMMIT
 RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh \
     --mount=type=bind,src=pack/gpustack-operator/external/ascend/vcann-rt,target=/vcann-rt-patches <<EOF

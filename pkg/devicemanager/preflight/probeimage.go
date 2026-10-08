@@ -19,10 +19,10 @@ import (
 var ascendProbeImages = map[string]string{
 	"cann-8-910b": "quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11",
 	"cann-8-910c": "quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.11",
-	"cann-9-910b": "quay.io/ascend/cann:9.1.0-beta.3-910b-ubuntu22.04-py3.12",
-	"cann-9-910c": "quay.io/ascend/cann:9.1.0-beta.3-a3-ubuntu22.04-py3.12",
-	"cann-9-950":  "quay.io/ascend/cann:9.1.0-beta.3-950-ubuntu22.04-py3.12",
-	"cann-9-310p": "quay.io/ascend/cann:9.1.0-beta.3-310p-ubuntu22.04-py3.12",
+	"cann-9-910b": "quay.io/ascend/cann:9.1.0-910b-ubuntu22.04-py3.12",
+	"cann-9-910c": "quay.io/ascend/cann:9.1.0-a3-ubuntu22.04-py3.12",
+	"cann-9-950":  "quay.io/ascend/cann:9.1.0-950-ubuntu22.04-py3.12",
+	"cann-9-310p": "quay.io/ascend/cann:9.1.0-310p-ubuntu22.04-py3.12",
 }
 
 // nvidiaProbeImages are the vendor images preflight's NVIDIA probe starts, one per CUDA runtime

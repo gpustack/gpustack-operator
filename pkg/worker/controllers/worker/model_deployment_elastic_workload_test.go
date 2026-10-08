@@ -25,6 +25,83 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
+func TestElasticRayLoggingEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		ordinary bool
+		env      []workercore.ModelDeploymentEnvVar
+		want     map[string]string
+	}{
+		{
+			name: "defaults",
+			want: map[string]string{"RAY_LOG_TO_STDERR": "1", "RAY_LOGGER_LEVEL": "info", "RAY_BACKEND_LOG_LEVEL": "info"},
+		},
+		{
+			name: "debug overrides",
+			env: []workercore.ModelDeploymentEnvVar{
+				{Name: "RAY_LOGGER_LEVEL", Value: "debug"},
+				{Name: "RAY_BACKEND_LOG_LEVEL", Value: "debug"},
+				{Name: "RAY_DEDUP_LOGS", Value: "0"},
+			},
+			want: map[string]string{"RAY_LOG_TO_STDERR": "1", "RAY_LOGGER_LEVEL": "debug", "RAY_BACKEND_LOG_LEVEL": "debug", "RAY_DEDUP_LOGS": "0"},
+		},
+		{
+			name: "file logging override",
+			env:  []workercore.ModelDeploymentEnvVar{{Name: "RAY_LOG_TO_STDERR", Value: "0"}},
+			want: map[string]string{"RAY_LOG_TO_STDERR": "0", "RAY_LOGGER_LEVEL": "info", "RAY_BACKEND_LOG_LEVEL": "info"},
+		},
+		{name: "ordinary deployment", ordinary: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			md.Spec.KVCache = nil
+			md.Spec.Roles[0].Env = append(slices.Clone(tc.env), workercore.ModelDeploymentEnvVar{Name: "VLLM_LOGGING_LEVEL", Value: "DEBUG"})
+			if !tc.ordinary {
+				md.Spec.Engine.Version = "0.29.0"
+				md.Spec.Roles[0].Replicas = 1
+				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2, HeadInstanceType: "cpu"}
+			}
+			cpu := newRenderInstanceType(func(it *worker.InstanceType) {
+				it.Name = "cpu"
+				it.Spec.Acceleratable = false
+				it.Status.Entrance = "cpu-queue"
+			})
+			cli := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
+			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+			_, err := r.convergeModelDeployment(context.Background(), md)
+			require.NoError(t, err)
+			pods := new(core.PodList)
+			require.NoError(t, cli.List(context.Background(), pods, ctrlcli.InNamespace(md.Namespace)))
+			wantPods := 3
+			if tc.ordinary {
+				wantPods = 2
+			}
+			require.Len(t, pods.Items, wantPods)
+			for _, pod := range pods.Items {
+				env := map[string]string{}
+				for _, value := range pod.Spec.Containers[0].Env {
+					require.NotContains(t, env, value.Name, "duplicate env on %s", pod.Name)
+					env[value.Name] = value.Value
+				}
+				if tc.ordinary {
+					for _, name := range []string{"RAY_LOG_TO_STDERR", "RAY_LOGGER_LEVEL", "RAY_BACKEND_LOG_LEVEL", "RAY_DEDUP_LOGS"} {
+						require.NotContains(t, env, name)
+					}
+				} else {
+					for name, value := range tc.want {
+						require.Equal(t, value, env[name], "%s on %s", name, pod.Name)
+					}
+				}
+				if modelDeploymentPodRole(&pod) == modelDeploymentElasticHeadName(md) {
+					require.NotContains(t, env, "VLLM_LOGGING_LEVEL")
+				} else {
+					require.Equal(t, "DEBUG", env["VLLM_LOGGING_LEVEL"])
+				}
+			}
+		})
+	}
+}
+
 func TestElasticConvergenceCreatesChildren(t *testing.T) {
 	for _, tp := range []int{1, 2, 4, 8} {
 		t.Run(fmt.Sprintf("tp-%d", tp), func(t *testing.T) {

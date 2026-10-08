@@ -86,6 +86,15 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 	gpu := copyMD.Spec.Roles[0].DeepCopy()
 	gpu.ElasticEP = nil
 	gpu.Replicas = role.ElasticEP.Width
+	for _, env := range []workercore.ModelDeploymentEnvVar{
+		{Name: "RAY_LOG_TO_STDERR", Value: "1"},
+		{Name: "RAY_LOGGER_LEVEL", Value: "info"},
+		{Name: "RAY_BACKEND_LOG_LEVEL", Value: "info"},
+	} {
+		if !slices.ContainsFunc(gpu.Env, func(value workercore.ModelDeploymentEnvVar) bool { return value.Name == env.Name }) {
+			gpu.Env = append(gpu.Env, env)
+		}
+	}
 	copyMD.Spec.Roles = []workercore.ModelDeploymentRole{*gpu}
 	desired, err := r.renderModelDeploymentPods(ctx, copyMD, connection, protocols, weights)
 	if err != nil {
@@ -142,7 +151,14 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 	head.Command = []string{"/bin/sh", "-ec", ModelDeploymentElasticHeadCommand +
 		" --num-gpus=0 --port=6379 --dashboard-host=0.0.0.0 --labels=" +
 		ModelDeploymentElasticRayNodeIdentityLabel + "=\"$GPUSTACK_ELASTIC_POD_UID\" --block"}
-	head.Env = nil
+	head.Env = slices.DeleteFunc(head.Env, func(env workercore.ModelDeploymentEnvVar) bool {
+		switch env.Name {
+		case "RAY_LOG_TO_STDERR", "RAY_LOGGER_LEVEL", "RAY_BACKEND_LOG_LEVEL", "RAY_DEDUP_LOGS":
+			return false
+		default:
+			return true
+		}
+	})
 	headMD := md.DeepCopy()
 	headMD.Spec.Roles = []workercore.ModelDeploymentRole{*head}
 	heads, err := r.renderModelDeploymentPods(ctx, headMD, nil, nil, nil)
