@@ -460,19 +460,17 @@ record SKIP "the unregistered domain costs the replicas their connector and noth
 # cannot fire on a create at all and no dry run reaches it. These two patch the deployment that is
 # still standing.
 #
-# THE PAIR IS THE ROW. `replicas` and `size` sit side by side in the same struct and are edited
-# through the same patch shape, so a webhook that refused both -- or a patch that failed for a
-# reason having nothing to do with either -- reads exactly like a correct one through the refusal
-# alone. The acceptance is what says the instrument can still say yes.
+# Ordinary size and replica-count edits are accepted. Model and engine identity remain frozen.
 if [ "$nobind_ready" = yes ]; then
   size_out="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai case45-nobind --type=json \
     -p '[{"op":"replace","path":"/spec/roles/0/size","value":2}]' 2>&1 | tr '\n' ' ')"
-  if [ -n "$size_out" ] && [ -z "${size_out##*roles\[0\].size*}" ]; then
-    record PASS "an edit to a role's size is refused, naming the field" \
-      "refused at spec.roles[0].size: every member of a running instance was built for the rank layout the old value described"
+  stored_size="$(kubectl -n "$NS" get modeldeployments.worker.gpustack.ai case45-nobind \
+    -o jsonpath='{.spec.roles[0].size}' 2>/dev/null)"
+  if [ -n "$size_out" ] && [ -z "${size_out##*patched*}" ] && [ "$stored_size" = 2 ]; then
+    record PASS "an ordinary role size edit is accepted and stored" "size=${stored_size}"
   else
-    record FAIL "an edit to a role's size is refused, naming the field" \
-      "wanted a refusal naming roles[0].size, got: $(echo "$size_out" | cut -c1-160)"
+    record FAIL "an ordinary role size edit is accepted and stored" \
+      "wanted size=2, stored=[${stored_size:-none}], patch: $(echo "$size_out" | cut -c1-160)"
   fi
 
   # THE MODEL SAYS WHICH DEPLOYMENT THIS IS, so it is frozen too, and its refusal is read for its
@@ -513,7 +511,7 @@ if [ "$nobind_ready" = yes ]; then
     -p '[{"op":"replace","path":"/spec/roles/0/replicas","value":2}]' 2>&1 | tr '\n' ' ')"
   if [ -n "$replicas_out" ] && [ -z "${replicas_out##*patched*}" ]; then
     record PASS "the control: an edit to a role's replicas is accepted" \
-      "patched, so the refusal above is this rule answering rather than the whole struct being frozen"
+      "patched alongside the accepted size edit"
   else
     record FAIL "the control: an edit to a role's replicas is accepted" \
       "wanted the patch to be accepted, got: $(echo "$replicas_out" | cut -c1-160)"
@@ -526,7 +524,7 @@ if [ "$nobind_ready" = yes ]; then
     record FAIL "the accepted replicas edit reached storage" "replicas=[${stored_replicas:-none}]"
   fi
 else
-  record SKIP "an edit to a role's size is refused, naming the field" \
+  record SKIP "an ordinary role size edit is accepted and stored" \
     "the subject deployment was never created, so there is no stored object to edit"
   record SKIP "an edit to the model is refused on a live object, naming the field" \
     "the subject deployment was never created, so there is no stored object to edit"

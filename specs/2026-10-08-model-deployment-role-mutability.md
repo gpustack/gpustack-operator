@@ -114,6 +114,9 @@ As an operator, I want documented shared effects and constraints, so that I can 
 - Desired-size differences alone do not qualify for incomplete-group repair.
 - Preserve recovery for actual member loss and interrupted writes.
 - Do not require obsolete, unadmitted configuration to become admitted before it can be replaced.
+- Apply this rule to complete groups waiting for first admission, including those without a replacement slot.
+- Select these groups before admitted siblings and use the same single-slot cleanup path.
+- Verify current member admission gates and exclude earlier execution, eviction, and preemption history.
 - Recovery preserves replacement limits and does not spend additional healthy serving capacity.
 - Reconciliation retries and restarts never overlap old and new members in one ordinal.
 - Combined replica-count and configuration edits preserve these ownership and cadence rules.
@@ -399,6 +402,9 @@ Use fake-client reconciliation sequences for these local integration checks:
 - Restart after intent persistence, partial member deletion, old Workload deletion, and partial creation.
 - Recover lost delete/create responses and an API-reader/cache disagreement.
 - Edit configuration again while its replacement is queued.
+- Reduce resources or change pools while a complete initial group waits without a replacement slot.
+- Keep admitted siblings intact when an initial queued group changes configuration.
+- Reject initial-queue classification after execution, eviction, preemption, or removal of the admission gate.
 - Combine configuration changes with replica growth and shrink.
 - Preserve unrelated P/D child UIDs, selectors, endpoints, and DNS.
 - Replace both roles when command-supplied shared degrees alter both renders.

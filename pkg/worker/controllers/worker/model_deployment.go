@@ -944,9 +944,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// no declared count covers and the barrier does not catch. The guard therefore turns a
 		// replica over only when every replica the role declares holds an admitted Workload: one
 		// admission is in flight at a time, and the pass comes back for the next departure once
-		// the replacement has actually been admitted. A deployment whose replicas hold no
-		// admitted Workloads at all never rolls -- without admission there is no capacity to
-		// trade, and an edit waits for it rather than stripping what serves.
+		// the replacement has actually been admitted. A complete group still waiting for its first
+		// admission can be replaced without spending admitted capacity. Previously admitted groups
+		// keep this guard after their admission is revoked.
 		//
 		// THE DEPARTING REPLICA'S WORKLOAD IS DELETED WITH IT, and that is not bookkeeping. The
 		// group is annotated serving, so Kueue never releases the finalizer it holds on the Pod
@@ -1033,12 +1033,26 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// replica below a healthy one is the more urgent of the two.
 			brokenTurnsOver := len(broken) > 0 && !holding
 			unguarded := len(ungated) > 0
+			var initiallyQueued []*core.Pod
+			if !holding && !brokenTurnsOver && !unguarded && admitted != declared {
+				for _, view := range modelDeploymentGroupPodsByReplica(modelDeploymentPodValues(outdated)) {
+					queued, queueErr := r.initialQueuedReplica(ctx, view, workloads)
+					if queueErr != nil {
+						return ctrl.Result{}, queueErr
+					}
+					if queued {
+						initiallyQueued = append(initiallyQueued, view.Members...)
+					}
+				}
+			}
 			pick := outdated
 			switch {
 			case brokenTurnsOver:
 				pick = broken
 			case unguarded:
 				pick = ungated
+			case len(initiallyQueued) > 0:
+				pick = initiallyQueued
 			}
 
 			// A ROLE WHOSE REPLACEMENT IS NOT ADMITTED YET SPENDS NO FURTHER HEALTHY CAPACITY. The
@@ -1048,7 +1062,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// The hold covers the broken replicas too: the slot's own replacement is the group the
 			// role is committed to, and a broken group behind it is repaired whole once that one is
 			// admitted rather than being dismantled to save a pass.
-			turnsOver := brokenTurnsOver || unguarded || (!holding && admitted == declared)
+			turnsOver := brokenTurnsOver || unguarded || len(initiallyQueued) > 0 || (!holding && admitted == declared)
 			if turnsOver {
 				// THE WHOLE REPLICA TURNS OVER, not the member that was picked. The pick names one
 				// Pod, and that Pod's replica is what departs: its members hold one Kueue group,

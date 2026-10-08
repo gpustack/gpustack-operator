@@ -479,11 +479,17 @@ answers by deleting the newer Pod, the replacement itself.
 A replacement is a **fresh admission**, not a rider on the reservation the departed replica held:
 freeing the slot deletes that replica's Workload, and the reservation goes with it.
 
-The cadence guard therefore turns a replica over only when every replica the role declares holds an
+The cadence guard therefore turns a healthy replica over only when every replica the role declares holds an
 admitted Workload; on a full pool a rollout waits for capacity rather than shedding replicas it
 cannot re-reserve. That gate holds back deleting the next healthy replica, not the configuration
 already waiting in a replacement slot: a queued replacement is superseded by a newer edit and
 admitted once, as the newer shape — the obsolete configuration need never be admitted.
+
+A complete group still waiting for its first admission can also be replaced after a configuration edit.
+It uses the same single replacement slot and fresh admission rules.
+The operator selects this queued group before deleting an admitted sibling.
+This exception requires every member to remain behind Kueue's admission gate.
+An eviction, preemption, or earlier execution does not qualify as first admission.
 
 ### Replacing a role whose shape moved
 
