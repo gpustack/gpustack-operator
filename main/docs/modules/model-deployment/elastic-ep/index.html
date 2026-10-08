@@ -509,7 +509,7 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
 </li>
 <li><a href="#requirements">Requirements</a>
 </li>
-<li><a href="#shared-memory-for-gpu-members">Shared memory for GPU members</a>
+<li><a href="#shared-memory">Shared memory</a>
 </li>
 <li><a href="#a-minimal-manifest">A minimal manifest</a>
 </li>
@@ -582,12 +582,11 @@ InstanceType that must already exist and must be CPU-only.</p>
 <p>The profile increases the number of GPU members. It does not resize the underlying nodes or claim
 cloud node elasticity, and it does not patch anything upstream in the engine. It drives the engine
 through the resize interface the engine already exposes.</p>
-<h2 id="shared-memory-for-gpu-members">Shared memory for GPU members</h2>
-<p>Each Elastic GPU member gets a separate memory-backed <code>EmptyDir</code> mounted at <code>/dev/shm</code>.
-Its size limit is 512 MiB. This includes the master and workers. The CPU head has no default mount.
-The volume is isolated per Pod and uses the Pod&rsquo;s memory allocation.</p>
-<p>An explicit <code>/dev/shm</code> mount takes precedence. Its capacity and backing remain the user&rsquo;s responsibility.
-Sufficiency at 512 MiB is not established. A workload that needs more must declare its own <code>/dev/shm</code> mount.</p>
+<h2 id="shared-memory">Shared memory</h2>
+<p>The CPU head, master and GPU workers each get a separate memory-backed <code>EmptyDir</code> at <code>/dev/shm</code>.
+Changing the role&rsquo;s <code>shmSize</code> affects new or replacement members; existing members keep their mounts.
+See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#shared-memory">Shared memory</a>
+ for configuration, precedence and memory budgeting.</p>
 <h2 id="a-minimal-manifest">A minimal manifest</h2>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -821,7 +820,7 @@ change.</li>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/3ce2edd3a7c6d341f25e120e2af0b6549cffc303/docs/modules/model-deployment/elastic-ep.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0c3d9e7a5a4c043d3b64238c41b7fb588e1405be/docs/modules/model-deployment/elastic-ep.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/elastic-ep.md">Edit this page</a>
             
@@ -834,7 +833,7 @@ change.</li>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#what-the-profile-means">What the profile means</a></li>
     <li><a href="#requirements">Requirements</a></li>
-    <li><a href="#shared-memory-for-gpu-members">Shared memory for GPU members</a></li>
+    <li><a href="#shared-memory">Shared memory</a></li>
     <li><a href="#a-minimal-manifest">A minimal manifest</a></li>
     <li><a href="#changing-the-width">Changing the width</a></li>
     <li><a href="#what-you-see-while-it-runs">What you see while it runs</a></li>

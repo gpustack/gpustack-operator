@@ -825,7 +825,7 @@ Without one, users patch the rendered Pod and the reconcile loop silently overwr
       </tr>
       <tr>
           <td>overlay</td>
-          <td>the role&rsquo;s own Pod fields — <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>privileged</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>terminationGracePeriodSeconds</code></td>
+          <td>the role&rsquo;s own Pod fields — <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>privileged</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>, <code>terminationGracePeriodSeconds</code></td>
           <td>the operator renders first, then merges this overlay on top</td>
       </tr>
       <tr>
@@ -866,6 +866,22 @@ a shell, so the environment is the only path left. Why the key is owned at all i
 <a href="https://github.com/gpustack/gpustack-operator/issues/168">#168</a>
 , whose own void conditions include a
 webhook-level one, so nothing here should be read as a claim about how that issue can be closed.</p>
+<h3 id="shared-memory">Shared memory</h3>
+<p><code>roles[].shmSize</code> sets the capacity limit of <code>/dev/shm</code> in each role Pod. It accepts a positive Kubernetes
+quantity, such as <code>32Gi</code>. Omission renders a <code>16Gi</code> memory-backed <code>EmptyDir</code>.
+This applies to both engines, take-over roles, and the Elastic Ray head and GPU members.
+Each Pod has its own volume. Only the main container mounts it.</p>
+<p>An explicit <code>/dev/shm</code> mount in <code>additionalVolumes</code> takes precedence, including when <code>shmSize</code> is set.
+The operator preserves that mount&rsquo;s capacity and backing.
+The default is a project capacity choice, not a universal engine requirement.</p>
+<p>The capacity limit does not reserve RAM or increase the Pod&rsquo;s memory request.
+Used shared memory counts toward the main container&rsquo;s memory limit.
+Budget memory for both shared memory and the engine heap.
+Ray&rsquo;s object store may need more than <code>16Gi</code>; size the volume for the configured workload.
+Kubelet lowers the mount size when the Pod memory limit or node allocatable memory is smaller.</p>
+<p>Changing the rendered capacity follows ordinary role rollout behavior.
+Existing Elastic members keep their mounts; new or replacement Pods use the current value.
+Upgrading the operator adds the default mount to ordinary roles and triggers their recreate rollout.</p>
 <h2 id="operator-owned-keys">Operator-owned keys</h2>
 <p>Ownership is per (engine, key): a key one engine owns is an ordinary user argument on another.
 <code>SGLANG_HICACHE_MOONCAKE_CONFIG_PATH</code> is meaningless to <code>vllm</code> and is a plain user variable there.</p>
@@ -1032,7 +1048,7 @@ appearing as an unattributable <code>ImagePullBackOff</code>.</p>
 <p>Changing <code>replicas</code> adds or removes instances and nothing more: the survivors are not restarted, do
 not reload their weights and keep their cached blocks. What still replaces <strong>every</strong> instance of the
 role is an edit that changes what a replica&rsquo;s Pod renders: <code>image</code>, <code>extraArgs</code>, <code>env</code>, <code>ports</code>,
-<code>additionalVolumes</code>, <code>terminationGracePeriodSeconds</code>. A change to <code>size</code> is not on that list because
+<code>additionalVolumes</code>, <code>shmSize</code>, <code>terminationGracePeriodSeconds</code>. A change to <code>size</code> is not on that list because
 it cannot be made: see <code>roles[].size</code> above.</p>
 <p>Such an edit <strong>deletes and recreates</strong> the role&rsquo;s replicas, one replica per role per pass, waited
 out. The role set itself cannot be edited at all; admission refuses it, so there is no role rename or
@@ -1146,7 +1162,7 @@ editable; the table below lists both groups and the scheduling exceptions.</p>
       </tr>
       <tr>
           <td><code>roles[].resources</code></td>
-          <td>the role&rsquo;s own Pod fields — <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>privileged</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>terminationGracePeriodSeconds</code></td>
+          <td>the role&rsquo;s own Pod fields — <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>privileged</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>, <code>terminationGracePeriodSeconds</code></td>
       </tr>
       <tr>
           <td><code>roles[].command</code></td>
@@ -1422,7 +1438,7 @@ structured snapshot and Pod scrape endpoints.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/3ce2edd3a7c6d341f25e120e2af0b6549cffc303/docs/modules/model-deployment/deployment.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0c3d9e7a5a4c043d3b64238c41b7fb588e1405be/docs/modules/model-deployment/deployment.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/deployment.md">Edit this page</a>
             
@@ -1444,6 +1460,7 @@ structured snapshot and Pod scrape endpoints.</li></ul>
     <li><a href="#the-three-override-tiers">The three override tiers</a>
       <ul>
         <li><a href="#take-over-roles-and-the-reuse-domain">Take-over roles and the reuse domain</a></li>
+        <li><a href="#shared-memory">Shared memory</a></li>
       </ul>
     </li>
     <li><a href="#operator-owned-keys">Operator-owned keys</a></li>

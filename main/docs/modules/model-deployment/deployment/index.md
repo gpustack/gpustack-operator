@@ -256,7 +256,7 @@ Without one, users patch the rendered Pod and the reconcile loop silently overwr
 | Tier | Field | Semantics |
 |---|---|---|
 | append | `roles[].extraArgs`, `roles[].env` | appended **after** the operator-synthesized arguments; a key the operator owns is refused, never merged |
-| overlay | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `terminationGracePeriodSeconds` | the operator renders first, then merges this overlay on top |
+| overlay | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `shmSize`, `terminationGracePeriodSeconds` | the operator renders first, then merges this overlay on top |
 | take over | `roles[].command` | the user owns the whole argv; the operator synthesizes **no** engine argument and **no** client environment |
 
 A role's Pod fields sit on the role itself, unlike the `Instance` that keeps its pod shape inside an
@@ -295,6 +295,27 @@ That is one instance of a wider exposure, not its boundary. The boundary is stat
 [Limitations](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#limitations), and tracked at
 [#168](https://github.com/gpustack/gpustack-operator/issues/168), whose own void conditions include a
 webhook-level one, so nothing here should be read as a claim about how that issue can be closed.
+
+### Shared memory
+
+`roles[].shmSize` sets the capacity limit of `/dev/shm` in each role Pod. It accepts a positive Kubernetes
+quantity, such as `32Gi`. Omission renders a `16Gi` memory-backed `EmptyDir`.
+This applies to both engines, take-over roles, and the Elastic Ray head and GPU members.
+Each Pod has its own volume. Only the main container mounts it.
+
+An explicit `/dev/shm` mount in `additionalVolumes` takes precedence, including when `shmSize` is set.
+The operator preserves that mount's capacity and backing.
+The default is a project capacity choice, not a universal engine requirement.
+
+The capacity limit does not reserve RAM or increase the Pod's memory request.
+Used shared memory counts toward the main container's memory limit.
+Budget memory for both shared memory and the engine heap.
+Ray's object store may need more than `16Gi`; size the volume for the configured workload.
+Kubelet lowers the mount size when the Pod memory limit or node allocatable memory is smaller.
+
+Changing the rendered capacity follows ordinary role rollout behavior.
+Existing Elastic members keep their mounts; new or replacement Pods use the current value.
+Upgrading the operator adds the default mount to ordinary roles and triggers their recreate rollout.
 
 ## Operator-owned keys
 
@@ -433,7 +454,7 @@ appearing as an unattributable `ImagePullBackOff`.
 Changing `replicas` adds or removes instances and nothing more: the survivors are not restarted, do
 not reload their weights and keep their cached blocks. What still replaces **every** instance of the
 role is an edit that changes what a replica's Pod renders: `image`, `extraArgs`, `env`, `ports`,
-`additionalVolumes`, `terminationGracePeriodSeconds`. A change to `size` is not on that list because
+`additionalVolumes`, `shmSize`, `terminationGracePeriodSeconds`. A change to `size` is not on that list because
 it cannot be made: see `roles[].size` above.
 
 Such an edit **deletes and recreates** the role's replicas, one replica per role per pass, waited
@@ -521,7 +542,7 @@ editable; the table below lists both groups and the scheduling exceptions.
 | the set of roles, and each role's `name` and `kind` | `roles[].replicas` |
 | `roles[].size` | |
 | `roles[].instanceType` | `roles[].extraArgs`, `roles[].env` |
-| `roles[].resources` | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `terminationGracePeriodSeconds` |
+| `roles[].resources` | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `shmSize`, `terminationGracePeriodSeconds` |
 | `roles[].command` | labels and annotations |
 
 `roles[].resources` is frozen because changing it renegotiates scheduling, much like deleting and
