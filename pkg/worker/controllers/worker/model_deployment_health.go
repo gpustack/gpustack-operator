@@ -297,16 +297,19 @@ func qualifyModelDeploymentInstance(
 	pending modelDeploymentPendingReplacement,
 	fetch modelDeploymentGroupForwardFetch,
 ) modelDeploymentInstanceQualification {
-	size := modelDeploymentRoleSize(role)
-
 	// THE CHEAP LEGS ARE DECIDED BEFORE THE OBSERVATION IS ASKED FOR. A replica that is short a
 	// member or holds an unready one is already condemned by facts the informer cache carries, so
 	// it never pays for a live observation, and more importantly its definite fault is never
 	// softened into a hold by an observation that happens to be missing.
+	//
+	// Completeness is measured against the group total the members declare, never the role's
+	// declared size, so a replica the role has been edited away from stays whole.
+	// A shape the members cannot establish holds; a replica short of its total still fails.
+	shape := modelDeploymentDeployedReplicaShape(view)
 	membersComplete := modelDeploymentQualificationLeg{
 		Name:    modelDeploymentLegMemberSetComplete,
-		Verdict: legVerdict(modelDeploymentReplicaIsComplete(view, size)),
-		Reason:  "the replica holds " + strconvx.Itoa(len(view.Members)) + " of " + strconvx.Itoa(size) + " declared members",
+		Verdict: shape.modelDeploymentReplicaLegVerdict(),
+		Reason:  modelDeploymentReplicaHoldsReason(view, shape),
 	}
 
 	unready, unobserved := 0, 0

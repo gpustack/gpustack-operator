@@ -946,10 +946,13 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 
 	healthy := healthDeployment(2)
 	healthy.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
-	healthyPods := []core.Pod{
+	// Stamped with the group total the render always writes, because completeness is measured
+	// against the replica's OWN total now. Without it this pair reads as two replicas of one, and a
+	// member claiming seat one of a group declaring one is a group this operator cannot classify.
+	healthyPods := stampHealthGroupTotals(healthy, []core.Pod{
 		healthPod("server", 0, 0, healthBool(true), "uid-a"),
 		healthPod("server", 0, 1, healthBool(true), "uid-b"),
-	}
+	})
 
 	for name, md := range map[string]*workercore.ModelDeployment{
 		"unverified engine version": unverified,

@@ -1,6 +1,6 @@
 # Spec: ModelDeployment Role Configuration Mutability
 
-Status: Planned
+Status: Building
 Blocked on: implementation, local validation, and user-arranged runtime testing before PR creation.
 Type: Feature
 
@@ -269,6 +269,10 @@ Read the group total, member indices, ownership, queue, and matching Workload.
 Require consistent totals and unique member seats.
 Preserve the legacy single-member fallback only when its metadata supports that shape.
 Unknown or contradictory observations do not authorize deleting healthy capacity.
+Unreadable shape or execution keeps health and cache observations Unknown.
+It does not grant new endpoint eligibility.
+Preserve existing eligibility through the established unknown-observation policy.
+Readable member loss remains a positive health failure.
 
 Use deployed facts in health, retirement, joint admission, ready counts, and cache observation.
 Preserve deployed command mode. A desired managed command does not make an old takeover Pod managed.
@@ -311,9 +315,9 @@ Keep the current working branch and use local validation.
 Workers own disjoint files. The coordinator owns commits and generated artifacts.
 No task creates a PR or executes cluster tests.
 
-- [ ] **T1 · Deployed replica facts and observation**
+- [x] **T1 · Deployed replica facts and observation**
       Blocked by: None
-      Owns: `pkg/worker/controllers/worker/model_deployment_pod_group*.go`, `pkg/worker/controllers/worker/model_deployment_group_shape*.go`, `pkg/worker/controllers/worker/model_deployment_render*.go`, `pkg/worker/controllers/worker/model_deployment_health*.go`, `pkg/worker/controllers/worker/model_deployment_retirement*.go`, `pkg/worker/controllers/worker/model_deployment_joint_admission*.go`, `pkg/worker/controllers/worker/model_deployment_cache_attached*.go`, `pkg/worker/controllers/worker/model_deployment_status*.go`
+      Owns: `pkg/worker/controllers/worker/model_deployment_pod_group*.go`, `pkg/worker/controllers/worker/model_deployment_group_shape*.go`, `pkg/worker/controllers/worker/model_deployment_render*.go`, `pkg/worker/controllers/worker/model_deployment_health*.go`, `pkg/worker/controllers/worker/model_deployment_retirement*.go`, `pkg/worker/controllers/worker/model_deployment_joint_admission*.go`, `pkg/worker/controllers/worker/model_deployment_cache_attached*.go`, `pkg/worker/controllers/worker/model_deployment_status*.go`, `pkg/worker/controllers/worker/model_deployment_answering_shape_test.go`, `pkg/worker/controllers/worker/model_deployment_service_test.go`
       Gate: review
       Acceptance: Read deployed size and execution without desired-shape substitution. Reject duplicate seats and contradictory group totals. Preserve existing unchanged-shape behavior and unknown-observation guards. Demonstrate old healthy groups remain complete and observable after a desired size or command edit.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -tags 'goccy netgo' -race -count=1 ./pkg/worker/controllers/worker`
@@ -322,7 +326,7 @@ Checkpoint: validate the replica reader and its negative controls before changin
 
 - [ ] **T2 · Ordinary role update contract**
       Blocked by: None
-      Owns: `api/worker/v1alpha1/model_deployment.go`, `pkg/worker/webhooks/worker/model_deployment*.go`, `docs/modules/model-deployment/deployment.md`, `docs/modules/model-deployment/prefill-decode.md`, `docs/modules/model-deployment/shutdown.md`, `docs/modules/model-deployment/status.md`, `docs/modules/model-deployment/elastic-ep.md`
+      Owns: `api/worker/v1alpha1/model_deployment.go`, `api/worker/v1alpha1/model_deployment_test.go`, `pkg/worker/webhooks/worker/model_deployment*.go`, `docs/modules/model-deployment/deployment.md`, `docs/modules/model-deployment/prefill-decode.md`, `docs/modules/model-deployment/shutdown.md`, `docs/modules/model-deployment/status.md`, `docs/modules/model-deployment/elastic-ep.md`
       Gate: review
       Acceptance: Accept all four ordinary fields while preserving name-map identity and kind rules. Cover size bounds, resources, pool dependencies, and all command transitions. Revalidate changed dependencies without rejecting unchanged inputs due to external drift. Preserve every Elastic EP refusal. Document mixed configurations, whole-group Recreate, shared effects, merge-patch omission, and quota waits.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -tags 'goccy netgo' -race -count=1 ./api/worker/v1alpha1 ./pkg/worker/webhooks/worker`
@@ -350,7 +354,9 @@ Checkpoint: T2 and T3 must both pass before the mutable contract is ready for us
 #### Prerequisite testing updates
 
 Add an honest Kueue composition fixture for new rollout tests.
-It waits for the declared member total and consistent templates.
+It waits for the declared member total and consistent scheduling inputs.
+Reuse the pinned Kueue group constructor when building PodSets.
+Preserve role-hash grouping; member commands can differ within one role.
 Give every Pod and Workload a distinct UID.
 Keep existing Workload ownership and finalizers visible.
 Prove the fixture rejects incomplete groups and stale reservation adoption.

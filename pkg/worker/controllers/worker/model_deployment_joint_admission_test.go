@@ -1425,7 +1425,7 @@ func anyReplicaMidReplacement(t *testing.T, cli ctrlcli.Client) bool {
 	t.Helper()
 
 	md := getModelDeployment(t, cli)
-	byGroup, liveByGroup, err := modelDeploymentReplicaGroups(context.Background(), cli, md)
+	byGroup, liveByGroup, _, err := modelDeploymentReplicaGroups(context.Background(), cli, md)
 	require.NoError(t, err)
 
 	wlList := new(kueue.WorkloadList)
@@ -1566,4 +1566,80 @@ func TestModelDeploymentJointAdmissionCheckReconciler_ExpectedWriteFailuresAreQu
 			assert.True(t, kubemeta.IsConditionTrue(got.Status.Conditions, kueue.AdmissionCheckActive))
 		})
 	}
+}
+
+// TestModelDeploymentJointAdmission_AnEditedRoleIsNotStillAssembling is the joint barrier's half of
+// this task.
+//
+// THE ROLE HAS BEEN EDITED AND THE REPLICA HAS NOT. The prefiller now declares four members per
+// replica; the replica standing was rendered at two and holds both of them, with a Workload holding
+// its quota. Reading the live count against the ROLE's size says the group has not reached its
+// declared total, which is the exact state Kueue composes no Workload for -- so the verdict reports
+// a deployment still assembling, and a barrier that reports assembling HOLDS. A perfectly healthy,
+// already-admitted deployment would sit behind a configuration change for as long as the rollout
+// takes.
+//
+// The group declares two of its own accord, on every member, and that is the figure the verdict is
+// entitled to compare against.
+func TestModelDeploymentJointAdmission_AnEditedRoleIsNotStillAssembling(t *testing.T) {
+	md := jointDeployment("qwen", "h20-8x", "a100-8x")
+	md.Spec.Roles[0].ReplicaSize = 4
+
+	group := modelDeploymentReplicaGroupName(md, "prefill", 0)
+	first := jointGroupPod("qwen-prefill-0-0", group, "qwen")
+	second := jointGroupPod("qwen-prefill-0-1", group, "qwen")
+	for _, member := range []*core.Pod{first, second} {
+		member.Annotations = map[string]string{kueuepodconst.GroupTotalCountAnnotation: "2"}
+	}
+	decoder := jointGroupPod("qwen-decode-0",
+		modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
+	decoder.Annotations = map[string]string{kueuepodconst.GroupTotalCountAnnotation: "1"}
+
+	cli := newJointClient(jointCheckObject(), md, first, second, decoder,
+		jointWorkload("wl-first", true, first), jointWorkload("wl-second", true, decoder))
+
+	r := &ModelDeploymentJointAdmissionReconciler{Client: cli}
+	held, err := r.jointVerdict(context.Background(), md)
+	require.NoError(t, err)
+
+	assert.Equal(t, kueue.CheckStateReady, held.State,
+		"both roles hold quota; an edited replica size is not a reason to hold a settled set")
+}
+
+// TestModelDeploymentJointAdmission_AGroupOfOneSeatIsNotAssembling is the control for the barrier
+// reading a group's own shape rather than a bare member count.
+//
+// A GROUP WHOSE MEMBERS ALL CLAIM ONE SEAT has not reached a total of two; it is one member counted
+// twice. Reducing the total on its own called that group assembled, and the assembled branch tells
+// an operator to wait for it to fill -- which is an instruction with no exit for a group that never
+// will. The shape reader refuses the group as one this operator cannot classify instead, which is
+// the answer the members actually support.
+func TestModelDeploymentJointAdmission_AGroupOfOneSeatIsNotAssembling(t *testing.T) {
+	md := jointDeployment("qwen", "h20-8x", "a100-8x")
+	md.Spec.Roles[0].ReplicaSize = 2
+
+	group := modelDeploymentReplicaGroupName(md, "prefill", 0)
+	seated := func(name, seat string) *core.Pod {
+		pod := jointGroupPod(name, group, "qwen")
+		pod.Labels[modelDeploymentMemberIndexLabel] = seat
+		pod.Annotations = map[string]string{kueuepodconst.GroupTotalCountAnnotation: "2"}
+
+		return pod
+	}
+	decoder := jointGroupPod("qwen-decode-0",
+		modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
+	decoder.Annotations = map[string]string{kueuepodconst.GroupTotalCountAnnotation: "1"}
+
+	cli := newJointClient(jointCheckObject(), md, seated("qwen-prefill-0-0", "0"),
+		seated("qwen-prefill-0-1", "0"), decoder,
+		jointWorkload("wl-decoder", true, decoder))
+
+	r := &ModelDeploymentJointAdmissionReconciler{Client: cli}
+	held, err := r.jointVerdict(context.Background(), md)
+	require.NoError(t, err)
+
+	assert.Equal(t, kueue.CheckStatePending, held.State,
+		"the decode role is admitted, so the only thing left to hold is the unclassifiable group")
+	assert.NotContains(t, held.Message, "quota",
+		"a duplicate seat is not a quota problem, and the message must not send an operator there")
 }

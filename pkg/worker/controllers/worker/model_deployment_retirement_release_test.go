@@ -71,18 +71,29 @@ func releaseHolder(t *testing.T, mutate ...func(*core.Pod)) *core.Pod {
 		ObjectMeta: meta.ObjectMeta{Name: "qwen-server-one", Namespace: "team-a", UID: "member-1"},
 		Spec: core.PodSpec{
 			NodeName: releaseNode,
-			Containers: []core.Container{{
-				Name:  "vllm",
-				Image: "vllm/vllm-openai:v0.25.1",
-				// The holder asks for the card it is recorded as holding. A recorded claim with no
-				// matching request would be a record this allocator never wrote.
-				Resources: core.ResourceRequirements{
-					Requests: core.ResourceList{
-						nodefeature.GetAcceleratableResourceName(
-							nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive): resource.MustParse("1"),
+			// THE ENGINE CONTAINER IS THE FIRST ONE, because it is the one the retirement guards read
+			// and a holder carrying none describes a Pod this operator never rendered. The card
+			// request lives on the second container so both facts stay on the same Pod.
+			Containers: []core.Container{
+				{
+					Name:    modelDeploymentMainContainerName,
+					Image:   "vllm/vllm-openai:v0.25.1",
+					Command: shapePlainCommand,
+				},
+				{
+					Name:  "vllm",
+					Image: "vllm/vllm-openai:v0.25.1",
+					// The holder asks for the card it is recorded as holding. A recorded claim with no
+					// matching request would be a record this allocator never wrote.
+					Resources: core.ResourceRequirements{
+						Requests: core.ResourceList{
+							nodefeature.GetAcceleratableResourceName(
+								nodefeature.ManufacturerNVIDIA,
+								workercore.DeviceAllocationModeExclusive): resource.MustParse("1"),
+						},
 					},
 				},
-			}},
+			},
 		},
 		Status: core.PodStatus{Phase: core.PodRunning, PodIP: "10.0.8.1"},
 	}

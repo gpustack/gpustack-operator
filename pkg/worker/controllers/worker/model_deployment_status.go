@@ -429,22 +429,28 @@ func modelDeploymentRoleStatuses(
 	// two. At one member per replica the grouping is the identity, which is why this reads exactly
 	// as it did for the shape that came before.
 	//
-	size := make(map[string]int, len(md.Spec.Roles))
-	for i := range md.Spec.Roles {
-		size[md.Spec.Roles[i].Name] = modelDeploymentRoleSize(&md.Spec.Roles[i])
-	}
-
 	ready := make(map[string]int32, len(md.Spec.Roles))
+	unmanaged := make(map[string]bool, len(md.Spec.Roles))
 	reserved := make(map[string]int32, len(md.Spec.Roles))
 	flavors := make(map[string]sets.Set[string], len(md.Spec.Roles))
 	for _, view := range modelDeploymentGroupPodsByReplica(pods) {
 		role := view.Role
 
+		// Whether the operator built the running command lines is read from the replicas, never
+		// from the role, and one replica it contributed nothing to is enough.
+		if execution, _ := modelDeploymentDeployedReplicaExecution(view.Members); execution ==
+			modelDeploymentExecutionTakeover {
+			unmanaged[role] = true
+		}
+
 		// A REPLICA IS READY WHEN IT HOLDS EVERY MEMBER IT DECLARES AND ALL OF THEM ARE READY. The
 		// completeness half is not redundant with the readiness half: a replica short of a member
 		// can have every member it DOES hold reporting ready, while Kueue has composed no Workload
 		// for it and it is admitted by nothing.
-		allReady := modelDeploymentReplicaIsComplete(view, size[role])
+		//
+		// The member set is taken against the group's own total, so a role being edited still
+		// counts the replicas it is serving from.
+		allReady := modelDeploymentDeployedReplicaShape(view).modelDeploymentReplicaIsWhole()
 		for _, pod := range view.Members {
 			allReady = allReady && podIsReady(pod)
 		}
@@ -489,9 +495,9 @@ func modelDeploymentRoleStatuses(
 			Desired:       role.Replicas,
 			Ready:         ready[role.Name],
 			QuotaReserved: reserved[role.Name],
-			// A role that replaced the whole command line got no synthesized argument and no client
-			// environment, so nothing here can claim it is attached to the cache.
-			Unmanaged:       len(role.Command) > 0,
+			// A replica that replaced the whole command line got no cache client, so nothing here
+			// can claim it is attached to one.
+			Unmanaged:       unmanaged[role.Name],
 			AssignedFlavors: modelDeploymentAssignedFlavors(flavors[role.Name]),
 			Parallelism:     ReadModelDeploymentRoleParallelism(md.Spec.Engine.Name, role),
 			Endpoints:       modelDeploymentRoleEndpoints(md.Spec.Router != nil, qualified[role.Name]),
@@ -851,18 +857,12 @@ func observeModelDeploymentQuota(
 	views := modelDeploymentGroupPodsByReplica(pods)
 	groups := modelDeploymentPodGroups(md)
 	for _, group := range groups {
-		size := 1
-		for i := range md.Spec.Roles {
-			if md.Spec.Roles[i].Name == group.Role {
-				size = modelDeploymentRoleSize(&md.Spec.Roles[i])
-
-				break
-			}
-		}
-
 		var alive int
 		for _, view := range views {
-			if view.Role == group.Role && modelDeploymentReplicaIsComplete(view, size) {
+			// The replica's own group total, so a role being edited still counts the replicas it is
+			// serving from.
+			if view.Role == group.Role &&
+				modelDeploymentDeployedReplicaShape(view).modelDeploymentReplicaIsWhole() {
 				alive++
 			}
 		}

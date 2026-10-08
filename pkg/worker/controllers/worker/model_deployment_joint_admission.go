@@ -408,7 +408,7 @@ type jointHeld struct {
 func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) (jointHeld, error) {
-	byGroup, liveByGroup, err := modelDeploymentReplicaGroups(ctx, r.Client, md)
+	byGroup, liveByGroup, shapes, err := modelDeploymentReplicaGroups(ctx, r.Client, md)
 	if err != nil {
 		return jointHeld{}, err
 	}
@@ -457,7 +457,12 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 			// as present sends the verdict to the message below, which tells an operator to look
 			// for a quota problem that does not exist. At one member per replica the two readings
 			// are the same test, which is why this was a comparison against zero.
-			if liveByGroup[group].Len() < modelDeploymentRoleSize(role) {
+			//
+			// The group's own declared shape decides, never the role's size: a role being edited
+			// describes the replica yet to be built, and a group the members cannot reconcile reads
+			// as assembling too.
+			if shape := shapes[group]; !shape.modelDeploymentReplicaIsWhole() ||
+				liveByGroup[group].Len() < shape.Total {
 				roleAssembling = true
 			}
 			if anyWorkloadHoldsQuotaFor(wlList.Items, members) ||
@@ -574,18 +579,25 @@ func anyWorkloadOwnsAny(wls []kueue.Workload, members sets.Set[types.UID]) bool 
 // counts every one, since a terminating Pod is still owned and the Workload holding it is still the
 // one a sibling's event has to reach. Collapsing the two either reads a rebuilding group as complete
 // or drops a Workload from the mapping while its last Pod is leaving.
+// modelDeploymentReplicaGroups splits this deployment's Pods by their Kueue group, and reads each
+// group's deployed shape off the same Pods.
+//
+// The shape is read with the same reader the other observations use, seats included, so a group
+// whose members all claim one seat is not mistaken for one still assembling.
 func modelDeploymentReplicaGroups(
 	ctx context.Context, cli ctrlcli.Client, md *workercore.ModelDeployment,
-) (all, live map[string]sets.Set[types.UID], err error) {
+) (all, live map[string]sets.Set[types.UID], shapes map[string]modelDeploymentReplicaShape, err error) {
 	podList := new(core.PodList)
 	if err = cli.List(ctx, podList,
 		ctrlcli.InNamespace(md.Namespace),
 		ctrlcli.MatchingLabels{modelDeploymentLabelKeyInstance: md.Name},
 		ctrlclix.WithoutQuorum); err != nil {
-		return nil, nil, fmt.Errorf("list replicas: %w", err)
+		return nil, nil, nil, fmt.Errorf("list replicas: %w", err)
 	}
 
 	all, live = make(map[string]sets.Set[types.UID]), make(map[string]sets.Set[types.UID])
+	shapes = make(map[string]modelDeploymentReplicaShape)
+	members := make(map[string][]*core.Pod)
 	for i := range podList.Items {
 		pod := &podList.Items[i]
 		if !modelDeploymentOwns(pod, md) {
@@ -595,6 +607,7 @@ func modelDeploymentReplicaGroups(
 		if all[group] == nil {
 			all[group] = sets.New[types.UID]()
 		}
+		members[group] = append(members[group], pod)
 		all[group].Insert(pod.UID)
 		if pod.DeletionTimestamp != nil {
 			continue
@@ -605,7 +618,13 @@ func modelDeploymentReplicaGroups(
 		live[group].Insert(pod.UID)
 	}
 
-	return all, live, nil
+	// Seats are validated with the same reader the other observations use.
+	for group, groupMembers := range members {
+		shapes[group] = modelDeploymentDeployedReplicaShape(
+			modelDeploymentReplicaView{Members: groupMembers})
+	}
+
+	return all, live, shapes, nil
 }
 
 // anyWorkloadHoldsQuotaFor reports whether one of these Workloads owns any of the group's replicas
@@ -774,7 +793,7 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointSiblings(
 
 	// Every replica, terminating ones included: this maps an event to the siblings that have to see
 	// it, and a Workload still holding a leaving Pod is still one of them.
-	byGroup, _, err := modelDeploymentReplicaGroups(ctx, r.Client, md)
+	byGroup, _, _, err := modelDeploymentReplicaGroups(ctx, r.Client, md)
 	if err != nil {
 		logger.Error(err, "index the deployment's replicas for sibling mapping")
 		return nil

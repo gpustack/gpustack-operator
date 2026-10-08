@@ -25,6 +25,7 @@ const (
 	modelDeploymentReasonCacheOperationsFailing = "CacheOperationsFailing"
 	modelDeploymentReasonCacheNotApplicable     = "NotApplicable"
 	modelDeploymentReasonUnmanaged              = "Unmanaged"
+	modelDeploymentReasonCacheNotAttributable   = "CacheNotAttributable"
 	modelDeploymentReasonNoReplicaReady         = "NoReplicaReady"
 	modelDeploymentReasonNoObservationAvailable = "NoObservationAvailable"
 )
@@ -98,12 +99,13 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentCache(
 		return
 	}
 
-	if role := modelDeploymentUnmanagedRole(md); role != "" {
-		// The operator synthesized no argument and no client environment for that role, so it does
-		// not claim the observation is about its own doing. Whatever the pool reports.
-		ModelDeploymentConditionCacheAttached.Unknown(holder, modelDeploymentReasonUnmanaged,
-			fmt.Sprintf("role %q replaced the whole command line, so the operator configured no "+
-				"cache client for it and does not report on one it did not render", role))
+	if replica, reason, why := modelDeploymentUnclaimableReplica(md, pods); replica != "" {
+		// THE OPERATOR CONTRIBUTED NOTHING THIS REPLICA COULD ANSWER FOR, so it does not claim the
+		// observation is about its own doing. Whatever the pool reports, and whatever the shared
+		// domain corroborates: a domain-wide fact cannot stand in for a replica whose command line
+		// could not be attributed.
+		ModelDeploymentConditionCacheAttached.Unknown(holder, reason,
+			fmt.Sprintf("%s does not report a cache client it was not shown to have: %s", replica, why))
 
 		return
 	}
@@ -193,16 +195,39 @@ func (r *ModelDeploymentReconciler) readModelDeploymentCache(
 	return active, failing, unreadable
 }
 
-// modelDeploymentUnmanagedRole names the first role that took over its command line, or "".
-func modelDeploymentUnmanagedRole(md *workercore.ModelDeployment) string {
+// modelDeploymentUnclaimableReplica names a replica of a declared role whose running command line
+// this operator cannot speak for, with the machine-readable reason and a message. It refuses both a
+// replica running a command line the operator did not write and one whose command line cannot be
+// attributed, because a shared domain may not corroborate either.
+func modelDeploymentUnclaimableReplica(
+	md *workercore.ModelDeployment, pods []core.Pod,
+) (string, string, string) {
+	declared := make(map[string]bool, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
-		if len(role.Command) > 0 {
-			return role.Name
+		declared[md.Spec.Roles[i].Name] = true
+	}
+
+	for _, replica := range modelDeploymentGroupPodsByReplica(pods) {
+		// Auxiliary heads some engines render are built by this operator and carry none of its
+		// annotations, so only a role the spec declares is asked.
+		if !declared[replica.Role] {
+			continue
+		}
+
+		execution, why := modelDeploymentDeployedReplicaExecution(replica.Members)
+		switch execution {
+		case modelDeploymentExecutionTakeover:
+			return modelDeploymentPodDescription(replica.Members[0]),
+				modelDeploymentReasonUnmanaged,
+				"it runs a command line this operator contributed no arguments to, so it was " +
+					"configured with no cache client and is not reported on one"
+		case modelDeploymentExecutionUnreadable:
+			return modelDeploymentPodDescription(replica.Members[0]),
+				modelDeploymentReasonCacheNotAttributable, why
 		}
 	}
 
-	return ""
+	return "", "", ""
 }
 
 // modelDeploymentReadyReplicas selects the replicas an engine can be asked about: whole, ready, not
@@ -233,17 +258,29 @@ func modelDeploymentUnmanagedRole(md *workercore.ModelDeployment) string {
 // replica of one member is whole as soon as that Pod is there, so exactly the same Pods are asked as
 // were asked before.
 func modelDeploymentReadyReplicas(md *workercore.ModelDeployment, pods []core.Pod) []*core.Pod {
-	sizes := make(map[string]int, len(md.Spec.Roles))
+	declared := make(map[string]bool, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
-		sizes[md.Spec.Roles[i].Name] = modelDeploymentRoleSize(&md.Spec.Roles[i])
+		declared[md.Spec.Roles[i].Name] = true
 	}
 
 	// The grouping drops the members already on their way out, so a replica losing one is short of
 	// its declared total here and falls out with the incomplete ones.
+	//
+	// COMPLETENESS IS READ FROM THE REPLICA'S OWN GROUP TOTAL. The role's declared size describes
+	// the replica about to be built, and a role whose size has been edited would otherwise drop
+	// every healthy old replica of it out of the set of engines this operator is willing to ask
+	// -- turning a configuration change into a silent cache observation gap.
 	ready := make([]*core.Pod, 0, len(pods))
 	for _, replica := range modelDeploymentGroupPodsByReplica(pods) {
-		size, declared := sizes[replica.Role]
-		if !declared || len(replica.Members) != size {
+		if !declared[replica.Role] {
+			continue
+		}
+		if !modelDeploymentDeployedReplicaShape(replica).modelDeploymentReplicaIsWhole() {
+			continue
+		}
+		// Only a replica proven managed is scraped: the gate above already refused the rest.
+		if execution, _ := modelDeploymentDeployedReplicaExecution(replica.Members); execution !=
+			modelDeploymentExecutionManaged {
 			continue
 		}
 
