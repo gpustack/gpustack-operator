@@ -170,6 +170,7 @@ func renderModelDeploymentElasticHeadPod(
 			Volumes:                      vols,
 			Containers: []core.Container{{
 				Name: modelDeploymentMainContainerName, Image: main.Image, ImagePullPolicy: role.ImagePullPolicy,
+				SecurityContext: main.SecurityContext.DeepCopy(),
 				Command: []string{"/bin/sh", "-ec", ModelDeploymentElasticHeadCommand +
 					" --num-gpus=0 --port=6379 --dashboard-host=0.0.0.0 --labels=" +
 					ModelDeploymentElasticRayNodeIdentityLabel + "=\"$GPUSTACK_ELASTIC_POD_UID\" --block"},

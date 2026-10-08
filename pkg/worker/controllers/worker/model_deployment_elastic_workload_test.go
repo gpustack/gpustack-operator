@@ -618,6 +618,56 @@ func TestElasticCreateUsesUncachedOccupancy(t *testing.T) {
 	require.Empty(t, pods.Items, "a lost create response must not create a second member")
 }
 
+func TestElasticAuxiliaryHeadRoleSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		privileged bool
+		grace      *int64
+	}{
+		{name: "defaults"},
+		{name: "privileged", privileged: true},
+		{name: "explicit grace", grace: ptr.To(int64(120))},
+		{name: "privileged with explicit grace", privileged: true, grace: ptr.To(int64(120))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			md := newRenderDeployment()
+			md.Spec.KVCache = nil
+			md.Spec.Roles[0].Replicas = 1
+			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+			md.Spec.Roles[0].Privileged = tc.privileged
+			md.Spec.Roles[0].TerminationGracePeriodSeconds = tc.grace
+			cli := newModelDeploymentClient(md, newRenderInstanceType())
+			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+			_, err := r.convergeModelDeployment(ctx, md)
+			require.NoError(t, err)
+			pods := new(core.PodList)
+			require.NoError(t, cli.List(ctx, pods))
+			heads := 0
+			for _, pod := range pods.Items {
+				if modelDeploymentPodRole(&pod) != modelDeploymentElasticHeadName(md) {
+					continue
+				}
+				heads++
+				container := pod.Spec.Containers[0]
+				if tc.privileged {
+					require.NotNil(t, container.SecurityContext)
+					require.NotNil(t, container.SecurityContext.Privileged)
+					require.True(t, *container.SecurityContext.Privileged)
+				} else {
+					require.Nil(t, container.SecurityContext)
+				}
+				require.Equal(t, tc.grace, pod.Spec.TerminationGracePeriodSeconds)
+				require.Nil(t, pod.Spec.RuntimeClassName)
+				require.Nil(t, pod.Spec.SecurityContext)
+				require.Empty(t, container.Resources.Requests)
+				require.Empty(t, container.Resources.Limits)
+			}
+			require.Equal(t, 1, heads)
+		})
+	}
+}
+
 func TestElasticAuxiliaryHeadLifecycle(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
