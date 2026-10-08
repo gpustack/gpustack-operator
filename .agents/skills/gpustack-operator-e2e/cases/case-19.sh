@@ -15,13 +15,17 @@
 # Inputs:      All real, nothing mocked —
 #              - patches the gpustack-settings Secret awareness key to "true" and restarts the worker to
 #                force the aware re-derive;
-#              - an Instance gpustack-e2e-case19 (accelerator=1, ubuntu sleep) on the aware accelerated type.
+#              - an Instance gpustack-e2e-case19 (accelerator=1, ubuntu sleep) on the aware accelerated type;
+#              - on NVIDIA pools with two free cards, a second Instance requests accelerator=2.
 # Expected:    - the aware type gpustack--${gKey}--${aKey}-${os}-${arch} materializes Active with
 #                acceleratorGroup=${aKey}, generalGroup=${gKey}, GPU product/memory/cores == the flavor's,
 #                and a non-empty status.detail.cpu (the awareness-gated CPU fold ran);
-#              - the Instance reaches Ready and its Pod runs with nvidia-smi seeing the card.
+#              - the Instance reaches Ready and its Pod runs with nvidia-smi seeing the card;
+#              - the two-card Instance sees exactly its two distinct allocated GPU UUIDs;
+#              - each assigned card is exclusive with no remaining capacity in Devices.Status.
 # Cleanup:     Trap deletes the Instance, restores the setting to its original value, restarts the worker,
-#              and removes any derived type the aware window created (snapshot diff).
+#              verifies pre-existing unitResources/localStorage are unchanged, checks card claims were released,
+#              and removes only derived types the aware window created (snapshot diff).
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
@@ -34,6 +38,8 @@ NS="${1:?usage: case-19.sh <NS>}"
 AWARE_KEY=instance-type-aware-cpu-manufacturer
 DERIVED_LABEL=schedule.gpustack.ai/derived-from-node
 INST=gpustack-e2e-case19
+MULTI_INST=${INST}-two
+CREATED=()
 
 set_aware() { local b64; b64=$(printf '%s' "$1" | base64 | tr -d '\n')
   kubectl -n "$NS" patch secret gpustack-settings --type=merge -p "{\"data\":{\"${AWARE_KEY}\":\"${b64}\"}}" >/dev/null 2>&1; }
@@ -61,26 +67,62 @@ ARCH=$(kubectl get resourceflavor "$ARF" -o jsonpath='{.metadata.labels.kubernet
 AWARE_IT="gpustack--${GKEY}--${AKEY}-${OS}-${ARCH}"
 echo "[case-19] accelerated flavor ${ARF} → aware type ${AWARE_IT} (product=${PRODUCT} memory=${MEMORY} cores=${CORES})"
 
-orig=$(kubectl -n "$NS" get secret gpustack-settings -o jsonpath="{.data.${AWARE_KEY}}" 2>/dev/null | base64 -d 2>/dev/null)
-[ "$orig" = "true" ] || orig=false
-before_its=" $(derived_its) "
+# Capture the exact setting value, including an absent key, before any mutation.
+orig=$(kubectl -n "$NS" get secret gpustack-settings -o json | jq -c --arg key "$AWARE_KEY" '.data[$key]') || exit 1
+before_json=$(kubectl get instancetypes.worker.gpustack.ai -o json) || exit 1
+before_type=$(printf '%s' "$before_json" | jq -c --arg name "$AWARE_IT" '.items[] | select(.metadata.name == $name)')
+for name in "$INST" "$MULTI_INST"; do
+  existing=$(kubectl -n default get instance "$name" --ignore-not-found -o name) || exit 1
+  [ -z "$existing" ] || { echo "[case-19] refusing pre-existing ${existing}"; exit 1; }
+done
+before_devices=$(kubectl get devices -o json) || exit 1
+ledger() { jq -cS '[.items[] | .metadata.name as $node | .status.groups[]? | .id as $group |
+  .accelerators[]? | {node:$node, group:$group, id, allocated, remaining, allocatedSlices}] | sort_by(.node,.group,.id)'; }
+before_ledger=$(printf '%s' "$before_devices" | ledger)
+[ "$before_ledger" != '[]' ] || { echo "[case-19] no per-card baseline"; exit 1; }
 
 cleanup() {
-  echo
-  echo "[case-19] cleanup: deleting Instance, restoring ${AWARE_KEY}=${orig}, restarting worker"
-  kubectl -n default delete instance "$INST" --ignore-not-found >/dev/null 2>&1 || true
-  set_aware "$orig"
-  bounce_worker
-  for it in $(derived_its); do
-    case "$before_its" in
-      *" $it "*) : ;;
-      *) kubectl patch instancetype "$it" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
-         kubectl delete instancetype "$it" --wait=false >/dev/null 2>&1 || true
-         kubectl delete clusterqueue "$it" --wait=false >/dev/null 2>&1 || true ;;
-    esac
+  local failed=0 current it settled="" after=""
+  echo "[case-19] cleanup: release claims and restore the exact setting and type fields"
+  for it in "${CREATED[@]}"; do
+    kubectl -n default delete instance "$it" --ignore-not-found --timeout=60s >/dev/null || failed=1
+    kubectl -n default wait --for=delete pod/"$it" --timeout=60s >/dev/null || failed=1
   done
+  for _ in $(seq 1 20); do
+    if current=$(kubectl get devices -o json); then
+      after=$(printf '%s' "$current" | ledger)
+      [ "$after" = "$before_ledger" ] && { settled=1; break; }
+    fi
+    sleep 3
+  done
+  [ -n "$settled" ] || failed=1
+  echo "[case-19] per-card baseline=${before_ledger} after=${after}"
+  if [ -n "$before_type" ]; then
+    current=$(kubectl get instancetype "$AWARE_IT" -o json) || failed=1
+    [ "$(printf '%s' "$current" | jq -cS '.spec | {unitResources,localStorage}')" = \
+      "$(printf '%s' "$before_type" | jq -cS '.spec | {unitResources,localStorage}')" ] || failed=1
+  fi
+  kubectl -n "$NS" patch secret gpustack-settings --type=merge \
+    -p "$(jq -nc --arg key "$AWARE_KEY" --argjson value "$orig" '{data:{($key):$value}}')" >/dev/null || failed=1
+  bounce_worker || failed=1
+  current=$(kubectl -n "$NS" get secret gpustack-settings -o json | jq -c --arg key "$AWARE_KEY" '.data[$key]') || failed=1
+  # Startup initializes absent keys. Restore absence after the final restart as well.
+  if [ "$orig" = null ] && [ "$current" != null ]; then
+    kubectl -n "$NS" patch secret gpustack-settings --type=merge \
+      -p "$(jq -nc --arg key "$AWARE_KEY" '{data:{($key):null}}')" >/dev/null || failed=1
+    current=$(kubectl -n "$NS" get secret gpustack-settings -o json | jq -c --arg key "$AWARE_KEY" '.data[$key]') || failed=1
+  fi
+  [ "$current" = "$orig" ] || failed=1
+  current=$(derived_its) || failed=1
+  for it in $current; do
+    if ! printf '%s' "$before_json" | jq -e --arg name "$it" '.items | any(.metadata.name == $name)' >/dev/null; then
+      kubectl delete instancetype "$it" --wait=false >/dev/null || failed=1
+      kubectl wait --for=delete instancetype/"$it" --timeout=60s >/dev/null || failed=1
+    fi
+  done
+  return "$failed"
 }
-trap cleanup EXIT
+trap 'cleanup || exit 1' EXIT
 
 FAILS=0
 ROWS=()
@@ -117,45 +159,105 @@ sHasCPU="$(printf '%s' "$it_json" | jq -r 'if ((.status.detail.cpu // {}) | leng
   && record PASS "CPU detail folded when aware" "status.detail.cpu present" \
   || record FAIL "CPU detail folded when aware" "status.detail.cpu empty — the awareness-gated cpuDetail fold did not run"
 
-# 3. Deploy a real GPU Instance on the aware type: set a unit spec, then run one whole card.
-for _ in $(seq 1 15); do
-  kubectl patch instancetype "$AWARE_IT" --type=merge \
-    -p '{"spec":{"unitResources":{"cpu":"2","ram":"4Gi"},"localStorage":"20Gi"}}' >/dev/null 2>&1
-  [ -n "$(kubectl get instancetype "$AWARE_IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)" ] && break
-  sleep 3
-done
-echo "[case-19] deploying GPU Instance ${INST} (accelerator=1) on ${AWARE_IT}"
-cat <<EOF | kubectl apply -f - >/dev/null 2>&1
+# 3. Use the type's creation-time resource units; they are immutable.
+# Compare identity sets as well as cardinality; duplicates must never satisfy a two-card claim.
+same_devices() {
+  jq -ne --argjson count "$1" --argjson assigned "$2" --argjson visible "$3" '
+    ($assigned | length) == $count and ($assigned | unique | length) == $count and
+    ($visible | length) == $count and ($visible | unique | length) == $count and
+    ($assigned | sort) == ($visible | sort)' >/dev/null
+}
+
+for count in 1 2; do
+  name=$INST
+  if [ "$count" -eq 2 ]; then
+    name=$MULTI_INST
+    if ! free=$(kubectl get instancetype "$AWARE_IT" -o json | jq -er '.status.accelerator.onceMaxRequest'); then
+      record FAIL "two-card capacity read" "$AWARE_IT"
+      continue
+    fi
+    if ! printf '%s' "$before_devices" | jq -e '.items[].spec.groups[] | select(.manufacturer == "nvidia")' >/dev/null ||
+       [ "${free:-0}" -lt 2 ]; then
+      record SKIP "two-card NVIDIA Instance" "requires two free NVIDIA cards in the aware pool; onceMaxRequest=${free}"
+      continue
+    fi
+  fi
+  echo "[case-19] deploying ${name} accelerator=${count}"
+  CREATED+=("$name")
+  if ! cat <<EOF | kubectl create -f - >/dev/null
 apiVersion: worker.gpustack.ai/v1
 kind: Instance
-metadata: { name: ${INST}, namespace: default }
+metadata: { name: ${name}, namespace: default }
 spec:
   type: ${AWARE_IT}
   image: ubuntu:24.04
   command: ["sleep", "86400"]
   volume: { ephemeral: { capacity: 1Gi } }
   resources:
-    accelerator: "1"
+    accelerator: "${count}"
+    localStorage: 1Gi
 EOF
-phase=""
-for _ in $(seq 1 60); do
-  phase=$(kubectl -n default get instance "$INST" -o jsonpath='{.status.phase}' 2>/dev/null)
-  { [ "$phase" = "Ready" ] || [ "$phase" = "Running" ]; } && break
-  sleep 3
+  then
+    record FAIL "${count}-card Instance created" "$name"
+    continue
+  fi
+  phase=""
+  for _ in $(seq 1 60); do
+    phase=$(kubectl -n default get instance "$name" -o jsonpath='{.status.phase}' 2>/dev/null)
+    { [ "$phase" = "Ready" ] || [ "$phase" = "Running" ]; } && break
+    sleep 3
+  done
+  if [ "$phase" = "Ready" ] || [ "$phase" = "Running" ]; then
+    record PASS "${count}-card Instance reaches Ready" "${name} phase=${phase}"
+  else
+    record FAIL "${count}-card Instance reaches Ready" "${name} phase='${phase:-<none>}'"
+  fi
+  kubectl -n default get instance "$name" -o json
+  pod=$(kubectl -n default get pod "$name" -o json) || { record FAIL "${count}-card Pod read" "$name"; continue; }
+  printf '%s\n' "$pod"
+  if [ "$(printf '%s' "$pod" | jq -r '.status.phase')" = Running ]; then
+    visible=$(kubectl -n default exec "$name" -c main -- nvidia-smi --query-gpu=uuid --format=csv,noheader) || visible=""
+    visible=$(printf '%s\n' "$visible" | jq -Rsc 'split("\n") | map(gsub("^[[:space:]]+|[[:space:]]+$";"")) | map(select(length>0))')
+    assigned=$(printf '%s' "$pod" | jq -c '[.metadata.annotations["device.gpustack.ai/accelerator.allocated"] |
+      fromjson | .main.devices.groups[].accelerators[].id]') || assigned='[]'
+    if same_devices "$count" "$assigned" "$visible"; then
+      record PASS "${count}-card visible UUIDs equal allocation" "assigned=${assigned} visible=${visible}"
+    else
+      record FAIL "${count}-card visible UUIDs equal allocation" "assigned=${assigned} visible=${visible}"
+    fi
+    occupied=""
+    node=$(printf '%s' "$pod" | jq -r '.spec.nodeName')
+    for _ in $(seq 1 20); do
+      if devices=$(kubectl get devices "$node" -o json); then
+        if printf '%s' "$devices" | jq -e --arg node "$node" --argjson ids "$assigned" --argjson count "$count" '
+          [.status.groups[]?.accelerators[]? | select(.id as $id | $ids | index($id))] as $cards |
+          .metadata.name == $node and
+          ($ids | length) == $count and ($ids | unique | length) == $count and
+          ($cards | map(.id) | sort) == ($ids | sort) and
+          all($cards[]; .mode == 1 and (.remaining // 0) == 0)' >/dev/null; then
+          occupied=1
+          break
+        fi
+      fi
+      sleep 3
+    done
+    printf '%s\n' "$devices"
+    if [ -n "$occupied" ]; then
+      record PASS "${count}-card live ledger reserves each UUID" "node=${node} assigned=${assigned}"
+    else
+      record FAIL "${count}-card live ledger reserves each UUID" "node=${node} assigned=${assigned}"
+    fi
+  else
+    record FAIL "${count}-card visible UUIDs equal allocation" "pod/${name} not Running"
+  fi
 done
-{ [ "$phase" = "Ready" ] || [ "$phase" = "Running" ]; } \
-  && record PASS "GPU Instance reaches Ready" "${INST} phase=${phase} (aware→derive→enrich→admit→schedule)" \
-  || record FAIL "GPU Instance reaches Ready" "${INST} phase='${phase:-<none>}' — full accelerated deploy chain did not complete"
 
-# The Pod is named after the Instance; confirm the card is actually visible inside it.
-if [ "$(kubectl -n default get pod "$INST" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Running" ]; then
-  smi=$(kubectl -n default exec "$INST" -- nvidia-smi -L 2>/dev/null | grep -c '^GPU ' || true)
-  [ "${smi:-0}" -ge 1 ] \
-    && record PASS "card visible in the Instance Pod" "nvidia-smi -L lists ${smi} GPU(s)" \
-    || record FAIL "card visible in the Instance Pod" "nvidia-smi -L saw no GPU (device plugin injection?)"
+if cleanup; then
+  record PASS "cleanup restores settings and claims; preserves type fields" "$AWARE_IT"
 else
-  record FAIL "card visible in the Instance Pod" "pod/${INST} not Running"
+  record FAIL "cleanup restores settings and claims; preserves type fields" "$AWARE_IT"
 fi
+trap - EXIT
 
 echo
 echo "== CASE 19 — CPU-manufacturer awareness enriches the accelerated InstanceType; a real GPU Instance runs on it =="
