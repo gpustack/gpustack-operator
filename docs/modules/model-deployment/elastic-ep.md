@@ -138,7 +138,7 @@ extraArgs:
 
 This example permits widths up to 4. The maximum is fixed after creation.
 Create a new deployment to change it.
-If omitted, the maximum equals the initial width, which prevents expansion.
+In vLLM 0.30.0 and later, omitting this argument prevents expansion beyond the initial width.
 Older vLLM releases do not accept this argument.
 
 ## Changing the width

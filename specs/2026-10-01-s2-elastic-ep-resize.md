@@ -247,7 +247,7 @@ An explicit `--elastic-ep-max-dp-size` in `extraArgs` bounds the target width on
 The effective maximum is fixed at creation; adding, removing or changing it requires a new deployment.
 Equivalent argument forms are accepted. The operator does not add a duplicate API field or inject the flag.
 The argument is available starting with vLLM v0.30.0:
-[CLI definition](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/engine/arg_utils.py#L1162-L1165).
+[CLI definition](https://github.com/vllm-project/vllm/blob/ced6857afa0ea7b2e3f0846a62e1394e90f15607/vllm/engine/arg_utils.py#L1213-L1216).
 Omission preserves legacy admission. In vLLM v0.31.0, the omitted maximum equals initial DP,
 so deployments using that version must set a larger maximum before startup to expand online.
 This version contract is source-checked, not GPU-verified:
