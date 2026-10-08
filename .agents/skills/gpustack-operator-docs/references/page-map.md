@@ -437,3 +437,11 @@ from an elastic collective and states which path was measured.
 
 **Never** — private engine code, raw infrastructure identities, or broad support claims inferred from
 one runtime configuration. The Elastic EP guide owns the profile contract; the resize spec owns design analysis.
+
+## `docs/modules/model-deployment/external-dp-walkthrough.md`
+
+**Owns** — the fixed External DP serving sequence, minimum argument dependencies, captured CR output,
+per-rank inference checks, Router coverage limits, and application cleanup. Links shared model prefetch steps.
+
+**Never** — imply online collective resize from fixed-group inference, or claim all ranks receive Router
+traffic from HTTP success alone. P/D combinations remain with their owning guide and follow-up issue.

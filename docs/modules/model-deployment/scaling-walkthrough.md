@@ -32,6 +32,8 @@ See [Elastic EP](elastic-ep.md) for the complete contract.
 The recorded validation covers elastic TP2/DP2 startup and DP2→4 expansion with short inference requests.
 The independent-replica example is a configuration alternative and was not executed in this run.
 Neither path adds Kubernetes nodes or cloud capacity.
+For a fixed group with a separate HTTP endpoint per DP rank, use the
+[External DP Walkthrough](external-dp-walkthrough.md).
 
 ## Prepare the cluster
 
@@ -286,9 +288,22 @@ See [Shared memory](deployment.md#shared-memory) before changing the budget.
 The recorded test also installed a read-only diagnostic extension to measure native parallel groups.
 That test instrumentation is omitted from this application manifest.
 
-This deployment has one serving instance and no router. Only its master exposes the inference API;
-the other GPU members participate through Ray. The run tests collective expansion and inference recovery.
-Router forwarding, replica load balancing, and failover are outside this recorded test.
+This manifest has one serving instance and no router. Only its master exposes the inference API;
+the other GPU members participate through Ray.
+A separate recorded run added this `spec.router` block before creating the deployment:
+
+```yaml
+router:
+  name: vllm-router
+  image: gpustack/llm-router:v0.2.0@sha256:98e70d94351baa9dc13897a545aff5c83ffac5e89ab810e204bc894b519d96db
+  extraArgs:
+    - --policy
+    - round_robin
+```
+
+The engine still uses Internal LB. This Router forwards to the master, which distributes work to the DP engines.
+Use the [Router observation steps](external-dp-walkthrough.md#check-router-coverage) with deployment name `tp2-elastic`.
+For this Elastic shape, expect one master endpoint; exclude the CPU head and other GPU members.
 
 ## Check the baseline
 
@@ -444,6 +459,11 @@ The recorded result combined native group measurements, actor state, GPU allocat
 All four recorded requests succeeded on their first attempt. The original master UID and HTTP process
 identity remained unchanged. The measurements joined native workers to Ray actors, Pod identities,
 and host GPU UUIDs. Placement groups used `STRICT_PACK`, with two GPU bundles per DP engine.
+
+The additional Router run also completed width 2→4 with the same official runner.
+Before and after expansion, its selector and registry contained only the original master.
+Each stage completed one ordinary request and one SSE request through the Router, with HTTP 200 and eight tokens.
+The master's Router counter increased by two at each stage. Worker and CPU-head endpoints were absent.
 
 These checks do not establish sustained concurrency, uninterrupted requests throughout resizing,
 per-rank request coverage, or inference quality. The response's `system_fingerprint` retained its startup DP2 text after

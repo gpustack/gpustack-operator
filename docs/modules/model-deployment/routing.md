@@ -1,7 +1,11 @@
 # Model Deployment Routing
 
-A router only chooses when a role has more than one replica. Every routing choice measured here ran
+A managed router selects among the HTTP endpoints of serving replicas. Every routing choice measured here ran
 on a server role; on a prefill/decode pair, where each half is chosen separately, none has been run.
+
+External DP within a Prefill or Decode role remains unverified; see
+[issue #754](https://github.com/gpustack/gpustack-operator/issues/754).
+Keep each P/D replica's leader as its HTTP endpoint until that combination is validated.
 
 ## Contents
 

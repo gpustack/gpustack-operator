@@ -59,6 +59,7 @@ order:
     - deployment
     - elastic-ep
     - scaling-walkthrough
+    - external-dp-walkthrough
     - engine-versions
     - prefill-decode
     - routing
@@ -115,6 +116,7 @@ labels:
   /docs/modules/model-deployment/deployment/: Configuration
   /docs/modules/model-deployment/elastic-ep/: Elastic EP
   /docs/modules/model-deployment/scaling-walkthrough/: Scaling walkthrough
+  /docs/modules/model-deployment/external-dp-walkthrough/: External DP walkthrough
   /docs/modules/model-deployment/engine-versions/: Engine versions
   /docs/modules/model-deployment/prefill-decode/: Prefill and decode
   /docs/modules/model-deployment/routing/: Routing
