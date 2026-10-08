@@ -102,7 +102,7 @@ func renderModelDeploymentService(md *workercore.ModelDeployment) *core.Service 
 	svc := renderModelDeploymentServiceFor(md, &md.Spec.Roles[0], md.Name)
 	modelDeploymentFrontLeadersOnly(svc, &md.Spec.Roles[0])
 	if modelDeploymentEligibilitySelectorActive(md, &md.Spec.Roles[0], nil, modelDeploymentEligibilityDecided(md)) {
-		modelDeploymentSelectEligibleEndpoints(svc)
+		modelDeploymentSelectEligibleEndpoints(svc, md, &md.Spec.Roles[0])
 	}
 
 	return svc
@@ -153,20 +153,6 @@ func modelDeploymentGroupForwardActivatable(
 		kind != workercore.ModelDeploymentRoleKindDecode
 }
 
-// modelDeploymentSelectEligibleEndpoints narrows an ordinary Service to the endpoints the
-// reconciler has marked eligible, by the same equality every selector that names endpoints
-// carries. The term rides ON TOP of the identity selector and the leader narrowing -- it gates
-// which of the members a Service already fronts are answerable, never which members exist.
-//
-// THE TERM IS A LABEL EQUALITY BECAUSE ONLY A LABEL CAN SATISFY A SERVICE SELECTOR. The key is
-// written by the reconciler's runtime convergence, outside every rendered hash, so gaining or
-// losing it moves no replica; what it moves is the Service's endpoint set, which is exactly the
-// lever a disqualification pulls.
-//
-// A REPLICA'S HEADLESS SERVICE NEVER TAKES THE TERM. That Service exists to publish every member
-// to its peers with unready addresses included; eligibility is about who may ANSWER, and the
-// peers' collective needs every member's record regardless of who answers.
-
 // modelDeploymentEligibilityDecided reports whether a pass has actually answered the whole-group
 // predicate: the EndpointEligibility condition is True (qualified -- narrow and let the labels
 // admit) or False (revoked -- narrow and let the labels withdraw). A decided condition is the
@@ -216,8 +202,18 @@ func modelDeploymentEligibilitySelectorActive(
 		liveSelector[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue
 }
 
-func modelDeploymentSelectEligibleEndpoints(svc *core.Service) {
+// modelDeploymentSelectEligibleEndpoints selects qualified HTTP endpoints.
+// External roles serve every rank; Internal roles retain their leader restriction.
+// Headless peer Services never use endpoint eligibility.
+func modelDeploymentSelectEligibleEndpoints(
+	svc *core.Service, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) {
 	svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+	// Every qualified External-DP member serves HTTP. The eligibility label already
+	// excludes unhealthy groups, so the legacy leader restriction must not hide ranks.
+	if modelDeploymentRoleExternalDP(md, role) {
+		delete(svc.Spec.Selector, modelDeploymentMemberIndexLabel)
+	}
 }
 
 // renderModelDeploymentRoleService renders the Service that fronts ONE role.
@@ -248,7 +244,7 @@ func renderModelDeploymentRoleService(
 	svc := renderModelDeploymentServiceFor(md, role, md.Name+"-"+role.Name)
 	modelDeploymentFrontLeadersOnly(svc, role)
 	if modelDeploymentEligibilitySelectorActive(md, role, nil, modelDeploymentEligibilityDecided(md)) {
-		modelDeploymentSelectEligibleEndpoints(svc)
+		modelDeploymentSelectEligibleEndpoints(svc, md, role)
 	}
 	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
 		for _, port := range inject.KVEventsPorts() {

@@ -1418,11 +1418,10 @@ func modelDeploymentRoleExternalDP(
 		// an accepted error-path semantics change, deliberately kept for a reviewed change.
 		return false
 	}
-	shape, _ := modelDeploymentLoadBalance(reading.declared.Wiring)
+	shape, _ := modelDeploymentLoadBalance(reading.declared)
 
-	return shape == workercore.ModelDeploymentLoadBalanceExternal ||
-		shape == workercore.ModelDeploymentLoadBalanceHybrid ||
-		shape == workercore.ModelDeploymentLoadBalanceMultiPort
+	return shape != workercore.ModelDeploymentLoadBalanceInternal &&
+		shape != workercore.ModelDeploymentLoadBalanceUnknown
 }
 
 // syncModelDeploymentService converges every Service the deployment owns: the one it is reached
@@ -1469,7 +1468,7 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentService(
 			continue
 		}
 		if modelDeploymentEligibilitySelectorActive(md, role, live.Spec.Selector, eligibilityDecided) {
-			modelDeploymentSelectEligibleEndpoints(rendered[i])
+			modelDeploymentSelectEligibleEndpoints(rendered[i], md, role)
 		}
 	}
 	expected := make([]ctrlcli.Object, len(rendered))

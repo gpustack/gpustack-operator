@@ -157,7 +157,7 @@ func TestParseModelDeploymentDeclaredParallelism(t *testing.T) {
 			name:      "vllm: single-letter alias concatenated value records",
 			engine:    vllm,
 			extraArgs: []string{"-n2"},
-			set:       func(p *ModelDeploymentDeclaredParallelism) { p.Wiring = []string{"--nnodes"} },
+			set:       func(p *ModelDeploymentDeclaredParallelism) { p.Wiring = []string{"--nnodes"}; p.NodeCount = 2 },
 		},
 		{
 			name:      "vllm: node-rank concatenated value records",
@@ -169,7 +169,7 @@ func TestParseModelDeploymentDeclaredParallelism(t *testing.T) {
 			name:      "vllm: single-letter alias with = value records",
 			engine:    vllm,
 			extraArgs: []string{"-n=2"},
-			set:       func(p *ModelDeploymentDeclaredParallelism) { p.Wiring = []string{"--nnodes"} },
+			set:       func(p *ModelDeploymentDeclaredParallelism) { p.Wiring = []string{"--nnodes"}; p.NodeCount = 2 },
 		},
 		{
 			name:      "vllm: underscore unique prefix resolves",
@@ -268,6 +268,7 @@ func TestParseModelDeploymentDeclaredParallelism(t *testing.T) {
 			extraArgs: []string{"--nnodes", "2", "--tensor-parallel-size", "2"},
 			set: func(p *ModelDeploymentDeclaredParallelism) {
 				p.TensorParallel = 2
+				p.NodeCount = 2
 				p.Wiring = []string{"--nnodes"}
 			},
 		},
@@ -275,7 +276,10 @@ func TestParseModelDeploymentDeclaredParallelism(t *testing.T) {
 			name:      "vllm: wiring short aliases record",
 			engine:    vllm,
 			extraArgs: []string{"-n", "2", "-r", "0"},
-			set:       func(p *ModelDeploymentDeclaredParallelism) { p.Wiring = []string{"--nnodes", "--node-rank"} },
+			set: func(p *ModelDeploymentDeclaredParallelism) {
+				p.Wiring = []string{"--nnodes", "--node-rank"}
+				p.NodeCount = 2
+			},
 		},
 		{
 			name:      "vllm: boolean wiring consumes nothing",
@@ -643,6 +647,7 @@ func TestParseModelDeploymentDeclaredParallelism(t *testing.T) {
 			extraArgs: []string{"--nnodes", "2", "--dist-init-addr", "a:1", "--nccl-init-addr", "b:2"},
 			set: func(p *ModelDeploymentDeclaredParallelism) {
 				p.Wiring = []string{"--nnodes", "--dist-init-addr"}
+				p.NodeCount = 2
 			},
 		},
 		{
@@ -999,11 +1004,11 @@ func TestReadModelDeploymentRoleParallelism(t *testing.T) {
 			},
 		},
 		{
-			name:   "an assigned start rank alone derives External",
+			name:   "an assigned start rank alone does not select external routing",
 			engine: vllm,
 			role:   workercore.ModelDeploymentRole{ExtraArgs: []string{"--data-parallel-start-rank=1"}},
 			want: workercore.ModelDeploymentRoleParallelismStatus{
-				LoadBalance: workercore.ModelDeploymentLoadBalanceExternal,
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
 				Source: workercore.ModelDeploymentParallelismSourceStatus{
 					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
 					Complete: true,
@@ -1011,16 +1016,17 @@ func TestReadModelDeploymentRoleParallelism(t *testing.T) {
 			},
 		},
 		{
-			name:   "start rank and external balancer agree on External",
+			name:   "start rank and external balancer conflict",
 			engine: vllm,
 			role: workercore.ModelDeploymentRole{
 				ExtraArgs: []string{"--data-parallel-start-rank=1", "--data-parallel-external-lb"},
 			},
 			want: workercore.ModelDeploymentRoleParallelismStatus{
-				LoadBalance: workercore.ModelDeploymentLoadBalanceExternal,
+				LoadBalance: workercore.ModelDeploymentLoadBalanceUnknown,
 				Source: workercore.ModelDeploymentParallelismSourceStatus{
-					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
-					Complete: true,
+					Kind:             workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete:         true,
+					UnreadableReason: "the balance flags --data-parallel-external-lb and --data-parallel-start-rank derive to different shapes",
 				},
 			},
 		},

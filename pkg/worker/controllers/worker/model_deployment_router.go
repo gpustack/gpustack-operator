@@ -124,22 +124,17 @@ func renderModelDeploymentRouterObjects(
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		kind := ModelDeploymentEffectiveRoleKind(role)
-		// THE PUBLISHED SELECTOR NAMES THE PODS A REQUEST MAY REACH, which is one member per
-		// replica -- the leader -- rather than every Pod the role runs. The field is published
-		// VERBATIM for a router to be configured from, so a selector that also named the members
-		// serving no API would hand that router the very defect the discovery selector below
-		// exists to remove. The leader term is what keeps the two selectors in one semantics; they
-		// differ in scope only, this one naming a role and that one the deployment.
+		// Keep legacy leader-only routing until the eligibility gate is active.
+		// Once qualified, External-DP members all serve HTTP and must remain selectable.
 		selector := modelDeploymentSelectorLabels(md, role)
 		selector[modelDeploymentLabelKeyRoleKind] = roles[i].Kind
 		selector[modelDeploymentMemberIndexLabel] = strconvx.Itoa(modelDeploymentLeaderMemberIndex)
-		// The eligibility term rides on the published selector beside the leader term, so a router
-		// configured from it can only ever reach endpoints the reconciler has marked eligible. It
-		// narrows the same set the terms above already name; it never widens one. A shape whose
-		// group-forward capability can never activate renders WITHOUT the term: a selector no pass
-		// would ever satisfy would hand the router zero endpoints and call it discovery.
+		// Unsupported shapes never gain an eligibility selector that no pass can satisfy.
 		if modelDeploymentEligibilitySelectorActive(md, role, nil, retainedEligibility) {
 			selector[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+			if modelDeploymentRoleExternalDP(md, role) {
+				delete(selector, modelDeploymentMemberIndexLabel)
+			}
 		}
 		// The renderer is handed the SAME map that is published, rather than one built beside it,
 		// because a router configured by argv discovers each role by these labels: two derivations
@@ -156,19 +151,9 @@ func renderModelDeploymentRouterObjects(
 		}
 		contract.Roles = append(contract.Roles, roleStatus)
 	}
-	// DISCOVERY NAMES ONLY THE PODS THAT ANSWER THE API: one member per replica, the leader, which
-	// at size one is the replica's only Pod. Without the index term the selector would name every
-	// member, a router would spread requests across the ones serving nothing, and the failures
-	// would interleave with successes rather than the router being visibly broken. The term is a
-	// plain equality rather than something sized per role, because a label selector is a
-	// conjunction and the pickers filter by kind: two server roles of different sizes share this
-	// one selector, and only a member index written on every member lets a single term hold for
-	// both.
-	//
-	// THE EQUALITIES ARE THE SOURCE AND THE EXPRESSION IS DERIVED FROM THEM, because the two
-	// routers configured by argv match on equality alone and cannot be handed an expression: one of
-	// them splits each entry on its first "=" and drops an entry carrying none without a word. A
-	// second literal here would let the string and the map name different sets.
+	// Start with legacy leader-only discovery. Qualified External-DP roles use the
+	// eligibility label instead, which also excludes internal followers in mixed roles.
+	// Derive every selector form from these equalities so all routers discover the same set.
 	endpointLabels := map[string]string{
 		modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
 		modelDeploymentLabelKeyInstance: md.Name,
@@ -191,10 +176,17 @@ func renderModelDeploymentRouterObjects(
 	}
 	if endpointActivatable && (modelDeploymentEligibilityDecided(md) || retainedEligibility) {
 		endpointLabels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		for i := range md.Spec.Roles {
+			if modelDeploymentRoleExternalDP(md, &md.Spec.Roles[i]) {
+				// Eligibility selects every answering External-DP member and only the
+				// leaders of internal roles, including deployments with both shapes.
+				delete(endpointLabels, modelDeploymentMemberIndexLabel)
+				break
+			}
+		}
 	}
-	// The router's own Pod carries the first two labels and NOT the member index, so the equalities
-	// already exclude it. The negation is kept in the expression, where it costs nothing and says
-	// out loud what the index term achieves by arithmetic.
+	// The router Pod has neither a member index nor endpoint eligibility.
+	// Keep the explicit exclusion in the expression as well.
 	//
 	// The terms are listed rather than sorted out of the map because their ORDER IS RENDERED: this
 	// string is a ConfigMap value and the Pod's configuration hash is taken over it, so reordering
@@ -202,7 +194,9 @@ func renderModelDeploymentRouterObjects(
 	endpointSelectorTerms := []string{
 		modelDeploymentLabelKeyName + "=" + endpointLabels[modelDeploymentLabelKeyName],
 		modelDeploymentLabelKeyInstance + "=" + endpointLabels[modelDeploymentLabelKeyInstance],
-		modelDeploymentMemberIndexLabel + "=" + endpointLabels[modelDeploymentMemberIndexLabel],
+	}
+	if member, present := endpointLabels[modelDeploymentMemberIndexLabel]; present {
+		endpointSelectorTerms = append(endpointSelectorTerms, modelDeploymentMemberIndexLabel+"="+member)
 	}
 	if len(endpointLabels[modelDeploymentLabelKeyEndpointEligible]) > 0 {
 		endpointSelectorTerms = append(endpointSelectorTerms,
