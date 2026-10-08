@@ -76,17 +76,17 @@ func TestResolveProbeImage(t *testing.T) {
 		{
 			name:         "ascend 910C on CANN 9 resolves a different tag than 910B",
 			manufacturer: nodefeature.ManufacturerAscend, family: "910C", runtimeVersion: "9.1.0",
-			want: "quay.io/ascend/cann:9.1.0-beta.3-a3-ubuntu22.04-py3.12",
+			want: "quay.io/ascend/cann:9.1.0-a3-ubuntu22.04-py3.12",
 		},
 		{
 			name:         "ascend 950 resolves its own tag",
 			manufacturer: nodefeature.ManufacturerAscend, family: "950", runtimeVersion: "9.1.0",
-			want: "quay.io/ascend/cann:9.1.0-beta.3-950-ubuntu22.04-py3.12",
+			want: "quay.io/ascend/cann:9.1.0-950-ubuntu22.04-py3.12",
 		},
 		{
 			name:         "ascend 310P resolves its own tag",
 			manufacturer: nodefeature.ManufacturerAscend, family: "310P", runtimeVersion: "9.1.0",
-			want: "quay.io/ascend/cann:9.1.0-beta.3-310p-ubuntu22.04-py3.12",
+			want: "quay.io/ascend/cann:9.1.0-310p-ubuntu22.04-py3.12",
 		},
 		{
 			// The family this image builds no vcann-rt for at all: a guess here would start a
