@@ -192,7 +192,7 @@ Pass a dict: (dict "root" $ "image" .Values.controllerManager.manager.image).
 {{- with $global.imageNamespace -}}
 {{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
 {{- end -}}
-{{- with $global.imageRegistry -}}
+{{- with (coalesce $global.imageRegistry $global.hub) -}}
 {{- $registry = trimSuffix "/" . -}}
 {{- end -}}
 {{- with $registry -}}

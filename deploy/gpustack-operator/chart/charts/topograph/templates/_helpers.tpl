@@ -47,7 +47,7 @@ Container image reference. The tag defaults to the chart appVersion when unset.
 {{- with $global.imageNamespace -}}
 {{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
 {{- end -}}
-{{- with $global.imageRegistry -}}
+{{- with (coalesce $global.imageRegistry $global.hub) -}}
 {{- $registry = trimSuffix "/" . -}}
 {{- end -}}
 {{- with $registry -}}

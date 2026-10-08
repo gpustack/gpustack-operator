@@ -2,7 +2,7 @@ diff --git a/templates/_helpers.tpl b/templates/_helpers.tpl
 index b540e3b..11b3f61 100644
 --- a/templates/_helpers.tpl
 +++ b/templates/_helpers.tpl
-@@ -124,3 +124,39 @@ imagePullSecrets helper - uses local values or falls back to global values
+@@ -124,3 +124,45 @@ imagePullSecrets helper - uses local values or falls back to global values
  {{- $imagePullSecrets | toJson }}
  {{- end -}}
  {{- end -}}
@@ -26,7 +26,13 @@ index b540e3b..11b3f61 100644
 +{{- with $global.imageNamespace -}}
 +{{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
 +{{- end -}}
-+{{- with $global.imageRegistry -}}
++{{- /*
++    `global.hub` is accepted as an alias so an umbrella chart carrying Istio-derived
++    subcharts — which read `hub` and will keep doing so upstream — can mirror every
++    image with one value instead of two that must be kept equal. `imageRegistry` wins
++    when both are set, so a release already setting it is unaffected.
++  */ -}}
++{{- with (coalesce $global.imageRegistry $global.hub) -}}
 +{{- $registry = trimSuffix "/" . -}}
 +{{- end -}}
 +{{- with $registry -}}
