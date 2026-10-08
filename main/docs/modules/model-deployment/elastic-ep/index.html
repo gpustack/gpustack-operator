@@ -527,7 +527,7 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
 </li>
 </ul>
 <h2 id="what-the-profile-means">What the profile means</h2>
-<p><code>roles[].elasticEp</code> selects this mode for a role. Two fields matter:</p>
+<p><code>roles[].elasticEp</code> selects this mode for a role. Its only field sets the target width:</p>
 <table>
   <thead>
       <tr>
@@ -539,10 +539,6 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
       <tr>
           <td><code>width</code></td>
           <td>Total GPU engines in the collective, counting the reserved master. Mutable, from 2 to 64.</td>
-      </tr>
-      <tr>
-          <td><code>headInstanceType</code></td>
-          <td>The CPU-only InstanceType the Ray control plane runs on. Set once.</td>
       </tr>
   </tbody>
 </table>
@@ -566,19 +562,29 @@ enforces the rest:</p>
 <li>there is no initial fabric to declare.</li>
 </ul>
 <p>Adding or removing the profile on an existing role is refused.
-<code>headInstanceType</code> and the effective TP value are fixed after creation.
+The effective TP value is fixed after creation.
 Equivalent TP argument spellings are accepted. Omitting TP and explicitly setting TP=1 are equivalent.
 A width change adjusts DP and EP while preserving TP. Online TP changes are refused.</p>
 <p>Only the master serves HTTP. The other members join the Ray cluster and hold collective state. That
 is why the master is counted inside <code>width</code> and is never retired.</p>
 <h2 id="requirements">Requirements</h2>
-<p>The engine image must be a vLLM 0.29.0 image that already contains a full Ray installation. The
+<p>The recorded runtime baseline uses a vLLM 0.29.0 image with a full Ray installation. The
 official vLLM image of that version ships without Ray, and the profile will not start on it. The
 pinned requirement in the resize spec is Ray 2.56.1 with the full default closure.</p>
 <p>The TP size must fit the selected MoE model, engine kernels, and GPUs available on one node.
-The operator does not limit TP to the size used by a particular test.</p>
-<p>The Ray control plane needs its own Pod, which is why <code>headInstanceType</code> is required. It names an
-InstanceType that must already exist and must be CPU-only.</p>
+The operator does not limit TP to the size used by a particular test.
+Static TP=2 inference has passed; online TP&gt;1 resizing remains under investigation.
+Admission of TP=2, 4 or 8 does not establish dynamic inference support.</p>
+<p>The operator directly manages a separate CPU Ray head Pod and its Service.
+The head has no InstanceType or LocalQueue dependency and does not count toward GPU width.
+Its Pod template declares no container or Pod resource requests or limits.
+Kubernetes schedules it using the namespace&rsquo;s normal admission rules.
+A LimitRange or another webhook can still inject resources at admission.</p>
+<p>GPU master and worker Pods retain their GPU requests and device allocations.
+Their <code>ray start</code> commands let Ray discover container-visible GPUs.
+The CPU head uses <code>--num-gpus=0</code> to exclude it from GPU tasks.
+The existing readiness check requires each live GPU Ray node&rsquo;s capacity to equal TP.
+Ray&rsquo;s logical count does not replace the allocated-device and Pod identity checks.</p>
 <p>The profile increases the number of GPU members. It does not resize the underlying nodes or claim
 cloud node elasticity, and it does not patch anything upstream in the engine. It drives the engine
 through the resize interface the engine already exposes.</p>
@@ -614,7 +620,6 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#s
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">your-registry/vllm-ray:0.29.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">elasticEp</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">width</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">headInstanceType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-cpu</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ports</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">http</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="m">8000</span><span class="w">
@@ -625,6 +630,17 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#s
 <p>To use TP=2, add <code>extraArgs: [&quot;--tensor-parallel-size&quot;, &quot;2&quot;]</code> and request <code>resources.accelerator: &quot;2&quot;</code>.
 If the accelerator quantity is omitted, admission defaults it to the TP size.
 Explicit quantities must equal the TP size. Each member&rsquo;s CPU and memory scale with its GPU count.</p>
+<h3 id="maximum-width">Maximum width</h3>
+<p>Starting with vLLM 0.30.0, set the largest planned width through <code>extraArgs</code> when creating the deployment:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- --<span class="l">elastic-ep-max-dp-size</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="s2">&#34;4&#34;</span></span></span></code></pre></div>
+</div><p>This example permits widths up to 4. The maximum is fixed after creation.
+Create a new deployment to change it.
+In vLLM 0.30.0 and later, omitting this argument prevents expansion beyond the initial width.
+Older vLLM releases do not accept this argument.</p>
 <h2 id="changing-the-width">Changing the width</h2>
 <p>Change only <code>width</code>. Starting at 2, this patch requests 4. Wait for the resize to complete before
 submitting another change. A patch that lowers the current width is rejected by the admission
@@ -787,10 +803,10 @@ Set these variables in the elastic role&rsquo;s <code>env</code>; the operator a
 The operator retains existing elastic Pods, so an env edit does not change their running loggers.</p>
 <h2 id="limits">Limits</h2>
 <ul>
-<li>The engine must be a vLLM 0.29.0 image with a full Ray installation supplied by you.</li>
+<li>This managed Elastic profile supports vLLM with a full Ray installation.
+SGLang supports ordinary replica scaling; its native elastic protocol is not integrated.</li>
 <li>Width is bounded to 2 through 64.</li>
-<li>The profile cannot be added to or removed from an existing role, and <code>headInstanceType</code> cannot
-change.</li>
+<li>The profile cannot be added to or removed from an existing role.</li>
 <li>There is one serving instance per deployment. <code>replicas</code> and <code>size</code> are not a width mechanism.</li>
 <li>Only the master serves HTTP.</li>
 <li>No RDMA fabric is requested for this profile.</li>
@@ -820,7 +836,7 @@ change.</li>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0c3d9e7a5a4c043d3b64238c41b7fb588e1405be/docs/modules/model-deployment/elastic-ep.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/6b826946008483277df8c9d88a5db7e861d20cfd/docs/modules/model-deployment/elastic-ep.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/elastic-ep.md">Edit this page</a>
             
@@ -834,7 +850,11 @@ change.</li>
     <li><a href="#what-the-profile-means">What the profile means</a></li>
     <li><a href="#requirements">Requirements</a></li>
     <li><a href="#shared-memory">Shared memory</a></li>
-    <li><a href="#a-minimal-manifest">A minimal manifest</a></li>
+    <li><a href="#a-minimal-manifest">A minimal manifest</a>
+      <ul>
+        <li><a href="#maximum-width">Maximum width</a></li>
+      </ul>
+    </li>
     <li><a href="#changing-the-width">Changing the width</a></li>
     <li><a href="#what-you-see-while-it-runs">What you see while it runs</a></li>
     <li><a href="#when-a-resize-holds">When a resize holds</a></li>

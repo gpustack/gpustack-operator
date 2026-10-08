@@ -867,11 +867,18 @@ a shell, so the environment is the only path left. Why the key is owned at all i
 , whose own void conditions include a
 webhook-level one, so nothing here should be read as a claim about how that issue can be closed.</p>
 <h3 id="shared-memory">Shared memory</h3>
-<p><code>roles[].shmSize</code> sets the capacity limit of <code>/dev/shm</code> in each role Pod. It accepts a positive Kubernetes
+<p><code>spec.roles[].shmSize</code> sets the capacity limit of <code>/dev/shm</code> in each role Pod. It accepts a positive Kubernetes
 quantity, such as <code>32Gi</code>. Omission renders a <code>16Gi</code> memory-backed <code>EmptyDir</code>.
 This applies to both engines, take-over roles, and the Elastic Ray head and GPU members.
 Each Pod has its own volume. Only the main container mounts it.</p>
-<p>An explicit <code>/dev/shm</code> mount in <code>additionalVolumes</code> takes precedence, including when <code>shmSize</code> is set.
+<p>Set it in the role configuration:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">shmSize</span><span class="p">:</span><span class="w"> </span><span class="l">32Gi</span></span></span></code></pre></div>
+</div><p>An explicit <code>/dev/shm</code> mount in <code>additionalVolumes</code> takes precedence, including when <code>shmSize</code> is set.
 The operator preserves that mount&rsquo;s capacity and backing.
 The default is a project capacity choice, not a universal engine requirement.</p>
 <p>The capacity limit does not reserve RAM or increase the Pod&rsquo;s memory request.
@@ -1438,7 +1445,7 @@ structured snapshot and Pod scrape endpoints.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0c3d9e7a5a4c043d3b64238c41b7fb588e1405be/docs/modules/model-deployment/deployment.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/6b826946008483277df8c9d88a5db7e861d20cfd/docs/modules/model-deployment/deployment.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/deployment.md">Edit this page</a>
             

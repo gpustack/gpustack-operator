@@ -19,12 +19,11 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
 
 ## What the profile means
 
-`roles[].elasticEp` selects this mode for a role. Two fields matter:
+`roles[].elasticEp` selects this mode for a role. Its only field sets the target width:
 
 | Field | Meaning |
 |---|---|
 | `width` | Total GPU engines in the collective, counting the reserved master. Mutable, from 2 to 64. |
-| `headInstanceType` | The CPU-only InstanceType the Ray control plane runs on. Set once. |
 
 `width` counts DP engines, including the master. Each member has its own GPU Pod.
 Set TP through the role's `extraArgs`, using the engine's `--tensor-parallel-size` argument.
@@ -47,7 +46,7 @@ enforces the rest:
 - there is no initial fabric to declare.
 
 Adding or removing the profile on an existing role is refused.
-`headInstanceType` and the effective TP value are fixed after creation.
+The effective TP value is fixed after creation.
 Equivalent TP argument spellings are accepted. Omitting TP and explicitly setting TP=1 are equivalent.
 A width change adjusts DP and EP while preserving TP. Online TP changes are refused.
 
@@ -56,15 +55,26 @@ is why the master is counted inside `width` and is never retired.
 
 ## Requirements
 
-The engine image must be a vLLM 0.29.0 image that already contains a full Ray installation. The
+The recorded runtime baseline uses a vLLM 0.29.0 image with a full Ray installation. The
 official vLLM image of that version ships without Ray, and the profile will not start on it. The
 pinned requirement in the resize spec is Ray 2.56.1 with the full default closure.
 
 The TP size must fit the selected MoE model, engine kernels, and GPUs available on one node.
 The operator does not limit TP to the size used by a particular test.
+Static TP=2 inference has passed; online TP>1 resizing remains under investigation.
+Admission of TP=2, 4 or 8 does not establish dynamic inference support.
 
-The Ray control plane needs its own Pod, which is why `headInstanceType` is required. It names an
-InstanceType that must already exist and must be CPU-only.
+The operator directly manages a separate CPU Ray head Pod and its Service.
+The head has no InstanceType or LocalQueue dependency and does not count toward GPU width.
+Its Pod template declares no container or Pod resource requests or limits.
+Kubernetes schedules it using the namespace's normal admission rules.
+A LimitRange or another webhook can still inject resources at admission.
+
+GPU master and worker Pods retain their GPU requests and device allocations.
+Their `ray start` commands let Ray discover container-visible GPUs.
+The CPU head uses `--num-gpus=0` to exclude it from GPU tasks.
+The existing readiness check requires each live GPU Ray node's capacity to equal TP.
+Ray's logical count does not replace the allocated-device and Pod identity checks.
 
 The profile increases the number of GPU members. It does not resize the underlying nodes or claim
 cloud node elasticity, and it does not patch anything upstream in the engine. It drives the engine
@@ -103,7 +113,6 @@ spec:
       image: your-registry/vllm-ray:0.29.0
       elasticEp:
         width: 2
-        headInstanceType: elastic-cpu
       ports:
         - name: http
           port: 8000
@@ -116,6 +125,21 @@ Weights reach the members through the same artifact and cache as any other deplo
 To use TP=2, add `extraArgs: ["--tensor-parallel-size", "2"]` and request `resources.accelerator: "2"`.
 If the accelerator quantity is omitted, admission defaults it to the TP size.
 Explicit quantities must equal the TP size. Each member's CPU and memory scale with its GPU count.
+
+### Maximum width
+
+Starting with vLLM 0.30.0, set the largest planned width through `extraArgs` when creating the deployment:
+
+```yaml
+extraArgs:
+  - --elastic-ep-max-dp-size
+  - "4"
+```
+
+This example permits widths up to 4. The maximum is fixed after creation.
+Create a new deployment to change it.
+In vLLM 0.30.0 and later, omitting this argument prevents expansion beyond the initial width.
+Older vLLM releases do not accept this argument.
 
 ## Changing the width
 
@@ -256,10 +280,10 @@ The operator retains existing elastic Pods, so an env edit does not change their
 
 ## Limits
 
-- The engine must be a vLLM 0.29.0 image with a full Ray installation supplied by you.
+- This managed Elastic profile supports vLLM with a full Ray installation.
+  SGLang supports ordinary replica scaling; its native elastic protocol is not integrated.
 - Width is bounded to 2 through 64.
-- The profile cannot be added to or removed from an existing role, and `headInstanceType` cannot
-  change.
+- The profile cannot be added to or removed from an existing role.
 - There is one serving instance per deployment. `replicas` and `size` are not a width mechanism.
 - Only the master serves HTTP.
 - No RDMA fabric is requested for this profile.

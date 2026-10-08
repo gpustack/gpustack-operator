@@ -298,10 +298,19 @@ webhook-level one, so nothing here should be read as a claim about how that issu
 
 ### Shared memory
 
-`roles[].shmSize` sets the capacity limit of `/dev/shm` in each role Pod. It accepts a positive Kubernetes
+`spec.roles[].shmSize` sets the capacity limit of `/dev/shm` in each role Pod. It accepts a positive Kubernetes
 quantity, such as `32Gi`. Omission renders a `16Gi` memory-backed `EmptyDir`.
 This applies to both engines, take-over roles, and the Elastic Ray head and GPU members.
 Each Pod has its own volume. Only the main container mounts it.
+
+Set it in the role configuration:
+
+```yaml
+spec:
+  roles:
+    - name: server
+      shmSize: 32Gi
+```
 
 An explicit `/dev/shm` mount in `additionalVolumes` takes precedence, including when `shmSize` is set.
 The operator preserves that mount's capacity and backing.
