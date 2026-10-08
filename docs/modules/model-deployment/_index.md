@@ -20,8 +20,9 @@ the role contract. [Prefill and Decode](prefill-decode.md) covers split roles.
 [Routing](routing.md) explain what the running service reports and how requests
 are directed.
 
-`Elastic EP` is its own mode rather than another role shape: it keeps one serving instance and
-changes the size of its collective while it runs.
+[Elastic EP](elastic-ep.md) keeps one serving instance and changes its collective while it runs.
+[Model Scaling Walkthrough](scaling-walkthrough.md) follows prefetch, TP2/DP2 startup, and DP2→4 expansion
+with captured resource output and completed inference requests.
 
 ---
 

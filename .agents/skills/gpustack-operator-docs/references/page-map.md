@@ -428,3 +428,12 @@ supersession is recorded that way because it has no new spec to be recorded in. 
 `**Corrected after shipping.**`. A spec naming another spec by file name is the case that forces one:
 when that file leaves the tree the name resolves to nothing, and leaving it alone preserves a pointer
 rather than a record.
+
+## `docs/modules/model-deployment/scaling-walkthrough.md`
+
+**Owns** — the user sequence from model prefetch to elastic TP2/DP2→4 expansion, captured CR output,
+short inference checks, log inspection, and application release. Distinguishes independent replicas
+from an elastic collective and states which path was measured.
+
+**Never** — private engine code, raw infrastructure identities, or broad support claims inferred from
+one runtime configuration. The Elastic EP guide owns the profile contract; the resize spec owns design analysis.
