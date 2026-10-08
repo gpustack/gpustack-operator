@@ -126,9 +126,9 @@ To use TP=2, add `extraArgs: ["--tensor-parallel-size", "2"]` and request `resou
 If the accelerator quantity is omitted, admission defaults it to the TP size.
 Explicit quantities must equal the TP size. Each member's CPU and memory scale with its GPU count.
 
-### Startup DP capacity
+### Maximum width
 
-vLLM 0.31.0 adds `--elastic-ep-max-dp-size`. Set it in `extraArgs` when creating the deployment:
+Starting with vLLM 0.30.0, set the largest planned width through `extraArgs` when creating the deployment:
 
 ```yaml
 extraArgs:
@@ -136,18 +136,10 @@ extraArgs:
   - "4"
 ```
 
-This permits a target width up to 4. The webhook rejects larger widths on create and update.
-It also rejects adding, removing or changing the effective maximum after creation.
-Equivalent argument spellings are accepted. Existing Elastic Pods retain their startup command;
-changing `extraArgs` cannot raise the running master's capacity. Create a new deployment to change it.
-
-If the parameter is omitted, admission preserves the older engine contract.
-In vLLM 0.31.0, omission limits expansion to the initial DP size. Set the maximum explicitly
-before startup when using that version for online expansion. Do not pass this newer flag to older images.
-
-The 0.31.0 capacity contract was checked in source; its dynamic GPU inference is not yet verified.
-See the pinned [configuration](https://github.com/vllm-project/vllm/blob/db9527a46873454610df6dbedf79a36d6bf1a7f6/vllm/config/parallel.py#L971-L981)
-and [resize check](https://github.com/vllm-project/vllm/blob/db9527a46873454610df6dbedf79a36d6bf1a7f6/vllm/v1/engine/core_client.py#L1746-L1762).
+This example permits widths up to 4. The maximum is fixed after creation.
+Create a new deployment to change it.
+If omitted, the maximum equals the initial width, which prevents expansion.
+Older vLLM releases do not accept this argument.
 
 ## Changing the width
 

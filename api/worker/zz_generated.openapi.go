@@ -10068,7 +10068,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleElasticEP(ref common
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.\n\nWidth is the only mutable field: it answers how large the collective currently should be, which is a running-state question. This release accepts increases and unchanged values; admission refuses a decrease until Elastic EP scale-down support is complete. Profile presence and the TP degree in ExtraArgs are fixed at creation. Protobuf field 2 was removed; do not reuse it.",
+				Description: "ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.\n\nWidth is the only mutable field: it answers how large the collective currently should be, which is a running-state question. This release accepts increases and unchanged values; admission refuses a decrease until Elastic EP scale-down support is complete. The role cannot enable or disable this profile after creation. Its tensor parallel size comes from ExtraArgs and cannot change after creation.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"width": {
