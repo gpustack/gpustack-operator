@@ -6496,11 +6496,6 @@ func (m *ModelDeploymentRoleElasticEP) MarshalToSizedBuffer(dAtA []byte) (int, e
 	_ = i
 	var l int
 	_ = l
-	i -= len(m.HeadInstanceType)
-	copy(dAtA[i:], m.HeadInstanceType)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.HeadInstanceType)))
-	i--
-	dAtA[i] = 0x12
 	i = encodeVarintGenerated(dAtA, i, uint64(m.Width))
 	i--
 	dAtA[i] = 0x8
@@ -11446,8 +11441,6 @@ func (m *ModelDeploymentRoleElasticEP) Size() (n int) {
 	var l int
 	_ = l
 	n += 1 + sovGenerated(uint64(m.Width))
-	l = len(m.HeadInstanceType)
-	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -14146,7 +14139,6 @@ func (this *ModelDeploymentRoleElasticEP) String() string {
 	}
 	s := strings.Join([]string{`&ModelDeploymentRoleElasticEP{`,
 		`Width:` + fmt.Sprintf("%v", this.Width) + `,`,
-		`HeadInstanceType:` + fmt.Sprintf("%v", this.HeadInstanceType) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -34671,38 +34663,6 @@ func (m *ModelDeploymentRoleElasticEP) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field HeadInstanceType", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.HeadInstanceType = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

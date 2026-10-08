@@ -233,32 +233,49 @@ separation of continuity claims from instance-interruption characterization.
 
 ### Elastic request contract
 
-The managed profile adds optional `roles[].elasticEp` with two required fields:
+The managed profile adds optional `roles[].elasticEp` with one required field:
 
 | Field | Meaning | Update rule |
 | --- | --- | --- |
 | `width` | Total GPU engines, including the reserved API/DP-master; integer from 2 through 64. | Mutable. |
-| `headInstanceType` | Name of an existing CPU-only InstanceType for the Ray head. | Immutable. |
 
 Profile presence is immutable. The deployment has one managed vLLM Server role, with
 `replicas=1` and `size=1`. Those fields retain their existing meanings. This profile
 supports the pinned vLLM release with PP=1 and prefill context parallel size one.
 TP is read from `extraArgs` and stays fixed while DP width changes.
+An explicit `--elastic-ep-max-dp-size` in `extraArgs` bounds the target width on create and update.
+The effective maximum is fixed at creation; adding, removing or changing it requires a new deployment.
+Equivalent argument forms are accepted. The operator does not add a duplicate API field or inject the flag.
+The argument is available starting with vLLM v0.30.0:
+[CLI definition](https://github.com/vllm-project/vllm/blob/ced6857afa0ea7b2e3f0846a62e1394e90f15607/vllm/engine/arg_utils.py#L1213-L1216).
+Omission preserves legacy admission. In vLLM v0.31.0, the omitted maximum equals initial DP,
+so deployments using that version must set a larger maximum before startup to expand online.
+This version contract is source-checked, not GPU-verified:
+[configuration](https://github.com/vllm-project/vllm/blob/db9527a46873454610df6dbedf79a36d6bf1a7f6/vllm/config/parallel.py#L971-L981),
+[resize admission](https://github.com/vllm-project/vllm/blob/db9527a46873454610df6dbedf79a36d6bf1a7f6/vllm/v1/engine/core_client.py#L1746-L1762).
 Each member requests the whole GPU count of its TP group; omitted TP defaults to one.
 Command takeover, slicing, partitioning and fabric interface requests are refused.
 Arguments or environment values that override operator-owned elastic settings are refused.
 
-The head uses its CPU InstanceType's unit resources and independent CPU queue admission.
+The head is a directly managed auxiliary Pod with no InstanceType or LocalQueue dependency.
+Its template declares no container or Pod resource requests or limits, including CPU, memory and GPU.
+Namespace admission can inject defaults; the controller does not add them.
 It consumes no GPU width. Only the reserved master supplies API endpoints and serving status.
 Initial boot width is retained separately from the mutable target. A target or deployment
 annotation change cannot replace a serving master. A smaller target alone cannot delete workers.
 This request contract does not freeze a public effective-width status field or prove native support.
 
+
 ### Feature 1 — Elastic workload realization with four-layer resource reconciliation (E9 / T07)
 
 **Shape.** One ModelDeployment instance maps to one dedicated logical Ray cluster. The operator
 creates and owns its head and worker Pods. The Ray head is CPU-only
-and carries only the Ray control plane. Each worker Pod holds one complete TP group with
+and carries only the Ray control plane. It starts with `--num-gpus=0`.
+GPU master and worker commands omit `--num-gpus` so Ray discovers container-visible devices.
+GPU requests, device allocation and TP remain unchanged.
+The existing observer rejects any live GPU Ray node whose logical GPU capacity differs from TP.
+Logical Ray capacity does not prove actual device allocation or Pod identity.
+Auto-discovery must also be verified in the pinned runtime; no slicing or multi-vendor support is inferred. Each worker Pod holds one complete TP group with
 `numOfHosts=1`. The vLLM API/DP-master role is pinned to a reserved GPU worker Pod with explicit
 `data_parallel_size_local=1` in Internal mode (strict placement requires a positive local size on
 a GPU-bearing node; a CPU head hosting the API master with strict placement and `local=0` allocates
@@ -324,7 +341,7 @@ whole-GPU admission only; Ray/elastic realization **NOT-established**).
 **MEASURED** — the pinned native profile failed before inference: its `/dev/shm` buffer required 160 MiB, with 64 MiB available.
 Ordinary role rendering provides each Pod with a memory-backed `EmptyDir` at `/dev/shm`.
 `roles[].shmSize` is an optional positive Kubernetes quantity. Omission renders `16Gi`.
-The common path covers ordinary roles, take-over roles, Elastic GPU members and the CPU head.
+Ordinary roles, take-over roles, Elastic GPU members and the auxiliary CPU head share this volume policy.
 The volume enters the Pod spec hash. Its capacity does not reserve RAM or raise the memory request.
 Only the main container mounts it; used shared memory counts toward that container's memory limit.
 An explicit `/dev/shm` mount takes precedence; its capacity and backing remain the user's responsibility.

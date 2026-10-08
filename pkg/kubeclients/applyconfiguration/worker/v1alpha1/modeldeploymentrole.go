@@ -194,15 +194,15 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head
 	// and one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role
 	// without it renders exactly as it did before this field existed, and a profile that is
-	// turned on and off again describes a different deployment, so the field's presence and
-	// HeadInstanceType are frozen at creation. Width is editable for scale-up; scale-down is
+	// turned on and off again describes a different deployment. The field's presence is frozen
+	// at creation. Width is editable for scale-up; scale-down is
 	// refused by admission in this release.
 	//
 	// The profile admits exactly one such role per deployment, running the vLLM engine as a
 	// single Server role of one instance of one Pod. Every member -- the reserved API/DP-master
 	// and every Ray-only worker -- takes a complete TP group declared through ExtraArgs.
 	// All GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP.
-	// The head uses HeadInstanceType's own queue and never counts toward Width.
+	// The auxiliary head requests no container resources and never counts toward Width.
 	ElasticEP *ModelDeploymentRoleElasticEPApplyConfiguration `json:"elasticEp,omitempty"`
 }
 

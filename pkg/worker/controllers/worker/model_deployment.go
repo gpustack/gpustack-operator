@@ -1872,7 +1872,12 @@ func (r *ModelDeploymentReconciler) modelDeploymentTakenGroups(
 		if !includeTerminal && (pod.Status.Phase == core.PodSucceeded || pod.Status.Phase == core.PodFailed) {
 			continue
 		}
-		if group := pod.Labels[kueuepodconst.GroupNameLabel]; group != "" {
+		group := pod.Labels[kueuepodconst.GroupNameLabel]
+		if group == "" && ModelDeploymentElasticRole(md) != nil && role == modelDeploymentElasticHeadName(md) {
+			// The auxiliary head has no Kueue group, but its uncached presence still holds the slot.
+			group = modelDeploymentReplicaGroupName(md, role, 0)
+		}
+		if group != "" {
 			taken.Insert(group)
 		}
 	}

@@ -24,7 +24,6 @@ import (
 	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
-	workerapi "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
@@ -80,16 +79,11 @@ func newElasticConvergenceFixture(t *testing.T) *elasticConvergenceFixture {
 	md.Spec.Engine.Version = "0.29.0"
 	md.Spec.Roles[0].Replicas = 1
 	md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(1, resource.DecimalSI)}
-	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2, HeadInstanceType: "cpu"}
-	cpu := newRenderInstanceType(func(it *workerapi.InstanceType) {
-		it.Name = "cpu"
-		it.Spec.Acceleratable = false
-		it.Status.Entrance = "cpu-queue"
-	})
+	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
 	md.ResourceVersion = "1"
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
 		WithObjectTracker(clitesting.NewObjectTracker(scheme.Scheme, scheme.Codecs.UniversalDecoder())).
-		WithObjects(md, newRenderInstanceType(), cpu).
+		WithObjects(md, newRenderInstanceType()).
 		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.Devices{}).
 		WithIndex(&core.Pod{}, "spec.nodeName", func(obj ctrlcli.Object) []string { return []string{obj.(*core.Pod).Spec.NodeName} }).
 		WithIndex(&core.Pod{}, modelDeploymentDrainIndexPodUID, func(obj ctrlcli.Object) []string { return []string{string(obj.GetUID())} }).Build()

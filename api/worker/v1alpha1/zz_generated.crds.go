@@ -4824,19 +4824,12 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															XListType: ptr.To[string]("atomic"),
 														},
 														"elasticEp": {
-															Description: "ElasticEP opts this role into the managed elastic-EP profile: the operator then renders\none dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head\nand one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role\nwithout it renders exactly as it did before this field existed, and a profile that is\nturned on and off again describes a different deployment, so the field's presence and\nHeadInstanceType are frozen at creation. Width is editable for scale-up; scale-down is\nrefused by admission in this release.\nThe profile admits exactly one such role per deployment, running the vLLM engine as a\nsingle Server role of one instance of one Pod. Every member -- the reserved API/DP-master\nand every Ray-only worker -- takes a complete TP group declared through ExtraArgs.\nAll GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP.\nThe head uses HeadInstanceType's own queue and never counts toward Width.",
+															Description: "ElasticEP opts this role into the managed elastic-EP profile: the operator then renders\none dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head\nand one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role\nwithout it renders exactly as it did before this field existed, and a profile that is\nturned on and off again describes a different deployment. The field's presence is frozen\nat creation. Width is editable for scale-up; scale-down is\nrefused by admission in this release.\nThe profile admits exactly one such role per deployment, running the vLLM engine as a\nsingle Server role of one instance of one Pod. Every member -- the reserved API/DP-master\nand every Ray-only worker -- takes a complete TP group declared through ExtraArgs.\nAll GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP.\nThe auxiliary head requests no container resources and never counts toward Width.",
 															Type:        "object",
 															Required: []string{
 																"width",
-																"headInstanceType",
 															},
 															Properties: map[string]v1.JSONSchemaProps{
-																"headInstanceType": {
-																	Description: "HeadInstanceType is the name of the CPU-only InstanceType the Ray control-plane head\nruns against. The head is admitted as its own CPU-accounted workload on that type's\nqueue: it takes no accelerator, joins no GPU queue at zero charge, and is not a width\nmember.",
-																	Type:        "string",
-																	MaxLength:   ptr.To[int64](253),
-																	MinLength:   ptr.To[int64](1),
-																},
 																"width": {
 																	Description: "Width is the total number of GPU engines in the elastic collective, INCLUDING the\nreserved API/DP-master member; width-1 of them are Ray-only workers. It is the total\nengine world the engine is told to run, not a Pod count and not a rank mapping: which\nmember holds which rank is the engine's own runtime fact and is never implied by this\nnumber.",
 																	Type:        "integer",

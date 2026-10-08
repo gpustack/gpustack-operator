@@ -557,15 +557,15 @@ type ModelDeploymentRole struct {
 	// one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head
 	// and one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role
 	// without it renders exactly as it did before this field existed, and a profile that is
-	// turned on and off again describes a different deployment, so the field's presence and
-	// HeadInstanceType are frozen at creation. Width is editable for scale-up; scale-down is
+	// turned on and off again describes a different deployment. The field's presence is frozen
+	// at creation. Width is editable for scale-up; scale-down is
 	// refused by admission in this release.
 	//
 	// The profile admits exactly one such role per deployment, running the vLLM engine as a
 	// single Server role of one instance of one Pod. Every member -- the reserved API/DP-master
 	// and every Ray-only worker -- takes a complete TP group declared through ExtraArgs.
 	// All GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP.
-	// The head uses HeadInstanceType's own queue and never counts toward Width.
+	// The auxiliary head requests no container resources and never counts toward Width.
 	//
 	// +optional
 	ElasticEP *ModelDeploymentRoleElasticEP `json:"elasticEp,omitempty" protobuf:"bytes,18,opt,name=elasticEp"`
@@ -576,7 +576,8 @@ type ModelDeploymentRole struct {
 // Width is the only mutable field: it answers how large the collective currently should be,
 // which is a running-state question. This release accepts increases and unchanged values;
 // admission refuses a decrease until Elastic EP scale-down support is complete.
-// Profile presence, HeadInstanceType and the TP degree in ExtraArgs are fixed at creation.
+// The role cannot enable or disable this profile after creation.
+// Its tensor parallel size comes from ExtraArgs and cannot change after creation.
 type ModelDeploymentRoleElasticEP struct {
 	// Width is the total number of GPU engines in the elastic collective, INCLUDING the
 	// reserved API/DP-master member; width-1 of them are Ray-only workers. It is the total
@@ -587,16 +588,6 @@ type ModelDeploymentRoleElasticEP struct {
 	// +k8s:validation:minimum=2
 	// +k8s:validation:maximum=64
 	Width int32 `json:"width" protobuf:"varint,1,name=width"`
-
-	// HeadInstanceType is the name of the CPU-only InstanceType the Ray control-plane head
-	// runs against. The head is admitted as its own CPU-accounted workload on that type's
-	// queue: it takes no accelerator, joins no GPU queue at zero charge, and is not a width
-	// member.
-	//
-	// +required
-	// +k8s:validation:minLength=1
-	// +k8s:validation:maxLength=253
-	HeadInstanceType string `json:"headInstanceType" protobuf:"bytes,2,name=headInstanceType"`
 }
 
 // ModelDeploymentRoleTopology is the topology request for one independent replica group.

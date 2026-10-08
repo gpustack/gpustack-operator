@@ -39,7 +39,7 @@ func allocationDeployment() *workercore.ModelDeployment {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Generation = allocationGeneration
 		md.Spec.KVCache = nil
-		md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 4, HeadInstanceType: "cpu"}
+		md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 4}
 	})
 	md.UID = allocationDeployUID
 
