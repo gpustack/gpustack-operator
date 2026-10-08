@@ -235,6 +235,28 @@ number of deployments present says nothing about routing.
    count that never moved points at members that have not joined.
 4. On a hold after an ambiguous send, do not resend. Confirm the engine's own reported width first.
 
+### Ray logs
+
+The Ray head and every GPU member send Ray system logs to container stdout and stderr by default.
+Read them with `kubectl logs` on each Pod. The default level is `info`.
+Set these variables in the elastic role's `env`; the operator also passes them to the CPU head:
+
+| Variable | Default | Scope |
+|---|---|---|
+| `RAY_LOG_TO_STDERR` | `1` | Ray system logs. Set `0` to keep Ray's log files instead. |
+| `RAY_LOGGER_LEVEL` | `info` | Ray Python components, including the dashboard and runtime environment agents. |
+| `RAY_BACKEND_LOG_LEVEL` | `info` | Ray C++ components, including GCS, raylet and the core worker. |
+| `RAY_DEDUP_LOGS` | Ray's default | Set `0` to disable deduplication of logs forwarded to a driver. |
+
+For more detail, set both level variables to `debug`. Ray's Python components accept
+`debug`, `info`, `warning`, `error` and `critical`. The C++ components accept
+`trace`, `debug`, `info`, `warning`, `error` and `fatal`.
+
+Use `VLLM_LOGGING_LEVEL` separately for vLLM logs; it stays on the GPU members.
+
+Set the variables before creating the deployment. Changes apply when new Pods are created.
+The operator retains existing elastic Pods, so an env edit does not change their running loggers.
+
 ## Limits
 
 - The engine must be a vLLM 0.29.0 image with a full Ray installation supplied by you.

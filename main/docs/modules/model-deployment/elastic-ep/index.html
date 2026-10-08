@@ -745,6 +745,47 @@ points at the engine. An admitted count that never moved points at quota or sche
 count that never moved points at members that have not joined.</li>
 <li>On a hold after an ambiguous send, do not resend. Confirm the engine&rsquo;s own reported width first.</li>
 </ol>
+<h3 id="ray-logs">Ray logs</h3>
+<p>The Ray head and every GPU member send Ray system logs to container stdout and stderr by default.
+Read them with <code>kubectl logs</code> on each Pod. The default level is <code>info</code>.
+Set these variables in the elastic role&rsquo;s <code>env</code>; the operator also passes them to the CPU head:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Variable</th>
+          <th>Default</th>
+          <th>Scope</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>RAY_LOG_TO_STDERR</code></td>
+          <td><code>1</code></td>
+          <td>Ray system logs. Set <code>0</code> to keep Ray&rsquo;s log files instead.</td>
+      </tr>
+      <tr>
+          <td><code>RAY_LOGGER_LEVEL</code></td>
+          <td><code>info</code></td>
+          <td>Ray Python components, including the dashboard and runtime environment agents.</td>
+      </tr>
+      <tr>
+          <td><code>RAY_BACKEND_LOG_LEVEL</code></td>
+          <td><code>info</code></td>
+          <td>Ray C++ components, including GCS, raylet and the core worker.</td>
+      </tr>
+      <tr>
+          <td><code>RAY_DEDUP_LOGS</code></td>
+          <td>Ray&rsquo;s default</td>
+          <td>Set <code>0</code> to disable deduplication of logs forwarded to a driver.</td>
+      </tr>
+  </tbody>
+</table>
+<p>For more detail, set both level variables to <code>debug</code>. Ray&rsquo;s Python components accept
+<code>debug</code>, <code>info</code>, <code>warning</code>, <code>error</code> and <code>critical</code>. The C++ components accept
+<code>trace</code>, <code>debug</code>, <code>info</code>, <code>warning</code>, <code>error</code> and <code>fatal</code>.</p>
+<p>Use <code>VLLM_LOGGING_LEVEL</code> separately for vLLM logs; it stays on the GPU members.</p>
+<p>Set the variables before creating the deployment. Changes apply when new Pods are created.
+The operator retains existing elastic Pods, so an env edit does not change their running loggers.</p>
 <h2 id="limits">Limits</h2>
 <ul>
 <li>The engine must be a vLLM 0.29.0 image with a full Ray installation supplied by you.</li>
@@ -780,7 +821,7 @@ change.</li>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/79cf90420b8c5f286b4e0704fe219098150e5b33/docs/modules/model-deployment/elastic-ep.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/3223fa4d693671daa1e9a02a4099aab6bff0fce2/docs/modules/model-deployment/elastic-ep.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/elastic-ep.md">Edit this page</a>
             
@@ -799,7 +840,11 @@ change.</li>
     <li><a href="#what-you-see-while-it-runs">What you see while it runs</a></li>
     <li><a href="#when-a-resize-holds">When a resize holds</a></li>
     <li><a href="#interruption-scope">Interruption scope</a></li>
-    <li><a href="#diagnosis">Diagnosis</a></li>
+    <li><a href="#diagnosis">Diagnosis</a>
+      <ul>
+        <li><a href="#ray-logs">Ray logs</a></li>
+      </ul>
+    </li>
     <li><a href="#limits">Limits</a></li>
   </ul>
 </nav>
