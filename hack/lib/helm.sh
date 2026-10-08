@@ -333,7 +333,7 @@ function gpustack::helm::verify_images() {
   # Every assertion spans the whole render, the chart's own workloads and its subcharts'
   # alike: one global knob is supposed to mean one behaviour everywhere, so a check that
   # exempted the parent would be conceding the thing worth proving.
-  local failed=0 rendered
+  local failed=0 rendered hub_value
   rendered="$(gpustack::helm::verify_images::render "${target}" \
     --set "global.imageRegistry=${registry}" \
     --set "global.imageNamespace=${namespace}" \
@@ -346,6 +346,33 @@ function gpustack::helm::verify_images() {
     "imagePullPolicy" exact "${pull_policy}" "${rendered}" || failed=1
   gpustack::helm::verify_images::pull_secrets \
     "${pull_secret}" "${rendered}" || failed=1
+
+  # Enable Topograph so the alias also covers optional subcharts.
+  for hub_value in "${registry}" "${registry}/"; do
+    rendered="$(gpustack::helm::verify_images::render "${target}" \
+      --set topograph.enabled=true \
+      --set topograph.provider.name=dra \
+      --set "global.hub=${hub_value}" \
+      --set "global.imageNamespace=${namespace}")"
+    gpustack::helm::verify_images::field \
+      "image" prefix "${registry}/${namespace}/" "${rendered}" || failed=1
+    gpustack::helm::verify_images::field \
+      "GPUSTACK_CONTAINER_REGISTRY" exact "${registry}" \
+      "$(sed -n '/name: GPUSTACK_CONTAINER_REGISTRY/{n;s/^[[:space:]]*value:/GPUSTACK_CONTAINER_REGISTRY:/;p;}' <<<"${rendered}")" || failed=1
+  done
+
+  # An explicit registry takes precedence over the alias.
+  rendered="$(gpustack::helm::verify_images::render "${target}" \
+    --set topograph.enabled=true \
+    --set topograph.provider.name=dra \
+    --set "global.hub=ignored.local" \
+    --set "global.imageRegistry=${registry}/" \
+    --set "global.imageNamespace=${namespace}")"
+  gpustack::helm::verify_images::field \
+    "image" prefix "${registry}/${namespace}/" "${rendered}" || failed=1
+  gpustack::helm::verify_images::field \
+    "GPUSTACK_CONTAINER_REGISTRY" exact "${registry}" \
+    "$(sed -n '/name: GPUSTACK_CONTAINER_REGISTRY/{n;s/^[[:space:]]*value:/GPUSTACK_CONTAINER_REGISTRY:/;p;}' <<<"${rendered}")" || failed=1
 
   return "${failed}"
 }

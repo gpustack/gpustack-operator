@@ -123,7 +123,7 @@ spec:
             # installs at runtime (Kueue/NFD/CSI/device-manager) share the same registry,
             # namespace, pull secrets and pull policy.
             - name: GPUSTACK_CONTAINER_REGISTRY
-              value: {{ .Values.global.imageRegistry | quote }}
+              value: {{ coalesce .Values.global.imageRegistry .Values.global.hub | default "" | trimSuffix "/" | quote }}
             - name: GPUSTACK_CONTAINER_NAMESPACE
               value: {{ .Values.global.imageNamespace | quote }}
             - name: GPUSTACK_IMAGE_PULL_SECRETS
