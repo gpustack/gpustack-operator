@@ -1,7 +1,7 @@
 # Spec: ModelDeployment Role Configuration Mutability
 
-Status: Building
-Blocked on: implementation, local validation, and user-arranged runtime testing before PR creation.
+Status: Built
+Blocked on: user-arranged runtime testing before PR creation.
 Type: Feature
 
 Supersedes: the size-freeze rule in "Role Replica Admission Unit", Summary and Motivation / Goals 7.
@@ -355,7 +355,7 @@ Checkpoint: validate the replica reader and its negative controls before changin
 
 Checkpoint: T2 and T3 must both pass before the mutable contract is ready for use.
 
-- [ ] **T4 · Integrated validation and generated contract**
+- [x] **T4 · Integrated validation and generated contract**
       Blocked by: T2, T3
       Owns: `api/**/zz_generated.*`, `api/**/generated.pb.go`, `api/**/generated.proto`, `pkg/worker/webhooks/worker/zz_generated.*`, `pkg/kubeclients/**`, `specs/2026-10-08-model-deployment-role-mutability.md`
       Gate: review
@@ -380,8 +380,8 @@ Use API-reader/client separation and intercepted writes for lost-response tests.
 
 #### Unit tests
 
-Coverage baselines have not been measured. Collect package coverage during implementation.
-Do not claim a coverage percentage from the compile-only environment check.
+Measured package coverage appears under Local validation.
+No pre-change baseline was measured.
 
 - `api/worker/v1alpha1`: size defaults and bounds; unchanged role list-map identity.
 - `pkg/worker/webhooks/worker`: ordinary four-field edits, role reorder, invalid identity/kind, resource modes, command transitions, changed interface/transport dependencies, drift escape hatches, and Elastic restrictions.
@@ -409,6 +409,29 @@ Use fake-client reconciliation sequences for these local integration checks:
 - Compare complete HTTP Service selectors against deployed answering members, including the first edit, mixed modes, qualification revocation, and Unknown observations.
 
 These tests exercise reconciliation and objects. They do not establish runtime engine or Kueue behavior.
+
+#### Local validation
+
+Checks passed on implementation commit `dc81b055f77cd07ebde0382e531dacba442d0a51`.
+
+- `make test`: all 99 packages with tests passed, with race detection, shuffled order, and coverage.
+- `make lint`: passed after all writers settled.
+- `make lint docs`: passed, including site links and module routing.
+- `make generate`: two passes passed on the exact implementation commit in a detached generation worktree.
+  All 1,468 generated file contents matched between passes and matched the implementation worktree.
+  No artifact drift remained after the final source lint.
+- `make build`: passed for the host target, darwin/arm64, with CGO enabled and goccy/netgo tags.
+- `git diff --check`: passed.
+
+Measured coverage: controller 84.2%; webhook 90.2%; API storage package 4.9%; repository total 25.5%.
+The repository aggregate includes generated code. No pre-change baseline supports a coverage comparison.
+
+Standards review corrections aligned Service reads and status documentation with their implemented contracts.
+Spec review corrections passed regressions for legacy Pods, first-edit routing, and peer DNS during cache lag.
+HTTP routing tests assert complete selectors against both qualified and revoked members.
+
+These results establish local object behavior and build validity.
+Runtime Kueue, engine, network, and inference acceptance remains pending.
 
 #### e2e tests
 
