@@ -3796,6 +3796,14 @@ message ModelDeploymentRole {
   // +listType=atomic
   repeated ModelDeploymentAdditionalVolume additionalVolumes = 13;
 
+  // ShmSize limits the memory-backed /dev/shm volume in each role Pod. It must be positive.
+  // Omission renders 16Gi. An explicit /dev/shm mount in AdditionalVolumes takes precedence.
+  // Used shared memory counts toward the container's memory limit; this is not a reservation.
+  // Existing elastic members keep their mounts; new and replacement Pods use the current value.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity shmSize = 19;
+
   // Command replaces the whole argv, which is the TAKE-OVER tier: the user owns the whole
   // command line, the operator synthesizes no engine argument and no client environment, the
   // role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command;

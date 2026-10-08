@@ -1741,6 +1741,36 @@ func TestValidateModelDeploymentRoleParallelWidth_DoesNotRefuseTwice(t *testing.
 // THE SOURCELESS CASE IS PAIRED WITH ONE PER SOURCE, because the rule is a three-way disjunction: an
 // implementation testing only configMap accepts the same table, and each accepting case is what says
 // the other two sources still satisfy it.
+func TestValidateModelDeploymentRoleShmSize(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		size    string
+		refused bool
+	}{
+		{name: "omitted"},
+		{name: "binary", size: "16Gi"},
+		{name: "decimal", size: "500M"},
+		{name: "zero", size: "0", refused: true},
+		{name: "negative", size: "-1Gi", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+			if tc.size != "" {
+				md.Spec.Roles[0].ShmSize = ptr.To(resource.MustParse(tc.size))
+			}
+			errs := validateModelDeploymentRoles(md)
+			if !tc.refused {
+				require.Empty(t, errs)
+
+				return
+			}
+			require.Len(t, errs, 1)
+			require.Equal(t, "spec.roles[0].shmSize", errs[0].Field)
+			require.Contains(t, errs[0].Detail, "must be greater than zero")
+		})
+	}
+}
+
 func TestValidateModelDeploymentRoleAdditionalVolumes(t *testing.T) {
 	volumes := func(avs ...workercore.ModelDeploymentAdditionalVolume) *workercore.ModelDeployment {
 		return modelDeployment(workercore.ModelDeploymentEngineVLLM,

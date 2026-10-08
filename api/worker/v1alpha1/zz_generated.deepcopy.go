@@ -2679,6 +2679,11 @@ func (in *ModelDeploymentRole) DeepCopyInto(out *ModelDeploymentRole) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.ShmSize != nil {
+		in, out := &in.ShmSize, &out.ShmSize
+		x := (*in).DeepCopy()
+		*out = &x
+	}
 	if in.Command != nil {
 		in, out := &in.Command, &out.Command
 		*out = make([]string, len(*in))

@@ -468,6 +468,14 @@ type ModelDeploymentRole struct {
 	// +listType=atomic
 	AdditionalVolumes []ModelDeploymentAdditionalVolume `json:"additionalVolumes,omitempty" protobuf:"bytes,13,rep,name=additionalVolumes"` // nolint: lll
 
+	// ShmSize limits the memory-backed /dev/shm volume in each role Pod. It must be positive.
+	// Omission renders 16Gi. An explicit /dev/shm mount in AdditionalVolumes takes precedence.
+	// Used shared memory counts toward the container's memory limit; this is not a reservation.
+	// Existing elastic members keep their mounts; new and replacement Pods use the current value.
+	//
+	// +optional
+	ShmSize *resource.Quantity `json:"shmSize,omitempty" protobuf:"bytes,19,opt,name=shmSize"`
+
 	// Command replaces the whole argv, which is the TAKE-OVER tier: the user owns the whole
 	// command line, the operator synthesizes no engine argument and no client environment, the
 	// role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command;

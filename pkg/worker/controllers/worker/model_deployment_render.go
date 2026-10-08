@@ -490,6 +490,19 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		vols = append(vols, in.Connector.Volumes...)
 		mounts = append(mounts, in.Connector.VolumeMounts...)
 	}
+	if !slices.ContainsFunc(mounts, func(m core.VolumeMount) bool { return m.MountPath == "/dev/shm" }) {
+		size := resource.MustParse("16Gi")
+		if role.ShmSize != nil {
+			size = role.ShmSize.DeepCopy()
+		}
+		vols = append(vols, core.Volume{
+			Name: "model-shm",
+			VolumeSource: core.VolumeSource{EmptyDir: &core.EmptyDirVolumeSource{
+				Medium: core.StorageMediumMemory, SizeLimit: &size,
+			}},
+		})
+		mounts = append(mounts, core.VolumeMount{Name: "model-shm", MountPath: "/dev/shm"})
+	}
 
 	probePath := modelDeploymentProbePath
 	probeScheme := scheme

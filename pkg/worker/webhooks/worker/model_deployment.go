@@ -1639,6 +1639,9 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 	rolesPath := field.NewPath("spec", "roles")
 	for i := range md.Spec.Roles {
 		role, rolePath := &md.Spec.Roles[i], rolesPath.Index(i)
+		if role.ShmSize != nil && role.ShmSize.Sign() <= 0 {
+			errs = append(errs, field.Invalid(rolePath.Child("shmSize"), role.ShmSize.String(), "must be greater than zero"))
+		}
 
 		errs = append(errs, validateModelDeploymentRoleExtraArgs(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleParallelWidth(md.Spec.Engine.Name, role, rolePath)...)

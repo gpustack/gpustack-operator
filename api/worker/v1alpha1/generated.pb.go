@@ -6299,6 +6299,20 @@ func (m *ModelDeploymentRole) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.ShmSize != nil {
+		{
+			size, err := m.ShmSize.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x9a
+	}
 	if m.ElasticEP != nil {
 		{
 			size, err := m.ElasticEP.MarshalToSizedBuffer(dAtA[:i])
@@ -11418,6 +11432,10 @@ func (m *ModelDeploymentRole) Size() (n int) {
 		l = m.ElasticEP.Size()
 		n += 2 + l + sovGenerated(uint64(l))
 	}
+	if m.ShmSize != nil {
+		l = m.ShmSize.Size()
+		n += 2 + l + sovGenerated(uint64(l))
+	}
 	return n
 }
 
@@ -14117,6 +14135,7 @@ func (this *ModelDeploymentRole) String() string {
 		`Topology:` + strings.Replace(this.Topology.String(), "ModelDeploymentRoleTopology", "ModelDeploymentRoleTopology", 1) + `,`,
 		`TerminationGracePeriodSeconds:` + valueToStringGenerated(this.TerminationGracePeriodSeconds) + `,`,
 		`ElasticEP:` + strings.Replace(this.ElasticEP.String(), "ModelDeploymentRoleElasticEP", "ModelDeploymentRoleElasticEP", 1) + `,`,
+		`ShmSize:` + strings.Replace(fmt.Sprintf("%v", this.ShmSize), "Quantity", "resource.Quantity", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -34544,6 +34563,42 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 				m.ElasticEP = &ModelDeploymentRoleElasticEP{}
 			}
 			if err := m.ElasticEP.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 19:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ShmSize", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.ShmSize == nil {
+				m.ShmSize = &resource.Quantity{}
+			}
+			if err := m.ShmSize.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

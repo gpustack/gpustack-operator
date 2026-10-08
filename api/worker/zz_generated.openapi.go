@@ -9964,6 +9964,12 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							},
 						},
 					},
+					"shmSize": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ShmSize limits the memory-backed /dev/shm volume in each role Pod. It must be positive. Omission renders 16Gi. An explicit /dev/shm mount in AdditionalVolumes takes precedence. Used shared memory counts toward the container's memory limit; this is not a reservation. Existing elastic members keep their mounts; new and replacement Pods use the current value.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
 					"command": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
@@ -10054,7 +10060,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName(), v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentPort{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleElasticEP{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleTopology{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName(), v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentPort{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleElasticEP{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleTopology{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
 	}
 }
 
