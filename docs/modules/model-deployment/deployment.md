@@ -492,13 +492,29 @@ carries consequences the Pod fields do not.
 
 **One unresolved replacement per role.** A replacement's fresh admission gates deleting the next
 old replica, so a role turns over one replica at a time no matter how many of its fields one edit
-moved: a patch changing `size`, `resources` and `command` together is one rollout, not three.
+moved: a patch changing `size`, `resources` and `command` together is one rollout, not three. The
+role remembers which replica it is replacing until that replacement is admitted, so an operator
+restart resumes the same rollout instead of selecting a second replica.
+
+**A broken replica does not jump the queue.** An old replica that loses a member while its role's
+replacement is unresolved waits behind that replacement, then is rebuilt whole before another
+healthy old replica is rolled. A replacement that itself loses a member is recovered in its own
+slot. Recovery never mixes members: an interrupted replacement is completed with its own
+configuration, and an old survivor is never filled with new-configuration members.
 
 **The old replicas run the configuration they were created with until each is deleted for
 replacement.** Nothing reshapes a running instance: an instance of two Pods keeps its two members,
 its leader address and its rank layout until it leaves. Cache injection, the unmanaged marker and
 retirement read the deployed Pods, so a role part-way through a `command` edit serves through
 replicas in both modes, and what status claims is what is actually deployed.
+
+A role moving between a managed command and a takeover keeps each running Pod's own mode. A managed
+replica keeps its qualification rules. Once qualification is active, an Unknown observation keeps
+existing eligibility without granting new eligibility; a definite fault still withdraws it. A role
+whose qualification was never activated keeps its legacy readiness rule.
+
+A takeover replica keeps its legacy Service membership and stays `unmanaged: true`. Routing
+membership does not establish engine health or cache qualification.
 
 **Mixed shapes can appear across instances, never within one.** A replacement is created only
 after the instance it replaces has left — members and Workload — so no ordinal holds old and
@@ -507,11 +523,18 @@ already replaced onto the new one; above `size: 1` each shape's leader is picked
 member-index label, so a leader of each shape can answer the same Service during that window.
 
 Peer DNS is per instance — one headless Service per replica — so the old and the new members
-resolve their own shape's peers and never each other's.
+resolve their own shape's peers and never each other's. Each instance keeps its peer Service until
+its members have left, so a terminating replica's members can still resolve one another. Each
+deployed shape also answers its own way while both serve: a leader-served replica through its
+leader, an External DP replica through its rank-carrying members.
 
 **A one-replica role has a gap.** Its only instance must leave before its replacement is admitted,
-so serving stops for the length of that swap. A multi-replica role never falls below its surviving
-count.
+so serving stops until the replacement is ready. The replacement's Kueue admission gates the next
+old replica's departure. Admission does not wait for engine readiness, so the next old replica may
+leave while the previous replacement is still starting.
+
+A multi-replica role can temporarily have no serving capacity. Replacement does not guarantee
+uninterrupted inference.
 
 **Siblings are untouched unless the edit reaches them.** An edit to one role's shape never rewrites
 another role's groups: their Workloads, admission, member names and DNS stay as they are.

@@ -169,6 +169,7 @@ As an operator, I want documented shared effects and constraints, so that I can 
 - Use observed group metadata and ownership to establish deployed facts.
 - Fresh admission can wait for capacity. Keep additional healthy replicas while it waits.
 - A single-replica role can lose capacity during Recreate.
+- Admission advances replacement before engine readiness. Multiple replicas do not guarantee continuous serving capacity.
 - Changed ports, commands, hardware, or shared transfer configuration can disrupt requests.
 - An unchanged sibling Pod does not guarantee complete inference while its peer is unavailable.
 - Elastic EP keeps its existing behavior outside the new replacement contract.
@@ -295,10 +296,21 @@ Clear the active slot only after complete current members receive fresh Workload
 A newer configuration can replace an obsolete queued configuration in the same active slot.
 It does not authorize another healthy old replica's deletion.
 Real membership failures remain repairable without spending other healthy capacity.
+A broken old replica can wait for the role's active replacement to receive admission.
+Then replace the broken replica as a whole before selecting another healthy old replica.
+Do not add new-configuration members beside surviving old-configuration members, even when their sizes match.
+An interrupted create can fill missing members only within its current replacement configuration.
+Record new member UIDs during creation, before the next reconciliation observation.
+If the active replacement loses members, recover that same slot as a whole.
+Retain its captured Workload identity when all members disappear or a cleanup response is lost.
 Replica-count edits cancel or finish only the affected slot after cleanup.
 
 Qualification distinguishes an outdated replica from a selected replacement.
 Keep old healthy eligibility until selection.
+During command-mode changes, preserve each deployed mode's routing rules.
+Managed replicas keep engine qualification. Takeover replicas keep legacy Service membership and remain Unmanaged.
+If a shared selector needs private routing labels, write those labels before switching the Service.
+Routing membership does not establish engine health or cache qualification.
 Retain peer Services required by actual members, including terminating members.
 Keep leader selection valid while old multi-member and new single-member groups coexist.
 Preserve External DP answering-member selection.
@@ -333,7 +345,7 @@ Checkpoint: validate the replica reader and its negative controls before changin
 
 - [ ] **T3 · Recoverable whole-replica replacement**
       Blocked by: T1
-      Owns: `pkg/worker/controllers/worker/model_deployment*.go`
+      Owns: `pkg/worker/controllers/worker/model_deployment*.go`, supporting `go.mod` and `go.sum` updates through the coordinator
       Gate: review
       Acceptance: Persist and recover one unresolved slot per affected role. Verify vacancy and old Workload absence before creation. Wait for fresh admission before another healthy deletion. Replace obsolete queued configuration within the same slot. Preserve actual member-loss recovery, untouched roles, mixed-shape Services, peer DNS, truthful status, and joint admission. Cover lost responses, restarts, partial deletion, repeated edits, and concurrent replica-count changes with observable object assertions.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -tags 'goccy netgo' -race -count=1 ./pkg/worker/controllers/worker`
@@ -356,6 +368,7 @@ Checkpoint: T2 and T3 must both pass before the mutable contract is ready for us
 Add an honest Kueue composition fixture for new rollout tests.
 It waits for the declared member total and consistent scheduling inputs.
 Reuse the pinned Kueue group constructor when building PodSets.
+Keep its required API dependencies at the versions selected by the existing Kueue pin.
 Preserve role-hash grouping; member commands can differ within one role.
 Give every Pod and Workload a distinct UID.
 Keep existing Workload ownership and finalizers visible.
@@ -387,6 +400,8 @@ Use fake-client reconciliation sequences for these local integration checks:
 - Preserve unrelated P/D child UIDs, selectors, endpoints, and DNS.
 - Replace both roles when command-supplied shared degrees alter both renders.
 - Recover genuine member loss during an active configuration replacement.
+- Recover all active replacement members disappearing before the next pass without losing Workload cleanup authority.
+- Compare complete HTTP Service selectors against deployed answering members, including mixed modes and Unknown observations.
 
 These tests exercise reconciliation and objects. They do not establish runtime engine or Kueue behavior.
 
