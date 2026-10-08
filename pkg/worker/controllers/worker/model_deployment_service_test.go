@@ -119,7 +119,7 @@ func TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide(t *testing.T) 
 
 func TestRenderModelDeploymentService_KVEventPorts(t *testing.T) {
 	md := routedModelDeployment()
-	services := renderModelDeploymentServices(md, nil)
+	services := renderModelDeploymentServices(md, nil, nil)
 	require.Len(t, services, 3)
 
 	portsByName := func(service *core.Service) map[string]int32 {
@@ -236,7 +236,7 @@ func TestModelDeploymentService_SurvivesAScale(t *testing.T) {
 // replica, and must not carry the entrance label, which a spec update can move.
 func TestRenderModelDeploymentService_SelectsExactlyTheRolesPods(t *testing.T) {
 	md := newRenderDeployment()
-	svc := renderModelDeploymentService(md)
+	svc := renderModelDeploymentService(md, nil)
 	pod := renderOne(t, md, newRenderInstanceType())
 	// The eligibility term is written at runtime by the reconciler, so a member the Service may
 	// select is one that carries it; the rendered template never does.
@@ -259,7 +259,7 @@ func TestRenderModelDeploymentServices_AboveOneMemberAddsAHeadlessServicePerRepl
 		md.Spec.Roles[0].Replicas = 3
 	})
 
-	svcs := renderModelDeploymentServices(md, nil)
+	svcs := renderModelDeploymentServices(md, nil, nil)
 	names := make([]string, 0, len(svcs))
 	byName := make(map[string]*core.Service, len(svcs))
 	for _, svc := range svcs {
@@ -330,7 +330,7 @@ func TestRenderModelDeploymentServices_SelectEligibleEndpoints(t *testing.T) {
 				require.NotEmpty(t, qs)
 				observeModelDeploymentEndpointEligibility(tc.md, qs)
 			}
-			svcs := renderModelDeploymentServices(tc.md, nil)
+			svcs := renderModelDeploymentServices(tc.md, nil, nil)
 			require.NotEmpty(t, svcs)
 
 			ordinary := 0
@@ -359,7 +359,7 @@ func TestRenderModelDeploymentServices_SelectEligibleEndpoints(t *testing.T) {
 func TestRenderModelDeploymentServices_AtSizeOneIsUnchanged(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 })
 
-	svcs := renderModelDeploymentServices(md, nil)
+	svcs := renderModelDeploymentServices(md, nil, nil)
 	names := make([]string, 0, len(svcs))
 	for _, svc := range svcs {
 		names = append(names, svc.Name)
@@ -416,7 +416,7 @@ func TestRenderModelDeploymentService_Port(t *testing.T) {
 				md.Spec.Roles[0].Ports = tc.ports
 			})
 
-			svc := renderModelDeploymentService(md)
+			svc := renderModelDeploymentService(md, nil)
 			require.Len(t, svc.Spec.Ports, 1)
 			assert.Equal(t, tc.wantPort, svc.Spec.Ports[0].Port)
 			assert.Equal(t, tc.wantPort, svc.Spec.Ports[0].TargetPort.IntVal)
@@ -544,7 +544,7 @@ func TestRenderModelDeploymentService_TargetFollowsTheEnginesPort(t *testing.T) 
 			pod, err := renderModelDeploymentPod(context.Background(), in)
 			require.NoError(t, err)
 
-			svcs := renderModelDeploymentServices(md, nil)
+			svcs := renderModelDeploymentServices(md, nil, nil)
 			require.Len(t, svcs, 2)
 			for _, svc := range svcs {
 				require.Len(t, svc.Spec.Ports, 1, svc.Name)
@@ -884,8 +884,8 @@ func TestAlignModelDeploymentService(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment()
-			expected := renderModelDeploymentService(md)
-			actual := renderModelDeploymentService(md)
+			expected := renderModelDeploymentService(md, nil)
+			actual := renderModelDeploymentService(md, nil)
 			if tc.mutate != nil {
 				tc.mutate(actual)
 			}
@@ -960,10 +960,10 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		"replaced command":          takeOver,
 	} {
 		t.Run(name+" renders no narrowing", func(t *testing.T) {
-			front := renderModelDeploymentService(md)
+			front := renderModelDeploymentService(md, nil)
 			_, has := front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
 			assert.False(t, has, "front Service must not narrow a never-activating shape")
-			roleSvc := renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil)
+			roleSvc := renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil, nil, false)
 			_, has = roleSvc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
 			assert.False(t, has, "role Service must not narrow a never-activating shape")
 			published, err := renderModelDeploymentRouterObjects(context.Background(), md,
@@ -988,7 +988,7 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		require.False(t, first[0].Activated(), "setup requires an unavailable first observation")
 		observeModelDeploymentEndpointEligibility(healthy, first)
 		assert.False(t, modelDeploymentEligibilityDecided(healthy), "no activation fact exists yet")
-		front := renderModelDeploymentService(healthy)
+		front := renderModelDeploymentService(healthy, nil)
 		_, has := front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
 		assert.False(t, has, "first enable with an unavailable observation must not narrow")
 
@@ -998,7 +998,7 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		require.True(t, working[0].Activated(), "setup requires an available observation")
 		observeModelDeploymentEndpointEligibility(healthy, working)
 		assert.True(t, modelDeploymentEligibilityDecided(healthy), "a real pass recorded the predicate")
-		front = renderModelDeploymentService(healthy)
+		front = renderModelDeploymentService(healthy, nil)
 		assert.Equal(t, modelDeploymentEndpointEligibleValue,
 			front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible], "activation narrows")
 
@@ -1009,7 +1009,7 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		retained := modelDeploymentEligibilitySelectorActive(healthy, &healthy.Spec.Roles[0],
 			map[string]string{modelDeploymentLabelKeyEndpointEligible: modelDeploymentEndpointEligibleValue}, false)
 		assert.True(t, retained, "an already-narrowed selector survives a quiet pass")
-		fresh := renderModelDeploymentService(healthy)
+		fresh := renderModelDeploymentService(healthy, nil)
 		_, has = fresh.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
 		assert.False(t, has, "a from-scratch render never fabricates the term")
 	})
@@ -1055,11 +1055,12 @@ func TestAdmissionFirstEnableUnknownPreservesExistingRouting(t *testing.T) {
 			require.False(t, qs[0].Activated(), "setup requires unavailable first-enable observation")
 			require.False(t, qs[0].HasFailure(), "setup requires healthy existing members")
 			for i := range pods {
-				require.False(t, modelDeploymentPodEligible(md, &md.Spec.Roles[0], &pods[i], qs[0], true),
+				view := modelDeploymentReplicaView{Members: []*core.Pod{&pods[i]}}
+				require.False(t, modelDeploymentPodEligible(md, &md.Spec.Roles[0], &pods[i], view, qs[0], true),
 					"first enable must not fabricate eligibility")
 			}
 			for _, svc := range []*core.Service{
-				renderModelDeploymentService(md), renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil),
+				renderModelDeploymentService(md, nil), renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil, nil, false),
 			} {
 				_, narrowed := svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
 				assert.False(t, narrowed, "unavailable first-enable observation must preserve Service selection")

@@ -2567,7 +2567,7 @@ func newRetirementReleaseFixture(
 	keeper.Status.Phase = core.PodRunning
 	keeper.Status.PodIP = "10.0.7.2"
 
-	workload := admittedReplicaWorkload(target, true)
+	workload := admittedReplicaWorkload([]*core.Pod{target}, true)
 	cli := newModelDeploymentClient(
 		md, newRenderInstanceType(), target, keeper, router, workload)
 	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*target, *keeper})

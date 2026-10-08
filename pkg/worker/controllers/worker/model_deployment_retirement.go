@@ -955,7 +955,7 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementDrained(
 	// serve no metrics endpoint; reading them would hold the operation on gauges that do not exist.
 	// The set the reservation bound is untouched, so the delete preconditions still cover every
 	// member this operation admitted.
-	answering, reason := r.modelDeploymentRetirementDrainMembers(md, role, plan)
+	answering, reason := r.modelDeploymentRetirementDrainMembers(md, plan)
 	if reason != "" {
 		return reason, false
 	}
@@ -1018,11 +1018,11 @@ type modelDeploymentRetirementCommand struct {
 }
 
 // modelDeploymentRetirementAnsweringShape classifies the replica from what the drain actually holds:
-// the member Pods. The role is an input and not a requirement, and the members decide.
+// the member Pods.
 func modelDeploymentRetirementAnsweringShape(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, members []*core.Pod,
+	md *workercore.ModelDeployment, members []*core.Pod,
 ) (modelDeploymentAnsweringShape, string) {
-	externalDP, size, reason := modelDeploymentRetirementReplicaFacts(md, role, members)
+	externalDP, size, reason := modelDeploymentRetirementReplicaFacts(md, members)
 	if reason != "" {
 		return modelDeploymentAnsweringUnknown, reason
 	}
@@ -1034,7 +1034,7 @@ func modelDeploymentRetirementAnsweringShape(
 // they could not be established. Both are read from the members; a replica no member can answer for
 // is refused rather than answered from the role.
 func modelDeploymentRetirementReplicaFacts(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, members []*core.Pod,
+	md *workercore.ModelDeployment, members []*core.Pod,
 ) (externalDP bool, size int, reason string) {
 	size = len(members)
 	if size == 0 {
@@ -1088,15 +1088,15 @@ func modelDeploymentRetirementMemberExternalDP(
 // report success with a member still running. What the drain reads is a measurement, and a
 // measurement is this function's business alone.
 //
-// THE CLASSIFIER'S OWN REASON IS THE HOLD REASON. A replica whose members disagree, whose role
-// declares a size it does not have, or whose command cannot be read at all, is a different
+// THE CLASSIFIER'S OWN REASON IS THE HOLD REASON. A replica whose members disagree, whose members
+// do not match their declared total, or whose command cannot be read at all, is a different
 // operator problem from one another, and collapsing them into a single "shape could not be
 // established" would leave the reservation naming a symptom with no cause behind it.
 func (r *ModelDeploymentReconciler) modelDeploymentRetirementDrainMembers(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	md *workercore.ModelDeployment,
 	plan *modelDeploymentRetirementPlan,
 ) ([]*core.Pod, string) {
-	shape, reason := modelDeploymentRetirementAnsweringShape(md, role, plan.Target.Members)
+	shape, reason := modelDeploymentRetirementAnsweringShape(md, plan.Target.Members)
 	if reason != "" {
 		return nil, reason
 	}

@@ -347,7 +347,11 @@ func (r *ModelDeploymentReconciler) elasticSetWithdrawn(ctx context.Context, md 
 		}
 	}
 	if withdraw {
-		if err := r.syncModelDeploymentService(ctx, md, true); err != nil {
+		pods, err := r.elasticLiveMembers(ctx, md)
+		if err != nil {
+			return err
+		}
+		if err = r.syncModelDeploymentService(ctx, md, true, pods); err != nil {
 			return err
 		}
 		return r.syncModelDeploymentRouter(ctx, md, true)

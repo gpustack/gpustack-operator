@@ -295,7 +295,7 @@ func modelDeploymentDeployedReplicaExecution(members []*core.Pod) (modelDeployme
 
 // modelDeploymentMemberExecution reads whether this operator built one member's command line, and
 // reports false for a member carrying no engine container to read.
-func modelDeploymentMemberExecution(member *core.Pod) (managed bool, ok bool) {
+func modelDeploymentMemberExecution(member *core.Pod) (managed, ok bool) {
 	if _, found := modelDeploymentDrainContainerOf(member, modelDeploymentMainContainerName); !found {
 		return false, false
 	}

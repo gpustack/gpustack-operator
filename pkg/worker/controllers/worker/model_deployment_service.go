@@ -8,6 +8,7 @@ import (
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
@@ -26,31 +27,81 @@ import (
 // entry read as "not known to be Ascend": the KV event ports are part of the render only where the
 // replicas behind the Service publish, and that decision is the connector's.
 func renderModelDeploymentServices(
-	md *workercore.ModelDeployment, manufacturers map[string]string,
+	md *workercore.ModelDeployment, manufacturers map[string]string, pods []core.Pod,
 ) []*core.Service {
 	svcs := make([]*core.Service, 0, len(md.Spec.Roles)+1)
-	svcs = append(svcs, renderModelDeploymentService(md))
+	svcs = append(svcs, renderModelDeploymentService(md, pods))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		svcs = append(svcs, renderModelDeploymentRoleService(md, role, manufacturers))
+		standing := modelDeploymentReplicaServiceOrdinals(pods, md, role)
+		svcs = append(svcs,
+			renderModelDeploymentRoleService(md, role, manufacturers,
+				modelDeploymentStandingMembers(pods, role, standing),
+				modelDeploymentMixedCommandMode(pods, md, role)))
 
-		// ONE HEADLESS SERVICE PER REPLICA, AND ONLY ABOVE SIZE ONE. It is what publishes the
-		// members' names in DNS, so a replica whose only member has nobody to address needs none --
-		// rendering one anyway would put an object per replica on the cluster for no consumer.
+		// ONE HEADLESS SERVICE PER REPLICA, AND ONLY WHERE A REPLICA HAS PEERS TO ADDRESS. It is
+		// what publishes the members' names in DNS, so a replica whose members are alone needs none
+		// -- rendering one anyway would put an object per replica on the cluster for no consumer.
 		//
 		// They come AFTER the role's own Service in this list, which matters because the caller
 		// garbage collects by comparing this list against what exists: a replica's Service must be
-		// derivable from the spec alone, and a scale-down drops the entries its ordinals no longer
+		// derivable from what will exist, and a scale-down drops the entries its ordinals no longer
 		// reach.
-		if modelDeploymentRoleSize(role) == 1 {
-			continue
+		//
+		// AN ORDINAL GETS ONE WHEN THE DESIRED SIZE SAYS IT WILL HAVE PEERS OR WHILE A MEMBER OF IT
+		// IS STILL RUNNING. A role edited from four members to one leaves the four-member replica
+		// serving while its replacement is built, and deleting its Service at that moment takes the
+		// peer records out from under a running collective: the members cannot resolve each other,
+		// and a collective that cannot resolve its peers does not fail visibly -- it hangs. So the
+		// retention is by observed membership and ends when the last such member has gone, one pass
+		// after the last departure.
+		ordinals := standing
+		for ordinal := range int(role.Replicas) {
+			if modelDeploymentRoleSize(role) == 1 {
+				break
+			}
+			ordinals[ordinal] = true
 		}
 		for ordinal := range int(role.Replicas) {
+			if !ordinals[ordinal] {
+				continue
+			}
 			svcs = append(svcs, renderModelDeploymentReplicaService(md, role, ordinal))
 		}
 	}
 
 	return svcs
+}
+
+// modelDeploymentReplicaServiceOrdinals returns the ordinals whose running members still need peer
+// records, whether or not the desired size would render them.
+//
+// A TERMINATING MEMBER COUNTS. The Service publishes unready addresses precisely so a member can
+// find its peers before it is ready, and deleting the record while a departing member still runs
+// is the same loss one instant later.
+//
+// THE EVIDENCE IS THE GROUP TOTAL THE MEMBER CARRIES, not the member index: the index is written at
+// every size, so its presence says a Pod was rendered, not that it has peers.
+func modelDeploymentReplicaServiceOrdinals(
+	pods []core.Pod, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) map[int]bool {
+	ordinals := make(map[int]bool)
+	for i := range pods {
+		pod := &pods[i]
+		if !modelDeploymentOwns(pod, md) || modelDeploymentPodRole(pod) != role.Name {
+			continue
+		}
+		total, err := strconvx.Atoi[int](pod.Annotations[kueuepodconst.GroupTotalCountAnnotation])
+		if err != nil || total <= 1 {
+			// A replica of one member has nobody to address.
+			continue
+		}
+		if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
+			ordinals[ordinal] = true
+		}
+	}
+
+	return ordinals
 }
 
 // renderModelDeploymentReplicaService renders the headless Service one replica's members are
@@ -98,10 +149,56 @@ func renderModelDeploymentReplicaService(
 // configured as a producer and one configured as a consumer, which is the silent wrong answer this
 // spec's whole kind field exists to prevent. Per-role addressability is what this task adds; a real
 // front door needs the router, and that is a later spec.
-func renderModelDeploymentService(md *workercore.ModelDeployment) *core.Service {
+// modelDeploymentEffectiveRoleForEligibility returns the role as the replicas standing in this
+// cluster see it.
+//
+// The gate is about the replicas serving, not about the role the spec states now. A role turned into
+// a take-over one while its old managed replicas are still running has not lost the group-forward
+// observation for them: their command lines are the ones this operator wrote. Clearing the desired
+// command line while any such replica stands keeps the gate, and the selector narrowed by it, from
+// being withdrawn on the pass that turned the role over.
+func modelDeploymentEffectiveRoleForEligibility(
+	role *workercore.ModelDeploymentRole, members []*core.Pod,
+) *workercore.ModelDeploymentRole {
+	if !modelDeploymentAnyMemberRunsCommand(members) {
+		return role
+	}
+	effective := *role
+	effective.Command = nil
+
+	return &effective
+}
+
+// modelDeploymentStandingMembers returns the live members of the replicas of one role that still
+// hold a seat, which is what the gate and the membership rules are read from.
+func modelDeploymentStandingMembers(
+	pods []core.Pod, role *workercore.ModelDeploymentRole, standing map[int]bool,
+) []*core.Pod {
+	members := make([]*core.Pod, 0, len(standing))
+	for _, view := range modelDeploymentGroupPods(pods, true) {
+		if modelDeploymentPodRole(view.Members[0]) != role.Name || !standing[view.Ordinal] {
+			continue
+		}
+		members = append(members, view.Members...)
+	}
+
+	return members
+}
+
+func renderModelDeploymentService(
+	md *workercore.ModelDeployment, pods []core.Pod,
+) *core.Service {
 	svc := renderModelDeploymentServiceFor(md, &md.Spec.Roles[0], md.Name)
-	modelDeploymentFrontLeadersOnly(svc, &md.Spec.Roles[0])
-	if modelDeploymentEligibilitySelectorActive(md, &md.Spec.Roles[0], nil, modelDeploymentEligibilityDecided(md)) {
+	modelDeploymentFrontLeadersOnly(svc, &md.Spec.Roles[0],
+		modelDeploymentRoleHasMultiMemberReplica(pods, md, &md.Spec.Roles[0]))
+	modelDeploymentSelectAnsweringMembers(svc, modelDeploymentMixedCommandMode(pods, md, &md.Spec.Roles[0]))
+	frontStanding := make([]*core.Pod, 0, len(pods))
+	for i := range pods {
+		frontStanding = append(frontStanding, &pods[i])
+	}
+	if modelDeploymentEligibilitySelectorActive(md,
+		modelDeploymentEffectiveRoleForEligibility(&md.Spec.Roles[0], frontStanding), nil,
+		modelDeploymentEligibilityDecided(md)) {
 		modelDeploymentSelectEligibleEndpoints(svc, md, &md.Spec.Roles[0])
 	}
 
@@ -120,12 +217,92 @@ func renderModelDeploymentService(md *workercore.ModelDeployment) *core.Service 
 // AT SIZE ONE THE SELECTOR IS LEFT EXACTLY AS IT WAS, and not merely equivalently: a single-Member
 // replica's Pod carries no member-index label, so adding the term there would select nothing and
 // empty every Service of every deployment already running.
-func modelDeploymentFrontLeadersOnly(svc *core.Service, role *workercore.ModelDeploymentRole) {
-	if modelDeploymentRoleSize(role) == 1 {
+//
+// WHILE A ROLE IS MID-EDIT, THE TERMS COME FROM WHAT IS STANDING RATHER THAN FROM THE DESIRED
+// SIZE. A replica edited from four members down to one still has four members running, and a
+// selector computed from the new size alone would drop the leader term and front all four of them
+// -- which is the exact failure above, reappearing for a deployment that was working. So the term
+// is applied whenever the desired size is above one OR any actual member of the role carries a
+// member index, and dropped only once the last such member has gone.
+func modelDeploymentFrontLeadersOnly(
+	svc *core.Service, role *workercore.ModelDeploymentRole, multiMemberStanding bool,
+) {
+	if modelDeploymentRoleSize(role) == 1 && !multiMemberStanding {
 		return
 	}
 
 	svc.Spec.Selector[modelDeploymentMemberIndexLabel] = strconvx.Itoa(modelDeploymentLeaderMemberIndex)
+}
+
+// modelDeploymentMixedCommandMode reports whether a role's standing replicas were built under
+// different command modes.
+//
+// It is the condition for narrowing an HTTP Service by routing membership. While it holds, the
+// replicas of each mode keep the routing that mode always had, which one selector cannot express
+// from the spec alone; once it stops holding, the selector is what the spec renders and the term
+// goes with it.
+func modelDeploymentMixedCommandMode(
+	pods []core.Pod, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	modes := map[modelDeploymentReplicaExecution]bool{}
+	for i := range pods {
+		pod := &pods[i]
+		if !modelDeploymentOwns(pod, md) || modelDeploymentPodRole(pod) != role.Name {
+			continue
+		}
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		managed, readable := modelDeploymentMemberExecution(pod)
+		if !readable {
+			continue
+		}
+		if managed {
+			modes[modelDeploymentExecutionManaged] = true
+		} else {
+			modes[modelDeploymentExecutionTakeover] = true
+		}
+	}
+
+	return len(modes) > 1
+}
+
+// modelDeploymentSelectAnsweringMembers narrows an HTTP Service to the members whose replicas
+// answer it under the mode they were built with.
+//
+// THE TERM IS ADDED ONLY WHILE A ROLE MIXES MODES. A homogeneous role is already selected by the
+// terms above, and adding one there would bind the Service to a label the reconciler has to keep
+// writing for no gain.
+func modelDeploymentSelectAnsweringMembers(
+	svc *core.Service, mixed bool,
+) {
+	if !mixed {
+		return
+	}
+
+	svc.Spec.Selector[modelDeploymentLabelKeyAPIAnswering] = modelDeploymentAPIAnsweringValue
+	delete(svc.Spec.Selector, modelDeploymentLabelKeyEndpointEligible)
+	delete(svc.Spec.Selector, modelDeploymentMemberIndexLabel)
+}
+
+// modelDeploymentRoleHasMultiMemberReplica reports whether any actual member of a role still
+// belongs to a replica built at more than one member, which is what makes it a member rather than
+// a whole replica.
+func modelDeploymentRoleHasMultiMemberReplica(
+	pods []core.Pod, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	for i := range pods {
+		pod := &pods[i]
+		if !modelDeploymentOwns(pod, md) || modelDeploymentPodRole(pod) != role.Name {
+			continue
+		}
+		if total, err := strconvx.Atoi[int](pod.Annotations[kueuepodconst.GroupTotalCountAnnotation]); err == nil &&
+			total > 1 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // modelDeploymentGroupForwardActivatable reports whether this role's group-forward capability
@@ -202,12 +379,23 @@ func modelDeploymentEligibilitySelectorActive(
 		liveSelector[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue
 }
 
+// modelDeploymentEligibilityActiveAnnotation retains gate activation while mixed Services use membership.
+const modelDeploymentEligibilityActiveAnnotation = "modeldeployment.gpustack.ai/eligibility-active"
+
 // modelDeploymentSelectEligibleEndpoints selects qualified HTTP endpoints.
 // External roles serve every rank; Internal roles retain their leader restriction.
 // Headless peer Services never use endpoint eligibility.
 func modelDeploymentSelectEligibleEndpoints(
 	svc *core.Service, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) {
+	if svc.Spec.Selector[modelDeploymentLabelKeyAPIAnswering] == modelDeploymentAPIAnsweringValue {
+		// Membership already combines each deployed mode's qualification and answering shape.
+		if svc.Annotations == nil {
+			svc.Annotations = map[string]string{}
+		}
+		svc.Annotations[modelDeploymentEligibilityActiveAnnotation] = modelDeploymentEndpointEligibleValue
+		return
+	}
 	svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
 	// Every qualified External-DP member serves HTTP. The eligibility label already
 	// excludes unhealthy groups, so the legacy leader restriction must not hide ranks.
@@ -239,11 +427,14 @@ func modelDeploymentSelectEligibleEndpoints(
 // two objects away from the field that caused it.
 func renderModelDeploymentRoleService(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
-	manufacturers map[string]string,
+	manufacturers map[string]string, standingMembers []*core.Pod, mixedCommandMode bool,
 ) *core.Service {
 	svc := renderModelDeploymentServiceFor(md, role, md.Name+"-"+role.Name)
-	modelDeploymentFrontLeadersOnly(svc, role)
-	if modelDeploymentEligibilitySelectorActive(md, role, nil, modelDeploymentEligibilityDecided(md)) {
+	modelDeploymentFrontLeadersOnly(svc, role, len(standingMembers) > 0)
+	modelDeploymentSelectAnsweringMembers(svc, mixedCommandMode)
+	if modelDeploymentEligibilitySelectorActive(md,
+		modelDeploymentEffectiveRoleForEligibility(role, standingMembers), nil,
+		modelDeploymentEligibilityDecided(md)) {
 		modelDeploymentSelectEligibleEndpoints(svc, md, role)
 	}
 	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
@@ -441,6 +632,18 @@ func modelDeploymentRoleEndpoint(
 // must not discard — the allocated ClusterIP above all, which every client that resolved it is
 // still using.
 func alignModelDeploymentService(actual, expected *core.Service) (changed bool) {
+	key := modelDeploymentEligibilityActiveAnnotation
+	if actual.Annotations[key] != expected.Annotations[key] {
+		if expected.Annotations[key] == "" {
+			delete(actual.Annotations, key)
+		} else {
+			if actual.Annotations == nil {
+				actual.Annotations = map[string]string{}
+			}
+			actual.Annotations[key] = expected.Annotations[key]
+		}
+		changed = true
+	}
 	if !maps.Equal(actual.Spec.Selector, expected.Spec.Selector) {
 		actual.Spec.Selector = expected.Spec.Selector
 		changed = true

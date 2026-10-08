@@ -400,15 +400,6 @@ func qualifyModelDeploymentInstance(
 	return qualification
 }
 
-// legVerdict maps a boolean onto a verdict, for the legs whose only question is yes or no.
-func legVerdict(ok bool) modelDeploymentLegVerdict {
-	if ok {
-		return modelDeploymentLegVerified
-	}
-
-	return modelDeploymentLegFailed
-}
-
 // modelDeploymentMemberReadiness reads one member's own readiness as three answers rather than
 // the two podIsReady returns.
 //

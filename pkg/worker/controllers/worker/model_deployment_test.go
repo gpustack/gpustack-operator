@@ -18,6 +18,7 @@ import (
 	labels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,6 +26,7 @@ import (
 	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
@@ -32,6 +34,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -46,7 +49,22 @@ func newModelDeploymentClient(objs ...ctrlcli.Object) ctrlcli.Client {
 		}
 	}
 
+	allocated := 0
 	return ctrlfake.NewClientBuilder().
+		WithInterceptorFuncs(ctrlinterceptor.Funcs{
+			Create: func(ctx context.Context, next ctrlcli.WithWatch, obj ctrlcli.Object,
+				opts ...ctrlcli.CreateOption,
+			) error {
+				switch obj.(type) {
+				case *core.Pod, *kueue.Workload:
+					if obj.GetUID() == "" {
+						allocated++
+						obj.SetUID(types.UID("created-" + strconv.Itoa(allocated)))
+					}
+				}
+				return next.Create(ctx, obj, opts...)
+			},
+		}).
 		WithScheme(scheme.Scheme).
 		// The release observation lists a node's pods with the spec.nodeName field selector, which
 		// a real API server answers directly. The fake client can only answer it when the field is
@@ -395,19 +413,33 @@ func setGroupAsk(t *testing.T, cli ctrlcli.Client, asking bool) {
 	require.NoError(t, cli.Update(context.Background(), wl))
 }
 
-// admittedReplicaWorkload builds the Workload Kueue composes for ONE replica's group: named after
-// the group the Pod's own membership label carries -- which is Kueue's own rule, the group name
-// verbatim -- owning that Pod by a plain reference, admitted or still pending as the case needs.
+// admittedReplicaWorkload builds the Workload Kueue composes for one replica's group: named after
+// the group the members' own membership labels carry -- which is Kueue's own rule, the group name
+// verbatim -- owning them by plain references, admitted or still pending as the case needs.
+//
+// THE WHOLE GROUP IS PASSED, not one of its members, because a PodSet counts the members sharing
+// its role hash and carries one member's template: a Workload built from a single member of a
+// multi-Member replica would ask Kueue for one Pod where the group seats two, which is a
+// composition Kueue never produces and which this tree's own admission proof must reject.
 //
 // The UIDs are stamped by the fixture rather than the environment, so an ownership match between a
 // Pod and a Workload cannot pass on two empty values.
-func admittedReplicaWorkload(pod *core.Pod, admitted bool) *kueue.Workload {
-	group := pod.Labels[kueuepodconst.GroupNameLabel]
+func admittedReplicaWorkload(group []*core.Pod, admitted bool) *kueue.Workload {
+	representative := group[0]
+	groupName := representative.Labels[kueuepodconst.GroupNameLabel]
 	wl := &kueue.Workload{}
-	wl.Name, wl.Namespace, wl.UID = group, pod.Namespace, types.UID("wl-"+group)
-	wl.OwnerReferences = []meta.OwnerReference{{
-		APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID,
-	}}
+	wl.Name, wl.Namespace = groupName, representative.Namespace
+	wl.UID = replicaWorkloadUID(group)
+	for _, member := range group {
+		wl.OwnerReferences = append(wl.OwnerReferences, meta.OwnerReference{
+			APIVersion: "v1", Kind: "Pod", Name: member.Name, UID: member.UID,
+		})
+	}
+	// The queue and the podsets are what Kueue copies off the members, and the replacement's
+	// admission proof compares them against what its current members compose to. A Workload that
+	// carried neither would not be fresh admission however it was admitted.
+	wl.Spec.QueueName = kueue.LocalQueueName(representative.Labels[kueuectrlconst.QueueLabel])
+	wl.Spec.PodSets = replacementPinnedPodSets(group)
 	if admitted {
 		wl.Status.Conditions = []meta.Condition{{
 			Type:               kueue.WorkloadAdmitted,
@@ -418,6 +450,24 @@ func admittedReplicaWorkload(pod *core.Pod, admitted bool) *kueue.Workload {
 	}
 
 	return wl
+}
+
+// replicaWorkloadUID identifies one Workload incarnation, from the members it was composed for
+// rather than from the group's name.
+//
+// THE GROUP NAME IS CONSTANT ACROSS EVERY INCARNATION of a replica, so a UID derived from it would
+// hand the same identity to the replacement that the replica it replaced wore. A lifecycle test
+// asking whether a captured Workload was the one deleted, or whether an admission belongs to the
+// group standing now, would then be reading one identity where the cluster holds two -- and would
+// pass against a controller that confused them.
+func replicaWorkloadUID(group []*core.Pod) types.UID {
+	uids := make([]string, 0, len(group))
+	for _, member := range group {
+		uids = append(uids, string(member.UID))
+	}
+	slices.Sort(uids)
+
+	return types.UID("wl-" + stringx.SumByFNV64a(strings.Join(uids, "/")))
 }
 
 // standInForKueue plays the half of the handshake this tree cannot run: after a pass, it finishes
@@ -459,16 +509,34 @@ func standInForKueue(t *testing.T, cli ctrlcli.Client, admit bool) {
 		composed[wl.Name] = wl
 	}
 
+	// THE LIVE MEMBERS OF EACH GROUP, because a Workload is composed for a group and not for a
+	// member of it: its PodSets count the members sharing a role hash and carry one member's
+	// template, so composing per member would ask Kueue for a PodSet of one where the group seats
+	// two. The groups are walked in name order and each group's members in name order, because
+	// Kueue's own List carries none and this stand-in has to produce the same composition twice.
+	groups := make(map[string][]*core.Pod)
+	var groupNames []string
 	for _, pod := range replicaPods(t, cli) {
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
 		group := pod.Labels[kueuepodconst.GroupNameLabel]
+		if _, seen := groups[group]; !seen {
+			groupNames = append(groupNames, group)
+		}
+		member := pod
+		groups[group] = append(groups[group], &member)
+	}
+	slices.Sort(groupNames)
+	for _, group := range groupNames {
+		members := groups[group]
+		slices.SortFunc(members, func(a, b *core.Pod) int { return strings.Compare(a.Name, b.Name) })
+
 		if composed[group] == nil {
-			// RECORDED AS COMPOSED, so the rest of the group adopts it below rather than trying to
+			// RECORDED AS COMPOSED, so the next pass's members adopt it below rather than trying to
 			// create a second object under the same name. A group holds one Workload however many
 			// members it has, and without this the stand-in could only ever serve groups of one.
-			wl := admittedReplicaWorkload(&pod, admit)
+			wl := admittedReplicaWorkload(members, admit)
 			require.NoError(t, cli.Create(ctx, wl))
 			composed[group] = wl
 
@@ -482,15 +550,22 @@ func standInForKueue(t *testing.T, cli ctrlcli.Client, admit bool) {
 		wl := composed[group].DeepCopy()
 		owned := false
 		for _, ref := range wl.OwnerReferences {
-			owned = owned || ref.UID == pod.UID
+			owned = owned || ref.UID == members[0].UID
 		}
 		if owned {
 			continue
 		}
-		wl.OwnerReferences = append(wl.OwnerReferences, meta.OwnerReference{
-			APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID,
-		})
+		for _, member := range members {
+			wl.OwnerReferences = append(wl.OwnerReferences, meta.OwnerReference{
+				APIVersion: "v1", Kind: "Pod", Name: member.Name, UID: member.UID,
+			})
+		}
 		require.NoError(t, cli.Update(ctx, wl))
+		// The admitted object goes back into the record, or the next pass would append to the copy
+		// this update has just superseded and the server would refuse it.
+		stored := new(kueue.Workload)
+		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(wl), stored))
+		composed[group] = stored
 	}
 }
 
@@ -963,6 +1038,20 @@ func TestModelDeploymentReconciler_CountHealsBeforeTheHashRolls(t *testing.T) {
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
+	require.Equal(t, map[string]string{names[1]: "vllm/vllm-openai:v0.25.1"}, replicaImages(t, cli),
+		"the missing ordinal remains blocked by its old Workload")
+	workloads := new(kueue.WorkloadList)
+	require.NoError(t, cli.List(ctx, workloads, ctrlcli.InNamespace("team-a")))
+	removed := 0
+	for i := range workloads.Items {
+		if modelDeploymentWorkloadOwnsAny(&workloads.Items[i], sets.New(gone.UID)) {
+			require.NoError(t, cli.Delete(ctx, &workloads.Items[i]))
+			removed++
+		}
+	}
+	require.Equal(t, 1, removed, "complete the vanished member's Workload cleanup")
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
 
 	// The count is healed in this pass -- one new replica built from the current spec -- and the
 	// outdated survivor is left standing until the count is right.
@@ -1392,9 +1481,8 @@ func TestModelDeploymentReconciler_ATemplateEditRollsOneReplicaAtATime(t *testin
 // was lost -- and the pass is woken by Pod events, so the read goes to the API server rather than a
 // cache that would just repeat the list the gate is checking against.
 //
-// THE COUNT IS PART OF THE CONTRACT because these reads bypass the cache: one per role, whatever
-// number of ordinals that role is short. A read per ordinal is the same answer at N times the cost,
-// billed again on every requeue for as long as a departure takes to drain.
+// Vacancy uses one Pod list and one Workload list per short role, independent of missing count.
+// A settled role needs neither read.
 type countingAPIReader struct {
 	ctrlcli.Reader
 	lists int
@@ -1414,13 +1502,11 @@ func TestModelDeploymentReconciler_TheCreateGateReadsTheAPIServer(t *testing.T) 
 	reader := &countingAPIReader{Reader: cli}
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: reader}
 
-	// The first pass reads the role ONCE on the API server before creating for either of its two
-	// missing ordinals: the groups a first create would double-populate are exactly the ones this
-	// read has to find empty, and one list of the role answers for every one of them.
+	// One Pod list and one Workload list cover both missing ordinals.
 	_, err := reconcileModelDeploymentWith(t, r)
 	require.NoError(t, err)
-	assert.Equal(t, 1, reader.lists,
-		"one API-server read per role, not one per missing ordinal: this role is short two")
+	assert.Equal(t, 2, reader.lists,
+		"Pod and Workload vacancy use two lists for the role's two missing ordinals")
 
 	// A settled pass reads nothing through the API server: every ordinal is accounted for and
 	// no role is rolling.
@@ -2367,13 +2453,24 @@ func TestModelDeploymentReconciler_AHeldReplicaLeavesAnExistingLabelUntouched(t 
 	_, err := reconcileModelDeploymentActivated(t, cli)
 	require.NoError(t, err)
 
-	assert.Zero(t, writes.patches,
-		"a held replica writes no Pod at all, so the pre-existing label is preserved byte for byte: %v",
-		writes.ordered)
 	for _, pod := range endpointEligibilityPods(t, cli) {
-		assert.Equal(t, before[pod.Name], pod.Labels,
+		after := maps.Clone(pod.Labels)
+		// The routing label is the one write this pass issues, and it answers a different question:
+		// whether the HTTP Service should select the Pod, which is not an eligibility decision and
+		// is stated by the command-mode routing cases. Everything else is what the predicate holds.
+		delete(after, modelDeploymentLabelKeyAPIAnswering)
+		assert.Equal(t, before[pod.Name], after,
 			"%s kept every label it had, because the predicate neither granted nor revoked", pod.Name)
 	}
+
+	// And a second held pass writes nothing at all, which is the part of the original contract that
+	// matters: a pass re-deriving what it already wrote must not write it again.
+	writes.patches, writes.ordered = 0, nil
+	_, err = reconcileModelDeploymentActivated(t, cli)
+	require.NoError(t, err)
+	assert.Zero(t, writes.patches,
+		"a held replica settles after one pass rather than being rewritten on every one: %v",
+		writes.ordered)
 }
 
 // TestModelDeploymentReconciler_ADefaultHealthFaultWithdrawsThroughTheGate is the half of the gate

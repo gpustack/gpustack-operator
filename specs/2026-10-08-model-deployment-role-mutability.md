@@ -343,7 +343,7 @@ Checkpoint: validate the replica reader and its negative controls before changin
       Acceptance: Accept all four ordinary fields while preserving name-map identity and kind rules. Cover size bounds, resources, pool dependencies, and all command transitions. Revalidate changed dependencies without rejecting unchanged inputs due to external drift. Preserve every Elastic EP refusal. Document mixed configurations, whole-group Recreate, shared effects, merge-patch omission, and quota waits.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -tags 'goccy netgo' -race -count=1 ./api/worker/v1alpha1 ./pkg/worker/webhooks/worker`
 
-- [ ] **T3 · Recoverable whole-replica replacement**
+- [x] **T3 · Recoverable whole-replica replacement**
       Blocked by: T1
       Owns: `pkg/worker/controllers/worker/model_deployment*.go`, supporting `go.mod` and `go.sum` updates through the coordinator
       Gate: review

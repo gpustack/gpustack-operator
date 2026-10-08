@@ -25,7 +25,7 @@ import (
 // THE PORT ANNOTATION IS THE EXECUTION MARKER BECAUSE THAT IS WHAT THE RENDER DOES: it stamps
 // prometheus.io/port only when the operator wrote the command. A fixture that invented a separate
 // label would test the fixture rather than the contract.
-func deployedMember(name string, total, seat int, managed bool, labelled bool) *core.Pod {
+func deployedMember(name string, total, seat int, managed, labelled bool) *core.Pod {
 	pod := &core.Pod{}
 	pod.Name = name
 	pod.Annotations = map[string]string{}
@@ -221,13 +221,15 @@ func TestModelDeploymentDeployedReplicaExecutionReadsTheRenderedCommandLine(t *t
 		{
 			name: "every member of a takeover replica agrees on it",
 			members: []*core.Pod{
-				deployedMember("a", 2, 0, false, true), deployedMember("b", 2, 1, false, true)},
+				deployedMember("a", 2, 0, false, true), deployedMember("b", 2, 1, false, true),
+			},
 			execution: modelDeploymentExecutionTakeover,
 		},
 		{
 			name: "members disagreeing on who wrote their command line cannot be classified",
 			members: []*core.Pod{
-				deployedMember("a", 2, 0, true, true), deployedMember("b", 2, 1, false, true)},
+				deployedMember("a", 2, 0, true, true), deployedMember("b", 2, 1, false, true),
+			},
 			execution: modelDeploymentExecutionUnreadable,
 			reasonHas: "disagree on who built",
 		},
@@ -236,7 +238,8 @@ func TestModelDeploymentDeployedReplicaExecutionReadsTheRenderedCommandLine(t *t
 			// classifiable from the members that happened to be legible.
 			name: "a member with no engine container makes the replica unreadable",
 			members: []*core.Pod{
-				deployedMember("a", 2, 0, true, true), deployedNoEngineMember("b")},
+				deployedMember("a", 2, 0, true, true), deployedNoEngineMember("b"),
+			},
 			execution: modelDeploymentExecutionUnreadable,
 			reasonHas: "member b carries no engine container",
 		},
@@ -364,7 +367,7 @@ func TestDeployedFactsSurviveADesiredSizeOrCommandEdit(t *testing.T) {
 	})
 
 	t.Run("its departure is classifiable", func(t *testing.T) {
-		shape, reason := modelDeploymentRetirementAnsweringShape(md, &md.Spec.Roles[0], view[0].Members)
+		shape, reason := modelDeploymentRetirementAnsweringShape(md, view[0].Members)
 
 		assert.Empty(t, reason, "an edit must not freeze the replica it means to retire")
 		assert.Equal(t, modelDeploymentAnsweringLeader, shape)

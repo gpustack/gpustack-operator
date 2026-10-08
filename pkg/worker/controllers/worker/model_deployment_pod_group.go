@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -89,6 +90,24 @@ const (
 	// selector is a conjunction of equalities, so the term is present-or-absent; the value exists
 	// because a selector needs one, and "true" states what presence means.
 	modelDeploymentEndpointEligibleValue = "true"
+
+	// modelDeploymentLabelKeyAPIAnswering marks a Pod whose replicas answer the deployment's HTTP
+	// API under the routing rules of the mode they were created with.
+	//
+	// IT IS ROUTING MEMBERSHIP, NOT ENGINE QUALIFICATION. The eligibility key above says this
+	// member's endpoints serve; this one says which Service this member is behind. They differ for
+	// exactly one reason: a role mid-edit holds replicas built under different command modes, and
+	// each mode keeps the routing it already had. A take-over replica answers under the legacy
+	// rules whether or not this operator can verify its engine, and a managed replica answers under
+	// the qualification rules, which the eligibility key already carries.
+	//
+	// It is written by the reconciler at runtime and never rendered, so it stays out of the
+	// spec-hash: turning a member's routing on or off must not roll the replica that serves.
+	modelDeploymentLabelKeyAPIAnswering = "modeldeployment." + systemname.LabelPrefix + "api-answering"
+
+	// modelDeploymentAPIAnsweringValue is the only value the answering key carries, for the same
+	// reason the eligibility key has one.
+	modelDeploymentAPIAnsweringValue = "true"
 )
 
 // ModelDeploymentPodGroupMeta is the Kueue group metadata one replica's Pod carries.
@@ -214,6 +233,118 @@ func modelDeploymentAnsweringShapeOf(externalDP bool, size int) modelDeploymentA
 	return modelDeploymentAnsweringLeader
 }
 
+// modelDeploymentReplicaRunsCommand reports whether every member of a replica was built with a
+// command line this operator wrote.
+//
+// A replica whose members disagree, or which carries no engine container to read, is left out: the
+// mode it runs in is then not established, and the reader that asks must not be told it is managed.
+func modelDeploymentReplicaRunsCommand(members []*core.Pod) bool {
+	if len(members) == 0 {
+		return false
+	}
+	for _, member := range members {
+		managed, ok := modelDeploymentMemberExecution(member)
+		if !ok || !managed {
+			return false
+		}
+	}
+
+	return true
+}
+
+// modelDeploymentAnyMemberRunsCommand reports whether any member standing for a role is one this
+// operator built. A role mid-transition holds replicas of both modes at once, and the gate belongs
+// to the managed ones still serving, so one is enough.
+func modelDeploymentAnyMemberRunsCommand(members []*core.Pod) bool {
+	for _, member := range members {
+		if managed, ok := modelDeploymentMemberExecution(member); ok && managed {
+			return true
+		}
+	}
+
+	return false
+}
+
+// modelDeploymentDeployedAnsweringShape derives the answering shape from what a replica's members
+// are RUNNING, rather than from the role the spec states now.
+//
+// IT MATTERS WHILE A REPLICA IS BEING REPLACED. A role edited from four members to one, or from an
+// External data-parallel arrangement to a leader-served one, leaves its old replicas serving under
+// the shape they were built at. Reading the desired role instead would withdraw the followers of a
+// four-member replica the moment the spec asked for one, or expose every member of a rank group the
+// moment the spec asked for a leader -- on replicas that are serving perfectly well and that nothing
+// has replaced yet.
+//
+// The total is the one the members themselves declare, and the parallelism is read off their own
+// command lines. Both are facts about the replica in front of us rather than about a role that may
+// have moved on.
+func modelDeploymentDeployedAnsweringShape(
+	view modelDeploymentReplicaView, engine string,
+) modelDeploymentAnsweringShape {
+	total, reason := modelDeploymentReplicaDeclaredTotal(view.Members)
+	if reason != "" || total <= 0 {
+		// A replica whose members disagree on what they are has no shape to read. Holding it is the
+		// honest answer, and holding keeps whatever membership it already carries.
+		return modelDeploymentAnsweringUnknown
+	}
+
+	return modelDeploymentAnsweringShapeOf(modelDeploymentMembersExternalDP(view.Members, engine), total)
+}
+
+// modelDeploymentMembersExternalDP reports whether the members of a replica carry a data-parallel
+// load balance, read from the command lines they are running.
+//
+// IT READS THE MEMBERS AND NOT THE ROLE for the same reason the shape does: the role states what the
+// next replica will be built as, and these members are running now.
+func modelDeploymentMembersExternalDP(members []*core.Pod, engine string) bool {
+	for _, member := range members {
+		managed, readable := modelDeploymentMemberExecution(member)
+		if !readable || !managed {
+			continue
+		}
+		container, found := modelDeploymentDrainContainerOf(member, modelDeploymentMainContainerName)
+		if !found {
+			continue
+		}
+		// THE ARGV IS THE COMMAND AND THE ARGS TOGETHER, because that is what the engine is run
+		// with. A managed replica's parallelism is declared as extra arguments and rendered onto the
+		// command line, so reading the arguments alone would report every replica as leader-served
+		// and expose the followers of an External-DP group.
+		argv := slices.Concat(container.Command, container.Args)
+		reading, err := scanModelDeploymentParallelism(engine, argv,
+			modelDeploymentDeclaredEnv(container.Env))
+		if err != nil {
+			continue
+		}
+		shape, _ := modelDeploymentLoadBalance(reading.declared)
+
+		return shape != workercore.ModelDeploymentLoadBalanceInternal &&
+			shape != workercore.ModelDeploymentLoadBalanceUnknown
+	}
+
+	return false
+}
+
+// modelDeploymentDeclaredEnv reads a container's environment back into the declared form the
+// parallelism scan takes.
+//
+// ONLY VARIABLES WHOSE VALUE IS WRITTEN LITERALLY ARE READ. A value Kubernetes fills in at run time
+// is not a declaration this operator can act on, and reading its name as if it were would let any
+// Pod carrying that name change how its replica is understood.
+func modelDeploymentDeclaredEnv(env []core.EnvVar) []workercore.ModelDeploymentEnvVar {
+	declared := make([]workercore.ModelDeploymentEnvVar, 0, len(env))
+	for _, variable := range env {
+		if variable.ValueFrom != nil {
+			continue
+		}
+		declared = append(declared, workercore.ModelDeploymentEnvVar{
+			Name: variable.Name, Value: variable.Value,
+		})
+	}
+
+	return declared
+}
+
 // modelDeploymentAnsweringMemberLeader reports whether a Pod is the member a leader-served replica's
 // answer comes from.
 //
@@ -319,9 +450,9 @@ func ModelDeploymentPodGroup(
 		// THE TOTAL IS THE REPLICA'S SIZE, AND A REPLICA COUNT CHANGE NEVER MOVES IT: the group
 		// is this replica and nobody else's, so adding or removing replicas adds or removes
 		// whole groups rather than editing the total any running member carries. That is what
-		// turns a resize into a trim rather than a rebuild, and it survives sizes above one
-		// only because the size itself is frozen at creation -- a mutable size would put this
-		// number back under two writers, which is the defect the per-replica split removed.
+		// turns a resize into a rebuild of one replica at a time, and it holds for sizes above one
+		// because a member created at the old size keeps its old total until its replica is
+		// recreated -- the two totals coexist, and nothing writes the running one.
 		kueuepodconst.GroupTotalCountAnnotation: strconvx.Itoa(modelDeploymentRoleSize(role)),
 		// THE ROLE HASH IS LOAD-BEARING, NOT COSMETIC. Kueue reads this annotation verbatim when
 		// present and otherwise derives a digest of the Pod spec's SHAPE -- containers,
@@ -448,21 +579,6 @@ func modelDeploymentGroupPods(pods []core.Pod, skipDeparting bool) []modelDeploy
 	}
 
 	return views
-}
-
-// modelDeploymentReplicaIsComplete reports whether a replica holds every member it declares.
-//
-// AN INCOMPLETE REPLICA IS NOT A PARTLY WORKING ONE. Kueue composes no Workload at all for a pod
-// group short of its declared total, so such a replica holds no quota, is admitted by nothing and
-// serves nothing -- it is not "most of the way there", it is absent with some Pods lying around.
-// Every figure that counts replicas therefore excludes it rather than discounting it.
-func modelDeploymentReplicaIsComplete(view modelDeploymentReplicaView, size int) bool {
-	if !view.Seated {
-		// A Pod that claims no ordinal declares one member, itself.
-		return len(view.Members) == 1
-	}
-
-	return len(view.Members) == size
 }
 
 // modelDeploymentPodDescription names a Pod the way its own shape makes true: a replica when a

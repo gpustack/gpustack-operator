@@ -305,7 +305,7 @@ func TestDrainReadsTheMembersTheShapeMakesAnswerable(t *testing.T) {
 			// A GROUP WITH NO MEMBER ON SEAT ZERO HAS ITS SEATS OUT OF ITS OWN RANGE, and the
 			// deployed-shape reader says so. It also means the leader search's own "no member carries
 			// the leader index" branch is unreachable from a readable shape: seats are unique and in
-			// range, so a group of N always has a seat zero. That branch stays as defence behind the
+			// range, so a group of N always has a seat zero. That branch stays as defense behind the
 			// shape check rather than as a route a case can reach.
 			name: "a replica whose seats are all outside its declared total holds",
 			md:   shapeDeployment(2),

@@ -729,6 +729,12 @@ func TestModelDeploymentRetirementRelease_EmptyWorkloadUIDHolds(t *testing.T) {
 	// cannot be shown to be anything but an object that still owns the target's member.
 	unidentified := releaseWorkload("", "member-1", "qwen-server-one")
 	require.NoError(t, scenario.cli.Create(context.Background(), unidentified))
+	// Corrupt the evidence explicitly after the fixture's server assigned a create identity.
+	unidentified.UID = ""
+	require.NoError(t, scenario.cli.Update(context.Background(), unidentified))
+	observed := new(kueue.Workload)
+	require.NoError(t, scenario.cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(unidentified), observed))
+	require.Empty(t, observed.UID, "the negative control presents unidentifiable evidence")
 	scenario.settleLedger()
 
 	plan, completed := scenario.settle()
