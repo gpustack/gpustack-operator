@@ -11,6 +11,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -50,7 +51,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 	connection *ModelDeploymentConnectorInput, protocols []string, weights *modelArtifactWeights,
 ) (map[string]map[int][]*core.Pod, error) {
 	role := ModelDeploymentElasticRole(md)
-	tpSize, err := ModelDeploymentElasticTensorParallelSize(role)
+	_, err := ModelDeploymentElasticTensorParallelSize(role)
 	if err != nil {
 		return nil, err
 	}
@@ -107,9 +108,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 			}},
 			core.EnvVar{Name: "VLLM_RAY_DP_PACK_STRATEGY", Value: "strict"},
 		)
-		tp := strconv.Itoa(tpSize)
 		join := "ray start --node-ip-address=\"$GPUSTACK_ELASTIC_POD_IP\" --address=" + address +
-			" --num-gpus=" + tp + " --labels=" + ModelDeploymentElasticRayNodeIdentityLabel + "=\"$GPUSTACK_ELASTIC_POD_UID\""
+			" --labels=" + ModelDeploymentElasticRayNodeIdentityLabel + "=\"$GPUSTACK_ELASTIC_POD_UID\""
 
 		if ordinal == 0 {
 			argv := slices.Clone(c.Command)
@@ -133,17 +133,21 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 		}
 		pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentPodSpecHash(pod)
 	}
-	head := gpu.DeepCopy()
-	head.Name = modelDeploymentElasticHeadName(md)
-	head.InstanceType = role.ElasticEP.HeadInstanceType
-	head.Resources = nil
-	head.Replicas = 1
-	head.ExtraArgs = nil
-	head.Ports = nil
-	head.Command = []string{"/bin/sh", "-ec", ModelDeploymentElasticHeadCommand +
-		" --num-gpus=0 --port=6379 --dashboard-host=0.0.0.0 --labels=" +
-		ModelDeploymentElasticRayNodeIdentityLabel + "=\"$GPUSTACK_ELASTIC_POD_UID\" --block"}
-	head.Env = slices.DeleteFunc(head.Env, func(env workercore.ModelDeploymentEnvVar) bool {
+	headPod := renderModelDeploymentElasticHeadPod(md, gpu, desired[role.Name][0][0].Spec.Containers[0])
+	desired[modelDeploymentElasticHeadName(md)] = map[int][]*core.Pod{0: {headPod}}
+	return desired, nil
+}
+
+// renderModelDeploymentElasticHeadPod bypasses GPU and InstanceType admission for the auxiliary head.
+func renderModelDeploymentElasticHeadPod(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, main core.Container,
+) *core.Pod {
+	name := modelDeploymentElasticHeadName(md)
+	labels := modelDeploymentSelectorLabels(md, &workercore.ModelDeploymentRole{Name: name})
+	labels["app.kubernetes.io/part-of"] = "gpustack-operator-worker"
+	labels[modelDeploymentReplicaOrdinalLabel] = "0"
+	labels[modelDeploymentMemberIndexLabel] = "0"
+	env := slices.DeleteFunc(slices.Clone(main.Env), func(env core.EnvVar) bool {
 		switch env.Name {
 		case "RAY_LOG_TO_STDERR", "RAY_LOGGER_LEVEL", "RAY_BACKEND_LOG_LEVEL", "RAY_DEDUP_LOGS":
 			return false
@@ -151,21 +155,36 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 			return true
 		}
 	})
-	headMD := md.DeepCopy()
-	headMD.Spec.Roles = []workercore.ModelDeploymentRole{*head}
-	heads, err := r.renderModelDeploymentPods(ctx, headMD, nil, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	headPod := heads[head.Name][0][0]
-	headPod.Spec.Containers[0].Env = append(headPod.Spec.Containers[0].Env, core.EnvVar{
-		Name: "GPUSTACK_ELASTIC_POD_UID", ValueFrom: &core.EnvVarSource{
-			FieldRef: &core.ObjectFieldSelector{FieldPath: "metadata.uid"},
+	env = append(env, core.EnvVar{Name: "GPUSTACK_ELASTIC_POD_UID", ValueFrom: &core.EnvVarSource{
+		FieldRef: &core.ObjectFieldSelector{FieldPath: "metadata.uid"},
+	}})
+	vols, mounts := convertModelDeploymentAdditionalVolumes(role.AdditionalVolumes)
+	vols, mounts = modelDeploymentSharedMemoryVolumes(role, vols, mounts)
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{GenerateName: md.Name + "-" + name + "-", Namespace: md.Namespace, Labels: labels},
+		Spec: core.PodSpec{
+			AutomountServiceAccountToken: ptr.To(false),
+			EnableServiceLinks:           ptr.To(false),
+			RestartPolicy:                core.RestartPolicyAlways,
+			ImagePullSecrets:             role.ImagePullSecrets,
+			Volumes:                      vols,
+			Containers: []core.Container{{
+				Name: modelDeploymentMainContainerName, Image: main.Image, ImagePullPolicy: role.ImagePullPolicy,
+				Command: []string{"/bin/sh", "-ec", ModelDeploymentElasticHeadCommand +
+					" --num-gpus=0 --port=6379 --dashboard-host=0.0.0.0 --labels=" +
+					ModelDeploymentElasticRayNodeIdentityLabel + "=\"$GPUSTACK_ELASTIC_POD_UID\" --block"},
+				Env: env, VolumeMounts: mounts,
+				Ports: []core.ContainerPort{{Name: "gcs", ContainerPort: 6379}, {Name: "dashboard", ContainerPort: 8265}},
+			}},
 		},
-	})
-	headPod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentPodSpecHash(headPod)
-	desired[head.Name] = heads[head.Name]
-	return desired, nil
+	}
+	if role.TerminationGracePeriodSeconds != nil {
+		pod.Spec.TerminationGracePeriodSeconds = ptr.To(*role.TerminationGracePeriodSeconds)
+	}
+	systemmeta.NoteResource(pod, ModelDeploymentResourceType, map[string]string{ModelDeploymentResourceNoteRole: name})
+	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
+	pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentPodSpecHash(pod)
+	return pod
 }
 
 func renderModelDeploymentElasticHeadService(md *workercore.ModelDeployment) *core.Service {

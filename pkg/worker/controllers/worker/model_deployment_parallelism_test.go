@@ -49,6 +49,12 @@ func TestParseModelDeploymentDeclaredParallelism(t *testing.T) {
 			engine: vllm,
 		},
 		{
+			name:      "vllm: startup capacity does not change running degrees",
+			engine:    vllm,
+			extraArgs: []string{"--elastic-ep-max-dp-size=8"},
+			set:       func(p *ModelDeploymentDeclaredParallelism) { p.ElasticEPMaxDataParallel = 8 },
+		},
+		{
 			name:      "vllm: long flag with separate value",
 			engine:    vllm,
 			extraArgs: []string{"--tensor-parallel-size", "2"},

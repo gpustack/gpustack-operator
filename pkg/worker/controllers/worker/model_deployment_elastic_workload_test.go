@@ -23,6 +23,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 
@@ -60,7 +61,7 @@ func TestElasticRayLoggingEnvironment(t *testing.T) {
 			if !tc.ordinary {
 				md.Spec.Engine.Version = "0.29.0"
 				md.Spec.Roles[0].Replicas = 1
-				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2, HeadInstanceType: "cpu"}
+				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
 			}
 			cpu := newRenderInstanceType(func(it *worker.InstanceType) {
 				it.Name = "cpu"
@@ -111,14 +112,9 @@ func TestElasticConvergenceCreatesChildren(t *testing.T) {
 			md.Spec.Engine.Version = "0.29.0"
 			md.Spec.Roles[0].Replicas = 1
 			md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(int64(tp), resource.DecimalSI)}
-			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2, HeadInstanceType: "cpu"}
+			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
 			md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", strconv.Itoa(tp)}
-			cpu := newRenderInstanceType(func(it *worker.InstanceType) {
-				it.Name = "cpu"
-				it.Spec.Acceleratable = false
-				it.Status.Entrance = "cpu-queue"
-			})
-			cli := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
+			cli := newModelDeploymentClient(md, newRenderInstanceType())
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 			gpuType := new(worker.InstanceType)
 			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: md.Spec.Roles[0].InstanceType}, gpuType))
@@ -134,17 +130,25 @@ func TestElasticConvergenceCreatesChildren(t *testing.T) {
 			var master core.Pod
 			for i := range pods.Items {
 				pod := &pods.Items[i]
-				groups[pod.Labels[kueuepodconst.GroupNameLabel]] = true
+				if group := pod.Labels[kueuepodconst.GroupNameLabel]; group != "" {
+					groups[group] = true
+				}
 				pod.UID = types.UID(fmt.Sprintf("uid-%d", i))
 				c := pod.Spec.Containers[0]
 				if modelDeploymentPodRole(pod) == modelDeploymentElasticHeadName(md) {
-					require.Equal(t, "cpu-queue", pod.Labels["kueue.x-k8s.io/queue-name"])
-					require.NotContains(t, c.Resources.Limits, gpuResource)
+					require.NotContains(t, pod.Labels, "kueue.x-k8s.io/queue-name")
+					require.NotContains(t, pod.Labels, kueuepodconst.GroupNameLabel)
+					require.Empty(t, pod.Spec.InitContainers)
+					require.Nil(t, pod.Spec.Resources)
+					for _, container := range pod.Spec.Containers {
+						require.Empty(t, container.Resources.Requests)
+						require.Empty(t, container.Resources.Limits)
+					}
 					require.Contains(t, c.Command[2], "--num-gpus=0")
 				} else {
 					q := c.Resources.Limits[gpuResource]
 					require.Equal(t, int64(tp), q.Value())
-					require.Contains(t, c.Command[2], fmt.Sprintf("--num-gpus=%d", tp))
+					require.NotContains(t, c.Command[2], "--num-gpus")
 					require.Equal(t, unitCPU.MilliValue()*int64(tp), c.Resources.Limits.Cpu().MilliValue())
 					require.Equal(t, unitMemory.Value()*int64(tp), c.Resources.Limits.Memory().Value())
 					require.Contains(t, c.Command[2], "gpustack-pod-uid=\"$GPUSTACK_ELASTIC_POD_UID\"")
@@ -159,7 +163,7 @@ func TestElasticConvergenceCreatesChildren(t *testing.T) {
 				}
 				require.NoError(t, cli.Update(context.Background(), pod))
 			}
-			require.Len(t, groups, 3)
+			require.Len(t, groups, 2, "only GPU members use Kueue groups")
 			require.NotEmpty(t, master.Name)
 			services := new(core.ServiceList)
 			require.NoError(t, cli.List(context.Background(), services, ctrlcli.InNamespace(md.Namespace)))
@@ -435,7 +439,7 @@ func TestModelDeploymentRolesSharedMemory(t *testing.T) {
 			md.Spec.KVCache = nil
 			md.Spec.Roles[0].Replicas = 1
 			if !tc.ordinary {
-				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2, HeadInstanceType: "cpu"}
+				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
 			}
 			md.Spec.Roles[0].AdditionalVolumes = tc.additional
 			if tc.engine != "" {
@@ -571,7 +575,7 @@ func TestElasticUnknownBootstrapRetainsMembers(t *testing.T) {
 			md := newRenderDeployment()
 			md.Spec.KVCache = nil
 			md.Spec.Roles[0].Replicas = 1
-			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2, HeadInstanceType: "cpu"}
+			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
 			cpu := newRenderInstanceType(func(it *worker.InstanceType) { it.Name = "cpu"; it.Spec.Acceleratable = false })
 			cli := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
@@ -600,19 +604,86 @@ func TestElasticCreateUsesUncachedOccupancy(t *testing.T) {
 	md := newRenderDeployment()
 	md.Spec.KVCache = nil
 	md.Spec.Roles[0].Replicas = 1
-	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2, HeadInstanceType: "cpu"}
-	cpu := newRenderInstanceType(func(it *worker.InstanceType) { it.Name = "cpu"; it.Spec.Acceleratable = false })
-	fresh := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
+	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+	fresh := newModelDeploymentClient(md, newRenderInstanceType())
 	r := &ModelDeploymentReconciler{Client: fresh, APIReader: fresh}
 	_, err := r.convergeModelDeployment(context.Background(), md)
 	require.NoError(t, err)
-	stale := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
+	stale := newModelDeploymentClient(md, newRenderInstanceType())
 	r.Client = stale
 	_, err = r.convergeModelDeployment(context.Background(), md)
 	require.NoError(t, err)
 	pods := new(core.PodList)
 	require.NoError(t, stale.List(context.Background(), pods))
 	require.Empty(t, pods.Items, "a lost create response must not create a second member")
+}
+
+func TestElasticAuxiliaryHeadLifecycle(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		phase    core.PodPhase
+		teardown bool
+		retained bool
+	}{
+		{name: "retain legacy running head", phase: core.PodRunning, retained: true},
+		{name: "retain legacy queued head", phase: core.PodPending, retained: true},
+		{name: "replace succeeded head", phase: core.PodSucceeded},
+		{name: "replace failed head", phase: core.PodFailed},
+		{name: "delete auxiliary head with deployment", phase: core.PodRunning, teardown: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newElasticConvergenceFixture(t)
+			pods := new(core.PodList)
+			require.NoError(t, f.reconciler.Client.List(ctx, pods, ctrlcli.InNamespace(f.md.Namespace)))
+			var head *core.Pod
+			for i := range pods.Items {
+				if modelDeploymentPodRole(&pods.Items[i]) == modelDeploymentElasticHeadName(f.md) {
+					head = pods.Items[i].DeepCopy()
+					break
+				}
+			}
+			require.NotNil(t, head)
+			if tc.retained {
+				head.Labels["kueue.x-k8s.io/queue-name"] = "legacy-cpu-queue"
+				head.Spec.Containers[0].Resources.Requests = core.ResourceList{core.ResourceCPU: resource.MustParse("1")}
+				require.NoError(t, f.reconciler.Client.Update(ctx, head))
+			}
+			head.Status.Phase = tc.phase
+			require.NoError(t, f.reconciler.Client.Status().Update(ctx, head))
+			if tc.teardown {
+				f.md.Finalizers = append(f.md.Finalizers, systemmeta.LockedResourceFinalizer)
+				require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+				_, err := f.reconciler.teardownModelDeployment(ctx, f.md)
+				require.NoError(t, err)
+			} else {
+				_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+				require.NoError(t, err)
+			}
+			require.NoError(t, f.reconciler.Client.List(ctx, pods, ctrlcli.InNamespace(f.md.Namespace)))
+			heads := make([]core.Pod, 0, 1)
+			for _, pod := range pods.Items {
+				if modelDeploymentPodRole(&pod) == modelDeploymentElasticHeadName(f.md) {
+					heads = append(heads, pod)
+				}
+			}
+			if tc.teardown {
+				require.Empty(t, heads)
+			} else {
+				require.Len(t, heads, 1)
+				if tc.retained {
+					require.Equal(t, head.UID, heads[0].UID)
+					require.Equal(t, head.Spec, heads[0].Spec)
+					require.Equal(t, "legacy-cpu-queue", heads[0].Labels["kueue.x-k8s.io/queue-name"])
+				} else {
+					require.NotEqual(t, head.Name, heads[0].Name)
+					require.NotContains(t, heads[0].Labels, "kueue.x-k8s.io/queue-name")
+					require.Empty(t, heads[0].Spec.Containers[0].Resources.Requests)
+					require.Empty(t, heads[0].Spec.Containers[0].Resources.Limits)
+				}
+			}
+		})
+	}
 }
 
 func TestElasticWithdrawalWithoutRouterRetainsCapacity(t *testing.T) {
@@ -664,7 +735,7 @@ func TestModelDeploymentElasticBootstrapFromMasterWidthBounds(t *testing.T) {
 
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{
-					Width: tc.width, HeadInstanceType: "cpu",
+					Width: tc.width,
 				}
 			})
 

@@ -22,7 +22,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	fakecli "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -37,8 +36,7 @@ func elasticRole(mutate func(*workercore.ModelDeploymentRole)) workercore.ModelD
 		ReplicaSize:  1,
 		InstanceType: "nvidia-gpu",
 		ElasticEP: &workercore.ModelDeploymentRoleElasticEP{
-			Width:            2,
-			HeadInstanceType: "cpu-head",
+			Width: 2,
 		},
 	}
 	if mutate != nil {
@@ -128,15 +126,6 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 		},
 		old:     func() *workercore.ModelDeployment { return elasticMD() },
 		wantErr: []string{"elasticEp"},
-	}, {
-		name: "headInstanceType change refused",
-		md: func() *workercore.ModelDeployment {
-			md := elasticMD()
-			md.Spec.Roles[0].ElasticEP.HeadInstanceType = "other-cpu"
-			return md
-		},
-		old:     func() *workercore.ModelDeployment { return elasticMD() },
-		wantErr: []string{"headInstanceType"},
 	}, {
 		name: "second elastic role refused",
 		md: func() *workercore.ModelDeployment {
@@ -263,13 +252,8 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 			}))
 		},
 	}, {
-		name:    "head instance type not found refused",
-		md:      func() *workercore.ModelDeployment { return elasticMD() },
-		wantErr: []string{"headInstanceType"},
-	}, {
-		name:    "head instance type acceleratable refused",
-		md:      func() *workercore.ModelDeployment { return elasticMD() },
-		wantErr: []string{"headInstanceType"},
+		name: "no CPU head instance type required",
+		md:   func() *workercore.ModelDeployment { return elasticMD() },
 	}}
 
 	for _, tc := range testCases {
@@ -280,15 +264,7 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 			if err := workercore.AddToScheme(scheme); err != nil {
 				t.Fatalf("build scheme: %v", err)
 			}
-			objs := []ctrlcli.Object{}
-			if tc.name != "head instance type not found refused" {
-				acceleratable := tc.name == "head instance type acceleratable refused"
-				objs = append(objs, &workercore.InstanceType{
-					ObjectMeta: meta.ObjectMeta{Name: "cpu-head"},
-					Spec:       workercore.InstanceTypeSpec{Acceleratable: acceleratable},
-				})
-			}
-			cli := fakecli.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+			cli := fakecli.NewClientBuilder().WithScheme(scheme).Build()
 			webhook := &ModelDeploymentWebhook{APIReader: cli}
 
 			var old *workercore.ModelDeployment

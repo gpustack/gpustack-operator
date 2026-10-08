@@ -19,10 +19,8 @@ import (
 	"fmt"
 	"strings"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
@@ -82,7 +80,6 @@ func (r *ModelDeploymentWebhook) ValidateModelDeploymentElasticEP(
 	if old != nil {
 		errs = append(errs, validateModelDeploymentElasticIdentity(md, old)...)
 	}
-	errs = append(errs, r.validateModelDeploymentElasticHeadInstanceType(ctx, md)...)
 
 	return errs
 }
@@ -164,17 +161,15 @@ func validateModelDeploymentElasticShape(
 		if err != nil {
 			errs = append(errs, field.Invalid(rolePath.Child("extraArgs"), role.ExtraArgs, err.Error()))
 		} else {
+			if declared.ElasticEPMaxDataParallel > 0 && int64(role.ElasticEP.Width) > int64(declared.ElasticEPMaxDataParallel) {
+				errs = append(errs, field.Invalid(rolePath.Child("elasticEp", "width"), role.ElasticEP.Width,
+					fmt.Sprintf("must not exceed the startup --elastic-ep-max-dp-size (%d)", declared.ElasticEPMaxDataParallel)))
+			}
 			if declared.PipelineParallel != 1 || declared.PrefillContextParallel != 1 {
 				errs = append(errs, field.Invalid(rolePath.Child("extraArgs"), role.ExtraArgs,
 					"each elastic member holds one TP group; pipeline and prefill context parallel sizes must be one"))
 			}
 			errs = append(errs, validateModelDeploymentElasticResources(role, rolePath, declared.TensorParallel)...)
-		}
-		if role.ElasticEP.HeadInstanceType == "" {
-			errs = append(errs, field.Required(
-				rolePath.Child("elasticEp", "headInstanceType"),
-				"the Ray control-plane head needs a CPU-only InstanceType to run against",
-			))
 		}
 		if role.Kind != workercore.ModelDeploymentRoleKindServer {
 			errs = append(errs, field.Invalid(
@@ -312,18 +307,18 @@ func validateModelDeploymentElasticIdentity(
 		return errs
 	}
 
-	if oldElastic.ElasticEP.HeadInstanceType != newElastic.ElasticEP.HeadInstanceType {
-		errs = append(errs, field.Invalid(
-			modelDeploymentElasticRolePath(md, newElastic).Child("elasticEp", "headInstanceType"),
-			newElastic.ElasticEP.HeadInstanceType, modelDeploymentIdentityMessage,
-		))
-	}
-	oldTP, oldErr := workerctrl.ModelDeploymentElasticTensorParallelSize(oldElastic)
-	newTP, newErr := workerctrl.ModelDeploymentElasticTensorParallelSize(newElastic)
-	if oldErr != nil || newErr != nil || oldTP != newTP {
+	oldParallel, oldErr := workerctrl.ParseModelDeploymentDeclaredParallelism(old.Spec.Engine.Name, oldElastic.ExtraArgs, oldElastic.Env)
+	newParallel, newErr := workerctrl.ParseModelDeploymentDeclaredParallelism(md.Spec.Engine.Name, newElastic.ExtraArgs, newElastic.Env)
+	if oldErr != nil || newErr != nil || oldParallel.TensorParallel != newParallel.TensorParallel {
 		errs = append(errs, field.Invalid(
 			modelDeploymentElasticRolePath(md, newElastic).Child("extraArgs"),
 			newElastic.ExtraArgs, "tensor parallel size is fixed at creation; "+modelDeploymentIdentityMessage,
+		))
+	}
+	if oldErr == nil && newErr == nil && oldParallel.ElasticEPMaxDataParallel != newParallel.ElasticEPMaxDataParallel {
+		errs = append(errs, field.Forbidden(
+			modelDeploymentElasticRolePath(md, newElastic).Child("extraArgs"),
+			"--elastic-ep-max-dp-size is fixed at creation; "+modelDeploymentIdentityMessage,
 		))
 	}
 	if oldElastic.Name != newElastic.Name {
@@ -337,40 +332,6 @@ func validateModelDeploymentElasticIdentity(
 			modelDeploymentElasticRolePath(md, newElastic).Child("elasticEp", "width"),
 			"elastic-EP scale-down is not supported in this release; keep width unchanged or increase it",
 		))
-	}
-
-	return errs
-}
-
-// validateModelDeploymentElasticHeadInstanceType resolves each named head InstanceType and
-// refuses anything acceleratable: the head is CPU-only by construction.
-func (r *ModelDeploymentWebhook) validateModelDeploymentElasticHeadInstanceType(
-	ctx context.Context, md *workercore.ModelDeployment,
-) field.ErrorList {
-	var errs field.ErrorList
-
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
-		if role.ElasticEP == nil || role.ElasticEP.HeadInstanceType == "" {
-			continue
-		}
-		headPath := field.NewPath("spec", "roles").Index(i).Child("elasticEp", "headInstanceType")
-		instType := &workercore.InstanceType{}
-		instType.Name = role.ElasticEP.HeadInstanceType
-		if err := r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType); err != nil {
-			if apierrors.IsNotFound(err) {
-				errs = append(errs, field.NotFound(headPath, role.ElasticEP.HeadInstanceType))
-			} else {
-				errs = append(errs, field.InternalError(headPath, fmt.Errorf("get instance type: %w", err)))
-			}
-			continue
-		}
-		if instType.Spec.Acceleratable {
-			errs = append(errs, field.Forbidden(
-				headPath,
-				"the Ray control-plane head runs CPU-only; an acceleratable InstanceType would put it on a GPU queue",
-			))
-		}
 	}
 
 	return errs

@@ -10,7 +10,8 @@ package v1alpha1
 // Width is the only mutable field: it answers how large the collective currently should be,
 // which is a running-state question. This release accepts increases and unchanged values;
 // admission refuses a decrease until Elastic EP scale-down support is complete.
-// Profile presence, HeadInstanceType and the TP degree in ExtraArgs are fixed at creation.
+// Profile presence and the TP degree in ExtraArgs are fixed at creation.
+// Protobuf field 2 was removed; do not reuse it.
 type ModelDeploymentRoleElasticEPApplyConfiguration struct {
 	// Width is the total number of GPU engines in the elastic collective, INCLUDING the
 	// reserved API/DP-master member; width-1 of them are Ray-only workers. It is the total
@@ -18,11 +19,6 @@ type ModelDeploymentRoleElasticEPApplyConfiguration struct {
 	// member holds which rank is the engine's own runtime fact and is never implied by this
 	// number.
 	Width *int32 `json:"width,omitempty"`
-	// HeadInstanceType is the name of the CPU-only InstanceType the Ray control-plane head
-	// runs against. The head is admitted as its own CPU-accounted workload on that type's
-	// queue: it takes no accelerator, joins no GPU queue at zero charge, and is not a width
-	// member.
-	HeadInstanceType *string `json:"headInstanceType,omitempty"`
 }
 
 // ModelDeploymentRoleElasticEPApplyConfiguration constructs a declarative configuration of the ModelDeploymentRoleElasticEP type for use with
@@ -36,13 +32,5 @@ func ModelDeploymentRoleElasticEP() *ModelDeploymentRoleElasticEPApplyConfigurat
 // If called multiple times, the Width field is set to the value of the last call.
 func (b *ModelDeploymentRoleElasticEPApplyConfiguration) WithWidth(value int32) *ModelDeploymentRoleElasticEPApplyConfiguration {
 	b.Width = &value
-	return b
-}
-
-// WithHeadInstanceType sets the HeadInstanceType field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the HeadInstanceType field is set to the value of the last call.
-func (b *ModelDeploymentRoleElasticEPApplyConfiguration) WithHeadInstanceType(value string) *ModelDeploymentRoleElasticEPApplyConfiguration {
-	b.HeadInstanceType = &value
 	return b
 }

@@ -29,6 +29,9 @@ type ModelDeploymentDeclaredParallelism struct {
 	// sentinel for DP specified externally, the check reads it as undeclared, and the env
 	// precedence still honors it.
 	DataParallelLocal int
+	// ElasticEPMaxDataParallel is vLLM's startup DP capacity, not the running degree.
+	// Zero means no explicit --elastic-ep-max-dp-size declaration.
+	ElasticEPMaxDataParallel int
 	// The degrees below have no key in today's transfer document; they are carried so the size
 	// check and any future consumer read the full picture without a parser change.
 	PrefillContextParallel int
@@ -96,6 +99,7 @@ var modelDeploymentParallelFlags = map[string][]modelDeploymentParallelFlag{
 		{names: []string{"--pipeline-parallel-size", "-pp"}, degree: true, min: 1},
 		{names: []string{"--data-parallel-size", "-dp"}, degree: true, min: 1},
 		{names: []string{"--data-parallel-size-local", "-dpl"}, degree: true, min: 0},
+		{names: []string{"--elastic-ep-max-dp-size"}, degree: true, min: 1},
 		{names: []string{"--prefill-context-parallel-size", "-pcp"}, abbr: []string{"-pc"}, degree: true, min: 1},
 		{names: []string{"--decode-context-parallel-size", "-dcp"}, degree: true, min: 1},
 		{names: []string{"--enable-expert-parallel", "-ep"}, abbr: []string{"-e"}, mode: true},
@@ -273,6 +277,8 @@ func scanModelDeploymentParallelism(
 				declared.DataParallelLocal = degree
 				reading.present[modelDeploymentSlotDataParallelLocal] = true
 				localZeroDeclared = degree == 0
+			case "--elastic-ep-max-dp-size":
+				declared.ElasticEPMaxDataParallel = degree
 			case "--prefill-context-parallel-size":
 				declared.PrefillContextParallel = degree
 				reading.present[modelDeploymentSlotPrefillContextParallel] = true
