@@ -28,6 +28,16 @@ A `ModelStore` selects its pool with `spec.nodeSelector` and states watermarks a
 limits as overrides field by field; the [pool layer](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#the-pool-layer)
 defines the override semantics, the overlap condition and the tie-break.
 
+`kubectl get modelstores` prints the pool's configured `High` and `Low` watermarks. A
+pool that states `spec.watermarks` shows its own values; a pool that states none shows the cluster
+Settings' `model-store-high-watermark` and `model-store-low-watermark`, falling back to their
+defaults when the Settings carry no value.
+
+The columns are the pool's policy, not what a node has already applied: a node's own kubelet
+thresholds can cap the high watermark lower, which only that node's
+[NodeModelStore](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md) shows. Settings changes appear on the next `kubectl get`.
+A Settings-only change does not trigger an update in an existing `kubectl get --watch`.
+
 A `ModelStoreBinding` is the provisioning point: creating one in a namespace is what grants that
 namespace a `quota.bytes` budget and, with `allowPinned`, the right to pin. The grant is explicit
 (there is no default pool a binding falls back to) and frozen: `storeRefs` cannot move, the budget
