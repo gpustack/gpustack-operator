@@ -73,12 +73,8 @@ through the resize interface the engine already exposes.
 ## Shared memory
 
 The CPU head, master and GPU workers each get a separate memory-backed `EmptyDir` at `/dev/shm`.
-The role's `shmSize` sets its capacity; omission renders `16Gi`.
-The volume is isolated per Pod and uses the main container's memory allocation.
-
-An explicit `/dev/shm` mount takes precedence. Its capacity and backing remain the user's responsibility.
-Changing `shmSize` affects new or replacement members; existing members keep their mounts.
-See [Shared memory](deployment.md#shared-memory) for precedence and memory budgeting.
+Changing the role's `shmSize` affects new or replacement members; existing members keep their mounts.
+See [Shared memory](deployment.md#shared-memory) for configuration, precedence and memory budgeting.
 
 ## A minimal manifest
 
