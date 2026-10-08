@@ -191,7 +191,7 @@ spec:
 
 The `ModelDeployment` below names the binding, which grants this namespace access to the cache.
 Choose member nodes, quotas, block size and dtype for your engine before applying these resources.
-The [KV Cache Walkthrough](./docs/modules/kv-cache/walkthrough.md) explains what to check at each step.
+The [KV Cache Walkthrough](./docs/walkthroughs/kv-cache/shared-cache.md) explains what to check at each step.
 
 ### Model Delivery
 
@@ -299,7 +299,7 @@ ssh -i ~/.ssh/id_ed25519 -p 2222 root@127.0.0.1
 ```
 
 The SSH session enters the workload container, where the accelerator and workspace are available.
-The [walkthrough](./docs/getting-started/walkthrough.md) shows the resulting resources. Pods can
+The [walkthrough](./docs/walkthroughs/devices/scheduling.md) shows the resulting resources. Pods can
 request accelerators directly; see
 [Accelerator Requests](./docs/modules/devices/requests.md) for complete manifests.
 

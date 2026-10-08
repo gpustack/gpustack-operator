@@ -61,7 +61,7 @@ one, not to widen the overview.
 | The local disk tier itself: what it renders, its bucket, its eviction, its host directory | `docs/modules/kv-cache/local-disk-tier.md` |
 | Configuring a node that is mostly disk: why a group is never disk alone, the thin-segment shape, the memory floor | `docs/modules/kv-cache/disk-heavy-nodes.md` |
 | A `KVCachePool` or `KVCachePoolBinding`: the grant, the reuse domain, a quota ceiling or grant, what a full quota does | `docs/modules/kv-cache/pool.md` |
-| Standing a cache up end to end, or which object comes first: the pasteable four-object sequence | `docs/modules/kv-cache/walkthrough.md` |
+| Standing a cache up end to end, or which object comes first: the pasteable four-object sequence | `docs/walkthroughs/kv-cache/shared-cache.md` |
 | How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/modules/kv-cache/injection.md` |
 | A `ModelArtifact`: its sources, resolution and revalidation, the manifest digest, how a `ModelDeployment` or an `Instance` mounts or downloads it, claim placement, the weight identity in KV keys | `docs/modules/model-delivery/artifact.md` |
 | The `image` source of a `ModelArtifact`: the digest contract, building weights into an image, image-volume delivery, the version floors, double storage, kubelet image GC, registry mirrors | `docs/modules/model-delivery/image-source.md` |
@@ -70,8 +70,9 @@ one, not to widen the overview.
 | A `NodeModelStore` or the `model-manager` plugin: a field and its writer, the status guard, mount authorization, materialization, a failure reason, collection, a metric | `docs/modules/model-delivery/node-store.md` |
 | Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, where replicas land and turning the preference off, upgrading, removing the cache | `docs/modules/model-delivery/operations.md` |
 | The `ModelDeployment` contract: the inherited reuse domain, the three override tiers, the owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field contract | `docs/modules/model-deployment/deployment.md` |
-| A recorded model-serving sequence from prefetch through elastic expansion, its captured CR output, or the distinction from independent replica scaling | `docs/modules/model-deployment/scaling-walkthrough.md` |
-| A fixed External DP group, its minimum arguments, per-rank requests, or measured Router coverage | `docs/modules/model-deployment/external-dp-walkthrough.md` |
+| A recorded Elastic EP expansion, its captured CR output and inference checks | `docs/walkthroughs/model-deployment/elastic-ep.md` |
+| A recorded model prefetch sequence and captured artifact, prefetch and node-store output | `docs/walkthroughs/model-delivery/prefetch.md` |
+| A fixed External DP group, its minimum arguments, per-rank requests, or measured Router coverage | `docs/walkthroughs/model-deployment/external-dp.md` |
 | A `ModelDeployment` metrics snapshot, which series each field reads per engine, role and router, cache-hit scope or Pod scrape annotation | `docs/modules/model-deployment/metrics.md` |
 | What a `ModelDeployment` status condition or published field means, and how to read them when a deployment misbehaves | `docs/modules/model-deployment/status.md` |
 | How a prefill role and a decode role are paired: the connector each engine and router renders, `spec.router` and its fields, `spec.kvTransfer`, roles on different hardware, a role's own Service | `docs/modules/model-deployment/prefill-decode.md` |
@@ -91,7 +92,7 @@ one, not to widen the overview.
 | A subcommand, one of its flags, its exit codes, its invocation | `docs/reference/commands.md` |
 | A user-visible capability, a vendor's slicing support, the install flow | `README.md` |
 | Vendor prerequisites, vendor GPU Operator coexistence | `docs/getting-started/vendor-prerequisites.md` |
-| A recorded run with real output | `docs/getting-started/walkthrough.md`, or the walkthrough section of `docs/modules/devices/nvidia-mig.md` |
+| A recorded run with real output | `docs/walkthroughs/devices/scheduling.md`, or the walkthrough section of `docs/modules/devices/nvidia-mig.md` |
 
 A decision *record* — why an approach was chosen over another — belongs in `specs/`, not in `docs/`.
 The docs state the rule that resulted; a `> **Why**` note carries only as much rationale as a reader

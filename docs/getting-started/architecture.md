@@ -106,7 +106,7 @@ allocation. [Admission](../modules/devices/admission.md#the-five-gates) owns the
 its failure behavior.
 
 InstanceType status reports the remaining capacity as workloads allocate and release devices. Use
-`kubectl get instancetype -w` to watch those changes. The [Walkthrough](walkthrough.md) shows the
+`kubectl get instancetype -w` to watch those changes. The [Walkthrough](../walkthroughs/devices/scheduling.md) shows the
 request and its resulting Kubernetes resources.
 
 ## Vocabulary
@@ -126,7 +126,7 @@ The hardware terms Device, Accelerator and Resource are defined in
 
 ## Related documentation
 
-- [Walkthrough](walkthrough.md) — submit a workload and inspect the scheduling chain.
+- [Walkthrough](../walkthroughs/devices/scheduling.md) — submit a workload and inspect the scheduling chain.
 - [GPU Instances](../modules/instances/_index.md) — configure an interactive container and SSH access.
 - [Model Deployment](../modules/model-deployment/_index.md) — configure inference engines and replicas.
 - [Model Delivery](../modules/model-delivery/_index.md) — resolve, cache and mount model weights.
@@ -138,4 +138,4 @@ The hardware terms Device, Accelerator and Resource are defined in
 **See also** — [Accelerator Requests](../modules/devices/requests.md) ·
 [Settings](../reference/settings.md) · [All documentation](../README.md)
 
-**Next** → [Walkthrough](walkthrough.md) — follow a workload from submission to allocation.
+**Next** → [Walkthrough](../walkthroughs/devices/scheduling.md) — follow a workload from submission to allocation.

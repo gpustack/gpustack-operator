@@ -255,6 +255,6 @@ at the top of that file; when either changes, compare the rows here with the pre
 
 **See also** — [Scheduling Chain](../modules/devices/scheduling.md#unit-spec-defaults)
 (where the unit spec is stamped) · [Admission](../modules/devices/admission.md#the-instancetype-and-instance-webhooks)
-(what the webhooks enforce on it) · [Walkthrough](../getting-started/walkthrough.md#4-managing-a-custom-instancetype)
+(what the webhooks enforce on it) · [Walkthrough](../walkthroughs/devices/scheduling.md#4-managing-a-custom-instancetype)
 
 **Next** → [Settings](settings.md#online-adjustable-settings) — the switches named on this page.

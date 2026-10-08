@@ -21,7 +21,7 @@ resources. [Architecture](../../getting-started/architecture.md) introduces the 
 
 ---
 
-**See also** — [Device Discovery](discovery.md) · [Walkthrough](../../getting-started/walkthrough.md)
+**See also** — [Device Discovery](discovery.md) · [Walkthrough](../../walkthroughs/devices/scheduling.md)
 
 **Next** → [Admission](admission.md) — the admission gates a request passes.
 ```
@@ -81,7 +81,7 @@ something that belongs in a list, a table, or another page.
 | Cap | Limit | Exempt |
 |---|---|---|
 | prose paragraph | 5 lines / 500 rendered characters | fenced blocks, table rows, list *markers*, `> **Why**` notes, the footer |
-| page length | 1000 lines | `docs/getting-started/walkthrough.md`, `docs/operate/*`, `docs/modules/devices/*-mig.md` — recordings and runbooks |
+| page length | 1000 lines | `docs/walkthroughs/devices/scheduling.md`, `docs/operate/*`, `docs/modules/devices/*-mig.md` — recordings and runbooks |
 | `##` sections | 10 per page, `## Contents` not counted | `docs/README.md`, `docs/reference/*` — both are lookup tables |
 
 A paragraph nested under a list item is prose a reader still has to get through, so it is measured on
@@ -106,7 +106,7 @@ it as follows — when a page starts serving two modes at once, that is the mome
 
 | Mode | Reader is… | Our pages |
 |---|---|---|
-| Tutorial | learning by doing | `README.md` Usage examples, `docs/getting-started/walkthrough.md`, the MIG walkthrough, `docs/modules/kv-cache/walkthrough.md` |
+| Tutorial | learning by doing | `README.md` Usage examples, `docs/walkthroughs/devices/scheduling.md`, the MIG walkthrough, `docs/walkthroughs/kv-cache/shared-cache.md` |
 | How-to | achieving a goal | `docs/operate/*`, `docs/modules/devices/*-mig.md`, `docs/operate/migration/*`, `docs/contribute/development.md`, a domain runbook (`docs/modules/model-delivery/operations.md`) |
 | Reference | looking something up | `docs/modules/devices/requests.md`, `docs/reference/settings.md`, `docs/reference/*` |
 | Explanation | building understanding | `docs/getting-started/architecture.md` and the deep pages under `docs/modules/` (contract pages read as reference, mechanism pages as explanation) |

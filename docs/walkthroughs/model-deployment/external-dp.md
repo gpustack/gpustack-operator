@@ -2,22 +2,22 @@
 
 Run one fixed vLLM data-parallel (DP) group with an HTTP endpoint on each rank.
 This walkthrough records two ranks using the official GPUStack runner.
-Direct requests passed on both ranks. The recorded operator's managed Router discovered only rank 0.
-That routing limitation remains visible in the checks below.
+Direct requests and managed Router requests passed on both ranks after the selector fix.
+Follow the steps to verify both engine inference and Router coverage.
 
 ## Contents
 
-- [Choose the deployment shape](#choose-the-deployment-shape)
-- [Prepare the model and GPUs](#prepare-the-model-and-gpus)
-- [Start the fixed group](#start-the-fixed-group)
-- [Omit redundant arguments](#omit-redundant-arguments)
-- [Read the running resources](#read-the-running-resources)
-- [Send requests to each rank](#send-requests-to-each-rank)
-- [Check Router coverage](#check-router-coverage)
+- [Deployment shape](#deployment-shape)
+- [Prerequisites](#prerequisites)
+- [Step 1: start the fixed group](#step-1-start-the-fixed-group)
+- [Step 2: read the running resources](#step-2-read-the-running-resources)
+- [Step 3: send requests to each rank](#step-3-send-requests-to-each-rank)
+- [Step 4: check Router coverage](#step-4-check-router-coverage)
 - [Understand the scaling limits](#understand-the-scaling-limits)
-- [Inspect and release the application](#inspect-and-release-the-application)
+- [Step 5: inspect and release the application](#step-5-inspect-and-release-the-application)
+- [Validation record](#validation-record)
 
-## Choose the deployment shape
+## Deployment shape
 
 This example uses one Server role with `replicas: 1` and `size: 2`.
 Each Pod has two GPUs and runs one DP rank with tensor parallelism (TP)=2.
@@ -33,34 +33,18 @@ The runner contains Ray, but this fixed group does not start Ray.
 See [vLLM's DP deployment guide](https://docs.vllm.ai/en/v0.29.0/serving/data_parallel_deployment/)
 for the engine's Internal and External LB distinction.
 
-## Prepare the model and GPUs
+## Prerequisites
 
-Complete [cluster preparation](scaling-walkthrough.md#prepare-the-cluster) and
-[model prefetch](scaling-walkthrough.md#prefetch-the-weights) first.
-Use the same namespace, cached artifact, model revision, and GPU InstanceType.
+Complete [cluster and GPU preparation](_index.md#prepare-the-cluster) and
+[model prefetch](../model-delivery/prefetch.md).
+Use the shared namespace, cached artifact, model revision, and GPU InstanceType.
 The GPU node needs four free cards and the verified model cache.
-
-For the recorded hardware, copy the `InstanceType` document from
-[the elastic deployment example](scaling-walkthrough.md#start-the-elastic-deployment)
-into `external-instance-type.yaml`. Apply that single resource before creating this deployment:
-
-```bash
-kubectl apply -f external-instance-type.yaml
-kubectl get instancetype elastic-cpu-gpu
-```
-
-For another GPU family, select an existing whole-GPU InstanceType and replace the name in the manifest below.
-
-The recorded operator binary was `d00f8fa8c98334a71af4c6eb302ee80d08289309` from
-`gpustack/gpustack-operator:dev@sha256:84f85914bdcb398b2f662dfdcb0845ee853597ec5661a5cf41828acae6a11e36`.
-The official runner below contained vLLM 0.29.0 and Ray 2.54.0, with no package replacements.
-Its CuPy installation contained only `cupy-cuda13x` 14.2.0.
 
 Each Pod needs a separate Pod IP. The ranks must reach each other over the Pod network.
 The DP RPC port defaults to 29550; collective communication also uses other ports.
 Setting an engine RPC port does not create a Kubernetes Service or a firewall rule.
 
-## Start the fixed group
+## Step 1: start the fixed group
 
 Save this as `external-dp.yaml`. Replace `elastic-cpu-gpu` with your GPU InstanceType if needed.
 The model delivery steps already created `deepseek-v2-lite-chat` in `gpustack-elastic`.
@@ -69,7 +53,7 @@ The model delivery steps already created `deepseek-v2-lite-chat` in `gpustack-el
 apiVersion: worker.gpustack.ai/v1
 kind: ModelDeployment
 metadata:
-  name: external-minimal
+  name: external-fixed
   namespace: gpustack-elastic
 spec:
   model:
@@ -128,12 +112,12 @@ That test instrumentation is omitted from this serving manifest.
 ```bash
 kubectl apply --dry-run=server -f external-dp.yaml
 kubectl apply -f external-dp.yaml
-kubectl -n gpustack-elastic get modeldeployment external-minimal
+kubectl -n gpustack-elastic get modeldeployment external-fixed
 kubectl -n gpustack-elastic get pods \
-  -l app.kubernetes.io/instance=external-minimal
+  -l app.kubernetes.io/instance=external-fixed
 ```
 
-## Omit redundant arguments
+### Arguments you can omit
 
 The minimal run omitted all six arguments below and still completed ordinary and streaming requests on both ranks.
 These defaults apply to this vLLM version and deployment shape.
@@ -148,16 +132,22 @@ These defaults apply to this vLLM version and deployment shape.
 | `--data-parallel-rpc-port 13345` | Both ranks can use the default RPC port, 29550. |
 
 The operator generates the ordinary HTTP serving port, model mount, Pod wiring, and Services.
-This example serves each rank on port 8000.
+This example serves each rank on the same fixed port, 8000.
+
+A single API server process and a single HTTP port are different constraints.
+Internal LB may use several API server processes behind one port.
+Keep the engine default for Internal LB; do not force `--api-server-count 1` on every configuration.
+Managed roles reject MultiPort mode because its additional listeners are outside this endpoint contract.
+
 `--data-parallel-backend` selects execution placement; it does not select the LB mode.
 `--data-parallel-start-rank` alone is not an External LB declaration.
 
-## Read the running resources
+## Step 2: read the running resources
 
 Retain the CR output beside the request results:
 
 ```bash
-kubectl -n gpustack-elastic get modeldeployment external-minimal -o json |
+kubectl -n gpustack-elastic get modeldeployment external-fixed -o json |
   jq '{name: .metadata.name, phase: .status.phase,
        size: .spec.roles[0].size, replicas: .spec.roles[0].replicas,
        accelerator: .spec.roles[0].resources.accelerator}'
@@ -167,7 +157,7 @@ Recorded values from the captured CR:
 
 ```json
 {
-  "name": "external-minimal",
+  "name": "external-fixed",
   "phase": "Ready",
   "size": 2,
   "replicas": 1,
@@ -175,11 +165,32 @@ Recorded values from the captured CR:
 }
 ```
 
+The captured status also reported one ready replica group and two serving HTTP endpoints:
+
+```bash
+kubectl -n gpustack-elastic get modeldeployment external-fixed -o json |
+  jq '.status.roles[] | {name, ready, loadBalance: .parallelism.loadBalance, endpoints}'
+```
+
+```json
+{
+  "name": "server",
+  "ready": 1,
+  "loadBalance": "External",
+  "endpoints": {
+    "eligible": 1,
+    "serving": {"state": "Confirmed", "value": 2}
+  }
+}
+```
+
+Here `eligible` counts replica groups; the serving observation counts HTTP endpoints.
+Keep the full CR with `kubectl -n gpustack-elastic get modeldeployment external-fixed -o yaml`.
 Read Pod UIDs, images, addresses, and endpoint labels separately:
 
 ```bash
 kubectl -n gpustack-elastic get pods \
-  -l app.kubernetes.io/instance=external-minimal -o json |
+  -l app.kubernetes.io/instance=external-fixed -o json |
   jq '.items[] | {name: .metadata.name, uid: .metadata.uid,
       labels: .metadata.labels, podIP: .status.podIP,
       containers: .status.containerStatuses}'
@@ -196,16 +207,16 @@ The recorded native checks found:
 All four worker GPU identities were distinct. Both ranks reported External LB enabled and Elastic EP disabled.
 Declared arguments and `Ready` status alone do not establish these native results.
 
-## Send requests to each rank
+## Step 3: send requests to each rank
 
 Open one port-forward per rank in separate terminals:
 
 ```bash
-kubectl -n gpustack-elastic port-forward pod/external-minimal-server-r0-m0 18000:8000
+kubectl -n gpustack-elastic port-forward pod/external-fixed-server-r0-m0 18000:8000
 ```
 
 ```bash
-kubectl -n gpustack-elastic port-forward pod/external-minimal-server-r0-m1 18001:8000
+kubectl -n gpustack-elastic port-forward pod/external-fixed-server-r0-m1 18001:8000
 ```
 
 Send an ordinary request and a streaming request to each endpoint:
@@ -226,13 +237,13 @@ Both ranks returned HTTP 200, nonempty text, eight completion tokens, and a vali
 Both streams ended with `data: [DONE]`.
 These short checks establish functional inference, not throughput or sustained-load behavior.
 
-## Check Router coverage
+## Step 4: check Router coverage
 
 Discover the Router Pod and forward its API and metrics ports:
 
 ```bash
 ROUTER_POD=$(kubectl -n gpustack-elastic get pods \
-  -l app.kubernetes.io/instance=external-minimal -o json |
+  -l app.kubernetes.io/instance=external-fixed -o json |
   jq -r '.items[] | select(any(.spec.containers[]; .name == "router")) | .metadata.name')
 kubectl -n gpustack-elastic port-forward "pod/$ROUTER_POD" 18081:8081 19090:9090
 ```
@@ -250,21 +261,19 @@ Repeat the completion requests through port 18081. Compare the counters before a
 For complete External LB coverage, the registry must contain both rank endpoints.
 Requests must increase each rank's counter. A successful response through the Router is insufficient.
 
-The recorded Router registered only member 0 because its selector retained `member-index=0`.
-All four Router requests completed, but all four increased only member 0's counter.
-Member 1 received no Router traffic. Direct rank inference passed; managed Router coverage failed.
-Keep this distinction when evaluating the recorded operator revision.
+The corrected run registered both healthy endpoints and included both in selection.
+Four Router requests passed on their first attempt: two ordinary requests and two streams.
+Each rank's request counter increased by two. The [validation record](#validation-record) compares the original and corrected runs.
 
-For ordinary Internal groups and [P/D deployments](prefill-decode.md), the leader restriction remains necessary.
-External DP inside a Prefill or Decode role is deferred to
-[issue #754](https://github.com/gpustack/gpustack-operator/issues/754).
+For ordinary Internal groups and [P/D deployments](../../modules/model-deployment/prefill-decode.md), the leader restriction remains necessary.
+See [Prefill and Decode](../../modules/model-deployment/prefill-decode.md) for the deferred External DP combination and its tracking issue.
 This Server example does not validate that combination.
 
 ## Understand the scaling limits
 
 This fixed External DP group has no online DP/EP resize contract.
 vLLM 0.29.0 rejects combining its native Elastic EP mode with External or Hybrid LB.
-Use the [Ray Internal Elastic walkthrough](scaling-walkthrough.md) for `elasticEp.width` growth.
+Use the [Ray Internal Elastic walkthrough](elastic-ep.md) for `elasticEp.width` growth.
 A Router in front of that Internal endpoint does not turn the engine into External LB.
 
 Increasing `roles[].replicas` creates additional complete groups with their existing TP/DP/EP shape.
@@ -272,14 +281,14 @@ That operation does not enlarge an existing group's EP world and was not measure
 The ordinary role's `size` cannot be changed after creation.
 Hybrid and multiple HTTP ports per Pod are outside this walkthrough.
 
-## Inspect and release the application
+## Step 5: inspect and release the application
 
 Read both ranks' logs when startup or collective requests stall:
 
 ```bash
-kubectl -n gpustack-elastic logs external-minimal-server-r0-m0 -c main
-kubectl -n gpustack-elastic logs external-minimal-server-r0-m1 -c main
-kubectl -n gpustack-elastic get modeldeployment external-minimal -o yaml
+kubectl -n gpustack-elastic logs external-fixed-server-r0-m0 -c main
+kubectl -n gpustack-elastic logs external-fixed-server-r0-m1 -c main
+kubectl -n gpustack-elastic get modeldeployment external-fixed -o yaml
 kubectl -n gpustack-elastic get services,endpointslices
 ```
 
@@ -290,17 +299,50 @@ The replica's headless Service supplies peer DNS; narrowing it to the HTTP leade
 After saving the results, stop the port-forward processes and delete this application:
 
 ```bash
-kubectl -n gpustack-elastic delete modeldeployment external-minimal
+kubectl -n gpustack-elastic delete modeldeployment external-fixed
 kubectl -n gpustack-elastic get pods,services,deployments \
-  -l app.kubernetes.io/instance=external-minimal
+  -l app.kubernetes.io/instance=external-fixed
 kubectl get devices -o json
 ```
 
 Verify that its owned workloads are gone and all four GPU claims are released.
-The recorded cleanup deleted both External test applications and returned all eight cards to their free state.
+In the final corrected run, engine Pods disappeared and all eight cards returned to their free state.
+The Router and Services remained after about two minutes of observation.
+Their deletion required explicit cleanup after confirming their owner UID.
+
+Automatic dependent cleanup was not established by that run; its cause remains unconfirmed.
+[Issue #601](https://github.com/gpustack/gpustack-operator/issues/601) tracks related cleanup delays after worker outages; this run did not establish that cause.
+
 Deleting the application retains the model cache and cloud cluster.
+
+## Validation record
+
+The initial operator binary was `d00f8fa8c98334a71af4c6eb302ee80d08289309` from
+`gpustack/gpustack-operator:dev@sha256:84f85914bdcb398b2f662dfdcb0845ee853597ec5661a5cf41828acae6a11e36`.
+The corrected run used binary `20d674b7f8c1e1d4c22b91a09fd178b9738d70be` from
+`thxcode/gpustack-operator:dev-20d674b7@sha256:43c14087fd3391e4bf4a3327f246053d9e59b2feb684cb792f63a2f0db659fbd`.
+That test image replaced the operator binary on the pinned official base. It retained the packaged vendor assets.
+
+The official runner below contained vLLM 0.29.0 and Ray 2.54.0, with no package replacements.
+Its CuPy installation contained only `cupy-cuda13x` 14.2.0.
+
+The initial operator retained `member-index=0` and registered only member 0.
+All four Router requests completed, but all four increased only member 0's counter.
+After the fix, discovery registered both healthy endpoints and included both in selection.
+Four Router requests completed on their first attempt: two ordinary and two streaming requests.
+Each returned eight completion tokens; both streams ended with `data: [DONE]`.
+
+| Operator run | Registered ranks | Rank 0 counter increase | Rank 1 counter increase | Coverage |
+|---|---|---|---|---|
+| Initial official dev | 0 | 4 | 0 | Failed |
+| Selector fix | 0, 1 | 2 | 2 | Passed |
+
+The correction removed the leader restriction only from eligible External Server endpoints.
+Both engine Pods remained running through the Operator upgrade. The Router Pod restarted with its corrected selector.
 
 ---
 
-**See also** — [Model Scaling Walkthrough](scaling-walkthrough.md) (prefetch and Elastic EP) ·
-[Routing](routing.md) (backend selection) · [Model Deployment Configuration](deployment.md) (role fields)
+**See also** — [Elastic EP Walkthrough](elastic-ep.md) (collective expansion) ·
+[Routing](../../modules/model-deployment/routing.md) (backend selection) · [Model Deployment Configuration](../../modules/model-deployment/deployment.md) (role fields)
+
+**Next** → [Model Deployment Status](../../modules/model-deployment/status.md)

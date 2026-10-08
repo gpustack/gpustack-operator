@@ -529,7 +529,7 @@ A manifest asking `"3"` for a heavier share of one accelerator now needs a node 
 
 `InstanceType.status.acceleratorShared.onceMaxRequest` moved with it: it counts a node's accelerators
 with a free share, where it used to sum their shares. Output recorded before the change, in the
-[Walkthrough](../../getting-started/walkthrough.md) and [NVIDIA MIG Operations](./nvidia-mig.md), still shows the
+[Walkthrough](../../walkthroughs/devices/scheduling.md) and [NVIDIA MIG Operations](./nvidia-mig.md), still shows the
 old reading under `SH` — `10/10` on one free accelerator now reads `1/10`.
 
 ## Limitations
@@ -596,4 +596,4 @@ partitioning) · [Admission](./admission.md) (where these keys are checked) ·
 served) · [RDMA Operations](../rdma/operations.md) (how many RDMA endpoints to ask for beside N
 accelerators, and the kubelet policy that aligns the two sides)
 
-**Next** → [Walkthrough](../../getting-started/walkthrough.md) — the same requests on a live cluster.
+**Next** → [Walkthrough](../../walkthroughs/devices/scheduling.md) — the same requests on a live cluster.

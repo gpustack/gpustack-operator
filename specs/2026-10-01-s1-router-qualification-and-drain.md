@@ -117,6 +117,13 @@ map; internal headless replica Services keep selecting every member with
 `publishNotReadyAddresses` untouched. The existing ready-instance status fields are preserved
 unchanged.
 
+**Corrected after shipping.** For qualified External Server roles, ordinary Services and Router discovery remove the legacy
+`member-index=0` equality and retain endpoint eligibility. Internal and P/D roles keep the leader
+restriction. Known non-Internal modes use the External selection rule; unknown modes do not expand
+selection. Hybrid runtime validation and External DP inside P/D remain separate follow-up work.
+Managed roles retain one HTTP port per Pod. MultiPort mode is refused because discovery cannot
+represent its additional listeners.
+
 - **Backfill before narrowing.** Before any Service or Router selector gains the key, the
   reconciler backfills it onto every existing healthy qualifying endpoint — no window in which a
   new selector term matches nothing and healthy endpoints disappear from selection. A static

@@ -10,7 +10,7 @@ Install the operator, configure a capability, or find the reference for a runnin
 
 - [Architecture](getting-started/architecture/) explains the components and scheduling chain.
 - [Vendor Prerequisites](getting-started/vendor-prerequisites/) lists the drivers and runtime setup.
-- [Walkthrough](getting-started/walkthrough/) follows a request through the operator.
+- [Walkthroughs](walkthroughs/) groups complete examples by module.
 
 ## Capabilities
 

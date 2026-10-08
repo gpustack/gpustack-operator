@@ -21,9 +21,9 @@ the role contract. [Prefill and Decode](prefill-decode.md) covers split roles.
 are directed.
 
 [Elastic EP](elastic-ep.md) keeps one serving instance and changes its collective while it runs.
-[Model Scaling Walkthrough](scaling-walkthrough.md) follows prefetch, TP2/DP2 startup, and DP2→4 expansion
+[Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) follows prefetch, TP2/DP2 startup, and DP2→4 expansion
 with captured resource output and completed inference requests.
-[External DP Walkthrough](external-dp-walkthrough.md) runs a fixed group with one HTTP endpoint per rank
+[External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md) runs a fixed group with one HTTP endpoint per rank
 and checks managed Router coverage.
 
 ---

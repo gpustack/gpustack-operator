@@ -1,4 +1,4 @@
-# Walkthrough
+# Device Scheduling Walkthrough
 
 This page records a real session: every `kubectl` invocation and its real output, objects as YAML
 trimmed to `metadata.labels` / `spec` / `status`, and a before / after `kubectl get instancetypes`
@@ -10,14 +10,14 @@ until section 5 flips it on.
 
 Watch three columns: **UNIT(CPU/RAM)/STORAGE**, the per-unit request the InstanceType charges; **CPU**,
 the collapsed CPU pool's `remaining/capacity` cores; **ACCELERATOR(EX/SH/SL/PT)**, the
-`onceMaxRequest/remaining` of each [four-view](../modules/devices/admission.md#four-view-status)
+`onceMaxRequest/remaining` of each [four-view](../../modules/devices/admission.md#four-view-status)
 projection. This run predates the shared card-count reading, so its `SH` once-max figures are
-shares, not accelerators ([Pre-release breaks](../modules/devices/requests.md#pre-release-breaks)).
+shares, not accelerators ([Pre-release breaks](../../modules/devices/requests.md#pre-release-breaks)).
 
 Each accelerator counts in exactly one of `EX`/`SH`/`SL` (unpartitioned) or `PT` (partitioned), so
 `0/0` under `PT` throughout means none is in a partitioning mode. For the all-partitioned and **mixed**
 configurations see the [three-configuration
-walkthrough](../modules/devices/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node).
+walkthrough](../../modules/devices/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node).
 
 ## Contents
 
@@ -415,17 +415,17 @@ Deleting the Instance releases the slice: the row returns to `1/1 10/10 100/100 
 > instead hard-partitions into fixed hardware instances the operator materializes on demand:
 >
 > - a different resource family (`.partitioned*`, reported under `PT`), with a different request shape —
->   keys and rules in [Accelerator Requests](../modules/devices/requests.md);
+>   keys and rules in [Accelerator Requests](../../modules/devices/requests.md);
 > - MIG *mode* is the administrator's, driven with `nvidia-smi`, so it has its own runbook and a recorded
 >   enable → request → reclaim → disable walkthrough in
->   [NVIDIA MIG Operations](../modules/devices/nvidia-mig.md).
+>   [NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md).
 
 ---
 
 ## 4. Managing a custom InstanceType
 
 A derived pool is sized from a **per-product preset**: 8 CPU / 64 GiB for this A10G, 4 CPU / 16 GiB for
-an unrecognised accelerator ([preset reference](../reference/instance-type-unit-resources.md)). For
+an unrecognised accelerator ([preset reference](../../reference/instance-type-unit-resources.md)). For
 another size, an admin authors an InstanceType referencing a catalog flavor by its `acceleratorGroup`,
 with a unit spec of its own:
 
@@ -666,10 +666,10 @@ spec:
 - **They mount into the workload container only.** The SSH sidecar needs no change: it enters that
   container's mount namespace per session, so every mount is visible over SSH too.
 - **A persistent claim places the Instance where it can attach.** The workspace claim and every
-  `persistent` entry follow the [claim placement rules](../modules/model-delivery/artifact.md#claim-delivery-and-placement):
+  `persistent` entry follow the [claim placement rules](../../modules/model-delivery/artifact.md#claim-delivery-and-placement):
   a node-local volume pins the Instance to its node and that node's capacity; network or `ReadWriteMany`
   storage avoids the pin. A claim nothing binds creates no Pod and says why in `status.phaseMessage`;
-  [`instance-persistent-volume-placement`](../reference/settings.md#online-adjustable-settings) turns this off.
+  [`instance-persistent-volume-placement`](../../reference/settings.md#online-adjustable-settings) turns this off.
 - **Both new fields are immutable while the Instance runs**, editable while stopped — the rule the rest
   of `spec` follows.
 
@@ -682,7 +682,7 @@ kept separate so node-path mounts can be allowed without a container escape:
 | `instance-host-path-volume-allowed` | `spec.additionalVolumes[*].hostPath` — reaches the node's filesystem, but not its devices or kernel. |
 
 Each gates taking its escape, so turning one off stops new grants without stranding an Instance
-that already holds one; [Settings](../reference/settings.md#online-adjustable-settings) has the exact terms.
+that already holds one; [Settings](../../reference/settings.md#online-adjustable-settings) has the exact terms.
 
 Both govern the **node** boundary, not the namespace one: a `persistent`, `configMap` or `secret`
 source names an object in the Instance's own namespace and may always be mounted, the same reach a Pod
@@ -691,9 +691,9 @@ other's Secrets in their own.
 
 ---
 
-**See also** — [Accelerator Requests](../modules/devices/requests.md) (the contract behind step 3) ·
-[NVIDIA MIG Operations](../modules/devices/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node)
-(hardware partitioning) · [Settings](../reference/settings.md#online-adjustable-settings) (the two gates)
+**See also** — [Accelerator Requests](../../modules/devices/requests.md) (the contract behind step 3) ·
+[NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node)
+(hardware partitioning) · [Settings](../../reference/settings.md#online-adjustable-settings) (the two gates)
 
-**Next** → [NVIDIA MIG Operations](../modules/devices/nvidia-mig.md) — hardware partitioning, from enabling
+**Next** → [NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md) — hardware partitioning, from enabling
 the mode to reclaiming the instance.
