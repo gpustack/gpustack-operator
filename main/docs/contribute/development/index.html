@@ -527,7 +527,7 @@ before changing the operator&rsquo;s behavior.</p>
 <ul>
 <li><code>make deps</code> — vendor patched k8s staging modules into <code>staging/</code> <strong>and</strong> upstream Helm charts into <code>deploy/gpustack-operator/chart/charts/</code>, then <code>go mod tidy &amp;&amp; go mod download</code>; <code>make deps update</code> adds <code>go get -u ./...</code>.</li>
 <li><code>make generate</code> — the <code>gen/api</code> generators: deepcopy, register, apiservice, CRDs, conversion, protobuf, webhooks. <code>make generate binding</code> regenerates the CGO bindings in <code>binding/</code> via c-for-go.</li>
-<li><code>make lint</code> — golangci-lint (<code>.golangci.yaml</code>); <code>make lint dirty</code> also fails on a dirty tree. <code>make lint docs</code> checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see <a href="https://github.com/gpustack/gpustack-operator/blob/3223fa4d693671daa1e9a02a4099aab6bff0fce2/.claude/skills/gpustack-operator-docs/SKILL.md">the docs skill</a>
+<li><code>make lint</code> — golangci-lint (<code>.golangci.yaml</code>); <code>make lint dirty</code> also fails on a dirty tree. <code>make lint docs</code> checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see <a href="https://github.com/gpustack/gpustack-operator/blob/3ce2edd3a7c6d341f25e120e2af0b6549cffc303/.claude/skills/gpustack-operator-docs/SKILL.md">the docs skill</a>
 .</li>
 <li><code>make build</code> — cross-build <code>cmd/gpustack-operator</code> into <code>.dist/build/</code>, version ldflag-injected into <code>pkg/utils/version</code>; <code>VERSION=vX.y.z+l.m make build</code> sets it, <code>BUILD_PLATFORMS=&quot;linux/amd64 linux/arm64&quot;</code> cross-compiles.</li>
 <li><code>make test</code> — <code>go test -v -failfast -race -cover -shuffle=on -timeout=30m ./...</code>, coverage to <code>.dist/test/coverage.out</code>. The order is shuffled on every run so an order-dependent test cannot hide behind the fixed one; a failure banner prints the seed, and <code>go test -shuffle=&lt;seed&gt;</code> reproduces that exact order. Trailing args are regexes of packages to <strong>exclude</strong>. <code>RACE=false make test</code> drops <code>-race</code> and changes nothing else.</li>
@@ -633,7 +633,7 @@ script and license are bundled under <code>site/assets/vendor/mermaid/</code>, s
 <p>Edit documentation under <code>docs/</code>, navigation labels and order in <code>site/data/navigation.yaml</code>, and
 layouts and styles under <code>site/</code>. Run <code>make lint docs</code> before committing to check source links,
 page structure, index entries and rendered site links. CI runs the same gate.</p>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/3223fa4d693671daa1e9a02a4099aab6bff0fce2/docs/README.md#module-map">shared module map</a>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/3ce2edd3a7c6d341f25e120e2af0b6549cffc303/docs/README.md#module-map">shared module map</a>
  connects guides, specs, code and skills for code
 changes. Update its routing in the same PR when those entry points or associations change.
 <code>make site</code> also generates <code>/llms.txt</code> from that index and <code>index.md</code> beside each article&rsquo;s HTML.
@@ -855,7 +855,7 @@ are under <code>hack/deploy/</code>.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/3223fa4d693671daa1e9a02a4099aab6bff0fce2/docs/contribute/development.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/3ce2edd3a7c6d341f25e120e2af0b6549cffc303/docs/contribute/development.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/contribute/development.md">Edit this page</a>
             
