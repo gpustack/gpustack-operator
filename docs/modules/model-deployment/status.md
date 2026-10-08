@@ -20,6 +20,12 @@ Ready instances by kind: `R` is managed router Pods, `S` is ordinary servers, `P
 and `D` is decoders. For example, `1R2S` means one Ready router and two Ready servers; `1R3P4D`
 means one Ready router, three Ready prefillers and four Ready decoders.
 
+**During a replacement the status reads what is deployed.** A `size`, `instanceType`, `resources`
+or `command` edit rolls a role one replica at a time (see
+[Rollout behavior](deployment.md#rollout-behavior)), so `desired` reflects the new spec while
+`ready` counts replicas still serving the configuration they were created with. `unmanaged`,
+`parallelism` and the cache conditions read the deployed command line the same way.
+
 Without a router, the `R` part is absent; a declared kind with nothing Ready shows zero. Several
 roles of the same kind are summed. A serving instance made of several Pods still counts once; use
 `status.roles[].desired` to see the requested count.

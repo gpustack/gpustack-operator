@@ -324,7 +324,7 @@ No task creates a PR or executes cluster tests.
 
 Checkpoint: validate the replica reader and its negative controls before changing replacement cadence.
 
-- [ ] **T2 · Ordinary role update contract**
+- [x] **T2 · Ordinary role update contract**
       Blocked by: None
       Owns: `api/worker/v1alpha1/model_deployment.go`, `api/worker/v1alpha1/model_deployment_test.go`, `pkg/worker/webhooks/worker/model_deployment*.go`, `docs/modules/model-deployment/deployment.md`, `docs/modules/model-deployment/prefill-decode.md`, `docs/modules/model-deployment/shutdown.md`, `docs/modules/model-deployment/status.md`, `docs/modules/model-deployment/elastic-ep.md`
       Gate: review

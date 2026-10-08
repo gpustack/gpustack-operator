@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
@@ -290,9 +291,9 @@ func validateModelDeploymentElasticOwnedKeys(
 	return errs
 }
 
-// validateModelDeploymentElasticIdentity enforces the frozen half of the profile: presence
-// and head placement are identity, width is the running state. The profile must also stay on
-// the role that carried it.
+// validateModelDeploymentElasticIdentity enforces the frozen half of the profile: presence,
+// head placement, the role's pool and card shape, and the declared TP and width ceiling are
+// identity; width is the running state. The profile must also stay on the role that carried it.
 func validateModelDeploymentElasticIdentity(
 	md, old *workercore.ModelDeployment,
 ) field.ErrorList {
@@ -325,6 +326,23 @@ func validateModelDeploymentElasticIdentity(
 		errs = append(errs, field.Forbidden(
 			modelDeploymentElasticRolePath(md, newElastic).Child("name"),
 			"the elastic profile must stay on the role it was created with: "+modelDeploymentIdentityMessage,
+		))
+	}
+	// The profile pins what the ordinary contract lets move: an elastic role's member shape is
+	// fixed at creation, and width is the only running-state field. ReplicaSize stays at one and
+	// a command stays forbidden through the shape rules.
+	if newElastic.InstanceType != oldElastic.InstanceType {
+		errs = append(errs, field.Invalid(
+			modelDeploymentElasticRolePath(md, newElastic).Child("instanceType"),
+			newElastic.InstanceType,
+			"the elastic-EP profile pins the pool the members were admitted against: "+modelDeploymentIdentityMessage,
+		))
+	}
+	if !kubemeta.DeepEqual(newElastic.Resources, oldElastic.Resources) {
+		errs = append(errs, field.Invalid(
+			modelDeploymentElasticRolePath(md, newElastic).Child("resources"),
+			newElastic.Resources,
+			"the elastic-EP profile pins the members' accelerator shape: "+modelDeploymentIdentityMessage,
 		))
 	}
 	if newElastic.ElasticEP.Width < oldElastic.ElasticEP.Width {

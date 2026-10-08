@@ -22,6 +22,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
@@ -407,12 +408,15 @@ func modelDeploymentRoleReservedListenPort(
 
 // validateModelDeploymentPoolTransport checks a new cache binding against each role's engine.
 // An unchanged binding is held access: an existing deployment remains editable if its backend
-// later changes transport, as with the host access gates above.
+// later changes transport, as with the host access gates above. On an update the rule re-runs
+// only for a role moved onto a different instanceType, because the engine it reads is carried by
+// that type's manufacturer; a role whose type did not move keeps held access.
 func (r *ModelDeploymentWebhook) validateModelDeploymentPoolTransport(
 	ctx context.Context, old, md *workercore.ModelDeployment,
 ) (field.ErrorList, error) {
 	if md.Spec.KVCache == nil || md.DeletionTimestamp != nil ||
-		old != nil && kubemeta.DeepEqual(old.Spec.KVCache, md.Spec.KVCache) {
+		old != nil && kubemeta.DeepEqual(old.Spec.KVCache, md.Spec.KVCache) &&
+			!modelDeploymentPoolTransportInputsChanged(old, md) {
 		return nil, nil
 	}
 	path := field.NewPath("spec", "kvCache", "poolRef", "name")
@@ -452,9 +456,23 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentPoolTransport(
 	if nonempty.Len() < 2 {
 		return nil, nil
 	}
+	// A create judges every role. On an update a role whose type did not move keeps held access;
+	// a changed binding is judged whole against the new pool.
+	judgeAll := old == nil || !kubemeta.DeepEqual(old.Spec.KVCache, md.Spec.KVCache)
+	stored := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
+	if !judgeAll {
+		for i := range old.Spec.Roles {
+			stored[old.Spec.Roles[i].Name] = &old.Spec.Roles[i]
+		}
+	}
 	seen := make(map[string]struct{}, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
+		if !judgeAll {
+			if was := stored[role.Name]; was != nil && was.InstanceType == role.InstanceType {
+				continue
+			}
+		}
 		if _, ok := seen[role.InstanceType]; ok {
 			continue
 		}
@@ -478,18 +496,118 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentPoolTransport(
 	return nil, nil
 }
 
+// modelDeploymentPoolTransportInputsChanged reports whether an update moved a role onto a
+// different instanceType. That is the one transport input the object carries: the engine each
+// role runs is read off the type's manufacturer, so a move can flip the verdict the stored shape
+// once passed.
+func modelDeploymentPoolTransportInputsChanged(old, md *workercore.ModelDeployment) bool {
+	if len(old.Spec.Roles) != len(md.Spec.Roles) {
+		return true
+	}
+	stored := make(map[string]string, len(old.Spec.Roles))
+	for i := range old.Spec.Roles {
+		stored[old.Spec.Roles[i].Name] = old.Spec.Roles[i].InstanceType
+	}
+	for i := range md.Spec.Roles {
+		if stored[md.Spec.Roles[i].Name] != md.Spec.Roles[i].InstanceType {
+			return true
+		}
+	}
+
+	return false
+}
+
+// modelDeploymentDirectLegProbe renders one role's direct-transfer leg the way any non-Ascend
+// type with a computed status would. The manufacturer only ever forces the leg empty or hands
+// back the declared protocol, so equal probes mean the leg kept its value whatever this role's
+// type reports.
+func modelDeploymentDirectLegProbe(md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole) string {
+	return workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, nodefeature.ManufacturerNVIDIA)
+}
+
+// modelDeploymentRoleInterfaceInputsChanged reports whether an update touched the inputs the
+// interface-request rule reads for one role: its interface request, its InstanceType and its
+// command presence. A role the object did not carry counts as changed. Roles are matched by name
+// and quantities by value.
+//
+// An unchanged role is not re-judged: the rule resolves cluster-side objects, and those can drift
+// under a stored deployment, so re-running it on a role whose inputs did not move would refuse
+// that role for a drift its own edit did not cause.
+func modelDeploymentRoleInterfaceInputsChanged(was, role *workercore.ModelDeploymentRole) bool {
+	return was == nil || role.InstanceType != was.InstanceType ||
+		(len(role.Command) > 0) != (len(was.Command) > 0) ||
+		!kubemeta.DeepEqual(interfaceQuantity(role.Resources), interfaceQuantity(was.Resources))
+}
+
+// interfaceQuantity returns the role's interface request, nil when unset anywhere on the way.
+func interfaceQuantity(ress *workercore.ModelDeploymentRoleResources) *resource.Quantity {
+	if ress == nil {
+		return nil
+	}
+	return ress.Interface
+}
+
+// modelDeploymentRoleNeedsInterfaceRejudge reports whether this write must rejudge one requesting
+// role. A create judges every role. An update judges the roles whose own inputs moved; the router
+// and the transfer declaration reach a role only through the direct leg the production helper
+// renders, so a role whose leg kept its value keeps the escape hatch its stored verdict provides.
+func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
+	ctx context.Context, old, md *workercore.ModelDeployment, was, role *workercore.ModelDeploymentRole, i int,
+) (bool, error) {
+	if modelDeploymentRoleInterfaceInputsChanged(was, role) {
+		return true, nil
+	}
+	if modelDeploymentDirectLegProbe(old, was) == modelDeploymentDirectLegProbe(md, role) {
+		return false, nil
+	}
+	// The probes differ, which only a non-Ascend manufacturer can turn into a real leg change,
+	// so the rendered legs are compared at the type's own manufacturer before rejudging.
+	manufacturer := ""
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
+		instType, err := r.getInstanceType(ctx, role.InstanceType, i)
+		if err != nil {
+			return false, err
+		}
+		manufacturer = instType.Status.Detail.Manufacturer
+	}
+	return workerctrl.ModelDeploymentDirectInterfaceProtocol(old, was, manufacturer) !=
+		workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer), nil
+}
+
 // validateModelDeploymentInterfaceRequests checks the device key against the resolved cache
-// backend and the direct leg each role actually renders. An unresolved cache binding cannot
+// backend and the direct leg each judged role actually renders. An unresolved cache binding cannot
 // justify a positive device request, because it may later resolve to another fabric.
+//
+// A create judges every requesting role. An update judges the roles whose own inputs moved, and
+// the roles whose rendered direct-transfer leg moved with the router or the transfer
+// declaration; a role whose leg kept its value keeps the escape hatch its stored verdict gives.
 func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
-	ctx context.Context, md *workercore.ModelDeployment,
+	ctx context.Context, old, md *workercore.ModelDeployment,
 ) (field.ErrorList, error) {
+	stored := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
+	if old != nil {
+		for i := range old.Spec.Roles {
+			stored[old.Spec.Roles[i].Name] = &old.Spec.Roles[i]
+		}
+	}
+
 	var requested []int
 	for i := range md.Spec.Roles {
 		ress := md.Spec.Roles[i].Resources
-		if ress != nil && ress.Interface != nil && ress.Interface.Sign() > 0 {
-			requested = append(requested, i)
+		if ress == nil || ress.Interface == nil || ress.Interface.Sign() <= 0 {
+			continue
 		}
+		if old != nil {
+			judge, err := r.modelDeploymentRoleNeedsInterfaceRejudge(
+				ctx, old, md, stored[md.Spec.Roles[i].Name], &md.Spec.Roles[i], i)
+			if err != nil {
+				return nil, err
+			}
+			if !judge {
+				continue
+			}
+		}
+		requested = append(requested, i)
 	}
 	if len(requested) == 0 {
 		return nil, nil
@@ -577,7 +695,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	}
 	errs = append(errs, typeErrs...)
 	if len(errs) == 0 {
-		interfaceErrs, err := r.validateModelDeploymentInterfaceRequests(ctx, md)
+		interfaceErrs, err := r.validateModelDeploymentInterfaceRequests(ctx, nil, md)
 		if err != nil {
 			return nil, err
 		}
@@ -631,9 +749,8 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 		return nil, err
 	}
 	errs = append(errs, typeErrs...)
-	if len(errs) == 0 && old != nil && (!kubemeta.DeepEqual(old.Spec.KVTransfer, md.Spec.KVTransfer) ||
-		!kubemeta.DeepEqual(old.Spec.Router, md.Spec.Router)) {
-		interfaceErrs, err := r.validateModelDeploymentInterfaceRequests(ctx, md)
+	if len(errs) == 0 && old != nil {
+		interfaceErrs, err := r.validateModelDeploymentInterfaceRequests(ctx, old, md)
 		if err != nil {
 			return nil, err
 		}
@@ -664,17 +781,6 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 const modelDeploymentIdentityMessage = "this is part of what makes this deployment the deployment " +
 	"it is: a different value describes a different deployment, which is created rather than edited"
 
-// modelDeploymentReplicaSizeFrozenMessage is the reason a size change carries, and it points at the
-// field that does move rather than only refusing.
-//
-// IT NAMES replicas BECAUSE THE REFUSAL IS OTHERWISE A DEAD END. An operator changing size almost
-// always wants more capacity, which replicas gives without touching anything already serving. The
-// one thing size can do -- serve at a different instance shape -- genuinely needs a new deployment,
-// and saying both is what separates "you asked for the wrong field" from "you cannot have this".
-const modelDeploymentReplicaSizeFrozenMessage = "an instance's size is fixed when the deployment is " +
-	"created: the Pods of a running instance cannot become a different number of Pods. Change " +
-	"replicas to run more or fewer instances, or create a deployment that declares the size you want"
-
 // validateModelDeploymentRouterName allows a router to be added or removed, but not changed in
 // place. Changing the implementation is a delete and create with an interval between them.
 func validateModelDeploymentRouterName(md, old *workercore.ModelDeployment) field.ErrorList {
@@ -691,17 +797,12 @@ func validateModelDeploymentRouterName(md, old *workercore.ModelDeployment) fiel
 // one that changes how it is currently run.
 //
 // THE CRITERION IS THE RULE, NOT THE LIST BELOW. A field is frozen when it answers "which deployment
-// is this" -- what is served, what serves it, whose cache it shares, and the shape of the roles that
-// serve it. A field is editable when it answers "how is this deployment being run right now" -- how
-// many replicas, which build, how that build is fetched and tuned. Judging a NEW field means asking
-// that question, not appending to the list; a list alone grows by precedent and stops meaning
-// anything.
-//
-// ONE FIELD IS FROZEN AGAINST THE CRITERION and is marked here so it is not read as an oversight:
-// roles[].resources does not answer which deployment this is, but it changes what admission has to
-// find. Changing it renegotiates the scheduling, which is not materially different from deleting and
-// recreating. Its mirror image is the role's privileged field, which the criterion leaves editable even
-// though a different argument could move it.
+// is this" -- what is served, what serves it, whose cache it shares. A field is editable when it
+// answers "how is this deployment being run right now" -- how many replicas at what size, which
+// pool and card shape, which build, how that build is fetched, tuned and launched. Judging a NEW
+// field means asking that question, not appending to the list; a list alone grows by precedent and
+// stops meaning anything. The role's shape fields sit on the editable side; kind stays frozen
+// because it is what the role is.
 //
 // ROLES ARE MATCHED BY NAME, NEVER BY POSITION. The field is a listType=map keyed by name, so a
 // reordered list is the same set of roles and the API already treats it as one; comparing by index
@@ -782,25 +883,13 @@ func validateModelDeploymentRoleIdentity(md, old *workercore.ModelDeployment) fi
 	return errs
 }
 
-// validateModelDeploymentRoleIdentityFields compares one role's frozen fields against the stored
+// validateModelDeploymentRoleIdentityFields compares one role's frozen field against the stored
 // role of the same name.
 //
-// command is frozen because it decides whether the operator configures this role at all: a
-// role that supplies one is taken over by its author, which changes cache injection and what status
-// can claim. The rest of the role's container fields are how the build is fetched, shaped and
-// tuned, and are editable.
-//
-// size IS FROZEN FOR A DIFFERENT REASON AND SO CARRIES A DIFFERENT MESSAGE. The others are identity:
-// a different value describes a different deployment. This one is arithmetic the Pods of a running
-// instance cannot survive -- an instance of n Pods is admitted as one group of n, and a new n makes
-// every living instance the wrong shape at once, with no intermediate state in which the deployment
-// is serving. What the reader needs is the field that does move, so the message names replicas.
-//
-// FREEZING IT ALSO KEEPS ONE NUMBER UNDER ONE WRITER. The size is the group's declared total, the
-// member count the operator creates, and the rank count it publishes to every container; all three
-// are derived from this one field on every pass. A count that never moves cannot be read as two
-// different totals by two readers, and a count that moved would change a group's declared total
-// while the group is running -- which Kueue answers by stopping every member it already admitted.
+// Kind is the one frozen role field: it is what the role is, so a Server role re-declared as
+// Decode is a different deployment wearing the same name. Size, instanceType, resources and
+// command describe how the role currently runs, are editable, and are applied by whole-group
+// replacement. The elastic-EP profile pins its own role through validateModelDeploymentElasticIdentity.
 func validateModelDeploymentRoleIdentityFields(
 	rolePath *field.Path, role, was *workercore.ModelDeploymentRole,
 ) field.ErrorList {
@@ -808,22 +897,6 @@ func validateModelDeploymentRoleIdentityFields(
 	if role.Kind != was.Kind {
 		errs = append(errs, field.Invalid(
 			rolePath.Child("kind"), role.Kind, modelDeploymentIdentityMessage))
-	}
-	if role.ReplicaSize != was.ReplicaSize {
-		errs = append(errs, field.Invalid(
-			rolePath.Child("size"), role.ReplicaSize, modelDeploymentReplicaSizeFrozenMessage))
-	}
-	if role.InstanceType != was.InstanceType {
-		errs = append(errs, field.Invalid(
-			rolePath.Child("instanceType"), role.InstanceType, modelDeploymentIdentityMessage))
-	}
-	if !kubemeta.DeepEqual(role.Resources, was.Resources) {
-		errs = append(errs, field.Invalid(
-			rolePath.Child("resources"), role.Resources, modelDeploymentIdentityMessage))
-	}
-	if !kubemeta.DeepEqual(role.Command, was.Command) {
-		errs = append(errs, field.Invalid(
-			rolePath.Child("command"), role.Command, modelDeploymentIdentityMessage))
 	}
 
 	return errs
@@ -1488,10 +1561,10 @@ func validateModelDeploymentServiceNamesAreDistinct(md *workercore.ModelDeployme
 // IT IS A SEPARATE RULE FROM THE SERVICE-NAME ONE ABOVE, AND NOT A WIDENING OF IT, because the two
 // have different subjects and different triggers. That rule is about <deployment>-<role>, which no
 // update can move, so it is checked once when a role appears. This one is about
-// <deployment>-<role>-r<ordinal>-m<member>, whose length depends on `replicas` -- a field a user is
-// invited to change -- so it has to be checked on every update, including for roles that already
-// exist. Merging them would mean either re-checking an immutable pair forever or letting a scale
-// walk a legal deployment into an illegal one.
+// <deployment>-<role>-r<ordinal>-m<member>, whose length depends on `replicas` and `size` -- both
+// fields a user is invited to change -- so it has to be checked on every update, including for
+// roles that already exist. Merging them would mean either re-checking an immutable pair forever
+// or letting an edit walk a legal deployment into an illegal one.
 //
 // THE FAILURE IT PREVENTS IS A LOOP RATHER THAN AN ERROR. A member's name is its hostname, which is
 // a DNS-1123 label of 63 characters, while the names above are only checked to 63 for the shorter
@@ -1529,16 +1602,14 @@ func validateModelDeploymentRoleMemberNames(md *workercore.ModelDeployment) fiel
 
 		// THE ERROR IS ATTACHED TO THE ROLE RATHER THAN TO ONE OF ITS FIELDS, because four inputs
 		// spell this name -- the deployment's name, the role's name, `replicas` and `size` -- and
-		// which of them moved is not knowable from the object being validated. Naming `size` would
-		// be actively misleading on the edit that reaches here most often: a scale that takes
-		// `replicas` from 9 to 10 lengthens the ordinal and trips this, while `size` is immutable
-		// and therefore the one input the user cannot act on. The detail below names every input
-		// that can be changed instead.
+		// which of them moved is not knowable from the object being validated. The two names are
+		// frozen identity; only the counts are editable, so the error names every input instead of
+		// betting on one.
 		errs = append(errs, field.Invalid(
 			rolesPath.Index(i), name, fmt.Sprintf(
 				"a replica of this role is addressed by naming each of its Pods, and the longest "+
 					"such name would be %q (%d characters), which cannot be a hostname: %s. "+
-					"Shorten the role or the deployment, or declare fewer replicas",
+					"Shorten the role or the deployment, or declare fewer replicas or members",
 				name, len(name), strings.Join(why, "; "))))
 	}
 

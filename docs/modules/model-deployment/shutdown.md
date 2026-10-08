@@ -17,6 +17,11 @@ a `replicas` reduction, a surplus shed, a dropped role — goes through
 [the retirement protocol](#the-retirement-protocol) first, and its Pod is deleted when that
 finishes.
 
+An edit that replaces a role's configuration deletes that role's old replicas one at a time, and
+each deleted replica drains exactly as below. The protocol reads a leaving replica as it is
+deployed — the size and command it was created with — so an edit elsewhere does not change how it
+is classified: a take-over replica is still held, a prefill or decode replica still refused.
+
 `G` below is the role's grace: `roles[].terminationGracePeriodSeconds`, 30 when unset, written to
 the Pod's field of the same name.
 

@@ -106,6 +106,35 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 		md:   func() *workercore.ModelDeployment { return elasticMD() },
 		old:  func() *workercore.ModelDeployment { return elasticMD() },
 	}, {
+		name: "instanceType change on update refused",
+		md: func() *workercore.ModelDeployment {
+			md := elasticMD()
+			md.Spec.Roles[0].InstanceType = "other-gpu"
+			return md
+		},
+		old:     func() *workercore.ModelDeployment { return elasticMD() },
+		wantErr: []string{"spec.roles[0].instanceType", "profile"},
+	}, {
+		name: "resources change on update refused",
+		md: func() *workercore.ModelDeployment {
+			md := elasticMD()
+			md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+				Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+			}
+			return md
+		},
+		old:     func() *workercore.ModelDeployment { return elasticMD() },
+		wantErr: []string{"spec.roles[0].resources", "profile"},
+	}, {
+		name: "command take-over on update refused",
+		md: func() *workercore.ModelDeployment {
+			md := elasticMD()
+			md.Spec.Roles[0].Command = []string{"python", "-m", "vllm"}
+			return md
+		},
+		old:     func() *workercore.ModelDeployment { return elasticMD() },
+		wantErr: []string{"spec.roles[0].command"},
+	}, {
 		name: "width decrease on update refused",
 		md: func() *workercore.ModelDeployment {
 			md := elasticMD()

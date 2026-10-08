@@ -25,6 +25,52 @@ func TestModelDeploymentKVCacheIsOptional(t *testing.T) {
 	assert.Equal(t, "object", spec.Properties["kvCache"].Type)
 }
 
+// TestModelDeploymentRoleSizeBoundsSurviveMutability pins the schema bounds the mutable role
+// contract keeps. size is editable, and every admitted value stays inside 1..64 with a default
+// of one; replicas keeps its own ceiling. These are schema facts, so they are pinned where the
+// schema is generated rather than assumed to have survived an annotation edit.
+func TestModelDeploymentRoleSizeBoundsSurviveMutability(t *testing.T) {
+	role := roleSchema(t, "spec")
+
+	size, ok := role.Properties["size"]
+	require.True(t, ok, "the schema has no spec.roles[].size")
+	require.NotNil(t, size.Default, "size carries a default")
+	assert.Equal(t, "1", string(size.Default.Raw), "an omitted size lands on one")
+	require.NotNil(t, size.Minimum, "size carries a lower bound")
+	assert.InDelta(t, 1, *size.Minimum, 0, "one Pod is the smallest instance")
+	require.NotNil(t, size.Maximum, "size carries an upper bound")
+	assert.InDelta(t, 64, *size.Maximum, 0, "the upper bound is the operator's own")
+
+	replicas, ok := role.Properties["replicas"]
+	require.True(t, ok, "the schema has no spec.roles[].replicas")
+	require.NotNil(t, replicas.Default, "replicas carries a default")
+	assert.Equal(t, "1", string(replicas.Default.Raw))
+	require.NotNil(t, replicas.Maximum, "replicas carries an upper bound")
+	assert.InDelta(t, 1024, *replicas.Maximum, 0)
+}
+
+// TestModelDeploymentRolesRemainAMapOnName pins the role list's merge identity. Roles are
+// listType=map keyed on name: reordering the list is not a change, and a name is what matches
+// an update to the role it edits. The mutable role contract depends on exactly this identity.
+func TestModelDeploymentRolesRemainAMapOnName(t *testing.T) {
+	roles := func(t *testing.T) extension.JSONSchemaProps {
+		t.Helper()
+
+		crd := GetCustomResourceDefinitions()["ModelDeployment"]
+		require.NotNil(t, crd, "ModelDeployment is not registered")
+		require.Len(t, crd.Spec.Versions, 1)
+
+		prop := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"].Properties["roles"]
+		require.NotNil(t, prop.Items, "roles is a list")
+		return prop
+	}(t)
+
+	require.NotNil(t, roles.XListType, "roles carries a list type")
+	assert.Equal(t, "map", *roles.XListType, "reordering roles must not itself be a change")
+	assert.Equal(t, []string{"name"}, roles.XListMapKeys,
+		"a role's name is what matches an update to the role it edits")
+}
+
 // roleSchema returns the schema of one entry under the given top-level section, as the generated
 // CRD carries it.
 //
