@@ -169,17 +169,71 @@ func TestDevicesReconciler_KubeletConflictStillPaysPendingReleases(t *testing.T)
 	require.Equal(t, devs.Status, published.Status, "and the conflict still publishes no guessed ledger")
 }
 
-func wholeCardAnnotation(t *testing.T, card string) map[string]string {
+func TestDevicesReconciler_KubeletResourceBlocks(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		blocks    [][]string
+		wantError string
+	}{
+		{name: "one complete block", blocks: [][]string{{"grp-0:dev-0:0000", "grp-0:dev-1:0000"}}},
+		{name: "one block per card", blocks: [][]string{{"grp-0:dev-0:0000"}, {"grp-0:dev-1:0000"}}},
+		{name: "reversed card blocks", blocks: [][]string{{"grp-0:dev-1:0000"}, {"grp-0:dev-0:0000"}}},
+		{name: "empty block beside complete blocks", blocks: [][]string{nil, {"grp-0:dev-0:0000"}, {"grp-0:dev-1:0000"}}},
+		{name: "missing card remains a conflict", blocks: [][]string{{"grp-0:dev-0:0000"}}, wantError: "allocation identity conflict"},
+		{name: "unknown card remains refused", blocks: [][]string{{"grp-0:dev-0:0000"}, {"grp-0:unknown:0000"}}, wantError: "absent from inventory"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			const node = "node-bookkeeping"
+			devs := twoCardDevices(node, workercore.DeviceAllocationModeNone)
+			pod := concurrentAllocatePod(node, "served", "uid-served", workercore.DeviceAllocationModeExclusive, 2)
+			pod.Status.Phase = core.PodRunning
+			pod.Annotations = wholeCardAnnotation(t, "dev-0", "dev-1")
+			devices := make([]*podresources.ContainerDevices, 0, len(tc.blocks))
+			for _, ids := range tc.blocks {
+				devices = append(devices, &podresources.ContainerDevices{
+					ResourceName: string(nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)),
+					DeviceIds:    ids,
+				})
+			}
+			rec := &DevicesReconciler{kubeletPods: func(context.Context) ([]*podresources.PodResources, error) {
+				return []*podresources.PodResources{{Name: pod.Name, Namespace: pod.Namespace, Containers: []*podresources.ContainerResources{{
+					Name: workloadContainer, Devices: devices,
+				}}}}, nil
+			}}
+			_, err := rec.verifyKubeletAllocations(ctx, devs, &core.PodList{Items: []core.Pod{*pod}})
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				return
+			}
+			require.NoError(t, err)
+			status, _ := BuildDesiredStatus(ctrl.LoggerFrom(ctx), devs, &core.PodList{Items: []core.Pod{*pod}})
+			for _, card := range status.Groups[0].Accelerators {
+				require.EqualValues(t, 0, card.Remaining)
+			}
+		})
+	}
+}
+
+func wholeCardAnnotation(t *testing.T, cards ...string) map[string]string {
 	t.Helper()
-	index := uint32(0)
-	if card == "dev-1" {
-		index = 1
+	ids := make([]string, 0, len(cards))
+	accelerators := make([]workercore.AcceleratorAllocation, 0, len(cards))
+	for _, card := range cards {
+		index := uint32(0)
+		if card == "dev-1" {
+			index = 1
+		}
+		ids = append(ids, "grp-0:"+card+":0000")
+		accelerators = append(accelerators, workercore.AcceleratorAllocation{
+			ID: card, Index: index, Mode: workercore.DeviceAllocationModeExclusive, Allocated: nodefeature.ResourceMaxUnits,
+		})
 	}
 	encoded, err := json.Marshal(PodAllocations{workloadContainer: {
-		DeviceIDs: []string{"grp-0:" + card + ":0000"},
+		DeviceIDs: ids,
 		Devices: workercore.DevicesStatus{Groups: []workercore.DevicesAllocationGroup{{
 			ID: "grp-0", Manufacturer: nodefeature.ManufacturerNVIDIA,
-			Accelerators: []workercore.AcceleratorAllocation{{ID: card, Index: index, Mode: workercore.DeviceAllocationModeExclusive, Allocated: nodefeature.ResourceMaxUnits}},
+			Accelerators: accelerators,
 		}}},
 	}})
 	require.NoError(t, err)

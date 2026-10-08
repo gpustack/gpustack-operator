@@ -76,16 +76,22 @@ func (r *DevicesReconciler) verifyKubeletAllocations(
 	}
 	for _, reportedPod := range listed {
 		for _, container := range reportedPod.GetContainers() {
+			// Kubelet can split one resource's devices into several blocks.
+			resources := make(map[string][]string)
 			for _, devices := range container.GetDevices() {
-				if len(devices.GetDeviceIds()) == 0 {
+				name := devices.GetResourceName()
+				resources[name] = append(resources[name], devices.GetDeviceIds()...)
+			}
+			for name, deviceIDs := range resources {
+				if len(deviceIDs) == 0 {
 					continue
 				}
-				accelerator, ok := manufacturableAccelerators[devices.GetResourceName()]
+				accelerator, ok := manufacturableAccelerators[name]
 				if !ok {
 					continue
 				}
 				if err := verifyKubeletContainer(devs, pods, reportedPod, container.GetName(),
-					devices.GetDeviceIds(), accelerator.manufacturer, accelerator.mode); err != nil {
+					deviceIDs, accelerator.manufacturer, accelerator.mode); err != nil {
 					return nil, err
 				}
 			}
