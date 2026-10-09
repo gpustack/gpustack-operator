@@ -292,8 +292,8 @@ The operator retains existing elastic Pods, so an env edit does not change their
 - There is one serving instance per deployment. `replicas` and `size` are not a width mechanism.
 - Only the master serves HTTP.
 - No RDMA fabric is requested for this profile.
-- The ordinary role fields' editability does not apply: `size`, `instanceType`, `resources` and
-  `command` are frozen on the profile's role.
+- The ordinary role fields' editability does not apply: the shape fields are frozen with the
+  profile, as described above.
 - Scale-down is not supported. A width decrease is rejected by admission; see [issue #741](https://github.com/gpustack/gpustack-operator/issues/741).
 
 **See also** — [Model Deployment Configuration](deployment.md) for the role contract ·
