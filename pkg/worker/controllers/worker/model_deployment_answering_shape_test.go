@@ -702,3 +702,17 @@ func TestDeployedAnsweringShape_UnreadableParallelismHolds(t *testing.T) {
 		})
 	}
 }
+
+// TestDrain_AReplicaWithNoMembersNamesThatAsTheHold keeps the hold reason honest for an already
+// unusual state: with no member there is no engine container missing, there is no member at all.
+func TestDrain_AReplicaWithNoMembersNamesThatAsTheHold(t *testing.T) {
+	r := &ModelDeploymentReconciler{}
+	plan := &modelDeploymentRetirementPlan{
+		Reservation: &workercore.ModelDeploymentRetirementStatus{RoleName: "server"},
+	}
+
+	reason, drained := r.observeModelDeploymentRetirementDrained(context.Background(), shapeDeployment(1), plan)
+
+	assert.False(t, drained)
+	assert.Equal(t, "the replica has no members to read", reason)
+}

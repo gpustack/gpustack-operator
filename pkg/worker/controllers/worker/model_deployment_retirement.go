@@ -942,6 +942,9 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementDrained(
 		return renderReason, false
 	}
 	// A member whose command cannot be read holds; the role is not consulted here at all.
+	if len(plan.Target.Members) == 0 {
+		return "the replica has no members to read", false
+	}
 	if !externalDP.known {
 		return "a member carries no engine container to read, so the replica's own command line could " +
 			"not be established", false
