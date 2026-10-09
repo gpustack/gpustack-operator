@@ -424,3 +424,40 @@ func TestReplacementWorkloadDeletes_OnlyProvableOwnershipIsDeletable(t *testing.
 	assert.Empty(t, replacementWorkloadDeletes(modelDeploymentReplacementSlot{}, []*kueue.Workload{orphan, byStranger}),
 		"a slot that captured nothing deletes nothing")
 }
+
+// TestCleanReplacementSlot_ASlotWrittenBeforeTheWorkloadWasSeenStillReleasesIt drives the whole
+// cleanup rather than the filter. The slot was written while the informer had not yet delivered
+// the departing group's Workload, so it holds no WorkloadUID, and its members are already gone. The
+// Workload is what Kueue's finalizer on the Pods and the reservation hang off, so leaving it
+// standing strands the group holding quota. It must go, and nothing that merely shares the
+// namespace may go with it.
+func TestCleanReplacementSlot_ASlotWrittenBeforeTheWorkloadWasSeenStillReleasesIt(t *testing.T) {
+	ctx := context.Background()
+	md := newRenderDeployment()
+
+	owned := composeReplicaGroup(md, "server", 0, []*core.Pod{{
+		ObjectMeta: meta.ObjectMeta{Name: "gone-0", Namespace: md.Namespace, UID: "pod-gone"},
+	}})
+	owned.Spec.QueueName = "q"
+	stranger := &kueue.Workload{ObjectMeta: meta.ObjectMeta{
+		Name: "someone-elses", Namespace: md.Namespace, UID: "wl-stranger",
+		OwnerReferences: []meta.OwnerReference{{APIVersion: "v1", Kind: "Pod", Name: "theirs", UID: "pod-theirs"}},
+	}}
+	orphan := &kueue.Workload{ObjectMeta: meta.ObjectMeta{Name: "orphan", Namespace: md.Namespace, UID: "wl-orphan"}}
+
+	cli := newJointClient(owned, stranger, orphan)
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(8)}
+	slot := modelDeploymentReplacementSlot{Role: "server", Ordinal: 0, MemberUIDs: []types.UID{"pod-gone"}}
+	require.Empty(t, slot.WorkloadUID, "the case is a slot that captured no Workload")
+
+	require.NoError(t, r.cleanReplacementSlot(ctx, md, slot, nil))
+
+	left := new(kueue.WorkloadList)
+	require.NoError(t, cli.List(ctx, left))
+	names := make([]string, 0, len(left.Items))
+	for i := range left.Items {
+		names = append(names, left.Items[i].Name)
+	}
+	assert.ElementsMatch(t, []string{"someone-elses", "orphan"}, names,
+		"only the Workload owned by a captured member is released")
+}
