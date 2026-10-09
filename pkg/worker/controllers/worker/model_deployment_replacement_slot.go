@@ -343,37 +343,19 @@ func replacementMemberDeletes(
 }
 
 // replacementWorkloadDeletes returns the Workloads the slot may delete: the one it captured, and
-// any uncaptured Workload owning nothing this operator still counts as live, which is the one
-// holding Kueue's finalizer on the departing group. A Workload claiming a member outside the
-// slot's set is another replica's, and a matching name is not a claim.
+// nothing else. A Workload the slot did not capture is not one this operator can prove it
+// composed, so a matching name or an ownerless shape is not authority to delete it.
 func replacementWorkloadDeletes(
-	slot modelDeploymentReplacementSlot, workloads []*kueue.Workload, live sets.Set[types.UID],
+	slot modelDeploymentReplacementSlot, workloads []*kueue.Workload,
 ) []*kueue.Workload {
 	var deletes []*kueue.Workload
 	for _, wl := range workloads {
 		if replacementCapturesWorkload(slot, wl) {
 			deletes = append(deletes, wl)
-
-			continue
 		}
-		if modelDeploymentWorkloadOwnsAny(wl, live) {
-			continue
-		}
-		if modelDeploymentWorkloadOwnsAny(wl, replacementSlotMemberSet(slot)) {
-			continue
-		}
-		if wl.DeletionTimestamp != nil {
-			continue
-		}
-		deletes = append(deletes, wl)
 	}
 
 	return deletes
-}
-
-// replacementSlotMemberSet is the member UID set a slot captured.
-func replacementSlotMemberSet(slot modelDeploymentReplacementSlot) sets.Set[types.UID] {
-	return sets.New[types.UID](slot.MemberUIDs...)
 }
 
 // workloadOwnsGroupName reports whether a Workload stands on a group's derived name. It locates
@@ -1018,7 +1000,7 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 		if err != nil {
 			return progress, err
 		}
-		if err = r.cleanReplacementSlot(ctx, md, slot, replacementPodPointers(members), members); err != nil {
+		if err = r.cleanReplacementSlot(ctx, md, slot, replacementPodPointers(members)); err != nil {
 			return progress, err
 		}
 		vacant, why, err := r.replacementVacant(ctx, md, slot)
@@ -1048,7 +1030,7 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 	// which is the one state the vacancy question below is asked from.
 	mine := replacementStandingMemberDeletes(slot, replacementPodPointers(captured))
 	if slot.Phase == modelDeploymentReplacementCleanup {
-		if err = r.cleanReplacementSlot(ctx, md, slot, mine, captured); err != nil {
+		if err = r.cleanReplacementSlot(ctx, md, slot, mine); err != nil {
 			return progress, err
 		}
 		if len(mine) > 0 {
@@ -1091,7 +1073,7 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 			if err = r.advanceReplacementSlot(ctx, md, next); err != nil {
 				return progress, err
 			}
-			if err = r.cleanReplacementSlot(ctx, md, next, standing, captured); err != nil {
+			if err = r.cleanReplacementSlot(ctx, md, next, standing); err != nil {
 				return progress, err
 			}
 			progress.requeue = true
@@ -1208,7 +1190,7 @@ func replacementPodPointers(pods []core.Pod) []*core.Pod {
 // cannot prove it composed is left standing and the vacancy proof waits on it.
 func (r *ModelDeploymentReconciler) cleanReplacementSlot(
 	ctx context.Context, md *workercore.ModelDeployment, slot modelDeploymentReplacementSlot,
-	members []*core.Pod, live []core.Pod,
+	members []*core.Pod,
 ) error {
 	for _, member := range replacementMemberDeletes(slot, members) {
 		uid := member.UID
@@ -1221,25 +1203,15 @@ func (r *ModelDeploymentReconciler) cleanReplacementSlot(
 	// A SLOT WHOSE MEMBERS ARE ALL GONE STILL OWES ITS WORKLOAD A DELETE. That Workload is what
 	// releases Kueue's finalizer on the Pods and gives the reservation back, and reading it as
 	// already done because the members left is what strands a group holding quota forever.
-	standing := sets.New[types.UID]()
-	for i := range live {
-		if live[i].DeletionTimestamp == nil {
-			standing.Insert(live[i].UID)
-		}
-	}
-
 	listed := new(kueue.WorkloadList)
 	if err := r.APIReader.List(ctx, listed, ctrlcli.InNamespace(md.Namespace)); err != nil {
 		return fmt.Errorf("list replaced workloads: %w", err)
 	}
-	workloads := make([]*kueue.Workload, 0, 1)
+	workloads := make([]*kueue.Workload, 0, len(listed.Items))
 	for i := range listed.Items {
-		wl := &listed.Items[i]
-		if replacementCapturesWorkload(slot, wl) {
-			workloads = append(workloads, wl)
-		}
+		workloads = append(workloads, &listed.Items[i])
 	}
-	for _, wl := range replacementWorkloadDeletes(slot, workloads, standing) {
+	for _, wl := range replacementWorkloadDeletes(slot, workloads) {
 		uid := wl.UID
 		if err := r.Client.Delete(ctx, wl, ctrlcli.Preconditions{UID: &uid}); err != nil &&
 			!kerrors.IsNotFound(err) {

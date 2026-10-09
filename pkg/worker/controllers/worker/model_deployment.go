@@ -1082,7 +1082,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				held, hasSlot := slots.slotFor(role.Name)
 				switch {
 				case hasSlot && seated && held.Ordinal == ordinal:
-					if err = r.cleanReplacementSlot(ctx, md, held, departing, actual); err != nil {
+					if err = r.cleanReplacementSlot(ctx, md, held, departing); err != nil {
 						logger.Error(err, "clean the replacing replica",
 							"role", role.Name, "ordinal", ordinal)
 						return ctrl.Result{}, err
@@ -1090,7 +1090,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				case seated:
 					logger.Info("recreating replica",
 						"pod", pod.Name, "members", len(departing),
-						"why", map[bool]string{true: "short of its members", false: "built from an earlier spec"}[unguarded])
+						"why", map[bool]string{true: "short of its members", false: "built from an earlier spec"}[brokenTurnsOver])
 
 					// The slot is written before any delete, and it is what a restart between
 					// the delete and the create recovers.
@@ -1105,7 +1105,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 					}
 					slots = slots.setSlot(slot)
 
-					if err = r.cleanReplacementSlot(ctx, md, slot, departing, actual); err != nil {
+					if err = r.cleanReplacementSlot(ctx, md, slot, departing); err != nil {
 						logger.Error(err, "clean the replaced replica",
 							"role", role.Name, "ordinal", ordinal)
 						return ctrl.Result{}, err

@@ -391,3 +391,19 @@ func replicaMembersAt(
 
 	return members
 }
+
+// TestReplacementWorkloadDeletes_OnlyTheCapturedWorkloadIsDeletable pins the contract that the group
+// name locates vacancy blockers and never authorizes cleanup: a Workload that owns nothing live and
+// nothing captured is still not this operator's to delete unless the slot captured its UID.
+func TestReplacementWorkloadDeletes_OnlyTheCapturedWorkloadIsDeletable(t *testing.T) {
+	captured := &kueue.Workload{ObjectMeta: meta.ObjectMeta{Name: "captured", UID: "wl-captured"}}
+	orphan := &kueue.Workload{ObjectMeta: meta.ObjectMeta{Name: "orphan", UID: "wl-orphan"}}
+	slot := modelDeploymentReplacementSlot{WorkloadUID: "wl-captured"}
+
+	deletes := replacementWorkloadDeletes(slot, []*kueue.Workload{orphan, captured})
+	require.Len(t, deletes, 1)
+	assert.Equal(t, captured.UID, deletes[0].UID)
+
+	assert.Empty(t, replacementWorkloadDeletes(modelDeploymentReplacementSlot{}, []*kueue.Workload{orphan, captured}),
+		"a slot that captured no Workload deletes none")
+}
