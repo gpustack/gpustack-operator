@@ -17,6 +17,11 @@ a `replicas` reduction, a surplus shed, a dropped role — goes through
 [the retirement protocol](#the-retirement-protocol) first, and its Pod is deleted when that
 finishes.
 
+An edit that replaces a role's configuration deletes that role's old replicas one at a time, and
+each deleted replica drains exactly as below. The protocol reads a leaving replica as it is
+deployed — the size and command it was created with — so an edit elsewhere does not change how it
+is classified: a take-over replica is still held, a prefill or decode replica still refused.
+
 `G` below is the role's grace: `roles[].terminationGracePeriodSeconds`, 30 when unset, written to
 the Pod's field of the same name.
 
@@ -85,6 +90,12 @@ for as long as the protocol holds it.
 For `llm-d-router`, withdrawal also waits for recent dispatches reported for a target member.
 This applies after the Router removes that member from selection. These records do not increase
 the serving count. A dispatch to an unrelated survivor does not hold the target.
+
+Without `spec.router`, withdrawal cannot observe established connections made directly through the
+role's Service. An admitted, running replica stays held during scale-down or surplus removal.
+The withdrawal budget expires after 30 seconds and retirement ends as `Aborted`, retaining its Pods,
+Workload and capacity. Removing the Service endpoint does not prove those connections have ended.
+Groups that never executed or received admission follow their separate cleanup path.
 
 Two mechanisms are involved and they answer different questions. The protocol decides **whether the
 Pod may be deleted**; the [drain window](#the-drain-window) above decides **how long the engine

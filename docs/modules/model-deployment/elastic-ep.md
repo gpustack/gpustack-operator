@@ -45,6 +45,9 @@ enforces the rest:
 - you cannot supply `command`, because the renderer owns the command line of the managed role;
 - there is no initial fabric to declare.
 
+The role's `size`, `instanceType` and `resources` are frozen with the profile: the ordinary role
+fields' editability does not reach it, and width is the only shape knob it offers.
+
 Adding or removing the profile on an existing role is refused.
 The effective TP value is fixed after creation.
 Equivalent TP argument spellings are accepted. Omitting TP and explicitly setting TP=1 are equivalent.
@@ -289,6 +292,8 @@ The operator retains existing elastic Pods, so an env edit does not change their
 - There is one serving instance per deployment. `replicas` and `size` are not a width mechanism.
 - Only the master serves HTTP.
 - No RDMA fabric is requested for this profile.
+- The ordinary role fields' editability does not apply: the shape fields are frozen with the
+  profile, as described above.
 - Scale-down is not supported. A width decrease is rejected by admission; see [issue #741](https://github.com/gpustack/gpustack-operator/issues/741).
 
 **See also** — [Model Deployment Configuration](deployment.md) for the role contract ·

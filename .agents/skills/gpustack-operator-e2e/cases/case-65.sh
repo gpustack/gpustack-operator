@@ -275,7 +275,7 @@ spec:
       # Omitting the key is refused at apply, which the host-directory gate above used to
       # hide -- that gate exits 0, so on any cluster without the directory this case reported
       # nothing rather than reporting that it could not build its own fixture.
-      leader: {electionBackend: None}
+      leader: {electionBackend: None, multiTenancy: false}
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM

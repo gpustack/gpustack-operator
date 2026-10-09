@@ -25,6 +25,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/setting/settingtest"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
 // modelDeployment builds a valid single-role deployment for the given engine, which every case then
@@ -250,7 +251,7 @@ func TestModelDeploymentWebhook_InterfaceProtocol(t *testing.T) {
 				objs = append(objs, cache...)
 			}
 			w := newModelDeploymentWebhookWith(objs)
-			errs, err := w.validateModelDeploymentInterfaceRequests(context.Background(), md)
+			errs, err := w.validateModelDeploymentInterfaceRequests(context.Background(), nil, md)
 			require.NoError(t, err)
 			if tc.wantErr != "" {
 				require.Len(t, errs, 1)
@@ -311,11 +312,12 @@ func TestModelDeploymentWebhook_InterfaceUpdateRejectsProtocolChange(t *testing.
 	require.ErrorContains(t, err, "no effective RDMA or EFA")
 }
 
-// TestModelDeploymentWebhook_InterfaceUpdateRefusesACountChange pins why the fabric check on
-// update runs only when kvTransfer or router moved: a count change with both untouched is refused
-// by the role-resources freeze, so no changed count reaches the fabric check. The raised count is
-// one EFA accepts, so only the freeze can refuse it. The unchanged update is the baseline.
-func TestModelDeploymentWebhook_InterfaceUpdateRefusesACountChange(t *testing.T) {
+// TestModelDeploymentWebhook_InterfaceUpdateJudgesACountChange pins what an editable count means
+// for the fabric check: a count change is an ordinary resources edit, so the raised count is
+// re-judged against the leg the pair renders instead of being refused for having moved. One EFA
+// leg accepts both one and two interfaces, so the raised count is admitted; the unchanged update
+// is the baseline that proves admission is not an accident of skipping the check.
+func TestModelDeploymentWebhook_InterfaceUpdateJudgesACountChange(t *testing.T) {
 	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
 		role(func(r *workercore.ModelDeploymentRole) {
 			r.Name = "prefill"
@@ -337,10 +339,8 @@ func TestModelDeploymentWebhook_InterfaceUpdateRefusesACountChange(t *testing.T)
 
 	md.Spec.Roles[0].Resources.Interface = ptr.To(resource.MustParse("2"))
 	_, err = w.ValidateUpdate(context.Background(), old, md)
-	require.ErrorContains(t, err, "spec.roles[0].resources")
-	require.ErrorContains(t, err, modelDeploymentIdentityMessage)
-	require.NotContains(t, err.Error(), "spec.roles[0].resources.interface",
-		"the freeze refuses the count, not the fabric check")
+	require.NoError(t, err,
+		"two interfaces on one EFA leg is a valid request, judged now that the count moved")
 }
 
 func TestValidateModelDeployment(t *testing.T) {
@@ -2575,6 +2575,12 @@ func modelDeploymentWithEveryField() *workercore.ModelDeployment {
 // distinguish the rule from either. A refusal case asserts the TYPED ERROR ON ITS OWN PATH rather
 // than that something was refused, because any other rule refusing the object would satisfy a
 // weaker assertion just as convincingly.
+//
+// THE ROLE'S SHAPE FIELDS ARE EDITABLE, not frozen: size, instanceType, resources and command are
+// accepted, and each edit is applied by replacing the role's replicas rather than by editing the
+// running ones. What stays frozen is what the role IS: its name within the set and its kind. The
+// elastic-EP profile pins its own role's shape fields, which
+// TestValidateModelDeploymentElasticProfileKeepsItsShapeFrozen holds separately.
 func TestValidateModelDeploymentIdentity(t *testing.T) {
 	accel2 := resource.NewQuantity(2, resource.DecimalSI)
 
@@ -2598,15 +2604,6 @@ func TestValidateModelDeploymentIdentity(t *testing.T) {
 		{"role_kind", func(md *workercore.ModelDeployment) {
 			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
 		}, "spec.roles[0].kind"},
-		{"role_instance_type", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].InstanceType = "a100-8x"
-		}, "spec.roles[0].instanceType"},
-		{"role_resources", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Resources.Accelerator = accel2
-		}, "spec.roles[0].resources"},
-		{"role_command", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Command = []string{"/bin/other"}
-		}, "spec.roles[0].command"},
 		{"role_added", func(md *workercore.ModelDeployment) {
 			md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
 				r.Name = "decode"
@@ -2615,6 +2612,19 @@ func TestValidateModelDeploymentIdentity(t *testing.T) {
 		{"role_removed", func(md *workercore.ModelDeployment) {
 			md.Spec.Roles = nil
 		}, "spec.roles"},
+
+		// The role's shape fields: how the deployment is currently run. Each is applied by
+		// replacing the role's replicas, not by editing running Pods.
+		{"role_instance_type", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].InstanceType = "a100-8x"
+		}, ""},
+		{"role_resources", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Resources.Accelerator = accel2
+		}, ""},
+		{"role_size", func(md *workercore.ModelDeployment) { md.Spec.Roles[0].ReplicaSize = 3 }, ""},
+		{"role_command", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Command = []string{"/bin/other"}
+		}, ""},
 
 		// Editable: how the deployment is being run right now.
 		{"engine_version", func(md *workercore.ModelDeployment) { md.Spec.Engine.Version = "0.26.0" }, ""},
@@ -2694,13 +2704,14 @@ func TestValidateModelDeploymentIdentity_RolesAreMatchedByName(t *testing.T) {
 	assert.Empty(t, validateModelDeploymentIdentity(reordered, old),
 		"a reordered listType=map is the same set of roles")
 
-	// The negative baseline: the same reorder, with one frozen field actually changed, is still
-	// refused and still names the role's own index in the INCOMING list.
+	// The negative baseline: the same reorder, with a frozen field actually changed, is still
+	// refused and still names the role's own index in the INCOMING list. Kind is the one role
+	// field the update contract freezes.
 	moved := reordered.DeepCopy()
-	moved.Spec.Roles[0].InstanceType = "a100-8x" // this is "decode" after the swap
+	moved.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer // this is "decode" after the swap
 	errs := validateModelDeploymentIdentity(moved, old)
 	require.Len(t, errs, 1)
-	assert.Equal(t, "spec.roles[0].instanceType", errs[0].Field)
+	assert.Equal(t, "spec.roles[0].kind", errs[0].Field)
 }
 
 // TestValidateModelDeploymentIdentity_DoesNotRunOnCreate pins that there is nothing to compare
@@ -2841,9 +2852,9 @@ func TestModelDeploymentWebhook_RefusesMemberNamesThatCannotBeHostnames(t *testi
 
 		got := err.Error()
 		assert.True(t, errsContain(got, "declare fewer replicas"), got)
-		// THE FIELD THE REFUSAL NAMES IS THE ONE THE USER CAN ACT ON. Nothing about `size` moved on
-		// this edit and nothing could -- it is immutable -- so an error attached to it would send an
-		// operator to change the one input this deployment has already frozen.
+		// THE ERROR STAYS ON THE ROLE, AND THE REASON IS STABLE ACROSS THE MUTABLE CONTRACT. Four
+		// inputs spell the name and size is now as editable as replicas, so a refusal naming one
+		// field would misread an edit made to another on exactly this kind of scale.
 		assert.False(t, errsContain(got, "spec.roles[0].size"),
 			"a replicas-only scale must not be reported against size, which did not change: %s", got)
 		assert.True(t, errsContain(got, "spec.roles[0]: Invalid value"), got)
@@ -2902,19 +2913,15 @@ func TestModelDeploymentWebhook_RefusesTwoServicesNamedTheSame(t *testing.T) {
 	})
 }
 
-// TestModelDeploymentWebhook_ValidateUpdateFreezesSizeButNotReplicas holds the two halves of the
-// scaling story against each other, on one object, in one test.
+// TestModelDeploymentWebhook_ValidateUpdateAllowsSizeAndReplicas holds the two scaling fields
+// against the same object, in one test.
 //
-// THE PAIR IS THE POINT, NOT EITHER HALF. A rule refusing a size change would also be satisfied by
-// a rule refusing every numeric change, and that implementation takes away the only elasticity this
-// role has. Asserting the refusal beside the acceptance is what distinguishes "size is frozen" from
-// "numbers are frozen", and the two subtests start from the same stored object so nothing but the
-// field under test differs.
-//
-// THE REFUSAL MUST NAME size AND POINT AT replicas. An operator raising size almost always wants
-// capacity, which replicas gives without disturbing anything already serving; a refusal that only
-// says no leaves them with a deployment they believe cannot grow.
-func TestModelDeploymentWebhook_ValidateUpdateFreezesSizeButNotReplicas(t *testing.T) {
+// THE PAIR IS THE POINT, NOT EITHER HALF. Both fields are editable, and the two edits mean
+// different things: replicas adds or removes whole instances and disturbs nothing already
+// serving, while a size edit replaces every instance of the role so the new group shape can be
+// admitted. A rule refusing either would pass every other acceptance case in this file, and
+// only running both against the same stored object pins the contract rather than an accident.
+func TestModelDeploymentWebhook_ValidateUpdateAllowsSizeAndReplicas(t *testing.T) {
 	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
 
 	stored := func() *workercore.ModelDeployment {
@@ -2926,22 +2933,14 @@ func TestModelDeploymentWebhook_ValidateUpdateFreezesSizeButNotReplicas(t *testi
 		return md
 	}
 
-	t.Run("size_change_is_refused", func(t *testing.T) {
+	t.Run("size_change_is_accepted", func(t *testing.T) {
 		old := stored()
 		md := old.DeepCopy()
 		md.Spec.Roles[0].ReplicaSize = 3
 
 		_, err := r.ValidateUpdate(context.Background(), old, md)
-		require.Error(t, err)
-
-		got := err.Error()
-		assert.True(t, errsContain(got, "spec.roles[0].size"), got)
-		assert.True(t, errsContain(got, "fixed when the deployment is created"), got)
-		assert.True(t, errsContain(got, "replicas"),
-			"the refusal has to name the field that does move: %s", got)
-		// The other frozen fields answer "this is a different deployment". Size is not that: the
-		// deployment is the same one, and what cannot happen is this edit to it.
-		assert.False(t, errsContain(got, "describes a different deployment"), got)
+		assert.NoError(t, err,
+			"the size edit replaces the role's replicas, which is what the contract allows")
 	})
 
 	t.Run("replicas_change_is_accepted", func(t *testing.T) {
@@ -2950,7 +2949,708 @@ func TestModelDeploymentWebhook_ValidateUpdateFreezesSizeButNotReplicas(t *testi
 		md.Spec.Roles[0].Replicas = 4
 
 		_, err := r.ValidateUpdate(context.Background(), old, md)
-		assert.NoError(t, err, "scaling a role is the one edit this whole shape exists to allow")
+		assert.NoError(t, err, "scaling a role is the edit this whole shape exists to allow")
+	})
+}
+
+// TestModelDeploymentWebhook_ValidateUpdateAcceptsOrdinaryShapeEdits walks the transitions the
+// mutable role contract names, each through the full update handler.
+//
+// THE TABLE IS THE CONTRACT, NOT A SAMPLE. Size crosses one in both directions; instanceType
+// moves to a second pool; resources change count, drop to nothing, and take a mode the type
+// offers; command makes every transition between the managed and take-over tiers. A case here
+// that stops passing is a rule that started refusing an update the contract admits.
+func TestModelDeploymentWebhook_ValidateUpdateAcceptsOrdinaryShapeEdits(t *testing.T) {
+	cases := []struct {
+		name  string
+		old   func(*workercore.ModelDeployment)
+		edit  func(*workercore.ModelDeployment)
+		types func() []ctrlcli.Object
+	}{
+		{
+			name: "size increase above one",
+			edit: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].ReplicaSize = 4 },
+		},
+		{
+			name: "size decrease to one",
+			old:  func(md *workercore.ModelDeployment) { md.Spec.Roles[0].ReplicaSize = 2 },
+			edit: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].ReplicaSize = 1 },
+		},
+		{
+			name: "size decrease across one",
+			old:  func(md *workercore.ModelDeployment) { md.Spec.Roles[0].ReplicaSize = 3 },
+			edit: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].ReplicaSize = 2 },
+		},
+		{
+			name: "size increase across one",
+			old:  func(md *workercore.ModelDeployment) { md.Spec.Roles[0].ReplicaSize = 1 },
+			edit: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].ReplicaSize = 2 },
+		},
+		{
+			name: "instanceType moves to another pool",
+			edit: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].InstanceType = "a100-8x" },
+			types: func() []ctrlcli.Object {
+				return []ctrlcli.Object{servingInstanceType("h20-8x", 8), servingInstanceType("a100-8x", 8)}
+			},
+		},
+		{
+			name: "resources change card count",
+			edit: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Resources.Accelerator = resource.NewQuantity(2, resource.DecimalSI)
+			},
+		},
+		{
+			name: "resources omitted entirely",
+			edit: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Resources = nil },
+		},
+		{
+			name: "resources take the slicing mode the type offers",
+			old: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Resources = nil
+			},
+			edit: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator:                       resource.NewQuantity(1, resource.DecimalSI),
+					AcceleratorSlicedMemoryPercentage: 50,
+				}
+			},
+			types: func() []ctrlcli.Object {
+				return []ctrlcli.Object{servingInstanceType("h20-8x", 8, offeringLogicalSlices)}
+			},
+		},
+		{
+			name: "managed role takes over its command line",
+			old: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Command = nil
+			},
+			edit: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Command = []string{"vllm", "serve", "Qwen/Qwen2.5-72B-Instruct", "--port", "8000"}
+			},
+		},
+		{
+			name: "take-over role returns to managed",
+			old: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Command = []string{"/bin/serve"}
+			},
+			edit: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Command = nil },
+		},
+		{
+			name: "take-over role replaces its command line",
+			edit: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Command = []string{"/bin/serve", "--else"}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var live []ctrlcli.Object
+			if tc.types != nil {
+				live = tc.types()
+			} else {
+				live = []ctrlcli.Object{servingInstanceType("h20-8x", 8)}
+			}
+			r := newModelDeploymentWebhookWith(live)
+
+			old := modelDeploymentWithEveryField()
+			if tc.old != nil {
+				tc.old(old)
+			}
+			r.Default(context.Background(), old)
+
+			md := old.DeepCopy()
+			tc.edit(md)
+
+			_, err := r.ValidateUpdate(context.Background(), old, md)
+			assert.NoErrorf(t, err, "an ordinary shape edit is admitted: %s", tc.name)
+		})
+	}
+}
+
+// TestModelDeploymentWebhook_ValidateUpdateStillRefusesInvalidShapeEdits pins that mutability did
+// not relax the rules that judge WHAT a shape edit asks for. Each edit is exactly one refusal on
+// its own path; a case passing for any other reason would say nothing about this contract.
+func TestModelDeploymentWebhook_ValidateUpdateStillRefusesInvalidShapeEdits(t *testing.T) {
+	cases := []struct {
+		name     string
+		old      func(*workercore.ModelDeployment)
+		edit     func(*workercore.ModelDeployment)
+		types    func() []ctrlcli.Object
+		refuse   string
+		contains string
+	}{
+		{
+			name: "a slice the new card count names on a type that offers none",
+			old:  func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Resources = nil },
+			edit: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator:                       resource.NewQuantity(1, resource.DecimalSI),
+					AcceleratorSlicedMemoryPercentage: 50,
+				}
+			},
+			refuse:   "spec.roles[0].resources",
+			contains: "does not offer logical slicing",
+		},
+		{
+			name: "a whole-card request over the new pool's ceiling",
+			edit: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Resources.Accelerator = resource.NewQuantity(16, resource.DecimalSI)
+			},
+			refuse:   "spec.roles[0].resources.accelerator",
+			contains: "at most 8 whole accelerator(s)",
+		},
+		{
+			name: "a size edit that makes member names impossible",
+			old: func(md *workercore.ModelDeployment) {
+				md.Name = "deploymentaaaaaaaaaaaaaaaaaaaaaaaaaaaaax"
+				md.Spec.Roles[0].Name = "roleaaaaaaaaaaaaay" // 40 + 1 + 17 = 58; r0-m8 = 63, r0-m10 = 65
+				md.Spec.Roles[0].ReplicaSize = 9
+			},
+			edit:     func(md *workercore.ModelDeployment) { md.Spec.Roles[0].ReplicaSize = 11 },
+			refuse:   "spec.roles[0]",
+			contains: "cannot be a hostname",
+		},
+		{
+			name: "an explicit zero card on a type another role shares",
+			old: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
+					r.Name = "cpu-sidecar"
+					r.Resources = &workercore.ModelDeploymentRoleResources{
+						Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+					}
+				}))
+			},
+			edit: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(0, resource.DecimalSI),
+				}
+			},
+			refuse:   "spec.roles[0].resources.accelerator",
+			contains: "request at least one accelerator",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			live := []ctrlcli.Object{servingInstanceType("h20-8x", 8)}
+			if tc.types != nil {
+				live = tc.types()
+			}
+			r := newModelDeploymentWebhookWith(live)
+
+			old := modelDeploymentWithEveryField()
+			if tc.old != nil {
+				tc.old(old)
+			}
+			r.Default(context.Background(), old)
+
+			md := old.DeepCopy()
+			tc.edit(md)
+
+			_, err := r.ValidateUpdate(context.Background(), old, md)
+			require.Error(t, err, "the shape the edit names is invalid and must be refused")
+
+			got := err.Error()
+			assert.True(t, errsContain(got, tc.refuse), got)
+			assert.True(t, errsContain(got, tc.contains), got)
+		})
+	}
+}
+
+// TestModelDeploymentWebhook_ValidateUpdateRechecksInterfaceRequests pins the two directions of
+// the dependency rule. Adding an interface request is judged against the fabric the deployment
+// actually renders, even though the router and the transfer settings did not move; an edit that
+// touches none of the inputs is still admitted when the fabric behind the object has drifted.
+func TestModelDeploymentWebhook_ValidateUpdateRechecksInterfaceRequests(t *testing.T) {
+	build := func(store string) ([]ctrlcli.Object, *workercore.ModelDeployment) {
+		objs := kvCacheFixture()
+		backend := objs[2].(*workercore.KVCacheBackend)
+		backend.Spec.Transport.Protocol = store
+		objs = append(objs, servingInstanceType("h20-8x", 8))
+		md := modelDeploymentWithEveryField()
+		// A role that took over its command line renders no managed leg, so its interface request
+		// is refused for that reason before the store is ever read. The request under test is
+		// judged against the fabric, so the role under test stays managed.
+		md.Spec.Roles[0].Command = nil
+		md.Spec.KVCache.PoolRef.Name = "chat"
+		return objs, md
+	}
+
+	t.Run("a new request is judged against the leg that renders", func(t *testing.T) {
+		objs, old := build("TCP")
+		r := newModelDeploymentWebhookWith(objs)
+
+		md := old.DeepCopy()
+		md.Spec.Roles[0].Resources.Interface = ptr.To(resource.MustParse("1"))
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		require.Error(t, err,
+			"the request names no interface a TCP store or a managed leg can use")
+		assert.True(t, errsContain(err.Error(), "no effective RDMA or EFA"), err.Error())
+		assert.True(t, errsContain(err.Error(), "spec.roles[0].resources.interface"), err.Error())
+	})
+
+	t.Run("the same request is admitted when the fabric backs it", func(t *testing.T) {
+		objs, old := build("RDMA")
+		r := newModelDeploymentWebhookWith(objs)
+
+		md := old.DeepCopy()
+		md.Spec.Roles[0].Resources.Interface = ptr.To(resource.MustParse("1"))
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err, "an RDMA store is an effective leg for the request")
+	})
+
+	t.Run("an unchanged input is not refused for a drifted fabric", func(t *testing.T) {
+		objs, old := build("RDMA")
+		r := newModelDeploymentWebhookWith(objs)
+		if _, err := r.ValidateCreate(context.Background(), old); err != nil {
+			t.Fatalf("the stored object was valid at creation: %s", err)
+		}
+
+		// The pool's transport is a fact about the cluster, not the object: the store now offers
+		// TCP, which the stored interface request can no longer use. The object did not change.
+		drifted := kvCacheFixture()
+		drifted[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "TCP"
+		drifted = append(drifted, servingInstanceType("h20-8x", 8))
+		r = newModelDeploymentWebhookWith(drifted)
+
+		md := old.DeepCopy()
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err,
+			"an edit that touches none of the interface inputs is admitted; repairing the pool is the remedy")
+	})
+
+	t.Run("a request count untouched by a card edit keeps the drift escape", func(t *testing.T) {
+		objs, old := build("RDMA")
+		old.Spec.Roles[0].Resources.Interface = ptr.To(resource.MustParse("1"))
+		r := newModelDeploymentWebhookWith(objs)
+		if _, err := r.ValidateCreate(context.Background(), old); err != nil {
+			t.Fatalf("the stored object was valid at creation: %s", err)
+		}
+
+		drifted := kvCacheFixture()
+		drifted[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "TCP"
+		drifted = append(drifted, servingInstanceType("h20-8x", 8))
+		r = newModelDeploymentWebhookWith(drifted)
+
+		// The card count moves; the interface request does not. The interface rule reads the
+		// request, so raising the accelerator is not judged against the drifted fabric.
+		md := old.DeepCopy()
+		md.Spec.Roles[0].Resources.Accelerator = resource.NewQuantity(2, resource.DecimalSI)
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err,
+			"the interface input did not move, so the drifted fabric is not re-judged")
+	})
+
+	t.Run("router tuning that leaves the leg named keeps the drift escape", func(t *testing.T) {
+		objs, old := build("RDMA")
+		old.Spec.Roles[0].Resources.Interface = ptr.To(resource.MustParse("1"))
+		// A routed role must name its serving port TCP; the fixture's port carries no protocol.
+		old.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8000, Protocol: "TCP"}}
+		old.Spec.Router = &workercore.ModelDeploymentRouter{
+			Name:      workercore.ModelDeploymentRouterLLMD,
+			ExtraArgs: []string{"--log-level=info"},
+		}
+		r := newModelDeploymentWebhookWith(objs)
+		if _, err := r.ValidateCreate(context.Background(), old); err != nil {
+			t.Fatalf("the stored object was valid at creation: %s", err)
+		}
+
+		drifted := kvCacheFixture()
+		drifted[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "TCP"
+		drifted = append(drifted, servingInstanceType("h20-8x", 8))
+		r = newModelDeploymentWebhookWith(drifted)
+
+		// The leg is decided by the router's presence and name, not by how it is tuned, so an
+		// extraArgs change re-judges nothing.
+		md := old.DeepCopy()
+		md.Spec.Router.ExtraArgs = []string{"--log-level=debug"}
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err,
+			"router parameter tuning moves no interface input, so the drifted fabric is not re-judged")
+	})
+}
+
+// TestModelDeploymentWebhook_ValidateUpdateRechecksPoolTransportAfterInstanceTypeMove pins the
+// pool-transport recheck an editable instanceType makes reachable. The rule reads each role's
+// manufacturer through its InstanceType, so moving a role onto hardware whose engine transport
+// cannot read the bound pool's blocks is refused, while a move within the same manufacturer is
+// admitted with the binding unchanged.
+func TestModelDeploymentWebhook_ValidateUpdateRechecksPoolTransportAfterInstanceTypeMove(t *testing.T) {
+	typeFixture := func(name, manufacturer string) ctrlcli.Object {
+		return servingInstanceType(name, 8, func(it *worker.InstanceType) {
+			it.Status.Detail.Manufacturer = manufacturer
+		})
+	}
+	live := func(first, second string) []ctrlcli.Object {
+		objs := kvCacheFixture()
+		backend := objs[2].(*workercore.KVCacheBackend)
+		backend.Spec.Connection.Managed = &workercore.KVCacheBackendManaged{Members: []workercore.KVCacheBackendMember{
+			{NodeSelector: map[string]string{"cache": "dram"}, Medium: "DRAM", CapacityPerMember: resource.MustParse("64Gi")},
+			{
+				NodeSelector: map[string]string{"cache": "vram"}, Medium: "VRAM", CapacityPerMember: resource.MustParse("16Gi"),
+				Transport: &workercore.KVCacheBackendMemberTransport{Protocol: "CANN"},
+			},
+		}}
+		objs = append(objs, typeFixture(first, nodefeature.ManufacturerAscend))
+		if second != "" {
+			objs = append(objs, typeFixture(second, nodefeature.ManufacturerNVIDIA))
+		}
+
+		return objs
+	}
+
+	stored := func(name string) *workercore.ModelDeployment {
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+		md.Spec.KVCache.PoolRef.Name = "chat"
+		md.Spec.Roles[0].InstanceType = name
+
+		return md
+	}
+
+	t.Run("a move across manufacturers is judged against the bound pool", func(t *testing.T) {
+		old := stored("ascend-type")
+		r := newModelDeploymentWebhookWith(live("ascend-type", "nvidia-type"))
+		if _, err := r.ValidateCreate(context.Background(), old); err != nil {
+			t.Fatalf("the stored object was valid at creation: %s", err)
+		}
+
+		md := old.DeepCopy()
+		md.Spec.Roles[0].InstanceType = "nvidia-type"
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		require.Error(t, err, "the mixed pool cannot serve the NVIDIA half of this binding")
+		assert.True(t, errsContain(err.Error(), "spec.kvCache.poolRef.name"), err.Error())
+	})
+
+	t.Run("a move within one manufacturer is admitted", func(t *testing.T) {
+		old := stored("ascend-type")
+		objs := live("ascend-type", "")
+		objs = append(objs, typeFixture("ascend-type-2", nodefeature.ManufacturerAscend))
+		r := newModelDeploymentWebhookWith(objs)
+
+		md := old.DeepCopy()
+		md.Spec.Roles[0].InstanceType = "ascend-type-2"
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err, "the constrained engine still reads every offered protocol")
+	})
+}
+
+// TestModelDeploymentWebhook_InterfaceRecheckJudgesOnlyTheMovedRoles pins the per-role scope of
+// the interface recheck on a two-role object: a role whose own inputs did not move keeps the
+// escape hatch its stored verdict provides when the fabric drifts, a role whose inputs did move
+// is judged, and a shared router or transfer move rejudges every requesting role.
+func TestModelDeploymentWebhook_InterfaceRecheckJudgesOnlyTheMovedRoles(t *testing.T) {
+	// build stores a two-role object whose server role requests an interface against an RDMA
+	// fabric, and drifted swaps the webhook's cluster for one whose store drifted to TCP.
+	build := func(t *testing.T) (*ModelDeploymentWebhook, *workercore.ModelDeployment) {
+		t.Helper()
+		objs := kvCacheFixture()
+		objs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "RDMA"
+		objs = append(objs, servingInstanceType("h20-8x", 8))
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "server"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+					Interface:   ptr.To(resource.MustParse("1")),
+				}
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "worker"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				}
+			}),
+		)
+		md.Spec.KVCache.PoolRef.Name = "chat"
+		r := newModelDeploymentWebhookWith(objs)
+		if _, err := r.ValidateCreate(context.Background(), md); err != nil {
+			t.Fatalf("the stored object was valid at creation: %s", err)
+		}
+
+		drifted := kvCacheFixture()
+		drifted[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "TCP"
+		drifted = append(drifted, servingInstanceType("h20-8x", 8))
+
+		return newModelDeploymentWebhookWith(drifted), md
+	}
+
+	t.Run("a sibling's command edit does not rejudge an unchanged request", func(t *testing.T) {
+		r, old := build(t)
+
+		md := old.DeepCopy()
+		md.Spec.Roles[1].Command = []string{"/bin/serve"}
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err,
+			"the worker role's interface inputs did not move, so the drifted fabric is not re-judged against the server role")
+	})
+
+	t.Run("the moved role's own request is judged against the drifted fabric", func(t *testing.T) {
+		r, old := build(t)
+
+		md := old.DeepCopy()
+		md.Spec.Roles[1].Resources.Interface = ptr.To(resource.MustParse("1"))
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		require.Error(t, err, "the new request names no interface a TCP store can use")
+		assert.True(t, errsContain(err.Error(), "spec.roles[1].resources.interface"), err.Error())
+		assert.True(t, errsContain(err.Error(), "no effective RDMA or EFA"), err.Error())
+	})
+
+	t.Run("the requesting role's command edit rejudges its own request", func(t *testing.T) {
+		r, old := build(t)
+
+		md := old.DeepCopy()
+		md.Spec.Roles[0].Command = []string{"/bin/serve"}
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		require.Error(t, err, "a takeover command renders no managed leg for the request")
+		assert.True(t, errsContain(err.Error(), "spec.roles[0].resources.interface"), err.Error())
+	})
+
+	t.Run("a shared transfer move rejudges every requesting role", func(t *testing.T) {
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "prefill"
+				r.Kind = workercore.ModelDeploymentRoleKindPrefill
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Interface: ptr.To(resource.MustParse("1")),
+				}
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "decode"
+				r.Kind = workercore.ModelDeploymentRoleKindDecode
+			}),
+		)
+		md.Spec.KVCache = nil
+		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+		if _, err := r.ValidateCreate(context.Background(), md); err != nil {
+			t.Fatalf("the stored object was valid at creation: %s", err)
+		}
+
+		newer := md.DeepCopy()
+		newer.Spec.KVTransfer.Protocol = "TCP"
+
+		_, err := r.ValidateUpdate(context.Background(), md, newer)
+		require.Error(t, err, "the transfer protocol is shared, so the unchanged prefill is rejudged")
+		assert.True(t, errsContain(err.Error(), "spec.roles[0].resources.interface"), err.Error())
+	})
+
+	t.Run("a router that renders no direct leg keeps the drift escape", func(t *testing.T) {
+		r, old := build(t)
+
+		md := old.DeepCopy()
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterVLLM}
+
+		// The leg the rule rejudges on a shared edit is the one the production helper renders,
+		// and for plain Server roles it is empty on both sides of the edit: a router fronts no
+		// pair here, so the edit moves no effective direct input.
+		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(old, &old.Spec.Roles[0],
+			nodefeature.ManufacturerNVIDIA))
+		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(md, &md.Spec.Roles[0],
+			nodefeature.ManufacturerNVIDIA))
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err,
+			"the added router cannot create a direct leg, so the drifted fabric is not re-judged")
+	})
+
+	t.Run("a transfer declaration no pair renders keeps the drift escape", func(t *testing.T) {
+		objs := kvCacheFixture()
+		objs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "RDMA"
+		objs = append(objs, servingInstanceType("h20-8x", 8))
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "server"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+					Interface:   ptr.To(resource.MustParse("1")),
+				}
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "worker"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				}
+			}),
+		)
+		md.Spec.KVCache.PoolRef.Name = "chat"
+		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
+		r := newModelDeploymentWebhookWith(objs)
+		if _, err := r.ValidateCreate(context.Background(), md); err != nil {
+			t.Fatalf("the stored object was valid at creation: %s", err)
+		}
+
+		drifted := kvCacheFixture()
+		drifted[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "TCP"
+		drifted = append(drifted, servingInstanceType("h20-8x", 8))
+		r = newModelDeploymentWebhookWith(drifted)
+
+		newer := md.DeepCopy()
+		newer.Spec.KVTransfer.Protocol = "TCP"
+
+		// Without a pair the declaration renders no leg on either side, so the protocol the
+		// object carries is inert for this role and the drifted fabric is not re-judged.
+		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(md, &md.Spec.Roles[0],
+			nodefeature.ManufacturerNVIDIA))
+		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(newer, &newer.Spec.Roles[0],
+			nodefeature.ManufacturerNVIDIA))
+
+		_, err := r.ValidateUpdate(context.Background(), md, newer)
+		assert.NoError(t, err,
+			"the transfer declaration renders no leg, so the drifted fabric is not re-judged")
+	})
+
+	t.Run("a transfer edit a pair cannot render keeps the Ascend escape", func(t *testing.T) {
+		ascend := func(name string) ctrlcli.Object {
+			return servingInstanceType(name, 8, func(it *worker.InstanceType) {
+				it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+			})
+		}
+		objs := kvCacheFixture()
+		objs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "RDMA"
+		objs = append(objs, ascend("ascend-type"))
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "prefill"
+				r.Kind = workercore.ModelDeploymentRoleKindPrefill
+				r.InstanceType = "ascend-type"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+					Interface:   ptr.To(resource.MustParse("1")),
+				}
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "decode"
+				r.Kind = workercore.ModelDeploymentRoleKindDecode
+				r.InstanceType = "ascend-type"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				}
+			}),
+		)
+		md.Spec.KVCache.PoolRef.Name = "chat"
+		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		r := newModelDeploymentWebhookWith(objs)
+		if _, err := r.ValidateCreate(context.Background(), md); err != nil {
+			t.Fatalf("the stored object was valid at creation: %s", err)
+		}
+
+		drifted := kvCacheFixture()
+		drifted[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "TCP"
+		drifted = append(drifted, ascend("ascend-type"))
+		r = newModelDeploymentWebhookWith(drifted)
+
+		newer := md.DeepCopy()
+		newer.Spec.KVTransfer.Protocol = "TCP"
+
+		// The helper renders no leg on Ascend whatever the routed pair declares, so the protocol
+		// edit moves no effective direct input for this role either.
+		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(md, &md.Spec.Roles[0],
+			nodefeature.ManufacturerAscend))
+		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(newer, &newer.Spec.Roles[0],
+			nodefeature.ManufacturerAscend))
+
+		_, err := r.ValidateUpdate(context.Background(), md, newer)
+		assert.NoError(t, err,
+			"the Ascend pair renders no direct leg, so the drifted fabric is not re-judged")
+	})
+}
+
+// TestModelDeploymentWebhook_PoolTransportRecheckJudgesOnlyTheMovedRole pins the per-role scope
+// of the pool-transport recheck: moving one role onto another type of the same manufacturer is
+// judged for that role alone, so an unchanged role is not refused because the bound pool drifted
+// into a mix its engine cannot read.
+func TestModelDeploymentWebhook_PoolTransportRecheckJudgesOnlyTheMovedRole(t *testing.T) {
+	typeFixture := func(name, manufacturer string) ctrlcli.Object {
+		return servingInstanceType(name, 8, func(it *worker.InstanceType) {
+			it.Status.Detail.Manufacturer = manufacturer
+		})
+	}
+	// live assembles the cluster the webhook reads; second adds the member group whose transport
+	// turns the pool into a CANN/RDMA mix, which is the drift an unconstrained engine cannot serve.
+	live := func(second string, types ...ctrlcli.Object) []ctrlcli.Object {
+		objs := kvCacheFixture()
+		backend := objs[2].(*workercore.KVCacheBackend)
+		backend.Spec.Transport.Protocol = "CANN"
+		if second != "" {
+			backend.Spec.Connection.Managed = &workercore.KVCacheBackendManaged{Members: []workercore.KVCacheBackendMember{
+				{NodeSelector: map[string]string{"cache": "dram"}, Medium: "DRAM", CapacityPerMember: resource.MustParse("64Gi")},
+				{
+					NodeSelector: map[string]string{"cache": "vram"}, Medium: "VRAM", CapacityPerMember: resource.MustParse("16Gi"),
+					Transport: &workercore.KVCacheBackendMemberTransport{Protocol: second},
+				},
+			}}
+		}
+		return append(objs, types...)
+	}
+	stored := func() *workercore.ModelDeployment {
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "server"
+				r.InstanceType = "nvidia-type"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				}
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "worker"
+				r.InstanceType = "ascend-type"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				}
+			}),
+		)
+		md.Spec.KVCache.PoolRef.Name = "chat"
+
+		return md
+	}
+	build := func(t *testing.T, types ...ctrlcli.Object) (*ModelDeploymentWebhook, *workercore.ModelDeployment) {
+		t.Helper()
+		old := stored()
+		r := newModelDeploymentWebhookWith(live("", types...))
+		if _, err := r.ValidateCreate(context.Background(), old); err != nil {
+			t.Fatalf("the stored object was valid at creation: %s", err)
+		}
+
+		return newModelDeploymentWebhookWith(live("RDMA", types...)), old
+	}
+
+	t.Run("an Ascend move spares the unchanged NVIDIA role", func(t *testing.T) {
+		r, old := build(t,
+			typeFixture("nvidia-type", nodefeature.ManufacturerNVIDIA),
+			typeFixture("ascend-type", nodefeature.ManufacturerAscend),
+			typeFixture("ascend-type-2", nodefeature.ManufacturerAscend),
+		)
+
+		md := old.DeepCopy()
+		md.Spec.Roles[1].InstanceType = "ascend-type-2"
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err,
+			"the NVIDIA role's type did not move, so the pool's drift into a mixed offering is not re-judged against it")
+	})
+
+	t.Run("the moved role is judged against the drifted pool", func(t *testing.T) {
+		r, old := build(t,
+			typeFixture("nvidia-type", nodefeature.ManufacturerNVIDIA),
+			typeFixture("ascend-type", nodefeature.ManufacturerAscend),
+			typeFixture("nvidia-type-2", nodefeature.ManufacturerNVIDIA),
+		)
+
+		md := old.DeepCopy()
+		md.Spec.Roles[1].InstanceType = "nvidia-type-2"
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		require.Error(t, err, "the Ascend role moved onto an engine that cannot read a CANN/RDMA pool")
+		assert.True(t, errsContain(err.Error(), "spec.kvCache.poolRef.name"), err.Error())
 	})
 }
 

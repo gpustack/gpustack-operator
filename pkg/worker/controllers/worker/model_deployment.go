@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -560,15 +561,53 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	})
 
 	createOrdinals := make(map[string][]int, len(md.Spec.Roles))
+	// partialCreates are the members filled into the group a replacement slot is building, gathered
+	// from the same decision below that admits a partial create as fillable at all.
+	partialCreates := make(map[string][]*core.Pod, len(md.Spec.Roles))
 	// The ordinals this pass condemns for replacement, gathered here so the whole-group health
 	// predicate can ask "is this replica on its way out" from the same decision the rollout makes
 	// rather than from a second comparison that could reach a different answer.
+	//
+	// Only a replica this pass selected is recorded. An outdated replica nobody has chosen is
+	// still serving, and failing its qualification would withdraw its endpoint before any
+	// replacement exists.
 	replacedByRole := make(map[string]map[int]bool, len(md.Spec.Roles))
+	// holdingRoles are the roles whose replacement has not been admitted yet. They take part in
+	// every decision below except selecting a further healthy replica.
+	holdingRoles := make(map[string]modelDeploymentReplacementSlot, len(md.Spec.Roles))
+	slots := modelDeploymentReplacementSlotsOf(md)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		live := liveByRole[role.Name]
 		declared := int(role.Replicas)
 		want := desired[role.Name]
+
+		// A ROLE ALREADY REPLACING ONE REPLICA DOES NOT SELECT ANOTHER until that replacement
+		// holds an admission. A queued one holds nothing, so spending a second healthy replica
+		// behind it would leave the role with less admitted capacity every pass it runs.
+		if slot, held := slots.slotFor(role.Name); held {
+			resolved, resolveErr := r.resolveReplacementSlot(ctx, md, slot, role, want[slot.Ordinal])
+			if resolveErr != nil {
+				return objectWriteResult(
+					logger, resolveErr, "resolve the replacement slot", _requeueAfterConflict)
+			}
+			if resolved.cleared {
+				// THE CLEARING IS PERSISTED, not just dropped from this pass's view: a slot left on
+				// the object would keep holding the role forever, because the next pass would read
+				// the same unresolved replacement this one just resolved.
+				if err = r.endReplacementSlot(ctx, md, role.Name); err != nil {
+					return objectWriteResult(
+						logger, err, "clear the replacement slot", _requeueAfterConflict)
+				}
+				slots = slots.clearRole(role.Name)
+			} else {
+				slots = slots.setSlot(resolved.slot)
+				holdingRoles[role.Name] = resolved.slot
+			}
+			if resolved.requeue {
+				requeue = true
+			}
+		}
 
 		// THE ORDINALS THE SPEC STILL NAMES KEEP THEIR PODS, and the ones it no longer names go --
 		// highest first, so a scale-down sheds the youngest slots and the ordinals stay dense from
@@ -582,12 +621,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// THE COUNTS BELOW ARE IN TWO DIFFERENT UNITS, and keeping them apart is what makes a role
 		// of multi-Member replicas arithmetically the same as one of single-Member replicas.
 		// `declared` counts REPLICAS, which is what the spec states and what a scale moves.
-		// `declaredPods` counts the Pods those replicas are made of, which is what a list of live
-		// Pods can be compared against. At size one the two are equal, which is why every decision
-		// here reads identically for the shape that existed before this one.
-		size := modelDeploymentRoleSize(role)
-		declaredPods := declared * size
-
+		// The desired member size is not used to measure the live set at all: it describes what a
+		// replacement will be built at, while the running replicas were built at whatever the spec
+		// said when they were created.
 		removed := make([]*core.Pod, 0)
 		kept := make([]*core.Pod, 0, len(live))
 		occupied := make(map[int]bool, declared)
@@ -649,7 +685,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// nothing separates, which is determinism rather than meaning. Each departing replica takes
 		// its Workload with it: leaving the excess standing would have Kueue evict a member of its
 		// own choosing on every pass.
-		if surplus := len(kept) - declaredPods; surplus > 0 {
+		if surplus := modelDeploymentSurplusCount(kept); surplus > 0 {
 			shedSurplus := modelDeploymentSurplusReplicas(kept, want, surplus)
 			// THE SHED IS ONE DECISION AND IT IS NOT PARTLY TAKEN. The protocol is handed the
 			// whole set rather than the first member of it, because a replica is removed as a
@@ -758,36 +794,63 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			outdatedByOrdinal[ordinal] = true
 		}
 
-		// A REPLICA SHORT OF ITS MEMBERS IS OUTDATED TOO, and nothing above notices it: every Pod
-		// that IS there can carry the current fingerprint while the replica is still missing a
-		// member, and a replica Kueue cannot compose a Workload for is not one the deployment is
-		// serving from. It is condemned on the same terms as one carrying a stale render, which
-		// keeps the repair path single.
-		seen := make(map[int]int, len(occupied))
-		for _, pod := range kept {
-			if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
-				if retirement.names(role.Name, ordinal) {
-					continue
-				}
-				seen[ordinal]++
-			}
-		}
+		// A REPLICA SHORT OF THE MEMBERS IT DECLARES IS OUTDATED TOO, and nothing above notices it:
+		// every Pod that IS there can carry the current fingerprint while the replica is still
+		// missing a member, and a replica Kueue cannot compose a Workload for is not one the
+		// deployment is serving from. It is condemned on the same terms as one carrying a stale
+		// render, which keeps the repair path single.
+		//
+		// The total compared is the one the members carry, never the role's desired size: a role
+		// edited from four members to two leaves every running replica whole at four, and reading
+		// that as loss would condemn them all at once.
 		incompleteByOrdinal := make(map[int]bool, len(occupied))
-		for ordinal := range occupied {
+		for _, view := range modelDeploymentGroupPods(modelDeploymentPodValues(kept), true) {
+			if !view.Seated || !occupied[view.Ordinal] {
+				continue
+			}
 			// AN ORDINAL THE RETIREMENT PROTOCOL OWNS IS NOT THIS RULE'S BUSINESS. The rollout
 			// condemns a replica whose members do not agree with the spec, and while a reservation
-			// is in flight the agreement is not yet decided -- the protocol is removing one member of
-			// a doubled ordinal, which leaves the ordinal looking over-complete to this rule for as
-			// long as the operation takes. Condemning it here would delete the whole ordinal, and
+			// is in flight the agreement is not yet decided -- the protocol is removing one member
+			// of a doubled ordinal, which leaves the ordinal looking over-complete to this rule for
+			// as long as the operation takes. Condemning it here would delete the whole ordinal, and
 			// with it the member the surplus rule existed to keep: the rollout would undo the
 			// surplus rule's careful choice with a blunter one, on a state the surplus rule had
 			// already resolved.
-			if retirement.names(role.Name, ordinal) {
+			if retirement.names(role.Name, view.Ordinal) {
 				continue
 			}
-			if seen[ordinal] != size {
-				outdatedByOrdinal[ordinal] = true
-				incompleteByOrdinal[ordinal] = true
+			if modelDeploymentDeployedReplicaShape(view).State == modelDeploymentReplicaShapeIncomplete {
+				outdatedByOrdinal[view.Ordinal] = true
+				incompleteByOrdinal[view.Ordinal] = true
+			}
+		}
+
+		// A PARTIAL CREATE IS FILLED ONLY IN THE GROUP A SLOT IS BUILDING, and only while that
+		// group is the current render and holds nothing admitted. A create that failed leaves the
+		// replacement one member short of its total, and Kueue composes no Workload for an
+		// incomplete group, so the slot would otherwise wait on a group that can never be granted
+		// anything.
+		//
+		// IT IS NEVER FILLED BESIDE A GROUP RUNNING AN EARLIER CONFIGURATION. Equal size is not
+		// compatibility: a member rendered from the current spec beside one rendered from the
+		// previous one is a group whose members disagree about what they are, which is not a state
+		// this operator can render, admit or account for. So a replica that lost a member under an
+		// older render is not filled here -- it waits behind the slot below and is replaced whole.
+		//
+		// The members are those of the slot's own ordinal and no other, and the group must hold no
+		// Workload: a group with one standing has proved no admission, and a group with a Workload
+		// on it is a group Kueue has already composed, where topping it up is Kueue's business and
+		// not this operator's.
+		if slot, holding := holdingRoles[role.Name]; holding {
+			partial, fillable, err := r.modelDeploymentPartialGroupMembers(ctx, md, slot, want[slot.Ordinal])
+			if err != nil {
+				logger.Error(err, "read the replacing replica's group", "role", role.Name,
+					"ordinal", slot.Ordinal)
+
+				return ctrl.Result{}, err
+			}
+			if fillable {
+				partialCreates[role.Name] = append(partialCreates[role.Name], partial...)
 			}
 		}
 
@@ -797,10 +860,6 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			if outdatedByOrdinal[ordinal] {
 				rollout.outdated++
 				outdated = append(outdated, modelDeploymentReplicaMembers(kept, ordinal)...)
-				if replacedByRole[role.Name] == nil {
-					replacedByRole[role.Name] = make(map[int]bool)
-				}
-				replacedByRole[role.Name][ordinal] = true
 			}
 		}
 
@@ -885,9 +944,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// no declared count covers and the barrier does not catch. The guard therefore turns a
 		// replica over only when every replica the role declares holds an admitted Workload: one
 		// admission is in flight at a time, and the pass comes back for the next departure once
-		// the replacement has actually been admitted. A deployment whose replicas hold no
-		// admitted Workloads at all never rolls -- without admission there is no capacity to
-		// trade, and an edit waits for it rather than stripping what serves.
+		// the replacement has actually been admitted. A complete group still waiting for its first
+		// admission can be replaced without spending admitted capacity. Previously admitted groups
+		// keep this guard after their admission is revoked.
 		//
 		// THE DEPARTING REPLICA'S WORKLOAD IS DELETED WITH IT, and that is not bookkeeping. The
 		// group is annotated serving, so Kueue never releases the finalizer it holds on the Pod
@@ -930,11 +989,27 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// of the role, ordinal-less ones included, which would be the wrong denominator -- but every
 		// such Pod is outdated by the rule above, so reaching the comparison at all means there are
 		// none, and the count is over seated replicas exactly when it is read.
+		// TWO KINDS OF REPLICA TURN OVER WITHOUT THE ADMISSION A HEALTHY ONE NEEDS, and they are kept
+		// apart because they are not waited for the same way.
+		//
+		// A POD CLAIMING NO ORDINAL holds no seat and no admission, and no ordinal a slot could name
+		// describes it, so there is nothing for it to wait behind: it rolls on its own path here.
+		//
+		// A REPLICA SHORT OF ITS MEMBERS is broken, and a broken replica BEHIND A SLOT WAITS FOR IT.
+		// The slot's replacement has to be admitted first, because that is the one group the role is
+		// committed to; a broken group behind it is not admitted and will not be, and taking it now
+		// would delete the member it still holds to rebuild a group whose remaining members are
+		// already obsolete. Once the slot clears it is taken whole, ahead of any healthy outdated
+		// replica -- see the pick below.
 		ungated := make([]*core.Pod, 0, len(outdated))
+		broken := make([]*core.Pod, 0, len(outdated))
 		for _, pod := range outdated {
 			ordinal, ok := modelDeploymentPodOrdinal(pod)
-			if !ok || incompleteByOrdinal[ordinal] {
+			switch {
+			case !ok:
 				ungated = append(ungated, pod)
+			case incompleteByOrdinal[ordinal]:
+				broken = append(broken, pod)
 			}
 		}
 
@@ -949,41 +1024,121 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// is what leaves. Same pick as below -- highest ordinal -- so two passes over one state
 			// still choose the same Pod, and a seated replica goes before one holding no ordinal
 			// because the pick reads a missing ordinal as below every seat.
+			_, holding := holdingRoles[role.Name]
+			admitted := modelDeploymentAdmittedReplicas(workloads, live)
+			// A BROKEN REPLICA IS TAKEN WHOLE AND TAKEN FIRST, AHEAD OF ANY HEALTHY OLD REPLICA.
+			// It is the only one of the two that is already down, so leaving it for a healthy
+			// replica's turn is how a role ends up replacing capacity that was serving while the
+			// capacity that was lost waits. The ordinal it sits at does not enter into it: a broken
+			// replica below a healthy one is the more urgent of the two.
+			brokenTurnsOver := len(broken) > 0 && !holding
 			unguarded := len(ungated) > 0
+			var initiallyQueued []*core.Pod
+			if !holding && !brokenTurnsOver && !unguarded && admitted != declared {
+				for _, view := range modelDeploymentGroupPodsByReplica(modelDeploymentPodValues(outdated)) {
+					queued, queueErr := r.initialQueuedReplica(ctx, view, workloads)
+					if queueErr != nil {
+						return ctrl.Result{}, queueErr
+					}
+					if queued {
+						initiallyQueued = append(initiallyQueued, view.Members...)
+					}
+				}
+			}
 			pick := outdated
-			if unguarded {
+			switch {
+			case brokenTurnsOver:
+				pick = broken
+			case unguarded:
 				pick = ungated
+			case len(initiallyQueued) > 0:
+				pick = initiallyQueued
 			}
 
-			if admitted := modelDeploymentAdmittedReplicas(workloads, live); unguarded ||
-				admitted == declared {
+			// A ROLE WHOSE REPLACEMENT IS NOT ADMITTED YET SPENDS NO FURTHER HEALTHY CAPACITY. The
+			// queued replacement holds nothing, so a second deletion behind it would remove another
+			// admitted replica on every pass until the role held none.
+			//
+			// The hold covers the broken replicas too: the slot's own replacement is the group the
+			// role is committed to, and a broken group behind it is repaired whole once that one is
+			// admitted rather than being dismantled to save a pass.
+			turnsOver := brokenTurnsOver || unguarded || len(initiallyQueued) > 0 || (!holding && admitted == declared)
+			if turnsOver {
 				// THE WHOLE REPLICA TURNS OVER, not the member that was picked. The pick names one
 				// Pod, and that Pod's replica is what departs: its members hold one Kueue group,
 				// so a delete of some of them leaves a group Kueue will not admit and will not
 				// release, and the Workload delete below would stop the rest regardless.
 				pod := modelDeploymentHighestOrdinalReplica(pick)
+				ordinal, seated := modelDeploymentPodOrdinal(pod)
 				departing := []*core.Pod{pod}
-				if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
+				if seated {
 					departing = modelDeploymentReplicaMembers(pick, ordinal)
 				}
 
-				logger.Info("recreating replica",
-					"pod", pod.Name, "members", len(departing),
-					"why", map[bool]string{true: "short of its members", false: "built from an earlier spec"}[unguarded])
-				departed := make([]core.Pod, 0, len(departing))
-				for _, member := range departing {
-					if err = r.Client.Delete(ctx, member); err != nil && !kerrors.IsNotFound(err) {
-						logger.Error(err, "delete outdated replica member", "pod", member.Name)
+				// A POD CLAIMING NO ORDINAL IS NOT ANY SLOT'S, and a slot keyed on one cannot
+				// describe it: its vacancy question is about an ordinal its members do not sit
+				// on, so it would wait on a group the Pod never belonged to. Such a Pod rolls on
+				// the ungated repair path alone, where the group name it does carry is the evidence.
+				held, hasSlot := slots.slotFor(role.Name)
+				switch {
+				case hasSlot && seated && held.Ordinal == ordinal:
+					if err = r.cleanReplacementSlot(ctx, md, held, departing); err != nil {
+						logger.Error(err, "clean the replacing replica",
+							"role", role.Name, "ordinal", ordinal)
 						return ctrl.Result{}, err
 					}
-					departed = append(departed, *member)
+				case seated:
+					logger.Info("recreating replica",
+						"pod", pod.Name, "members", len(departing),
+						"why", map[bool]string{true: "short of its members", false: "built from an earlier spec"}[brokenTurnsOver])
+
+					// The slot is written before any delete, and it is what a restart between
+					// the delete and the create recovers.
+					slot := replacementCapturedIdentities(modelDeploymentReplicaView{
+						Role:    role.Name,
+						Ordinal: ordinal,
+						Members: departing,
+					}, workloads)
+					if err = r.beginReplacementSlot(ctx, md, slot); err != nil {
+						return objectWriteResult(
+							logger, err, "record the replacement slot", _requeueAfterConflict)
+					}
+					slots = slots.setSlot(slot)
+
+					if err = r.cleanReplacementSlot(ctx, md, slot, departing); err != nil {
+						logger.Error(err, "clean the replaced replica",
+							"role", role.Name, "ordinal", ordinal)
+						return ctrl.Result{}, err
+					}
+
+				default:
+					logger.Info("recreating replica",
+						"pod", pod.Name,
+						"why", map[bool]string{
+							true:  "holds no ordinal, so no slot can name it",
+							false: "short of its members",
+						}[unguarded])
+					departed := make([]core.Pod, 0, 1)
+					uid := pod.UID
+					if err = r.Client.Delete(ctx, pod, ctrlcli.Preconditions{UID: &uid}); err != nil &&
+						!kerrors.IsNotFound(err) {
+						logger.Error(err, "delete the ordinal-less replica member", "pod", pod.Name)
+						return ctrl.Result{}, err
+					}
+					departed = append(departed, *pod)
+					if err = r.deleteModelDeploymentGroupWorkload(ctx, md, departed); err != nil {
+						logger.Error(err, "delete the departing replica's workload", "pod", pod.Name)
+						return ctrl.Result{}, err
+					}
 				}
-				// One call for the whole replica: its members share a single Workload, so this is
-				// one delete however many of them there were.
-				if err = r.deleteModelDeploymentGroupWorkload(ctx, md, departed); err != nil {
-					logger.Error(err, "delete the departing replica's workload", "pod", pod.Name)
-					return ctrl.Result{}, err
+
+				if seated {
+					if replacedByRole[role.Name] == nil {
+						replacedByRole[role.Name] = make(map[int]bool)
+					}
+					replacedByRole[role.Name][ordinal] = true
 				}
+
 				requeue = true
 			}
 			// Otherwise the rollout holds rather than proceeding short, and it asks for no requeue.
@@ -992,23 +1147,8 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// API server, which is at least as fresh as the cache the event came from.
 		}
 
-		// THE CREATE GATE, PER MISSING ORDINAL: an ordinal with no live Pod in the cached list is
-		// created for only once the API server holds no Pod for it either. The same read answers
-		// the two questions a missing ordinal carries -- whether a create this deployment already
-		// issued is standing on the server unseen by the cache, and whether a departing holder has
-		// finished leaving -- and it is read ON THE API SERVER for both, because the cache lags the
-		// server in exactly the window each question lives in.
-		//
-		// AN EARLIER GATE HERE ASKED THE ORDINAL'S WORKLOAD WHETHER KUEE WANTED A REPLACEMENT, AND
-		// NO REPLACEMENT PATH CONSULTS THAT ASK ANY MORE, because on this design the ask has no
-		// object to be asked of. Freeing an ordinal deletes that replica's Workload with the Pod,
-		// so by the time the Pod is gone there is no Workload left to read a verdict from -- an ask
-		// gated on it would be a condition that is never true, a wait with no exit. Waiting for the
-		// vacancy itself replaces the ask and covers it strictly: while the departing Pod is still
-		// on the server the ask could already read True, yet creating then seats two members in a
-		// one-member group and Kueue's answer to that excess is to delete the newest gated Pod --
-		// the replacement itself.
-		//
+		// A reused ordinal requires both Pod and Workload vacancy on the API server.
+		// The cache can miss a successful create or a holder still leaving behind its finalizer.
 		// THE MISSING ORDINALS ARE FILLED LOWEST FIRST, and only as many as the count is short: a
 		// role short by one with two ordinals free -- a pre-per-replica pod still serving among
 		// them -- creates the lower slot and lets the surplus pod's own departure settle the other.
@@ -1018,17 +1158,42 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// as present here even if it is short a member; the rollout above is what repairs that,
 		// because filling the gap in place would seat a member in a group Kueue already refused.
 		if missing := declared - len(occupied) - orphans; missing > 0 {
-			// ONE UNCACHED READ FOR THE ROLE, taken before the loop rather than inside it: every
-			// free ordinal asks the same question of the same objects, and asking it per ordinal
-			// cost one list each while a departure drained.
+			// Two uncached lists answer vacancy for every ordinal of this role.
 			taken, takenErr := r.modelDeploymentTakenGroups(ctx, md, role.Name, true)
 			if takenErr != nil {
-				logger.Error(takenErr, "read the role's groups on the api server", "role", role.Name)
 				return ctrl.Result{}, takenErr
+			}
+			workloads := new(kueue.WorkloadList)
+			if err := r.APIReader.List(ctx, workloads, ctrlcli.InNamespace(md.Namespace)); err != nil {
+				return ctrl.Result{}, err
+			}
+			for ordinal := range declared {
+				group := modelDeploymentReplicaGroupName(md, role.Name, ordinal)
+				for i := range workloads.Items {
+					if workloadOwnsGroupName(&workloads.Items[i], group) {
+						taken.Insert(group)
+						break
+					}
+				}
+			}
+
+			// The slot's ordinal is filled first: it is the one the role is committed to, and a role
+			// short for another reason would otherwise spend its creates while this one waits.
+			//
+			// IT ASKS THE SAME UNCACHED QUESTION AS EVERY OTHER ORDINAL. The member this slot
+			// deleted is still standing on the server behind its finalizer, and a replacement is
+			// rendered for the very name that member holds -- so filling this ordinal ahead of the
+			// gate would seat two members in one group and collide on the name.
+			if slot, held := holdingRoles[role.Name]; held && !occupied[slot.Ordinal] {
+				if !taken.Has(modelDeploymentReplicaGroupName(md, role.Name, slot.Ordinal)) {
+					createOrdinals[role.Name] = append(createOrdinals[role.Name], slot.Ordinal)
+				} else {
+					requeue = true
+				}
 			}
 
 			for ordinal := 0; ordinal < declared && len(createOrdinals[role.Name]) < missing; ordinal++ {
-				if occupied[ordinal] {
+				if occupied[ordinal] || slices.Contains(createOrdinals[role.Name], ordinal) {
 					continue
 				}
 
@@ -1075,6 +1240,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// would only produce a Pod that sits Pending while its Workload holds quota.
 	if weights != nil && weights.Blocked {
 		clear(createOrdinals)
+		clear(partialCreates)
 	}
 
 	// The placement preference is read once for every member this pass creates, and not at all by a
@@ -1084,6 +1250,14 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		if len(ordinals) > 0 {
 			preference = weights.placementPreference(ctx, r.Client)
 			break
+		}
+	}
+	if preference == nil {
+		for _, created := range partialCreates {
+			if len(created) > 0 {
+				preference = weights.placementPreference(ctx, r.Client)
+				break
+			}
 		}
 	}
 
@@ -1101,6 +1275,18 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		for _, ordinal := range createOrdinals[role.Name] {
+			if slot, held := slots.slotFor(role.Name); held && slot.Ordinal == ordinal &&
+				slot.Phase == modelDeploymentReplacementCleanup {
+				slot = modelDeploymentReplacementSlot{
+					Role: role.Name, Ordinal: ordinal, Phase: modelDeploymentReplacementWaitingForAdmission,
+					MemberHashes: replacementRenderHashes(desired[role.Name][ordinal]),
+				}
+				if err := r.advanceReplacementSlot(ctx, md, slot); err != nil {
+					return objectWriteResult(logger, err, "record replacement creation", _requeueAfterConflict)
+				}
+				slots = slots.setSlot(slot)
+			}
+
 			// EVERY MEMBER OF THE REPLICA IS ISSUED, AND A FAILURE ON ONE DOES NOT ABANDON THE REST.
 			// The members share one Kueue group whose declared total is the replica's size, and
 			// Kueue composes no Workload at all until that many exist -- so a replica left short is
@@ -1142,6 +1328,48 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// outdated, not eight.
 			rollout.accounted++
 		}
+
+		// THE MISSING MEMBER OF A PARTIAL REPLICA IS ISSUED THE WAY A WHOLE REPLICA'S MEMBERS ARE,
+		// into the group its own ordinal names and with the same placement terms, because it is that
+		// group's member and Kueue composes the group from all of them alike.
+		for _, rendered := range partialCreates[role.Name] {
+			pod := rendered.DeepCopy()
+			if weights != nil {
+				injectModelArtifactAffinity(pod, weights.Affinity)
+			}
+			injectModelPlacementPreference(pod, preference)
+			if err = r.Client.Create(ctx, pod); err != nil {
+				logger.Error(err, "create the missing member of a partial replica",
+					"role", role.Name,
+					"ordinal", pod.Labels[modelDeploymentReplicaOrdinalLabel],
+					"member", pod.Labels[modelDeploymentMemberIndexLabel])
+				if createErr == nil {
+					createErr = err
+				}
+
+				continue
+			}
+			logger.Info("created the missing member of a partial replica", "pod", pod.Name)
+		}
+	}
+
+	for name, slot := range slots {
+		if slot.Phase != modelDeploymentReplacementWaitingForAdmission ||
+			(len(createOrdinals[name]) == 0 && len(partialCreates[name]) == 0) {
+			continue
+		}
+		members, err := r.replacementOccupancyOnServer(ctx, md, name, slot.Ordinal)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		uids := sets.New[types.UID]()
+		for _, member := range members {
+			uids.Insert(member.UID)
+		}
+		slot.CurrentMemberUIDs = sets.List(uids)
+		if err := r.advanceReplacementSlot(ctx, md, slot); err != nil {
+			return objectWriteResult(logger, err, "record replacement members", _requeueAfterConflict)
+		}
 	}
 
 	// The whole-group health predicate is evaluated ONCE here, before any Service or selector
@@ -1161,11 +1389,16 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 	eligibilityDecided := modelDeploymentQualificationsDecided(qualifications)
 
-	if err = r.convergeModelDeploymentEndpointEligibility(ctx, md, actual, qualificationByMember); err != nil {
+	if err = r.convergeModelDeploymentEndpointEligibility(
+		ctx, md, actual, qualificationByMember, replacedByRole); err != nil {
 		logger.Error(err, "converge endpoint eligibility")
 		return ctrl.Result{}, err
 	}
-	if err = r.syncModelDeploymentService(ctx, md, eligibilityDecided); err != nil {
+	servicePods, err := readModelDeploymentPods(ctx, md, r.APIReader)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if err = r.syncModelDeploymentService(ctx, md, eligibilityDecided, servicePods); err != nil {
 		logger.Error(err, "sync service")
 		return ctrl.Result{}, err
 	}
@@ -1288,10 +1521,31 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
 func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
 	qualificationByMember map[types.UID]modelDeploymentInstanceQualification,
+	replacedByRole map[string]map[int]bool,
 ) error {
+	logger := ctrllog.FromContext(ctx)
+
 	roles := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		roles[md.Spec.Roles[i].Name] = &md.Spec.Roles[i]
+	}
+
+	// THE REPLICA EACH POD BELONGS TO, grouped once. Which members of a replica answer is a question
+	// about the replica, so it is answered from the replica's own members rather than from each Pod
+	// in isolation and the role the spec states now.
+	replicaOf := make(map[types.UID]modelDeploymentReplicaView, len(pods))
+	for _, view := range modelDeploymentGroupPods(pods, true) {
+		for _, member := range view.Members {
+			replicaOf[member.UID] = view
+		}
+	}
+
+	// The selector already published decides whether an undecided deployment keeps its existing
+	// routing. Reading it rather than passing nothing is what keeps an enabled selector enabled
+	// across the passes that did not decide it.
+	liveSelectors, err := r.modelDeploymentLiveRoleSelectors(ctx, md)
+	if err != nil {
+		return err
 	}
 
 	for i := range pods {
@@ -1300,26 +1554,144 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 		if role == nil {
 			continue
 		}
+		view, seated := replicaOf[pod.UID]
+		if !seated {
+			// A Pod holding no seat of its own answers under readiness alone, which is the rule a
+			// pre-replica deployment ran on.
+			view = modelDeploymentReplicaView{Members: []*core.Pod{pod}, Seated: false}
+		}
 
 		qualification, evaluated := qualificationByMember[pod.UID]
-		eligible := modelDeploymentPodEligible(md, role, pod, qualification, evaluated)
-		carried := pod.Labels[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue
-		if eligible == carried {
+		eligible := modelDeploymentPodEligible(md, role, pod, view, qualification, evaluated)
+		// The gate is asked of the mode this replica is running, not of the mode the spec states
+		// now. A desired command line would take the gate away from an old managed replica that has
+		// activated revocation, which is the replica the gate exists to withdraw.
+		effective := *role
+		if modelDeploymentReplicaRunsCommand(view.Members) {
+			effective.Command = nil
+		}
+		gated := modelDeploymentEligibilitySelectorActive(md, &effective,
+			liveSelectors[role.Name], modelDeploymentEligibilityDecided(md))
+		answering := modelDeploymentPodAnswersAPI(pod, view, md.Spec.Engine.Name,
+			eligible, gated, replacedByRole[role.Name])
+		patched := pod.DeepCopy()
+		changed := modelDeploymentApplyLabel(
+			patched, modelDeploymentLabelKeyEndpointEligible, eligible)
+		changed = modelDeploymentApplyLabel(
+			patched, modelDeploymentLabelKeyAPIAnswering, answering) || changed
+		if !changed {
 			continue
 		}
 
-		patched := pod.DeepCopy()
-		if eligible {
-			patched.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
-		} else {
-			delete(patched.Labels, modelDeploymentLabelKeyEndpointEligible)
+		// The write is bound to the Pod this pass judged. A name is not an identity, so a take-over
+		// replica's legacy membership must not land on a managed replica that has qualified nothing
+		// yet. The object is read back, a different incarnation under that name is skipped, and the
+		// patch carries the version that read returned.
+		fresh := new(core.Pod)
+		if err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(pod), fresh); err != nil {
+			if kerrors.IsNotFound(err) {
+				// A Pod this pass deleted has no labels left to write, and reporting a whole
+				// deployment unhealthy over a replica on its way out would be worse than the label.
+				continue
+			}
+
+			return err
 		}
-		if err := r.Client.Patch(ctx, patched, ctrlcli.MergeFrom(pod)); err != nil {
+		if fresh.UID != pod.UID {
+			// A different object now holds this name. The answer computed above describes the one
+			// that is gone, and the next pass judges whatever stands here now.
+			logger.V(3).Info("skipping a routing write for a member that was replaced",
+				"role", role.Name, "pod", pod.Name,
+				"observed", pod.UID, "standing", fresh.UID)
+
+			continue
+		}
+		rewritten := fresh.DeepCopy()
+		modelDeploymentApplyLabel(
+			rewritten, modelDeploymentLabelKeyEndpointEligible, eligible)
+		modelDeploymentApplyLabel(
+			rewritten, modelDeploymentLabelKeyAPIAnswering, answering)
+		if err := r.Client.Patch(ctx, rewritten, ctrlcli.MergeFromWithOptions(fresh,
+			ctrlcli.MergeFromWithOptimisticLock{})); err != nil && !kerrors.IsNotFound(err) {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// modelDeploymentApplyLabel writes or removes one membership label and reports whether the object
+// moved. Absence is the disqualification, so a false never writes "false".
+func modelDeploymentApplyLabel(pod *core.Pod, key string, present bool) bool {
+	carried := pod.Labels[key] == modelDeploymentEndpointEligibleValue
+	if present == carried {
+		return false
+	}
+	if present {
+		pod.Labels[key] = modelDeploymentEndpointEligibleValue
+	} else {
+		delete(pod.Labels, key)
+	}
+
+	return true
+}
+
+// modelDeploymentPodAnswersAPI reports whether a member is behind the deployment's HTTP Service
+// under the routing rules of the mode and the shape it was built with.
+//
+// THE MODE AND THE SHAPE ARE READ FROM THE POD AND ITS REPLICA, never from the spec. A role mid-edit
+// carries replicas of both modes at once, and each keeps the routing it had: a take-over replica
+// answers under the legacy membership rules, which this operator cannot verify and does not pretend
+// to, and a managed replica answers only once it qualifies, which is the eligibility key beside it.
+// A replica whose followers are still serving its previous four-member shape answers under that shape
+// until its own turn comes.
+//
+// A MEMBER THIS PASS SELECTED FOR REPLACEMENT ANSWERS NOTHING, however its mode reads. That is the
+// one rule that removes capacity, and it names one replica rather than the whole role: its outdated
+// siblings keep serving until they are selected in their own turn.
+func modelDeploymentPodAnswersAPI(
+	pod *core.Pod, view modelDeploymentReplicaView, engine string,
+	eligible, gated bool, replacingByOrdinal map[int]bool,
+) bool {
+	if !podIsReady(pod) {
+		return false
+	}
+	ordinal, seated := modelDeploymentPodOrdinal(pod)
+	if !seated || replacingByOrdinal[ordinal] {
+		return false
+	}
+
+	switch modelDeploymentDeployedAnsweringShape(view, engine) {
+	case modelDeploymentAnsweringAll, modelDeploymentAnsweringSole:
+	case modelDeploymentAnsweringLeader:
+		if !modelDeploymentAnsweringMemberLeader(pod) {
+			return false
+		}
+	default:
+		// Unknown shape retains carried routing, subject to readiness and qualification.
+		if pod.Labels[modelDeploymentLabelKeyAPIAnswering] != modelDeploymentAPIAnsweringValue {
+			return false
+		}
+	}
+
+	managed, readable := modelDeploymentMemberExecution(pod)
+	if !readable {
+		// A member whose mode cannot be read keeps what readiness alone allows, which is the legacy
+		// behavior rather than a new judgement about it.
+		return true
+	}
+	if !managed {
+		return true
+	}
+	if !gated {
+		// A ROLE WHOSE ELIGIBILITY SELECTOR WAS NEVER ACTIVATED IS STILL ROUTED THE WAY IT ALWAYS
+		// WAS, and readiness was always the whole rule there. Reading "managed means qualified" for
+		// such a role would withdraw every managed endpoint in the deployment on the first pass that
+		// touched it -- which on a mode edit is the pass that rewrites the selector.
+		return true
+	}
+
+	return eligible
 }
 
 // modelDeploymentPodEligible is the member rule: a Pod's endpoints may be selected exactly when
@@ -1341,6 +1713,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 // the whole replica at size one. Nothing here widens or narrows that.
 func modelDeploymentPodEligible(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, pod *core.Pod,
+	view modelDeploymentReplicaView,
 	qualification modelDeploymentInstanceQualification, evaluated bool,
 ) bool {
 	if role.ElasticEP != nil {
@@ -1388,12 +1761,11 @@ func modelDeploymentPodEligible(
 		return false
 	}
 
-	// WHICH MEMBERS ANSWER IS THE SHAPE'S DECISION, and it is the one derivation the retirement drain
-	// also uses. This reader happens to hold the role, so it reads the facts from there; the drain
-	// holds the members instead and reads the same facts from the Pods the role rendered. Sharing
-	// the derivation is what keeps the two from answering "which members serve" differently.
-	shape := modelDeploymentAnsweringShapeOf(
-		modelDeploymentRoleExternalDP(md, role), modelDeploymentRoleSize(role))
+	// Which members answer is the replica's own shape, read from the members it is running rather
+	// than from the role the spec states now. An activated External-DP replica whose argv has since
+	// been edited to an internal one keeps its ranks; reading the role would revoke every follower
+	// of a group that is still serving.
+	shape := modelDeploymentDeployedAnsweringShape(view, md.Spec.Engine.Name)
 	if shape == modelDeploymentAnsweringAll || shape == modelDeploymentAnsweringSole {
 		return true
 	}
@@ -1432,9 +1804,11 @@ func modelDeploymentRoleExternalDP(
 // a Service is NOT rebuilt when the group is: the group's shape decides which Pods exist, and the
 // address they answer on must survive that.
 func (r *ModelDeploymentReconciler) syncModelDeploymentService(
-	ctx context.Context, md *workercore.ModelDeployment, eligibilityDecided bool,
+	ctx context.Context, md *workercore.ModelDeployment, eligibilityDecided bool, pods []core.Pod,
 ) error {
-	rendered := renderModelDeploymentServices(md, r.modelDeploymentRoleManufacturers(ctx, md))
+	// The standing members come from the API server: a cache that has not caught up would retire
+	// the peer records of a collective whose members are still running.
+	rendered := renderModelDeploymentServices(md, r.modelDeploymentRoleManufacturers(ctx, md), pods)
 	if ModelDeploymentElasticRole(md) != nil {
 		for _, service := range rendered {
 			service.Spec.Selector[modelDeploymentReplicaOrdinalLabel] = "0"
@@ -1467,7 +1841,20 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentService(
 		if role == nil {
 			continue
 		}
-		if modelDeploymentEligibilitySelectorActive(md, role, live.Spec.Selector, eligibilityDecided) {
+		members := make([]*core.Pod, 0, len(pods))
+		for i := range pods {
+			if modelDeploymentPodRole(&pods[i]) == role.Name && modelDeploymentOwns(&pods[i], md) &&
+				pods[i].DeletionTimestamp == nil {
+				members = append(members, &pods[i])
+			}
+		}
+		role = modelDeploymentEffectiveRoleForEligibility(role, members)
+
+		selector := maps.Clone(live.Spec.Selector)
+		if live.Annotations[modelDeploymentEligibilityActiveAnnotation] == modelDeploymentEndpointEligibleValue {
+			selector[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		}
+		if modelDeploymentEligibilitySelectorActive(md, role, selector, eligibilityDecided) {
 			modelDeploymentSelectEligibleEndpoints(rendered[i], md, role)
 		}
 	}
@@ -1912,6 +2299,17 @@ func modelDeploymentAdmittedReplicas(workloads []kueue.Workload, pods []*core.Po
 	return admitted
 }
 
+// modelDeploymentPodValues copies a list of live Pods into the value form the grouping helpers
+// take, so a caller holding pointers does not have to hold a second copy of the same list.
+func modelDeploymentPodValues(pods []*core.Pod) []core.Pod {
+	values := make([]core.Pod, 0, len(pods))
+	for _, pod := range pods {
+		values = append(values, *pod)
+	}
+
+	return values
+}
+
 // modelDeploymentReplicaMembers is every live Pod seated on one ordinal, which is what a replica is
 // once it may have more than one member. The order is the caller's list order and carries no
 // meaning: a replica leaves as a whole, so nothing downstream picks between its members.
@@ -1924,6 +2322,39 @@ func modelDeploymentReplicaMembers(pods []*core.Pod, ordinal int) []*core.Pod {
 	}
 
 	return members
+}
+
+// seat is one position inside one replica: an ordinal and a member index within it.
+type seat struct{ ordinal, member int }
+
+// modelDeploymentSurplusCount measures the excess this rule exists for: members beyond the seats
+// they can occupy.
+//
+// It counts seats, not desired members: a replica edited from four members to two still fills the
+// four seats it was built at, and comparing that against the desired count would trim a healthy
+// admitted group until it matched a size the spec only wants for its replacement.
+//
+// A POD CLAIMING NO ORDINAL IS NOT SURPLUS. It cannot be excess on a seat, and it is judged on the
+// ungated rollout instead: it holds a Workload of its own, so it is a replica the rollout turns
+// over one per pass rather than a duplicate to trim here.
+func modelDeploymentSurplusCount(kept []*core.Pod) int {
+	seats := make(map[seat]bool, len(kept))
+	excess := 0
+	for _, pod := range kept {
+		ordinal, ok := modelDeploymentPodOrdinal(pod)
+		if !ok {
+			continue
+		}
+		key := seat{ordinal: ordinal, member: modelDeploymentPodMemberIndex(pod)}
+		if seats[key] {
+			excess++
+
+			continue
+		}
+		seats[key] = true
+	}
+
+	return excess
 }
 
 // modelDeploymentSurplusReplicas picks which Pods of an over-counted role leave: the Pods that
@@ -2144,14 +2575,20 @@ func (r *ModelDeploymentReconciler) getModelDeploymentRuntimeClassName(
 func (r *ModelDeploymentReconciler) listModelDeploymentPods(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) ([]core.Pod, error) {
+	return readModelDeploymentPods(ctx, md, r.Client)
+}
+
+// readModelDeploymentPods filters by identity labels and requires the deployment's owner UID.
+func readModelDeploymentPods(
+	ctx context.Context, md *workercore.ModelDeployment, reader ctrlcli.Reader,
+) ([]core.Pod, error) {
 	podList := new(core.PodList)
-	err := r.Client.List(ctx, podList,
+	err := reader.List(ctx, podList,
 		ctrlcli.InNamespace(md.Namespace),
 		ctrlcli.MatchingLabels{
 			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
 			modelDeploymentLabelKeyInstance: md.Name,
-		},
-		ctrlclix.WithoutQuorum)
+		})
 	if err != nil {
 		return nil, err
 	}

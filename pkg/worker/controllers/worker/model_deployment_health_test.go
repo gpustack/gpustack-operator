@@ -16,6 +16,7 @@ import (
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
@@ -61,6 +62,38 @@ func healthPod(role string, ordinal, member int, ready *bool, uid string) core.P
 }
 
 func healthBool(v bool) *bool { return &v }
+
+// stampHealthGroupTotals writes onto every member the Kueue group total a rendered replica always
+// carries, taken from the size of the role it belongs to.
+//
+// THE STAMP IS WHAT MAKES THESE FIXTURES HONEST RATHER THAN MERELY PASSING. The completeness leg
+// reads a replica's deployed size from its members rather than from the role, so a Pod without the
+// annotation reads as a replica of one -- and every case here below would then be judging a
+// multi-member replica against a total of one. healthPod is given the total it was rendered with by
+// this call rather than by an argument, because the size belongs to the deployment and a case that
+// wants a replica built at a DIFFERENT size than the role declares -- which is the state this whole
+// change exists for -- stamps it by hand and is explicit about doing so.
+func stampHealthGroupTotals(md *workercore.ModelDeployment, pods []core.Pod) []core.Pod {
+	sizes := make(map[string]int, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		sizes[md.Spec.Roles[i].Name] = modelDeploymentRoleSize(&md.Spec.Roles[i])
+	}
+
+	stamped := make([]core.Pod, len(pods))
+	for i := range pods {
+		stamped[i] = *pods[i].DeepCopy()
+		total := sizes[modelDeploymentPodRole(&stamped[i])]
+		if total < 1 {
+			total = 1
+		}
+		if stamped[i].Annotations == nil {
+			stamped[i].Annotations = map[string]string{}
+		}
+		stamped[i].Annotations[kueuepodconst.GroupTotalCountAnnotation] = strconvx.Itoa(total)
+	}
+
+	return stamped
+}
 
 // healthDeployment builds a deployment of one engine-shaped role of the given replica size, and
 // optionally a second role, which is what the P/D shape needs.
@@ -352,6 +385,7 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 			if pods == nil {
 				pods = []core.Pod{healthPod("server", 0, 0, healthBool(true), "uid-a")}
 			}
+			pods = stampHealthGroupTotals(md, pods)
 
 			qualifications := qualifyModelDeploymentInstances(
 				context.Background(), md, pods, tc.pending, boundProbeFetch,
@@ -529,8 +563,9 @@ func TestEndpointEligibilityStatusMapping(t *testing.T) {
 				}
 			}
 
+			pods := stampHealthGroupTotals(md, tc.pods)
 			qualifications := qualifyModelDeploymentInstances(
-				context.Background(), md, tc.pods, tc.pending, boundProbeFetch,
+				context.Background(), md, pods, tc.pending, boundProbeFetch,
 			)
 			holder := &workercore.ModelDeployment{ObjectMeta: meta.ObjectMeta{Name: md.Name}}
 			observeModelDeploymentEndpointEligibility(holder, qualifications)
@@ -543,7 +578,7 @@ func TestEndpointEligibilityStatusMapping(t *testing.T) {
 				"the machine-readable class of that verdict")
 
 			roles := modelDeploymentRoleStatuses(
-				md, tc.pods, nil, modelDeploymentRoleQualified(qualifications),
+				md, pods, nil, modelDeploymentRoleQualified(qualifications),
 			)
 			require.Len(t, roles, 1)
 			assert.Equal(t, tc.wantEligible, roles[0].Endpoints.Eligible,
@@ -627,15 +662,12 @@ func TestACondemnedReplicaIsNeverProbed(t *testing.T) {
 	t.Run("an incomplete replica condemns it before any probe", func(t *testing.T) {
 		calls = 0
 		md := healthDeployment(2)
-		pods := []core.Pod{
+		// One member of a replica declared at two. The group total is stamped from the role,
+		// because these members were rendered from it; a replica short of a DIFFERENT size than
+		// the role declares is the edit case and is asserted in the table above instead.
+		pods := stampHealthGroupTotals(md, []core.Pod{
 			healthPod("server", 0, 0, healthBool(true), "uid-a"),
-			healthPod("server", 0, 1, healthBool(true), "uid-b"),
-			healthPod("server", 1, 0, healthBool(true), "uid-c"),
-		}
-		_ = pods
-		pods = []core.Pod{
-			healthPod("server", 0, 0, healthBool(true), "uid-a"),
-		}
+		})
 		qualifications := qualifyModelDeploymentInstances(
 			context.Background(), md, pods,
 			modelDeploymentPendingReplacement{}, countingFetch,

@@ -22,6 +22,7 @@ import (
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueuepod "sigs.k8s.io/kueue/pkg/controller/jobs/pod"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
 
@@ -1063,7 +1064,29 @@ func TestModelDeploymentJointAdmission_AnAbsentReplicaIsReadByItsDeparture(t *te
 // subresources for the convergence loop, and the Workload's and the check's for the barrier's
 // verdict writes.
 func newRolloutClient(objs ...ctrlcli.Object) ctrlcli.Client {
+	allocated := 0
 	return ctrlfake.NewClientBuilder().
+		WithInterceptorFuncs(ctrlinterceptor.Funcs{
+			Create: func(ctx context.Context, next ctrlcli.WithWatch, obj ctrlcli.Object,
+				opts ...ctrlcli.CreateOption,
+			) error {
+				switch obj.(type) {
+				case *core.Pod, *kueue.Workload:
+					if obj.GetUID() == "" {
+						allocated++
+						obj.SetUID(types.UID(fmt.Sprintf("rollout-created-%d", allocated)))
+					}
+				}
+				return next.Create(ctx, obj, opts...)
+			},
+		}).
+		WithIndex(&core.Pod{}, kueuepod.PodGroupNameCacheKey, func(obj ctrlcli.Object) []string {
+			group := obj.GetLabels()[kueuepodconst.GroupNameLabel]
+			if group == "" {
+				return nil
+			}
+			return []string{group}
+		}).
 		WithScheme(scheme.Scheme).
 		WithStatusSubresource(
 			&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{},
@@ -1073,19 +1096,14 @@ func newRolloutClient(objs ...ctrlcli.Object) ctrlcli.Client {
 		Build()
 }
 
-// stampReplicaUIDs gives every replica a distinct UID, standing in for the API server's half of a
-// create: the fake client assigns none, and every ownership question in this controller is answered
-// by UID -- a fleet of empty UIDs makes one Workload "own" every replica, and a barrier test that
-// cannot tell replicas apart proves nothing.
-func stampReplicaUIDs(t *testing.T, cli ctrlcli.Client) {
+// assertReplicaUIDs checks the identities assigned at creation, before any owner comparisons.
+func assertReplicaUIDs(t *testing.T, cli ctrlcli.Client) {
 	t.Helper()
-
-	for i, pod := range replicaPods(t, cli) {
-		if pod.UID != "" {
-			continue
-		}
-		pod.UID = types.UID(fmt.Sprintf("uid-%s-%d", pod.Name, i))
-		require.NoError(t, cli.Update(context.Background(), &pod))
+	seen := sets.New[types.UID]()
+	for _, pod := range replicaPods(t, cli) {
+		require.NotEmpty(t, pod.UID)
+		require.False(t, seen.Has(pod.UID), "every incarnation has a distinct identity")
+		seen.Insert(pod.UID)
 	}
 }
 
@@ -1111,12 +1129,10 @@ func armReplicaFinalizers(t *testing.T, cli ctrlcli.Client) {
 func composeWorkloadFor(t *testing.T, cli ctrlcli.Client, pod core.Pod) {
 	t.Helper()
 
-	wl := new(kueue.Workload)
-	wl.Name, wl.Namespace = pod.Labels[kueuepodconst.GroupNameLabel], pod.Namespace
-	wl.UID = types.UID("uid-" + wl.Name)
-	wl.OwnerReferences = []meta.OwnerReference{{
-		APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID,
-	}}
+	wl, err := kueueComposeGroup(context.Background(), cli, pod.Labels[kueuepodconst.GroupNameLabel])
+	require.NoError(t, err)
+	require.NotNil(t, wl, "complete authoritative members compose their own Workload")
+
 	wl.Status.Conditions = []meta.Condition{{
 		Type:               kueue.WorkloadQuotaReserved,
 		Status:             meta.ConditionTrue,
@@ -1178,7 +1194,7 @@ func rolloutSetup(t *testing.T, cli ctrlcli.Client) {
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	stampReplicaUIDs(t, cli)
+	assertReplicaUIDs(t, cli)
 	armReplicaFinalizers(t, cli)
 	for _, pod := range replicaPods(t, cli) {
 		composeWorkloadFor(t, cli, pod)
@@ -1221,6 +1237,13 @@ func TestModelDeploymentJointAdmission_AnAdmittedWorkloadIsSkippedThroughARollou
 	require.NoError(t, cli.Update(ctx, changed))
 
 	for round := 0; round < 40; round++ {
+		for _, wl := range rolloutWorkloads(t, cli) {
+			if wl.DeletionTimestamp == nil {
+				continue
+			}
+			wl.Finalizers = nil
+			require.NoError(t, cli.Update(ctx, &wl))
+		}
 		// KUEUE RELEASES A DEPARTED REPLICA'S FINALIZER ONCE ITS WORKLOAD IS GONE. The converger
 		// deletes the pair together, and the fake cluster holds the Pod until this clears it -- the
 		// compressed shape of the drain a real cluster measures in tens of seconds.
@@ -1235,7 +1258,7 @@ func TestModelDeploymentJointAdmission_AnAdmittedWorkloadIsSkippedThroughARollou
 
 		_, err := reconcileModelDeployment(t, cli)
 		require.NoError(t, err, "round %d", round)
-		stampReplicaUIDs(t, cli)
+		assertReplicaUIDs(t, cli)
 
 		// THE BARRIER RUNS WHILE THE NEWEST REPLICAS HAVE NO WORKLOAD YET: Kueue composes on its
 		// own events, and this loop composes at the round's end. The gap is the state the skip
@@ -1318,6 +1341,13 @@ func TestModelDeploymentJointAdmission_ARolloutRunsToCompletionWithTheBarrierAct
 	admittedMidReplacement := false
 
 	for round := 0; round < 40; round++ {
+		for _, wl := range rolloutWorkloads(t, cli) {
+			if wl.DeletionTimestamp == nil {
+				continue
+			}
+			wl.Finalizers = nil
+			require.NoError(t, cli.Update(ctx, &wl))
+		}
 		for _, pod := range replicaPods(t, cli) {
 			if pod.DeletionTimestamp == nil {
 				continue
@@ -1348,7 +1378,7 @@ func TestModelDeploymentJointAdmission_ARolloutRunsToCompletionWithTheBarrierAct
 
 		_, err := reconcileModelDeployment(t, cli)
 		require.NoError(t, err, "round %d", round)
-		stampReplicaUIDs(t, cli)
+		assertReplicaUIDs(t, cli)
 
 		// KUEUE COMPOSES PER GROUP ON ITS OWN EVENTS, and one composition per round is the
 		// interleaving where a sibling is judged while another ordinal's recomposition has not
@@ -1425,7 +1455,7 @@ func anyReplicaMidReplacement(t *testing.T, cli ctrlcli.Client) bool {
 	t.Helper()
 
 	md := getModelDeployment(t, cli)
-	byGroup, liveByGroup, err := modelDeploymentReplicaGroups(context.Background(), cli, md)
+	byGroup, liveByGroup, _, err := modelDeploymentReplicaGroups(context.Background(), cli, md)
 	require.NoError(t, err)
 
 	wlList := new(kueue.WorkloadList)
@@ -1566,4 +1596,80 @@ func TestModelDeploymentJointAdmissionCheckReconciler_ExpectedWriteFailuresAreQu
 			assert.True(t, kubemeta.IsConditionTrue(got.Status.Conditions, kueue.AdmissionCheckActive))
 		})
 	}
+}
+
+// TestModelDeploymentJointAdmission_AnEditedRoleIsNotStillAssembling is the joint barrier's half of
+// this task.
+//
+// THE ROLE HAS BEEN EDITED AND THE REPLICA HAS NOT. The prefiller now declares four members per
+// replica; the replica standing was rendered at two and holds both of them, with a Workload holding
+// its quota. Reading the live count against the ROLE's size says the group has not reached its
+// declared total, which is the exact state Kueue composes no Workload for -- so the verdict reports
+// a deployment still assembling, and a barrier that reports assembling HOLDS. A perfectly healthy,
+// already-admitted deployment would sit behind a configuration change for as long as the rollout
+// takes.
+//
+// The group declares two of its own accord, on every member, and that is the figure the verdict is
+// entitled to compare against.
+func TestModelDeploymentJointAdmission_AnEditedRoleIsNotStillAssembling(t *testing.T) {
+	md := jointDeployment("qwen", "h20-8x", "a100-8x")
+	md.Spec.Roles[0].ReplicaSize = 4
+
+	group := modelDeploymentReplicaGroupName(md, "prefill", 0)
+	first := jointGroupPod("qwen-prefill-0-0", group, "qwen")
+	second := jointGroupPod("qwen-prefill-0-1", group, "qwen")
+	for _, member := range []*core.Pod{first, second} {
+		member.Annotations = map[string]string{kueuepodconst.GroupTotalCountAnnotation: "2"}
+	}
+	decoder := jointGroupPod("qwen-decode-0",
+		modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
+	decoder.Annotations = map[string]string{kueuepodconst.GroupTotalCountAnnotation: "1"}
+
+	cli := newJointClient(jointCheckObject(), md, first, second, decoder,
+		jointWorkload("wl-first", true, first), jointWorkload("wl-second", true, decoder))
+
+	r := &ModelDeploymentJointAdmissionReconciler{Client: cli}
+	held, err := r.jointVerdict(context.Background(), md)
+	require.NoError(t, err)
+
+	assert.Equal(t, kueue.CheckStateReady, held.State,
+		"both roles hold quota; an edited replica size is not a reason to hold a settled set")
+}
+
+// TestModelDeploymentJointAdmission_AGroupOfOneSeatIsNotAssembling is the control for the barrier
+// reading a group's own shape rather than a bare member count.
+//
+// A GROUP WHOSE MEMBERS ALL CLAIM ONE SEAT has not reached a total of two; it is one member counted
+// twice. Reducing the total on its own called that group assembled, and the assembled branch tells
+// an operator to wait for it to fill -- which is an instruction with no exit for a group that never
+// will. The shape reader refuses the group as one this operator cannot classify instead, which is
+// the answer the members actually support.
+func TestModelDeploymentJointAdmission_AGroupOfOneSeatIsNotAssembling(t *testing.T) {
+	md := jointDeployment("qwen", "h20-8x", "a100-8x")
+	md.Spec.Roles[0].ReplicaSize = 2
+
+	group := modelDeploymentReplicaGroupName(md, "prefill", 0)
+	seated := func(name, seat string) *core.Pod {
+		pod := jointGroupPod(name, group, "qwen")
+		pod.Labels[modelDeploymentMemberIndexLabel] = seat
+		pod.Annotations = map[string]string{kueuepodconst.GroupTotalCountAnnotation: "2"}
+
+		return pod
+	}
+	decoder := jointGroupPod("qwen-decode-0",
+		modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
+	decoder.Annotations = map[string]string{kueuepodconst.GroupTotalCountAnnotation: "1"}
+
+	cli := newJointClient(jointCheckObject(), md, seated("qwen-prefill-0-0", "0"),
+		seated("qwen-prefill-0-1", "0"), decoder,
+		jointWorkload("wl-decoder", true, decoder))
+
+	r := &ModelDeploymentJointAdmissionReconciler{Client: cli}
+	held, err := r.jointVerdict(context.Background(), md)
+	require.NoError(t, err)
+
+	assert.Equal(t, kueue.CheckStatePending, held.State,
+		"the decode role is admitted, so the only thing left to hold is the unclassifiable group")
+	assert.NotContains(t, held.Message, "quota",
+		"a duplicate seat is not a quota problem, and the message must not send an operator there")
 }

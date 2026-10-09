@@ -276,6 +276,7 @@ spec:
     managed:
       leader:
         replicas: 3
+        multiTenancy: false
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM

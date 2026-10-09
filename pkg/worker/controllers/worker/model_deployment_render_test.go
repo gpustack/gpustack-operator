@@ -2170,7 +2170,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			// THE GATE AND THE SERVICE MUST NAME ONE PORT, and the comparison is against the
 			// rendered Service rather than against the helper the render used -- comparing a value
 			// with the function that produced it would hold however either side drifted.
-			svc := renderModelDeploymentService(md)
+			svc := renderModelDeploymentService(md, nil)
 			require.Len(t, svc.Spec.Ports, 1)
 			assert.Equal(t, svc.Spec.Ports[0].TargetPort.IntVal, c.ReadinessProbe.HTTPGet.Port.IntVal,
 				"the port the gate grades and the port the Service sends traffic to are one fact")

@@ -273,6 +273,10 @@ Editing it [turns over every role](deployment.md#rollout-behavior): the value re
 into both ends' arguments, so every role's replicas turn over one at a time. A prefiller and a decoder
 can disagree on the protocol until both converge, the same window an `engine.version` edit opens.
 
+The same shared-document rule reaches the parallel degrees on the Ascend leg. The pair turns over
+together; see [Rollout behavior](deployment.md#rollout-behavior) for the mechanism. Until both roles
+converge, the pair can fail to complete a transfer.
+
 ## Different hardware per role
 
 A Kueue Workload carries one `queueName`, and that name is the one the role's `instanceType`

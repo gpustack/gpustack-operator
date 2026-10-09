@@ -33,9 +33,12 @@ import (
 // nothing at all: it adds or removes instances, and every instance that stays keeps running,
 // keeps the accelerators it was admitted with and keeps whatever cache it holds.
 //
-// THE SET OF ROLES IS FIXED AFTER CREATION. Admission refuses adding, removing or renaming a role.
-// A replica's group is named from the deployment, its role and its ordinal, so edits to one role's
-// running configuration do not rename a sibling role's groups.
+// THE SET OF ROLES IS FIXED AFTER CREATION. Admission refuses adding, removing or renaming a role,
+// and it refuses a kind change on a role that exists: the name and the kind are what the role IS,
+// while size, instanceType, resources and command are how it is currently running and are
+// editable beside every other container field. A replica's group is named from the deployment,
+// its role and its ordinal, so edits to one role's running configuration do not rename a sibling
+// role's groups.
 //
 // A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A ROLLOUT. The replica that left is replaced on
 // its own, under a new name, while its siblings keep serving — see
@@ -80,10 +83,14 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// start together, they are replaced together, and none of them serves alone — the instance,
 	// not the Pod, is the unit that appears and disappears.
 	//
-	// THIS NUMBER IS FIXED AT CREATION AND CANNOT BE CHANGED. An instance's size is the shape of the
-	// instance, not a dial on it: the Pods a running instance is made of are not the Pods a different
-	// size asks for. Scaling is what replicas is for, and it leaves every running instance alone. To
-	// serve at a different size, create a deployment that declares it.
+	// IT IS EDITABLE. The edit replaces the role's replicas one at a time: an old replica and its
+	// Workload are deleted first, its replacement is created only after that slot is free, and the
+	// replacement's fresh admission gates deleting the next old replica. Surviving replicas keep
+	// their deployed configuration until each is selected for replacement; continuous serving is
+	// not guaranteed -- a one-replica role stops for the length of its swap. Scaling WITHOUT
+	// replacement is what replicas is for.
+	//
+	// THE ELASTIC-EP PROFILE PINS THIS NUMBER AT ONE; see ElasticEP.
 	//
 	// ABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods
 	// is rendered with stable names and publishes the first Pod's address, this instance's size and
@@ -100,6 +107,12 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	ReplicaSize *int32 `json:"size,omitempty"`
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.
+	//
+	// IT IS EDITABLE. Moving a role to another type runs the same whole-group replacement: each
+	// old replica leaves before its replacement is created, and that replacement is admitted
+	// against the queue the new type publishes before the next old replica may leave. Existing
+	// Pods keep the type they were admitted with until they are deleted. The elastic-EP profile
+	// freezes this field after creation.
 	InstanceType *string `json:"instanceType,omitempty"`
 	// Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED
 	// FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
@@ -113,6 +126,11 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
 	// a Pod wants is a property of the model being served, so two deployments on one InstanceType
 	// routinely want different counts.
+	//
+	// IT IS EDITABLE. A change runs the same whole-group replacement, and the new request is
+	// admitted against the pool as each replacement is created. Omission behaves as on create:
+	// the accelerator half is defaulted, to one whole card of an acceleratable type. The
+	// elastic-EP profile freezes this field at the whole-card group it bound to TP at creation.
 	Resources *ModelDeploymentRoleResourcesApplyConfiguration `json:"resources,omitempty"`
 	// Image is the container image to run. Leaving it empty is the ordinary case: the operator then
 	// synthesizes one from the pool's accelerator backend, the observed runtime version and the
@@ -140,10 +158,11 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// there is deliberately no Args, because a second append tier beside ExtraArgs would have no
 	// defined precedence.
 	//
-	// IT IS FROZEN AFTER CREATION, because it decides whether the operator configures this role at
-	// all: a role that supplies one is taken over by its author, which changes cache injection and
-	// what status can claim. The rest of the container fields are how the build is fetched, shaped
-	// and tuned, and stay editable.
+	// IT IS EDITABLE IN EVERY DIRECTION: managed to take-over, take-over back to managed, and
+	// take-over to take-over. Each edit runs the whole-group replacement, and the deployed Pods
+	// keep the mode they were created with until each is deleted for replacement, so during a
+	// rollout the role can hold both modes at once; cache injection and status read what is
+	// deployed. The elastic-EP profile freezes this field: the elastic renderer owns the argv.
 	Command []string `json:"command,omitempty"`
 	// ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the
 	// operator owns is REJECTED rather than merged: a silent merge produces two values for one

@@ -351,11 +351,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 	masters := modelDeploymentElasticMasters(md, actual)
 	qualifications := qualifyModelDeploymentInstances(ctx, md, masters, modelDeploymentPendingReplacement{}, fetch)
 	byMember := modelDeploymentQualificationsByMember(qualifications)
-	if err := r.convergeModelDeploymentEndpointEligibility(ctx, md, actual, byMember); err != nil {
+	if err := r.convergeModelDeploymentEndpointEligibility(ctx, md, actual, byMember, nil); err != nil {
 		return true, err
 	}
 	decided := modelDeploymentQualificationsDecided(qualifications)
-	if err := r.syncModelDeploymentService(ctx, md, decided); err != nil {
+	if err := r.syncModelDeploymentService(ctx, md, decided, actual); err != nil {
 		return true, err
 	}
 	return true, r.syncModelDeploymentRouter(ctx, md, decided)

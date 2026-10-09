@@ -149,7 +149,7 @@ restore() {
   for ns in "$NS_A" "$NS_B"; do
     kubectl -n "$ns" get kvcachepoolbindings.worker.gpustack.ai -o name 2>/dev/null \
       | while read -r b; do
-      kubectl -n "$ns" patch "$b" --subresource=status --type=merge \
+      kubectl -n "$ns" patch kvcachepoolbindings.v1alpha1.worker.gpustack.ai "${b##*/}" --subresource=status --type=merge \
         -p '{"status":{"usedBy":null}}' >/dev/null 2>&1 || true
     done
   done
@@ -630,8 +630,20 @@ echo "== 6. a binding a workload holds cannot be deleted =="
 # WRITTEN BY THIS CASE. The ModelDeployment controller fills a Binding's usedBy in production, and
 # this case runs no ModelDeployment. A case that waited for a writer would wait forever, and one
 # that skipped the write would assert a release nothing was holding.
-kubectl -n "$NS_A" patch kvcachepoolbindings.worker.gpustack.ai bind-a --subresource=status --type=merge \
-  -p '{"status":{"usedBy":[{"kind":"ModelDeployment","namespace":"","name":"qwen-e2e"}]}}' >/dev/null 2>&1
+# The public v1 proxy exposes no status writer. Use the storage version for this fixture write.
+if ! kubectl -n "$NS_A" patch kvcachepoolbindings.v1alpha1.worker.gpustack.ai bind-a --subresource=status --type=merge \
+  -p '{"status":{"usedBy":[{"kind":"ModelDeployment","namespace":"","name":"qwen-e2e"}]}}' >/dev/null; then
+  record FAIL "the holder fixture is written" "the storage-version status patch failed; no held deletion can be asserted"
+  print_rows
+  exit 1
+fi
+holder_kind="$(kubectl -n "$NS_A" get kvcachepoolbindings.v1alpha1.worker.gpustack.ai bind-a \
+  -o 'jsonpath={.status.usedBy[?(@.name=="qwen-e2e")].kind}')"
+if [ "$holder_kind" != ModelDeployment ]; then
+  record FAIL "the holder fixture is read back" "usedBy does not contain ModelDeployment/qwen-e2e"
+  print_rows
+  exit 1
+fi
 
 kubectl -n "$NS_A" delete kvcachepoolbindings.worker.gpustack.ai bind-a --wait=false >/dev/null 2>&1 || true
 sleep 20
@@ -650,8 +662,12 @@ fi
 
 # Released by hand, since nothing else will: this is the same patch a real consumer's controller
 # would make when it stops using the pool.
-kubectl -n "$NS_A" patch kvcachepoolbindings.worker.gpustack.ai bind-a --subresource=status --type=merge \
-  -p '{"status":{"usedBy":null}}' >/dev/null 2>&1
+if ! kubectl -n "$NS_A" patch kvcachepoolbindings.v1alpha1.worker.gpustack.ai bind-a --subresource=status --type=merge \
+  -p '{"status":{"usedBy":null}}' >/dev/null; then
+  record FAIL "the holder fixture is released" "the storage-version status patch failed"
+  print_rows
+  exit 1
+fi
 # Deliberately NOT wait_for with an empty expected value. That helper reads kubectl under
 # 2>/dev/null and compares the output, so a transport error, an RBAC denial or a webhook intercepting
 # the GET yields the same empty string a deleted object does — and with an empty `want` the FIRST

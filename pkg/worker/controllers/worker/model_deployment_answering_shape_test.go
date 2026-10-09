@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
@@ -29,6 +31,27 @@ func shapeMember(ordinal, member int, uid string, command ...string) core.Pod {
 		Image:   "vllm/vllm-openai:v0.29.0",
 		Command: command,
 	}}
+
+	return pod
+}
+
+// shapeSizedMember is a member whose group total is written explicitly, for the cases where the
+// replica was NOT rendered at the size the role now declares. planFor leaves a total it has already
+// stamped alone, so this is how a case says what the replica was actually built at.
+func shapeSizedMember(ordinal, member int, uid string, total int, command ...string) core.Pod {
+	pod := shapeMember(ordinal, member, uid, command...)
+	pod.Annotations[kueuepodconst.GroupTotalCountAnnotation] = strconv.Itoa(total)
+
+	return pod
+}
+
+// shapeNoEngineMember is a member with no engine container at all, which is what a Pod this operator
+// never rendered looks like. The retirement guards hold on one rather than classify the replica from
+// its siblings.
+func shapeNoEngineMember(ordinal int, uid string, total int) core.Pod {
+	pod := healthPod("server", ordinal, 0, healthBool(true), uid)
+	pod.Spec.Containers = nil
+	pod.Annotations = map[string]string{kueuepodconst.GroupTotalCountAnnotation: strconv.Itoa(total)}
 
 	return pod
 }
@@ -108,6 +131,26 @@ func planFor(
 	t *testing.T, md *workercore.ModelDeployment, pods []core.Pod, reader *recordingDrainReader,
 ) *modelDeploymentRetirementPlan {
 	t.Helper()
+
+	// THE GROUP TOTAL IS STAMPED FROM THE ROLE'S OWN SIZE, which is what every case below means by
+	// its members: these replicas were rendered from this deployment at this size. A member carrying
+	// seat one of a group declaring one is a shape the renderer never emits, and a fixture that
+	// produced one would be testing a group this operator could not classify rather than the drain.
+	for i := range pods {
+		if _, ok := pods[i].Annotations[kueuepodconst.GroupTotalCountAnnotation]; ok {
+			continue
+		}
+		total := 1
+		for r := range md.Spec.Roles {
+			if pods[i].Labels[modelDeploymentLabelKeyComponent] == md.Spec.Roles[r].Name {
+				total = modelDeploymentRoleSize(&md.Spec.Roles[r])
+			}
+		}
+		if pods[i].Annotations == nil {
+			pods[i].Annotations = map[string]string{}
+		}
+		pods[i].Annotations[kueuepodconst.GroupTotalCountAnnotation] = strconv.Itoa(total)
+	}
 
 	uids := make([]string, 0, len(pods))
 	for i := range pods {
@@ -206,8 +249,8 @@ func TestDrainReadsTheMembersTheShapeMakesAnswerable(t *testing.T) {
 			name: "a leader-served replica whose role is gone drains through the leader",
 			md:   shapeAbsentRole(2),
 			pods: []core.Pod{
-				shapeMember(1, 0, "m-0", shapePlainCommand...),
-				shapeMember(1, 1, "m-1", shapePlainCommand...),
+				shapeSizedMember(1, 0, "m-0", 2, shapePlainCommand...),
+				shapeSizedMember(1, 1, "m-1", 2, shapePlainCommand...),
 			},
 			wantState: workercore.ModelDeploymentRetirementStateDeleting,
 			wantReads: map[string]int{"m-0": 2},
@@ -220,20 +263,23 @@ func TestDrainReadsTheMembersTheShapeMakesAnswerable(t *testing.T) {
 			wantReads: map[string]int{"m-0": 2},
 		},
 		{
-			// THE EXTERNAL-DP SHAPE IS REACHABLE FROM THE DRAIN ONLY WITHOUT A ROLE. With a role
-			// declared, the disaggregation refusal above the selection is the earlier and the
-			// stronger answer, and it is not this task's to move.
-			name: "an External-DP replica whose role is gone reads every member",
+			// THE MEMBERS ANSWER EVEN WITH NO ROLE TO ASK. The role is the one thing this protocol
+			// tolerates missing, and letting its absence decide the guard would have drained a
+			// disaggregated replica on the strength of a role that no longer exists.
+			name: "an External-DP replica whose role is gone is still refused",
 			md:   shapeAbsentRole(2),
 			pods: []core.Pod{
 				shapeMember(1, 0, "m-0", shapeExternalDPCommand...),
 				shapeMember(1, 1, "m-1", shapeExternalDPCommand...),
 			},
-			wantState: workercore.ModelDeploymentRetirementStateDeleting,
-			wantReads: map[string]int{"m-0": 2, "m-1": 2},
+			wantState:  workercore.ModelDeploymentRetirementStateDraining,
+			wantReads:  map[string]int{},
+			wantReason: "a disaggregated replica has no verifiable decoder-side release",
 		},
 		{
-			name: "an External-DP replica without a role holds when one of its members is busy",
+			// The refusal comes before any read, so the busy member never gets its turn. The busy
+			// member path stays covered above on leader-served replicas, where it is reachable.
+			name: "an External-DP replica holds before reading a busy member",
 			md:   shapeAbsentRole(2),
 			pods: []core.Pod{
 				shapeMember(1, 0, "m-0", shapeExternalDPCommand...),
@@ -241,8 +287,8 @@ func TestDrainReadsTheMembersTheShapeMakesAnswerable(t *testing.T) {
 			},
 			busy:       map[types.UID]bool{"m-1": true},
 			wantState:  workercore.ModelDeploymentRetirementStateDraining,
-			wantReads:  map[string]int{"m-0": 2, "m-1": 1},
-			wantReason: "still holds",
+			wantReads:  map[string]int{},
+			wantReason: "a disaggregated replica has no verifiable decoder-side release",
 		},
 		{
 			name: "a role declaring External-DP is refused before any member is read",
@@ -256,7 +302,12 @@ func TestDrainReadsTheMembersTheShapeMakesAnswerable(t *testing.T) {
 			wantReason: "no verifiable decoder-side release",
 		},
 		{
-			name: "a leader-served replica with no member carrying the leader index holds",
+			// A GROUP WITH NO MEMBER ON SEAT ZERO HAS ITS SEATS OUT OF ITS OWN RANGE, and the
+			// deployed-shape reader says so. It also means the leader search's own "no member carries
+			// the leader index" branch is unreachable from a readable shape: seats are unique and in
+			// range, so a group of N always has a seat zero. That branch stays as defense behind the
+			// shape check rather than as a route a case can reach.
+			name: "a replica whose seats are all outside its declared total holds",
 			md:   shapeDeployment(2),
 			pods: []core.Pod{
 				shapeMember(1, 1, "m-1", shapePlainCommand...),
@@ -264,13 +315,13 @@ func TestDrainReadsTheMembersTheShapeMakesAnswerable(t *testing.T) {
 			},
 			wantState:  workercore.ModelDeploymentRetirementStateDraining,
 			wantReads:  map[string]int{},
-			wantReason: "no member carrying the leader index",
+			wantReason: "claims seat 2 of a replica declaring only 2 members",
 		},
 		{
-			// THE CASE THE LABEL READ EXISTS FOR. Neither member says which rank it is, so neither
-			// can be shown to be the leader, and a search that treated "unknown rank" as "rank zero"
-			// would return this whole replica as its own answer and drain it on a guess.
-			name: "a leader-served replica whose members carry no member index holds",
+			// A MULTI-MEMBER GROUP WITH NO SEATS IS NOT A LEGACY REPLICA. Replicas written before the
+			// member-index label existed were exactly the single-member ones, so this is a shape the
+			// renderer never emits and the reader refuses it rather than counting its members.
+			name: "a multi-member replica whose members carry no member index holds",
 			md:   shapeDeployment(2),
 			pods: []core.Pod{
 				shapeUnlabelledMember(1, "m-0", shapePlainCommand...),
@@ -278,10 +329,13 @@ func TestDrainReadsTheMembersTheShapeMakesAnswerable(t *testing.T) {
 			},
 			wantState:  workercore.ModelDeploymentRetirementStateDraining,
 			wantReads:  map[string]int{},
-			wantReason: "no member carrying the leader index",
+			wantReason: "no member declares which seat it holds",
 		},
 		{
-			name: "a leader-served replica with two leaders holds and says how many",
+			// TWO MEMBERS ON ONE SEAT IS A DUPLICATE, so the reader that validates seats answers before
+			// the leader search that counts them. Both refuse the group; the seat reader names the
+			// smaller fact, and two members on seat zero cannot happen in a readable group at all.
+			name: "a replica with two members on the leader seat holds",
 			md:   shapeDeployment(2),
 			pods: []core.Pod{
 				shapeMember(1, 0, "m-0", shapePlainCommand...),
@@ -289,7 +343,39 @@ func TestDrainReadsTheMembersTheShapeMakesAnswerable(t *testing.T) {
 			},
 			wantState:  workercore.ModelDeploymentRetirementStateDraining,
 			wantReads:  map[string]int{},
-			wantReason: "2 members carrying the leader index",
+			wantReason: "both claim seat 0",
+		},
+		{
+			// THE COUNTEREXAMPLE FOR THE DEPLOYED-SHAPE CHECK. Three members declaring a group of
+			// three, with two of them claiming seat one. There is exactly one member carrying the
+			// leader index, so the leader search finds a leader, names it and lets the drain run --
+			// over a group that cannot be told apart from itself, which is the shape every other
+			// reader here refuses to classify.
+			name: "a three-member group whose seats duplicate holds",
+			md:   shapeDeployment(3),
+			pods: []core.Pod{
+				shapeMember(1, 0, "m-0", shapePlainCommand...),
+				shapeMember(1, 1, "m-1", shapePlainCommand...),
+				shapeMember(1, 1, "m-1b", shapePlainCommand...),
+			},
+			wantState:  workercore.ModelDeploymentRetirementStateDraining,
+			wantReads:  map[string]int{},
+			wantReason: "both claim seat 1",
+		},
+		{
+			// THE SAME HOLE FROM THE OTHER SIDE: every seat is distinct, so nothing duplicates, and
+			// the member holding seat ninety-nine is outside a group of three. The leader search
+			// still finds seat zero and never looks at the other two.
+			name: "a three-member group with a seat outside its declared total holds",
+			md:   shapeDeployment(3),
+			pods: []core.Pod{
+				shapeMember(1, 0, "m-0", shapePlainCommand...),
+				shapeMember(1, 1, "m-1", shapePlainCommand...),
+				shapeMember(1, 99, "m-99", shapePlainCommand...),
+			},
+			wantState:  workercore.ModelDeploymentRetirementStateDraining,
+			wantReads:  map[string]int{},
+			wantReason: "claims seat 99",
 		},
 		{
 			name: "a replica whose members disagree on the shape holds",
@@ -303,18 +389,32 @@ func TestDrainReadsTheMembersTheShapeMakesAnswerable(t *testing.T) {
 			wantReason: "the replica's members disagree on whether it is disaggregated",
 		},
 		{
-			name:       "a role that declares more members than the replica holds",
-			md:         shapeDeployment(3),
-			pods:       []core.Pod{shapeMember(1, 0, "m-0", shapePlainCommand...)},
-			wantState:  workercore.ModelDeploymentRetirementStateDraining,
-			wantReads:  map[string]int{},
-			wantReason: "declares 3 members and the replica holds 1",
+			// THE SIZE FREEZE THIS TASK REMOVES. The role now asks for three members; the replica
+			// standing was rendered at one and holds its one. Comparing against the role made every
+			// old replica of an edited role undeclassifiable, and an undeclassifiable replica is one
+			// this operator never drains -- so a size edit would have pinned the old shape in place
+			// for as long as the edit existed.
+			name:      "a replica built smaller than the role now declares still drains",
+			md:        shapeDeployment(3),
+			pods:      []core.Pod{shapeSizedMember(1, 0, "m-0", 1, shapePlainCommand...)},
+			wantState: workercore.ModelDeploymentRetirementStateDeleting,
+			wantReads: map[string]int{"m-0": 2},
 		},
 		{
-			// THE DIRECTION THAT REACHES THE CHECK. A role declaring External-DP is refused one
-			// step earlier, so the only disagreement this can observe is a leader-served role
-			// above members whose own rendered command says otherwise.
-			name: "a role and a rendered command that disagree on the shape",
+			// The genuine fault, still a refusal: the group says it was built at three and is not.
+			name:       "a replica short of the total its own group declared holds",
+			md:         shapeDeployment(3),
+			pods:       []core.Pod{shapeSizedMember(1, 0, "m-0", 3, shapePlainCommand...)},
+			wantState:  workercore.ModelDeploymentRetirementStateDraining,
+			wantReads:  map[string]int{},
+			wantReason: "short of the group it was built at",
+		},
+		{
+			// THE UNSUPPORTED OLD SHAPE, REACHED WITH THE ROLE DISAGREEING. A leader-served role
+			// above members whose own command is disaggregated is a group the prefiller queues do not
+			// measure. Reading the role instead of the members drained it on the replacement's
+			// description.
+			name: "a leader-served role over disaggregated members is refused on their command",
 			md:   shapeDeployment(2),
 			pods: []core.Pod{
 				shapeMember(1, 0, "m-0", shapeExternalDPCommand...),
@@ -322,18 +422,33 @@ func TestDrainReadsTheMembersTheShapeMakesAnswerable(t *testing.T) {
 			},
 			wantState:  workercore.ModelDeploymentRetirementStateDraining,
 			wantReads:  map[string]int{},
-			wantReason: "the role and the replica's own rendered command disagree",
+			wantReason: "a disaggregated replica has no verifiable decoder-side release",
+		},
+		{
+			// THE MISSING-ENGINE CONTROL WITH A CHANGED DESIRED SPEC. The role now declares the
+			// disaggregated flag, so every reading about the replacement says the group is
+			// disaggregated and the guard has a tempting answer available. The members still carry no
+			// engine container, so this operator has not read what is running and must not delete on
+			// the replacement's description.
+			name: "a member with no engine container holds even when the role declares the shape",
+			md:   shapeDeployment(1, "--data-parallel-external-lb"),
+			pods: []core.Pod{
+				healthPod("server", 1, 0, healthBool(true), "m-0"),
+			},
+			wantState:  workercore.ModelDeploymentRetirementStateDraining,
+			wantReads:  map[string]int{},
+			wantReason: "could not be established",
 		},
 		{
 			name: "a replica with no role and no readable command cannot be classified",
 			md:   shapeAbsentRole(2),
 			pods: []core.Pod{
-				healthPod("server", 1, 0, healthBool(true), "m-0"),
-				shapeMember(1, 1, "m-1", shapePlainCommand...),
+				shapeNoEngineMember(1, "m-0", 2),
+				shapeSizedMember(1, 1, "m-1", 2, shapePlainCommand...),
 			},
 			wantState:  workercore.ModelDeploymentRetirementStateDraining,
 			wantReads:  map[string]int{},
-			wantReason: "no engine container to read",
+			wantReason: "carries no engine container to read",
 		},
 	}
 
@@ -546,4 +661,58 @@ func TestDrainReasonsNameTheShape(t *testing.T) {
 
 	assert.True(t, strings.Contains(reason, "leader-served"),
 		"the reason names the shape, not just the symptom: %q", reason)
+}
+
+// A managed replica whose parallelism cannot be read has no established shape. It must hold, not
+// be read as leader-served, because that reading withdraws the followers of an External-DP replica
+// on a failed read.
+func TestDeployedAnsweringShape_UnreadableParallelismHolds(t *testing.T) {
+	testCases := []struct {
+		name    string
+		command []string
+		want    modelDeploymentAnsweringShape
+	}{
+		{
+			name:    "a readable External-DP command answers through every member",
+			command: shapeExternalDPCommand,
+			want:    modelDeploymentAnsweringAll,
+		},
+		{
+			name:    "a readable plain command answers through its leader",
+			command: shapePlainCommand,
+			want:    modelDeploymentAnsweringLeader,
+		},
+		{
+			name:    "an unreadable parallelism value holds",
+			command: []string{"vllm", "serve", "model", "--tensor-parallel-size", "many"},
+			want:    modelDeploymentAnsweringUnknown,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			leader := shapeSizedMember(0, 0, "uid-leader", 2, tc.command...)
+			follower := shapeSizedMember(0, 1, "uid-follower", 2, tc.command...)
+			view := modelDeploymentReplicaView{
+				Role: "server", Ordinal: 0, Seated: true,
+				Members: []*core.Pod{&leader, &follower},
+			}
+
+			assert.Equal(t, tc.want, modelDeploymentDeployedAnsweringShape(view, workercore.ModelDeploymentEngineVLLM))
+		})
+	}
+}
+
+// TestDrain_AReplicaWithNoMembersNamesThatAsTheHold keeps the hold reason honest for an already
+// unusual state: with no member there is no engine container missing, there is no member at all.
+func TestDrain_AReplicaWithNoMembersNamesThatAsTheHold(t *testing.T) {
+	r := &ModelDeploymentReconciler{}
+	plan := &modelDeploymentRetirementPlan{
+		Reservation: &workercore.ModelDeploymentRetirementStatus{RoleName: "server"},
+	}
+
+	reason, drained := r.observeModelDeploymentRetirementDrained(context.Background(), shapeDeployment(1), plan)
+
+	assert.False(t, drained)
+	assert.Equal(t, "the replica has no members to read", reason)
 }

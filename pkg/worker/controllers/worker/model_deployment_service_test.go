@@ -9,10 +9,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
@@ -119,7 +121,7 @@ func TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide(t *testing.T) 
 
 func TestRenderModelDeploymentService_KVEventPorts(t *testing.T) {
 	md := routedModelDeployment()
-	services := renderModelDeploymentServices(md, nil)
+	services := renderModelDeploymentServices(md, nil, nil)
 	require.Len(t, services, 3)
 
 	portsByName := func(service *core.Service) map[string]int32 {
@@ -163,8 +165,8 @@ func TestModelDeploymentService_RemovingARoleRemovesItsService(t *testing.T) {
 
 // TestModelDeploymentService_AReplicaServiceIsCreatedAndReclaimedWithItsReplica runs the whole
 // convergence rather than the renderer, because the question here is about the prune path: a
-// headless Service is derived from an ordinal, so scaling down has to reclaim the ones whose
-// ordinals the role no longer reaches.
+// headless Service is derived from an ordinal. Scaling down keeps its peer records until the
+// ordinal's last member leaves, then reclaims the Service.
 //
 // THE SCALE-UP HALF IS THE CONTROL. Without it "the Services went away" is satisfied by a
 // convergence that never created them, which is the failure this case would otherwise report as a
@@ -189,8 +191,21 @@ func TestModelDeploymentService_AReplicaServiceIsCreatedAndReclaimedWithItsRepli
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
+	require.Len(t, replicaPods(t, cli), 6, "the old members have not left")
+	require.Equal(t, []string{
+		"qwen", "qwen-server", "qwen-server-r0", "qwen-server-r1", "qwen-server-r2",
+	}, serviceNames(t, cli), "old members keep their peer records")
+	for _, pod := range replicaPods(t, cli) {
+		if pod.Labels[modelDeploymentReplicaOrdinalLabel] != "0" {
+			releaseLifecyclePod(t, cli, &pod)
+		}
+	}
+	require.Len(t, replicaPods(t, cli), 2, "only the desired replica remains")
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
 	assert.Equal(t, []string{"qwen", "qwen-server", "qwen-server-r0"}, serviceNames(t, cli),
-		"the ordinals the role no longer reaches take their addresses with them")
+		"the departed replicas take their peer records with them")
 }
 
 // TestModelDeploymentService_SurvivesAScale pins the one interaction between the Service and a
@@ -236,7 +251,7 @@ func TestModelDeploymentService_SurvivesAScale(t *testing.T) {
 // replica, and must not carry the entrance label, which a spec update can move.
 func TestRenderModelDeploymentService_SelectsExactlyTheRolesPods(t *testing.T) {
 	md := newRenderDeployment()
-	svc := renderModelDeploymentService(md)
+	svc := renderModelDeploymentService(md, nil)
 	pod := renderOne(t, md, newRenderInstanceType())
 	// The eligibility term is written at runtime by the reconciler, so a member the Service may
 	// select is one that carries it; the rendered template never does.
@@ -259,7 +274,7 @@ func TestRenderModelDeploymentServices_AboveOneMemberAddsAHeadlessServicePerRepl
 		md.Spec.Roles[0].Replicas = 3
 	})
 
-	svcs := renderModelDeploymentServices(md, nil)
+	svcs := renderModelDeploymentServices(md, nil, nil)
 	names := make([]string, 0, len(svcs))
 	byName := make(map[string]*core.Service, len(svcs))
 	for _, svc := range svcs {
@@ -330,7 +345,7 @@ func TestRenderModelDeploymentServices_SelectEligibleEndpoints(t *testing.T) {
 				require.NotEmpty(t, qs)
 				observeModelDeploymentEndpointEligibility(tc.md, qs)
 			}
-			svcs := renderModelDeploymentServices(tc.md, nil)
+			svcs := renderModelDeploymentServices(tc.md, nil, nil)
 			require.NotEmpty(t, svcs)
 
 			ordinary := 0
@@ -359,7 +374,7 @@ func TestRenderModelDeploymentServices_SelectEligibleEndpoints(t *testing.T) {
 func TestRenderModelDeploymentServices_AtSizeOneIsUnchanged(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 })
 
-	svcs := renderModelDeploymentServices(md, nil)
+	svcs := renderModelDeploymentServices(md, nil, nil)
 	names := make([]string, 0, len(svcs))
 	for _, svc := range svcs {
 		names = append(names, svc.Name)
@@ -416,7 +431,7 @@ func TestRenderModelDeploymentService_Port(t *testing.T) {
 				md.Spec.Roles[0].Ports = tc.ports
 			})
 
-			svc := renderModelDeploymentService(md)
+			svc := renderModelDeploymentService(md, nil)
 			require.Len(t, svc.Spec.Ports, 1)
 			assert.Equal(t, tc.wantPort, svc.Spec.Ports[0].Port)
 			assert.Equal(t, tc.wantPort, svc.Spec.Ports[0].TargetPort.IntVal)
@@ -544,7 +559,7 @@ func TestRenderModelDeploymentService_TargetFollowsTheEnginesPort(t *testing.T) 
 			pod, err := renderModelDeploymentPod(context.Background(), in)
 			require.NoError(t, err)
 
-			svcs := renderModelDeploymentServices(md, nil)
+			svcs := renderModelDeploymentServices(md, nil, nil)
 			require.Len(t, svcs, 2)
 			for _, svc := range svcs {
 				require.Len(t, svc.Spec.Ports, 1, svc.Name)
@@ -884,8 +899,8 @@ func TestAlignModelDeploymentService(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment()
-			expected := renderModelDeploymentService(md)
-			actual := renderModelDeploymentService(md)
+			expected := renderModelDeploymentService(md, nil)
+			actual := renderModelDeploymentService(md, nil)
 			if tc.mutate != nil {
 				tc.mutate(actual)
 			}
@@ -946,10 +961,13 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 
 	healthy := healthDeployment(2)
 	healthy.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
-	healthyPods := []core.Pod{
+	// Stamped with the group total the render always writes, because completeness is measured
+	// against the replica's OWN total now. Without it this pair reads as two replicas of one, and a
+	// member claiming seat one of a group declaring one is a group this operator cannot classify.
+	healthyPods := stampHealthGroupTotals(healthy, []core.Pod{
 		healthPod("server", 0, 0, healthBool(true), "uid-a"),
 		healthPod("server", 0, 1, healthBool(true), "uid-b"),
-	}
+	})
 
 	for name, md := range map[string]*workercore.ModelDeployment{
 		"unverified engine version": unverified,
@@ -957,10 +975,10 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		"replaced command":          takeOver,
 	} {
 		t.Run(name+" renders no narrowing", func(t *testing.T) {
-			front := renderModelDeploymentService(md)
+			front := renderModelDeploymentService(md, nil)
 			_, has := front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
 			assert.False(t, has, "front Service must not narrow a never-activating shape")
-			roleSvc := renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil)
+			roleSvc := renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil, nil, false)
 			_, has = roleSvc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
 			assert.False(t, has, "role Service must not narrow a never-activating shape")
 			published, err := renderModelDeploymentRouterObjects(context.Background(), md,
@@ -985,7 +1003,7 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		require.False(t, first[0].Activated(), "setup requires an unavailable first observation")
 		observeModelDeploymentEndpointEligibility(healthy, first)
 		assert.False(t, modelDeploymentEligibilityDecided(healthy), "no activation fact exists yet")
-		front := renderModelDeploymentService(healthy)
+		front := renderModelDeploymentService(healthy, nil)
 		_, has := front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
 		assert.False(t, has, "first enable with an unavailable observation must not narrow")
 
@@ -995,7 +1013,7 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		require.True(t, working[0].Activated(), "setup requires an available observation")
 		observeModelDeploymentEndpointEligibility(healthy, working)
 		assert.True(t, modelDeploymentEligibilityDecided(healthy), "a real pass recorded the predicate")
-		front = renderModelDeploymentService(healthy)
+		front = renderModelDeploymentService(healthy, nil)
 		assert.Equal(t, modelDeploymentEndpointEligibleValue,
 			front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible], "activation narrows")
 
@@ -1006,7 +1024,7 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		retained := modelDeploymentEligibilitySelectorActive(healthy, &healthy.Spec.Roles[0],
 			map[string]string{modelDeploymentLabelKeyEndpointEligible: modelDeploymentEndpointEligibleValue}, false)
 		assert.True(t, retained, "an already-narrowed selector survives a quiet pass")
-		fresh := renderModelDeploymentService(healthy)
+		fresh := renderModelDeploymentService(healthy, nil)
 		_, has = fresh.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
 		assert.False(t, has, "a from-scratch render never fabricates the term")
 	})
@@ -1052,11 +1070,12 @@ func TestAdmissionFirstEnableUnknownPreservesExistingRouting(t *testing.T) {
 			require.False(t, qs[0].Activated(), "setup requires unavailable first-enable observation")
 			require.False(t, qs[0].HasFailure(), "setup requires healthy existing members")
 			for i := range pods {
-				require.False(t, modelDeploymentPodEligible(md, &md.Spec.Roles[0], &pods[i], qs[0], true),
+				view := modelDeploymentReplicaView{Members: []*core.Pod{&pods[i]}}
+				require.False(t, modelDeploymentPodEligible(md, &md.Spec.Roles[0], &pods[i], view, qs[0], true),
 					"first enable must not fabricate eligibility")
 			}
 			for _, svc := range []*core.Service{
-				renderModelDeploymentService(md), renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil),
+				renderModelDeploymentService(md, nil), renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil, nil, false),
 			} {
 				_, narrowed := svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
 				assert.False(t, narrowed, "unavailable first-enable observation must preserve Service selection")
@@ -1066,6 +1085,64 @@ func TestAdmissionFirstEnableUnknownPreservesExistingRouting(t *testing.T) {
 			require.NotEmpty(t, router.Contract.Roles)
 			_, narrowed := router.Contract.Roles[0].Selector[modelDeploymentLabelKeyEndpointEligible]
 			assert.False(t, narrowed, "unavailable first-enable observation must preserve router discovery")
+		})
+	}
+}
+
+// The front Service routes the first role alone. A managed Pod of a sibling role, or one already
+// leaving, must not lift the take-over refusal for a first role that supplies its own command.
+func TestRenderModelDeploymentService_FrontGateReadsOnlyTheFrontRoleMembers(t *testing.T) {
+	newDeployment := func() *workercore.ModelDeployment {
+		md := healthDeployment(1, "sibling")
+		md.Spec.Roles[0].Command = []string{"vllm", "serve", "qwen"}
+		ModelDeploymentConditionEndpointEligibility.True(md,
+			modelDeploymentReasonEndpointsQualified, "every group qualified")
+
+		return md
+	}
+	// siblingPod is a managed Pod, which is what would lift the refusal if it were counted.
+	siblingPod := func(md *workercore.ModelDeployment, mutate func(*core.Pod)) core.Pod {
+		pod := healthPod("sibling", 0, 0, healthBool(true), "uid-sibling")
+		pod.Spec.Containers = []core.Container{{Name: modelDeploymentMainContainerName}}
+		kubemeta.ControlOnWithoutBlock(&pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
+		if mutate != nil {
+			mutate(&pod)
+		}
+
+		return pod
+	}
+
+	testCases := []struct {
+		name string
+		pod  func(md *workercore.ModelDeployment) core.Pod
+	}{
+		{
+			name: "a managed Pod of a sibling role",
+			pod:  func(md *workercore.ModelDeployment) core.Pod { return siblingPod(md, nil) },
+		},
+		{
+			name: "a managed Pod of the front role that is already leaving",
+			pod: func(md *workercore.ModelDeployment) core.Pod {
+				return siblingPod(md, func(pod *core.Pod) {
+					pod.Labels[modelDeploymentLabelKeyComponent] = md.Spec.Roles[0].Name
+					now := meta.Now()
+					pod.DeletionTimestamp = &now
+				})
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newDeployment()
+			pod := tc.pod(md)
+			require.True(t, modelDeploymentReplicaRunsCommand([]*core.Pod{&pod}),
+				"setup requires the Pod to be one this operator built")
+
+			svc := renderModelDeploymentService(md, []core.Pod{pod})
+
+			_, narrowed := svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
+			assert.False(t, narrowed, "a take-over front role is never narrowed by endpoint eligibility")
 		})
 	}
 }

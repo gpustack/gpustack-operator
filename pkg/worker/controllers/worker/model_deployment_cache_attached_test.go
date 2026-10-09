@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
@@ -106,12 +107,32 @@ func TestModelDeploymentCacheAttached_Table(t *testing.T) {
 			// The operator rendered no cache client for it, so it does not report on one it did not
 			// render — whatever the pool says. The domain here deliberately HOLDS data, which would
 			// otherwise corroborate a True.
-			name: "a role that took over the command line",
+			//
+			// THE REPLICAS CARRY NO DRAIN HOOK, which is what makes them takeover replicas: a role
+			// supplying its own command line gets no hook, no synthesized arguments and no client
+			// environment. Declaring Command on the role is no longer what opens this gate -- the
+			// running Pods are what do -- so a fixture that only edited the spec would now describe
+			// replicas the operator did build and would be asking the wrong question.
+			name: "a replica running a command line the operator contributed nothing to",
 			mutateMD: func(md *workercore.ModelDeployment) {
 				md.Spec.Roles[0].Command = []string{"/bin/my-server"}
 			},
-			pods:       func(md *workercore.ModelDeployment) []core.Pod { return readyPods(md, 2) },
+			pods:       func(md *workercore.ModelDeployment) []core.Pod { return takeoverPods(md, 2) },
 			domain:     readyDomain(func(d *modelDeploymentDomain) { d.Blocks = ptr.To[int64](512) }),
+			wantStatus: "Unknown",
+			wantReason: modelDeploymentReasonUnmanaged,
+		},
+		{
+			// The reverse transition is the case that made this observable: the role has gone back
+			// to a managed command line, so the DESIRED spec claims the operator built these
+			// arguments -- while the Pods still standing are running a command line it never wrote.
+			// Reading the spec here would report a cache for an engine configured with no client.
+			name: "a role declared managed while its running replicas were built as a takeover",
+			mutateMD: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Command = []string{"/bin/my-server"}
+			},
+			pods:       func(md *workercore.ModelDeployment) []core.Pod { return takeoverPods(md, 2) },
+			domain:     readyDomain(),
 			wantStatus: "Unknown",
 			wantReason: modelDeploymentReasonUnmanaged,
 		},
@@ -291,6 +312,19 @@ func readyPods(md *workercore.ModelDeployment, n int32) []core.Pod {
 	return pods
 }
 
+// takeoverPods are replicas whose command line the operator did not write: the same Pods
+// readyPods builds with the serving-port annotation removed, which is exactly what the render emits
+// for a role supplying its own command line -- it stamps nothing, because it cannot know what the
+// replacement serves.
+func takeoverPods(md *workercore.ModelDeployment, n int32) []core.Pod {
+	pods := readyPods(md, n)
+	for i := range pods {
+		delete(pods[i].Annotations, "prometheus.io/port")
+	}
+
+	return pods
+}
+
 // TestModelDeploymentCacheAttached_IsNeverTrueFromARender is G5 and F8's whole premise, asserted
 // where it can actually be caught.
 //
@@ -435,4 +469,57 @@ func TestModelDeploymentCacheAttached_AnInstanceShortAMemberIsNotAsked(t *testin
 		assert.Equal(t, []string{"qwen-server-r0-m0"}, scraper.calls,
 			"a rank that is not Ready withholds its whole instance, leader included")
 	})
+}
+
+// TestModelDeploymentCacheAttached_UnreadableExecutionIsNeverTrue is the control the review named.
+//
+// THE MEMBERS OF ONE GROUP DISAGREE on whether the operator wrote their command line, so this
+// operator cannot say what either container was configured with. The shared domain deliberately
+// HOLDS data here, which is the signal that would otherwise corroborate a True: it is a domain-wide
+// fact, and letting it stand in for a replica whose client was never shown would attribute a
+// domain observation to containers that may carry no client at all.
+func TestModelDeploymentCacheAttached_UnreadableExecutionIsNeverTrue(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+	})
+	domain := readyDomain(func(d *modelDeploymentDomain) { d.Blocks = ptr.To[int64](512) })
+
+	// A MANAGED REPLICA DOES report here, which is what shows the case below is refused for the
+	// disagreement rather than because the domain is unusable: same domain, same replicas.
+	assert.Equal(t, "True",
+		ModelDeploymentConditionCacheAttached.GetStatus(
+			cacheAttachedOf(t, md, readyPods(md, 1), domain, nil)),
+		"the corroborating signal is usable, so a refusal below is about the replicas")
+
+	// ONE GROUP OF TWO, hand-built because readyReplica names each Pod for itself and two members
+	// of one replica have to name the SAME group. The disagreement is the defect under test, so the
+	// fixture states it outright rather than arriving at it by accident.
+	group := modelDeploymentReplicaGroupName(md, "server", 0)
+	member := func(name, seat string, managed bool) core.Pod {
+		pod := *readyReplica(md, 0, true)
+		pod.Name, pod.UID = name, types.UID("uid-"+name)
+		pod.Annotations = map[string]string{
+			kueuepodconst.GroupTotalCountAnnotation: "2",
+		}
+		pod.Labels = map[string]string{
+			modelDeploymentLabelKeyComponent:   "server",
+			modelDeploymentReplicaOrdinalLabel: "0",
+			modelDeploymentMemberIndexLabel:    seat,
+			kueuepodconst.GroupNameLabel:       group,
+		}
+		if managed {
+			pod.Annotations["prometheus.io/port"] = "8000"
+		}
+
+		return pod
+	}
+	half := []core.Pod{member("s-half-0", "0", true), member("s-half-1", "1", false)}
+
+	got := cacheAttachedOf(t, md, half, domain, nil)
+	assert.NotEqual(t, "True", ModelDeploymentConditionCacheAttached.GetStatus(got),
+		"an unattributable command line may never be corroborated by a shared domain")
+	assert.Equal(t, "Unknown", ModelDeploymentConditionCacheAttached.GetStatus(got))
+	assert.Equal(t, modelDeploymentReasonCacheNotAttributable,
+		ModelDeploymentConditionCacheAttached.GetReason(got),
+		"the reason names the refusal rather than the missing observation it would otherwise report")
 }

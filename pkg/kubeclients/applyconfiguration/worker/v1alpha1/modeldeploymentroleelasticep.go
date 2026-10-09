@@ -12,6 +12,8 @@ package v1alpha1
 // admission refuses a decrease until Elastic EP scale-down support is complete.
 // The role cannot enable or disable this profile after creation.
 // Its tensor parallel size comes from ExtraArgs and cannot change after creation.
+// The ordinary role fields' editability does not reach this role: instanceType, resources and
+// command are frozen with the profile, and replicas and size stay at one.
 type ModelDeploymentRoleElasticEPApplyConfiguration struct {
 	// Width is the total number of GPU engines in the elastic collective, INCLUDING the
 	// reserved API/DP-master member; width-1 of them are Ray-only workers. It is the total

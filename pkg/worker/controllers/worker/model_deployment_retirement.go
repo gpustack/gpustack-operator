@@ -928,7 +928,28 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementDrained(
 	// The disaggregation shape is asked only where the spec can still answer it. A role the spec
 	// no longer declares cannot be read, and an absent answer is not a disaggregated one: the
 	// replica's own Pods say what they run, and that is what the drain reader needs anyway.
-	if role != nil && modelDeploymentRoleExternalDP(md, role) {
+	//
+	// THE MEMBERS ANSWER, NOT THE ROLE. The role describes the replica about to replace this one, so
+	// a flag added to the role would refuse to drain a leader-served replica that is still running a
+	// supported command, and clearing it would let a replica that IS disaggregated through a guard
+	// written to catch exactly that. What the replica is is on the members.
+	//
+	// A COMMAND NO MEMBER CAN SUPPLY IS A HOLD rather than a fallback to the role. The role's answer
+	// here would be about a group nobody has read, and this guard exists to avoid deleting live
+	// traffic on a shape it has not established.
+	externalDP, renderReason := modelDeploymentRetirementRenderedExternalDP(md, plan.Target.Members)
+	if renderReason != "" {
+		return renderReason, false
+	}
+	// A member whose command cannot be read holds; the role is not consulted here at all.
+	if len(plan.Target.Members) == 0 {
+		return "the replica has no members to read", false
+	}
+	if !externalDP.known {
+		return "a member carries no engine container to read, so the replica's own command line could " +
+			"not be established", false
+	}
+	if externalDP.answer {
 		return "a disaggregated replica has no verifiable decoder-side release", false
 	}
 
@@ -937,7 +958,7 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementDrained(
 	// serve no metrics endpoint; reading them would hold the operation on gauges that do not exist.
 	// The set the reservation bound is untouched, so the delete preconditions still cover every
 	// member this operation admitted.
-	answering, reason := r.modelDeploymentRetirementDrainMembers(md, role, plan)
+	answering, reason := r.modelDeploymentRetirementDrainMembers(md, plan)
 	if reason != "" {
 		return reason, false
 	}
@@ -962,22 +983,49 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementDrained(
 	return "", true
 }
 
-// modelDeploymentRetirementAnsweringShape classifies the replica from what the drain actually holds,
-// which is the member Pods and, when the spec still names it, the role.
+// modelDeploymentRetirementRenderedExternalDP reads whether a replica is disaggregated from every
+// member's own rendered command.
 //
-// THE ROLE IS AN INPUT AND NOT A REQUIREMENT. A removal the spec has already made often concerns a
-// role it no longer declares, so requiring one would make that case the one the protocol can never
-// finish. Everything the role would have said is either also on the Pods or already in hand: the
-// balance shape is read from the member's own rendered command by the same helper the reader uses,
-// and the size is the count of the members the reservation bound.
-//
-// WHERE BOTH SOURCES EXIST THEY MUST AGREE. The role's own book and the Pods it rendered should say
-// the same thing, and a replica where they do not is one this operator cannot reason about; naming a
-// winner between them would be picking the reading that happens to let the deletion proceed.
+// EVERY MEMBER IS ASKED. A member whose engine container is not there has not been read, and a
+// replica is not classifiable from the members that happened to be legible. The answer is reported
+// alongside whether every member gave one, because callers hold on the missing case.
+func modelDeploymentRetirementRenderedExternalDP(
+	md *workercore.ModelDeployment, members []*core.Pod,
+) (modelDeploymentRetirementCommand, string) {
+	var answer modelDeploymentRetirementCommand
+	var missing bool
+	for _, member := range members {
+		externalDP, known := modelDeploymentRetirementMemberExternalDP(md, member)
+		if !known {
+			missing = true
+
+			continue
+		}
+		if answer.known && answer.answer != externalDP {
+			return modelDeploymentRetirementCommand{}, "the replica's members disagree on whether it " +
+				"is disaggregated, so its shape could not be established"
+		}
+		answer = modelDeploymentRetirementCommand{answer: externalDP, known: true}
+	}
+	// ONE UNREAD MEMBER MAKES THE WHOLE REPLICA UNREADABLE, and a later readable member does not
+	// repair that: the members this operator could not read are still the ones it would delete.
+	answer.known = answer.known && !missing
+
+	return answer, ""
+}
+
+// modelDeploymentRetirementCommand is what the members said, and whether all of them said it.
+type modelDeploymentRetirementCommand struct {
+	answer bool
+	known  bool
+}
+
+// modelDeploymentRetirementAnsweringShape classifies the replica from what the drain actually holds:
+// the member Pods.
 func modelDeploymentRetirementAnsweringShape(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, members []*core.Pod,
+	md *workercore.ModelDeployment, members []*core.Pod,
 ) (modelDeploymentAnsweringShape, string) {
-	externalDP, size, reason := modelDeploymentRetirementReplicaFacts(md, role, members)
+	externalDP, size, reason := modelDeploymentRetirementReplicaFacts(md, members)
 	if reason != "" {
 		return modelDeploymentAnsweringUnknown, reason
 	}
@@ -986,66 +1034,37 @@ func modelDeploymentRetirementAnsweringShape(
 }
 
 // modelDeploymentRetirementReplicaFacts are the two facts the shape is derived from, or the reason
-// they could not be established.
-//
-// THE POD IS ITS OWN SECOND SOURCE for both facts, and where the role is present both are read and
-// required to agree. The balance shape comes from the member's rendered command through the same
-// helper the drain reader uses, so there is one answer to "is this replica disaggregated" in the tree
-// rather than two that can drift. The size is the count of the members the reservation actually bound,
-// which is what the drain can read and what the leader search below then runs over.
+// they could not be established. Both are read from the members; a replica no member can answer for
+// is refused rather than answered from the role.
 func modelDeploymentRetirementReplicaFacts(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, members []*core.Pod,
+	md *workercore.ModelDeployment, members []*core.Pod,
 ) (externalDP bool, size int, reason string) {
 	size = len(members)
 	if size == 0 {
 		return false, 0, "the replica has no members to read"
 	}
 
-	// The members carry the shape in their own rendered commands, and a replica whose members
-	// disagree is not one this operator can classify. A member with no engine container to read has
-	// no opinion, and an absent opinion is not a disagreement; that member is held later, by the
-	// reader, with the reason that says which container was missing.
-	podExternalDP, podReadable := modelDeploymentRetirementMemberExternalDP(md, members[0])
-	if podReadable {
-		for _, member := range members[1:] {
-			other, ok := modelDeploymentRetirementMemberExternalDP(md, member)
-			if !ok {
-				continue
-			}
-			if other != podExternalDP {
-				return false, 0, "the replica's members disagree on whether it is disaggregated, " +
-					"so its shape could not be established"
-			}
-		}
+	// Every member must answer; skipping one would classify the replica from the members that
+	// happened to be legible.
+	command, cmdReason := modelDeploymentRetirementRenderedExternalDP(md, members)
+	if cmdReason != "" {
+		return false, 0, cmdReason
+	}
+	if !command.known {
+		return false, 0, "a member carries no engine container to read, so the replica's own command " +
+			"line could not be established"
 	}
 
-	// A role the spec no longer declares is the ordinary case for a dropped role, and it carries no
-	// facts at all, so the members are all there is. A replica whose own rendered command cannot be
-	// read then has nothing to classify it by, and that is a hold rather than a guess.
-	if role == nil {
-		if !podReadable {
-			return false, 0, "the role is no longer declared and a member carries no engine " +
-				"container to read, so the replica's shape could not be established"
-		}
-
-		return podExternalDP, size, ""
+	// The replica is measured against its own declared shape, not the role: a role being edited
+	// describes the replica about to be built. Seats are included because the leader search below
+	// counts only seat zero, so a group of three declaring three with seats 0, 1 and 1 has a leader
+	// and would otherwise drain.
+	shape := modelDeploymentDeployedReplicaShape(modelDeploymentReplicaView{Members: members})
+	if !shape.modelDeploymentReplicaIsWhole() {
+		return false, 0, shape.Reason
 	}
 
-	// Where the role can answer, it answers, and the members are the check on it rather than the
-	// source. The two should say the same thing, and naming a winner between them when they do not
-	// would be picking whichever reading lets the deletion proceed.
-	roleExternalDP := modelDeploymentRoleExternalDP(md, role)
-	if podReadable && roleExternalDP != podExternalDP {
-		return false, 0, "the role and the replica's own rendered command disagree on whether it is " +
-			"disaggregated, so its shape could not be established"
-	}
-	if declared := modelDeploymentRoleSize(role); declared != size {
-		return false, 0, fmt.Sprintf(
-			"the role declares %d members and the replica holds %d, so its shape could not be "+
-				"established", declared, size)
-	}
-
-	return roleExternalDP, size, ""
+	return command.answer, size, ""
 }
 
 // modelDeploymentRetirementMemberExternalDP reads one member's own balance shape, and reports false
@@ -1072,15 +1091,15 @@ func modelDeploymentRetirementMemberExternalDP(
 // report success with a member still running. What the drain reads is a measurement, and a
 // measurement is this function's business alone.
 //
-// THE CLASSIFIER'S OWN REASON IS THE HOLD REASON. A replica whose members disagree, whose role
-// declares a size it does not have, or whose command cannot be read at all, is a different
+// THE CLASSIFIER'S OWN REASON IS THE HOLD REASON. A replica whose members disagree, whose members
+// do not match their declared total, or whose command cannot be read at all, is a different
 // operator problem from one another, and collapsing them into a single "shape could not be
 // established" would leave the reservation naming a symptom with no cause behind it.
 func (r *ModelDeploymentReconciler) modelDeploymentRetirementDrainMembers(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	md *workercore.ModelDeployment,
 	plan *modelDeploymentRetirementPlan,
 ) ([]*core.Pod, string) {
-	shape, reason := modelDeploymentRetirementAnsweringShape(md, role, plan.Target.Members)
+	shape, reason := modelDeploymentRetirementAnsweringShape(md, plan.Target.Members)
 	if reason != "" {
 		return nil, reason
 	}

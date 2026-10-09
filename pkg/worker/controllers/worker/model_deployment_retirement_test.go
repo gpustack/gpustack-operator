@@ -130,6 +130,25 @@ func retirementDeployment(mutate ...func(*workercore.ModelDeployment)) *workerco
 }
 
 // retirementReservation builds the persisted operation the FSM re-enters at.
+// renderedMember is healthPod carrying the engine container the render writes.
+//
+// The retirement guards read each member's own rendered command, so a fixture without a container
+// describes a Pod this operator never rendered. A command may be given; the default is the plain
+// leader-served one the render emits for an ordinary role.
+func renderedMember(role string, ordinal, member int, ready *bool, uid string, command ...string) core.Pod {
+	pod := healthPod(role, ordinal, member, ready, uid)
+	if len(command) == 0 {
+		command = shapePlainCommand
+	}
+	pod.Spec.Containers = []core.Container{{
+		Name:    modelDeploymentMainContainerName,
+		Image:   "vllm/vllm-openai:v0.29.0",
+		Command: command,
+	}}
+
+	return pod
+}
+
 func retirementReservation(
 	state workercore.ModelDeploymentRetirementState, role string, ordinal int32,
 	uids []string, mutate ...func(*workercore.ModelDeploymentRetirementStatus),
@@ -250,7 +269,7 @@ func TestProductionDrainReaderHoldsUntilTheTransportLands(t *testing.T) {
 // naive reader fails: it scraped two of the four SGLang gauges, summed them, and reported a zero.
 func TestDrainNeverCountsAnIncompleteReadAsIdle(t *testing.T) {
 	md := retirementDeployment()
-	pods := []core.Pod{healthPod("server", 1, 0, healthBool(true), "member-1")}
+	pods := []core.Pod{renderedMember("server", 1, 0, healthBool(true), "member-1")}
 
 	testCases := []struct {
 		name       string
@@ -367,7 +386,7 @@ func TestDrainNeedsTwoConsecutiveCompleteZeros(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := retirementDeployment()
-			pods := []core.Pod{healthPod("server", 1, 0, healthBool(true), "member-1")}
+			pods := []core.Pod{renderedMember("server", 1, 0, healthBool(true), "member-1")}
 			md = reserve(md, retirementReservation(
 				workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"member-1"}))
 			// The member is seeded, because the release capture reads the target back from the
@@ -427,7 +446,7 @@ func TestDrainHoldsOnAnythingThatIsNotAnObservation(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := retirementDeployment()
-			pods := []core.Pod{healthPod("server", 1, 0, healthBool(true), "member-1")}
+			pods := []core.Pod{renderedMember("server", 1, 0, healthBool(true), "member-1")}
 			md = reserve(md, retirementReservation(
 				workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"member-1"}))
 			cli := newModelDeploymentClient(md.DeepCopy())
@@ -452,12 +471,15 @@ func TestDrainHoldsOnAnythingThatIsNotAnObservation(t *testing.T) {
 // that work while the decoder that will serve it reports none. Reading the prefill gauges as the
 // decoder-side release would delete a decode cluster in the middle of a prefill.
 func TestDisaggregatedRetirementIsRefusedRatherThanMeasuredByThePrefiller(t *testing.T) {
-	// The shape is declared the way the tree reads it: an external load-balance argument on the
-	// role, which is what makes the group disaggregated rather than merely multi-rank.
+	// THE MEMBER CARRIES THE ARGUMENT, which is what the refusal now reads. The role declares the
+	// same thing because a rendered replica and its role agree, and declaring it on the role alone
+	// is no longer sufficient to refuse.
 	md := retirementDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].ExtraArgs = []string{"--data-parallel-external-lb"}
 	})
-	pods := []core.Pod{healthPod("server", 1, 0, healthBool(true), "member-1")}
+	pods := []core.Pod{
+		renderedMember("server", 1, 0, healthBool(true), "member-1", shapeExternalDPCommand...),
+	}
 	md = reserve(md, retirementReservation(
 		workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"member-1"}))
 	cli := newModelDeploymentClient(md.DeepCopy())
@@ -477,7 +499,7 @@ func TestDisaggregatedRetirementIsRefusedRatherThanMeasuredByThePrefiller(t *tes
 // does: the operation stops with every member, the Workload and the capacity still standing.
 func TestBudgetExpiryAbortsAndRetains(t *testing.T) {
 	md := retirementDeployment()
-	pods := []core.Pod{healthPod("server", 1, 0, healthBool(true), "member-1")}
+	pods := []core.Pod{renderedMember("server", 1, 0, healthBool(true), "member-1")}
 	exhausted := retirementReservation(
 		workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"member-1"},
 		func(r *workercore.ModelDeploymentRetirementStatus) {
@@ -511,7 +533,7 @@ func TestAnAbortedReservationIsNotRetriedUnchanged(t *testing.T) {
 	md := retirementDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 1
 	})
-	pods := []core.Pod{healthPod("server", 1, 0, healthBool(true), "member-1")}
+	pods := []core.Pod{renderedMember("server", 1, 0, healthBool(true), "member-1")}
 	md = reserve(md, retirementReservation(
 		workercore.ModelDeploymentRetirementStateAborted, "server", 1, []string{"member-1"},
 		func(r *workercore.ModelDeploymentRetirementStatus) { r.Reason = "the drain budget expired" },
@@ -537,7 +559,7 @@ func TestAnAbortedReservationIsNotRetriedUnchanged(t *testing.T) {
 // deployment that restarts often would never finish at all.
 func TestRestartResumesFromThePersistedState(t *testing.T) {
 	md := retirementRouterBacked(retirementDeployment())
-	pods := []core.Pod{healthPod("server", 1, 0, healthBool(true), "member-1")}
+	pods := []core.Pod{renderedMember("server", 1, 0, healthBool(true), "member-1")}
 	for i := range pods {
 		pods[i].Status.Phase = core.PodRunning
 		pods[i].Status.PodIP = "10.0.2.1"
@@ -1489,7 +1511,7 @@ func TestAProtocolThatIsNotAbortedIgnoresItsOwnRetryDirective(t *testing.T) {
 	})
 	md = reserve(md, retirementReservation(
 		workercore.ModelDeploymentRetirementStateWithdrawing, "server", 1, []string{"member-1"}))
-	pods := []core.Pod{healthPod("server", 1, 0, healthBool(true), "member-1")}
+	pods := []core.Pod{renderedMember("server", 1, 0, healthBool(true), "member-1")}
 	cli := newModelDeploymentClient(md.DeepCopy())
 	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
 
@@ -2545,7 +2567,7 @@ func newRetirementReleaseFixture(
 	keeper.Status.Phase = core.PodRunning
 	keeper.Status.PodIP = "10.0.7.2"
 
-	workload := admittedReplicaWorkload(target, true)
+	workload := admittedReplicaWorkload([]*core.Pod{target}, true)
 	cli := newModelDeploymentClient(
 		md, newRenderInstanceType(), target, keeper, router, workload)
 	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*target, *keeper})

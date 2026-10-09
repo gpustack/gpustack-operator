@@ -47,7 +47,7 @@ func TestExternalDPRoutingSelectsQualifiedMembers(t *testing.T) {
 				for i := range md.Spec.Roles {
 					role := &md.Spec.Roles[i]
 					published := labels.SelectorFromSet(objects.Contract.Roles[i].Selector)
-					service := labels.SelectorFromSet(renderModelDeploymentRoleService(md, role, nil).Spec.Selector)
+					service := labels.SelectorFromSet(renderModelDeploymentRoleService(md, role, nil, nil, false).Spec.Selector)
 					for member := range 2 {
 						pod, renderErr := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
 							Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
@@ -135,10 +135,10 @@ func TestPDRoutingKeepsReplicaLeaders(t *testing.T) {
 				for i := range md.Spec.Roles {
 					role := &md.Spec.Roles[i]
 					discovery := routingDiscoverySelector(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args, objects.ConfigMap, "--"+role.Name+"-selector")
-					service := renderModelDeploymentRoleService(md, role, nil)
+					service := renderModelDeploymentRoleService(md, role, nil, nil, false)
 					selectors := []labels.Selector{labels.SelectorFromSet(service.Spec.Selector), labels.SelectorFromSet(objects.Contract.Roles[i].Selector)}
 					if i == 0 {
-						selectors = append(selectors, labels.SelectorFromSet(renderModelDeploymentService(md).Spec.Selector))
+						selectors = append(selectors, labels.SelectorFromSet(renderModelDeploymentService(md, nil).Spec.Selector))
 					}
 					for ordinal := range 2 {
 						for member := range sizes[i] {
@@ -173,7 +173,7 @@ func TestExternalDPServiceEligibilityRetention(t *testing.T) {
 	reconciler := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(16)}
 	for _, status := range []meta.ConditionStatus{meta.ConditionTrue, meta.ConditionFalse, meta.ConditionUnknown} {
 		md.Status.Conditions = []gpustackcore.Condition{{Type: string(ModelDeploymentConditionEndpointEligibility), Status: status}}
-		require.NoError(t, reconciler.syncModelDeploymentService(context.Background(), md, false))
+		require.NoError(t, reconciler.syncModelDeploymentService(context.Background(), md, false, nil))
 		for _, name := range []string{md.Name, md.Name + "-" + role.Name} {
 			service := new(core.Service)
 			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: md.Namespace, Name: name}, service))

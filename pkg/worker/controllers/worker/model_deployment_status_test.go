@@ -16,12 +16,14 @@ import (
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
 
 func TestModelDeploymentRoleSummary(t *testing.T) {
@@ -99,6 +101,17 @@ func readyReplica(md *workercore.ModelDeployment, ordinal int32, ready bool) *co
 	// The controller reference is what the reconciler selects on, so a fixture without one is
 	// invisible to every path that lists replicas rather than being handed them.
 	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
+	// The render writes the serving-port annotation, the drain hook and the group total; readers
+	// below use all three to tell a command line the operator built from one it did not.
+	engine := core.Container{Name: modelDeploymentMainContainerName, Image: "vllm/vllm-openai:v0.29.0"}
+	engine.Lifecycle = &core.Lifecycle{PreStop: &core.LifecycleHandler{Exec: &core.ExecAction{
+		Command: []string{"/bin/sh", "-c", "/usr/local/bin/gpustack-drain"},
+	}}}
+	pod.Spec.Containers = []core.Container{engine}
+	pod.Annotations = map[string]string{
+		kueuepodconst.GroupTotalCountAnnotation: strconvx.Itoa(modelDeploymentRoleSize(&md.Spec.Roles[0])),
+		"prometheus.io/port":                    "8000",
+	}
 	if ready {
 		pod.Status.Conditions = []core.PodCondition{{Type: core.PodReady, Status: core.ConditionTrue}}
 	}
@@ -338,16 +351,45 @@ func readyRouterRolePods(md *workercore.ModelDeployment) []core.Pod {
 
 // TestComputeModelDeploymentStatus_Unmanaged pins the flag that tells a reader why no cache
 // condition will ever be True for this role.
+// TestComputeModelDeploymentStatus_Unmanaged pins the field against the REPLICAS rather than the
+// role, which is the whole difference this task makes to it.
+//
+// A role declaring a command line says the operator will contribute nothing to the replica it is
+// about to build. It says nothing at all about the replica already running, and during a command
+// transition the two disagree: a role that has just gone back to a managed command line describes
+// a replacement, while every Pod standing runs arguments this operator never wrote -- containers
+// carrying no cache client, which is precisely what the field exists to say.
 func TestComputeModelDeploymentStatus_Unmanaged(t *testing.T) {
+	managed := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+	})
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(managed, newRenderInstanceType())}
+
+	status, err := r.computeModelDeploymentStatusWithQualifications(
+		context.Background(), managed, readyPods(managed, 1), nil, nil, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, status.Roles, 1)
+	assert.False(t, status.Roles[0].Unmanaged,
+		"a replica this operator built is a replica it can claim a cache client for")
+}
+
+// TestComputeModelDeploymentStatus_UnmanagedIsObservedNotDeclared is the reverse transition, and it
+// is the case the desired-shaped field got wrong: the ROLE is declared managed and the RUNNING
+// replicas are not, so reporting the role would tell an operator their engine has a cache client
+// when the container in front of it never received one.
+func TestComputeModelDeploymentStatus_UnmanagedIsObservedNotDeclared(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].Command = []string{"/bin/my-server"}
+		md.Spec.Roles[0].Replicas = 1
 	})
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
 
-	status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, nil, nil, nil, nil, nil)
+	status, err := r.computeModelDeploymentStatusWithQualifications(
+		context.Background(), md, takeoverPods(md, 1), nil, nil, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, status.Roles, 1)
-	assert.True(t, status.Roles[0].Unmanaged)
+	assert.True(t, status.Roles[0].Unmanaged,
+		"the running replicas run a command line the operator contributed nothing to, whatever "+
+			"the role now declares")
 }
 
 // TestModelDeploymentStatus_AssignedFlavorIsAbsentUntilItIsAssigned is why the field is nil rather
@@ -646,6 +688,12 @@ func TestObserveModelDeploymentQuota_AnIncompleteReplicaIsReportedAboveOneMember
 				modelDeploymentLabelKeyComponent:   role,
 				modelDeploymentReplicaOrdinalLabel: fmt.Sprint(ordinal),
 				modelDeploymentMemberIndexLabel:    fmt.Sprint(index),
+			},
+			// The group total a rendered replica always carries, and the size completeness is
+			// measured against. Without it each member reads as a replica of one, and a member
+			// holding seat one of a group of one is a group that contradicts itself.
+			Annotations: map[string]string{
+				kueuepodconst.GroupTotalCountAnnotation: "2",
 			},
 		}}
 	}
@@ -2431,6 +2479,12 @@ func TestObserveModelDeploymentQuota_WaitingFiguresAreInReplicasNotPods(t *testi
 				modelDeploymentLabelKeyComponent:   role,
 				modelDeploymentReplicaOrdinalLabel: fmt.Sprint(ordinal),
 				modelDeploymentMemberIndexLabel:    fmt.Sprint(index),
+			},
+			// The group total a rendered replica always carries, and the size completeness is
+			// measured against. Without it each member reads as a replica of one, and a member
+			// holding seat one of a group of one is a group that contradicts itself.
+			Annotations: map[string]string{
+				kueuepodconst.GroupTotalCountAnnotation: "2",
 			},
 		}}
 	}
