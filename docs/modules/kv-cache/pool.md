@@ -329,6 +329,8 @@ at all, which is a declared single-tenant topology rather than a fault: `QuotaLe
 **A Binding's deletion is held for three different reasons, and the condition says which.** Read the
 reason on `Releasable=False` before acting. They need different remedies:
 
+The API accepts the deletion request. The Binding remains in `Deleting` until the hold clears.
+
 - `HeldByWorkloads` — a workload in the namespace still references the Binding (it is in
   `status.usedBy`). The message names the **workloads**. Remove them; nothing needs draining.
 - `LedgerNotReleased` — the store refuses to drop the tenant while its domain is non-empty. The

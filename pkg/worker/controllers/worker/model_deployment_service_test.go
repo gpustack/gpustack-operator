@@ -163,8 +163,8 @@ func TestModelDeploymentService_RemovingARoleRemovesItsService(t *testing.T) {
 
 // TestModelDeploymentService_AReplicaServiceIsCreatedAndReclaimedWithItsReplica runs the whole
 // convergence rather than the renderer, because the question here is about the prune path: a
-// headless Service is derived from an ordinal, so scaling down has to reclaim the ones whose
-// ordinals the role no longer reaches.
+// headless Service is derived from an ordinal. Scaling down keeps its peer records until the
+// ordinal's last member leaves, then reclaims the Service.
 //
 // THE SCALE-UP HALF IS THE CONTROL. Without it "the Services went away" is satisfied by a
 // convergence that never created them, which is the failure this case would otherwise report as a
@@ -189,8 +189,21 @@ func TestModelDeploymentService_AReplicaServiceIsCreatedAndReclaimedWithItsRepli
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
+	require.Len(t, replicaPods(t, cli), 6, "the old members have not left")
+	require.Equal(t, []string{
+		"qwen", "qwen-server", "qwen-server-r0", "qwen-server-r1", "qwen-server-r2",
+	}, serviceNames(t, cli), "old members keep their peer records")
+	for _, pod := range replicaPods(t, cli) {
+		if pod.Labels[modelDeploymentReplicaOrdinalLabel] != "0" {
+			releaseLifecyclePod(t, cli, &pod)
+		}
+	}
+	require.Len(t, replicaPods(t, cli), 2, "only the desired replica remains")
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
 	assert.Equal(t, []string{"qwen", "qwen-server", "qwen-server-r0"}, serviceNames(t, cli),
-		"the ordinals the role no longer reaches take their addresses with them")
+		"the departed replicas take their peer records with them")
 }
 
 // TestModelDeploymentService_SurvivesAScale pins the one interaction between the Service and a

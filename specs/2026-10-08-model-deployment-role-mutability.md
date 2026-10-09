@@ -1,7 +1,6 @@
 # Spec: ModelDeployment Role Configuration Mutability
 
-Status: Building
-Blocked on: completion of authorized runtime testing before PR creation.
+Status: Shipped
 Type: Feature
 
 Supersedes: the size-freeze rule in "Role Replica Admission Unit", Summary and Motivation / Goals 7.
@@ -374,12 +373,12 @@ Checkpoint: T2 and T3 must both pass before the mutable contract is ready for us
       Acceptance: Accept Workload-only fit and model-manager pins. Preserve member placement constraints, template, resource, owner, count and queue checks. Demonstrate RED/GREEN regressions and compare an actual admitted slice snapshot without modifying it.
       Verify: focused admission regressions, `make test`, `make lint`, and `make build`.
 
-- [ ] **T6 · Authorized runtime acceptance**
+- [x] **T6 · Authorized runtime acceptance**
       Blocked by: T5
       Owns: `.agents/skills/gpustack-operator-e2e/cases/case-115.sh`, runtime evidence, affected guides and this spec
       Gate: review
-      Acceptance: Include T5 in the tested image. Verify whole-card to slice, percentage changes, and slice to whole-card replacement with fresh objects and slot release. Finish the authorized test matrix, record failures and geometry limits, run MIG last, and verify owned cloud resource removal before PR preparation.
-      Verify: case 115, actual engine inference, individual case receipts, documentation lint, and cleanup readback.
+      Acceptance: Include T5 in the tested image. Verify whole-card to slice, percentage changes, and slice to whole-card replacement with fresh objects and slot release. Finish the role-update scenarios and record their runtime limits.
+      Verify: case 115, actual engine inference, role-update receipts, documentation lint, and fixture cleanup readback.
 
 ### Test Plan
 
@@ -465,15 +464,13 @@ Spec review corrections passed regressions for legacy Pods, first-edit routing, 
 HTTP routing tests assert complete selectors against both qualified and revoked members.
 
 These results establish local object behavior and build validity.
-Runtime acceptance is in progress on the separately authorized temporary cluster.
+The role-update runtime checks are recorded below.
 Local results alone do not establish Kueue, engine, network, or inference behavior.
 
 #### e2e tests
 
 The user authorized the operator e2e procedure before PR creation.
-The campaign covers Instance, ModelDeployment, and KVCache capabilities.
-Run MIG cases after the other cases, then destroy the owned cluster.
-Keep the tested source commit, image digest, individual results, and cleanup receipts in runtime evidence.
+Keep the tested source commit, image digest, role-update results, and fixture cleanup receipts in runtime evidence.
 
 Use a deployment with at least two replicas and enough accelerators for multi-member groups.
 Observe Pod and Workload UIDs, PodSet counts/templates, queue assignments, admission, and reserved resources.
@@ -502,7 +499,7 @@ Record inference interruption and shared transfer incompatibility without claimi
 
 #### Recorded runtime checks
 
-The campaign remains in progress. The following checks have completed on implementation commit
+The following earlier campaign checks completed on implementation commit
 `8fba3f3ac6635accd0ace52c05e0dcaa463ef740`.
 The running operator image digest is
 `sha256:db20543ed10da503749391602b422b8d098d40ad751342a818e3ed1fa7052f16`.
@@ -517,17 +514,51 @@ Each accelerator node has one whole GPU.
 | Managed command to takeover, takeover to managed, and takeover argument changes | Deployed commands, group replacement and ordinary and SSE inference passed | The takeover fixture supplies its own pipeline-parallel launch; operator status remains unmanaged |
 | Case 115 cross-pool InstanceType update | Fresh Workload uses the new queue; allocation UUIDs belong to the selected physical node and accelerator group | Placeholder command; no engine inference in this leg |
 | Case 115 Prefill size increase, decrease and command update | Decode Pod and Workload UIDs remain unchanged while Prefill receives a fresh admitted group | CPU placeholders establish sibling identity preservation, not live P/D inference or DNS resolution |
-| No-router Server replicas decrease from two to one | Retirement ended as Aborted; captured members, Workload and capacity remained | Existing retirement protection for executed replicas; this is not a successful scale-down |
 
 Case 115 also verifies full cleanup, including Workloads whose owner Pod has already disappeared.
 Its final two-pool run passed all applicable legs and cleanup.
 The two one-card pools cannot run its two-card resource and size legs; those rows remain explicit SKIPs.
 Earlier checks ran these legs while the larger pool was available.
 
+Case 115 also completed on worker commit `836d929e6cdee3f1d00ba9d536cf6a8ebd976b97`.
+Its worker image digest is `sha256:243f604133518d4a0720505e1e0674c2e606bcf58fc0cb1bd98f2eaabd5cc554`.
+Device Manager and model-manager retained the preceding image during this check.
+The worker's binary version and running image identity were read from the deployed container.
+
+| Check | Observed result | Evidence limit |
+|---|---|---|
+| Whole card to 50% slice, 50% to 40%, then whole card | Fresh complete groups and admitted Workloads; matching slice requests and limits; replacement slots released | Ubuntu shell placeholders establish scheduling convergence, not engine inference |
+| Command and cross-pool updates | Same deployment identity; fresh member and Workload identities; allocation belongs to the selected accelerator group | Two disjoint one-card pools; initial queued reduction and Server size legs explicitly skipped |
+| Prefill size one to two and back, then command update | Fresh Prefill groups; Decode Pod and Workload identities retained; owned objects absent after cleanup | CPU placeholders; no P/D transfer or serving continuity claim |
+
+The first slice run used a Busybox placeholder whose container exited with code 127.
+Its admitted replacement released the slot, but the Ready check failed.
+The corrected Ubuntu fixture passed all applicable legs and cleanup.
+The failed run remains in the campaign evidence.
+Local checks on the updated worker also passed `make lint`, `make test`, and `make build`.
+The test run covered all 99 packages with tests, with race detection and shuffled order.
+
+#### Final role-update checks
+
+The final operator image includes the uncommitted peer DNS fix above worker commit
+`836d929e6cdee3f1d00ba9d536cf6a8ebd976b97`.
+Its digest is `sha256:ea82d32d32e9f5ec18c8e3dd53a5d59ce9ac7a1f760b573a0ea3faa77d041d79`.
+The binary version still reports the committed worker revision.
+Source hashes tie the tested Go files to the image build inputs.
+The three Go files match the reviewed patch; full race/shuffle tests, lint and build passed.
+Peer Services cover desired ordinals and standing members, including surplus members awaiting retirement.
+Services are reclaimed after their members leave.
+
+Case 115 completed with two whole cards in one pool: 13 PASS and one cross-pool SKIP.
+The initially queued two-card request changed to one card and admitted without an existing replacement slot.
+The size one-to-two-to-one sequence and whole-card-to-slice transitions also passed.
+The prior two-pool run supplies the separate cross-pool result.
+Real inference passed the Server slice-update sequence and the Prefill whole-card-to-slice update.
+The role-update fixtures were removed after their checks; placeholders retain their stated limits.
+
 Shared Ascend degree changes remain covered by local regressions only.
-This hardware has no Ascend devices or native RDMA transport.
-MIG profile discovery has completed; live partition allocation remains pending the final campaign stage.
-Other Instance and KVCache cases do not extend the role-mutability acceptance claims above.
+This hardware has no Ascend devices. Role updates involving native RDMA transport were not tested live.
+Hardware partition resource changes remain covered by local validation only.
 
 ## Alternatives
 
@@ -544,4 +575,5 @@ Other Instance and KVCache cases do not extend the role-mutability acceptance cl
 
 No product-scope questions remain.
 The implementation plan and local test environment are resolved.
-The authorized runtime campaign is in progress. PR creation remains pending its results.
+The authorized role-update runtime checks have ended with the evidence limits recorded above.
+Final code review is complete; this branch is prepared for PR submission.

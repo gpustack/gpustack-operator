@@ -16,6 +16,7 @@ import (
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
 
 func TestFinalReview_OrdinalLessPodDoesNotInterruptAnActiveReplacement(t *testing.T) {
@@ -140,37 +141,52 @@ func TestFinalReview_ServicesKeepDeployedRanksBeforeNewConfigurationAppears(t *t
 }
 
 func TestFinalReview_CacheLagDoesNotRemovePeerDNS(t *testing.T) {
-	for _, terminating := range []bool{false, true} {
-		name := map[bool]string{false: "standing", true: "terminating"}[terminating]
-		t.Run(name, func(t *testing.T) {
+	cases := []struct {
+		name        string
+		replicas    int32
+		ordinal     int
+		desiredSize int32
+		terminating bool
+	}{
+		{name: "standing", replicas: 1, desiredSize: 1},
+		{name: "terminating", replicas: 1, desiredSize: 1, terminating: true},
+		{name: "standing_surplus_and_size_change", replicas: 2, ordinal: 1, desiredSize: 1},
+		{name: "terminating_surplus_and_size_change", replicas: 2, ordinal: 1, desiredSize: 1, terminating: true},
+		{name: "standing_surplus", replicas: 2, ordinal: 1, desiredSize: 2},
+		{name: "terminating_surplus", replicas: 2, ordinal: 1, desiredSize: 2, terminating: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Roles[0].Replicas = 1
+				md.Spec.Roles[0].Replicas = tc.replicas
 				md.Spec.Roles[0].ReplicaSize = 2
 			})
 			f := newLifecycleFixture(t, md)
 			f.pass(false)
 			f.admit()
-			members := f.live("server", 0)
+			members := f.live("server", tc.ordinal)
 			require.Len(t, members, 2)
 			published := new(core.ServiceList)
 			require.NoError(t, f.cli.List(ctx, published, ctrlcli.InNamespace(md.Namespace)))
 			peers := make([]core.Service, 0, 1)
 			for _, svc := range published.Items {
-				if svc.Spec.ClusterIP == core.ClusterIPNone {
+				if svc.Spec.ClusterIP == core.ClusterIPNone &&
+					svc.Spec.Selector[modelDeploymentReplicaOrdinalLabel] == strconvx.Itoa(tc.ordinal) {
 					peers = append(peers, svc)
 				}
 			}
 			require.Len(t, peers, 1)
 			peerName := peers[0].Name
 			peer := peers[0].DeepCopy()
-			if terminating {
+			if tc.terminating {
 				for _, member := range members {
 					require.NoError(t, f.cli.Delete(ctx, member))
 				}
 			}
 			edited := getModelDeployment(t, f.cli)
-			edited.Spec.Roles[0].ReplicaSize = 1
+			edited.Spec.Roles[0].Replicas = 1
+			edited.Spec.Roles[0].ReplicaSize = tc.desiredSize
 			require.NoError(t, f.cli.Update(ctx, edited))
 			view := ctrlinterceptor.NewClient(f.cli, ctrlinterceptor.Funcs{
 				List: func(ctx context.Context, next ctrlcli.WithWatch, list ctrlcli.ObjectList, opts ...ctrlcli.ListOption) error {
@@ -186,7 +202,7 @@ func TestFinalReview_CacheLagDoesNotRemovePeerDNS(t *testing.T) {
 			r := &ModelDeploymentReconciler{Client: view, APIReader: f.cli, Recorder: ctrlrecord.NewFakeRecorder(64)}
 			_, err := reconcileModelDeploymentWith(t, r)
 			require.NoError(t, err)
-			require.Len(t, replicaPods(t, f.cli), 2, "the server still holds the old members")
+			require.Len(t, replicaPods(t, f.cli), int(tc.replicas)*2, "the server still holds the old members")
 			require.Empty(t, replicaPods(t, view), "the cache has not observed them")
 			err = f.cli.Get(ctx, ctrlcli.ObjectKey{Namespace: md.Namespace, Name: peerName}, peer)
 			assert.NoError(t, err, "old members retain peer DNS through cache lag")

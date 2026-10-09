@@ -91,6 +91,12 @@ For `llm-d-router`, withdrawal also waits for recent dispatches reported for a t
 This applies after the Router removes that member from selection. These records do not increase
 the serving count. A dispatch to an unrelated survivor does not hold the target.
 
+Without `spec.router`, withdrawal cannot observe established connections made directly through the
+role's Service. An admitted, running replica stays held during scale-down or surplus removal.
+The withdrawal budget expires after 30 seconds and retirement ends as `Aborted`, retaining its Pods,
+Workload and capacity. Removing the Service endpoint does not prove those connections have ended.
+Groups that never executed or received admission follow their separate cleanup path.
+
 Two mechanisms are involved and they answer different questions. The protocol decides **whether the
 Pod may be deleted**; the [drain window](#the-drain-window) above decides **how long the engine
 takes to exit once it is**, on the kubelet's grace clock after the delete. A replica passes the

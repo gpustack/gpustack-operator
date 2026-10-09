@@ -44,9 +44,8 @@ func renderModelDeploymentServices(
 		// -- rendering one anyway would put an object per replica on the cluster for no consumer.
 		//
 		// They come AFTER the role's own Service in this list, which matters because the caller
-		// garbage collects by comparing this list against what exists: a replica's Service must be
-		// derivable from what will exist, and a scale-down drops the entries its ordinals no longer
-		// reach.
+		// garbage collects by comparing this list against what exists. A replica keeps its Service
+		// while it is desired or while its deployed members still need peer records.
 		//
 		// AN ORDINAL GETS ONE WHEN THE DESIRED SIZE SAYS IT WILL HAVE PEERS OR WHILE A MEMBER OF IT
 		// IS STILL RUNNING. A role edited from four members to one leaves the four-member replica
@@ -62,10 +61,7 @@ func renderModelDeploymentServices(
 			}
 			ordinals[ordinal] = true
 		}
-		for ordinal := range int(role.Replicas) {
-			if !ordinals[ordinal] {
-				continue
-			}
+		for _, ordinal := range slices.Sorted(maps.Keys(ordinals)) {
 			svcs = append(svcs, renderModelDeploymentReplicaService(md, role, ordinal))
 		}
 	}

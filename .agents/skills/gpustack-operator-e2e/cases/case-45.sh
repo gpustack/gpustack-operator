@@ -61,11 +61,11 @@
 # Inputs:      All real, nothing mocked. Server-side dry-run (`--dry-run=server`) runs the schema
 #              and the webhook and persists nothing; the one row that needs a controller verdict
 #              creates a ModelDeployment naming a Binding that does not exist and deletes it again.
-#              Before it is deleted that stored object is edited three times, because a frozen field
-#              is a rule about an UPDATE and no dry-run create reaches it: `size` and `model` must be
-#              refused (the model refusal must name spec.model, state that the value describes a
-#              different deployment, and say nothing of conflict, concurrency, locks or races), and
-#              `replicas` must be accepted and read back from storage.
+#              Before it is deleted that stored object is edited three times, because an UPDATE
+#              rule is not exercised by a dry-run create: `size` and `replicas` must be accepted,
+#              and the accepted values must be read back from storage. The `model` refusal must
+#              name spec.model and state that the value describes a different deployment. It must
+#              say nothing of conflict, concurrency, locks or races.
 #
 # Deferred:    The serving half of this case — `replicas: 2` reaching `status.roles[0].ready == 2`
 #              and `status.endpoint` answering an inference request — is NOT here. It needs the

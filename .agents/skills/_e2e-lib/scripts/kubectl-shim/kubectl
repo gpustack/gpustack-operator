@@ -119,7 +119,7 @@ transient() {
 }
 
 errf="$(mktemp)"
-trap 'rm -f "$errf" "${SPOOL:-}"' EXIT
+trap 'rm -f "$errf" >/dev/null; if [ -n "$SPOOL" ]; then rm -f "$SPOOL" >/dev/null; fi' EXIT
 attempt=0
 while :; do
   if [ -n "$SPOOL" ]; then

@@ -111,7 +111,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - Specs: [consolidation](../specs/2026-09-18-kvcache-and-model-deployment-consolidation.md) · [role replica admission](../specs/2026-09-19-role-replica-admission-unit.md) · [role configuration mutability](../specs/2026-10-08-model-deployment-role-mutability.md) · [P/D pairing and router](../specs/2026-09-12-model-deployment-pd-pairing-and-router.md) · [router implementations](../specs/2026-09-19-model-deployment-router-implementations.md) · [router qualification and drain](../specs/2026-10-01-s1-router-qualification-and-drain.md) · [elastic EP resize](../specs/2026-10-01-s2-elastic-ep-resize.md)
 - Code: `model_deployment_*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/) · native resize client in [pkg/worker/elasticengine](../pkg/worker/elasticengine/) · webhooks in [pkg/worker/webhooks/worker](../pkg/worker/webhooks/worker/) · router image under [pack/llm-router](../pack/llm-router/)
 - Related: [KV Cache](#kv-cache) (a deployment can attach a shared cache) · [Model Delivery](#model-delivery) (weights reach replicas through an artifact) · [Topology Aware](#topology-aware) (the placement field constrains replicas)
-- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (serving cases)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (serving cases and role update scheduling checks, case 115)
 
 ### GPU Instances
 

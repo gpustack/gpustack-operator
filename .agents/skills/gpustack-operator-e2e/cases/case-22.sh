@@ -85,6 +85,8 @@ best=None
 for n in json.load(sys.stdin).get('items',[]):
     a=n.get('status',{}).get('allocatable',{})
     for k,v in a.items():
+        # Allocation checks below read accelerator grants, so exclude RDMA interfaces.
+        if k == 'device.gpustack.ai/rdma': continue
         if not re.match(r'^[^/]+/[^.]+$', k): continue  # the bare exclusive whole-card resource
         try: cnt=int(v)
         except: continue
@@ -327,7 +329,7 @@ fill_exclusive() {
   local tag="$1" check="$2" count="$3" lq="$4" forbidden="$5"
   local tagl="${tag,,}" i p c cc seen=" "
   FILL_CARDS=""
-  for i in $(seq 1 "$count"); do
+  for ((i = 1; i <= count; i++)); do
     p="${PODPFX}-${tagl}-excl-${i}"; TESTPODS+=("$p")
     mkpod "$p" "$EXCL" "$lq"
     if [ "$(wait_settled "$p")" != "Running" ]; then

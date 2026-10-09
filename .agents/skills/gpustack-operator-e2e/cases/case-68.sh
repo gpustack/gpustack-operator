@@ -190,7 +190,7 @@ group_names() {
 # value on every round -- a wait that can only succeed immediately or run out the clock. It reads
 # like a wait and behaves like a single sample.
 group_count_is() { [ "$(group_names "$1" | wc -l | tr -d ' ')" = "$2" ]; }
-admitted_count_is_not() { [ "$(admitted_count)" != "$1" ]; }
+admitted_count_is_not() { [ "$(admitted_count "$MD")" != "$1" ]; }
 role_count_is() { # role_count_is <md> <role> <n>
   [ "$(k -n "$NS" get pods -l "app.kubernetes.io/instance=$1,app.kubernetes.io/component=$2" \
     -o name 2>/dev/null | grep -c .)" = "$3" ]
@@ -227,14 +227,12 @@ deployment_workloads() {
 }
 
 admitted_count() {
-  k -n "$NS" get workloads.kueue.x-k8s.io \
-    -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Admitted")].status}{"\n"}{end}' 2>/dev/null \
-    | grep -c '^True$'
+  local counts
+  counts="$(deployment_admitted "$1")"
+  printf '%s\n' "${counts%%/*}"
 }
 
-# How many of ONE deployment's workloads report Admitted, as "<admitted>/<total>". The whole-cluster
-# count above cannot answer Phase E: another deployment being admitted would satisfy it, and the
-# claim there is about every group of one deployment.
+# How many of one deployment's workloads report Admitted, as "<admitted>/<total>".
 deployment_admitted() { # deployment_admitted <md>
   local wl total=0 ok=0
   for wl in $(deployment_workloads "$1"); do
@@ -513,10 +511,10 @@ else
 
   # NO ROLE ADMITTED -- and the control below is what makes this mean anything.
   sleep 30
-  if [ "$(admitted_count)" = 0 ]; then
+  if [ "$(admitted_count "$MD")" = 0 ]; then
     record PASS "no role admitted while one group cannot be placed" "0 admitted workloads"
   else
-    record FAIL "no role admitted while one group cannot be placed" "$(admitted_count) admitted"
+    record FAIL "no role admitted while one group cannot be placed" "$(admitted_count "$MD") admitted"
   fi
 
   # AND THE DEPLOYMENT MUST NOT CLAIM IT HOLDS QUOTA. This row exists because this cluster case

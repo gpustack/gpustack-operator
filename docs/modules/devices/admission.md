@@ -324,6 +324,9 @@ edit touches only the InstanceType, never a Node or the ClusterQueue notes.
   `spec.cpu` (generic) or `spec.accelerator.cpu` (accelerated).
 - **Instance validating** — enforces the unit spec on **Create and Update**: a submission's RAM must not
   exceed `unitRAM × count`, its local storage not the InstanceType's `LocalStorage`.
+  - Changing `spec.type` or `spec.resources` requires an already stored `spec.stop: true`.
+    Stop the Instance before editing its configuration.
+    Starting requires `status.phase: Stopped` and revalidates the updated resource request.
   - On a non-accelerated type, create and start also bound the CPU request by the pool's CPU
     **capacity** (`status.cpu.capacity`), never by what is unrequested right now: an Instance submitted
     while every core is requested is admitted and waits in its queue.

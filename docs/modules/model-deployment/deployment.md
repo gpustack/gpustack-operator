@@ -485,6 +485,8 @@ cannot re-reserve. That gate holds back deleting the next healthy replica, not t
 already waiting in a replacement slot: a queued replacement is superseded by a newer edit and
 admitted once, as the newer shape — the obsolete configuration need never be admitted.
 
+The slot is reused, but its obsolete Pods and Workload are deleted and replaced with fresh objects.
+
 A complete group still waiting for its first admission can also be replaced after a configuration edit.
 It uses the same single replacement slot and fresh admission rules.
 The operator selects this queued group before deleting an admitted sibling.
