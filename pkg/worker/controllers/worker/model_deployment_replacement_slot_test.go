@@ -15,6 +15,7 @@ import (
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
 
@@ -70,6 +71,79 @@ func TestReplacementAdmission_AnHonestCompositionIsAccepted(t *testing.T) {
 
 	reason := replacementAdmissionHolds(wl, members, members)
 	assert.Empty(t, reason, "a Workload composed from these members is fresh admission")
+}
+
+func TestReplacementAdmission_WorkloadAffinityPins(t *testing.T) {
+	slicePin := core.NodeSelectorRequirement{
+		Key:      nodefeature.FitSlicedMaxFreeUnitsLabelKey("nvidia-test-gpu"),
+		Operator: core.NodeSelectorOpGt, Values: []string{"799999"},
+	}
+	sharedPin := core.NodeSelectorRequirement{
+		Key:      nodefeature.FitSharedFreeCardsLabelKey("nvidia-test-gpu"),
+		Operator: core.NodeSelectorOpGt, Values: []string{"1"},
+	}
+	pluginPin := core.NodeSelectorRequirement{
+		Key: ModelManagerRegisteredLabel, Operator: core.NodeSelectorOpIn, Values: []string{"true"},
+	}
+	volumePin := core.NodeSelectorRequirement{
+		Key: core.LabelTopologyZone, Operator: core.NodeSelectorOpIn, Values: []string{"zone-a"},
+	}
+	otherVolumePin := volumePin.DeepCopy()
+	otherVolumePin.Values = []string{"zone-b"}
+	otherSlicePin := slicePin.DeepCopy()
+	otherSlicePin.Values = []string{"399999"}
+	cases := []struct {
+		name             string
+		member, workload []core.NodeSelectorRequirement
+		wantAccepted     bool
+	}{
+		{name: "slice fit pin only", workload: []core.NodeSelectorRequirement{slicePin}, wantAccepted: true},
+		{name: "shared fit pin only", workload: []core.NodeSelectorRequirement{sharedPin}, wantAccepted: true},
+		{name: "model manager pin only", workload: []core.NodeSelectorRequirement{pluginPin}, wantAccepted: true},
+		{
+			name: "volume affinity with fit pin", member: []core.NodeSelectorRequirement{volumePin},
+			workload: []core.NodeSelectorRequirement{volumePin, slicePin}, wantAccepted: true,
+		},
+		{
+			name: "changed volume affinity with fit pin", member: []core.NodeSelectorRequirement{volumePin},
+			workload: []core.NodeSelectorRequirement{*otherVolumePin, slicePin},
+		},
+		{name: "unrelated affinity", workload: []core.NodeSelectorRequirement{volumePin}},
+		{name: "empty term matches no node", workload: []core.NodeSelectorRequirement{}},
+		{
+			name: "member fit constraint preserved", member: []core.NodeSelectorRequirement{slicePin},
+			workload: []core.NodeSelectorRequirement{slicePin, pluginPin}, wantAccepted: true,
+		},
+		{
+			name: "changed member fit constraint refused", member: []core.NodeSelectorRequirement{slicePin},
+			workload: []core.NodeSelectorRequirement{*otherSlicePin},
+		},
+	}
+	affinity := func(expressions []core.NodeSelectorRequirement) *core.Affinity {
+		if expressions == nil {
+			return nil
+		}
+		return &core.Affinity{NodeAffinity: &core.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+				NodeSelectorTerms: []core.NodeSelectorTerm{{MatchExpressions: expressions}},
+			},
+		}}
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			members := replicaMembersAt(t, md, "server", 0)
+			members[0].Spec.Affinity = affinity(tc.member)
+			wl := admit(composeReplicaGroup(md, "server", 0, members))
+			wl.Spec.PodSets[0].Template.Spec.Affinity = affinity(tc.workload)
+			reason := replacementAdmissionHolds(wl, members, members)
+			if tc.wantAccepted {
+				assert.Empty(t, reason, "a Workload-only admission pin must not hold the replacement")
+			} else {
+				assert.Contains(t, reason, "do not match", "a different placement still holds the replacement")
+			}
+		})
+	}
 }
 
 // TestReplacementAdmission_AFollowerRepresentativeIsStillFreshAdmission covers the representative

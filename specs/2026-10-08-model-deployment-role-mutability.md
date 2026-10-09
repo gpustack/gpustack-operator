@@ -1,7 +1,7 @@
 # Spec: ModelDeployment Role Configuration Mutability
 
-Status: Built
-Blocked on: user-arranged runtime testing before PR creation.
+Status: Building
+Blocked on: completion of authorized runtime testing before PR creation.
 Type: Feature
 
 Supersedes: the size-freeze rule in "Role Replica Admission Unit", Summary and Motivation / Goals 7.
@@ -46,7 +46,7 @@ Source inspection found these additional requirements:
 - [The existing pair test](../pkg/worker/controllers/worker/model_deployment_test.go), TestModelDeployment_DegreeEditRollsThePair, asserts shared effects.
   Ascend TP/DP changes move both roles' hashes; ordinary argument changes affect one role.
 
-These are source observations. No runtime validation was performed.
+These are observations from the source baseline before implementation.
 
 ### Non-Goals
 
@@ -206,7 +206,7 @@ As an operator, I want documented shared effects and constraints, so that I can 
 
 Validation runs locally, using the current worktree's source.
 The user confirmed unit tests, lint, generation, and compilation.
-Cluster tests remain outside this authorization.
+The user separately authorized cluster tests on owned temporary accelerator infrastructure.
 
 Run focused task tests from the repository root:
 
@@ -230,8 +230,9 @@ Run generation twice and compare output contents to prove deterministic parity.
 Preserve the shared main checkout.
 
 The build uses the host platform unless BUILD_PLATFORMS is set.
-Do not set remote or cluster targets.
-Use gpustack-operator-e2e only after separate authorization.
+Use the authorized remote builder for packaged runtime validation.
+Publish a development image tied to the source commit and record its tested digest.
+Run gpustack-operator-e2e against the isolated temporary cluster.
 
 ### Project Structure
 
@@ -331,7 +332,8 @@ Keep Elastic EP restrictions through an explicit profile-specific identity path.
 The user authorized unattended implementation with mcode and qwen.
 Keep the current working branch and use local validation.
 Workers own disjoint files. The coordinator owns commits and generated artifacts.
-No task creates a PR or executes cluster tests.
+The implementation tasks do not create a PR.
+Cluster acceptance follows separate user authorization.
 
 - [x] **T1 · Deployed replica facts and observation**
       Blocked by: None
@@ -365,6 +367,20 @@ Checkpoint: T2 and T3 must both pass before the mutable contract is ready for us
       Acceptance: Review both Standards and Spec against the integrated diff. Resolve material defects through the owning tasks. Run local race tests, general lint, code generation, documentation lint, and compilation. Confirm a second generation leaves no artifact drift. Record runtime scenarios still awaiting user testing. Stop before PR creation.
       Verify: run the complete Commands sequence and review the generated diff.
 
+- [x] **T5 · Workload placement pins and replacement admission**
+      Blocked by: T3
+      Owns: `pkg/worker/controllers/worker/model_deployment_replacement_slot.go`, `pkg/worker/controllers/worker/model_deployment_replacement_slot_test.go`
+      Gate: review
+      Acceptance: Accept Workload-only fit and model-manager pins. Preserve member placement constraints, template, resource, owner, count and queue checks. Demonstrate RED/GREEN regressions and compare an actual admitted slice snapshot without modifying it.
+      Verify: focused admission regressions, `make test`, `make lint`, and `make build`.
+
+- [ ] **T6 · Authorized runtime acceptance**
+      Blocked by: T5
+      Owns: `.agents/skills/gpustack-operator-e2e/cases/case-115.sh`, runtime evidence, affected guides and this spec
+      Gate: review
+      Acceptance: Include T5 in the tested image. Verify whole-card to slice, percentage changes, and slice to whole-card replacement with fresh objects and slot release. Finish the authorized test matrix, record failures and geometry limits, run MIG last, and verify owned cloud resource removal before PR preparation.
+      Verify: case 115, actual engine inference, individual case receipts, documentation lint, and cleanup readback.
+
 ### Test Plan
 
 [x] The involved component owners may require updates to existing tests before this enhancement can land.
@@ -390,6 +406,18 @@ No pre-change baseline was measured.
 - `pkg/worker/webhooks/worker`: ordinary four-field edits, role reorder, invalid identity/kind, resource modes, command transitions, changed interface/transport dependencies, drift escape hatches, and Elastic restrictions.
 - `pkg/worker/controllers/worker`: consistent deployed facts, legacy groups, duplicate seats, missing members, old execution, qualification, status attribution, joint admission, cache observation, peer Services, and leader/External DP selectors.
 - `pkg/worker/controllers/worker`: preserved pair fingerprint tests for independent and shared Ascend changes.
+
+Each changed contract has a repeatable regression:
+
+| Contract | Local regression source | Live check |
+|---|---|---|
+| Ordinary size, resources, instanceType and command updates | [Webhook update cases](../pkg/worker/webhooks/worker/model_deployment_test.go) and [four-field lifecycle cases](../pkg/worker/controllers/worker/model_deployment_lifecycle_test.go) | Case 115; real-engine inference is checked separately |
+| Initially queued resource or pool updates without a replacement slot | [Initial-queue regressions](../pkg/worker/controllers/worker/model_deployment_initial_queue_test.go) | Case 115 queued resource reduction |
+| Independent P/D edits preserve the sibling | [Sibling lifecycle cases](../pkg/worker/controllers/worker/model_deployment_lifecycle_test.go) | Case 115 CPU P/D size and command checks |
+| Shared rendered degrees may replace both roles | [Pair fingerprint cases](../pkg/worker/controllers/worker/model_deployment_test.go) | Shared Ascend behavior remains outside NVIDIA runtime evidence |
+| Queued edits, restart recovery and fresh admission | [Lifecycle recovery cases](../pkg/worker/controllers/worker/model_deployment_lifecycle_test.go) and [admission controls](../pkg/worker/controllers/worker/model_deployment_replacement_slot_test.go) | Case 115 checks current admission and complete group identities |
+| Workload-only placement pins release an admitted replacement | [Admission pin regressions](../pkg/worker/controllers/worker/model_deployment_replacement_slot_test.go) | Case 115 whole-card to slice, percentage changes and slice to whole-card |
+| Role map identity, kind rules and Elastic EP restrictions | [API schema cases](../api/worker/v1alpha1/model_deployment_test.go), [identity cases](../pkg/worker/webhooks/worker/model_deployment_test.go) and [Elastic cases](../pkg/worker/webhooks/worker/model_deployment_elastic_test.go) | Existing admission cases remain controls; case 115 does not exercise Elastic EP |
 
 #### Integration tests
 
@@ -437,22 +465,69 @@ Spec review corrections passed regressions for legacy Pods, first-edit routing, 
 HTTP routing tests assert complete selectors against both qualified and revoked members.
 
 These results establish local object behavior and build validity.
-Runtime Kueue, engine, network, and inference acceptance remains pending.
+Runtime acceptance is in progress on the separately authorized temporary cluster.
+Local results alone do not establish Kueue, engine, network, or inference behavior.
 
 #### e2e tests
 
-Cluster execution requires separate user authorization and is pending.
-The user will arrange testing before PR creation.
-Run the operator e2e procedure against the final branch when authorized.
+The user authorized the operator e2e procedure before PR creation.
+The campaign covers Instance, ModelDeployment, and KVCache capabilities.
+Run MIG cases after the other cases, then destroy the owned cluster.
+Keep the tested source commit, image digest, individual results, and cleanup receipts in runtime evidence.
 
 Use a deployment with at least two replicas and enough accelerators for multi-member groups.
 Observe Pod and Workload UIDs, PodSet counts/templates, queue assignments, admission, and reserved resources.
 Cover all size transitions, pool/resource updates, command transitions, queue contention, and interrupted cleanup.
+
+Case 115 supplies repeatable live scheduling checks for ordinary role updates.
+It covers an initially queued resource edit without a replacement slot, complete size replacements, and takeover command changes.
+Logical slice capacity enables whole-card to slice, percentage changes, and slice to whole-card updates.
+These legs require fresh Pods and Workloads, matching slice resources, and replacement slot release.
+A second accelerator group enables its cross-pool InstanceType leg.
+A CPU type enables P/D size and command updates while verifying the sibling keeps both Pod and Workload UIDs.
+Each update reads the same deployment UID, fresh Pod and Workload UIDs, PodSet count and template, queue, and current admission.
+Its initially queued resource leg needs two total whole cards; its size leg needs two free cards.
+A one-card pool still checks command, cross-pool, and CPU P/D updates.
+It asserts cleanup and reports missing geometry as a limited SKIP.
+It uses placeholder commands, so engine inference remains a separate runtime check.
+
+Local lifecycle regressions cover queued replacements across passes and restarts, a second edit, captured cleanup, simultaneous four-field updates, and sibling-role identity.
+The initially queued regressions include positive replacements and execution-history guards.
+Webhook tests retain role identity, kind rules, configuration validity, and Elastic EP constraints.
 Verify role endpoints select answering members and old peer DNS lasts through departure.
 Verify independent P/D edits preserve the sibling and shared Ascend edits roll both roles.
 Exercise real joint admission and finalizer delays.
 Keep a supported Elastic EP deployment as the unchanged-profile control.
 Record inference interruption and shared transfer incompatibility without claiming continuous service.
+
+#### Recorded runtime checks
+
+The campaign remains in progress. The following checks have completed on implementation commit
+`8fba3f3ac6635accd0ace52c05e0dcaa463ef740`.
+The running operator image digest is
+`sha256:db20543ed10da503749391602b422b8d098d40ad751342a818e3ed1fa7052f16`.
+The engine fixture uses Qwen/Qwen2.5-0.5B-Instruct with vLLM 0.29.0 on NVIDIA RTX PRO 6000 Blackwell Server Edition.
+Each accelerator node has one whole GPU.
+
+| Check | Observed result | Evidence limit |
+|---|---|---|
+| Initially queued accelerator request changes from two to one | Same deployment UID; obsolete Pod and Workload removed; fresh group admitted; ordinary and SSE inference passed | The pool had two total cards across one-card nodes; no replacement slot existed before the edit |
+| Two-replica Server size changes from one to two and back | Each selected replica was replaced completely; fresh admission, member selection and inference passed | Four accelerator nodes were available for the two-member shape |
+| One-replica Server size ladder, one to two to three to two to one | Fresh groups admitted and ordinary and SSE inference passed at each step | Recreate has a serving gap; these checks do not establish continuous inference |
+| Managed command to takeover, takeover to managed, and takeover argument changes | Deployed commands, group replacement and ordinary and SSE inference passed | The takeover fixture supplies its own pipeline-parallel launch; operator status remains unmanaged |
+| Case 115 cross-pool InstanceType update | Fresh Workload uses the new queue; allocation UUIDs belong to the selected physical node and accelerator group | Placeholder command; no engine inference in this leg |
+| Case 115 Prefill size increase, decrease and command update | Decode Pod and Workload UIDs remain unchanged while Prefill receives a fresh admitted group | CPU placeholders establish sibling identity preservation, not live P/D inference or DNS resolution |
+| No-router Server replicas decrease from two to one | Retirement ended as Aborted; captured members, Workload and capacity remained | Existing retirement protection for executed replicas; this is not a successful scale-down |
+
+Case 115 also verifies full cleanup, including Workloads whose owner Pod has already disappeared.
+Its final two-pool run passed all applicable legs and cleanup.
+The two one-card pools cannot run its two-card resource and size legs; those rows remain explicit SKIPs.
+Earlier checks ran these legs while the larger pool was available.
+
+Shared Ascend degree changes remain covered by local regressions only.
+This hardware has no Ascend devices or native RDMA transport.
+MIG profile discovery has completed; live partition allocation remains pending the final campaign stage.
+Other Instance and KVCache cases do not extend the role-mutability acceptance claims above.
 
 ## Alternatives
 
@@ -469,4 +544,4 @@ Record inference interruption and shared transfer incompatibility without claimi
 
 No product-scope questions remain.
 The implementation plan and local test environment are resolved.
-Runtime acceptance remains pending. The user will arrange cluster testing before PR creation.
+The authorized runtime campaign is in progress. PR creation remains pending its results.

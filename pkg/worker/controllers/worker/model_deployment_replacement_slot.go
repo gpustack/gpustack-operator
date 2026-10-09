@@ -23,6 +23,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
 
@@ -812,7 +813,54 @@ func replacementPodRequests(pod *core.Pod) core.ResourceList {
 // replacementPodShapesMatch compares the Pod specs Kueue reserved quota against, ignoring what
 // admission is expected to have changed between the two.
 func replacementPodShapesMatch(got, want core.PodSpec) bool {
-	return kubemeta.DeepEqual(replacementComparablePod(got), replacementComparablePod(want))
+	actual, member := replacementComparablePod(got), replacementComparablePod(want)
+	actual.Affinity = replacementWorkloadAffinity(actual.Affinity, member.Affinity)
+
+	return kubemeta.DeepEqual(actual, member)
+}
+
+// replacementWorkloadAffinity removes only Workload webhook pins absent from the member.
+// Fit and model-manager pins constrain Kueue placement but are not copied to the Pod.
+// Required terms and all other affinity must still describe the member's placement.
+func replacementWorkloadAffinity(got, want *core.Affinity) *core.Affinity {
+	if got == nil || got.NodeAffinity == nil || got.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		return got
+	}
+	var wanted []core.NodeSelectorTerm
+	if want != nil && want.NodeAffinity != nil && want.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		wanted = want.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	}
+	required := got.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+	if len(required.NodeSelectorTerms) != max(1, len(wanted)) {
+		return got
+	}
+	for i := range required.NodeSelectorTerms {
+		term := &required.NodeSelectorTerms[i]
+		var original []core.NodeSelectorRequirement
+		if len(wanted) > 0 {
+			original = wanted[i].MatchExpressions
+		}
+		before := len(term.MatchExpressions)
+		term.MatchExpressions = slices.DeleteFunc(term.MatchExpressions, func(e core.NodeSelectorRequirement) bool {
+			if !nodefeature.IsFitLabelKey(e.Key) && e.Key != ModelManagerRegisteredLabel {
+				return false
+			}
+			return !slices.ContainsFunc(original, func(existing core.NodeSelectorRequirement) bool {
+				return kubemeta.DeepEqual(existing, e)
+			})
+		})
+		if len(wanted) == 0 && before > 0 && len(term.MatchExpressions) == 0 && len(term.MatchFields) == 0 {
+			got.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = nil
+		}
+	}
+	if kubemeta.DeepEqual(got.NodeAffinity, &core.NodeAffinity{}) {
+		got.NodeAffinity = nil
+	}
+	if kubemeta.DeepEqual(got, &core.Affinity{}) {
+		return nil
+	}
+
+	return got
 }
 
 // replacementComparablePod reduces a Pod spec to what the operator rendered, which is what Kueue
