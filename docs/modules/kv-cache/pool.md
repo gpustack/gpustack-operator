@@ -329,8 +329,6 @@ at all, which is a declared single-tenant topology rather than a fault: `QuotaLe
 **A Binding's deletion is held for three different reasons, and the condition says which.** Read the
 reason on `Releasable=False` before acting. They need different remedies:
 
-The API accepts the deletion request. The Binding remains in `Deleting` until the hold clears.
-
 - `HeldByWorkloads` — a workload in the namespace still references the Binding (it is in
   `status.usedBy`). The message names the **workloads**. Remove them; nothing needs draining.
 - `LedgerNotReleased` — the store refuses to drop the tenant while its domain is non-empty. The
@@ -340,6 +338,8 @@ The API accepts the deletion request. The Binding remains in `Deleting` until th
 
 They are separate because the action differs: removing workloads, draining a domain and restoring
 an unanswering master are three different operations.
+
+The API accepts the deletion request. The Binding remains in `Deleting` until the hold clears.
 
 **A master that holds no tenant ledger releases the Binding rather than holding it.** With
 multi-tenancy declared off there is no ledger for a quota entry to be in, so the deletion strands nothing and
