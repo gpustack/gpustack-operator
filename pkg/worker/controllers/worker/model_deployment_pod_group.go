@@ -288,7 +288,14 @@ func modelDeploymentDeployedAnsweringShape(
 		return modelDeploymentAnsweringUnknown
 	}
 
-	return modelDeploymentAnsweringShapeOf(modelDeploymentMembersExternalDP(view.Members, engine), total)
+	externalDP, known := modelDeploymentMembersExternalDP(view.Members, engine)
+	if !known {
+		// A failed read is not a reading of internal data parallelism. Holding keeps the membership
+		// the replica already carries instead of withdrawing followers on a guess.
+		return modelDeploymentAnsweringUnknown
+	}
+
+	return modelDeploymentAnsweringShapeOf(externalDP, total)
 }
 
 // modelDeploymentMembersExternalDP reports whether the members of a replica carry a data-parallel
@@ -296,12 +303,18 @@ func modelDeploymentDeployedAnsweringShape(
 //
 // IT READS THE MEMBERS AND NOT THE ROLE for the same reason the shape does: the role states what the
 // next replica will be built as, and these members are running now.
-func modelDeploymentMembersExternalDP(members []*core.Pod, engine string) bool {
+//
+// known is false when a managed member was consulted and none of them could be read, so the answer
+// is not an established "leader-served". Members this operator did not build carry no managed load
+// balance, which is an established answer.
+func modelDeploymentMembersExternalDP(members []*core.Pod, engine string) (externalDP, known bool) {
+	consulted := false
 	for _, member := range members {
 		managed, readable := modelDeploymentMemberExecution(member)
 		if !readable || !managed {
 			continue
 		}
+		consulted = true
 		container, found := modelDeploymentDrainContainerOf(member, modelDeploymentMainContainerName)
 		if !found {
 			continue
@@ -319,10 +332,10 @@ func modelDeploymentMembersExternalDP(members []*core.Pod, engine string) bool {
 		shape, _ := modelDeploymentLoadBalance(reading.declared)
 
 		return shape != workercore.ModelDeploymentLoadBalanceInternal &&
-			shape != workercore.ModelDeploymentLoadBalanceUnknown
+			shape != workercore.ModelDeploymentLoadBalanceUnknown, true
 	}
 
-	return false
+	return false, !consulted
 }
 
 // modelDeploymentDeclaredEnv reads a container's environment back into the declared form the

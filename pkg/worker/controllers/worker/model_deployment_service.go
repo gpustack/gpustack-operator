@@ -188,9 +188,13 @@ func renderModelDeploymentService(
 	modelDeploymentFrontLeadersOnly(svc, &md.Spec.Roles[0],
 		modelDeploymentRoleHasMultiMemberReplica(pods, md, &md.Spec.Roles[0]))
 	modelDeploymentSelectAnsweringMembers(svc, modelDeploymentNeedsDeployedRouting(pods, md, &md.Spec.Roles[0]))
-	frontStanding := make([]*core.Pod, 0, len(pods))
-	for i := range pods {
-		frontStanding = append(frontStanding, &pods[i])
+	// ONLY THE FRONT ROLE'S OWN STANDING MEMBERS: the Service routes Roles[0] alone, so a sibling
+	// role's managed Pod, or a Pod already leaving, must not lift the take-over refusal for it.
+	var frontStanding []*core.Pod
+	for _, view := range modelDeploymentGroupPods(pods, true) {
+		if modelDeploymentPodRole(view.Members[0]) == md.Spec.Roles[0].Name {
+			frontStanding = append(frontStanding, view.Members...)
+		}
 	}
 	if modelDeploymentEligibilitySelectorActive(md,
 		modelDeploymentEffectiveRoleForEligibility(&md.Spec.Roles[0], frontStanding), nil,
@@ -252,7 +256,12 @@ func modelDeploymentNeedsDeployedRouting(
 		if managed != desiredManaged {
 			return true
 		}
-		if managed && modelDeploymentMembersExternalDP([]*core.Pod{pod}, md.Spec.Engine.Name) != desiredExternal {
+		if !managed {
+			continue
+		}
+		// A member whose parallelism cannot be read says nothing about the routing it was built with.
+		if external, known := modelDeploymentMembersExternalDP(
+			[]*core.Pod{pod}, md.Spec.Engine.Name); known && external != desiredExternal {
 			return true
 		}
 	}

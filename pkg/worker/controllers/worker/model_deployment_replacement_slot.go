@@ -545,10 +545,10 @@ func (r *ModelDeploymentReconciler) modelDeploymentLiveRoleSelectors(
 // A lost response is not absence.
 func (r *ModelDeploymentReconciler) replacementVacant(
 	ctx context.Context, md *workercore.ModelDeployment, slot modelDeploymentReplacementSlot,
-) (bool, string) {
+) (vacant bool, why string, err error) {
 	occupied, err := r.replacementOccupancyOnServer(ctx, md, slot.Role, slot.Ordinal)
 	if err != nil {
-		return false, err.Error()
+		return false, "", err
 	}
 	if len(occupied) > 0 {
 		names := make([]string, 0, len(occupied))
@@ -557,7 +557,7 @@ func (r *ModelDeploymentReconciler) replacementVacant(
 		}
 		slices.Sort(names)
 
-		return false, fmt.Sprintf("the server still holds %s", strings.Join(names, ", "))
+		return false, fmt.Sprintf("the server still holds %s", strings.Join(names, ", ")), nil
 	}
 
 	// An occupied name holds the slot even by a Workload this operator cannot prove it composed.
@@ -565,17 +565,17 @@ func (r *ModelDeploymentReconciler) replacementVacant(
 	// would collide, so the wait stands until it goes.
 	blocking, err := r.replacementGroupWorkload(ctx, md, slot)
 	if err != nil {
-		return false, err.Error()
+		return false, "", err
 	}
 	if blocking != nil {
 		if !blocking.DeletionTimestamp.IsZero() {
-			return false, fmt.Sprintf("workload %s is still terminating", blocking.Name)
+			return false, fmt.Sprintf("workload %s is still terminating", blocking.Name), nil
 		}
 
-		return false, fmt.Sprintf("workload %s still occupies the group", blocking.Name)
+		return false, fmt.Sprintf("workload %s still occupies the group", blocking.Name), nil
 	}
 
-	return true, ""
+	return true, "", nil
 }
 
 // replacementGroupWorkload returns the Workload still standing on a slot's derived group name,
@@ -604,37 +604,37 @@ func (r *ModelDeploymentReconciler) replacementGroupWorkload(
 func (r *ModelDeploymentReconciler) replacementAdmitted(
 	ctx context.Context, md *workercore.ModelDeployment, slot modelDeploymentReplacementSlot,
 	want []*core.Pod,
-) (bool, string) {
+) (admitted bool, why string, err error) {
 	members, err := r.replacementOccupancyOnServer(ctx, md, slot.Role, slot.Ordinal)
 	if err != nil {
-		return false, err.Error()
+		return false, "", err
 	}
 
 	standing := make([]*core.Pod, 0, len(members))
 	for i := range members {
 		if members[i].DeletionTimestamp != nil {
-			return false, fmt.Sprintf("member %s is on its way out", members[i].Name)
+			return false, fmt.Sprintf("member %s is on its way out", members[i].Name), nil
 		}
 		standing = append(standing, &members[i])
 	}
 
 	if reason := replacementMembersMatch(want, standing); reason != "" {
-		return false, reason
+		return false, reason, nil
 	}
 
 	wl, err := r.replacementGroupWorkload(ctx, md, slot)
 	if err != nil {
-		return false, err.Error()
+		return false, "", err
 	}
 	if wl == nil {
-		return false, "the group holds no workload yet"
+		return false, "the group holds no workload yet", nil
 	}
 
 	if reason := replacementAdmissionHolds(wl, standing, want); reason != "" {
-		return false, reason
+		return false, reason, nil
 	}
 
-	return true, ""
+	return true, "", nil
 }
 
 // replacementAdmissionHolds reports whether an admitted Workload is fresh admission for the group
@@ -1021,7 +1021,11 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 		if err = r.cleanReplacementSlot(ctx, md, slot, replacementPodPointers(members), members); err != nil {
 			return progress, err
 		}
-		if vacant, why := r.replacementVacant(ctx, md, slot); !vacant {
+		vacant, why, err := r.replacementVacant(ctx, md, slot)
+		if err != nil {
+			return progress, err
+		}
+		if !vacant {
 			progress.requeue = true
 			logger.V(3).Info("waiting for a cancelled replacement to leave",
 				"slot", replacementDescription(slot), "because", why)
@@ -1108,7 +1112,10 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 	// slot waits on admission rather than on vacancy, and the two questions are different: vacancy
 	// is about the old group leaving, admission about the new one being granted quota.
 	if len(standing) == 0 {
-		vacant, why := r.replacementVacant(ctx, md, slot)
+		vacant, why, err := r.replacementVacant(ctx, md, slot)
+		if err != nil {
+			return progress, err
+		}
 		if !vacant {
 			// Something still holds the ordinal. That is the ordinary waiting state -- a member
 			// draining behind its finalizer, a Workload not yet gone -- and it ends through the Pod
@@ -1136,14 +1143,17 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 		return progress, nil
 	}
 
-	if admitted, reason := r.replacementAdmitted(ctx, md, slot, want); admitted {
+	admitted, reason, err := r.replacementAdmitted(ctx, md, slot, want)
+	if err != nil {
+		return progress, err
+	}
+	if admitted {
 		progress.cleared = true
 
 		return progress, nil
-	} else {
-		logger.V(3).Info("waiting for the replacement to be admitted",
-			"slot", replacementDescription(slot), "because", reason)
 	}
+	logger.V(3).Info("waiting for the replacement to be admitted",
+		"slot", replacementDescription(slot), "because", reason)
 
 	return progress, nil
 }

@@ -9,10 +9,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
@@ -1083,6 +1085,64 @@ func TestAdmissionFirstEnableUnknownPreservesExistingRouting(t *testing.T) {
 			require.NotEmpty(t, router.Contract.Roles)
 			_, narrowed := router.Contract.Roles[0].Selector[modelDeploymentLabelKeyEndpointEligible]
 			assert.False(t, narrowed, "unavailable first-enable observation must preserve router discovery")
+		})
+	}
+}
+
+// The front Service routes the first role alone. A managed Pod of a sibling role, or one already
+// leaving, must not lift the take-over refusal for a first role that supplies its own command.
+func TestRenderModelDeploymentService_FrontGateReadsOnlyTheFrontRoleMembers(t *testing.T) {
+	newDeployment := func() *workercore.ModelDeployment {
+		md := healthDeployment(1, "sibling")
+		md.Spec.Roles[0].Command = []string{"vllm", "serve", "qwen"}
+		ModelDeploymentConditionEndpointEligibility.True(md,
+			modelDeploymentReasonEndpointsQualified, "every group qualified")
+
+		return md
+	}
+	// siblingPod is a managed Pod, which is what would lift the refusal if it were counted.
+	siblingPod := func(md *workercore.ModelDeployment, mutate func(*core.Pod)) core.Pod {
+		pod := healthPod("sibling", 0, 0, healthBool(true), "uid-sibling")
+		pod.Spec.Containers = []core.Container{{Name: modelDeploymentMainContainerName}}
+		kubemeta.ControlOnWithoutBlock(&pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
+		if mutate != nil {
+			mutate(&pod)
+		}
+
+		return pod
+	}
+
+	testCases := []struct {
+		name string
+		pod  func(md *workercore.ModelDeployment) core.Pod
+	}{
+		{
+			name: "a managed Pod of a sibling role",
+			pod:  func(md *workercore.ModelDeployment) core.Pod { return siblingPod(md, nil) },
+		},
+		{
+			name: "a managed Pod of the front role that is already leaving",
+			pod: func(md *workercore.ModelDeployment) core.Pod {
+				return siblingPod(md, func(pod *core.Pod) {
+					pod.Labels[modelDeploymentLabelKeyComponent] = md.Spec.Roles[0].Name
+					now := meta.Now()
+					pod.DeletionTimestamp = &now
+				})
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newDeployment()
+			pod := tc.pod(md)
+			require.True(t, modelDeploymentReplicaRunsCommand([]*core.Pod{&pod}),
+				"setup requires the Pod to be one this operator built")
+
+			svc := renderModelDeploymentService(md, []core.Pod{pod})
+
+			_, narrowed := svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
+			assert.False(t, narrowed, "a take-over front role is never narrowed by endpoint eligibility")
 		})
 	}
 }

@@ -662,3 +662,43 @@ func TestDrainReasonsNameTheShape(t *testing.T) {
 	assert.True(t, strings.Contains(reason, "leader-served"),
 		"the reason names the shape, not just the symptom: %q", reason)
 }
+
+// A managed replica whose parallelism cannot be read has no established shape. It must hold, not
+// be read as leader-served, because that reading withdraws the followers of an External-DP replica
+// on a failed read.
+func TestDeployedAnsweringShape_UnreadableParallelismHolds(t *testing.T) {
+	testCases := []struct {
+		name    string
+		command []string
+		want    modelDeploymentAnsweringShape
+	}{
+		{
+			name:    "a readable External-DP command answers through every member",
+			command: shapeExternalDPCommand,
+			want:    modelDeploymentAnsweringAll,
+		},
+		{
+			name:    "a readable plain command answers through its leader",
+			command: shapePlainCommand,
+			want:    modelDeploymentAnsweringLeader,
+		},
+		{
+			name:    "an unreadable parallelism value holds",
+			command: []string{"vllm", "serve", "model", "--tensor-parallel-size", "many"},
+			want:    modelDeploymentAnsweringUnknown,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			leader := shapeSizedMember(0, 0, "uid-leader", 2, tc.command...)
+			follower := shapeSizedMember(0, 1, "uid-follower", 2, tc.command...)
+			view := modelDeploymentReplicaView{
+				Role: "server", Ordinal: 0, Seated: true,
+				Members: []*core.Pod{&leader, &follower},
+			}
+
+			assert.Equal(t, tc.want, modelDeploymentDeployedAnsweringShape(view, workercore.ModelDeploymentEngineVLLM))
+		})
+	}
+}
