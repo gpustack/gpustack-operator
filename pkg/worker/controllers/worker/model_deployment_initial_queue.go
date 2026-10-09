@@ -22,6 +22,17 @@ func (r *ModelDeploymentReconciler) initialQueuedReplica(
 		return false, nil
 	}
 
+	// A member whose cached status already shows progress cannot be in the initial queue: the gate
+	// is never added back and a node assignment or container status never goes away. Only the
+	// survivors are confirmed on the API server.
+	for _, member := range view.Members {
+		if member.Spec.NodeName != "" || len(member.Status.ContainerStatuses) != 0 ||
+			len(member.Status.InitContainerStatuses) != 0 ||
+			len(member.Status.EphemeralContainerStatuses) != 0 {
+			return false, nil
+		}
+	}
+
 	for i, member := range view.Members {
 		standing := new(core.Pod)
 		if err := r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(member), standing); err != nil {

@@ -349,3 +349,30 @@ func TestLifecycle_InitialQueueSlotAcceptsASecondResourceAndPoolEdit(t *testing.
 	require.True(t, holding)
 	require.Equal(t, 0, slot.Ordinal)
 }
+
+// TestInitialQueuedReplica_CachedProgressSkipsTheServerRead locks in the cheap pre-filter: a member
+// whose cached status already shows a node assignment cannot be in the initial queue, so the replica
+// is refused without a quorum read per member.
+func TestInitialQueuedReplica_CachedProgressSkipsTheServerRead(t *testing.T) {
+	f := newLifecycleFixture(t, newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 1 }))
+	f.pass(false)
+	setInitialReplicaQueue(t, f, 0)
+
+	member := f.live("server", 0)[0].DeepCopy()
+	member.Spec.NodeName = "node-a"
+	reads := 0
+	reader := ctrlinterceptor.NewClient(f.cli, ctrlinterceptor.Funcs{
+		Get: func(ctx context.Context, next ctrlcli.WithWatch, key ctrlcli.ObjectKey, obj ctrlcli.Object, opts ...ctrlcli.GetOption) error {
+			reads++
+			return next.Get(ctx, key, obj, opts...)
+		},
+	})
+	r := &ModelDeploymentReconciler{Client: f.cli, APIReader: reader, Recorder: ctrlrecord.NewFakeRecorder(64)}
+
+	queued, err := r.initialQueuedReplica(context.Background(), modelDeploymentReplicaView{
+		Role: "server", Ordinal: 0, Seated: true, Members: []*core.Pod{member},
+	}, nil)
+	require.NoError(t, err)
+	require.False(t, queued)
+	require.Zero(t, reads, "a member with a node assignment must be refused before any server read")
+}
