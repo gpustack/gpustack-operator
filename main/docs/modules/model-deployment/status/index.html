@@ -563,6 +563,11 @@ all role replicas are ready but a declared router has no ready replica.
 Ready instances by kind: <code>R</code> is managed router Pods, <code>S</code> is ordinary servers, <code>P</code> is prefillers,
 and <code>D</code> is decoders. For example, <code>1R2S</code> means one Ready router and two Ready servers; <code>1R3P4D</code>
 means one Ready router, three Ready prefillers and four Ready decoders.</p>
+<p><strong>During a replacement, status combines desired and observed fields.</strong> See
+<a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">Rollout behavior</a>
+. <code>desired</code> and <code>parallelism</code> describe the current
+spec; they can differ from running replicas while replacement waits. <code>ready</code> counts replicas still
+serving their deployed configuration. <code>unmanaged</code> and cache conditions read deployed command mode.</p>
 <p>Without a router, the <code>R</code> part is absent; a declared kind with nothing Ready shows zero. Several
 roles of the same kind are summed. A serving instance made of several Pods still counts once; use
 <code>status.roles[].desired</code> to see the requested count.</p>
@@ -1239,7 +1244,7 @@ distinguish from the operator&rsquo;s own.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/45d1484b23c849da0a181bc5c021ae8fad7b8852/docs/modules/model-deployment/status.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/10b5a0b655f77f6ae342765b31ada50a40c389dd/docs/modules/model-deployment/status.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/status.md">Edit this page</a>
             

@@ -826,6 +826,10 @@ deployment with no <code>kvCache</code> block still has this leg to configure.</
 : the value renders
 into both ends&rsquo; arguments, so every role&rsquo;s replicas turn over one at a time. A prefiller and a decoder
 can disagree on the protocol until both converge, the same window an <code>engine.version</code> edit opens.</p>
+<p>The same shared-document rule reaches the parallel degrees on the Ascend leg. The pair turns over
+together; see <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">Rollout behavior</a>
+ for the mechanism. Until both roles
+converge, the pair can fail to complete a transfer.</p>
 <h2 id="different-hardware-per-role">Different hardware per role</h2>
 <p>A Kueue Workload carries one <code>queueName</code>, and that name is the one the role&rsquo;s <code>instanceType</code>
 publishes as its <code>status.entrance</code>. Every replica is its own group regardless, so two roles were
@@ -908,7 +912,7 @@ each leg</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/45d1484b23c849da0a181bc5c021ae8fad7b8852/docs/modules/model-deployment/prefill-decode.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/10b5a0b655f77f6ae342765b31ada50a40c389dd/docs/modules/model-deployment/prefill-decode.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/prefill-decode.md">Edit this page</a>
             

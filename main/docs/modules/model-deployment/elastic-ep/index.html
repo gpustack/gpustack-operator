@@ -607,6 +607,8 @@ enforces the rest:</p>
 <li>you cannot supply <code>command</code>, because the renderer owns the command line of the managed role;</li>
 <li>there is no initial fabric to declare.</li>
 </ul>
+<p>The role&rsquo;s <code>size</code>, <code>instanceType</code> and <code>resources</code> are frozen with the profile: the ordinary role
+fields&rsquo; editability does not reach it, and width is the only shape knob it offers.</p>
 <p>Adding or removing the profile on an existing role is refused.
 The effective TP value is fixed after creation.
 Equivalent TP argument spellings are accepted. Omitting TP and explicitly setting TP=1 are equivalent.
@@ -858,6 +860,8 @@ SGLang supports ordinary replica scaling; its native elastic protocol is not int
 <li>There is one serving instance per deployment. <code>replicas</code> and <code>size</code> are not a width mechanism.</li>
 <li>Only the master serves HTTP.</li>
 <li>No RDMA fabric is requested for this profile.</li>
+<li>The ordinary role fields&rsquo; editability does not apply: the shape fields are frozen with the
+profile, as described above.</li>
 <li>Scale-down is not supported. A width decrease is rejected by admission; see <a href="https://github.com/gpustack/gpustack-operator/issues/741">issue #741</a>
 .</li>
 </ul>
@@ -884,7 +888,7 @@ SGLang supports ordinary replica scaling; its native elastic protocol is not int
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/45d1484b23c849da0a181bc5c021ae8fad7b8852/docs/modules/model-deployment/elastic-ep.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/10b5a0b655f77f6ae342765b31ada50a40c389dd/docs/modules/model-deployment/elastic-ep.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/elastic-ep.md">Edit this page</a>
             

@@ -20,6 +20,11 @@ Ready instances by kind: `R` is managed router Pods, `S` is ordinary servers, `P
 and `D` is decoders. For example, `1R2S` means one Ready router and two Ready servers; `1R3P4D`
 means one Ready router, three Ready prefillers and four Ready decoders.
 
+**During a replacement, status combines desired and observed fields.** See
+[Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior). `desired` and `parallelism` describe the current
+spec; they can differ from running replicas while replacement waits. `ready` counts replicas still
+serving their deployed configuration. `unmanaged` and cache conditions read deployed command mode.
+
 Without a router, the `R` part is absent; a declared kind with nothing Ready shows zero. Several
 roles of the same kind are summed. A serving instance made of several Pods still counts once; use
 `status.roles[].desired` to see the requested count.

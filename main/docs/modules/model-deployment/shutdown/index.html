@@ -564,6 +564,10 @@ a <code>replicas</code> reduction, a surplus shed, a dropped role — goes throu
 <a href="#the-retirement-protocol">the retirement protocol</a>
  first, and its Pod is deleted when that
 finishes.</p>
+<p>An edit that replaces a role&rsquo;s configuration deletes that role&rsquo;s old replicas one at a time, and
+each deleted replica drains exactly as below. The protocol reads a leaving replica as it is
+deployed — the size and command it was created with — so an edit elsewhere does not change how it
+is classified: a take-over replica is still held, a prefill or decode replica still refused.</p>
 <p><code>G</code> below is the role&rsquo;s grace: <code>roles[].terminationGracePeriodSeconds</code>, 30 when unset, written to
 the Pod&rsquo;s field of the same name.</p>
 <table>
@@ -668,6 +672,11 @@ for as long as the protocol holds it.</p>
 <p>For <code>llm-d-router</code>, withdrawal also waits for recent dispatches reported for a target member.
 This applies after the Router removes that member from selection. These records do not increase
 the serving count. A dispatch to an unrelated survivor does not hold the target.</p>
+<p>Without <code>spec.router</code>, withdrawal cannot observe established connections made directly through the
+role&rsquo;s Service. An admitted, running replica stays held during scale-down or surplus removal.
+The withdrawal budget expires after 30 seconds and retirement ends as <code>Aborted</code>, retaining its Pods,
+Workload and capacity. Removing the Service endpoint does not prove those connections have ended.
+Groups that never executed or received admission follow their separate cleanup path.</p>
 <p>Two mechanisms are involved and they answer different questions. The protocol decides <strong>whether the
 Pod may be deleted</strong>; the <a href="#the-drain-window">drain window</a>
  above decides <strong>how long the engine
@@ -839,7 +848,7 @@ reads.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/45d1484b23c849da0a181bc5c021ae8fad7b8852/docs/modules/model-deployment/shutdown.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/10b5a0b655f77f6ae342765b31ada50a40c389dd/docs/modules/model-deployment/shutdown.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/shutdown.md">Edit this page</a>
             

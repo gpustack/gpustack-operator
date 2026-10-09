@@ -913,6 +913,10 @@ from a matching ResourceFlavor; and when awareness is on, that flavor&rsquo;s <c
 <li><strong>Instance validating</strong> — enforces the unit spec on <strong>Create and Update</strong>: a submission&rsquo;s RAM must not
 exceed <code>unitRAM × count</code>, its local storage not the InstanceType&rsquo;s <code>LocalStorage</code>.
 <ul>
+<li>Changing <code>spec.type</code>, <code>spec.resources</code> or any other template field requires an already stored
+<code>spec.stop: true</code>. Only <code>spec.volume</code> is immutable regardless of <code>spec.stop</code>.
+Stop the Instance before editing its configuration.
+Starting requires <code>status.phase: Stopped</code> and revalidates the updated resource request.</li>
 <li>On a non-accelerated type, create and start also bound the CPU request by the pool&rsquo;s CPU
 <strong>capacity</strong> (<code>status.cpu.capacity</code>), never by what is unrequested right now: an Instance submitted
 while every core is requested is admitted and waits in its queue.</li>
@@ -1016,7 +1020,7 @@ AdmissionCheck. The operator never leaves such a queue admitting — see
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/45d1484b23c849da0a181bc5c021ae8fad7b8852/docs/modules/devices/admission.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/10b5a0b655f77f6ae342765b31ada50a40c389dd/docs/modules/devices/admission.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/admission.md">Edit this page</a>
             

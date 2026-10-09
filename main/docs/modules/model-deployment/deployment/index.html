@@ -617,10 +617,12 @@ they keep serving without interruption and keep whatever cache they hold.</p>
 <p><code>size</code> is how many Pods form one instance, defaulting to 1. The Pods of one instance are
 fate-sharing: they start together, they are admitted together, and they are replaced together. Use
 it when one instance genuinely spans hosts (tensor, pipeline, expert or sequence parallelism).</p>
-<p><strong><code>size</code> cannot be changed after creation.</strong> The Pods a running instance is made of are not the Pods
-a different size asks for, so no edit exists that does not replace every instance of the role at
-once. To serve at a different size, create a deployment that declares it. Scaling is what <code>replicas</code>
-is for, and it disturbs nothing already running.</p>
+<p><strong><code>size</code> is editable, and the edit replaces the role&rsquo;s instances.</strong> An instance is never reshaped in
+place: each old instance and its Workload are deleted first, and the replacement created in that
+slot is admitted fresh before the next old instance may be deleted. See
+<a href="#rollout-behavior">Rollout behavior</a>
+ for the cadence and its costs. Scaling without replacement is
+what <code>replicas</code> is for, and it disturbs nothing already running.</p>
 <p>Above 1, the operator names each Pod of an instance <code>&lt;deployment&gt;-&lt;role&gt;-r&lt;replica&gt;-m&lt;member&gt;</code> and
 publishes them behind a headless Service per instance, so every Pod can address the others by a name
 that is derivable before any of them exists.</p>
@@ -684,9 +686,10 @@ An unset or zero count adds no device request.</p>
 <p>The key follows the bound cache backend&rsquo;s effective group protocol and any direct prefill/decode
 transport the engine actually renders. Different backend-group protocols or an RDMA and EFA mix
 are refused for a positive count.</p>
-<p>A count with no managed RDMA or EFA transfer leg is also refused. The count is frozen with the other
-role resources. See <a href="/gpustack-operator/main/docs/modules/rdma/operations/">RDMA Operations</a>
- for the allocation and topology limits.</p>
+<p>A count with no managed RDMA or EFA transfer leg is also refused, whenever the request, the
+transfer settings or the pool the roles name change. See <a href="/gpustack-operator/main/docs/modules/rdma/operations/">RDMA Operations</a>
+
+for the allocation and topology limits.</p>
 <h2 id="prefill-and-decode">Prefill and decode</h2>
 <p>Several roles in one deployment are admitted <strong>atomically</strong>: a pool that cannot fit all of them leaves
 all of them queued, instead of admitting the prefillers and stranding them waiting for decoders that
@@ -746,13 +749,13 @@ a role&rsquo;s own address.</p>
       </tr>
       <tr>
           <td>label <code>modeldeployment.gpustack.ai/member-index</code></td>
-          <td>which Pod of its instance this is, from 0 up — <strong>present only above <code>size: 1</code></strong></td>
-          <td>what tells two Pods of one instance apart, and what a <code>Service</code> selector matches to front only the leader. A container reads its own index through this label rather than from a rendered value, which is what keeps one Pod template per instance. A Pod without the label is member 0</td>
+          <td>which Pod of its instance this is, from 0 up — rendered at <strong>every</strong> size, one Pod included</td>
+          <td>what tells two Pods of one instance apart, and what a <code>Service</code> selector matches to front only the leader above <code>size: 1</code>. A container reads its own index through this label rather than from a rendered value, which is what keeps one Pod template per instance</td>
       </tr>
       <tr>
           <td>annotation <code>kueue.x-k8s.io/pod-group-total-count</code></td>
           <td>the role&rsquo;s <code>size</code></td>
-          <td>how many Pods Kueue waits for before composing anything. A replica-count change moves no total any member carries — a resize is a trim, not a rebuild</td>
+          <td>how many Pods Kueue waits for before composing anything. A replica-count change moves no total any member carries — a resize is a trim, not a rebuild. A <code>size</code> edit never edits a running group&rsquo;s total either: it replaces whole groups, and each new group carries its own</td>
       </tr>
       <tr>
           <td>annotation <code>kueue.x-k8s.io/role-hash</code></td>
@@ -1100,19 +1103,84 @@ appearing as an unattributable <code>ImagePullBackOff</code>.</p>
 <h2 id="rollout-behavior">Rollout behavior</h2>
 <p>Changing <code>replicas</code> adds or removes instances and nothing more: the survivors are not restarted, do
 not reload their weights and keep their cached blocks. What still replaces <strong>every</strong> instance of the
-role is an edit that changes what a replica&rsquo;s Pod renders: <code>image</code>, <code>extraArgs</code>, <code>env</code>, <code>ports</code>,
-<code>additionalVolumes</code>, <code>shmSize</code>, <code>terminationGracePeriodSeconds</code>. A change to <code>size</code> is not on that list because
-it cannot be made: see <code>roles[].size</code> above.</p>
+role is an edit that changes what a replica&rsquo;s Pod renders: <code>size</code>, <code>instanceType</code>, <code>resources</code>,
+<code>command</code>, <code>image</code>, <code>extraArgs</code>, <code>env</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>,
+<code>terminationGracePeriodSeconds</code>.</p>
 <p>Such an edit <strong>deletes and recreates</strong> the role&rsquo;s replicas, one replica per role per pass, waited
-out. The role set itself cannot be edited at all; admission refuses it, so there is no role rename or
-addition to roll. There are no surge or unavailable knobs.</p>
+out. The role set itself cannot be edited at all; admission refuses a role added, removed, renamed
+or moved to another kind, so there is none of that to roll. There are no surge or unavailable knobs.</p>
 <p>The one-at-a-time cadence is a constraint: each replica&rsquo;s group declares a total — the role&rsquo;s
 <code>size</code> — and a replacement created beside its still-counted member reads as excess, which Kueue
 answers by deleting the newer Pod, the replacement itself.</p>
 <p>A replacement is a <strong>fresh admission</strong>, not a rider on the reservation the departed replica held:
-freeing the slot deletes that replica&rsquo;s Workload, and the reservation goes with it. The cadence guard
-therefore turns a replica over only when every replica the role declares holds an admitted Workload;
-on a full pool a rollout waits for capacity rather than shedding replicas it cannot re-reserve.</p>
+freeing the slot deletes that replica&rsquo;s Workload, and the reservation goes with it.</p>
+<p>The cadence guard therefore turns a healthy replica over only when every replica the role declares holds an
+admitted Workload; on a full pool a rollout waits for capacity rather than shedding replicas it
+cannot re-reserve. That gate holds back deleting the next healthy replica, not the configuration
+already waiting in a replacement slot: a queued replacement is superseded by a newer edit and
+admitted once, as the newer shape — the obsolete configuration need never be admitted.</p>
+<p>The slot is reused, but its obsolete Pods and Workload are deleted and replaced with fresh objects.</p>
+<p>A complete group still waiting for its first admission can also be replaced after a configuration edit.
+It uses the same single replacement slot and fresh admission rules.
+The operator selects this queued group before deleting an admitted sibling.
+This exception requires every member to remain behind Kueue&rsquo;s admission gate.
+An eviction, preemption, or earlier execution does not qualify as first admission.</p>
+<h3 id="replacing-a-role-whose-shape-moved">Replacing a role whose shape moved</h3>
+<p><code>size</code>, <code>instanceType</code>, <code>resources</code> and <code>command</code> roll the same way as any Pod field, and each
+carries consequences the Pod fields do not.</p>
+<p><strong>One unresolved replacement per role.</strong> A replacement&rsquo;s fresh admission gates deleting the next
+old replica, so a role turns over one replica at a time no matter how many of its fields one edit
+moved: a patch changing <code>size</code>, <code>resources</code> and <code>command</code> together is one rollout, not three. The
+role remembers which replica it is replacing until that replacement is admitted, so an operator
+restart resumes the same rollout instead of selecting a second replica.</p>
+<p><strong>A broken replica does not jump the queue.</strong> An old replica that loses a member while its role&rsquo;s
+replacement is unresolved waits behind that replacement, then is rebuilt whole before another
+healthy old replica is rolled. A replacement that itself loses a member is recovered in its own
+slot. Recovery never mixes members: an interrupted replacement is completed with its own
+configuration, and an old survivor is never filled with new-configuration members.</p>
+<p><strong>The old replicas run the configuration they were created with until each is deleted for
+replacement.</strong> Nothing reshapes a running instance: an instance of two Pods keeps its two members,
+its leader address and its rank layout until it leaves. Cache injection, the unmanaged marker and
+retirement read the deployed Pods, so a role part-way through a <code>command</code> edit serves through
+replicas in both modes, and what status claims is what is actually deployed.</p>
+<p>A role moving between a managed command and a takeover keeps each running Pod&rsquo;s own mode. A managed
+replica keeps its qualification rules. Once qualification is active, an Unknown observation keeps
+existing eligibility without granting new eligibility; a definite fault still withdraws it. A role
+whose qualification was never activated keeps its legacy readiness rule.</p>
+<p>A takeover replica keeps its legacy Service membership and stays <code>unmanaged: true</code>. Routing
+membership does not establish engine health or cache qualification.</p>
+<p><strong>Mixed shapes can appear across instances, never within one.</strong> A replacement is created only
+after the instance it replaces has left — members and Workload — so no ordinal holds old and
+new members at once. Replicas not yet selected keep serving their old shape beside replicas
+already replaced onto the new one; above <code>size: 1</code> each shape&rsquo;s leader is picked by the
+member-index label, so a leader of each shape can answer the same Service during that window.</p>
+<p>Peer DNS is per instance — one headless Service per replica — so the old and the new members
+resolve their own shape&rsquo;s peers and never each other&rsquo;s. Each instance keeps its peer Service until
+its members have left, so a terminating replica&rsquo;s members can still resolve one another. Each
+deployed shape also answers its own way while both serve: a leader-served replica through its
+leader, an External DP replica through its rank-carrying members.</p>
+<p><strong>A one-replica role has a gap.</strong> Its only instance must leave before its replacement is admitted,
+so serving stops until the replacement is ready. The replacement&rsquo;s Kueue admission gates the next
+old replica&rsquo;s departure. Admission does not wait for engine readiness, so the next old replica may
+leave while the previous replacement is still starting.</p>
+<p>A multi-replica role can temporarily have no serving capacity. Replacement does not guarantee
+uninterrupted inference.</p>
+<p><strong>Siblings are untouched unless the edit reaches them.</strong> An edit to one role&rsquo;s shape never rewrites
+another role&rsquo;s groups: their Workloads, admission, member names and DNS stay as they are.</p>
+<p>The exception is the shared transfer document: on the vLLM-Ascend leg the parallel degrees one role
+declares render into the document both roles carry, so a degree edit — through <code>extraArgs</code> or
+through a replaced <code>command</code> — rolls the pair, and until both halves converge the pair can fail to
+complete a transfer. See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#direct-transfer-transport">Prefill and Decode</a>
+ for what
+that window means.</p>
+<p><strong>Admission rejudges a moved dependency, not the world.</strong> The interface and pool-transport checks
+re-run for a role whose own interface request, type or command presence moved, for the roles whose
+rendered direct-transfer leg a router or transfer edit actually changes — a router fronting no
+prefill/decode pair renders none — and on a type move for the moved role. Everything else keeps its
+admitted verdict, so a drifted store is repaired at the pool, not refused at the next edit.</p>
+<p>A role carrying <code>elasticEp</code> is excluded from all of this: the profile pins that role&rsquo;s shape, and
+width is the only thing that moves (<a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/#changing-the-width">Elastic EP</a>
+).</p>
 <p>The cost rides on the block lease described under
 <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#workload-impact">Workload impact</a>
 : a lease survives a long queue and does <strong>not</strong>
@@ -1183,8 +1251,8 @@ Changing <code>replicas</code> is none of these departures — see <a href="#rol
  — and the
 role set cannot be edited at all; admission refuses it.</p>
 <h3 id="deployment-identity-fields">Deployment identity fields</h3>
-<p>Fields that identify the deployment are frozen. Fields that control how it runs are generally
-editable; the table below lists both groups and the scheduling exceptions.</p>
+<p>Fields that identify the deployment are frozen. Fields that control how it runs are editable; the
+table below lists both groups.</p>
 <table>
   <thead>
       <tr>
@@ -1203,29 +1271,33 @@ editable; the table below lists both groups and the scheduling exceptions.</p>
       </tr>
       <tr>
           <td>the set of roles, and each role&rsquo;s <code>name</code> and <code>kind</code></td>
-          <td><code>roles[].replicas</code></td>
+          <td><code>roles[].replicas</code>, <code>roles[].size</code></td>
       </tr>
       <tr>
-          <td><code>roles[].size</code></td>
+          <td>on a role carrying <code>elasticEp</code>: its <code>size</code>, <code>instanceType</code>, <code>resources</code> and <code>command</code></td>
+          <td><code>roles[].instanceType</code>, <code>roles[].resources</code>, <code>roles[].command</code></td>
+      </tr>
+      <tr>
           <td></td>
-      </tr>
-      <tr>
-          <td><code>roles[].instanceType</code></td>
           <td><code>roles[].extraArgs</code>, <code>roles[].env</code></td>
       </tr>
       <tr>
-          <td><code>roles[].resources</code></td>
+          <td></td>
           <td>the role&rsquo;s own Pod fields — <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>privileged</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>, <code>terminationGracePeriodSeconds</code></td>
       </tr>
       <tr>
-          <td><code>roles[].command</code></td>
+          <td></td>
           <td>labels and annotations</td>
       </tr>
   </tbody>
 </table>
-<p><code>roles[].resources</code> is frozen because changing it renegotiates scheduling, much like deleting and
-recreating the deployment. <code>roles[].privileged</code> stays editable because it controls how the role
-runs.</p>
+<p>The role&rsquo;s shape fields — <code>size</code>, <code>instanceType</code>, <code>resources</code>, <code>command</code> — are editable on the same
+terms as the Pod fields: each edit replaces that role&rsquo;s replicas one at a time, deleting each old
+instance before creating its replacement, whose fresh admission gates the next deletion.
+<code>roles[].privileged</code> stays editable because it controls how the role runs.</p>
+<p>The elastic-EP row is the exception: the profile admits one fixed member shape, and
+<a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/#changing-the-width">width</a>
+ is the only shape knob it offers.</p>
 <p><strong>To change a frozen field, create another deployment.</strong> A frozen field is not a lock protecting a
 concurrent writer, and the refusal says so: what you are describing is a different deployment, so it
 is created rather than edited. Editing is what keeps the object&rsquo;s name, its <code>status</code> history and its
@@ -1233,14 +1305,34 @@ cache-pool registration; a frozen field is none of those things.</p>
 <p>When adding a field, decide whether it identifies the deployment or controls how it runs before
 choosing its update rule.</p>
 <blockquote>
-<p><strong>A merge patch that omits a frozen field is an edit to that frozen field.</strong> <code>roles</code> is a list, and
-<code>kubectl patch --type=merge</code> replaces a list wholesale rather than merging into it, so a role
-restated without its <code>command</code> sets <code>command</code> to null, and the edit is refused naming
-that field rather than the one you meant to change.</p>
-<p>Change one field with a JSON patch (<code>--type=json</code>, <code>/spec/roles/0/replicas</code>), or send the whole
-object with <code>kubectl apply</code> or <code>kubectl edit</code>. Omitting a value in a merge patch sets it to null,
-and the rule reads what you actually sent.</p>
-</blockquote>
+<p><strong>A merge patch replaces the <code>roles</code> list wholesale.</strong> <code>kubectl patch --type=merge</code> follows
+RFC 7386, which replaces an array rather than merging into it: a role restated with only some of
+its fields loses the ones it did not carry. An omitted <code>size</code> lands on the default of 1 and an
+omitted <code>resources</code> lands on the accelerator default, exactly as a full-list rewrite says; a role
+restated without its <code>name</code> is refused for the missing name, and one restated without <code>instanceType</code>
+is refused for the empty value — none of these fields has a default that can stand in.
+<code>listType=map</code> does not soften this: it is what keeps role names unique and drives <code>kubectl apply</code>&rsquo;s
+merge, not what a client-side merge patch does to an array.</p>
+<p><code>kind</code> still binds too: a role restated without its <code>kind</code> picks up the default <code>Server</code>, so
+restating a prefiller that way is refused as a kind change rather than silently converting it.</p>
+<p>Change one field with a JSON patch, or restate the role in full:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl patch modeldeployment qwen-chat -n team-a --type<span class="o">=</span>json <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/size&#34;,&#34;value&#34;:2}]&#39;</span></span></span></code></pre></div>
+</div><div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># --type=merge --patch-file=role.yaml: the whole role, not the field</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">h20-8x</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span></span></span></code></pre></div>
+</div></blockquote>
 <h3 id="one-group-per-replica">One group per replica</h3>
 <p>The grouping key is the <strong>replica</strong>: every replica of every role forms its own pod group, derived from
 the role and the replica&rsquo;s ordinal within it, and Kueue composes one Workload per group with a
@@ -1491,7 +1583,7 @@ structured snapshot and Pod scrape endpoints.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/45d1484b23c849da0a181bc5c021ae8fad7b8852/docs/modules/model-deployment/deployment.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/10b5a0b655f77f6ae342765b31ada50a40c389dd/docs/modules/model-deployment/deployment.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/deployment.md">Edit this page</a>
             
@@ -1520,6 +1612,7 @@ structured snapshot and Pod scrape endpoints.</li></ul>
     <li><a href="#runner-image-formula">Runner image formula</a></li>
     <li><a href="#rollout-behavior">Rollout behavior</a>
       <ul>
+        <li><a href="#replacing-a-role-whose-shape-moved">Replacing a role whose shape moved</a></li>
         <li><a href="#replica-departures">Replica departures</a></li>
         <li><a href="#deployment-identity-fields">Deployment identity fields</a></li>
         <li><a href="#one-group-per-replica">One group per replica</a></li>

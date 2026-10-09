@@ -339,6 +339,8 @@ reason on `Releasable=False` before acting. They need different remedies:
 They are separate because the action differs: removing workloads, draining a domain and restoring
 an unanswering master are three different operations.
 
+The API accepts the deletion request. The Binding remains in `Deleting` until the hold clears.
+
 **A master that holds no tenant ledger releases the Binding rather than holding it.** With
 multi-tenancy declared off there is no ledger for a quota entry to be in, so the deletion strands nothing and
 completes, the same answer the pool's own teardown takes. Every other failed ledger request leaves
