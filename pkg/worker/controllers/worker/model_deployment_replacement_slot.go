@@ -342,15 +342,18 @@ func replacementMemberDeletes(
 	return deletes
 }
 
-// replacementWorkloadDeletes returns the Workloads the slot may delete: the one it captured, and
-// nothing else. A Workload the slot did not capture is not one this operator can prove it
-// composed, so a matching name or an ownerless shape is not authority to delete it.
+// replacementWorkloadDeletes returns the Workloads the slot may delete: the one it captured, and a
+// Workload that names one of the members it captured as an owner. The second covers a slot written
+// before the informer delivered the departing group's Workload, which carries no WorkloadUID but is
+// still provably that group's. A matching name, or an ownerless shape, is not authority.
 func replacementWorkloadDeletes(
 	slot modelDeploymentReplacementSlot, workloads []*kueue.Workload,
 ) []*kueue.Workload {
+	members := sets.New[types.UID](slot.MemberUIDs...)
+
 	var deletes []*kueue.Workload
 	for _, wl := range workloads {
-		if replacementCapturesWorkload(slot, wl) {
+		if replacementCapturesWorkload(slot, wl) || modelDeploymentWorkloadOwnsAny(wl, members) {
 			deletes = append(deletes, wl)
 		}
 	}

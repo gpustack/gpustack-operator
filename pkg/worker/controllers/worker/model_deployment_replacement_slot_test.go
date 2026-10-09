@@ -392,18 +392,35 @@ func replicaMembersAt(
 	return members
 }
 
-// TestReplacementWorkloadDeletes_OnlyTheCapturedWorkloadIsDeletable pins the contract that the group
-// name locates vacancy blockers and never authorizes cleanup: a Workload that owns nothing live and
-// nothing captured is still not this operator's to delete unless the slot captured its UID.
-func TestReplacementWorkloadDeletes_OnlyTheCapturedWorkloadIsDeletable(t *testing.T) {
-	captured := &kueue.Workload{ObjectMeta: meta.ObjectMeta{Name: "captured", UID: "wl-captured"}}
-	orphan := &kueue.Workload{ObjectMeta: meta.ObjectMeta{Name: "orphan", UID: "wl-orphan"}}
-	slot := modelDeploymentReplacementSlot{WorkloadUID: "wl-captured"}
+// TestReplacementWorkloadDeletes_OnlyProvableOwnershipIsDeletable pins the contract that the group
+// name locates vacancy blockers and never authorizes cleanup. A Workload is deletable only when the
+// slot captured its UID, or when it names a member the slot captured as an owner, which is how a
+// slot written while the Workload was still unseen reaches it.
+func TestReplacementWorkloadDeletes_OnlyProvableOwnershipIsDeletable(t *testing.T) {
+	ownedBy := func(name string, uid, pod types.UID) *kueue.Workload {
+		wl := &kueue.Workload{ObjectMeta: meta.ObjectMeta{Name: name, UID: uid}}
+		if pod != "" {
+			wl.OwnerReferences = []meta.OwnerReference{{APIVersion: "v1", Kind: "Pod", Name: "p", UID: pod}}
+		}
 
-	deletes := replacementWorkloadDeletes(slot, []*kueue.Workload{orphan, captured})
-	require.Len(t, deletes, 1)
-	assert.Equal(t, captured.UID, deletes[0].UID)
+		return wl
+	}
+	captured := ownedBy("captured", "wl-captured", "")
+	orphan := ownedBy("orphan", "wl-orphan", "")
+	byMember := ownedBy("by-member", "wl-by-member", "pod-captured")
+	byStranger := ownedBy("by-stranger", "wl-by-stranger", "pod-other")
 
-	assert.Empty(t, replacementWorkloadDeletes(modelDeploymentReplacementSlot{}, []*kueue.Workload{orphan, captured}),
-		"a slot that captured no Workload deletes none")
+	slot := modelDeploymentReplacementSlot{WorkloadUID: "wl-captured", MemberUIDs: []types.UID{"pod-captured"}}
+	deletes := replacementWorkloadDeletes(slot, []*kueue.Workload{orphan, captured, byStranger, byMember})
+	require.Len(t, deletes, 2)
+	assert.ElementsMatch(t, []types.UID{"wl-captured", "wl-by-member"}, []types.UID{deletes[0].UID, deletes[1].UID})
+
+	// Cache lag at capture time: no WorkloadUID, but the member still proves whose Workload it is.
+	lagged := modelDeploymentReplacementSlot{MemberUIDs: []types.UID{"pod-captured"}}
+	got := replacementWorkloadDeletes(lagged, []*kueue.Workload{orphan, byStranger, byMember})
+	require.Len(t, got, 1)
+	assert.Equal(t, byMember.UID, got[0].UID)
+
+	assert.Empty(t, replacementWorkloadDeletes(modelDeploymentReplacementSlot{}, []*kueue.Workload{orphan, byStranger}),
+		"a slot that captured nothing deletes nothing")
 }
