@@ -26,19 +26,17 @@ order:
     - architecture
     - vendor-prerequisites
   /docs/walkthroughs/:
-    - devices
-    - kv-cache
-    - model-delivery
-    - model-deployment
-  /docs/walkthroughs/devices/:
     - scheduling
-  /docs/walkthroughs/kv-cache/:
+    - network-endpoints
+    - hierarchical-placement
     - shared-cache
-  /docs/walkthroughs/model-delivery/:
     - prefetch
+    - model-deployment
   /docs/walkthroughs/model-deployment/:
+    - prefill-decode
     - elastic-ep
     - external-dp
+    - multi-host
   /docs/modules/devices/:
     - preflight
     - discovery
@@ -97,26 +95,27 @@ order:
     - internals
 labels:
   /docs/walkthroughs/: Walkthroughs
-  /docs/walkthroughs/devices/: Devices
   /docs/walkthroughs/devices/scheduling/: Scheduling
-  /docs/walkthroughs/kv-cache/: KV Cache
+  /docs/walkthroughs/rdma/network-endpoints/: RDMA network endpoints
+  /docs/walkthroughs/topology/hierarchical-placement/: Hierarchical placement
   /docs/walkthroughs/kv-cache/shared-cache/: Shared cache
-  /docs/walkthroughs/model-delivery/: Model Delivery
   /docs/walkthroughs/model-delivery/prefetch/: Model prefetch
-  /docs/walkthroughs/model-deployment/: Model Deployment
+  /docs/walkthroughs/model-deployment/: Model deployment
+  /docs/walkthroughs/model-deployment/prefill-decode/: Prefill and decode
   /docs/walkthroughs/model-deployment/elastic-ep/: Elastic EP
   /docs/walkthroughs/model-deployment/external-dp/: External DP
+  /docs/walkthroughs/model-deployment/multi-host/: Multi-host serving
   /docs/getting-started/architecture/: Architecture
-  /docs/getting-started/vendor-prerequisites/: Prerequisites
-  /docs/modules/devices/preflight/: Preflight
-  /docs/modules/devices/discovery/: Discovery
-  /docs/modules/devices/requests/: Resource requests
-  /docs/modules/devices/scheduling/: Scheduling
+  /docs/getting-started/vendor-prerequisites/: Vendor prerequisites
+  /docs/modules/devices/preflight/: Preflight operations
+  /docs/modules/devices/discovery/: Device discovery
+  /docs/modules/devices/requests/: Accelerator requests
+  /docs/modules/devices/scheduling/: Scheduling chain
   /docs/modules/devices/admission/: Admission
   /docs/modules/devices/nvidia-mig/: NVIDIA MIG
   /docs/modules/devices/hygon-mig/: Hygon MIG
   /docs/modules/devices/thead-mig/: T-Head MIG
-  /docs/modules/rdma/network-topology/: Interface discovery
+  /docs/modules/rdma/network-topology/: Network topology
   /docs/modules/rdma/operations/: Operations
   /docs/modules/topology/scheduling/: Scheduling
   /docs/modules/topology/operations/: Operations
@@ -126,14 +125,14 @@ labels:
   /docs/modules/kv-cache/leader/: Leader
   /docs/modules/kv-cache/local-disk-tier/: Local disk tier
   /docs/modules/kv-cache/disk-heavy-nodes/: Disk-heavy nodes
-  /docs/modules/model-delivery/artifact/: Artifacts
-  /docs/modules/model-delivery/image-source/: Image sources
-  /docs/modules/model-delivery/prefetch/: Prefetch and quotas
-  /docs/modules/model-delivery/node-store/: Node cache
-  /docs/modules/model-delivery/peer-sync/: Peer sync
+  /docs/modules/model-delivery/artifact/: Model artifact
+  /docs/modules/model-delivery/image-source/: Model image source
+  /docs/modules/model-delivery/prefetch/: Model prefetch
+  /docs/modules/model-delivery/node-store/: Node model store
+  /docs/modules/model-delivery/peer-sync/: Node-to-node sync
   /docs/modules/model-delivery/operations/: Operations
-  /docs/modules/model-delivery/views/: API reference
-  /docs/modules/model-deployment/deployment/: Configuration
+  /docs/modules/model-delivery/views/: Model artifact API
+  /docs/modules/model-deployment/deployment/: Deployment configuration
   /docs/modules/model-deployment/elastic-ep/: Elastic EP
   /docs/modules/model-deployment/engine-versions/: Engine versions
   /docs/modules/model-deployment/prefill-decode/: Prefill and decode
@@ -141,15 +140,15 @@ labels:
   /docs/modules/model-deployment/metrics/: Metrics
   /docs/modules/model-deployment/status/: Status
   /docs/modules/model-deployment/shutdown/: Shutdown
-  /docs/operate/installation-modes/: Installation
+  /docs/operate/installation-modes/: Installation modes
   /docs/operate/high-availability/: High availability
   /docs/operate/migration/: Upgrades
-  /docs/operate/migration/from-v0.5/: From v0.5
-  /docs/operate/migration/to-subcharts/: Subchart migration
-  /docs/operate/migration/kv-cache-dtype/: Cache data types
+  /docs/operate/migration/from-v0.5/: From v0.5.x
+  /docs/operate/migration/to-subcharts/: Bundled subcharts
+  /docs/operate/migration/kv-cache-dtype/: Enforced binding dtype
   /docs/operate/migration/troubleshooting/: Troubleshooting
   /docs/reference/commands/: Commands
-  /docs/reference/settings/: Settings
+  /docs/reference/settings/: Settings & environment variables
   /docs/reference/instance-type-unit-resources/: Resource presets
   /docs/reference/instance-metrics/: Instance metrics
   /docs/contribute/development/: Development

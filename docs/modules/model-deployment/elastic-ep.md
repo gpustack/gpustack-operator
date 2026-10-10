@@ -115,7 +115,7 @@ spec:
       replicas: 1
       size: 1
       instanceType: elastic-gpu
-      image: gpustack/runner:cuda13.0-vllm0.29.0@sha256:1c826749ed16fbd9f9594d7a49f774904662d9c46231e08e32b494e8bac4ee91
+      image: gpustack/runner:cuda13.0-vllm0.29.0
       elasticEp:
         width: 2
       ports:

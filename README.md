@@ -132,12 +132,15 @@ spec:
 For a role whose replica spans multiple Pods, request one zone for each replica group:
 
 ```yaml
-roles:
-  - name: server
-    replicas: 2
-    size: 4
-    topology:
-      requiredLevel: topology.kubernetes.io/zone
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+spec:
+  roles:
+    - name: server
+      replicas: 2
+      size: 4
+      topology:
+        requiredLevel: topology.kubernetes.io/zone
 ```
 
 This is a role fragment; the engine still needs its own distributed execution settings. Use
@@ -191,7 +194,7 @@ spec:
 
 The `ModelDeployment` below names the binding, which grants this namespace access to the cache.
 Choose member nodes, quotas, block size and dtype for your engine before applying these resources.
-The [KV Cache Walkthrough](./docs/walkthroughs/kv-cache/shared-cache.md) explains what to check at each step.
+The [Shared Cache Walkthrough](./docs/walkthroughs/kv-cache/shared-cache.md) explains what to check at each step.
 
 ### Model Delivery
 

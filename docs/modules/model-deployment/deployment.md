@@ -308,6 +308,10 @@ Each Pod has its own volume. Only the main container mounts it.
 Set it in the role configuration:
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen-chat
 spec:
   roles:
     - name: server

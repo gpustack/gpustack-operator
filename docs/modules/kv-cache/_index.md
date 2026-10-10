@@ -10,7 +10,7 @@ capacity they receive.
 
 ## Quick start
 
-[KV Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md) creates the backend, pool, binding and
+[Shared Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md) creates the backend, pool, binding and
 deployment in order. A plain Pod can also use a binding through [KV Cache
 Injection](injection.md).
 
@@ -26,4 +26,4 @@ tier](local-disk-tier.md) have separate operating details.
 **See also** — [Model Deployment](../model-deployment/_index.md) (cache consumers) ·
 [RDMA Networking](../rdma/_index.md) (transport)
 
-**Next** → [KV Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md) — create a shared cache.
+**Next** → [Shared Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md) — create a shared cache.

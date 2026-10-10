@@ -13,7 +13,7 @@ The capability guides are [Heterogeneous Devices](modules/devices/_index.md),
 
 For a first workload, follow [Usage](../README.md#usage), then use
 [Accelerator Requests](modules/devices/requests.md) to choose its resource keys. The
-[Device Scheduling Walkthrough](walkthroughs/devices/scheduling.md) records a run on a four-node cluster.
+[Scheduling Walkthrough](walkthroughs/devices/scheduling.md) records a run on a four-node cluster.
 Workloads that need RDMA also need [RDMA Operations](modules/rdma/operations.md).
 
 For cluster operations, read [Architecture](getting-started/architecture.md) and [Installation
@@ -63,7 +63,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `rdma`
 - Use for: requesting RDMA endpoints for a workload; how the NIC inventory, link states and labels are discovered; aligning requests with the kubelet TopologyManager policy.
 - Aliases: `RDMA`, `NIC`, `RoCE`, `link state`, `rdma.capable`
-- Guides: [RDMA Networking](modules/rdma/_index.md); keys and policy in [RDMA Operations](modules/rdma/operations.md); inventory in [Network Topology](modules/rdma/network-topology.md).
+- Guides: [RDMA Networking](modules/rdma/_index.md); keys and policy in [RDMA Operations](modules/rdma/operations.md); inventory in [Network Topology](modules/rdma/network-topology.md); endpoints in [RDMA Network Endpoints Walkthrough](walkthroughs/rdma/network-endpoints.md).
 - Specs: [NIC/RDMA topology](../specs/2026-09-02-devices-nic-rdma-topology.md) · [extended resource](../specs/2026-09-20-rdma-extended-resource.md) · [NVIDIA fabric domain](../specs/2026-09-20-nvidia-fabric-domain.md) · [fabric by protocol](../specs/2026-09-22-fabric-device-by-protocol.md) · [interface count](../specs/2026-09-22-fabric-interface-count.md)
 - Code: NIC and link discovery in [pkg/devicemanager/detector](../pkg/devicemanager/detector/) (`network.go`, `link.go`) · request vocabulary in [pkg/nodefeature/rdma.go](../pkg/nodefeature/rdma.go) and [pkg/nodefeature/fabric.go](../pkg/nodefeature/fabric.go)
 - Related: [Devices Manager](#devices-manager) (the interfaces are entries in the same per-node inventory)
@@ -74,7 +74,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `topology`
 - Use for: describing domains such as zones and racks; letting Kueue place replicas within a domain; enabling a topology source; diagnosing a Pending group.
 - Aliases: `TAS`, `Topograph`, `topology source`, `zone`, `placement`
-- Guides: [Topology Management](modules/topology/_index.md); semantics in [Topology-Aware Scheduling](modules/topology/scheduling.md); enablement in [Topology-Aware Scheduling Operations](modules/topology/operations.md).
+- Guides: [Topology Management](modules/topology/_index.md); semantics in [Topology-Aware Scheduling](modules/topology/scheduling.md); enablement in [Topology-Aware Scheduling Operations](modules/topology/operations.md); placement in [Hierarchical Placement Walkthrough](walkthroughs/topology/hierarchical-placement.md).
 - Specs: [topology discovery](../specs/2026-09-22-topology-discovery.md) · [model placement preference](../specs/2026-09-26-model-placement-preference.md)
 - Code: [pkg/worker/controllers/worker/topology_source.go](../pkg/worker/controllers/worker/topology_source.go) and [pkg/worker/controllers/worker/node_topology.go](../pkg/worker/controllers/worker/node_topology.go)
 - Related: [Devices Manager](#devices-manager) (placement constrains which pool serves a replica) · [Model Deployment](#model-deployment) (replicas can prefer nodes holding their model)
@@ -85,7 +85,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `kv-cache`
 - Use for: standing up a shared inference cache; pool grants and quotas; attaching a workload to a pool.
 - Aliases: `KVCacheBackend`, `KVCachePool`, `Mooncake`, `prefix cache`, `injection`
-- Guides: [KV Cache](modules/kv-cache/_index.md); setup order in [KV Cache Walkthrough](walkthroughs/kv-cache/shared-cache.md); store and grants in [KV Cache Backend](modules/kv-cache/backend.md) and [KV Cache Pool](modules/kv-cache/pool.md).
+- Guides: [KV Cache](modules/kv-cache/_index.md); setup order in [Shared Cache Walkthrough](walkthroughs/kv-cache/shared-cache.md); store and grants in [KV Cache Backend](modules/kv-cache/backend.md) and [KV Cache Pool](modules/kv-cache/pool.md).
 - Specs: [backend](../specs/2026-08-28-kv-cache-backend.md) · [pool](../specs/2026-08-28-kv-cache-pool.md) · [injection](../specs/2026-08-28-kv-cache-injection.md) · [media and scaling](../specs/2026-09-05-kv-cache-media-and-scaling.md) · [high availability](../specs/2026-09-06-kv-cache-backend-high-availability.md)
 - Code: store rendering and read-back in [pkg/worker/kvcache](../pkg/worker/kvcache/) · per-engine client config in [pkg/worker/kvcache/inject](../pkg/worker/kvcache/inject/) · `kv_cache_*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/)
 - Related: [Model Deployment](#model-deployment) (deployments and Pods consume a pool through injection)
@@ -107,7 +107,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `model-deployment`
 - Use for: describing a serving workload's model, engine and roles; prefill/decode pairing; replica routing, status and metrics.
 - Aliases: `ModelDeployment`, `prefill`, `decode`, `router`, `vLLM`, `SGLang`, `replica`
-- Guides: [Model Deployment](modules/model-deployment/_index.md); the role contract in [Model Deployment Configuration](modules/model-deployment/deployment.md); pairing in [Prefill and Decode](modules/model-deployment/prefill-decode.md); replica selection and Router observation in [Routing](modules/model-deployment/routing.md); what a status field means in [Status](modules/model-deployment/status.md); retirement and drain in [Shutdown](modules/model-deployment/shutdown.md); in-place collective resize in [Elastic EP](modules/model-deployment/elastic-ep.md); a recorded run in [Elastic EP Walkthrough](walkthroughs/model-deployment/elastic-ep.md); fixed per-rank HTTP serving in [External DP Walkthrough](walkthroughs/model-deployment/external-dp.md).
+- Guides: [Model Deployment](modules/model-deployment/_index.md); the role contract in [Model Deployment Configuration](modules/model-deployment/deployment.md); pairing in [Prefill and Decode](modules/model-deployment/prefill-decode.md); replica selection and Router observation in [Routing](modules/model-deployment/routing.md); what a status field means in [Status](modules/model-deployment/status.md); retirement and drain in [Shutdown](modules/model-deployment/shutdown.md); in-place collective resize in [Elastic EP](modules/model-deployment/elastic-ep.md); disaggregated serving in [Prefill and Decode Walkthrough](walkthroughs/model-deployment/prefill-decode.md); a recorded run in [Elastic EP Walkthrough](walkthroughs/model-deployment/elastic-ep.md); fixed per-rank HTTP serving in [External DP Walkthrough](walkthroughs/model-deployment/external-dp.md); multi-node serving in [Multi-Host Serving Walkthrough](walkthroughs/model-deployment/multi-host.md).
 - Specs: [consolidation](../specs/2026-09-18-kvcache-and-model-deployment-consolidation.md) · [role replica admission](../specs/2026-09-19-role-replica-admission-unit.md) · [role configuration mutability](../specs/2026-10-08-model-deployment-role-mutability.md) · [P/D pairing and router](../specs/2026-09-12-model-deployment-pd-pairing-and-router.md) · [router implementations](../specs/2026-09-19-model-deployment-router-implementations.md) · [router qualification and drain](../specs/2026-10-01-s1-router-qualification-and-drain.md) · [elastic EP resize](../specs/2026-10-01-s2-elastic-ep-resize.md)
 - Code: `model_deployment_*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/) · native resize client in [pkg/worker/elasticengine](../pkg/worker/elasticengine/) · webhooks in [pkg/worker/webhooks/worker](../pkg/worker/webhooks/worker/) · router image under [pack/llm-router](../pack/llm-router/)
 - Related: [KV Cache](#kv-cache) (a deployment can attach a shared cache) · [Model Delivery](#model-delivery) (weights reach replicas through an artifact) · [Topology Aware](#topology-aware) (the placement field constrains replicas)
@@ -239,12 +239,16 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | Page | Description |
 |---|---|
 | [Walkthroughs](walkthroughs/_index.md) | Choose a complete example by module. |
-| [Device Scheduling Walkthrough](walkthroughs/devices/scheduling.md) | Follow a recorded accelerator scheduling run. |
-| [KV Cache Walkthrough](walkthroughs/kv-cache/shared-cache.md) | Create a shared cache from backend to workload. |
+| [Scheduling Walkthrough](walkthroughs/devices/scheduling.md) | Follow a recorded accelerator scheduling run. |
+| [RDMA Network Endpoints Walkthrough](walkthroughs/rdma/network-endpoints.md) | Request and verify RDMA endpoints and NUMA alignment. |
+| [Hierarchical Placement Walkthrough](walkthroughs/topology/hierarchical-placement.md) | Place serving replicas across zones and physical racks. |
+| [Shared Cache Walkthrough](walkthroughs/kv-cache/shared-cache.md) | Create a shared cache from backend to workload. |
 | [Model Prefetch Walkthrough](walkthroughs/model-delivery/prefetch.md) | Cache weights and verify captured model CR output. |
 | [Model Deployment Walkthroughs](walkthroughs/model-deployment/_index.md) | Choose a serving shape and prepare GPUs. |
+| [Prefill and Decode Walkthrough](walkthroughs/model-deployment/prefill-decode.md) | Deploy prefill and decode roles fronted by router. |
 | [Elastic EP Walkthrough](walkthroughs/model-deployment/elastic-ep.md) | Grow DP width with TP fixed and verify inference. |
 | [External DP Walkthrough](walkthroughs/model-deployment/external-dp.md) | Verify per-rank inference and Router coverage. |
+| [Multi-Host Serving Walkthrough](walkthroughs/model-deployment/multi-host.md) | Scale models across multiple GPU nodes. |
 
 ### Start here
 

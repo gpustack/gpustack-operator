@@ -1,4 +1,4 @@
-# KV Cache Walkthrough
+# Shared Cache Walkthrough
 
 Create a store, a pool, a namespace grant and a workload in that order.
 
@@ -12,8 +12,10 @@ name in the manifests below, then apply them in that order.
 - [Step 2: the pool and the grant](#step-2-the-pool-and-the-grant)
 - [Step 3: the workload](#step-3-the-workload)
 - [Step 4: high availability](#step-4-high-availability)
-- [Step 5: post-failover state](#step-5-post-failover-state)
-- [Failure modes](#failure-modes)
+- [Step 5: local disk tier](#step-5-local-disk-tier)
+- [Step 6: post-failover state](#step-6-post-failover-state)
+- [Step 7: a second team and a second domain](#step-7-a-second-team-and-a-second-domain)
+- [Troubleshooting](#troubleshooting)
 
 ## Creation order
 
@@ -34,6 +36,8 @@ same-namespace reference, so the name it accepts is a Binding's.
 
 ## Step 1: the store
 
+Replace the `kubernetes.io/os: linux` selector with the labels of the nodes that should contribute memory.
+
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: KVCacheBackend
@@ -46,7 +50,7 @@ spec:
       leader: {}
       members:
         - nodeSelector:
-            kubernetes.io/os: linux      # replace with the nodes that should contribute
+            kubernetes.io/os: linux
           medium: DRAM
           capacityPerMember: 8Gi
 ```
@@ -150,7 +154,7 @@ spec:
       replicas: 2
       instanceType: <one from kubectl get instancetype>
       resources:
-        accelerator: 1
+        accelerator: "1"
 ```
 
 `kvCache` is optional. Omit it and the deployment runs with no shared cache at all, which is the
@@ -177,12 +181,23 @@ $ kubectl -n team-a get md qwen-chat -o jsonpath='{.status.conditions[?(@.type==
 Everything so far runs one leader process that already holds a Kubernetes Lease. An update or a node
 failure takes the store's metadata with it. Add standbys with one edit:
 
-```yaml
-spec:
-  connection:
-    managed:
-      leader:
-        replicas: 3
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: KVCacheBackend
+ metadata:
+   name: mooncake-dram
+ spec:
+   type: Mooncake
+   connection:
+     managed:
+-      leader: {}
++      leader:
++        replicas: 3
+       members:
+         - nodeSelector:
+             kubernetes.io/os: linux
+           medium: DRAM
+           capacityPerMember: 8Gi
 ```
 
 **The healthy steady state now reads `3 desired / 1 ready`, and that is not a broken Deployment.**
@@ -209,7 +224,47 @@ These conditions apply at one replica too; the phase does not summarize them:
 `RolloutComplete` exists because this workload disables the deployment deadline that would normally
 answer it: that deadline requires every replica to be available, and only one ever is here.
 
-## Step 5: post-failover state
+## Step 5: local disk tier
+
+A running member group cannot gain a disk tier. Admission refuses the edit, because the members
+would have to restart to mount the directory. Declare the tier when you create a backend. This diff
+turns Step 1's manifest into a second backend that selects the nodes carrying the disk:
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: KVCacheBackend
+ metadata:
+-  name: mooncake-dram
++  name: mooncake-disk
+ spec:
+   type: Mooncake
+   connection:
+     managed:
+       leader: {}
+       members:
+         - nodeSelector:
+-            kubernetes.io/os: linux
++            kvcache: "true"
+           medium: DRAM
+           capacityPerMember: 8Gi
++          localDisks:
++            - path: /var/lib/kvcache
++              capacity: 100Gi
+```
+
+Create the directory on every selected node before you apply the backend. The published store image
+runs as uid 65532, so give the directory to that uid. The uid depends on the image; see
+[Directory requirements](../../modules/kv-cache/local-disk-tier.md#directory-requirements).
+
+```console
+$ install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
+```
+
+A pool names exactly one backend and cannot be re-pointed. Serving workloads from `mooncake-disk`
+therefore takes its own `KVCachePool` and Binding. The tier writes in buckets, so a small cache can
+show an empty tier while it works; see [Bucket writes](../../modules/kv-cache/local-disk-tier.md#bucket-writes).
+
+## Step 6: post-failover state
 
 **A failover keeps nothing in memory.** A standby holds no data, so the replica that takes over knows
 none of the objects held in member memory and rebuilds from member remounts alone; a single leader
@@ -220,26 +275,112 @@ misses afterwards. Plan for a cold cache after every failover and every leader r
 restoring a snapshot can make the cache serve another key's bytes instead of a miss.
 [High availability](../../modules/kv-cache/leader.md#high-availability) says why.
 
-## Failure modes
+## Step 7: a second team and a second domain
 
-**A published upstream store image, under high availability.** No published `kvcacheai/mooncake`
-image carries a leadership backend: the leader answers `UNAVAILABLE_IN_CURRENT_MODE` and runs as a
-permanent standby, and members answer `Invalid HA backend entry` and CrashLoopBackOff. `spec.image`
-and every `members[].image` need a build that has one. Leaving them unset is the simplest way.
+Each Binding is one ceiling and one reuse domain. To give a second team cache capacity, create a
+Binding in its namespace:
 
-**Expecting a failover or a restart to keep the cache.** Neither does: the new leader knows none of
-the objects held in member memory, so every lookup for one misses until an engine writes it again.
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCachePoolBinding
+metadata:
+  name: team-b
+  namespace: team-b
+spec:
+  poolRef:
+    name: shared-dram
+  quota:
+    ceiling: 8Gi
+  domain:
+    name: llama-8b-v1
+    blockSize: 16
+    dtype: bfloat16
+```
 
-**Reading `3/1` as a fault.** It is the designed steady state under high availability, and the one
-reading on this page most likely to be escalated as an outage.
+A namespace that runs a different dtype needs a second Binding, because a domain is immutable and
+holds one dtype. Mixing dtypes in one domain can return wrong blocks silently. The Binding below
+serves an `fp8_e4m3` deployment in `team-a`. Replace the instance type as in Step 3.
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCachePoolBinding
+metadata:
+  name: qwen-fp8
+  namespace: team-a
+spec:
+  poolRef:
+    name: shared-dram
+  quota:
+    ceiling: 4Gi
+  domain:
+    name: qwen-fp8-v1
+    blockSize: 16
+    dtype: fp8_e4m3
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen-chat-fp8
+  namespace: team-a
+spec:
+  model:
+    name: Qwen/Qwen2.5-7B-Instruct
+  engine:
+    name: vLLM
+    version: "0.29.0"
+  kvCache:
+    poolRef:
+      name: qwen-fp8
+  roles:
+    - name: server
+      replicas: 1
+      instanceType: <one from kubectl get instancetype>
+      resources:
+        accelerator: "1"
+```
+
+The operator renders `--kv-cache-dtype fp8_e4m3` from the Binding onto every role. A role that sets
+that flag itself is refused. See [Engine dtype](../../modules/kv-cache/pool.md#engine-dtype).
+
+**The three ceilings ask for 20Gi against a pool `quota.total` of 16Gi.** The pool reports
+`QuotaWithinTotal=False` with reason `Oversubscribed`. That is not a fault: a ceiling is an ask, and
+the store recuts each grant against the capacity it can serve, in proportion to what each Binding
+asked. `status.effectiveQuota` on each Binding shows the grant. See
+[Ceiling and grant](../../modules/kv-cache/pool.md#ceiling-and-grant).
+
+**A domain separates cached blocks. It does not wall off a tenant.** A Binding is not an enforcement
+boundary: a workload that knows another domain's name can still read and write that domain. Isolation
+of reuse needs a master that keeps a tenant ledger (the Step 1 default) and an engine that forwards
+the injected tenant. See [Limitations](../../modules/kv-cache/pool.md#limitations) and
+[Tenant compatibility](../../modules/kv-cache/injection.md#tenant-compatibility).
+
+## Troubleshooting
+
+| Symptom | Condition / Reason | Check & Mitigation |
+|---|---|---|
+| `KVCacheBackend` stuck in `Provisioning` or `Error` | `LeaderAvailable=False` | Leader Deployment unready, image missing election backend, or external endpoint address unreachable |
+| `KVCacheBackend` shows `Degraded` | `MembersMounted` shortfall (`SegmentsShort`, `NoSegments`) | DaemonSet member Pods failing to mount or allocate memory/disk segments; check node capacity and daemon logs |
+| `KVCachePool` shows `Error` | `BackendResolved=False` / `CapacityAllocatable=False` | Referenced backend does not exist or has zero allocatable capacity |
+| `KVCachePool` `QuotaLedgerAvailable=False` | `MultiTenancyDisabled` | Backend explicitly set `multiTenancy: false`; ceiling quotas are intentionally not enforced |
+| `KVCachePoolBinding` `effectiveQuota: 0` | `QuotaGranted=False/ZeroGranted` | The master grants this domain nothing. Read the pool's `CapacityAllocatable`: `NothingToAllocate` means no member has mounted yet, and a restarted master can take roughly 30 s to remount its segments. Otherwise a proportional recut left this domain no share |
+| Pool reports oversubscribed | `QuotaWithinTotal=False/Oversubscribed` | The Bindings' ceilings sum past the pool's `quota.total`. This is not a fault: grants are recut in proportion and shown in each `status.effectiveQuota`. Lower a ceiling or raise `quota.total` for full grants |
+| Binding refused at apply with `Duplicate` on `spec.domain.name` | Domain already registered on the same master | Another Binding holds the name; an omitted name is `default`. Give each Binding a unique `domain.name` |
+| Two Bindings report one domain | `DomainExclusive=False/DomainClaimedByMultipleBindings` | Two creates raced past admission; delete one of them |
+| Member Pod stuck with `FailedMount ... hostPath type check failed` | Pod event | The tier directory does not exist on that node; create it as in Step 5 |
+| Member Pod runs but never becomes Ready | `MembersMounted=False` (`NoSegments`, or `MemberCrashLooping` if the container exits), or a `CAPACITY` below the expected figure | The directory exists but the image's user cannot write it; the container log says `no write permission on directory`. Run `install -d -o 65532 -g 0 -m 0750 <path>` for the default image. See [Directory requirements](../../modules/kv-cache/local-disk-tier.md#directory-requirements) |
+| Member init container restarts | `MembersMounted=False/MemberInitCrashLooping` | The directory-survey init container restarted; the condition message gives the restart count, exit code and termination message. The survey runs `sh -c`, so the member image needs a shell. An unwritable directory does not cause this |
+| Local disk tier reports preexisting content | `TierWasEmpty=False/PreexistingContent` | The directory held files from an earlier backend. Nothing was removed; empty it yourself. `cleanAfterDelete: true` empties it only when this backend is deleted |
+| HA Leader shows `3 desired / 1 ready` | Expected steady state | Only elected active leader is Ready; 2 standby leader replicas remain unready until failover |
+| Deletion of `KVCachePoolBinding` blocked | `Releasable=False/HeldByWorkloads` | Active ModelDeployments or Pods reference this binding; delete client workloads first |
 
 ---
 
 **See also** — [KV Cache Backend](../../modules/kv-cache/backend.md) (every field of the store, and what status reports) ·
 [KV Cache Leader](../../modules/kv-cache/leader.md) (the election, why there is no snapshot, and the member addressing choice in full) ·
 [KV Cache Pool](../../modules/kv-cache/pool.md) (quota, domains and what a full quota does) ·
+[KV Cache Local Disk Tier](../../modules/kv-cache/local-disk-tier.md) (directory, bucket and cleanup rules) ·
 [Model Deployment](../../modules/model-deployment/deployment.md) (roles, prefill/decode, rollout) ·
 [Model Deployment Prefill and Decode](../../modules/model-deployment/prefill-decode.md) (router, transfer) ·
 [KV Cache Injection](../../modules/kv-cache/injection.md) (what a Pod actually receives)
 
-**Next** → [KV Cache Pool](../../modules/kv-cache/pool.md) — the quota this walkthrough set once and did not explain.
+**Next** → [Model Prefetch Walkthrough](../model-delivery/prefetch.md) — cache weights on GPU nodes before serving.

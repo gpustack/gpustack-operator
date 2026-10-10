@@ -218,6 +218,10 @@ three durations must be positive.
 Set `requiredLevel` on a role to require each replica's Pod group to fit in one domain at that level:
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: zoned-deployment
 spec:
   roles:
     - name: decode
