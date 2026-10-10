@@ -15,7 +15,9 @@
 # Environment: A kind (or other) cluster installed from this chart with modelManager.enabled, at least
 #              two workers whose CSINode lists the plugin's driver (four gives the sharpest baseline),
 #              a materialized scheduling chain with an InstanceType (run case-1 first), and the stock
-#              python image pullable. NO GPU. Exits 2, NOTHING WAS VERIFIED, with fewer than two such
+#              python image pullable. The eligible workers must share one CPU model (one
+#              ResourceFlavor): the case keeps the largest such group, since TAS ranks nodes only
+#              inside the flavor Kueue picked first. NO GPU. Exits 2, NOTHING WAS VERIFIED, with fewer than two such
 #              workers, without the plugin, or without an InstanceType. The Kueue gate
 #              TASRespectNodeAffinityPreferred is read, not set: the case prints it, and with the gate
 #              off the hot-node row is expected to FAIL, which is how the instrument is checked.
@@ -216,7 +218,24 @@ for n in $(model_workers); do
   kubectl get csinode "$n" -o jsonpath='{.spec.drivers[*].name}' 2>/dev/null | tr ' ' '\n' \
     | grep -qx model.csi.gpustack.ai && POOL+=("$n")
 done
-[ "${#POOL[@]}" -ge 2 ] || { echo "[case-107] needs two workers running the plugin; NOTHING WAS VERIFIED"; exit 2; }
+# One pool, one ResourceFlavor. Kueue picks the flavor first and TAS ranks nodes only inside it, so a
+# preferred term naming a node of another flavor can never win, and the 1/K baseline below only
+# holds when every eligible node can take every consumer. The operator keys a flavor on the node's
+# CPU identity, so group by the NFD cpu-model triple and keep the largest group.
+cpu_id() {
+  kubectl get node "$1" -o go-template='{{index .metadata.labels "feature.node.kubernetes.io/cpu-model.vendor_id"}}/{{index .metadata.labels "feature.node.kubernetes.io/cpu-model.family"}}/{{index .metadata.labels "feature.node.kubernetes.io/cpu-model.id"}}{{"\n"}}' 2>/dev/null
+}
+BEST="" BEST_N=0
+for id in $(for n in "${POOL[@]}"; do cpu_id "$n"; done | sort -u); do
+  c=0; for n in "${POOL[@]}"; do [ "$(cpu_id "$n")" = "$id" ] && c=$((c + 1)); done
+  [ "$c" -gt "$BEST_N" ] && BEST="$id" BEST_N="$c"
+done
+if [ "$BEST_N" -ge 2 ] && [ "$BEST_N" -lt "${#POOL[@]}" ]; then
+  ALL=("${POOL[@]}"); POOL=()
+  for n in "${ALL[@]}"; do [ "$(cpu_id "$n")" = "$BEST" ] && POOL+=("$n"); done
+  echo "[case-107] ${#ALL[@]} plugin workers span several CPU models (so several ResourceFlavors); keeping the ${#POOL[@]} of ${BEST}: ${POOL[*]}"
+fi
+[ "${#POOL[@]}" -ge 2 ] || { echo "[case-107] needs two workers of one CPU model running the plugin; NOTHING WAS VERIFIED"; exit 2; }
 K="${#POOL[@]}"
 [ -n "$IT" ] || IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
 [ -n "$IT" ] || { echo "[case-107] no InstanceType; run case-1 first; NOTHING WAS VERIFIED" >&2; exit 2; }

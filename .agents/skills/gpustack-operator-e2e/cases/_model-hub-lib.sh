@@ -235,11 +235,17 @@ plugin_pod() {
     --field-selector "spec.nodeName=$1" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
 }
 
+# plugin_metrics NODE: the plugin's /metrics on NODE, read from inside its own container. The API
+# server's pod proxy is not an option: the chart's model-manager NetworkPolicy admits only the
+# plugins, the worker and the configured scrapers on the secure port, and drops the apiserver on a
+# CNI that enforces it. The loopback is never filtered, and the image carries curl.
+plugin_metrics() {
+  kubectl -n "$SYSTEM_NS" exec "$(plugin_pod "$1")" -c main -- curl -sk -m 20 https://127.0.0.1:32444/metrics 2>/dev/null
+}
+
 # plugin_metric NODE METRIC: the plugin's metric on NODE, summed over its labels.
 plugin_metric() {
-  local pod
-  pod="$(plugin_pod "$1")"
-  kubectl get --raw "/api/v1/namespaces/${SYSTEM_NS}/pods/https:${pod}:32444/proxy/metrics" 2>/dev/null \
+  plugin_metrics "$1" \
     | awk -v m="$2" '$1 ~ "^"m"({|$)" {s += $2} END {printf "%d", s}'
 }
 
