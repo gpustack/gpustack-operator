@@ -69,27 +69,27 @@ spec:
         - -c
         - |
           set -euo pipefail
-          set -- --tensor-parallel-size 8 \
-            --pipeline-parallel-size "${GPUSTACK_REPLICA_SIZE}" \
-            --distributed-executor-backend ray \
-            --nnodes "${GPUSTACK_REPLICA_SIZE}" \
-            --node-rank "${GPUSTACK_MEMBER_INDEX}" \
-            --master-addr "${GPUSTACK_REPLICA_LEADER_ADDRESS}"
-          if [ "${GPUSTACK_MEMBER_INDEX}" -gt 0 ]; then
-            set -- "$@" --headless
+          if [ "${GPUSTACK_MEMBER_INDEX}" -eq 0 ]; then
+            ray start --head --port=6379 --disable-usage-stats
+            exec vllm serve /models --served-model-name deepseek-v2-lite-chat \
+              --host 0.0.0.0 --port 8000 \
+              --tensor-parallel-size 8 \
+              --pipeline-parallel-size "${GPUSTACK_REPLICA_SIZE}" \
+              --distributed-executor-backend ray
+          else
+            exec ray start --address="${GPUSTACK_REPLICA_LEADER_ADDRESS}:6379" --block
           fi
-          exec vllm serve /models --served-model-name deepseek-v2-lite-chat \
-            --host 0.0.0.0 --port 8000 "$@"
 ```
 
 The operator does not compose multi-node arguments. A multi-host role takes over the command line with
 `command`, and the script reads the three variables the operator injects into every member.
 This snippet illustrates how the operator wires member coordinates to the entrypoint script.
 
-Production multi-host engines typically use Ray (`--distributed-executor-backend ray`) or torchrun
-(`external_launcher`). Member `m0` serves the API; other members run workers without exposing endpoints.
-A role with `command` reports `status.roles[].unmanaged: true`, because the operator renders no engine
-argument for it. See [the override tiers](../../modules/model-deployment/deployment.md#the-three-override-tiers).
+Production multi-host engines typically use Ray (`--distributed-executor-backend ray`).
+Member `m0` initializes the Ray head cluster and serves the API; subordinate members join the Ray cluster
+with `ray start --address=... --block`. A role with `command` reports `status.roles[].unmanaged: true`,
+because the operator renders no engine argument for it. See
+[the override tiers](../../modules/model-deployment/deployment.md#the-three-override-tiers).
 
 Apply the deployment manifest:
 

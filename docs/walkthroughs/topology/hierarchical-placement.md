@@ -192,13 +192,10 @@ The profile is a hash of the ordered level keys, and the keys did not change.
 The node keeps its profile, so the worker creates no flavor and applies no hold.
 The node carries the new rack value after NFD publishes it.
 
-A change to the ordered level keys is a different operation. It produces a new profile, a new Kueue
-`Topology` and new `ResourceFlavor` objects. If the new plan drops a flavor that still has reservations,
-the worker sets `HoldAndDrain` on the managed ClusterQueue. It waits for zero reservations, switches
-the flavor plan, and restores the previous stop policy.
-
-Kueue evicts and readmits the affected Workloads, so serving can be interrupted.
-Read [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy) before you edit `levels`.
+A change to the ordered level keys is a different operation that can evict and readmit workloads,
+unlike the revision-only change in Step 5. See
+[Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy) for the
+`HoldAndDrain` migration sequence and its interruption impact before editing `levels`.
 
 ## Troubleshooting
 
