@@ -87,7 +87,7 @@ kubectl -n "$OPERATOR_NAMESPACE" exec "$OPERATOR_POD" -c "$OPERATOR_CONTAINER" -
 ```
 
 The `dev` tag can move. Each walkthrough's validation record identifies the binary and image used.
-The serving manifests name the runner by tag. Each validation record lists the digest that was observed.
+The serving manifests name the runner by tag. Validation records list the observed image tags or digests.
 No engine packages were replaced during validation.
 
 ---
