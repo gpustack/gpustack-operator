@@ -26,12 +26,22 @@ order:
     - architecture
     - vendor-prerequisites
   /docs/walkthroughs/:
-    - scheduling
-    - network-endpoints
-    - hierarchical-placement
-    - shared-cache
-    - prefetch
+    - devices
+    - rdma
+    - topology
+    - kv-cache
+    - model-delivery
     - model-deployment
+  /docs/walkthroughs/devices/:
+    - scheduling
+  /docs/walkthroughs/rdma/:
+    - network-endpoints
+  /docs/walkthroughs/topology/:
+    - hierarchical-placement
+  /docs/walkthroughs/kv-cache/:
+    - shared-cache
+  /docs/walkthroughs/model-delivery/:
+    - prefetch
   /docs/walkthroughs/model-deployment/:
     - prefill-decode
     - elastic-ep
@@ -95,10 +105,15 @@ order:
     - internals
 labels:
   /docs/walkthroughs/: Walkthroughs
+  /docs/walkthroughs/devices/: Devices
   /docs/walkthroughs/devices/scheduling/: Scheduling
+  /docs/walkthroughs/rdma/: RDMA
   /docs/walkthroughs/rdma/network-endpoints/: RDMA network endpoints
+  /docs/walkthroughs/topology/: Topology
   /docs/walkthroughs/topology/hierarchical-placement/: Hierarchical placement
+  /docs/walkthroughs/kv-cache/: KV Cache
   /docs/walkthroughs/kv-cache/shared-cache/: Shared cache
+  /docs/walkthroughs/model-delivery/: Model Delivery
   /docs/walkthroughs/model-delivery/prefetch/: Model prefetch
   /docs/walkthroughs/model-deployment/: Model deployment
   /docs/walkthroughs/model-deployment/prefill-decode/: Prefill and decode

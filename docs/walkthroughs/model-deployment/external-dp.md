@@ -325,7 +325,9 @@ The corrected run used binary `20d674b7f8c1e1d4c22b91a09fd178b9738d70be` from
 `thxcode/gpustack-operator:dev-20d674b7@sha256:43c14087fd3391e4bf4a3327f246053d9e59b2feb684cb792f63a2f0db659fbd`.
 That test image replaced the operator binary on the pinned official base. It retained the packaged vendor assets.
 
-The official runner below contained vLLM 0.29.0 and Ray 2.54.0, with no package replacements.
+The official runner below contained vLLM 0.29.0 and Ray 2.54.0, with no package replacements:
+`gpustack/runner:cuda13.0-vllm0.29.0@sha256:1c8267252069b165fb3e19875f5697669ba8e7525fc6eb142b781165ad5730a3`.
+The router image was `gpustack/llm-router:dev@sha256:98e70d944c6c2e3a1523ecddcb2d2c161eb32d786db9fb42fa103dbf072bbd92`.
 Its CuPy installation contained only `cupy-cuda13x` 14.2.0.
 
 The initial operator retained `member-index=0` and registered only member 0.

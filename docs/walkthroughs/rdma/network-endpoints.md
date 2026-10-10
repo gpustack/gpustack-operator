@@ -22,7 +22,9 @@ Device Manager discovers network interfaces from `/sys/class/net`, resolves boun
 verifies link status before publishing endpoints.
 
 When at least one endpoint is active, the node receives the `feature.gpustack.ai/rdma.capable=true`
-label. Device Manager registers three extended resource keys with the kubelet:
+label (see [Network Topology](../../modules/rdma/network-topology.md)).
+Device Manager registers three extended resource keys with the kubelet
+([The RDMA resource keys](../../modules/rdma/network-topology.md#the-rdma-resource-keys)):
 
 | Resource key | Mode | Quantity `1` represents | Capacity per port |
 |---|---|---|---|
@@ -70,11 +72,8 @@ spec:
           device.gpustack.ai/rdma.shared: "1"
 ```
 
-The allocated container receives:
-
-- The character device `/dev/infiniband/uverbs<N>` for each granted port;
-- The connection manager device `/dev/infiniband/rdma_cm`;
-- The environment variable `NCCL_IB_HCA` containing the comma-separated granted device names.
+The allocated container receives character devices and `NCCL_IB_HCA` configuration
+(see [Injected devices](../../modules/rdma/operations.md#injected-devices)).
 
 Prefer `device.gpustack.ai/rdma.shared` when a container needs a single endpoint. Use the exclusive
 key `device.gpustack.ai/rdma` when requesting multiple distinct network endpoints.
@@ -82,7 +81,8 @@ key `device.gpustack.ai/rdma` when requesting multiple distinct network endpoint
 ## Step 2: NUMA alignment with kubelet
 
 Kubernetes does not pair specific accelerators with adjacent network adapters by default.
-Enable NUMA alignment by setting the TopologyManager policy in `/var/lib/kubelet/config.yaml`:
+Enable NUMA alignment by setting the TopologyManager policy in `/var/lib/kubelet/config.yaml`
+(see [Enabling NUMA alignment on the kubelet](../../modules/rdma/operations.md#enabling-numa-alignment-on-the-kubelet)):
 
 ```diff
  apiVersion: kubelet.config.k8s.io/v1beta1
@@ -144,7 +144,8 @@ spec:
 
 For the `RDMA` protocol, the operator translates `interface: 1` into `device.gpustack.ai/rdma.shared: 1`.
 When `interface` is greater than 1, it renders `device.gpustack.ai/rdma: N`.
-Each allocated endpoint then corresponds to an independent physical adapter.
+Each allocated endpoint then corresponds to an independent physical adapter
+(see [A minimal deployment](../../modules/model-deployment/deployment.md#a-minimal-deployment)).
 
 The same request without `router`, `kvTransfer` or a cache backend that uses RDMA fails at admission with
 "no effective RDMA or EFA transfer leg uses the requested interfaces".
@@ -176,8 +177,8 @@ The transport is editable on a running backend:
 +          fabricInterfaceCount: 2
 ```
 
-Member DaemonSet Pods automatically receive `hostNetwork: true`, `dnsPolicy: ClusterFirstWithHostNet`,
-the required `device.gpustack.ai/rdma` limits, and the `IPC_LOCK` and `SYS_RESOURCE` capabilities.
+Member DaemonSet Pods automatically receive the network devices, host privileges, and limits
+required for high-performance transport (see [The members](../../modules/kv-cache/backend.md#the-members)).
 
 ## Step 5: AWS EFA differences
 

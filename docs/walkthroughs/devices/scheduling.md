@@ -332,7 +332,8 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-The worker writes one NodeFeature per node, in `gpustack-system`, named `<node>-gpustack-worker`.
+The worker writes one NodeFeature per node, in `gpustack-system`, named `<node>-gpustack-worker`
+(see [Device Scheduling](../../modules/devices/scheduling.md)).
 This is the one for `node-a10g`, which carries the managed label and the CPU keys from the Node above:
 
 ```yaml

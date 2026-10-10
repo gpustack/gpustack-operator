@@ -83,10 +83,13 @@ spec:
 ```
 
 The operator does not compose multi-node arguments. A multi-host role takes over the command line with
-`command`, and the script reads the three variables the operator injects into every member. Member
-`m0` serves the API. The other members start with `--headless`. A role with `command` reports
-`status.roles[].unmanaged: true`, because the operator renders no engine argument for it. See
-[the override tiers](../../modules/model-deployment/deployment.md#the-three-override-tiers).
+`command`, and the script reads the three variables the operator injects into every member.
+This snippet illustrates how the operator wires member coordinates to the entrypoint script.
+
+Production multi-host engines typically use Ray (`--distributed-executor-backend ray`) or torchrun
+(`external_launcher`). Member `m0` serves the API; other members run workers without exposing endpoints.
+A role with `command` reports `status.roles[].unmanaged: true`, because the operator renders no engine
+argument for it. See [the override tiers](../../modules/model-deployment/deployment.md#the-three-override-tiers).
 
 Apply the deployment manifest:
 
