@@ -202,16 +202,16 @@ Read [Change a live hierarchy](../../modules/topology/operations.md#change-a-liv
 
 ## Troubleshooting
 
+For general failure surfaces (including `AwaitingQueueStatus`, `HoldAndDrain` flavor migration, and
+domain capacity fragmentation), see [Topology-Aware Scheduling Failure Surfaces](../../modules/topology/scheduling.md#failure-surfaces)
+and [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
+
 | Condition / Symptom | Status / Reason | Root cause & Mitigation |
 |---|---|---|
 | `TopologySource` `Ready=False` | `InvalidHierarchy` / `SnapshotInvalid` | Label hierarchy invalid (child key must have unique parent value); fix snapshot syntax or missing node entries |
 | `TopologySource` `Ready=False` | `OwnershipConflict` | Multiple writable sources target the same node; adjust node selectors to ensure disjoint sets |
 | `TopologySource` `Valid=False` | `ConfigMapReadFailed` | Verify ConfigMap name and namespace match the worker installation |
 | Node Topology Profile falls back to single-level `hostname` | Ambiguous source ownership | Node selected by 0 or multiple Ready sources; check node selectors across all sources |
-| Workloads are evicted after a change of level keys | ClusterQueue `stopPolicy: HoldAndDrain` while the plan migrates | The worker holds and drains the managed ClusterQueue, switches the flavor plan, and restores the previous stop policy. Kueue readmits the evicted Workloads. Read `TopologyReady` and the queue's migration annotations |
-| Migration does not finish | `TopologyReady=False` on the ClusterQueue | A replacement flavor is missing, an object drifted, too many flavors are required, or quota cannot be conserved. The last complete plan stays in place. Read the reason before you change anything else |
-| `ClusterQueue` `TopologyReady=Unknown` | `AwaitingQueueStatus` | Kueue has not written status for current generation; check Kueue controller health and `Active=True` |
-| Deployment remains `Pending` despite total cluster capacity being sufficient | Domain capacity fragmentation | No single topology domain (zone/rack) can satisfy the whole replica group; check Workload `topologyRequest` and profiles |
 | Multi-role deployment has 1 Workload reserved but Pod not bound | Joint admission gang hold | First role fits in domain, but held until secondary role (prefill/decode) secures domain capacity; check other roles |
 
 ---

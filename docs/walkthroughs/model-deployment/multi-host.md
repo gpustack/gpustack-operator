@@ -71,7 +71,7 @@ spec:
           set -euo pipefail
           set -- --tensor-parallel-size 8 \
             --pipeline-parallel-size "${GPUSTACK_REPLICA_SIZE}" \
-            --distributed-executor-backend mp \
+            --distributed-executor-backend ray \
             --nnodes "${GPUSTACK_REPLICA_SIZE}" \
             --node-rank "${GPUSTACK_MEMBER_INDEX}" \
             --master-addr "${GPUSTACK_REPLICA_LEADER_ADDRESS}"
@@ -199,10 +199,9 @@ kubectl get devices -o json | jq '[.items[].status.groups[].accelerators[] |
 |---|---|---|
 | Deployment stuck in `Starting`, Kueue composes no Workload | `QuotaReserved=False/PodGroupIncomplete` | Fewer instances exist than the role declares. Read the message for the counts, then check the Pods that are missing or unschedulable |
 | An instance was lost and is being rebuilt | `ReplicasUpToDate=False/ReplacementInProgress` | A replica disappeared for a reason outside the spec: a drained node, Kueue reclaiming quota, an eviction or a manual delete. The Pods of an instance share one lifecycle, so the whole instance is rebuilt. Check the node and Kueue events |
-| Workload no longer asks for quota | `QuotaReserved=False/Parked` | The Workload was deactivated. Free capacity, then reactivate or recreate it. Waiting does not help |
+| Replicas wait for quota | `QuotaReserved=False/Pending` | The ClusterQueue has insufficient capacity to admit the replica. Free capacity, raise the pool quota, or reduce per-member accelerator requests |
 | Secondary worker cannot reach the leader | Engine logs on `m1` | Check that the headless Service resolves `GPUSTACK_REPLICA_LEADER_ADDRESS` and that no NetworkPolicy blocks the engine's distributed port |
 | Engine errors on parallel size | Engine startup log | Check that `--tensor-parallel-size` equals the accelerators per member and that the pipeline degree equals `size` |
-| Pods stay `Pending` | Kueue Workload events | The ClusterQueue has too little quota. Raise the pool quota or lower the per-member accelerator request |
 
 ---
 
