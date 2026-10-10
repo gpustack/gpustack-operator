@@ -92,7 +92,7 @@ wait_phase() { # want bound -> phase
 }
 # hits NODE: the plugin's mount hits on NODE, the one labeled series of mounts_total.
 hits() {
-  kubectl get --raw "/api/v1/namespaces/${SYSTEM_NS}/pods/https:$(plugin_pod "$1"):32444/proxy/metrics" 2>/dev/null \
+  plugin_metrics "$1" \
     | awk '$1 == "gpustack_model_manager_mounts_total{result=\"hit\"}" {printf "%d", $2}'
 }
 probe() { kubectl -n "$NS" exec "${P}-probe" -- curl -sS -m 120 "$@" 2>/dev/null; }

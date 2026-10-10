@@ -81,7 +81,7 @@ probe() { kubectl -n "$NS" exec "${P}-probe" -- curl -sS -m 120 "$@" 2>/dev/null
 
 echo "== fixtures: a probe, a claim holding Qwen2.5-0.5B-Instruct, the token =="
 kubectl -n "$NS" run "${P}-probe" --image="$PROBE_IMAGE" --labels="$LABEL" --restart=Never --command -- sleep 7200 >/dev/null
-kubectl -n "$NS" create secret generic "${P}-token" --from-file=token=/dev/stdin --dry-run=client -o yaml <<<"$HF_TOKEN_READONLY" \
+printf '%s' "$HF_TOKEN_READONLY" | kubectl -n "$NS" create secret generic "${P}-token" --from-file=token=/dev/stdin --dry-run=client -o yaml \
   | kubectl label --local -f - "$LABEL" -o yaml | kubectl apply -f - >/dev/null
 kubectl apply -f - >/dev/null <<YAML
 apiVersion: v1

@@ -440,6 +440,18 @@ trap 'exit 143' TERM
 
 tas_zone_shape
 
+# Every proof below places or labels on zoned Nodes. A cluster whose schedulable Linux Nodes carry no
+# zone label cannot carry any of them, so say so now, naming the measured shape, before a label or
+# a fixture is written. Reaching the zone selection below with none made jq iterate a null and the
+# case aborted with no row at all, which reads as neither a pass nor a fail.
+if [ "$TAS_NODES" -eq 0 ]; then
+  record SKIP "the cluster has schedulable Linux Nodes that carry a zone label" \
+    "0 Nodes qualify (zones: ${TAS_ZONES_SUMMARY:-none}); every source-to-profile and placement proof here needs zoned Nodes"
+  print_rows
+  echo "[case-87] nothing was verified: the cluster has no zoned Node"
+  exit 0
+fi
+
 # The Nodes this case labels and places on are the ones tas_zone_shape counts: Linux, zoned,
 # schedulable, and carrying no NoSchedule or NoExecute taint. Selecting on unschedulable alone let a
 # tainted control-plane with no zone label in, and the writing sources then fed its null zone to jq
@@ -467,7 +479,7 @@ NATIVE_NODES="$(kubectl get nodes -o json | jq -r "
   [.items
    | map(${TAS_NODE_JQ})
    | group_by(.metadata.labels[\"topology.kubernetes.io/zone\"])[]] as \$zones |
-  (\$zones[0][] | .metadata.name), (\$zones[1][0] | .metadata.name)" | sort -u)"
+  ((\$zones[0] // [])[] | .metadata.name), (\$zones[1][0]? // empty | .metadata.name)" | sort -u)"
 while read -r node; do
   [ -n "$node" ] && kubectl label node "$node" topology.gpustack.ai/e2e-native=enabled --overwrite >/dev/null
 done <<EOF

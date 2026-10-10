@@ -317,7 +317,7 @@ scan() { # everything the token must never reach
   kubectl get nodemodelstores.worker.gpustack.ai -o json 2>/dev/null
   kubectl get modelartifacts.worker.gpustack.ai -A -o json 2>/dev/null
   for w in "$W1" "$W2"; do
-    kubectl get --raw "/api/v1/namespaces/${SYSTEM_NS}/pods/https:$(plugin_pod "$w"):32444/proxy/metrics" 2>/dev/null
+    plugin_metrics "$w"
   done
 }
 { scan; printf 'planted %s\n' "$TOKEN"; } >"$SCRATCH/planted"
