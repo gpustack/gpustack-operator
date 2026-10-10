@@ -14,6 +14,9 @@ runtime isolation method depend on the manufacturer.
 physically partitioned requests. [Device Discovery](discovery.md) explains
 how the per-node `Devices` record connects discovery to allocation.
 
+Follow [Scheduling Walkthrough](../../walkthroughs/devices/scheduling.md) for
+end-to-end device allocation and Kueue queuing.
+
 ## Device operations
 
 Check a node before installation with [Preflight Operations](preflight.md). If you

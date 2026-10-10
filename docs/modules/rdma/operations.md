@@ -271,8 +271,7 @@ that moves KV over EFA. A role naming no image gets the runner image, whatever i
 Derive it from the runner image the deployment would otherwise run:
 
 ```dockerfile
-# Pin the base by digest.
-FROM gpustack/runner:cuda13.0-vllm0.29.0@sha256:<digest>
+FROM gpustack/runner:cuda13.0-vllm0.29.0
 SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 ARG AWS_EFA_VERSION=1.44.0
 RUN curl --retry 3 --retry-connrefused -fL "https://efa-installer.amazonaws.com/aws-efa-installer-${AWS_EFA_VERSION}.tar.gz" | tar -zx -C /tmp \

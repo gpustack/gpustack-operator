@@ -16,6 +16,7 @@ Follow the steps to verify both engine inference and Router coverage.
 - [Understand the scaling limits](#understand-the-scaling-limits)
 - [Step 5: inspect and release the application](#step-5-inspect-and-release-the-application)
 - [Validation record](#validation-record)
+- [Troubleshooting](#troubleshooting)
 
 ## Deployment shape
 
@@ -69,7 +70,7 @@ spec:
       replicas: 1
       size: 2
       instanceType: elastic-cpu-gpu
-      image: gpustack/runner:cuda13.0-vllm0.29.0@sha256:1c826749ed16fbd9f9594d7a49f774904662d9c46231e08e32b494e8bac4ee91
+      image: gpustack/runner:cuda13.0-vllm0.29.0
       imagePullPolicy: IfNotPresent
       resources:
         accelerator: "2"
@@ -92,7 +93,7 @@ spec:
         - allgather_reducescatter
   router:
     name: vllm-router
-    image: gpustack/llm-router:v0.2.0@sha256:98e70d94351baa9dc13897a545aff5c83ffac5e89ab810e204bc894b519d96db
+    image: gpustack/llm-router:v0.2.0
     extraArgs:
       - --policy
       - round_robin
@@ -278,7 +279,8 @@ A Router in front of that Internal endpoint does not turn the engine into Extern
 
 Increasing `roles[].replicas` creates additional complete groups with their existing TP/DP/EP shape.
 That operation does not enlarge an existing group's EP world and was not measured in this External run.
-The ordinary role's `size` cannot be changed after creation.
+Changing `size` replaces whole replicas. It does not resize a running DP group.
+See [Rollout behavior](../../modules/model-deployment/deployment.md#rollout-behavior).
 Hybrid and multiple HTTP ports per Pod are outside this walkthrough.
 
 ## Step 5: inspect and release the application
@@ -323,7 +325,9 @@ The corrected run used binary `20d674b7f8c1e1d4c22b91a09fd178b9738d70be` from
 `thxcode/gpustack-operator:dev-20d674b7@sha256:43c14087fd3391e4bf4a3327f246053d9e59b2feb684cb792f63a2f0db659fbd`.
 That test image replaced the operator binary on the pinned official base. It retained the packaged vendor assets.
 
-The official runner below contained vLLM 0.29.0 and Ray 2.54.0, with no package replacements.
+The official runner below contained vLLM 0.29.0 and Ray 2.54.0, with no package replacements:
+`gpustack/runner:cuda13.0-vllm0.29.0`.
+The router image was `gpustack/llm-router:v0.2.0`.
 Its CuPy installation contained only `cupy-cuda13x` 14.2.0.
 
 The initial operator retained `member-index=0` and registered only member 0.
@@ -339,6 +343,16 @@ Each returned eight completion tokens; both streams ended with `data: [DONE]`.
 
 The correction removed the leader restriction only from eligible External Server endpoints.
 Both engine Pods remained running through the Operator upgrade. The Router Pod restarted with its corrected selector.
+
+## Troubleshooting
+
+| Symptom | Condition / Reason | Check & Mitigation |
+|---|---|---|
+| No router Pod exists | `RouterReady=False/RenderFailed` | The operator refused to render the router from the spec, so it creates no router Pod for it. The condition message carries the refusal, such as roles that serve on different ports. Fix `spec.router` or the roles. See [Routing](../../modules/model-deployment/routing.md#which-pods-receive-traffic) and [The router block](../../modules/model-deployment/prefill-decode.md#the-router-block) |
+| Router sends all traffic to rank 0 only | None; the leader-only endpoint selector still applies | Check that the operator build includes the External selector fix: the initial build in the validation record registered only member 0. Check that `parallelism.loadBalance` reads `External` in the role status. Check that the Router's `/observer/endpoints` lists both ranks. See [Routing](../../modules/model-deployment/routing.md#which-pods-receive-traffic) |
+| DP ranks fail distributed initialization | None; read the engine logs of both members | Each member reaches the leader at `<deployment>-<role>-r<replica>-m0.<deployment>-<role>-r<replica>`. Check `$(GPUSTACK_REPLICA_LEADER_ADDRESS)` in `--data-parallel-address`, distinct rank values, matching DP sizes, and the DP RPC port between the Pods |
+| Direct HTTP calls succeed but Router calls fail | `endpoints.eligible` is `null` or `0`, or `endpoints.serving.state` is not `Confirmed` | The Router selects only endpoints the operator qualified. Read `status.roles[].endpoints` and the Router's `/observer/endpoints`. See [Model Deployment Status](../../modules/model-deployment/status.md#status) |
+| Router and Services remain after deployment deletion | None; the cause is unconfirmed | This run left them for about two minutes and needed explicit cleanup. [Issue #601](https://github.com/gpustack/gpustack-operator/issues/601) tracks related delays, but this run did not establish that cause. Confirm the leftovers' owner UID, then delete them with `kubectl -n gpustack-elastic delete deployments,services -l app.kubernetes.io/instance=external-fixed` |
 
 ---
 

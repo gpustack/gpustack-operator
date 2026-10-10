@@ -114,12 +114,17 @@ The default `leader.electionBackend: Kubernetes` elects through a **Kubernetes L
 replica count. The Lease is named `<backend>-leader` in the operator's namespace. Scale an already
 elected leader by changing only its count:
 
-```yaml
-spec:
-  connection:
-    managed:
-      leader:
-        replicas: 3
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: KVCacheBackend
+ metadata:
+   name: shared-mooncake
+ spec:
+   connection:
+     managed:
+       leader:
+-        replicas: 1
++        replicas: 3
 ```
 
 `leader.memberAddressing` is optional and only selects how members find the

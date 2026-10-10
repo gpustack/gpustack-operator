@@ -13,6 +13,9 @@ those domains.
 [Topology-Aware Scheduling](scheduling.md) explains topology
 profiles, Kueue Topologies and how a replica asks to stay in one domain.
 
+Follow [Hierarchical Placement Walkthrough](../../walkthroughs/topology/hierarchical-placement.md) to
+place serving replicas across zones and physical racks.
+
 ## Topology sources
 
 [Topology-Aware Scheduling Operations](operations.md) covers inventory

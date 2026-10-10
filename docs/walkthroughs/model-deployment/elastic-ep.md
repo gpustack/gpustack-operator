@@ -13,6 +13,7 @@ Captured CR output appears beside each check.
 - [Step 4: release the application](#step-4-release-the-application)
 - [Diagnose a stalled resize](#diagnose-a-stalled-resize)
 - [Validation record](#validation-record)
+- [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
 
@@ -49,7 +50,7 @@ spec:
       replicas: 1
       size: 1
       instanceType: elastic-cpu-gpu
-      image: gpustack/runner:cuda13.0-vllm0.29.0@sha256:1c826749ed16fbd9f9594d7a49f774904662d9c46231e08e32b494e8bac4ee91
+      image: gpustack/runner:cuda13.0-vllm0.29.0
       imagePullPolicy: IfNotPresent
       resources:
         accelerator: "2"
@@ -99,13 +100,19 @@ This manifest has one serving instance and no router. Only its master exposes th
 the other GPU members participate through Ray.
 A separate recorded run added this `spec.router` block before creating the deployment:
 
-```yaml
-router:
-  name: vllm-router
-  image: gpustack/llm-router:v0.2.0@sha256:98e70d94351baa9dc13897a545aff5c83ffac5e89ab810e204bc894b519d96db
-  extraArgs:
-    - --policy
-    - round_robin
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: tp2-elastic
+   namespace: gpustack-elastic
+ spec:
++  router:
++    name: vllm-router
++    image: gpustack/llm-router:v0.2.0
++    extraArgs:
++      - --policy
++      - round_robin
 ```
 
 The engine still uses Internal LB. This Router forwards to the master, which distributes work to the DP engines.
@@ -203,6 +210,20 @@ kubectl -n gpustack-elastic patch modeldeployment tp2-elastic --type=json \
   -p '[{"op":"test","path":"/spec/roles/0/elasticEp/width","value":2},{"op":"replace","path":"/spec/roles/0/elasticEp/width","value":4}]'
 ```
 
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: tp2-elastic
+   namespace: gpustack-elastic
+ spec:
+   roles:
+     - name: server
+       elasticEp:
+-        width: 2
++        width: 4
+```
+
 Wait for the operator's observation of the current generation to reach width 4 at every layer.
 Read the diagnostic ConfigMap belonging to this deployment UID:
 
@@ -279,7 +300,9 @@ That release check also verified deletion of the owned head, GPU Pods, Router, S
 For a shared cluster, compare the application's captured device claims with the ledger;
 other workloads may keep cards occupied.
 
-ModelPrefetch keeps the model pinned independently of the serving application.
+A ModelPrefetch keeps the weights on the node independently of the serving application.
+Without a pin, the node cache can still collect them once they lapse. To keep them, see
+[Step 4 of the prefetch walkthrough](../model-delivery/prefetch.md#step-4-pin-weights-against-eviction).
 When no consumer needs the weights, remove the prefetch and its dedicated binding, artifact, and store.
 See [Model Prefetch](../../modules/model-delivery/prefetch.md) for cache retention and collection behavior.
 
@@ -366,6 +389,17 @@ expansion, so it was not used to establish the effective width.
 An earlier run reached `CREATED` placement groups and eight live GPU workers, but new EngineCore actors
 remained pending and requests timed out. This recorded run completed expansion and inference.
 The earlier root cause remains unconfirmed; the result does not isolate shared memory or head placement as its cause.
+
+## Troubleshooting
+
+| Symptom | Condition / Reason | Check & Mitigation |
+|---|---|---|
+| Deployment stuck in `Starting` | `QuotaReserved=False/Pending` | Replicas wait for quota in the role's ClusterQueue, which the condition message names. Width times TP is the GPU demand; compare it with the queue's quota |
+| Pods stay gated and `kubectl get workloads` lists none for the role | `QuotaReserved=False/PodGroupIncomplete` | Fewer replicas exist than the role declares, so Kueue composes no Workload for the missing ones. The message gives the counts. Read `kubectl get pods` and the events to see which replica is missing |
+| Expansion from width 2 to 4 does not complete | `ElasticResize=False/ScaleRefused` or `ElasticResize=Unknown/WorldUnprovable` | `ScaleRefused`: the engine refused the resize until the retry bound was spent, and the message carries its last refusal. `WorldUnprovable`: the live width cannot be proved. An unanswered request is never resent; the outcome is decided by observation. See [When a resize holds](../../modules/model-deployment/elastic-ep.md#when-a-resize-holds) and [Diagnosis](../../modules/model-deployment/elastic-ep.md#diagnosis) |
+| Role update changed image or args but pods didn't roll | `ReplicasUpToDate=False/RolloutHeldByWeights` | The weights the replacements need are blocked, so the operator keeps the serving replicas. `WeightsReady` says what blocks them |
+| Role update stalled with old pods retained | `ReplicasUpToDate=False/RolloutHeldByCache` | The KV cache connection could not be resolved. The operator keeps the old replicas and rolls the edit out once the connection returns |
+| Router requests fail during or after a resize | None; the engine answers 503 and withdraws readiness while it reconfigures | Wait for the master Pod to be Ready, then repeat the request. Read `status.roles[].endpoints.serving.state` and the Router's `/observer/endpoints` with the [Router observation steps](external-dp.md#step-4-check-router-coverage). Expect the master only |
 
 ---
 

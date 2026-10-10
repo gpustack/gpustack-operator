@@ -141,14 +141,18 @@ has reserved quota, so `Prefill` still never starts without `Decode`.
 Splitting `instanceType`s buys different hardware; the isolation it used to buy, every replica has
 by default.
 
-**With a shared pool**, the same object plus one block:
+**With a shared pool**, the same object plus one block. `spec.kvCache` is frozen after creation, so declare it in the first apply:
 
-```yaml
-spec:
-  # ... everything above, unchanged ...
-  kvCache:
-    poolRef:
-      name: team-a-dram                  # a KVCachePoolBinding in THIS namespace
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: qwen-pd
+   namespace: team-a
+ spec:
++  kvCache:
++    poolRef:
++      name: team-a-dram                  # a KVCachePoolBinding in THIS namespace
 ```
 
 ## The router block
@@ -231,10 +235,15 @@ there is no field for either, and neither is reachable through `extraArgs`.
 
 The point-to-point leg renders Mooncake's `tcp` when the API field is unset:
 
-```yaml
-spec:
-  kvTransfer:
-    protocol: RDMA                     # unset renders "tcp"
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: qwen-pd
+   namespace: team-a
+ spec:
++  kvTransfer:
++    protocol: RDMA                     # unset renders "tcp"
 ```
 
 The value is a property of **one link**, so it is deployment-wide: a per-role field could only

@@ -14,6 +14,10 @@ its own replicas and resources.
 the role contract. [Prefill and Decode](prefill-decode.md) covers split roles.
 [Engine Versions](engine-versions.md) records tested version floors.
 
+Follow [Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/prefill-decode.md) for
+disaggregated serving, and [Multi-Host Serving Walkthrough](../../walkthroughs/model-deployment/multi-host.md)
+for distributed multi-node serving.
+
 ## Service operations
 
 [Status](status.md), [Metrics](metrics.md) and

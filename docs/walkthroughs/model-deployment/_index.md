@@ -1,7 +1,8 @@
 # Model Deployment Walkthroughs
 
 Choose a serving shape, prepare its model, then follow the matching walkthrough.
-Both examples use the official GPUStack runner and retain captured CR output and inference results.
+The Elastic EP and External DP examples use the official GPUStack runner and retain captured CR output and inference results.
+The Prefill and Decode and the Multi-Host pages are configuration examples. They record no captured run.
 
 ## Contents
 
@@ -12,10 +13,12 @@ Both examples use the official GPUStack runner and retain captured CR output and
 
 ## Choose an example
 
-| Walkthrough | Serving shape | What was measured |
+| Walkthrough | Serving shape | What it covers |
 |---|---|---|
+| [Prefill and Decode](prefill-decode.md) | Disaggregated roles fronted by router | Not measured here. Separate Prefill and Decode roles, `llm-d-router` routing, joint admission, and KV cache transfer. |
 | [Elastic EP](elastic-ep.md) | One Internal LB instance on Ray | TP2, DP width 2→4, EP world 4→8; ordinary and streaming requests before and after expansion. |
 | [External DP](external-dp.md) | Two fixed DP ranks using multiprocessing | TP2, DP2, EP world4; direct requests to each rank and Router distribution across both ranks. |
+| [Multi-Host](multi-host.md) | Coordinated instance spanning multiple hosts | Not measured here. `size: 2`, sixteen GPUs across two physical nodes, leader `m0` routing, and gang admission. |
 
 A Router can front either shape. The engine's LB mode determines which Pods accept inference requests.
 Increasing `roles[].replicas` adds complete groups; see [role scaling](../../modules/model-deployment/deployment.md#rollout-behavior).
@@ -68,7 +71,7 @@ kubectl apply -f gpu-instance-type.yaml
 kubectl get instancetype elastic-cpu-gpu
 ```
 
-Both examples refer to `elastic-cpu-gpu`. Replace that name if you use an existing InstanceType.
+All four examples refer to `elastic-cpu-gpu`. Replace that name if you use an existing InstanceType.
 
 ## Check the software identity
 
@@ -84,11 +87,12 @@ kubectl -n "$OPERATOR_NAMESPACE" exec "$OPERATOR_POD" -c "$OPERATOR_CONTAINER" -
 ```
 
 The `dev` tag can move. Each walkthrough's validation record identifies the binary and image used.
-The serving manifests pin the official runner digest; no engine packages were replaced during validation.
+The serving manifests name the runner by tag. Validation records list the observed image tags or digests.
+No engine packages were replaced during validation.
 
 ---
 
 **See also** — [Model Deployment](../../modules/model-deployment/_index.md) (configuration guides) ·
 [Model Prefetch Walkthrough](../model-delivery/prefetch.md)
 
-**Next** → [Elastic EP Walkthrough](elastic-ep.md) or [External DP Walkthrough](external-dp.md)
+**Next** → [Prefill and Decode Walkthrough](prefill-decode.md) — disaggregated serving with router.
