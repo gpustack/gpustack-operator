@@ -10,7 +10,9 @@ The output below was captured with node model delivery enabled.
 - [Step 1: create the artifact and prefetch](#step-1-create-the-artifact-and-prefetch)
 - [Step 2: verify the cached model](#step-2-verify-the-cached-model)
 - [Step 3: start a serving workload](#step-3-start-a-serving-workload)
-- [Step 4: release the cache](#step-4-release-the-cache)
+- [Step 4: pin weights against eviction](#step-4-pin-weights-against-eviction)
+- [Step 5: release the cache](#step-5-release-the-cache)
+- [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
 
@@ -73,7 +75,6 @@ spec:
     - name: rtx6000-models
   quota:
     bytes: 64Gi
-  allowPinned: true
 ---
 apiVersion: worker.gpustack.ai/v1
 kind: ModelPrefetch
@@ -90,8 +91,6 @@ spec:
       matchLabels:
         kubernetes.io/hostname: gpu-node
   minReady: 1
-  retention:
-    pinned: true
 ```
 
 ## Step 2: verify the cached model
@@ -141,7 +140,56 @@ Continue with [Elastic EP](/gpustack-operator/main/docs/walkthroughs/model-deplo
 or [External DP](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) to route requests across fixed DP ranks.
 Use the namespace and artifact created here in either manifest.
 
-## Step 4: release the cache
+## Step 4: pin weights against eviction
+
+The node cache removes unreferenced weights, oldest first, when usage passes the high watermark.
+Pinning keeps a digest out of that collection. Admission refuses `retention.pinned` on a prefetch
+whose `ModelStoreBinding` does not set `allowPinned`, so the administrator grants the right first.
+
+Edit `model-delivery.yaml`. The grant changes as follows:
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelStoreBinding
+ metadata:
+   name: rtx6000-models
+   namespace: gpustack-elastic
+ spec:
+   storeRefs:
+     - name: rtx6000-models
+   quota:
+     bytes: 64Gi
++  allowPinned: true
+```
+
+The prefetch then asks for the pin:
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelPrefetch
+ metadata:
+   name: deepseek-v2-lite-chat
+   namespace: gpustack-elastic
+ spec:
+   artifactRef:
+     name: deepseek-v2-lite-chat
+   bindingRef:
+     name: rtx6000-models
+   placement:
+     nodeSelector:
+       matchLabels:
+         kubernetes.io/hostname: gpu-node
+   minReady: 1
++  retention:
++    pinned: true
+```
+
+Run `kubectl apply -f model-delivery.yaml` again. The file lists the grant before the prefetch, so
+the grant is in place when the prefetch is admitted. A pinned digest is never a collection candidate
+on the target nodes, though it still counts toward the store's usage. See
+[Pinning and expiry](/gpustack-operator/main/docs/modules/model-delivery/prefetch/index.md#pinning-and-expiry).
+
+## Step 5: release the cache
 
 Keep the prefetch while a serving application needs the cached weights.
 After deleting those consumers, remove the dedicated resources:
@@ -155,6 +203,23 @@ kubectl delete modelstore rtx6000-models
 
 Cache collection follows the [retention rules](/gpustack-operator/main/docs/modules/model-delivery/prefetch/index.md).
 Deleting these CRs does not delete the Kubernetes cluster or its disks.
+
+## Troubleshooting
+
+| Symptom | Condition / Reason | Check & Mitigation |
+|---|---|---|
+| `ModelArtifact` resolution failed | `Resolved=False/AccessDenied` | Private or gated repository; check namespace Secret token and inspect `InvalidToken` event |
+| `ModelArtifact` resolution failed | `Resolved=False/RevisionNotFound` | Branch, tag, or commit hash misspelled (ModelScope does not default silently to master) |
+| `ModelArtifact` resolution failed | `Resolved=False/SourceUnavailable` | Hub endpoint unreachable, large directory enumeration timeout, or 5xx network error |
+| `ModelArtifact` resolution failed | `Resolved=False/EmptyManifest` | Allow/ignore pattern filters excluded all files; review the glob patterns |
+| Model deployment blocked at `Starting` | `WeightsReady=False/NodeDeliveryUnavailable` | CSI driver `model.csi.gpustack.ai` missing or `modelManager.enabled: false` in Helm values |
+| Deployment blocked with pattern filters | `WeightsReady=False/FilterNeedsNodeDelivery` | Pattern filtering requires `Node` delivery mode; set `model-artifact-delivery-mode: Node` |
+| Pod stuck in `ContainerCreating` | `WeightsReady=False/Materializing` | Node plugin actively downloading; check Pod `FailedMount` event for downloaded byte count |
+| Weight download failed on node | `WeightsReady=False/MaterializationFailed` | Check `kubectl get nodemodelstore <node> -o yaml` for digest failure `reason`, `message`, and `retryTime` |
+| `ModelPrefetch` fails to reach `Available` | `Degraded=True/NodeFailed` | One or more target nodes failed download; check node disk capacity and logs |
+| `ModelPrefetch` shows fewer ready nodes than `minReady` | `Lapsed=True/RetentionTTLExpired` | Node copies went unused past `retention.ttlAfterLastUse`, left `readyNodes` and released any pin, and nothing re-warms them; raise or remove the TTL |
+| New `ModelPrefetch` rejected at admission | Over quota or unauthorized | Prefetch exceeds `ModelStoreBinding` `quota.bytes`, sets `retention.pinned` without `allowPinned: true`, or targets undeclared store |
+| Peer sync downloads continuously from Hub | `modelManager.port: 0` or peer sync disabled | Verify setting `model-store-peer-sync: true` and node `spec.peerSyncEnabled: true` |
 
 ---
 

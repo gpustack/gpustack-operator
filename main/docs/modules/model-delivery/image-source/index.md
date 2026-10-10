@@ -16,6 +16,10 @@ image read-only for the workload; packaging and pulling it adds disk and registr
 ## The source and its digest contract
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelArtifact
+metadata:
+  name: qwen
 spec:
   source:
     image:

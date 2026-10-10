@@ -146,7 +146,10 @@ Or through the `Instance` API, as with [NVIDIA's
 `acceleratorPartitionedProfile`](nvidia-mig.md#requesting-a-partition):
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
 kind: Instance
+metadata:
+  name: thead-instance
 spec:
   type: <a T-Head InstanceType from your pool>
   resources:

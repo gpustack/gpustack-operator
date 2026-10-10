@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers hardware, shapes accelerator capacity, and helps Kubernetes place workloads where that capacity is available.
 
-Documentation version: main. Source revision: 1e4ff35361012d4c2658e0d61131c599e22ac9ce.
+Documentation version: main. Source revision: 1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -72,12 +72,16 @@ documentation and code for your release. This index routes questions; follow its
 ## Walkthroughs
 
 - [Walkthroughs](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/index.md): Choose a complete example by module.
-- [Device Scheduling Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md): Follow a recorded accelerator scheduling run.
-- [KV Cache Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md): Create a shared cache from backend to workload.
+- [Scheduling Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md): Follow a recorded accelerator scheduling run.
+- [RDMA Network Endpoints Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md): Request and verify RDMA endpoints and NUMA alignment.
+- [Hierarchical Placement Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md): Place serving replicas across zones and physical racks.
+- [Shared Cache Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md): Create a shared cache from backend to workload.
 - [Model Prefetch Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md): Cache weights and verify captured model CR output.
 - [Model Deployment Walkthroughs](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md): Choose a serving shape and prepare GPUs.
+- [Prefill and Decode Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md): Deploy prefill and decode roles fronted by router.
 - [Elastic EP Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md): Grow DP width with TP fixed and verify inference.
 - [External DP Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md): Verify per-rank inference and Router coverage.
+- [Multi-Host Serving Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md): Scale models across multiple GPU nodes.
 
 ## Start here
 
@@ -100,6 +104,6 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/1e4ff35361012d4c2658e0d61131c599e22ac9ce/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.

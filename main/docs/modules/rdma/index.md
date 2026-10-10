@@ -13,6 +13,9 @@ count; kubelet decides which endpoints a container receives.
 [RDMA Operations](/gpustack-operator/main/docs/modules/rdma/operations/index.md) covers the resource keys, endpoint counts and kubelet
 TopologyManager policy. It also explains why Kueue admission alone does not reserve an interface.
 
+Follow [RDMA Network Endpoints Walkthrough](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md) to
+request and verify endpoints and NUMA alignment.
+
 ## Interface discovery
 
 [Network Topology](/gpustack-operator/main/docs/modules/rdma/network-topology/index.md) describes the interface inventory, link

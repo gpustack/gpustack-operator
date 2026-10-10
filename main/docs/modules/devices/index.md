@@ -14,6 +14,9 @@ runtime isolation method depend on the manufacturer.
 physically partitioned requests. [Device Discovery](/gpustack-operator/main/docs/modules/devices/discovery/index.md) explains
 how the per-node `Devices` record connects discovery to allocation.
 
+Follow [Scheduling Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) for
+end-to-end device allocation and Kueue queuing.
+
 ## Device operations
 
 Check a node before installation with [Preflight Operations](/gpustack-operator/main/docs/modules/devices/preflight/index.md). If you

@@ -1,0 +1,835 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Prefill and Decode Walkthrough · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">main</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">main</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/main/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" open>
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/" aria-current="page">Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/">Model Deployment Walkthroughs</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Prefill and Decode Walkthrough</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="prefill-and-decode-walkthrough">Prefill and Decode Walkthrough</h1>
+<p>Deploy a disaggregated LLM serving topology with dedicated prefill and decode roles fronted by a router.
+The operator coordinates joint admission across both roles and routes requests through a unified endpoint.
+Configuration diffs show how the roles cooperate. This page records no captured run.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#deployment-shape">Deployment shape</a>
+</li>
+<li><a href="#prerequisites">Prerequisites</a>
+</li>
+<li><a href="#step-1-start-disaggregated-serving">Step 1: start disaggregated serving</a>
+</li>
+<li><a href="#step-2-pin-the-kv-cache-transfer-protocol">Step 2: pin the KV cache transfer protocol</a>
+</li>
+<li><a href="#step-3-verify-router-endpoints-and-inference">Step 3: verify router endpoints and inference</a>
+</li>
+<li><a href="#step-4-inspect-joint-admission-and-scaling">Step 4: inspect joint admission and scaling</a>
+</li>
+<li><a href="#step-5-release-the-application">Step 5: release the application</a>
+</li>
+<li><a href="#troubleshooting">Troubleshooting</a>
+</li>
+</ul>
+<h2 id="deployment-shape">Deployment shape</h2>
+<p>Prefill and decode disaggregation separates prompt processing from token generation.
+A compute-heavy Prefill role processes initial prompt context with high parallel throughput.
+A memory-bandwidth-bound Decode role generates subsequent tokens sequentially.</p>
+<p>A managed Router fronts both roles and exposes a single external HTTP endpoint.
+The Router parses prompt requests, forwards prefill work, and coordinates KV cache transfer to decoders.
+Kueue schedules both roles as a joint unit, preventing half-admitted workloads.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<p>Complete <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#prepare-the-cluster">cluster and GPU preparation</a>
+ and
+<a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">model prefetch</a>
+.
+Ensure sufficient GPUs exist for both roles simultaneously (at least six GPUs for this example).
+Use the shared namespace, cached artifact, and GPU InstanceType.</p>
+<h2 id="step-1-start-disaggregated-serving">Step 1: start disaggregated serving</h2>
+<p>Save the following manifest as <code>pd-deployment.yaml</code>.
+The definition specifies one Prefill replica with two GPUs and two Decode replicas with two GPUs each.
+The <code>spec.router</code> stanza deploys <code>llm-d-router</code> as the unified front door.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-pd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-elastic</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">/models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.29.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-d-router</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-cpu-gpu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.29.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-cpu-gpu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.29.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span></span></span></code></pre></div>
+</div><p>Apply the manifest to the cluster:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f pd-deployment.yaml
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic get modeldeployment deepseek-pd</span></span></code></pre></div>
+</div><h2 id="step-2-pin-the-kv-cache-transfer-protocol">Step 2: pin the KV cache transfer protocol</h2>
+<p>Disaggregated serving requires prompt KV tensors to flow from prefill workers to decode workers.
+The pair in Step 1 already hands blocks over directly. Unset <code>spec.kvTransfer.protocol</code> renders <code>tcp</code>.
+Pin the protocol explicitly. Add the lines marked <code>+</code> to <code>pd-deployment.yaml</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeployment
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: deepseek-pd
+</span></span><span class="line"><span class="cl">   namespace: gpustack-elastic
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl"><span class="gi">+  kvTransfer:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    protocol: TCP
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span>   router:
+</span></span><span class="line"><span class="cl">     name: llm-d-router
+</span></span><span class="line"><span class="cl">   roles:
+</span></span><span class="line"><span class="cl">     - name: prefill
+</span></span><span class="line"><span class="cl">       kind: Prefill
+</span></span></code></pre></div>
+</div><p>Apply the update:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f pd-deployment.yaml</span></span></code></pre></div>
+</div><p>The protocol is deployment-wide, because it describes one link between the two roles.
+It accepts <code>Auto</code>, <code>TCP</code>, <code>RDMA</code>, <code>EFA</code>, <code>CANN</code> and <code>ROCM</code>. <code>Auto</code> renders <code>tcp</code> too.</p>
+<p>An edit restarts every role, because the value renders into both ends&rsquo; arguments.
+The roles can run different protocols until both converge.
+<code>RDMA</code> and <code>EFA</code> also need a matching device request on each role.
+See the <a href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/#step-3-prefill-and-decode-interface-requests">RDMA walkthrough</a>
+.</p>
+<p>A shared store through <code>spec.kvCache.poolRef</code> is part of the deployment identity.
+Declare it in the first apply. Adding it later is refused, because a different cache describes a different deployment.
+See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#deployment-identity-fields">deployment identity fields</a>
+.</p>
+<h2 id="step-3-verify-router-endpoints-and-inference">Step 3: verify router endpoints and inference</h2>
+<p>Monitor status conditions until all roles and the router reach ready states:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic get modeldeployment deepseek-pd -o yaml</span></span></code></pre></div>
+</div><p>Read the reported endpoint. It carries the scheme and a cluster-internal <code>.svc</code> host name:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">ROUTER_ENDPOINT</span><span class="o">=</span><span class="k">$(</span>kubectl -n gpustack-elastic get modeldeployment deepseek-pd <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.endpoint}&#39;</span><span class="k">)</span>
+</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;Router endpoint: </span><span class="nv">$ROUTER_ENDPOINT</span><span class="s2">&#34;</span></span></span></code></pre></div>
+</div><p>Send a test completion request through the Router from inside the cluster:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic run test-client --rm -i --restart<span class="o">=</span>Never <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --image<span class="o">=</span>curlimages/curl -- <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  curl -s <span class="s2">&#34;</span><span class="si">${</span><span class="nv">ROUTER_ENDPOINT</span><span class="si">}</span><span class="s2">/v1/chat/completions&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -H <span class="s2">&#34;Content-Type: application/json&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -d <span class="s1">&#39;{
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;model&#34;: &#34;deepseek-v2-lite-chat&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;messages&#34;: [{&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: &#34;Explain prefill and decode disaggregation.&#34;}],
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;max_tokens&#34;: 16
+</span></span></span><span class="line"><span class="cl"><span class="s1">  }&#39;</span></span></span></code></pre></div>
+</div><p>The Router receives the request, delegates the prompt phase, transfers KV tensors, and streams tokens.
+<code>status.endpoint</code> remains empty until the router Pod passes its readiness check.</p>
+<h2 id="step-4-inspect-joint-admission-and-scaling">Step 4: inspect joint admission and scaling</h2>
+<p>The operator manages Kueue workloads across all declared roles simultaneously.
+Inspect the Kueue Workloads that the deployment&rsquo;s Pods own:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic get workloads</span></span></code></pre></div>
+</div><p>Joint admission guarantees that neither role starts execution without capacity for the other.
+If the cluster lacks capacity for decode workers, prefill workers remain queued rather than idling.
+You can adjust <code>replicas</code> independently on either role to balance prompt versus token throughput.</p>
+<p>Role kinds (<code>kind: Prefill</code>, <code>kind: Decode</code>), role names and the declared role set are frozen.
+The <code>size</code>, <code>resources</code>, <code>instanceType</code> and <code>command</code> of an existing role are editable.
+An edit replaces whole replicas, one at a time, with fresh Kueue admission.
+See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">rollout behavior</a>
+.</p>
+<h2 id="step-5-release-the-application">Step 5: release the application</h2>
+<p>After testing disaggregated serving, delete the deployment to release GPUs and router services:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic delete modeldeployment deepseek-pd
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic get pods,services -l app.kubernetes.io/instance<span class="o">=</span>deepseek-pd</span></span></code></pre></div>
+</div><p>Verify that the accelerators are free again. Each card reports <code>remaining</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get devices -o json <span class="p">|</span> jq <span class="s1">&#39;[.items[].status.groups[].accelerators[] |
+</span></span></span><span class="line"><span class="cl"><span class="s1">  {mode, remaining, allocatedSlices: (.allocatedSlices // 0)}]&#39;</span></span></span></code></pre></div>
+</div><h2 id="troubleshooting">Troubleshooting</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Symptom</th>
+          <th>Condition / Reason</th>
+          <th>Check &amp; Mitigation</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Deployment stuck in <code>Starting</code>, Kueue composes no Workload</td>
+          <td><code>QuotaReserved=False/PodGroupIncomplete</code></td>
+          <td>Fewer replicas exist than a role declares. Read the message for the counts, then check the missing or unschedulable Pods</td>
+      </tr>
+      <tr>
+          <td>No Workload asks for quota any more</td>
+          <td><code>QuotaReserved=False/Parked</code></td>
+          <td>The groups could not all be placed, so their Workloads were deactivated. An identical re-apply does not clear this. Free the capacity and reactivate the Workloads, or recreate the deployment</td>
+      </tr>
+      <tr>
+          <td>Part of the deployment was taken by another workload</td>
+          <td><code>QuotaReserved=False/PreemptedInPart</code></td>
+          <td>A higher-priority workload reclaimed some replicas. The replicas that kept their quota hold accelerators until the reclaimed ones are admitted again or the deployment is deleted. Check what took the quota</td>
+      </tr>
+      <tr>
+          <td><code>status.endpoint</code> is empty</td>
+          <td><code>RouterReady=False/NoReadyReplicas</code></td>
+          <td>The router has no ready replica. It may still pull its image or fail readiness. Inspect the router Pod</td>
+      </tr>
+      <tr>
+          <td>Router is not created</td>
+          <td><code>RouterReady=False/RenderFailed</code></td>
+          <td>The router render was refused as a spec problem, so no router Pod exists. Read the condition message and check <code>spec.router</code></td>
+      </tr>
+      <tr>
+          <td>Disaggregated roles fail KV transfer</td>
+          <td>Engine logs on both roles</td>
+          <td>The protocol is deployment-wide, so the two ends cannot name different values. Check that the image carries the matching Mooncake build, that the device request fits the protocol, and that the nodes can reach each other</td>
+      </tr>
+      <tr>
+          <td>Router sees no cache events</td>
+          <td><code>KVEventsPublishing=False/PublisherDisabled</code></td>
+          <td>A role that produces cache blocks renders no publisher. A routed SGLang deployment always reports this, because only vLLM renders one. The condition reports configuration, not traffic. See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#operator-owned-keys">KV events</a>
+</td>
+      </tr>
+      <tr>
+          <td>Missing role readiness</td>
+          <td><code>RoleKindsReady=False</code></td>
+          <td>One of the role kinds (Prefill or Decode) has zero ready replicas; check failed engine pods</td>
+      </tr>
+  </tbody>
+</table>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
+ (configuration and transfer)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/">Routing</a>
+ (router engine combinations)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/">Elastic EP Walkthrough</a>
+ (collective expansion)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
+ (fixed per-rank serving)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/">Multi-Host Serving Walkthrough</a>
+ — scale models across multiple GPU nodes.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/docs/walkthroughs/model-deployment/prefill-decode.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/prefill-decode.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#deployment-shape">Deployment shape</a></li>
+    <li><a href="#prerequisites">Prerequisites</a></li>
+    <li><a href="#step-1-start-disaggregated-serving">Step 1: start disaggregated serving</a></li>
+    <li><a href="#step-2-pin-the-kv-cache-transfer-protocol">Step 2: pin the KV cache transfer protocol</a></li>
+    <li><a href="#step-3-verify-router-endpoints-and-inference">Step 3: verify router endpoints and inference</a></li>
+    <li><a href="#step-4-inspect-joint-admission-and-scaling">Step 4: inspect joint admission and scaling</a></li>
+    <li><a href="#step-5-release-the-application">Step 5: release the application</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

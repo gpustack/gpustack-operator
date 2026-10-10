@@ -735,6 +735,10 @@ other images may deregister later or wait differently. The operator controls the
 the endpoint.
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: mooncake-dram
 spec:
   connection:
     managed:
@@ -763,6 +767,11 @@ own success signal does not tell you that happened.
 (no Deployment, no Service, no DaemonSet) and only observes.
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: external-mooncake
+spec:
   connection:
     external:
       endpoints:

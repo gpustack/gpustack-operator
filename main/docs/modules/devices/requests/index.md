@@ -37,7 +37,7 @@ no `.partitioned*` keys at all.
 ## The resource keys
 
 `<base>` is the manufacturer's device resource (`nvidia.com/gpu`, `huawei.com/npu`, … — see
-[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/1e4ff35361012d4c2658e0d61131c599e22ac9ce/README.md#accelerator-support)).
+[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/README.md#accelerator-support)).
 
 | Key | Served by | Eligible accelerators | Request value | Node value |
 |---|---|---|---|---|
@@ -143,6 +143,10 @@ one container group.*
 Accepted — both app containers claim the same family:
 
 ```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: trainer-pod
 spec:
   containers:
     - name: trainer
@@ -158,6 +162,10 @@ spec:
 Rejected — two families in one Pod:
 
 ```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mixed-family-pod
 spec:
   containers:
     - name: a
@@ -176,6 +184,10 @@ spec:
 Rejected — the same family claimed in both container groups:
 
 ```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: split-group-pod
 spec:
   initContainers:
     - name: warmup
@@ -295,6 +307,10 @@ resource sits deliberately outside the accelerator families.
 Accepted:
 
 ```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sliced-pod
 spec:
   containers:
     - name: main
@@ -311,6 +327,10 @@ spec:
 Rejected — two containers each holding a slice:
 
 ```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-sliced-pod
 spec:
   containers:
     - name: a
@@ -333,6 +353,10 @@ Accepted — the claim sits on an app container while the native sidecar carries
 native sidecar carries the claim:
 
 ```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: accepted-sidecar-pod
 spec:                                                       # accepted
   initContainers:
     - name: log-shipper
@@ -346,6 +370,10 @@ spec:                                                       # accepted
         limits:
           nvidia.com/gpu: "1"
 ---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rejected-sidecar-pod
 spec:                                                       # rejected
   initContainers:
     - name: log-shipper
@@ -459,7 +487,10 @@ into the keys above:
 | `accelerator: "1"`<br/>`acceleratorPartitionedProfile: "3g.40gb"` | one hardware partition of that profile |
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
 kind: Instance
+metadata:
+  name: partitioned-instance
 spec:
   type: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
   resources:

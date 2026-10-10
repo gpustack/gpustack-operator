@@ -128,6 +128,7 @@ resources:
 controller shapes it into the two keys above:
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
 kind: Instance
 metadata:
   name: mig-instance

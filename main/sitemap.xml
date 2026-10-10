@@ -124,6 +124,14 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/</loc>
   </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/</loc>
+  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/</loc>

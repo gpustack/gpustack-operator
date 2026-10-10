@@ -219,12 +219,18 @@ Two consequences follow:
 
 ## Referencing it from a ModelDeployment
 
-```yaml
-spec:
-  model:
-    name: qwen-7b                        # the served name, unchanged
-    artifactRef: # a ModelArtifact in this namespace
-      name: qwen-7b
+Set the reference when you create the deployment. The webhook refuses to add it later.
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: qwen-7b-serving
+ spec:
+   model:
+     name: qwen-7b                        # the served name, unchanged
++    artifactRef:                         # a ModelArtifact in this namespace
++      name: qwen-7b
 ```
 
 `artifactRef` is frozen with the rest of `spec.model`: other weights are another deployment. A
@@ -397,13 +403,21 @@ timeout evicts and requeues the replica.
 
 ## Instance model volumes
 
-```yaml
-spec:
-  additionalVolumes:
-    - mountPath: /models/qwen
-      model:
-        artifactRef:
-          name: qwen-7b
+`additionalVolumes` is immutable while the Instance runs.
+Set it at creation, or set `spec.stop: true` first and edit it while the Instance is stopped.
+See [Instance admission](/gpustack-operator/main/docs/modules/devices/admission/index.md).
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: Instance
+ metadata:
+   name: workspace-demo
+ spec:
++  additionalVolumes:
++    - mountPath: /models/qwen
++      model:
++        artifactRef:
++          name: qwen-7b
 ```
 
 The volume is always read-only and takes no `subPath`. A claim artifact's `path` is the sub-path and

@@ -10,7 +10,7 @@ capacity they receive.
 
 ## Quick start
 
-[KV Cache Walkthrough](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) creates the backend, pool, binding and
+[Shared Cache Walkthrough](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) creates the backend, pool, binding and
 deployment in order. A plain Pod can also use a binding through [KV Cache
 Injection](injection.md).
 
@@ -26,4 +26,4 @@ tier](local-disk-tier.md) have separate operating details.
 **See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) (cache consumers) ·
 [RDMA Networking](/gpustack-operator/main/docs/modules/rdma/index.md) (transport)
 
-**Next** → [KV Cache Walkthrough](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) — create a shared cache.
+**Next** → [Shared Cache Walkthrough](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) — create a shared cache.

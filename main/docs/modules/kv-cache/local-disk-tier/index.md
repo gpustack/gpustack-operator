@@ -7,6 +7,10 @@ its own and takes its offload flags from this list's presence. The list holds on
 not be attributed).
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: shared-mooncake
 spec:
   connection:
     managed:
@@ -244,14 +248,21 @@ Deleting a `KVCacheBackend` leaves the tier directory exactly as it was. Set
 `members[].localDisks[].cleanAfterDelete: true` and the operator empties it as part of the deletion, on
 every node that group's `nodeSelector` picks at the moment you delete it.
 
-```yaml
-      members:
-        - medium: DRAM
-          capacityPerMember: 64Gi
-          localDisks:
-            - path: /var/lib/kvcache
-              capacity: 512Gi
-              cleanAfterDelete: true
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: KVCacheBackend
+ metadata:
+   name: shared-mooncake
+ spec:
+   connection:
+     managed:
+       members:
+         - medium: DRAM
+           capacityPerMember: 500Gi
+           localDisks:
+             - path: /var/lib/kvcache
+               capacity: 4Ti
++              cleanAfterDelete: true
 ```
 
 **It defaults to `false`, which is how every release before it behaved.** What is on that disk is

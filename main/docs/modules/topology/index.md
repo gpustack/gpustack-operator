@@ -13,6 +13,9 @@ those domains.
 [Topology-Aware Scheduling](/gpustack-operator/main/docs/modules/topology/scheduling/index.md) explains topology
 profiles, Kueue Topologies and how a replica asks to stay in one domain.
 
+Follow [Hierarchical Placement Walkthrough](/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md) to
+place serving replicas across zones and physical racks.
+
 ## Topology sources
 
 [Topology-Aware Scheduling Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md) covers inventory

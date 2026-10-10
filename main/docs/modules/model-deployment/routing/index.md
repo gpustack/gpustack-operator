@@ -83,13 +83,17 @@ How any of the three spreads concurrent traffic is not measured.
 **Add `--policy round_robin` to `spec.router.extraArgs` on `vllm-router` or `sglang-gateway`** to
 send each request to the next replica in turn, whatever it shares with earlier ones:
 
-```yaml
-spec:
-  router:
-    name: vllm-router                    # or sglang-gateway
-    extraArgs:
-      - --policy
-      - round_robin
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: round-robin-serving
+ spec:
+   router:
+     name: vllm-router                    # or sglang-gateway
++    extraArgs:
++      - --policy
++      - round_robin
 ```
 
 `--policy` is in neither router's [refused list](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md#the-router-block), so admission

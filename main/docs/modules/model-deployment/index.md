@@ -14,6 +14,10 @@ its own replicas and resources.
 the role contract. [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) covers split roles.
 [Engine Versions](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) records tested version floors.
 
+Follow [Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) for
+disaggregated serving, and [Multi-Host Serving Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md)
+for distributed multi-node serving.
+
 ## Service operations
 
 [Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md), [Metrics](/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md) and
