@@ -1,0 +1,1569 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  
+  <title>Preflight Operations · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0"
+    data-home="/gpustack-operator/v0.9.0/" data-page="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/" >Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/" aria-current="page">Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/" >Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/" >Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0/docs/modules/devices/">Heterogeneous Devices</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Preflight Operations</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="preflight-operations">Preflight Operations</h1>
+<p>Run preflight on a bare host to check which accelerators the node can serve and what an allocation
+would require. It needs no cluster, CRDs, NFD labels or running Device Manager. This page covers
+the command, host mounts and result fields; <a href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/#preflight-checks">Discovery</a>
+
+explains the states, depths and how preflight reuses the allocator checks.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#before-you-run-it">Before you run it</a>
+</li>
+<li><a href="#the-command-line">The command line</a>
+</li>
+<li><a href="#mounts">Mounts</a>
+</li>
+<li><a href="#flags">Flags</a>
+</li>
+<li><a href="#side-effects">Side effects</a>
+</li>
+<li><a href="#emitted-steps">Emitted steps</a>
+</li>
+<li><a href="#output-by-manufacturer">Output by manufacturer</a>
+</li>
+<li><a href="#reading-the-result">Reading the result</a>
+</li>
+</ul>
+<h2 id="before-you-run-it">Before you run it</h2>
+<p><strong>There is one mode: the run reproduces what the device-manager does in production.</strong> These steps
+touch the node while it does, so decide them before running where live workloads are:</p>
+<ul>
+<li>the probe containers, which hold an accelerator for as long as they run;</li>
+<li>the preload-library tree, copied onto the host where an init container would have put it;</li>
+<li><strong>a driver mode asked on and put straight back</strong>, on manufacturers whose slicing depends on
+one. A mode that is off is not a node that cannot serve (the allocator turns it on itself when a
+slice lands), so reading it answers nothing, and asking the driver is the only way to know. The
+toggle happens only where the mode was already off, so nothing on the node is sharing that
+accelerator and nothing can notice the window. A restore that fails is reported, loudly, on the
+row: the accelerator is left on and the row is the only thing that can send someone to turn it off.</li>
+</ul>
+<p>Pass <code>--dry-run</code> to see all of it without any of it happening.</p>
+<p>A probe container is <strong>not</strong> privileged. It gets exactly the device nodes, mounts and environment the
+allocator&rsquo;s own injection names, because what it is there to measure is the isolation that injection
+establishes; a privileged container would be handed every device on the host instead.</p>
+<p>Preflight needs <code>CAP_SYS_CHROOT</code> to enter the host root, which the default container capability set
+already carries. <code>--privileged</code> is for the driver reads and the device nodes, not for the <code>chroot</code>.</p>
+<h2 id="the-command-line">The command line</h2>
+<p><strong>Find your manufacturer below and run the block as it stands.</strong> Each one is complete and needs
+nothing filled in. Add <code>--dry-run</code> to any of them to see every step without taking one.</p>
+<p>The blocks differ only in their last vendor argument, which is what that manufacturer&rsquo;s library
+loads from: the same host path the device-manager DaemonSet mounts for it, at the same access. That
+is what makes this run reproduce production rather than resemble it.</p>
+<p><strong>On containerd</strong>, swap <code>docker run</code> for <code>nerdctl run</code>; it resolves its own socket and namespace on
+the host it is invoked on. The two blocks carrying <code>--runtime</code> are the exception, and each says what
+to use instead.</p>
+<blockquote>
+<p><strong>A vendor path that is not there is created, not refused.</strong> <code>docker run -v</code> creates a missing
+source directory as an empty one, so a typo (or a driver installed somewhere else) mounts nothing
+over the right place, and the detect pass reports zero accelerators: the same answer a node with no
+hardware gives. Check the path exists on the host before reading the result.</p>
+</blockquote>
+<h3 id="amd">AMD</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /opt/rocm:/opt/rocm:ro -v /opt/rocm/lib:/opt/rocm/lib:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>amd</span></span></code></pre></div>
+</div><p>The second mount is not a duplicate of the first. ROCm&rsquo;s packaging puts a symlink somewhere in this
+path on every install, and where it falls decides whether the mount survives it: one at or above the
+mount source is resolved by the host and is harmless, while one inside the mounted tree dangles in
+the container. Naming the library directory as its own source has the host resolve it first.</p>
+<blockquote>
+<p><strong>Both shapes are ordinary.</strong> On a single-version host <code>/opt/rocm</code> is itself the link. On one
+carrying two ROCm versions, <code>/opt/rocm/lib</code> is — and mounting <code>/opt/rocm</code> alone then loads no ROCm
+library at all, so a node with an accelerator reports as having none. The device-manager DaemonSet
+mounts both for the same reason.</p>
+</blockquote>
+<blockquote>
+<p><strong>To pin one ROCm version on a host carrying two</strong>, mount the versioned tree in place of both
+(<code>-v /opt/rocm/core-&lt;ver&gt;:/opt/rocm:ro</code>), which is how the same host is preflighted against 7.14
+and 10.0 separately.</p>
+</blockquote>
+<h3 id="ascend">Ascend</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/Ascend:/usr/local/Ascend:ro -v /usr/local/dcmi:/usr/local/dcmi:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>ascend</span></span></code></pre></div>
+</div><p>No <code>--runtime ascend</code> here, although <a href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/">Vendor Prerequisites</a>
+ requires that
+runtime in production: what it injects is device nodes, and this command is already <code>--privileged</code>
+with <code>/dev</code> mounted whole. The driver is the mount above. The Ascend probe containers do need it,
+and get it themselves; under <code>nerdctl</code> they cannot, and are emitted for you to run instead.</p>
+<h3 id="cambricon">Cambricon</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/neuware:/usr/local/neuware:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>cambricon</span></span></code></pre></div>
+</div><h3 id="hygon">Hygon</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /opt/hyhal:/opt/hyhal:ro -v /opt/dtk:/opt/dtk:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /etc/dmi_mig_config:/etc/dmi_mig_config <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>hygon</span></span></code></pre></div>
+</div><p>The third mount is the only writable one on this page: the vendor library materializes a partition by
+writing that registry, and the DaemonSet mounts it writable for the same reason. Add
+<code>--probe-image &lt;image&gt;</code> to measure the two slice rows; no default is claimed for a Hygon family, and
+what the image has to carry is in <a href="#the-container-probe-tier">The container-probe
+tier</a>
+.</p>
+<h3 id="iluvatar">Iluvatar</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/corex:/usr/local/corex:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>iluvatar</span></span></code></pre></div>
+</div><p>No <code>--runtime iluvatar</code>, for the same reason Ascend needs none: <code>ix-container-runtime</code> injects device
+nodes, which <code>--privileged</code> and <code>/dev</code> already cover, and the driver is the mount above.</p>
+<h3 id="metax">MetaX</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /opt/mxdriver:/opt/mxdriver:ro -v /opt/maca:/opt/maca:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>metax</span></span></code></pre></div>
+</div><h3 id="moore-threads">Moore Threads</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host --runtime mthreads <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>mthreads</span></span></code></pre></div>
+</div><p>Nothing to mount, and a <code>--runtime</code> instead: the user-space driver here is injected by the vendor
+container runtime rather than installed at a path you can bind-mount. <code>mthreads</code> is the handler that
+runtime registered with your container engine, and the same name the chart&rsquo;s RuntimeClass carries.
+Under <code>nerdctl</code>, whose <code>--runtime</code> names an OCI shim, that flag does not reach the handler.</p>
+<h3 id="nvidia">NVIDIA</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host --runtime nvidia <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>nvidia</span></span></code></pre></div>
+</div><p>Nothing to mount, for the same reason as Moore Threads above. Under <code>nerdctl</code> use <code>--gpus all</code> in
+place of <code>--runtime nvidia</code>, whose <code>--runtime</code> names an OCI shim and rejects the handler name.</p>
+<p><strong>The flag is not optional.</strong> Measured on a host with one RTX 4090: the identical command under
+<code>--runtime runc</code> reports <code>accelerators: 0</code> against a host whose own <code>nvidia-smi</code> reports 1, and exits
+1; under <code>--runtime nvidia</code> it reports <code>ok</code>, <code>accelerators: 1</code>, and exits 0.</p>
+<h3 id="t-head">T-Head</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/PPU_SDK:/usr/local/PPU_SDK:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>thead</span></span></code></pre></div>
+</div><p>Add <code>--probe-image &lt;image&gt;</code> to measure the slice rows: no default is claimed for a PPU family, because
+the workload container brings its own SDK and there is no generation to match an image against.</p>
+<h3 id="every-manufacturer-at-once">Every manufacturer at once</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --network<span class="o">=</span>host -v /:/host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight</span></span></code></pre></div>
+</div><p><strong>With no vendor mounts at all</strong>, the run still reports every manufacturer and names the mounts the
+rest of the questions need. Only NVIDIA, Ascend and AMD carry a host CLI to cross-check that
+detection against, so for manufacturers without a host CLI a detection of zero is this container&rsquo;s own view and not the
+host&rsquo;s; the Host cross-check column below says which is which.</p>
+<h2 id="mounts">Mounts</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Mount</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>-v /:/host</code></td>
+          <td>the host&rsquo;s own root. Preflight enters it with <code>chroot</code> to run the host&rsquo;s container CLI and the host&rsquo;s vendor CLI, and stages the preload libraries through it. Move it with <code>--host-root</code></td>
+      </tr>
+      <tr>
+          <td><code>--network=host</code></td>
+          <td><code>chroot</code> changes the root and not the network namespace, so a host CLI entered through it reads the host&rsquo;s <code>/etc/resolv.conf</code> inside this container&rsquo;s namespace. Without it, any host CLI asked to pull an image fails on DNS</td>
+      </tr>
+      <tr>
+          <td><code>-v /dev:/dev</code>, <code>-v /sys:/sys</code></td>
+          <td>what preflight&rsquo;s own in-process detect pass and driver reads need. They stay in container context — only the host&rsquo;s executables go through the <code>chroot</code></td>
+      </tr>
+      <tr>
+          <td>the vendor arguments for your manufacturer</td>
+          <td>what the manufacturer&rsquo;s library needs in order to load in this container — a host path to bind-mount, or a <code>--runtime</code> for the two whose driver is injected rather than installed. Without them the detect pass finds nothing while the host&rsquo;s CLI finds cards, which is exactly the discrepancy the result reports. Yours is in <a href="#the-command-line">The command line</a>
+</td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p><strong>Why the host root rather than a mounted runtime socket</strong> — mounting a runtime socket already
+grants host root, and needs one mount per runtime plus a CLI of ours in the image whose version
+need not match the daemon it talks to. Entering the host root costs one mount and gives the host&rsquo;s
+own CLIs, at their own versions.</p>
+</blockquote>
+<h2 id="flags">Flags</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Flag</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--manufacturer</code></td>
+          <td>which manufacturers to ask about, comma separated. Every one asked about is reported, including the ones nothing is read for. Defaults to all of them</td>
+      </tr>
+      <tr>
+          <td><code>--no-pci-check</code></td>
+          <td>as on <code>detect</code> — skip the PCI check the detect pass makes</td>
+      </tr>
+      <tr>
+          <td><code>--dry-run</code></td>
+          <td>print the container steps instead of taking them. It writes nothing to the host at all — no library tree, nothing a responder rendered, no driver mode — so a printed step names what its reader has to stage first, and a capability that could only be established by asking the driver reports that it was not asked</td>
+      </tr>
+      <tr>
+          <td><code>--probe-image</code></td>
+          <td>the image the probe containers run, overriding the per-family default. Required for a family that has no default, and the way to run a probe in an air-gapped environment</td>
+      </tr>
+      <tr>
+          <td><code>--host-root</code></td>
+          <td>where the host&rsquo;s root filesystem is mounted into this container. Defaults to <code>/host</code></td>
+      </tr>
+      <tr>
+          <td><code>--runtime</code></td>
+          <td>the host container runtime to drive, overriding what was resolved. One of <code>docker</code>, <code>nerdctl</code>, <code>ctr</code>; anything else is refused before the pass starts, so a typo is a usage error rather than a run that quietly established nothing. An escape hatch: a runtime that the host does not carry drops every container step to being emitted</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>The runtime is resolved from the kubelet&rsquo;s own CRI endpoint</strong> wherever the host states one. That
+is what starts a container on this node in production, and reproducing production is the point.</p>
+<p><strong>Which configuration states it comes from the running kubelet&rsquo;s own command line</strong>, found in the
+host&rsquo;s process table through the mounted host root: <code>--config</code> names the file it loaded,
+<code>--config-dir</code> the drop-ins merged over that file, and an endpoint on the command line itself
+overrides both.</p>
+<p>A host with no kubelet running — a machine before it joins a cluster, or a distribution that embeds
+the kubelet in its agent process — has no such command line. Then
+<code>/var/lib/kubelet/kubeadm-flags.env</code>, <code>/var/lib/kubelet/config.yaml</code> and the distribution&rsquo;s own
+<code>kubelet.conf.d</code> tree are read instead, in that order.</p>
+<blockquote>
+<p><strong>Why not simply probe</strong> — a host carrying both <code>docker</code> and <code>containerd</code>, with a kubelet talking
+to <code>containerd</code>, would be probed <code>docker</code>-first and every container answer would then describe a
+path no workload takes. A host that states no endpoint — a bare machine before a cluster exists,
+or a distribution keeping that configuration elsewhere — falls through to probing <code>docker</code>, then
+<code>nerdctl</code>, then <code>ctr</code>.</p>
+</blockquote>
+<p><strong>A host root mounted without the host&rsquo;s <code>/proc</code> refuses instead of probing.</strong> Nothing there can say
+which kubelet is running, and the paths above are only this node&rsquo;s kubelet&rsquo;s if this node&rsquo;s kubelet
+reads them. Every container step drops to being emitted; <code>--runtime</code> names a runtime past it.</p>
+<h2 id="side-effects">Side effects</h2>
+<p><strong>It starts one probe container per accelerator that can host a logical slice</strong>, and — on a
+manufacturer whose co-tenancy is measured — <strong>two more for that accelerator afterwards</strong>, started
+together to see whether one card carries two slices at once.</p>
+<p>Each one runs the vendor image resolved for that accelerator&rsquo;s family, with the injection an
+allocation would emit, and prints its own address map and the vendor reader&rsquo;s output. The container
+is named for its accelerator, so two cards never render their artifacts over one path.</p>
+<p><strong>NVIDIA and Ascend probes are handed to a vendor runtime</strong>, without which the container gets device
+nodes and no user-space driver — and the flag for that differs by CLI. <code>docker</code> takes
+<code>--runtime nvidia</code> / <code>--runtime ascend</code>, naming an entry in its own daemon configuration; <code>nerdctl</code>&rsquo;s
+<code>--runtime</code> names an OCI shim instead and rejects those names outright, so its door to the NVIDIA
+hook is <code>--gpus</code>. A pair with no known door — <code>nerdctl</code> and Ascend — is emitted rather than run.</p>
+<p><strong>Everything it starts is removed.</strong> Every probe container carries the label
+<code>gpustack.ai/preflight=true</code> and is started with <code>--rm</code>, and a run sweeps containers carrying that
+label before it starts any of its own — so one left behind by a run that was killed is collected by
+the next.</p>
+<p>On containerd the containers are created in the namespace <code>gpustack-preflight</code>, named in the result,
+and the CLI is pointed at the socket that was resolved rather than at its own default.</p>
+<p><strong>The run writes to the host in four places, and only the first two outlive it:</strong></p>
+<table>
+  <thead>
+      <tr>
+          <th>Write</th>
+          <th>Where</th>
+          <th>Removed when</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>the manufacturer&rsquo;s preload-library tree, copied out of this image</td>
+          <td><code>/var/lib/gpustack/operator/lib/&lt;manufacturer&gt;</code></td>
+          <td><strong>never</strong> — it is what a device-manager init container normally stages, and a probe container has none</td>
+      </tr>
+      <tr>
+          <td>whatever the allocator&rsquo;s own responder rendered for a container</td>
+          <td><code>/var/lib/gpustack/operator/preflight/</code></td>
+          <td>at the end of the pass. What lands here is the responder&rsquo;s own business: Ascend writes an <code>npu_info.config</code>, Hygon a <code>vdev.conf</code>, and a manufacturer whose responder renders nothing writes nothing</td>
+      </tr>
+      <tr>
+          <td>a lock, so two runs cannot sweep each other&rsquo;s probes</td>
+          <td><code>/var/lib/gpustack/operator/preflight/lock</code></td>
+          <td><strong>never</strong> — the file stays; the lock on it is held by the running process and released by the kernel when that process ends, whatever ended it</td>
+      </tr>
+      <tr>
+          <td>a driver mode asked on, to tell &ldquo;off&rdquo; from &ldquo;cannot be turned on&rdquo;</td>
+          <td>the host&rsquo;s driver state</td>
+          <td>immediately, in the same breath — unless the restore itself fails, which the row then says</td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p><strong>Run it before the node serves workloads.</strong> The mode above is put back within the same call, but
+nothing serialises that against a device-manager allocating on the same card: an allocation landing
+in that window can be switched off under. Ascend and Cambricon write to the driver.</p>
+</blockquote>
+<blockquote>
+<p><strong>Run the image that matches the installed device-manager.</strong> The library tree in the first row is
+the one real allocations mount, not a copy of it, and staging replaces the files already there. On a
+node with a device-manager installed, running preflight from a different image version therefore
+leaves that version&rsquo;s preload libraries behind for every allocation afterwards: a working node,
+silently changed by a command that reads. On a node being brought up there is nothing there yet and
+nothing to disturb, which is what this command is for. If you must run it against an installed
+node, use the same tag the device-manager runs, and treat any other tag as an operation that
+changes the node.</p>
+</blockquote>
+<blockquote>
+<p><strong>Why they go in a directory of their own</strong> — the neighbouring <code>.../operator/pods</code> is what an
+allocator reads as its record of what other Pods hold, and an entry there under a Pod UID no
+kubelet scheduled would be counted as occupancy. Preflight never writes into it, so a run killed
+before it can clean up costs a later allocation nothing.</p>
+</blockquote>
+<h2 id="emitted-steps">Emitted steps</h2>
+<p>A container step that cannot be taken is <strong>printed complete</strong>, and the row says it was emitted. That
+is an answer, not a failure of the node, and it does not affect the exit code. Whether it runs as
+printed depends on the case: the two below that write nothing to the host name what you have to put
+there first, and the <code>ctr</code> row names a CLI this host does not have. Five cases reach it:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Case</th>
+          <th>Printed output</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--dry-run</code></td>
+          <td>the command, plus the two things its reader still has to do: stage the library tree, and let a responder render whatever it renders — a dry run writes neither</td>
+      </tr>
+      <tr>
+          <td>the library tree could not be staged</td>
+          <td>the command, naming what could not be written. It is not runnable until that is fixed, and the row says so — but the command is what an operator needs in order to stage the tree by hand and take the step themselves</td>
+      </tr>
+      <tr>
+          <td>no container runtime on the host</td>
+          <td>the command, naming what was probed</td>
+      </tr>
+      <tr>
+          <td>no host root to enter</td>
+          <td>the command, naming the marker directory that was looked for and absent</td>
+      </tr>
+      <tr>
+          <td>a runtime that cannot pass the vendor runtime (<code>ctr</code>, or <code>nerdctl</code> for Ascend)</td>
+          <td>the same command <strong>rewritten in a dialect that can</strong> — <code>nerdctl</code> against the socket <code>ctr</code> resolved, or <code>docker</code> with its <code>--runtime</code> flag and the containerd addressing dropped. A <code>ctr</code> resolved on its own was reached <em>because</em> nerdctl is absent, and the row says so: install nerdctl, or take the step from a host that has one</td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p><strong>Why <code>ctr</code> never starts a probe</strong> — <code>ctr run</code> has no flag that passes a device node, so the only
+way to reach an accelerator through it is <code>--privileged</code>, which grants every device on the host.
+That would report an isolation the injection never established: a measured answer that measured the
+wrong thing.</p>
+</blockquote>
+<h2 id="output-by-manufacturer">Output by manufacturer</h2>
+<p><strong>Find your manufacturer first.</strong> How much this command can tell you depends on how much your
+allocator reads before it hands a device out, and that differs by vendor. The tiers below say
+what a run on your node will and will not establish.</p>
+<p><strong>Every manufacturer is asked for the capability rows.</strong> All allocators can produce an injection
+without one being served, so every one of them answers what an allocation would grant. What differs
+by tier is the two things an injection alone cannot establish: whether a driver said anything
+<strong>before</strong> it, and whether a container was started <strong>after</strong> it.</p>
+<p><strong>How many of those rows come back is a fact about the accelerator, not the tier.</strong> The two sliced
+rows are produced only for an accelerator declaring logical slicing; a partition-backed one (a card
+with MIG on) reports the two management rows and no sliced rows, because a partitioned accelerator
+serves no other mode. One declaring neither family reports none of the four.</p>
+<p><strong>An absent row is a family this accelerator does not offer</strong>, not a result that went missing.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Tier</th>
+          <th>Manufacturers</th>
+          <th>Driver-read row</th>
+          <th>Capability rows via</th>
+          <th>Deepest answer</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><strong>Full</strong></td>
+          <td>NVIDIA, Ascend, AMD, T-Head</td>
+          <td>yes</td>
+          <td>a real container, except <code>sidecar-visibility</code></td>
+          <td><code>measured</code></td>
+      </tr>
+      <tr>
+          <td><strong>Container probe, no driver read</strong></td>
+          <td>Hygon</td>
+          <td>no — a <code>note</code> says why instead</td>
+          <td>a real container, except <code>sidecar-visibility</code></td>
+          <td><code>measured</code></td>
+      </tr>
+      <tr>
+          <td><strong>Driver read + injection</strong></td>
+          <td>Cambricon, MetaX</td>
+          <td>yes</td>
+          <td>the injection only; no container is started</td>
+          <td><code>simulated</code></td>
+      </tr>
+      <tr>
+          <td><strong>Injection only</strong></td>
+          <td>Iluvatar, MThreads</td>
+          <td>no — a <code>note</code> says why instead</td>
+          <td>the injection only; no container is started</td>
+          <td><code>simulated</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>The two middle tiers are the reminder that the two questions are independent. Cambricon and MetaX
+read a driver and start no container; Hygon starts a container and reads no driver. Neither is
+&ldquo;further along&rdquo; than the other: they answer different halves.</p>
+<p><code>sidecar-visibility</code> is <code>simulated</code> on <strong>every</strong> tier, including the full one: measuring it would need
+the owner container still running when the sidecar starts, and the probe containers are one-shots that
+exit as soon as they have printed their evidence.</p>
+<h3 id="the-injection-only-tier">The injection-only tier</h3>
+<p><strong>Your rows stop one step short of the full tier&rsquo;s, and the missing step is the driver read.</strong> Your
+allocator consults no driver when it serves an allocation: the memory cap and compute weight come from
+the container&rsquo;s own resource request, and the host kmod plus the vendor container runtime enforce
+them. There is no precondition to check ahead of time, which is a fact about your stack and not a gap
+in this command; the <code>note</code> on your group says so in your vendor&rsquo;s own terms.</p>
+<p>What you do get:</p>
+<ul>
+<li><strong>The capability rows your accelerators offer, at <code>simulated</code></strong> — the allocator really did produce the injection, and
+the row names what it grants: the device nodes, the mounts, the environment. What is not
+established is what that injection looks like from inside a container, because no container was
+started. See <a href="https://github.com/gpustack/gpustack-operator/issues/138">#138</a>
+ for the work that
+would close that; Hygon left this tier that way, and the two sections below are what changed.</li>
+<li><strong>The host cross-check</strong> on your detection, the one thing <code>detect</code> cannot do. From inside a
+container with no device mounts, &ldquo;this machine has no accelerators&rdquo; and &ldquo;this machine has eight you
+cannot reach&rdquo; are the same sentence. This enters the host and asks its own vendor CLI, so a
+detection of zero on a host that sees eight comes back naming the mounts you are missing. Only
+NVIDIA, Ascend and AMD carry a host CLI to cross-check against; the rest of the table&rsquo;s
+Host cross-check column says so.</li>
+<li><strong>The <code>note</code></strong>, which says in that manufacturer&rsquo;s own terms why no precondition exists — so you can
+tell &ldquo;nobody implemented this&rdquo; from &ldquo;there is nothing here to implement&rdquo;.</li>
+</ul>
+<p>If a slice does not work on your node, the place to look is the vendor container runtime and the
+resource request, not a driver flag.</p>
+<h3 id="the-container-probe-tier">The container-probe tier</h3>
+<p><strong>Hygon is here, and it is the tier where the two sliced rows mean the most.</strong> Its allocator reads no
+driver (the paragraph above applies to the <code>note</code> on your group unchanged), but a container is
+started, so <code>sliced-runtime-loaded</code> and <code>sliced-quota-in-force</code> come back at <code>measured</code>.</p>
+<p>Before reading those rows, check the following:</p>
+<ul>
+<li><strong><code>--probe-image</code> is required.</strong> No default is claimed for a Hygon family. The image does not have
+to be a DTK one (the probe runs the vendor&rsquo;s own <code>BandwidthTest</code> out of <code>/opt/dtk</code>, which your
+allocator already mounts), but it is not &ldquo;any image&rdquo; either. It needs <code>sh</code>, <code>cat</code>, <code>grep</code>, <code>awk</code>,
+<code>mkdir</code>, <code>sleep</code> and <code>kill</code>, plus a C library that can load a dynamically linked glibc binary.
+<code>mkdir</code> is load-bearing: the reader claims the driver record it is about to read, and an image
+without it reports a healthy accelerator as unavailable. Measured on a glibc image without DTK.</li>
+<li><strong>The evidence is the driver&rsquo;s record, not a log line.</strong> The other measured manufacturers preload a
+library GPUStack builds and raise its log level to make it state the cap. Hygon&rsquo;s slicing runtime is
+the vendor&rsquo;s own DTK/hyhal user space, whose vgpu diagnostics have an API to set the level and no
+environment variable, so there is nothing to turn on from outside. What answers instead is the
+per-slice record the driver publishes under the kfd vgpu sysfs, which exists only for a process
+that entered vgpu mode.</li>
+<li><strong><code>hy-smi</code> will not confirm a slice for you.</strong> It answers from the DMI layer and reports the
+physical card: under a container capped at 1024 MiB it still prints the card&rsquo;s full VRAM. That is
+not a broken slice; the cap binds the HSA/HIP runtime a workload uses. To see a slice by hand, ask
+a HIP client.</li>
+</ul>
+<h3 id="the-full-table">The full table</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Manufacturer</th>
+          <th>Detection reads</th>
+          <th>Host cross-check</th>
+          <th>Driver-read row</th>
+          <th>For which mode</th>
+          <th>Container probe</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>NVIDIA</td>
+          <td>NVML</td>
+          <td><code>nvidia-smi -L</code></td>
+          <td><code>mig-partitioning</code></td>
+          <td><code>partitioned</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>Ascend</td>
+          <td>DCMI</td>
+          <td><code>npu-smi info -l</code></td>
+          <td><code>container-share</code></td>
+          <td><code>sliced</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>AMD</td>
+          <td>RSMI, AMDSMI, HSA</td>
+          <td><code>rocm-smi --showuniqueid</code></td>
+          <td><code>cu-mask-topology</code></td>
+          <td><code>sliced</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>T-Head</td>
+          <td>HGML</td>
+          <td></td>
+          <td><code>mig-partitioning</code></td>
+          <td><code>partitioned</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>Cambricon</td>
+          <td>CNDev</td>
+          <td></td>
+          <td><code>smlu-mode</code></td>
+          <td><code>sliced</code></td>
+          <td></td>
+      </tr>
+      <tr>
+          <td>MetaX</td>
+          <td>MXSML, sGPU sysfs registry</td>
+          <td></td>
+          <td><code>sgpu-mode</code></td>
+          <td><code>sliced</code></td>
+          <td></td>
+      </tr>
+      <tr>
+          <td>Hygon</td>
+          <td>RSMI, AMDGPU, HSA</td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>Iluvatar</td>
+          <td>IXML</td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+      </tr>
+      <tr>
+          <td>MThreads</td>
+          <td>MTML</td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>An empty cell is &ldquo;this manufacturer has none&rdquo;</strong>, not a value left out. Ascend files two more rows on
+an A5 accelerator, which are neither a driver read nor a probe — see <a href="#the-a5-host-state-rows">The A5 host-state
+rows</a>
+.</p>
+<blockquote>
+<p><strong>Read the <code>mode</code> column, not the capability name.</strong> Every row in a report carries a <code>mode</code>, and it
+is what makes two manufacturers comparable: <code>container-share</code> and <code>cu-mask-topology</code> are different
+vendors&rsquo; words for the same question — <em>can this accelerator be logically sliced?</em> The capability
+name stays the vendor&rsquo;s own so that searching for it finds their documentation; <code>mode</code> is what tells
+you two rows answer the same thing, and which mode nothing answered for on your node.</p>
+</blockquote>
+<p><strong>An empty host cross-check is an answer, not a gap.</strong> A manufacturer with none has no vendor CLI
+whose output shape this command has established, and the column says so rather than guessing: a wrong
+match counts zero, and a zero reads as &ldquo;the host sees nothing either&rdquo;, the one answer that sends an
+operator to debug the wrong layer.</p>
+<h3 id="what-the-driver-read-row-means-per-manufacturer">What the driver-read row means, per manufacturer</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Row</th>
+          <th><code>ok</code> means</th>
+          <th><code>not-declared</code> means</th>
+          <th><code>unavailable</code> means</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>mig-partitioning</code></td>
+          <td>the accelerator declares a physical-slice profile</td>
+          <td>no profile is declared, so MIG is off or absent — a consumer card always reads this way</td>
+          <td>the driver could not be asked</td>
+      </tr>
+      <tr>
+          <td><code>container-share</code></td>
+          <td>the flag is on, or was off and the driver accepted turning it on</td>
+          <td>this generation has no such flag</td>
+          <td>dcmi has no such entry point, or refused</td>
+      </tr>
+      <tr>
+          <td><code>cu-mask-topology</code></td>
+          <td>the HSA topology reads and validates, and the detail names the compute units and the allocation atom</td>
+          <td>—</td>
+          <td>HSA could not be initialized, or no agent names the card</td>
+      </tr>
+      <tr>
+          <td><code>smlu-mode</code></td>
+          <td>the mode is on, or was off and the driver accepted turning it on</td>
+          <td>the accelerator advertises no logical-slicing capacity</td>
+          <td>cnDev has no sMLU API, or refused</td>
+      </tr>
+      <tr>
+          <td><code>sgpu-mode</code></td>
+          <td>the registry reads; the detail says whether the card already hosts a subdevice</td>
+          <td>—</td>
+          <td>the registry could not be read</td>
+      </tr>
+  </tbody>
+</table>
+<p>Two of these are <strong>established rather than read</strong> — <code>container-share</code> and <code>smlu-mode</code>. Where the mode
+is off, the driver is asked to turn it on and it is put straight back; the detail says which
+happened, and says so explicitly if the restore failed and the accelerator was left on.</p>
+<p>Under <code>--dry-run</code> the ask is withheld, because asking is a write however briefly the mode is held.
+The row then reports the mode as read and says it was not established — which is a different answer
+from a capability that was checked and found working.</p>
+<h3 id="the-a5-host-state-rows">The A5 host-state rows</h3>
+<p><strong>Ascend files two more rows on an Atlas A5 (950) accelerator and on no other.</strong> Neither reads a
+driver and neither starts a container: each reads one file the host either carries or does not, so
+both come back at the <code>declared</code> depth. Each is one node-level fact, and it is a precondition for
+every mode the accelerator serves, so each is repeated on every accelerator and under every mode,
+and a report filtered by either still carries it.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Row</th>
+          <th>Reads</th>
+          <th><code>ok</code> means</th>
+          <th><code>unavailable</code> means</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ascend-docker-runtime</code></td>
+          <td>the version the vendor runtime&rsquo;s installer recorded under <code>/usr/local/Ascend</code></td>
+          <td>MindCluster 26.0.0 or newer, the release where A5 support landed</td>
+          <td>an older release, or a version that could not be read: an allocation on this accelerator fails at container creation</td>
+      </tr>
+      <tr>
+          <td><code>hccl-ranktable</code></td>
+          <td><code>/etc/hccl_rootinfo.json</code>, through the mounted host root</td>
+          <td>the host carries no such file, <strong>or</strong> carries one at version <code>2.0</code></td>
+          <td>any other version, a file that could not be parsed or is a symbolic link, or a host root this command could not look in: multi-card jobs on this accelerator fail to initialise HCCL</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Why each of those fails, and how to correct it, is in <a href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/#ascend">Vendor
+Prerequisites</a>
+</strong> — the mechanism is stated there once, and the
+<code>reason</code> on the row itself carries it verbatim, so a report is readable without this page.</p>
+<p>Read the following from the table rather than inferring them:</p>
+<ul>
+<li><strong>An absent ranktable is <code>ok</code>, not a prerequisite nobody installed.</strong> It is the healthy state,
+which is why that row treats an unreadable file the opposite way to the one above it.</li>
+<li><strong>A host root this command could not look in is <code>unavailable</code>, not <code>ok</code>.</strong> A missing
+<code>/etc/hccl_rootinfo.json</code> and an unmounted host root are the same absence to the filesystem, and
+only the first is a healthy node. A run with <a href="#emitted-steps">no host root to
+enter</a>
+ carries on as a dry run rather than stopping, so
+this row says the host was never looked at. A path that merely resembles a host root counts as
+none.</li>
+<li><strong>A ranktable behind a symbolic link is <code>unavailable</code> too.</strong> This command resolves an absolute
+target against its own root rather than the host&rsquo;s, so following the link would read a file inside
+the container while the vendor runtime follows the same link on the host. The row names the target
+instead; read it there.</li>
+</ul>
+<h3 id="the-slice-rows-and-what-the-probe-needs">The slice rows, and what the probe needs</h3>
+<p>Manufacturers with a container probe start one container per sliceable accelerator. The table below
+lists their probe images and requirements.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Manufacturer</th>
+          <th>Probe image</th>
+          <th>Vendor runtime</th>
+          <th>Reader inside</th>
+          <th>Where the cap is</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>NVIDIA</td>
+          <td><code>nvidia/cuda:&lt;CUDA major&gt;</code></td>
+          <td><code>--runtime nvidia</code> (docker) · <code>--gpus all</code> (nerdctl)</td>
+          <td><code>nvidia-smi --query-gpu=memory.total</code></td>
+          <td><code>CUDA_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
+      </tr>
+      <tr>
+          <td>Ascend</td>
+          <td><code>quay.io/ascend/cann:&lt;CANN major&gt;-&lt;family&gt;</code></td>
+          <td><code>--runtime ascend</code> (docker only)</td>
+          <td><code>enpu-monitor</code></td>
+          <td><code>npu_info.config</code>, key <code>memory-quota</code></td>
+      </tr>
+      <tr>
+          <td>AMD</td>
+          <td><code>ubuntu:24.04</code></td>
+          <td>none</td>
+          <td><code>rocm-monitor</code></td>
+          <td><code>VROCM_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
+      </tr>
+      <tr>
+          <td>T-Head</td>
+          <td>none — pass <code>--probe-image</code></td>
+          <td>none</td>
+          <td><code>ppu-monitor</code></td>
+          <td><code>HGGC_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
+      </tr>
+      <tr>
+          <td>Hygon</td>
+          <td>none — pass <code>--probe-image</code></td>
+          <td>none</td>
+          <td><code>BandwidthTest</code>, then the kfd vgpu record it causes</td>
+          <td><code>vdev0.conf</code>, key <code>mem</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>The rows themselves are the same four everywhere:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Row</th>
+          <th>Establishes</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>sliced-runtime-loaded</code></td>
+          <td>every shared object the injection mounts is in the container&rsquo;s own address space — or, where the injection mounts none, that the driver recorded a slicing instance for the container. <code>unavailable</code> means the slice was <strong>not</strong> established: usually a container that got the whole accelerator and no cap at all, and for a driver-record manufacturer also a probe whose client could not run. The row&rsquo;s <code>reason</code> and <code>evidence</code> say which</td>
+      </tr>
+      <tr>
+          <td><code>sliced-quota-in-force</code></td>
+          <td>the container reported back the cap the injection set, rather than the accelerator&rsquo;s own figure</td>
+      </tr>
+      <tr>
+          <td><code>sidecar-visibility</code></td>
+          <td>the <code>sshd</code> sidecar&rsquo;s allocation names what the owner was granted, and nothing the owner was not</td>
+      </tr>
+      <tr>
+          <td><code>co-tenancy</code></td>
+          <td>two independent slices were placed on one accelerator, each with its own geometry</td>
+      </tr>
+  </tbody>
+</table>
+<p>Hygon is the row that mounts no shared object of ours, so its <code>sliced-runtime-loaded</code> is answered by
+the driver&rsquo;s own per-slice record rather than by the container&rsquo;s address space — the tier above
+describes what that costs and what the probe image has to carry.</p>
+<p>A slice asks for <strong>half the accelerator</strong>, so the figure to expect inside is half what the host
+reports: a 24564 MiB card caps at 12282, a 65536 MiB one at 32768. Half rather than a sliver because
+the figure is the evidence, and a cap near the card&rsquo;s own size could be read as the card.</p>
+<h2 id="reading-the-result">Reading the result</h2>
+<p>One YAML document goes to stdout, with <strong>three sections</strong>. This outline uses <code>...</code> for omitted
+values and rows:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">accelerators</span><span class="p">:</span><span class="w">            </span><span class="c"># one group per manufacturer asked about</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">detection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l">...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">depth</span><span class="p">:</span><span class="w"> </span><span class="l">...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="l">...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">checks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">network</span><span class="p">:</span><span class="w">                 </span><span class="c"># the node&#39;s RDMA links — belongs to no manufacturer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="l">...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">checks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">topology</span><span class="p">:</span><span class="w">                </span><span class="c"># what this node&#39;s kubelet does with a NUMA hint</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="l">...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">single-numa-node</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">depth</span><span class="p">:</span><span class="w"> </span><span class="l">declared</span></span></span></code></pre></div>
+</div><p>Each <code>accelerators</code> group carries the time it was read, the detection answer, and a row per
+accelerator per capability — each row carrying
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/#preflight-checks">the state and the depth</a>
+
+it reached, the driver&rsquo;s or the container&rsquo;s own words, and the container command where one was
+involved.</p>
+<p>The <code>network</code> section carries one row per RDMA-capable interface — and per RDMA-capable virtual
+function, named <code>&lt;interface&gt;/&lt;vf bus id&gt;</code>, since on an SR-IOV node those are every RDMA device there
+is. Each row gives the name, the RDMA device and the
+<a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#the-rdma-link-check">link verdict</a>
+.</p>
+<p>The rows come from the same pass that produces the node&rsquo;s published record, so the two judge a link
+the same way. They need not say the same thing: this section is a fresh read taken when you invoke
+it, so a link that changed since the last detect pass shows here first.</p>
+<p>An entry with no RDMA device <strong>and no link verdict</strong> gets no row: <code>rdma: false</code> on its own settles
+the question, while a verdict without a device is the unreadable-tree case this section exists to
+surface. A section with no rows carries a <code>note</code> saying which of the two reasons applies: the
+enumeration failed, or the node has no RDMA hardware.</p>
+<p>The <code>topology</code> section names the TopologyManager policy this node&rsquo;s kubelet is configured with,
+read off the same command line and out of the same configuration the CRI endpoint is read from.</p>
+<p>It matters because the policy decides what the kubelet does with the NUMA hint a device plugin
+publishes: <code>single-numa-node</code> and <code>restricted</code> gate admission on it, <code>best-effort</code> admits a
+misaligned placement anyway, and <code>none</code> discards it. So a request pairing an accelerator with an
+<a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#the-rdma-resource-keys">RDMA interface</a>
+
+lands them on one NUMA node only where the policy enforces it.</p>
+<p>A node nobody configured runs <code>none</code> — <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/#enabling-numa-alignment-on-the-kubelet">how to set a policy, and how to confirm the kubelet took
+it</a>
+.</p>
+<p><strong>A policy that no readable configuration names is reported as <code>unknown</code>, never as the kubelet&rsquo;s
+default.</strong> Reporting <code>none</code> because nothing was found would publish a value nobody read. An
+<code>unknown</code> always carries a <code>note</code> saying which of the four reasons applies: nothing the kubelet
+reads named one, a file could not be read, two distribution trees name different policies, or the
+host&rsquo;s process table was not visible.</p>
+<p><strong>That last one reports &ldquo;not read&rdquo;, not a value.</strong> Without the host&rsquo;s <code>/proc</code> nothing can say which
+kubelet is running or which file it loaded, and a file at a standard path is this node&rsquo;s kubelet&rsquo;s
+only if this node&rsquo;s kubelet reads it, so the section says it could not look rather than naming the
+policy of whichever file happened to sit there.</p>
+<p><strong>The exit code is non-zero only for an <code>unavailable</code> accelerator answer.</strong> A capability this
+generation does not declare, a manufacturer nothing is checked for, a node carrying none of its
+hardware, an answer that went no deeper and a step that was emitted are all answers, and a run that
+reports them has done its job.</p>
+<p><strong>A broken RDMA link does not fail the run.</strong> It withholds a node label, which changes what a
+flavor selects rather than what an allocator can hand out.</p>
+<p><strong>Neither does the topology section, whatever it says</strong> (including a policy it could not read at
+all). The policy decides which placements the kubelet admits, not what this node can hand out, so
+failing the run on it would refuse nodes that allocate perfectly well.</p>
+<blockquote>
+<p><strong>Why</strong> — this exit code answers whether the node can serve the allocation modes its allocators
+offer, and a down link stops none of them. The reasoning is recorded in the feature&rsquo;s spec.</p>
+</blockquote>
+<p>The document is written whether or not the node passed, so a failing run is still readable rather
+than leaving the exit code as the only thing to debug from.</p>
+<p><strong>Only one preflight runs on a node at a time.</strong> Every probe container carries the same label, so a
+second run&rsquo;s stale sweep would remove the first run&rsquo;s live probes, and an accelerator whose probe
+was killed mid-measurement reports as unable to slice. A second run therefore refuses before it
+sweeps anything, reports every manufacturer <code>unavailable</code> naming the lock, and exits non-zero.
+<code>--dry-run</code> is exempt: it starts nothing and writes nothing.</p>
+<p><strong>A failed detection stops that manufacturer&rsquo;s other two questions.</strong> Detection is the floor the rest
+stands on, so when it reads <code>unavailable</code> (the container cannot see hardware the host reports, or the
+accelerators answered but could not be named) the group carries its detection block, no rows, and a
+<code>note</code> saying the remaining questions are unanswerable. Fix what the detection <code>reason</code> names and run
+it again; rows about accelerators the report cannot identify would not have helped.</p>
+<p><strong>One manufacturer&rsquo;s crash does not take the others down.</strong> Everything reached for a manufacturer is
+vendor code over a driver a half-installed node can leave in any state, and that is the node this
+command exists to be run on.</p>
+<p>A panic in one is contained to that one: its group keeps the detection block it had already answered,
+discards whatever the crashed pass had filled in, and reports one <code>unavailable</code> row per accelerator
+plus a <code>note</code> with what the panic said. The other manufacturers are read and reported as usual.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">cambricon</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">checks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="l">MLU-0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">capability</span><span class="p">:</span><span class="w"> </span><span class="l">preflight-panicked</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l">unavailable</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="p">&gt;-</span><span class="sd">
+</span></span></span><span class="line"><span class="cl"><span class="sd">        this manufacturer&#39;s preflight panicked and was contained, so none of this
+</span></span></span><span class="line"><span class="cl"><span class="sd">        accelerator&#39;s preconditions were established: runtime error: invalid memory address</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">note: &#39;this manufacturer&#39;&#39;s preflight panicked and was contained</span><span class="p">:</span><span class="w"> </span><span class="l">whatever it had established</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="l">is discarded, and every accelerator it was asked about is reported unavailable below; the</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">rest of this run is unaffected: runtime error</span><span class="p">:</span><span class="w"> </span><span class="l">invalid memory address&#39;</span></span></span></code></pre></div>
+</div><p>The rows are what make it <strong>exit non-zero</strong>: a crash that left only a note would be a run that
+verified nothing and said it passed. Treat it as a bug worth reporting, with the <code>-v=3</code> output
+attached; the stack trace goes to the log rather than the document.</p>
+<p><strong>A sweep that could not be completed fails the accelerators it could not clear.</strong> Before anything is
+started, the run removes every container left behind by an earlier one, see <a href="#side-effects">Side
+effects</a>
+. Where that sweep fails, the
+run carries one <code>stale-container-sweep</code> row per accelerator:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="l">GPU-0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">capability</span><span class="p">:</span><span class="w"> </span><span class="l">stale-container-sweep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l">unavailable</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s1">&#39;the stale-container sweep could not be completed, so a container an earlier run left
+</span></span></span><span class="line"><span class="cl"><span class="s1">    behind may still be holding this accelerator and every answer measured against it here is
+</span></span></span><span class="line"><span class="cl"><span class="s1">    unsafe to trust: docker: exit status 1: permission denied&#39;</span></span></span></code></pre></div>
+</div><p>It is a failure and not a warning because of what a leftover does: it still holds its accelerator, so
+the slice measured against it comes back short and the report blames the card. A run that swept
+nothing, measured anyway and exited zero would state the opposite of the truth about hardware that is
+fine. Clear the leftovers by hand (<code>docker ps -aq --filter label=gpustack.ai/preflight=true</code>, and the
+same for <code>nerdctl</code> with <code>--namespace gpustack-preflight</code>), then run it again.</p>
+<p><strong>Not every unhappy sweep is one of these.</strong> The sweep lists by label and then removes what it found,
+and the two are told apart:</p>
+<table>
+  <thead>
+      <tr>
+          <th>What failed</th>
+          <th>On which runtime</th>
+          <th>Reported as</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>the removal</td>
+          <td>any</td>
+          <td>a failure — the container was seen and would not go away</td>
+      </tr>
+      <tr>
+          <td>the listing</td>
+          <td>the one this run drives</td>
+          <td>a failure — the probes are about to run through a runtime that cannot be asked what it holds</td>
+      </tr>
+      <tr>
+          <td>the listing</td>
+          <td>any other</td>
+          <td>nothing — a runtime this command cannot reach is one no earlier run started a probe through either</td>
+      </tr>
+  </tbody>
+</table>
+<p>The last row is why a node carrying <code>nerdctl</code> beside a containerd that is not listening stays green:
+the CLI is there, its socket file may even be there, but nothing can be behind it.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/#preflight-checks">Device
+Discovery</a>
+
+(what preflight reads and what the states and depths mean)</li><li><a href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/">Vendor
+Prerequisites</a>
+ (the driver and toolkit paths per manufacturer)</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/">Accelerator Requests</a>
+ (the modes these answers guard)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+ — the runbook for the one mode preflight reads and
+never creates.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/docs/modules/devices/preflight.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#before-you-run-it">Before you run it</a></li>
+    <li><a href="#the-command-line">The command line</a>
+      <ul>
+        <li><a href="#amd">AMD</a></li>
+        <li><a href="#ascend">Ascend</a></li>
+        <li><a href="#cambricon">Cambricon</a></li>
+        <li><a href="#hygon">Hygon</a></li>
+        <li><a href="#iluvatar">Iluvatar</a></li>
+        <li><a href="#metax">MetaX</a></li>
+        <li><a href="#moore-threads">Moore Threads</a></li>
+        <li><a href="#nvidia">NVIDIA</a></li>
+        <li><a href="#t-head">T-Head</a></li>
+        <li><a href="#every-manufacturer-at-once">Every manufacturer at once</a></li>
+      </ul>
+    </li>
+    <li><a href="#mounts">Mounts</a></li>
+    <li><a href="#flags">Flags</a></li>
+    <li><a href="#side-effects">Side effects</a></li>
+    <li><a href="#emitted-steps">Emitted steps</a></li>
+    <li><a href="#output-by-manufacturer">Output by manufacturer</a>
+      <ul>
+        <li><a href="#the-injection-only-tier">The injection-only tier</a></li>
+        <li><a href="#the-container-probe-tier">The container-probe tier</a></li>
+        <li><a href="#the-full-table">The full table</a></li>
+        <li><a href="#what-the-driver-read-row-means-per-manufacturer">What the driver-read row means, per manufacturer</a></li>
+        <li><a href="#the-a5-host-state-rows">The A5 host-state rows</a></li>
+        <li><a href="#the-slice-rows-and-what-the-probe-needs">The slice rows, and what the probe needs</a></li>
+      </ul>
+    </li>
+    <li><a href="#reading-the-result">Reading the result</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

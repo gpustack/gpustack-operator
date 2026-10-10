@@ -1,0 +1,1041 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  
+  <title>RDMA Operations · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0"
+    data-home="/gpustack-operator/v0.9.0/" data-page="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/" >Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/" >Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/" >Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/" aria-current="page">Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/" >Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/">RDMA Networking</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">RDMA Operations</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="rdma-operations">RDMA Operations</h1>
+<p>Choose an RDMA resource key for the workload, set the kubelet&rsquo;s NUMA policy, and check the Pod&rsquo;s
+placement. <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/">Network Topology</a>
+ explains how endpoints become available;
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/">Accelerator Requests</a>
+ lists the admission rules.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#which-key-a-workload-asks-for">Which key a workload asks for</a>
+</li>
+<li><a href="#how-many-endpoints-beside-n-accelerators">How many endpoints beside N accelerators</a>
+</li>
+<li><a href="#injected-devices">Injected devices</a>
+</li>
+<li><a href="#example-manifest">Example manifest</a>
+</li>
+<li><a href="#enabling-numa-alignment-on-the-kubelet">Enabling NUMA alignment on the kubelet</a>
+</li>
+<li><a href="#verifying-the-policy">Verifying the policy</a>
+</li>
+<li><a href="#kueue-and-the-rdma-keys">Kueue and the RDMA keys</a>
+</li>
+<li><a href="#efa-engine-images">EFA engine images</a>
+</li>
+<li><a href="#when-a-pod-does-not-schedule">When a Pod does not schedule</a>
+</li>
+</ul>
+<h2 id="which-key-a-workload-asks-for">Which key a workload asks for</h2>
+<p>The three keys differ in allocation mode, in what a quantity of a key means, and in how many tokens
+one endpoint carries. <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#the-rdma-resource-keys">Network
+Topology</a>
+ describes those
+differences. Choose the key for your workload:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Key</th>
+          <th>Use when</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>device.gpustack.ai/rdma</code></td>
+          <td>the workload must be the adapter&rsquo;s only tenant</td>
+      </tr>
+      <tr>
+          <td><code>device.gpustack.ai/rdma.shared</code></td>
+          <td>everything else</td>
+      </tr>
+      <tr>
+          <td><code>device.gpustack.ai/rdma.partitioned</code></td>
+          <td>the node&rsquo;s adapters are physical functions with virtual functions configured</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>A node serves one branch or the other, and nothing in a manifest chooses it.</strong> An SR-IOV physical
+function with virtual functions configured serves the partitioned key <strong>only</strong>; every other
+interface serves the exclusive and shared keys (<a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#the-rdma-resource-keys">which interface serves
+what</a>
+).
+Read the fleet before writing the manifest:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get nodes -o json <span class="p">|</span>
+</span></span><span class="line"><span class="cl">  jq -r <span class="s1">&#39;.items[] | .metadata.name as $n | .status.allocatable
+</span></span></span><span class="line"><span class="cl"><span class="s1">         | with_entries(select(.key | startswith(&#34;device.gpustack.ai/rdma&#34;)))
+</span></span></span><span class="line"><span class="cl"><span class="s1">         | select(length &gt; 0) | {node: $n} + .&#39;</span></span></span></code></pre></div>
+</div><p>Ask for the shared key unless the workload needs sole tenancy. An adapter carries far more
+concurrent queue pairs than the tokens an endpoint is advertised for, and several processes on
+one adapter is ordinary RDMA practice: the isolation is the firmware&rsquo;s and the kernel&rsquo;s, not the
+token count&rsquo;s. Taking a whole adapter exclusively removes it from every other tenant on the node and
+buys nothing the hardware was not already doing.</p>
+<p>For a managed <code>ModelDeployment</code>, set <code>spec.roles[].resources.interface</code> instead of naming the key
+in a Pod template. <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/">Model Deployment</a>
+ states which key a
+count selects, and the mixed-fabric refusal. The field allocates a device to each rendered engine
+Pod and does not assert that the engine has transferred bytes.</p>
+<p><strong>An EFA leg also needs an EFA build of Mooncake in the engine image</strong>, which no runner image
+carries; see <a href="#efa-engine-images">what an EFA leg needs from the engine
+image</a>
+.</p>
+<h2 id="how-many-endpoints-beside-n-accelerators">How many endpoints beside N accelerators</h2>
+<p><strong>Ask for one RDMA endpoint per accelerator the container requests.</strong> A host built for collective
+traffic carries one adapter beside each accelerator, so <code>N</code> accelerators and <code>N</code> endpoints is the
+count that matches the machine. Fewer puts several accelerators behind one adapter&rsquo;s bandwidth; more
+hands the container adapters that no accelerator sits beside.</p>
+<blockquote>
+<p><strong>Why it is not a pairing</strong> — nothing here binds a particular accelerator to a particular adapter.
+The accelerator plugin&rsquo;s tokens name accelerators and the RDMA plugin&rsquo;s tokens name endpoints;
+each publishes its own NUMA node and nothing finer. The kubelet&rsquo;s TopologyManager is the only
+thing that relates the two sides, and the unit it relates them in is the NUMA node.</p>
+</blockquote>
+<p>What each policy leaves you with:</p>
+<ul>
+<li><code>none</code>, the default: the two allocations are <strong>independent</strong>. A container can be handed every
+accelerator on one NUMA node and every adapter on the other. Nothing reports it; the Pod runs,
+and only the throughput says so.</li>
+<li><code>single-numa-node</code> or <code>restricted</code>: both sides land on <strong>one</strong> NUMA node, and that is the whole
+guarantee. Where a NUMA node carries four accelerators and four adapters, this narrows the choice
+from eight adapters to four and stops: which adapter ends up beside which accelerator is
+unconstrained.</li>
+</ul>
+<p>No request can name &ldquo;this accelerator with the adapter next to it&rdquo;. A workload
+that needs that pins itself to a machine shape it has verified and pairs the devices itself, from
+the granted names below.</p>
+<p>The operator&rsquo;s own <code>rdma.distance</code> and <code>rdma.numa</code> labels cannot close the gap either. Both describe
+the whole node, so neither can say which accelerator ended up beside which adapter in this
+container (<a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#the-three-node-labels">what a label can carry</a>
+).</p>
+<h2 id="injected-devices">Injected devices</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Container contents</th>
+          <th>Count</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>the endpoint&rsquo;s verbs character device, <code>/dev/infiniband/uverbs&lt;N&gt;</code></td>
+          <td>one per granted endpoint</td>
+      </tr>
+      <tr>
+          <td>the node-level connection-manager device, <code>/dev/infiniband/rdma_cm</code></td>
+          <td><strong>one per response</strong>, however many endpoints were granted, and only where the host has one</td>
+      </tr>
+      <tr>
+          <td>the <code>NCCL_IB_HCA</code> environment variable</td>
+          <td>one, naming the granted RDMA devices, comma-joined</td>
+      </tr>
+  </tbody>
+</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># inside the container: one uverbs entry per granted endpoint, and exactly one rdma_cm</span>
+</span></span><span class="line"><span class="cl">ls /dev/infiniband
+</span></span><span class="line"><span class="cl"><span class="c1"># the same devices by name, comma-joined</span>
+</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;</span><span class="nv">$NCCL_IB_HCA</span><span class="s2">&#34;</span></span></span></code></pre></div>
+</div><p>Two granted endpoints therefore show <strong>two</strong> <code>uverbs</code> entries, <strong>one</strong> <code>rdma_cm</code>, and two names in
+<code>NCCL_IB_HCA</code>. The single connection manager is the correct answer rather than a half grant: it
+belongs to the node, not to an endpoint, so it is injected once whatever was granted (<a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#the-allocation-response">what an
+allocation hands over</a>
+).</p>
+<p>The injected set is evidenced for RoCE and for nothing else; what that leaves open on a classic
+InfiniBand fabric is <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#the-allocation-response">what an allocation hands over</a>
+.</p>
+<h2 id="example-manifest">Example manifest</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;local-queue&gt;      </span><span class="w"> </span><span class="c"># without it, no request rule is checked at all</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">&lt;your-own-label&gt;</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;a-machine-shape-you-verified&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">trainer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;8&#34;</span><span class="w">                      </span><span class="c"># eight whole accelerators</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">device.gpustack.ai/rdma</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;8&#34;</span><span class="w">             </span><span class="c"># eight distinct endpoints, same container</span></span></span></code></pre></div>
+</div><p>Four details in this manifest are load-bearing:</p>
+<ul>
+<li><strong>Both requests in one container.</strong> The kubelet aligns per container by default, so a request
+split across two containers is aligned by nothing at all.</li>
+<li><strong>One endpoint per accelerator</strong>, for the reasons above, on the <strong>exclusive</strong> key. A shared-key
+quantity above one does not promise distinct endpoints: the RDMA plugin offers no preferred
+allocation, so kubelet may hand one container several shared tokens of the same endpoint, and
+Allocate collapses them into that one endpoint; <code>rdma.shared: &quot;8&quot;</code> can report satisfied with
+fewer than eight <code>uverbs</code> devices. The shared key is right for a container that needs one.</li>
+<li><strong>A nodeSelector on a label you set yourself.</strong> Nothing this operator publishes asserts &ldquo;one
+adapter per accelerator, evenly split across NUMA nodes&rdquo;; <code>rdma.capable</code> says only that at least
+one endpoint on the node is usable. Label the node pools whose shape you have verified, and select
+on that label.</li>
+<li><strong>Whole accelerators.</strong> An accelerator partition token publishes no NUMA hint, so pairing a
+partition profile with an RDMA key aligns the RDMA side alone; the full condition list is
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/#co-locating-an-accelerator-and-an-rdma-interface">co-locating an accelerator and an RDMA
+interface</a>
+.</li>
+</ul>
+<h2 id="enabling-numa-alignment-on-the-kubelet">Enabling NUMA alignment on the kubelet</h2>
+<p>Do not assume a cluster already has it: no Kubernetes release turns it on. The TopologyManager is
+stable and enabled, but its policy field&rsquo;s default is <code>none</code>, which discards every hint a device
+plugin publishes. Until somebody sets it, the accelerator and the adapter handed to one container
+are two independent picks.</p>
+<p>Two fields, in the kubelet&rsquo;s own <code>KubeletConfiguration</code>:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Field</th>
+          <th>Default</th>
+          <th>Set to</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>topologyManagerPolicy</code></td>
+          <td><code>none</code> — the hint is discarded</td>
+          <td><strong><code>restricted</code></strong>; <a href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/#reading-the-result">what each of the four does</a>
+</td>
+      </tr>
+      <tr>
+          <td><code>topologyManagerScope</code></td>
+          <td><code>container</code> — each container is aligned on its own</td>
+          <td>leave it: the accelerator and the adapter already share a container</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Why <code>restricted</code> and not <code>single-numa-node</code>.</strong> Both gate admission on the hint; they differ on a
+container too wide for one NUMA node:</p>
+<ul>
+<li><code>single-numa-node</code> admits only an allocation inside one NUMA node. On a two-socket host with four
+accelerators per socket it refuses every container asking for eight, with <code>TopologyAffinityError</code>;
+a Pod the kubelet refuses is not rescheduled.</li>
+<li><code>restricted</code> admits the allocation spanning the fewest NUMA nodes that fit. The eight-accelerator
+container lands on both sockets, while a one-accelerator, one-adapter container is still held to a
+single NUMA node.</li>
+</ul>
+<p>Reach for <code>single-numa-node</code> only where every container fits in one NUMA node.</p>
+<p><code>pod</code> scope merges every container&rsquo;s requests into one alignment, which only makes admission
+harder: a ModelDeployment renders the accelerator and the adapter into the same main container, so
+per-container alignment already covers the pair.</p>
+<p>Where those fields go depends on the distribution, and there are three shapes:</p>
+<ul>
+<li><strong><code>/var/lib/kubelet/config.yaml</code></strong>, the kubelet configuration file a kubeadm-style install reads.</li>
+<li><strong>A kubelet drop-in directory.</strong> The kubelet merges every <code>*.conf</code> below the directory it is
+pointed at, a later file overriding an earlier one. A distribution that embeds the kubelet
+regenerates its own tree on every start and offers a separate directory for your files, whose
+contents it copies in; a file written into the generated tree is gone at the next restart.</li>
+<li><strong>The kubelet command line</strong>, <code>--topology-manager-policy=</code>. Some distributions expose it as a
+pass-through argument in their own configuration file rather than as a kubelet field.</li>
+</ul>
+<p><strong>Drain the node before changing it.</strong> The policy decides what the kubelet admits, and the
+containers already running were admitted under the old one; a node restarted into a stricter policy
+can refuse Pods it was happily running.</p>
+<p>On a managed cluster, check that you can set the policy at all before planning a topology around
+it. A managed Kubernetes offering commonly does not expose the kubelet&rsquo;s configuration, and
+failure is silent: the Pod is admitted, the two sides are picked independently, and only the
+throughput says so.</p>
+<h2 id="verifying-the-policy">Verifying the policy</h2>
+<p>Editing a file is not the kubelet running what it says. Read it back from the kubelet itself, which
+needs permission on the <code>nodes/proxy</code> subresource:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get --raw /api/v1/nodes/&lt;node&gt;/proxy/configz <span class="p">|</span>
+</span></span><span class="line"><span class="cl">  jq -r <span class="s1">&#39;.kubeletconfig | {topologyManagerPolicy, topologyManagerScope}&#39;</span></span></span></code></pre></div>
+</div><p>That is the running kubelet&rsquo;s <strong>effective</strong> configuration, defaults included, so it always answers.
+A <code>none</code> from it therefore does not distinguish &ldquo;nobody set it&rdquo; from &ldquo;somebody set it to <code>none</code>&rdquo;;
+it answers what the kubelet will do, which is the question to ask after a change.</p>
+<p><code>device-manager preflight</code> answers the other question. Its <code>topology</code> section reports only a policy
+that some readable kubelet configuration <strong>names</strong>, and <code>unknown</code> when none does, never the
+kubelet&rsquo;s default (<a href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/#reading-the-result">why it refuses to fill one
+in</a>
+). Use it on a bare host before anything is installed, and to
+tell a node that was configured from one that was left alone.</p>
+<p>The two therefore differ in exactly one case, and it is not a contradiction: on a node nobody
+configured, <code>configz</code> says <code>none</code> and preflight says <code>unknown</code>.</p>
+<h2 id="kueue-and-the-rdma-keys">Kueue and the RDMA keys</h2>
+<p>Do not read a queue&rsquo;s admission as an RDMA reservation. The RDMA keys sit outside every accelerator
+family, and the same classifier drives Kueue&rsquo;s node-devices admission, so an RDMA request
+contributes nothing to a Workload&rsquo;s demand, and no ResourceFlavor and no credit can be expressed
+for it.</p>
+<p>A queued Workload can therefore be admitted far past the fleet&rsquo;s real RDMA capacity, and the excess
+surfaces as <strong>Pods that will not schedule</strong> rather than as a queue that waits. The queue reports the
+Workload admitted while its Pod sits <code>Pending</code>, because no node advertises a free endpoint.</p>
+<p>Three things to do instead of a quota:</p>
+<ul>
+<li><strong>Size the accelerator quota so its accelerators never need more endpoints than the fleet
+carries.</strong> One endpoint per accelerator makes the two counts the same number, which is part of why
+that is the count to ask for.</li>
+<li><strong>Watch Pending Pods belonging to admitted Workloads</strong>, not queue depth. That pair is where the
+over-subscription becomes visible; queue depth stays at zero throughout.</li>
+<li><strong>Remember which key runs out first.</strong> An endpoint carries one exclusive token and many more
+shared ones (<a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#the-rdma-resource-keys">how many of each</a>
+),
+so a fleet exhausts the exclusive key long before the shared one on the same hardware.</li>
+</ul>
+<h2 id="efa-engine-images">EFA engine images</h2>
+<p>Which engine can use EFA on which leg, beside every other transport, is <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/engine-versions/#which-transport-each-engine-can-use">the transport
+matrix</a>
+. This section is what
+the cells marked &ldquo;own image&rdquo; there ask of you.</p>
+<p>The engine image needs an EFA build of Mooncake, and no runner image carries one. The
+runner images carry the standard build, which has no EFA transport. Granted an EFA device, an
+engine on that build falls to the verbs path, fails creating its completion queue with <code>Operation not supported</code>, and never starts: the Pod restarts in a loop. Without the grant it moves KV over TCP
+and says nothing.</p>
+<p><strong>Both legs read the engine&rsquo;s build.</strong> A store group on <code>EFA</code> hands the engines it serves the
+protocol <code>EFA</code>, and <code>kvTransfer.protocol: EFA</code> renders <code>efa</code> into both ends of a direct pair, so
+every engine Pod on either leg needs the EFA build. The store members do not: the
+<a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/backend/#the-image">default member image</a>
+ already carries EFA.</p>
+<p><strong>Nothing more is needed from the operator.</strong> An image differing from the vLLM runner image only by
+the EFA build of the same client, plus libfabric, completed a direct transfer and a store write over
+EFA with only the device grant the operator renders: no host network, no mount, and no added
+capability.</p>
+<p><strong>The operator does not pick that image.</strong> Build it, then name it in <code>roles[].image</code> on every role
+that moves KV over EFA. A role naming no image gets the runner image, whatever its leg&rsquo;s protocol.</p>
+<h3 id="building-the-image">Building the image</h3>
+<p>Derive it from the runner image the deployment would otherwise run:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>dockerfile</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-dockerfile" data-lang="dockerfile"><span class="line"><span class="cl"><span class="k">FROM</span><span class="w"> </span><span class="s">gpustack/runner:cuda13.0-vllm0.29.0</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">SHELL</span> <span class="p">[</span><span class="s2">&#34;/bin/bash&#34;</span><span class="p">,</span> <span class="s2">&#34;-eo&#34;</span><span class="p">,</span> <span class="s2">&#34;pipefail&#34;</span><span class="p">,</span> <span class="s2">&#34;-c&#34;</span><span class="p">]</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">ARG</span> <span class="nv">AWS_EFA_VERSION</span><span class="o">=</span><span class="m">1</span>.44.0<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">RUN</span> curl --retry <span class="m">3</span> --retry-connrefused -fL <span class="s2">&#34;https://efa-installer.amazonaws.com/aws-efa-installer-</span><span class="si">${</span><span class="nv">AWS_EFA_VERSION</span><span class="si">}</span><span class="s2">.tar.gz&#34;</span> <span class="p">|</span> tar -zx -C /tmp <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span> <span class="o">&amp;&amp;</span> <span class="nb">cd</span> /tmp/aws-efa-installer <span class="o">&amp;&amp;</span> ./efa_installer.sh -y --skip-kmod <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span> <span class="o">&amp;&amp;</span> rm -f /opt/amazon/efa/lib/libfabric.a <span class="o">&amp;&amp;</span> ldconfig <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span> <span class="o">&amp;&amp;</span> rm -rf /tmp/aws-efa-installer /var/cache/apt /var/lib/apt/lists/*<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">ENV</span> <span class="nv">PATH</span><span class="o">=</span><span class="s2">&#34;</span><span class="si">${</span><span class="nv">PATH</span><span class="si">}</span><span class="s2">:/opt/amazon/efa/bin&#34;</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="c"># Same Mooncake version as the base, EFA build. Remove the standard build under either name;</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="c"># on a CUDA 12 base install mooncake-transfer-engine-efa instead of the -cuda13 wheel.</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">RUN</span> python3 -m pip uninstall -y mooncake-transfer-engine mooncake-transfer-engine-cuda13 <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span> <span class="o">&amp;&amp;</span> python3 -m pip install --no-cache-dir --no-deps mooncake-transfer-engine-efa-cuda13<span class="o">==</span>0.3.13.post1</span></span></code></pre></div>
+</div><p>The image also needs libfabric. The EFA wheel links <code>libfabric.so.1</code> and does not bundle
+it, so without the installer step Mooncake fails at import. <code>--skip-kmod</code> installs the user-space
+half only; the kernel module belongs to the node.</p>
+<p>Check the build before deploying it, and the engine once it runs:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># inside the image: non-zero means the EFA transport is compiled in</span>
+</span></span><span class="line"><span class="cl"><span class="nv">MC</span><span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>python3 -c <span class="s1">&#39;import importlib.util as u; print(u.find_spec(&#34;mooncake&#34;).submodule_search_locations[0])&#39;</span><span class="k">)</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl">grep -ac EfaTransport <span class="s2">&#34;</span><span class="nv">$MC</span><span class="s2">/engine.so&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># the engine&#39;s log once it has started</span>
+</span></span><span class="line"><span class="cl">kubectl logs &lt;engine-pod&gt; <span class="p">|</span> grep <span class="s1">&#39;The Mooncake Transfer Engine is using efa&#39;</span></span></span></code></pre></div>
+</div><h3 id="image-maintenance">Image maintenance</h3>
+<p>The image is yours from then on, and nothing in the operator tracks it:</p>
+<ul>
+<li><strong>The base.</strong> Rebuild whenever the deployment moves to another runner image or engine version; the
+operator keeps rendering the image you named, not the one it would assemble.</li>
+<li><strong>The Mooncake version.</strong> Install the EFA build of the version the base carries (which client
+each runner image carries is <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/engine-versions/#the-minimum-per-shape">its table</a>
+)
+and keep the store on that client&rsquo;s minor line: <a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/backend/#the-store-version-must-match-the-engines-client">the store version must match the engine&rsquo;s
+client</a>
+.</li>
+<li><strong>libfabric</strong>, from the EFA installer, whose version the recipe pins.</li>
+<li><strong>The image on every EFA role.</strong> A new role, or a role you re-create, runs the runner image until
+you name yours on it.</li>
+</ul>
+<h3 id="limitations">Limitations</h3>
+<p>Measured on the <code>0.3.13.post1</code> wheels. These are why the runner images keep the standard build:</p>
+<ul>
+<li><strong>x86_64 only.</strong> No aarch64 EFA wheel is published.</li>
+<li><strong>No intra-node NVLink transport</strong>, which the standard build carries.</li>
+<li><strong>No Mooncake EP or PG modules</strong>, which SGLang uses, so this recipe covers vLLM images only.</li>
+<li><strong>No silent fallback.</strong> Asked for <code>efa</code> on a node without an EFA device it fails, where the
+standard build falls back to TCP. With libfabric installed, <code>tcp</code>, <code>rdma</code> and the store still work
+on such a node.</li>
+<li><strong>Not measured:</strong> the RDMA data path on InfiniBand or RoCE hardware with the <code>rdma-core</code> the
+installer brings.</li>
+</ul>
+<h3 id="sglang-and-efa">SGLang and EFA</h3>
+<p>No SGLang leg reaches EFA. On the direct leg the operator grants SGLang no fabric
+device: SGLang does not hand the declared protocol to its transfer engine, so the declaration cannot
+select a grant, and a positive <code>resources.interface</code> with no other fabric leg is refused at
+admission.</p>
+<p>On the store leg the operator renders the pool&rsquo;s protocol into SGLang&rsquo;s <code>MOONCAKE_PROTOCOL</code>, but
+SGLang&rsquo;s runner image carries a Mooncake with no EFA transport, and the EFA build lacks the modules
+SGLang loads. Run SGLang on AWS over <code>TCP</code>, which has been run there.</p>
+<h3 id="rdma-on-aws">RDMA on AWS</h3>
+<p><strong>Choose <code>EFA</code> or <code>TCP</code> on AWS.</strong> The Device Manager discovers no RDMA device on an EFA node, so
+the <code>device.gpustack.ai/rdma</code> keys are allocatable at zero there, and a member group or engine that
+asks for them stays <code>Pending</code>. Granting the EFA device instead does not help <code>rdma</code> either: the
+verbs path fails creating its completion queue, as above.</p>
+<h2 id="when-a-pod-does-not-schedule">When a Pod does not schedule</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Symptom</th>
+          <th>Meaning</th>
+          <th>Check</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>no node advertises the key at all</td>
+          <td>the node has no RDMA-capable interface, or that family is switched off on the Device Manager</td>
+          <td>the allocatable read above; the <code>--no-shared</code> and <code>--no-partitioned</code> switches</td>
+      </tr>
+      <tr>
+          <td>the key is advertised, every token unhealthy</td>
+          <td>the node judged every endpoint&rsquo;s link <code>Failed</code>, which withholds nothing but marks the tokens</td>
+          <td><a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#inspecting-the-record">reading it yourself</a>
+</td>
+      </tr>
+      <tr>
+          <td>the Workload is admitted and its Pod stays <code>Pending</code></td>
+          <td>over-subscription: nothing meters these keys</td>
+          <td><a href="#kueue-and-the-rdma-keys">the section above</a>
+</td>
+      </tr>
+      <tr>
+          <td>the Pod is scheduled, then refused on the node and not rescheduled</td>
+          <td>the node&rsquo;s totals sufficed but its devices sit on two NUMA nodes</td>
+          <td>the node&rsquo;s policy, and that both requests sit in one container</td>
+      </tr>
+      <tr>
+          <td>the container starts with fewer devices than expected</td>
+          <td>one <code>rdma_cm</code> is correct — count the <code>uverbs</code> entries</td>
+          <td><a href="#injected-devices">the injected set</a>
+</td>
+      </tr>
+      <tr>
+          <td>a node drops out of scheduling without changing</td>
+          <td>its link broke: the hardware stays, the label does not</td>
+          <td><a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#inspecting-the-record">reading it yourself</a>
+</td>
+      </tr>
+  </tbody>
+</table>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/">Accelerator Requests</a>
+ (the normative request contract
+these keys sit beside, and the seven rules they are exempt from)</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/">Network Topology</a>
+ (what the keys are, which endpoint serves
+each, and what an allocation resolves)</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/">Preflight Operations</a>
+ (reading a node&rsquo;s link
+verdicts and its topology policy before anything is installed)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/">Preflight Operations</a>
+ — what a node can detect, slice and manage, read on
+the bare host.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/docs/modules/rdma/operations.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#which-key-a-workload-asks-for">Which key a workload asks for</a></li>
+    <li><a href="#how-many-endpoints-beside-n-accelerators">How many endpoints beside N accelerators</a></li>
+    <li><a href="#injected-devices">Injected devices</a></li>
+    <li><a href="#example-manifest">Example manifest</a></li>
+    <li><a href="#enabling-numa-alignment-on-the-kubelet">Enabling NUMA alignment on the kubelet</a></li>
+    <li><a href="#verifying-the-policy">Verifying the policy</a></li>
+    <li><a href="#kueue-and-the-rdma-keys">Kueue and the RDMA keys</a></li>
+    <li><a href="#efa-engine-images">EFA engine images</a>
+      <ul>
+        <li><a href="#building-the-image">Building the image</a></li>
+        <li><a href="#image-maintenance">Image maintenance</a></li>
+        <li><a href="#limitations">Limitations</a></li>
+        <li><a href="#sglang-and-efa">SGLang and EFA</a></li>
+        <li><a href="#rdma-on-aws">RDMA on AWS</a></li>
+      </ul>
+    </li>
+    <li><a href="#when-a-pod-does-not-schedule">When a Pod does not schedule</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

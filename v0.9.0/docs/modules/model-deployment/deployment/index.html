@@ -1,0 +1,1658 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  
+  <title>Model Deployment Configuration · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0"
+    data-home="/gpustack-operator/v0.9.0/" data-page="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/" >Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/" >Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/" >Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/" aria-current="page">Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Deployment Configuration</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-deployment-configuration">Model Deployment Configuration</h1>
+<p>A <code>ModelDeployment</code> defines one or more inference-engine roles, each with its own replicas. The
+roles can share cached prefixes through a KV cache pool, form a direct prefill/decode pair, or do
+both.</p>
+<p>The operator creates Pods for those replicas. Its <code>ModelDeployment</code> webhook checks the transport
+of a new KV cache binding; the generated Pods bypass KV cache Pod injection. Ordinary Pod
+admission still applies to every replica.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#a-minimal-deployment">A minimal deployment</a>
+</li>
+<li><a href="#prefill-and-decode">Prefill and decode</a>
+</li>
+<li><a href="#topology-placement">Topology placement</a>
+</li>
+<li><a href="#inherited-reuse-domain">Inherited reuse domain</a>
+</li>
+<li><a href="#the-three-override-tiers">The three override tiers</a>
+</li>
+<li><a href="#operator-owned-keys">Operator-owned keys</a>
+</li>
+<li><a href="#runner-image-formula">Runner image formula</a>
+</li>
+<li><a href="#rollout-behavior">Rollout behavior</a>
+</li>
+<li><a href="#admission-refusals">Admission refusals</a>
+</li>
+<li><a href="#operating-notes">Operating notes</a>
+</li>
+</ul>
+<h2 id="a-minimal-deployment">A minimal deployment</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment                   </span><span class="w"> </span><span class="c"># namespaced, short name md</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-chat</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-72B-Instruct     </span><span class="w"> </span><span class="c"># served, never provisioned</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">                                </span><span class="c"># vLLM | SGLang</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.29.0&#34;</span><span class="w">                    </span><span class="c"># free-form; you guarantee alignment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kvCache</span><span class="p">:</span><span class="w">                               </span><span class="c"># OPTIONAL; omit it and no shared pool is attached</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">poolRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">team-a-dram                 </span><span class="w"> </span><span class="c"># a KVCachePoolBinding IN THIS NAMESPACE</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">connector</span><span class="p">:</span><span class="w"> </span><span class="l">Mooncake                 </span><span class="w"> </span><span class="c"># the only value; defaulted</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-a10g-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">                   </span><span class="c"># cards per Pod</span></span></span></code></pre></div>
+</div><p><code>model.name</code> is what the engine serves. The weights come from the engine&rsquo;s own hub client, a role&rsquo;s
+volumes, or a <code>ModelArtifact</code> named by <code>model.artifactRef</code>; see the
+<a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/artifact/">Model Artifact</a>
+.</p>
+<p><code>poolRef</code> names a <code>KVCachePoolBinding</code> in the deployment&rsquo;s namespace. An administrator must create
+that binding to grant the namespace access. A cluster-scoped pool name, another namespace or a bare
+endpoint URL cannot be used in this field.</p>
+<p>The only accepted <code>connector</code> value is <code>Mooncake</code>; it is defaulted and immutable. Current rendering
+derives the connector configuration from the engine, role kind and pool backend. The field reserves
+the API for future connector implementations; NIXL and ROCm NIXL have not been verified here.</p>
+<p>A deployment supports 1 to 10 roles. Set <code>replicas</code> for the number of serving instances in each
+role, and <code>size</code> for the number of Pods in each instance.</p>
+<p><code>replicas</code> counts <strong>independent serving instances</strong>: each one starts, serves and is replaced on its
+own. Changing the number adds or removes instances, and the ones that survive are not restarted:
+they keep serving without interruption and keep whatever cache they hold.</p>
+<p><code>size</code> is how many Pods form one instance, defaulting to 1. The Pods of one instance are
+fate-sharing: they start together, they are admitted together, and they are replaced together. Use
+it when one instance genuinely spans hosts (tensor, pipeline, expert or sequence parallelism).</p>
+<p><strong><code>size</code> is editable, and the edit replaces the role&rsquo;s instances.</strong> An instance is never reshaped in
+place: each old instance and its Workload are deleted first, and the replacement created in that
+slot is admitted fresh before the next old instance may be deleted. See
+<a href="#rollout-behavior">Rollout behavior</a>
+ for the cadence and its costs. Scaling without replacement is
+what <code>replicas</code> is for, and it disturbs nothing already running.</p>
+<p>Above 1, the operator names each Pod of an instance <code>&lt;deployment&gt;-&lt;role&gt;-r&lt;replica&gt;-m&lt;member&gt;</code> and
+publishes them behind a headless Service per instance, so every Pod can address the others by a name
+that is derivable before any of them exists.</p>
+<p>Member <code>m0</code> is the <strong>leader</strong>: it is the one the role&rsquo;s Service fronts, because it is the one
+serving the OpenAI API. Each container is told the leader&rsquo;s address, the instance&rsquo;s size and its own
+index, through three variables the operator owns on every engine:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Variable</th>
+          <th>Value</th>
+          <th>Read from</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>GPUSTACK_REPLICA_LEADER_ADDRESS</code></td>
+          <td><code>&lt;deployment&gt;-&lt;role&gt;-r&lt;replica&gt;-m0.&lt;deployment&gt;-&lt;role&gt;-r&lt;replica&gt;</code></td>
+          <td>a literal</td>
+      </tr>
+      <tr>
+          <td><code>GPUSTACK_REPLICA_SIZE</code></td>
+          <td>the role&rsquo;s <code>size</code></td>
+          <td>a literal</td>
+      </tr>
+      <tr>
+          <td><code>GPUSTACK_MEMBER_INDEX</code></td>
+          <td><code>0</code> for the leader, then <code>1</code>, <code>2</code>, …</td>
+          <td>the downward API, off a label</td>
+      </tr>
+  </tbody>
+</table>
+<p>They appear <strong>only above <code>size: 1</code></strong>. The three names are nonetheless reserved at <strong>every</strong> size: a
+role that sets one of them in <code>env</code> is refused rather than silently overridden, at <code>size: 1</code> as well,
+so that widening an instance later cannot turn a deployment that was accepted into one that is
+refused. The index is read from a label so that every member of an instance carries the same
+container spec and only the label value differs.</p>
+<p><strong>What the engine does with those facts is yours.</strong> The operator composes no
+<code>--tensor-parallel-size</code> or equivalent, because the degrees do not decompose from <code>size</code> alone and
+a formula missing an input would pass silently. A degree you declare on the role is another matter:
+it is read and validated, and <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/#how-a-pair-is-wired">the transfer leg renders from
+it</a>
+.</p>
+<p>A whole instance is the unit of replacement at every size. That is Kueue&rsquo;s constraint rather than a
+preference: a deleted member of an admitted group is held on the API server until the group&rsquo;s
+Workload goes, and deleting that Workload stops the instance&rsquo;s surviving members anyway.</p>
+<p><code>replicas</code>, <code>size</code> and <code>instanceType</code> are structured fields and stay so: admission and scheduling
+read them, so an override able to shadow them would make the feasibility check read a ledger that
+does not match reality.</p>
+<p>The accelerator request of <strong>one Pod</strong> lives in <code>roles[].resources</code>, whose fields mirror
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/">Accelerator Requests</a>
+; at <code>size: 1</code> the Pod and the instance are the
+same request. CPU, memory and ephemeral storage are <strong>derived</strong> from the InstanceType&rsquo;s per-unit
+resources scaled by the card count, so they are not expressible here.</p>
+<p>An optional <code>resources.interface</code> requests a whole number of fabric interfaces per engine Pod.
+One RDMA interface uses <code>device.gpustack.ai/rdma.shared</code>; more than one uses that count of
+<code>device.gpustack.ai/rdma</code> devices. EFA uses
+<a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#the-rdma-resource-keys">the EFA device plugin&rsquo;s own key</a>
+.
+An unset or zero count adds no device request.</p>
+<p>The key follows the bound cache backend&rsquo;s effective group protocol and any direct prefill/decode
+transport the engine actually renders. Different backend-group protocols or an RDMA and EFA mix
+are refused for a positive count.</p>
+<p>A count with no managed RDMA or EFA transfer leg is also refused, whenever the request, the
+transfer settings or the pool the roles name change. See <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/">RDMA Operations</a>
+
+for the allocation and topology limits.</p>
+<h2 id="prefill-and-decode">Prefill and decode</h2>
+<p>Several roles in one deployment are admitted <strong>atomically</strong>: a pool that cannot fit all of them leaves
+all of them queued, instead of admitting the prefillers and stranding them waiting for decoders that
+never arrive. Every replica of every role is its own pod group, so the set is held together by an
+admission check this operator runs, which holds every group until the whole set has reserved quota.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill                       </span><span class="w"> </span><span class="c"># Server (default) | Prefill | Decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h20-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h20-linux-amd64  </span><span class="w"> </span><span class="c"># may differ; see the prefill and decode page</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
+</div><blockquote>
+<p><strong>A role&rsquo;s parallelism degrees are not API fields.</strong> They reach the engine through
+<code>roles[].extraArgs</code> (or through <code>roles[].command</code> alone when the role takes the line over),
+spelled the engine&rsquo;s own way. The operator composes no degree, but it reads the command line:
+admission refuses a degree it cannot parse, and the transfer leg renders from them. They do not
+determine the AscendDirect transfer-port window.</p>
+</blockquote>
+<p><code>name</code> identifies the role and becomes the Kueue PodSet name; <code>kind</code> selects behaviour and is closed.
+They are separate because a semantic reachable by typing a free-form string is a semantic one typo away
+from silently changing.</p>
+<p>Two roles may share a <code>kind</code> and differ in <code>name</code> only where that <code>kind</code> is <code>Server</code>: a pair of
+servers is a set of equals, whereas nothing consuming these roles expresses a second prefiller, so a
+deployment declaring one would render a role nothing downstream can reach.</p>
+<p>What pairs the two roles is on <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
+: the connector each engine and router renders, the
+router block and its fields, the direct transfer and its transport, roles on different hardware, and
+a role&rsquo;s own address.</p>
+<h3 id="pod-group-labels-and-annotations">Pod group labels and annotations</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Key</th>
+          <th>Value</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>label <code>kueue.x-k8s.io/pod-group-name</code></td>
+          <td><code>gpustack-fnv64-&lt;hash&gt;</code> over the namespace, deployment, role and ordinal — always the hashed form, on every shape</td>
+          <td>membership: it is what makes a replica its own group. The name is unique, not parseable; the ordinal travels in its own label</td>
+      </tr>
+      <tr>
+          <td>label <code>modeldeployment.gpustack.ai/pod-ordinal</code></td>
+          <td>the replica&rsquo;s slot within its role, from 0 up</td>
+          <td>the per-replica identity: the group name derives from it, and a scale-down sheds the highest ordinals first</td>
+      </tr>
+      <tr>
+          <td>label <code>modeldeployment.gpustack.ai/member-index</code></td>
+          <td>which Pod of its instance this is, from 0 up — rendered at <strong>every</strong> size, one Pod included</td>
+          <td>what tells two Pods of one instance apart, and what a <code>Service</code> selector matches to front only the leader above <code>size: 1</code>. A container reads its own index through this label rather than from a rendered value, which is what keeps one Pod template per instance</td>
+      </tr>
+      <tr>
+          <td>annotation <code>kueue.x-k8s.io/pod-group-total-count</code></td>
+          <td>the role&rsquo;s <code>size</code></td>
+          <td>how many Pods Kueue waits for before composing anything. A replica-count change moves no total any member carries — a resize is a trim, not a rebuild. A <code>size</code> edit never edits a running group&rsquo;s total either: it replaces whole groups, and each new group carries its own</td>
+      </tr>
+      <tr>
+          <td>annotation <code>kueue.x-k8s.io/role-hash</code></td>
+          <td>the role&rsquo;s <code>name</code></td>
+          <td>names the single PodSet the replica&rsquo;s group composes, which is what lets status attribute a Workload back to the role that asked for it. Every replica of a role names the same PodSet</td>
+      </tr>
+      <tr>
+          <td>annotation <code>kueue.x-k8s.io/pod-group-serving</code></td>
+          <td><code>&quot;true&quot;</code></td>
+          <td>an inference deployment never finishes; without it Kueue reclaims the quota of a replica that exited</td>
+      </tr>
+      <tr>
+          <td>label <code>kueue.x-k8s.io/queue-name</code></td>
+          <td>the <code>status.entrance</code> <strong>published by</strong> the role&rsquo;s InstanceType</td>
+          <td>unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type so this operator and the LocalQueue it creates cannot disagree about the queue</td>
+      </tr>
+      <tr>
+          <td>label <code>app.kubernetes.io/component</code></td>
+          <td>the role&rsquo;s <code>name</code></td>
+          <td>unchanged; what a <code>Service</code> selects on and what <code>status.roles[]</code> is attributed by</td>
+      </tr>
+      <tr>
+          <td>label <code>modeldeployment.gpustack.ai/role-kind</code></td>
+          <td>the role&rsquo;s effective kind mapped to the router&rsquo;s spelling, so <code>server</code> when the API field is unset</td>
+          <td>what something in front of the replicas selects on to tell a prefiller from a decoder. Rendered for every deployment, a lone <code>server</code> included, so &ldquo;no prefiller is running&rdquo; and &ldquo;this deployment does not label its roles&rdquo; are different answers</td>
+      </tr>
+      <tr>
+          <td>annotation <code>kueue.x-k8s.io/podset-required-topology</code></td>
+          <td><code>roles[].topology.requiredLevel</code>, when non-empty</td>
+          <td>asks Kueue to fit this replica&rsquo;s whole PodSet in one domain at the named hierarchy level</td>
+      </tr>
+      <tr>
+          <td><code>spec.nodeSelector</code></td>
+          <td>no topology value is added</td>
+          <td>Kueue selects the concrete domain through the flavor&rsquo;s Topology and writes its assignment; the deployment requests a level, not a region, zone, rack, or host value</td>
+      </tr>
+  </tbody>
+</table>
+<p>The <code>role-hash</code> annotation is load-bearing: status joins a Workload&rsquo;s PodSets to the roles by this
+name. Without it Kueue names the PodSet after a digest of the Pod spec&rsquo;s <em>shape</em>, and that join
+breaks while nothing errors.</p>
+<blockquote>
+<p><strong><code>kueue.x-k8s.io/pod-group-fast-admission</code> must never be set.</strong> It composes the group&rsquo;s Workload
+from the first runnable Pod alone; with a declared total of one it buys nothing, and it
+mis-composes the group the day an instance grows a second member. The operator never sets it.</p>
+</blockquote>
+<h2 id="topology-placement">Topology placement</h2>
+<p><code>roles[].topology.requiredLevel</code> is an optional Kubernetes label key. It requires the <code>size</code> Pods in
+each replica group to fit within one domain at that level. See <a href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/#per-replica-topology-requests">per-replica request
+semantics</a>
+.</p>
+<p>The value names a configured level, not a domain value. Region, zone, a GPUStack rack key, an
+administrator-owned key, and selected Topograph labels all use the same field. The syntax is
+validated at admission; availability in the chosen queue is resolved dynamically by Kueue.</p>
+<p>Omit <code>topology</code> or leave <code>requiredLevel</code> empty for unconstrained topology-aware placement.
+<code>kubernetes.io/hostname</code> is implicit and is rejected as an explicit required level. Changing or
+removing the request changes the role render hash and rolls only that role&rsquo;s replicas.</p>
+<p>The full discovery, profile, capacity, and diagnostic contract is in <a href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/">Topology-Aware
+Scheduling</a>
+; setup examples are in <a href="/gpustack-operator/v0.9.0/docs/modules/topology/operations/">Topology-Aware
+Scheduling Operations</a>
+.</p>
+<h2 id="inherited-reuse-domain">Inherited reuse domain</h2>
+<p>The reuse domain (<code>name</code>, <code>blockSize</code>, <code>dtype</code>) is a required, immutable block on the
+<code>KVCachePoolBinding</code>; its <code>name</code> alone may be left out, and is then <code>default</code>. <code>ModelDeploymentSpec</code> has <strong>no domain field</strong>, and that is a security property
+rather than tidiness.</p>
+<blockquote>
+<p><strong>Why</strong> — a workload free to name its own domain could mint tenants and escape its namespace&rsquo;s
+quota ceiling. The mechanism is stated once, under
+<a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/#one-binding-one-reuse-domain">One Binding, one reuse domain</a>
+.</p>
+</blockquote>
+<p>The requested semantics:</p>
+<ul>
+<li>Two deployments referencing the <strong>same</strong> Binding share KV.</li>
+<li>Two referencing <strong>different</strong> Bindings use different tenant identifiers. They are isolated only
+when their engine images read and forward those identifiers.</li>
+<li>Name matching between workloads disappears, and with it a whole class of typo.</li>
+<li>A namespace needing two reuse boundaries creates <strong>two Bindings</strong> on the same pool, the same shape
+as a namespace having several Kueue <code>LocalQueue</code>s.</li>
+</ul>
+<p><code>status.kvCache</code> echoes the Binding&rsquo;s <code>binding</code>, <code>pool</code> and the whole domain block, so an operator
+reads the attached domain off this object alone. A wrong <code>blockSize</code> or <code>dtype</code> is silent cache
+pollution: writes succeed, reads succeed, and the tensors are wrong.</p>
+<p>For an operator-managed role, the operator renders a non-empty Binding domain as the engine&rsquo;s tenant
+identifier. It does not inspect the engine image version or decide whether that build supports
+tenant isolation. The tenant variable is operator-owned, so supplying it in <code>env</code> or <code>extraArgs</code> is
+refused: it is a second path to a value <a href="#inherited-reuse-domain">the API already refuses</a>
+.</p>
+<p>A rendered tenant identifier does not by itself prove isolation. The operator records what it
+rendered, never what the container did with it: whether the build inside the image reads the value
+is decided by the image, not by the render.</p>
+<p>Users who require tenant isolation must select a compatible engine image and verify it themselves; see
+<a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/#tenant-compatibility">Tenant compatibility</a>
+ for what
+the image must consume. The API states the requested boundary, while the engine enforces it
+(the same caveat <a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/#limitations">KV Cache Pool</a>
+ states for
+capacity).</p>
+<h2 id="the-three-override-tiers">The three override tiers</h2>
+<p>The engine command line is the fastest-moving thing in this design, so it has three escape tiers.
+Without one, users patch the rendered Pod and the reconcile loop silently overwrites them.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Tier</th>
+          <th>Field</th>
+          <th>Semantics</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>append</td>
+          <td><code>roles[].extraArgs</code>, <code>roles[].env</code></td>
+          <td>appended <strong>after</strong> the operator-synthesized arguments; a key the operator owns is refused, never merged</td>
+      </tr>
+      <tr>
+          <td>overlay</td>
+          <td>the role&rsquo;s own Pod fields — <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>privileged</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>, <code>terminationGracePeriodSeconds</code></td>
+          <td>the operator renders first, then merges this overlay on top</td>
+      </tr>
+      <tr>
+          <td>take over</td>
+          <td><code>roles[].command</code></td>
+          <td>the user owns the whole argv; the operator synthesizes <strong>no</strong> engine argument and <strong>no</strong> client environment</td>
+      </tr>
+  </tbody>
+</table>
+<p>A role&rsquo;s Pod fields sit on the role itself, unlike the <code>Instance</code> that keeps its pod shape inside an
+<code>InstanceTemplate</code>, and they are <strong>mutable</strong> — which is what makes a rollout possible at all.</p>
+<p>Arguments fold into <code>command</code>; there is no <code>args</code> field.</p>
+<p>A take-over <code>command</code> is the whole argv (the image&rsquo;s own entrypoint never participates), and an
+<code>extraArgs</code> written beside it is inert: read by nobody, refused nothing, and invisible to the check
+that reads parallelism from the command line.</p>
+<p><strong>Engine authentication is the append tier&rsquo;s known bad input.</strong> <code>--api-key</code> and <code>VLLM_API_KEY</code>
+are not operator-owned, so admission accepts them, and vLLM then guards its <code>/v1</code> routes,
+including the <code>/v1/models</code> a direct decode role&rsquo;s gates read. The probes get 401, and a
+disaggregated pair&rsquo;s decode replica never becomes Ready.</p>
+<p>North-south authentication belongs at the gateway in front of the deployment. The routing
+sidecar authenticates no inference traffic, so there is nothing to configure on it.</p>
+<p>Taking over the command line has a visible cost: the role reports
+<code>status.roles[].unmanaged: true</code> and <code>CacheAttached</code> moves to <code>Unknown</code>. The operator configured no
+cache client for that role, so it does not report on one it did not render.</p>
+<h3 id="take-over-roles-and-the-reuse-domain">Take-over roles and the reuse domain</h3>
+<p><code>MOONCAKE_TENANT_ID</code> is refused in <code>roles[].env</code> on the engines that own it (the table under
+<a href="#operator-owned-keys">Operator-owned keys</a>
+ is the authority), but <code>roles[].command</code> is a program
+and its arguments: the same value can travel inside a shell assignment or inside the script the
+argv names, and admission has nothing to read either way.</p>
+<p>Where the operator builds the argv, that refusal is real enforcement: the user cannot interpose
+a shell, so the environment is the only path left. Why the key is owned at all is stated under
+<a href="#operator-owned-keys">Operator-owned keys</a>
+.</p>
+<p>That is one instance of a wider exposure, not its boundary. The boundary is stated once, under
+<a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/#limitations">Limitations</a>
+, and tracked at
+<a href="https://github.com/gpustack/gpustack-operator/issues/168">#168</a>
+, whose own void conditions include a
+webhook-level one, so nothing here should be read as a claim about how that issue can be closed.</p>
+<h3 id="shared-memory">Shared memory</h3>
+<p><code>spec.roles[].shmSize</code> sets the capacity limit of <code>/dev/shm</code> in each role Pod. It accepts a positive Kubernetes
+quantity, such as <code>32Gi</code>. Omission renders a <code>16Gi</code> memory-backed <code>EmptyDir</code>.
+This applies to both engines, take-over roles, and the Elastic Ray head and GPU members.
+Each Pod has its own volume. Only the main container mounts it.</p>
+<p>Set it in the role configuration:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-chat</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">shmSize</span><span class="p">:</span><span class="w"> </span><span class="l">32Gi</span></span></span></code></pre></div>
+</div><p>An explicit <code>/dev/shm</code> mount in <code>additionalVolumes</code> takes precedence, including when <code>shmSize</code> is set.
+The operator preserves that mount&rsquo;s capacity and backing.
+The default is a project capacity choice, not a universal engine requirement.</p>
+<p>The capacity limit does not reserve RAM or increase the Pod&rsquo;s memory request.
+Used shared memory counts toward the main container&rsquo;s memory limit.
+Budget memory for both shared memory and the engine heap.
+Ray&rsquo;s object store may need more than <code>16Gi</code>; size the volume for the configured workload.
+Kubelet lowers the mount size when the Pod memory limit or node allocatable memory is smaller.</p>
+<p>Changing the rendered capacity follows ordinary role rollout behavior.
+Existing Elastic members keep their mounts; new or replacement Pods use the current value.
+Upgrading the operator adds the default mount to ordinary roles and triggers their recreate rollout.</p>
+<h2 id="operator-owned-keys">Operator-owned keys</h2>
+<p>Ownership is per (engine, key): a key one engine owns is an ordinary user argument on another.
+<code>SGLANG_HICACHE_MOONCAKE_CONFIG_PATH</code> is meaningless to <code>vllm</code> and is a plain user variable there.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Engine</th>
+          <th>Owned arguments</th>
+          <th>Owned environment</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>vLLM</code></td>
+          <td><code>--kv-transfer-config</code>, <code>--kv-events-config</code> — each also in every spelling vLLM reads as it: a unique prefix (<code>--kv-transfer-conf</code>), underscores (<code>--kv_transfer_config</code>), or a dotted member (<code>--kv-transfer-config.kv_role</code>), which vLLM merges into a whole document that replaces the operator&rsquo;s</td>
+          <td><code>MOONCAKE_CONFIG_PATH</code>, <code>VLLM_MOONCAKE_BOOTSTRAP_PORT</code></td>
+      </tr>
+      <tr>
+          <td><code>SGLang</code></td>
+          <td><code>--hicache-storage-backend</code>, <code>--hicache-storage-backend-extra-config</code>, <code>--disaggregation-mode</code>, <code>--disaggregation-transfer-backend</code>, <code>--disaggregation-bootstrap-port</code> — each also as a unique prefix (<code>--disaggregation-mo</code>)</td>
+          <td><code>SGLANG_HICACHE_MOONCAKE_CONFIG_PATH</code>, <code>MOONCAKE_MASTER</code>, <code>MOONCAKE_TE_META_DATA_SERVER</code>, <code>MOONCAKE_PROTOCOL</code>, <code>MOONCAKE_DEVICE</code>, <code>MOONCAKE_GLOBAL_SEGMENT_SIZE</code>, <code>MOONCAKE_LOCAL_HOSTNAME</code>, <strong><code>MOONCAKE_TENANT_ID</code></strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>One <code>vLLM</code> row covers <strong>both backends</strong>. The owned keys follow the engine while only the connector
+name follows the accelerator backend, so an Ascend pool and an NVIDIA pool running <code>vLLM</code> own exactly
+the same keys and differ only in the connector the operator names.</p>
+<p><strong>Owned</strong> means the operator refuses a user-supplied duplicate, because two values for one connector
+argument cannot be told apart. The refusal names the key, the engine, and <code>roles[].command</code> as the
+way to own it instead.</p>
+<p><strong><code>--kv-cache-dtype</code> is owned on both engines while <code>spec.kvCache</code> is set</strong>, in every spelling the
+engine reads as it, because the operator renders the Binding&rsquo;s <code>dtype</code> there; why is under
+<a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/#engine-dtype">Engine dtype</a>
+. It is
+not in the table because it is conditional:</p>
+<ul>
+<li>A deployment with no <code>spec.kvCache</code>, or a role with <code>roles[].command</code>, keeps the flag as its own.</li>
+<li>With the Setting <code>model-deployment-kv-cache-dtype-owned</code> off, nothing is rendered or refused.</li>
+<li>A deployment stored with the flag before the refusal keeps running on <strong>its own value</strong>, which
+comes later on the command line and wins. Its next update is refused until the flag is removed; the
+update that clears its finalizer on deletion is not.</li>
+</ul>
+<p><strong>Defaulted</strong> is the other case, and <code>MC_TE_METRIC</code> is the one that matters: the operator sets it to
+<code>1</code>, and a user&rsquo;s own value wins with no refusal. It turns on the transfer engine&rsquo;s metrics, without
+which the hit rate this design rests on cannot be measured at all.</p>
+<p>So are <code>MC_FORCE_TCP</code> <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/#direct-transfer-transport">on a <code>tcp</code> leg</a>
+ and
+<a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/#sglang-host-memory-tier">SGLang&rsquo;s two cache switches</a>
+.</p>
+<p>Two of SGLang&rsquo;s owned keys are owned for what a user entry would <strong>destroy</strong> rather than duplicate,
+and the operator does not set either of them:</p>
+<ul>
+<li>SGLang picks its configuration source in the order extra-config argument, then config-path file,
+then environment. The operator leaves both of the first two unset, and that is what <strong>selects</strong> the
+environment loader.</li>
+<li>Each of the first two loaders falls back to built-in defaults per key. So setting either
+one does not override a value: it silently replaces the whole configuration with defaults (a 4 GiB
+segment and a <code>localhost</code> identity).</li>
+</ul>
+<p>SGLang needs <code>local_hostname</code>, which is the replica&rsquo;s own Pod IP. A file and an argument are both
+fixed when the object is admitted, when no Pod IP exists yet, so only an environment variable with a
+<code>fieldRef</code> on <code>status.podIP</code> can carry it, which is why this engine gets no config file at all.</p>
+<p><code>MOONCAKE_CONFIG_PATH</code> is owned on <code>vllm</code> and not on <code>sglang</code>, while seven other
+<code>MOONCAKE_*</code> names are owned on <code>sglang</code> alone. The table is the authority; a name prefix is not.</p>
+<p><code>MOONCAKE_TENANT_ID</code> is the one whose ownership is a security property: it carries the reuse domain,
+and a workload able to set it could write into another Binding&rsquo;s domain. It is a second path to a
+value <a href="#inherited-reuse-domain">the API already refuses</a>
+.</p>
+<p>On the vLLM family the operator mounts the rendered client JSON at
+<code>/etc/gpustack/kvcache/mooncake.json</code>, read-only. <strong>There is no ConfigMap</strong>: the file is a downwardAPI
+projection of the Pod&rsquo;s own <code>kvcache.gpustack.ai/client-config</code> annotation.</p>
+<p>When <code>spec.router</code> is present, a role that produces cache blocks also receives a
+<code>--kv-events-config</code> document. It enables the ZMQ publisher on <code>tcp://*:5557</code>, enables replay on
+<code>tcp://*:5558</code>, retains 10,000 batches, uses a high-water mark and queue depth of 100,000, and
+publishes topic <code>kv@</code>.</p>
+<p><strong>That applies to the vLLM engine only.</strong> A routed SGLang deployment renders no publisher arguments
+and reports <code>KVEventsPublishing=False/PublisherDisabled</code>. The condition reports configuration rather
+than live traffic, and SGLang&rsquo;s rendering carries no publisher configuration to report.</p>
+<p>The wildcard addresses are bind addresses only. The role&rsquo;s Service hostname with ports 5557 and
+5558 is the dialable form published in status, and both ports are declared on the producing
+container. A decode-only role does not need to publish. A role with <code>roles[].command</code> receives none
+of this configuration because the operator does not own its command line.</p>
+<p>Nothing is created beside the Pod, no RBAC for one is needed, and the configuration&rsquo;s lifetime is
+exactly the replica&rsquo;s. It is also part of the Pod&rsquo;s spec hash, which is what moves the replicas when
+the pool&rsquo;s published endpoint changes.</p>
+<p>It sits under <code>/etc</code> rather than in the image&rsquo;s workspace so that a role&rsquo;s own volumes are
+unlikely to collide, but an overlay that mounts over that path replaces the configuration silently,
+and the owned <code>MOONCAKE_CONFIG_PATH</code> cannot protect against it. SGLang gets no file at all; its
+configuration travels entirely in the environment.</p>
+<h2 id="runner-image-formula">Runner image formula</h2>
+<p>A role with no <code>roles[].image</code> gets one assembled from the engine the deployment declares and the
+hardware its InstanceType observed. A stated image always wins.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">gpustack/runner:&lt;backend&gt;&lt;runtimeVersion&gt;[-&lt;variant&gt;]-&lt;engine&gt;&lt;version&gt;</span></span></code></pre></div>
+</div><p><code>gpustack/runner:cuda12.9-vllm0.29.0</code> on an NVIDIA pool; <code>gpustack/runner:cann9.0-910b-sglang0.5.18</code>
+on an Ascend 910B one. The platform is not part of the tag: no published tag carries an
+architecture, which indicates one multi-arch manifest per tag.</p>
+<table>
+  <thead>
+      <tr>
+          <th>This project&rsquo;s manufacturer</th>
+          <th>Runner backend</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>nvidia</code></td>
+          <td><code>cuda</code></td>
+      </tr>
+      <tr>
+          <td><code>ascend</code></td>
+          <td><code>cann</code></td>
+      </tr>
+      <tr>
+          <td><code>amd</code></td>
+          <td><code>rocm</code></td>
+      </tr>
+      <tr>
+          <td><code>metax</code></td>
+          <td><code>maca</code></td>
+      </tr>
+      <tr>
+          <td><code>mthreads</code></td>
+          <td><code>musa</code></td>
+      </tr>
+      <tr>
+          <td><code>iluvatar</code></td>
+          <td><code>corex</code></td>
+      </tr>
+      <tr>
+          <td><code>hygon</code></td>
+          <td><code>dtk</code></td>
+      </tr>
+      <tr>
+          <td><code>thead</code></td>
+          <td><code>hggc</code></td>
+      </tr>
+      <tr>
+          <td><code>cambricon</code></td>
+          <td>none — the role must name an image</td>
+      </tr>
+  </tbody>
+</table>
+<p>The variant applies to <strong>Ascend only</strong>: <code>310P</code> to <code>310p</code>, <code>910B</code> to <code>910b</code>, <code>910C</code> to <code>a3</code>, <code>950</code> to
+<code>950</code>. Across the whole matrix the variant is populated for <code>cann</code> alone. Ascend <code>910</code> and <code>310B</code>
+publish none, so a role on one of those must name an image.</p>
+<p><code>engine.version</code> is optional in the schema, and the obligation sits with the roles: a role that
+names no image of its own has one synthesized from this version, so admission refuses an empty
+version beside such a role. It is otherwise <strong>free-form</strong>: the operator checks neither that the
+combination was ever published nor that the version supports the installed driver. You guarantee
+version alignment; a bad combination surfaces as an <code>ImagePullBackOff</code> on a tag that does not exist.</p>
+<p>It is per deployment rather than per role, which is what lets one engine and one version assemble a
+<strong>different</strong> image per role: the backend half of the tag comes from the role&rsquo;s own InstanceType.</p>
+<p>Two synthesis failures read alike and are not the same: a manufacturer with no backend, or a family
+with no variant, will <strong>never</strong> resolve and the role has to name an image, while an unobserved
+runtime version resolves on a later reconcile. Each message says which one it is.</p>
+<p><strong>A pool mid driver rollout does not agree on a runtime version.</strong> The image takes the <strong>lowest</strong>
+version the pool reports, because a workload&rsquo;s image is fixed before admission chooses its node and
+only the lowest runs everywhere. The deployment then carries a <code>RuntimeVersionSkew</code> warning event
+naming the value taken and the ones skipped, so the node holding the pool back is legible instead of
+appearing as an unattributable <code>ImagePullBackOff</code>.</p>
+<h2 id="rollout-behavior">Rollout behavior</h2>
+<p>Changing <code>replicas</code> adds or removes instances and nothing more: the survivors are not restarted, do
+not reload their weights and keep their cached blocks. What still replaces <strong>every</strong> instance of the
+role is an edit that changes what a replica&rsquo;s Pod renders: <code>size</code>, <code>instanceType</code>, <code>resources</code>,
+<code>command</code>, <code>image</code>, <code>extraArgs</code>, <code>env</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>,
+<code>terminationGracePeriodSeconds</code>.</p>
+<p>Such an edit <strong>deletes and recreates</strong> the role&rsquo;s replicas, one replica per role per pass, waited
+out. The role set itself cannot be edited at all; admission refuses a role added, removed, renamed
+or moved to another kind, so there is none of that to roll. There are no surge or unavailable knobs.</p>
+<p>The one-at-a-time cadence is a constraint: each replica&rsquo;s group declares a total — the role&rsquo;s
+<code>size</code> — and a replacement created beside its still-counted member reads as excess, which Kueue
+answers by deleting the newer Pod, the replacement itself.</p>
+<p>A replacement is a <strong>fresh admission</strong>, not a rider on the reservation the departed replica held:
+freeing the slot deletes that replica&rsquo;s Workload, and the reservation goes with it.</p>
+<p>The cadence guard therefore turns a healthy replica over only when every replica the role declares holds an
+admitted Workload; on a full pool a rollout waits for capacity rather than shedding replicas it
+cannot re-reserve. That gate holds back deleting the next healthy replica, not the configuration
+already waiting in a replacement slot: a queued replacement is superseded by a newer edit and
+admitted once, as the newer shape — the obsolete configuration need never be admitted.</p>
+<p>The slot is reused, but its obsolete Pods and Workload are deleted and replaced with fresh objects.</p>
+<p>A complete group still waiting for its first admission can also be replaced after a configuration edit.
+It uses the same single replacement slot and fresh admission rules.
+The operator selects this queued group before deleting an admitted sibling.
+This exception requires every member to remain behind Kueue&rsquo;s admission gate.
+An eviction, preemption, or earlier execution does not qualify as first admission.</p>
+<h3 id="replacing-a-role-whose-shape-moved">Replacing a role whose shape moved</h3>
+<p><code>size</code>, <code>instanceType</code>, <code>resources</code> and <code>command</code> roll the same way as any Pod field, and each
+carries consequences the Pod fields do not.</p>
+<p><strong>One unresolved replacement per role.</strong> A replacement&rsquo;s fresh admission gates deleting the next
+old replica, so a role turns over one replica at a time no matter how many of its fields one edit
+moved: a patch changing <code>size</code>, <code>resources</code> and <code>command</code> together is one rollout, not three. The
+role remembers which replica it is replacing until that replacement is admitted, so an operator
+restart resumes the same rollout instead of selecting a second replica.</p>
+<p><strong>A broken replica does not jump the queue.</strong> An old replica that loses a member while its role&rsquo;s
+replacement is unresolved waits behind that replacement, then is rebuilt whole before another
+healthy old replica is rolled. A replacement that itself loses a member is recovered in its own
+slot. Recovery never mixes members: an interrupted replacement is completed with its own
+configuration, and an old survivor is never filled with new-configuration members.</p>
+<p><strong>The old replicas run the configuration they were created with until each is deleted for
+replacement.</strong> Nothing reshapes a running instance: an instance of two Pods keeps its two members,
+its leader address and its rank layout until it leaves. Cache injection, the unmanaged marker and
+retirement read the deployed Pods, so a role part-way through a <code>command</code> edit serves through
+replicas in both modes, and what status claims is what is actually deployed.</p>
+<p>A role moving between a managed command and a takeover keeps each running Pod&rsquo;s own mode. A managed
+replica keeps its qualification rules. Once qualification is active, an Unknown observation keeps
+existing eligibility without granting new eligibility; a definite fault still withdraws it. A role
+whose qualification was never activated keeps its legacy readiness rule.</p>
+<p>A takeover replica keeps its legacy Service membership and stays <code>unmanaged: true</code>. Routing
+membership does not establish engine health or cache qualification.</p>
+<p><strong>Mixed shapes can appear across instances, never within one.</strong> A replacement is created only
+after the instance it replaces has left — members and Workload — so no ordinal holds old and
+new members at once. Replicas not yet selected keep serving their old shape beside replicas
+already replaced onto the new one; above <code>size: 1</code> each shape&rsquo;s leader is picked by the
+member-index label, so a leader of each shape can answer the same Service during that window.</p>
+<p>Peer DNS is per instance — one headless Service per replica — so the old and the new members
+resolve their own shape&rsquo;s peers and never each other&rsquo;s. Each instance keeps its peer Service until
+its members have left, so a terminating replica&rsquo;s members can still resolve one another. Each
+deployed shape also answers its own way while both serve: a leader-served replica through its
+leader, an External DP replica through its rank-carrying members.</p>
+<p><strong>A one-replica role has a gap.</strong> Its only instance must leave before its replacement is admitted,
+so serving stops until the replacement is ready. The replacement&rsquo;s Kueue admission gates the next
+old replica&rsquo;s departure. Admission does not wait for engine readiness, so the next old replica may
+leave while the previous replacement is still starting.</p>
+<p>A multi-replica role can temporarily have no serving capacity. Replacement does not guarantee
+uninterrupted inference.</p>
+<p><strong>Siblings are untouched unless the edit reaches them.</strong> An edit to one role&rsquo;s shape never rewrites
+another role&rsquo;s groups: their Workloads, admission, member names and DNS stay as they are.</p>
+<p>The exception is the shared transfer document: on the vLLM-Ascend leg the parallel degrees one role
+declares render into the document both roles carry, so a degree edit — through <code>extraArgs</code> or
+through a replaced <code>command</code> — rolls the pair, and until both halves converge the pair can fail to
+complete a transfer. See <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/#direct-transfer-transport">Prefill and Decode</a>
+ for what
+that window means.</p>
+<p><strong>Admission rejudges a moved dependency, not the world.</strong> The interface and pool-transport checks
+re-run for a role whose own interface request, type or command presence moved, for the roles whose
+rendered direct-transfer leg a router or transfer edit actually changes — a router fronting no
+prefill/decode pair renders none — and on a type move for the moved role. Everything else keeps its
+admitted verdict, so a drifted store is repaired at the pool, not refused at the next edit.</p>
+<p>A role carrying <code>elasticEp</code> is excluded from all of this: the profile pins that role&rsquo;s shape, and
+width is the only thing that moves (<a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/#changing-the-width">Elastic EP</a>
+).</p>
+<p>The cost rides on the block lease described under
+<a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/#workload-impact">Workload impact</a>
+: a lease survives a long queue and does <strong>not</strong>
+survive an interrupted heartbeat, which is what a departing replica is. A departing replica
+therefore costs its siblings the blocks it held.</p>
+<p>The deployment records an event naming the replica and the lease window on each of three paths
+(<code>ReplicaEvicted</code>, <code>ReplicaLeaving</code>, <code>ReplicaRestarted</code>), so an operator correlating a burst of
+failed requests with a replica that went away has the correlation written down rather than inferred.</p>
+<p><strong>An upgrade can trigger the same turnover without any spec edit.</strong> The fingerprint covers a replica&rsquo;s
+labels, annotations and spec, so a release that changes what every replica renders turns each one over
+once: the <code>role-kind</code> label above did, and so did the <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/">drain</a>
+. Nothing
+is required of you, but on a busy deployment the restart is worth scheduling.</p>
+<h3 id="replica-departures">Replica departures</h3>
+<p>Most departures are not a spec change, and none of them touches a sibling:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Cause</th>
+          <th>Who initiates it</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><strong>Kueue preempting</strong> the deployment for a higher-priority workload</td>
+          <td>the scheduler</td>
+      </tr>
+      <tr>
+          <td><strong>a node being drained</strong>, cordoned or replaced</td>
+          <td>the cluster</td>
+      </tr>
+      <tr>
+          <td><strong>the kubelet evicting</strong> a replica under node pressure</td>
+          <td>the node</td>
+      </tr>
+      <tr>
+          <td><code>kubectl delete pod</code> on one replica</td>
+          <td>you</td>
+      </tr>
+  </tbody>
+</table>
+<p>Who frees the slot depends on the cause. Kueue&rsquo;s own preemption evicts the departed replica&rsquo;s
+Workload, and that eviction removes the Pod and releases the slot; the replacement then follows on
+its own.</p>
+<p>A delete that lands on the Pod alone (a drain, a kubelet eviction, <code>kubectl delete pod</code>) leaves
+that replica&rsquo;s Workload standing, and the Workload is what holds the slot: the Pod stays readable on
+the API server, and the slot is freed only when that Workload is deleted — which the deployment&rsquo;s
+controller does when it replaces the replica. The replacement is created once no Pod for that
+ordinal reads on the API server, on the terms the callout above states.</p>
+<p>The gate reads the ordinal and nothing else, which is why a scale-up is immediate: an ordinal nothing
+ever occupied has no Pod to wait out, so its replica is created on the first pass that sees it.</p>
+<p>On a cluster with preemption enabled, a replica going away is routine rather than an incident, worth
+knowing before you chase one as a fault.</p>
+<p><strong>A replica on a node that is NotReady but still registered is never replaced.</strong> Its Pod keeps its
+<code>nodeName</code> and a Running phase, so its ordinal still reads occupied and no replacement is created.
+Force-deleting that Pod is how two processes end up holding one accelerator; deleting the Node object
+resolves it, which is what a cluster that replaces nodes already does.</p>
+<p>The replacement carries a fresh name the API server assigns, never the departed Pod&rsquo;s name — so
+nothing can predict a replica&rsquo;s name, and anything that addresses replicas should select by label
+instead:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get pods -l app.kubernetes.io/name<span class="o">=</span>model-deployment,app.kubernetes.io/instance<span class="o">=</span>&lt;deployment&gt;</span></span></code></pre></div>
+</div><p>Add <code>,app.kubernetes.io/component=&lt;role&gt;</code> for one role&rsquo;s replicas, or
+<code>,modeldeployment.gpustack.ai/role-kind=prefill</code> for every prefiller regardless of what its role is
+called. A runbook that spells <code>&lt;deployment&gt;-&lt;role&gt;-0</code> breaks here and has no fixed name to move to.
+Changing <code>replicas</code> is none of these departures — see <a href="#rollout-behavior">Rollout behavior</a>
+ — and the
+role set cannot be edited at all; admission refuses it.</p>
+<h3 id="deployment-identity-fields">Deployment identity fields</h3>
+<p>Fields that identify the deployment are frozen. Fields that control how it runs are editable; the
+table below lists both groups.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Frozen</th>
+          <th>Editable</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>model</code>, <code>engine.name</code>, <code>kvCache</code></td>
+          <td><code>engine.version</code>, <code>kvTransfer</code></td>
+      </tr>
+      <tr>
+          <td><code>router.name</code> in place — the router block itself may be added or removed</td>
+          <td><code>router.replicas</code>, <code>router.extraArgs</code></td>
+      </tr>
+      <tr>
+          <td>the set of roles, and each role&rsquo;s <code>name</code> and <code>kind</code></td>
+          <td><code>roles[].replicas</code>, <code>roles[].size</code></td>
+      </tr>
+      <tr>
+          <td>on a role carrying <code>elasticEp</code>: its <code>size</code>, <code>instanceType</code>, <code>resources</code> and <code>command</code></td>
+          <td><code>roles[].instanceType</code>, <code>roles[].resources</code>, <code>roles[].command</code></td>
+      </tr>
+      <tr>
+          <td></td>
+          <td><code>roles[].extraArgs</code>, <code>roles[].env</code></td>
+      </tr>
+      <tr>
+          <td></td>
+          <td>the role&rsquo;s own Pod fields — <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>privileged</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>, <code>terminationGracePeriodSeconds</code></td>
+      </tr>
+      <tr>
+          <td></td>
+          <td>labels and annotations</td>
+      </tr>
+  </tbody>
+</table>
+<p>The role&rsquo;s shape fields — <code>size</code>, <code>instanceType</code>, <code>resources</code>, <code>command</code> — are editable on the same
+terms as the Pod fields: each edit replaces that role&rsquo;s replicas one at a time, deleting each old
+instance before creating its replacement, whose fresh admission gates the next deletion.
+<code>roles[].privileged</code> stays editable because it controls how the role runs.</p>
+<p>The elastic-EP row is the exception: the profile admits one fixed member shape, and
+<a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/#changing-the-width">width</a>
+ is the only shape knob it offers.</p>
+<p><strong>To change a frozen field, create another deployment.</strong> A frozen field is not a lock protecting a
+concurrent writer, and the refusal says so: what you are describing is a different deployment, so it
+is created rather than edited. Editing is what keeps the object&rsquo;s name, its <code>status</code> history and its
+cache-pool registration; a frozen field is none of those things.</p>
+<p>When adding a field, decide whether it identifies the deployment or controls how it runs before
+choosing its update rule.</p>
+<blockquote>
+<p><strong>A merge patch replaces the <code>roles</code> list wholesale.</strong> <code>kubectl patch --type=merge</code> follows
+RFC 7386, which replaces an array rather than merging into it: a role restated with only some of
+its fields loses the ones it did not carry. An omitted <code>size</code> lands on the default of 1 and an
+omitted <code>resources</code> lands on the accelerator default, exactly as a full-list rewrite says; a role
+restated without its <code>name</code> is refused for the missing name, and one restated without <code>instanceType</code>
+is refused for the empty value — none of these fields has a default that can stand in.
+<code>listType=map</code> does not soften this: it is what keeps role names unique and drives <code>kubectl apply</code>&rsquo;s
+merge, not what a client-side merge patch does to an array.</p>
+<p><code>kind</code> still binds too: a role restated without its <code>kind</code> picks up the default <code>Server</code>, so
+restating a prefiller that way is refused as a kind change rather than silently converting it.</p>
+<p>Change one field with a JSON patch, or restate the role in full:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl patch modeldeployment qwen-chat -n team-a --type<span class="o">=</span>json <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/size&#34;,&#34;value&#34;:2}]&#39;</span></span></span></code></pre></div>
+</div><div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># --type=merge --patch-file=role.yaml: the whole role, not the field</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">h20-8x</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span></span></span></code></pre></div>
+</div></blockquote>
+<h3 id="one-group-per-replica">One group per replica</h3>
+<p>The grouping key is the <strong>replica</strong>: every replica of every role forms its own pod group, derived from
+the role and the replica&rsquo;s ordinal within it, and Kueue composes one Workload per group with a
+declared total equal to the role&rsquo;s <code>size</code>. Two roles naming the same <code>instanceType</code> share nothing:
+a queue name is derived from the <code>instanceType</code> and one Workload carries one queue name, so rather
+than forbid the shape the roles are simply not made to share.</p>
+<p><strong>What an edit costs is therefore the replica, not the group it used to share.</strong> Growing or shrinking
+<code>replicas</code> adds or removes whole groups and leaves every surviving replica&rsquo;s group, Workload and
+admission untouched; a role-field edit rolls that role&rsquo;s replicas one at a time.</p>
+<p>The groups are still admitted as a <strong>set</strong>, by the admission check described in
+<a href="#prefill-and-decode">Prefill and decode</a>
+, whichever <code>instanceType</code>s they name.</p>
+<p>A scale-down sheds the <strong>highest ordinals first</strong>, deleting each departing replica&rsquo;s Pod together with
+its own Workload: the Workload delete is what releases Kueue&rsquo;s finalizer on the Pod and the quota the
+replica held, because a serving group is never finished and nothing else releases either.</p>
+<h2 id="admission-refusals">Admission refusals</h2>
+<p>Two webhooks make up the admission surface. Nearly every default lives in the CRD schema; the
+mutating half exists for the one value a schema cannot reach: a role&rsquo;s accelerator count, which
+depends on the <code>InstanceType</code> the role names.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Refused</th>
+          <th>Message names</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>more than 10 roles</td>
+          <td>the bound as <strong>this operator&rsquo;s own shape limit</strong>, not an upstream number — every role renders its own replicas, Services and queue references</td>
+      </tr>
+      <tr>
+          <td>a role whose members could not be named</td>
+          <td>the longest name the declared <code>replicas</code> and <code>size</code> would produce, its length and why it is not a hostname, and the three ways out — shorten the role, shorten the deployment, or declare fewer replicas</td>
+      </tr>
+      <tr>
+          <td>two roles sharing a <code>name</code></td>
+          <td>the duplicate — refused by the <strong>schema</strong>, since <code>roles</code> is a list keyed on <code>name</code>, so this one never reaches the webhook</td>
+      </tr>
+      <tr>
+          <td>an edit to an identity field — <code>model</code>, <code>engine.name</code>, <code>kvCache</code>, or the shape of the roles</td>
+          <td>the field path, and that a different value describes a different <strong>deployment</strong>, which is created rather than edited. See <a href="#deployment-identity-fields">Deployment identity fields</a>
+</td>
+      </tr>
+      <tr>
+          <td>a resource mode the named <code>InstanceType</code> does not offer</td>
+          <td>the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list</td>
+      </tr>
+      <tr>
+          <td>a whole-accelerator count over the type&rsquo;s whole-accelerator capacity</td>
+          <td>the capacity itself, not only that the request was too large, so the next attempt is not a guess. The bound is the pool&rsquo;s total, not what is free, so a deployment submitted while every accelerator is held is admitted and waits in its queue; one above the largest node but within the total is admitted and stays queued — see <a href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/#limitations">Accelerator Requests</a>
+</td>
+      </tr>
+      <tr>
+          <td>a negative or fractional <code>resources.interface</code>, or one with no effective RDMA/EFA leg</td>
+          <td>the role&rsquo;s interface field and the protocol that prevents allocation; mixed backend groups and mixed fabric legs are rejected</td>
+      </tr>
+      <tr>
+          <td>an explicit <code>accelerator: 0</code> on an acceleratable <code>InstanceType</code> shared by another role</td>
+          <td>the accelerator field, the shared type, and two recommended remedies: request at least one accelerator or move the CPU-only role to a non-acceleratable type</td>
+      </tr>
+      <tr>
+          <td>a <code>Prefill</code> and a <code>Decode</code> role both requesting a <strong>logical slice</strong> from types that draw on the same accelerator group</td>
+          <td>both roles and the slice field. Whole cards and partition profiles are accepted — including on one card, because partitions are isolated by the device</td>
+      </tr>
+      <tr>
+          <td>a role whose <code>&lt;deployment&gt;-&lt;role&gt;</code> is not a DNS-1035 label</td>
+          <td>the combined <strong>Service</strong> name, which is what the pair becomes; over 63 characters or carrying a dot from a subdomain-shaped deployment name. A role the object <strong>already had</strong> is exempt, so a rule added later cannot strand a stored object</td>
+      </tr>
+      <tr>
+          <td>two roles whose Services would be named the same</td>
+          <td>the shared name and both claimants — a role named <code>x-r0</code> collides with a role <code>x</code> of several members, whose instance 0 is published behind <code>&lt;deployment&gt;-x-r0</code>. Checked on every edit, since <code>replicas</code> decides how many instance Services a role derives</td>
+      </tr>
+      <tr>
+          <td>an invalid topology <code>requiredLevel</code></td>
+          <td>the field path and the <a href="#topology-placement">topology placement</a>
+ field rule</td>
+      </tr>
+      <tr>
+          <td>a <code>replicas</code> over 1024, or a <code>size</code> over 64</td>
+          <td>the bound — refused by the <strong>schema</strong>. It limits how many Pods one pass renders before it writes any of them, so it is this operator&rsquo;s own ceiling rather than a Kubernetes one</td>
+      </tr>
+      <tr>
+          <td><code>kind: Server</code> beside any other kind</td>
+          <td>that a server serves whole requests by itself, so the combination describes no arrangement</td>
+      </tr>
+      <tr>
+          <td>a <code>kind</code> the engine has no rendering term for</td>
+          <td>the engine and the kind. No engine this API accepts is refused by this rule today: vLLM and SGLang both render <code>Server</code>, <code>Prefill</code> and <code>Decode</code></td>
+      </tr>
+      <tr>
+          <td>an owned key in <code>extraArgs</code></td>
+          <td>the key, the engine, and <code>roles[].command</code> as the way to own it</td>
+      </tr>
+      <tr>
+          <td>an owned name in <code>env</code></td>
+          <td>the same three</td>
+      </tr>
+      <tr>
+          <td><code>--kv-cache-dtype</code> in <code>extraArgs</code> while <code>spec.kvCache</code> is set</td>
+          <td>that it carries the Binding&rsquo;s <code>dtype</code>, and a Binding declaring another dtype or <code>roles[].command</code> as the ways out — see <a href="#operator-owned-keys">Operator-owned keys</a>
+</td>
+      </tr>
+      <tr>
+          <td>a <code>--port</code> in <code>extraArgs</code> or <code>command</code> naming another port than the role&rsquo;s first <code>ports</code> entry</td>
+          <td>both values and the field each came from. A managed direct decoder is exempt, since its proxy owns the declared port. A stored role is judged only when an edit changes its <code>ports</code> or arguments</td>
+      </tr>
+      <tr>
+          <td>a port the operator reserves for a listener it synthesizes onto the role — vLLM&rsquo;s KV event ports under <code>llm-d-router</code>, or the bootstrap port of a prefiller in a declared pair that names a router or a cache — declared in <code>ports</code>, or passed as <code>--port</code> in <code>extraArgs</code> by a role declaring no <code>ports</code></td>
+          <td>the port, the field it came from and the reserved set, on <code>spec.router</code> when a router is named. A replaced <code>command</code> is exempt, since nothing is synthesized onto it. A stored <code>--port</code> collision is left alone until an edit changes it; adding a router that creates one is refused</td>
+      </tr>
+      <tr>
+          <td>a parallel degree the role&rsquo;s books cannot be read for — a known flag&rsquo;s value missing, non-integer, out of range or below its bound, or a malformed <code>VLLM_DP_SIZE</code></td>
+          <td>the role, the flag, and <code>roles[].command</code> as the way to own the whole line</td>
+      </tr>
+      <tr>
+          <td>a declared parallel width over the role&rsquo;s card request</td>
+          <td>the card count, the degrees behind the width, and that the width is per member — <code>size</code> does not rescue it</td>
+      </tr>
+      <tr>
+          <td>a <code>template</code> field on a role</td>
+          <td>the unknown field itself — the block is gone, so strict decoding refuses it rather than a webhook rule</td>
+      </tr>
+      <tr>
+          <td>a partition profile together with a slice percentage</td>
+          <td>both slice fields; one accelerator cannot serve both</td>
+      </tr>
+      <tr>
+          <td>a <code>poolRef</code> outside this namespace</td>
+          <td>nothing — it is unrepresentable in the type</td>
+      </tr>
+      <tr>
+          <td>a self-declared reuse domain</td>
+          <td>nothing — the field does not exist</td>
+      </tr>
+      <tr>
+          <td>an EMPTY <code>poolRef.name</code></td>
+          <td>the Binding as the authorization point, and that an empty reference names none</td>
+      </tr>
+      <tr>
+          <td>a new binding to a pool with mixed member protocols for an unconstrained engine</td>
+          <td>each effective protocol and why one installed transport cannot read blocks on the others; use one protocol across the groups or another pool</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Most rules above are answered from the submitted object.</strong> Resource mode, card count and a shared
+type&rsquo;s acceleratability depend on <code>InstanceType</code>; new cache binding compatibility depends on its
+Binding, pool and backend. The webhook reads these objects from the API server so a stale cache
+cannot decide admission. An unchanged binding stays editable if its backend later becomes mixed.</p>
+<p>An older binding still renders its first offered transport. It can remain healthy while reads of
+blocks on another transport fail, so repair the pool even though an unrelated update is accepted.</p>
+<p><strong>Any rule that reads an <code>InstanceType</code> declines for a deployment being deleted</strong>, in the mutating
+half and the validating half alike. Such a rule refuses when the type is absent, so leaving it on
+would let a deleted <code>InstanceType</code> block the very update that clears the deployment&rsquo;s finalizer, an
+object its own teardown could never release.</p>
+<p>The price is named rather than hidden: an edit made while a deployment is being deleted can move a
+role onto a mode its type does not offer, and nothing renders the result. Why that trade is necessary
+rather than merely tidy is in
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/#update-validation-while-an-object-is-deleted">Update validation while an object is deleted</a>
+.</p>
+<p>A manufacturer with no runner backend is still refused <strong>at render time and not at admission</strong>, and the
+reason is not the missing client. The rule needs the InstanceType&rsquo;s OBSERVED detail, and
+<code>InstanceType.status</code> has not converged on a freshly created object, so the rule would refuse a
+perfectly legal deployment for losing a race against the InstanceType reconciler.</p>
+<p>The render-time refusal reaches a reader as a <code>RenderFailed</code> warning event carrying the renderer&rsquo;s
+own message, because a pass that cannot build a replica aborts before writing any status.</p>
+<h2 id="operating-notes">Operating notes</h2>
+<p><strong>Two notes apply to every workload on a pool, replicas included, and are stated once under</strong>
+<a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/#workload-impact">Workload impact</a>
+: the transfer engine binds ports nobody
+configured, so a NetworkPolicy or port reservation has to be a range rather than a list; and the
+&ldquo;Local segment descriptor not found&rdquo; line the transfer engine logs at startup is an <code>ERROR</code> that is
+benign on a client mounting no segment of its own, which is what every replica here is.</p>
+<p><strong>A replica serves on port 8000</strong> unless the role names its own container port. The
+Service and <code>status.endpoint</code> keep that external port. On a managed native-vLLM decoder the routing
+proxy owns it and vLLM listens behind the proxy on an internal port; every other role tells the engine
+itself to open the external port. The startup, readiness and liveness probes follow the external
+listener, so a decoder becomes Ready only when the proxy can reach the engine.</p>
+<p><strong>A role that passes its own <code>--port</code> and declares no <code>ports</code> moves only the container side.</strong> The
+container port, the Service&rsquo;s <code>targetPort</code>, the probes and a router&rsquo;s target port follow the port the
+engine reads, in any spelling it accepts, from <code>extraArgs</code> or a replaced <code>command</code>. The Service&rsquo;s own
+port and <code>status.endpoint</code> stay on 8000, so callers keep their address.</p>
+<h3 id="transfer-ports-are-runtime-selected">Transfer ports are runtime-selected</h3>
+<p><code>roles[].ports</code> exposes container ports for the engine and Service. It neither reserves nor
+selects transfer-engine ports. AscendDirect binds its transfer ports inside the container&rsquo;s own
+network namespace, so a declaration here cannot prevent a collision with another process in that
+same namespace.</p>
+<p>AscendDirect calculates the transfer-port window only after scheduling, when it resolves a logical
+device to its physical device ID. The device plugin decides that assignment, so admission cannot
+know the window&rsquo;s position. Images can use different rules.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Input</th>
+          <th>Rule</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>base port</td>
+          <td><code>ASCEND_BASE_PORT</code>, or <code>20000</code> when unset</td>
+      </tr>
+      <tr>
+          <td>window</td>
+          <td><code>base_port + physical_device_id * 100</code> through <code>base_port + (physical_device_id + 1) * 100</code>, inclusive</td>
+      </tr>
+      <tr>
+          <td>example on eight cards</td>
+          <td>physical device ID <code>7</code> can use <code>20700</code> through <code>20800</code></td>
+      </tr>
+      <tr>
+          <td>selection</td>
+          <td>a port is chosen at random, with up to 500 attempts; the other transfer-port families are also random</td>
+      </tr>
+  </tbody>
+</table>
+<p>Parallelism and card count are not inputs to this calculation. Neither identifies the physical device
+and therefore neither locates its window.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/">KV Cache Pool</a>
+ for the Binding that grants the quota and declares
+the domain</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/">Elastic EP</a>
+ for the profile that resizes one serving instance&rsquo;s collective
+instead of adding replicas</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
+ for
+what pairs a prefill role with a decode role</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/">Accelerator Requests</a>
+ for the request fields
+<code>roles[].resources</code> mirrors</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/">Admission</a>
+ for the gates a replica passes
+as an ordinary Pod</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/">Model Deployment Status</a>
+ for what each condition
+and published field means</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
+ for the
+structured snapshot and Pod scrape endpoints.</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/">Accelerator Requests</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/docs/modules/model-deployment/deployment.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#a-minimal-deployment">A minimal deployment</a></li>
+    <li><a href="#prefill-and-decode">Prefill and decode</a>
+      <ul>
+        <li><a href="#pod-group-labels-and-annotations">Pod group labels and annotations</a></li>
+      </ul>
+    </li>
+    <li><a href="#topology-placement">Topology placement</a></li>
+    <li><a href="#inherited-reuse-domain">Inherited reuse domain</a></li>
+    <li><a href="#the-three-override-tiers">The three override tiers</a>
+      <ul>
+        <li><a href="#take-over-roles-and-the-reuse-domain">Take-over roles and the reuse domain</a></li>
+        <li><a href="#shared-memory">Shared memory</a></li>
+      </ul>
+    </li>
+    <li><a href="#operator-owned-keys">Operator-owned keys</a></li>
+    <li><a href="#runner-image-formula">Runner image formula</a></li>
+    <li><a href="#rollout-behavior">Rollout behavior</a>
+      <ul>
+        <li><a href="#replacing-a-role-whose-shape-moved">Replacing a role whose shape moved</a></li>
+        <li><a href="#replica-departures">Replica departures</a></li>
+        <li><a href="#deployment-identity-fields">Deployment identity fields</a></li>
+        <li><a href="#one-group-per-replica">One group per replica</a></li>
+      </ul>
+    </li>
+    <li><a href="#admission-refusals">Admission refusals</a></li>
+    <li><a href="#operating-notes">Operating notes</a>
+      <ul>
+        <li><a href="#transfer-ports-are-runtime-selected">Transfer ports are runtime-selected</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,1390 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  
+  <title>Vendor Prerequisites · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0"
+    data-home="/gpustack-operator/v0.9.0/" data-page="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/" aria-current="page">Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/" >Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/" >Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/" >Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0/docs/getting-started/">Getting started</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Vendor Prerequisites</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="vendor-prerequisites">Vendor Prerequisites</h1>
+<p>Vendor value keys and component names change between releases, so each manufacturer section names the
+vendor artifact and product version its statements were read against.</p>
+<p>Every section starts with what to <strong>install before GPUStack</strong>. Where the vendor also ships a GPU
+Operator, it goes on to say which of that operator&rsquo;s components conflict with ours, how to <strong>install
+it</strong> alongside GPUStack, and, if it is <strong>already installed</strong>, what to change before GPUStack can go
+on the same node.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#allocator-injection">Allocator injection</a>
+</li>
+<li><a href="#device-plugin-name-collisions">Device plugin name collisions</a>
+</li>
+<li><a href="#one-node-feature-discovery-per-cluster">One Node Feature Discovery per cluster</a>
+</li>
+<li><a href="#resource-removal-lag">Resource removal lag</a>
+</li>
+<li><a href="#per-manufacturer">Per manufacturer</a>
+</li>
+</ul>
+<h2 id="allocator-injection">Allocator injection</h2>
+<p>Whether a container toolkit is required at all follows directly from how our own allocator makes the
+accelerator visible: a <code>/dev</code> node needs nothing from the toolkit, while an env var needs the vendor&rsquo;s
+runtime hook to interpret it.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Manufacturer</th>
+          <th>Allocator injection</th>
+          <th>Toolkit required</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>AMD</td>
+          <td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+          <td>No</td>
+      </tr>
+      <tr>
+          <td>Ascend</td>
+          <td><code>ASCEND_VISIBLE_DEVICES</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>Cambricon</td>
+          <td><code>/dev</code> nodes (<code>/dev/cambricon_dev*</code>, the control nodes), plus <code>CAMBRICON_VISIBLE_DEVICES</code></td>
+          <td>No</td>
+      </tr>
+      <tr>
+          <td>Hygon</td>
+          <td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/mkfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+          <td>No</td>
+      </tr>
+      <tr>
+          <td>Iluvatar</td>
+          <td><code>IX_VISIBLE_DEVICES</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>MetaX</td>
+          <td><code>/dev</code> nodes (<code>/dev/mxcd</code>, <code>/dev/mxnd</code>, <code>/dev/mxgd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+          <td>No</td>
+      </tr>
+      <tr>
+          <td>Moore Threads</td>
+          <td><code>MTHREADS_VISIBLE_DEVICES</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>NVIDIA</td>
+          <td><code>NVIDIA_VISIBLE_DEVICES</code> by default, or a CDI request — see <a href="#nvidia">NVIDIA</a>
+</td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>T-Head</td>
+          <td><code>/dev</code> nodes (<code>/dev/alixpu</code>, <code>/dev/alixpu_ctl</code>, <code>/dev/alixpu_ppu&lt;N&gt;</code>)</td>
+          <td>No</td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p><strong>Why</strong> — a device plugin that names <code>/dev</code> entries directly needs only what <code>runc</code> already grants;
+an env var needs the vendor&rsquo;s own runtime hook to translate it into a device grant, so removing that
+hook removes the accelerator from the container.</p>
+</blockquote>
+<p>An env var reaches the container either way, so a missing toolkit does not fail the allocation: it
+produces a running container with the variable set and no accelerator behind it.</p>
+<h2 id="device-plugin-name-collisions">Device plugin name collisions</h2>
+<p>The kubelet does not reject a second device-plugin registration for a resource name it already knows:
+it replaces the endpoint. Both plugins keep writing their own device sets, so node capacity oscillates
+between the two views, and a Pod can fail admission during the flap.</p>
+<p>Allocation can also fail when kubelet sends one plugin&rsquo;s device IDs to the other. Remove the duplicate
+plugin before submitting workloads.</p>
+<h2 id="one-node-feature-discovery-per-cluster">One Node Feature Discovery per cluster</h2>
+<p>Run exactly one NFD master. Two masters write and garbage-collect the same
+<code>feature.node.kubernetes.io/*</code> labels, so each one&rsquo;s GC pass can erase the other&rsquo;s writes. Every
+device-manager DaemonSet in this operator is placed onto a node by a <code>pci-&lt;vendor&gt;.present</code> label that
+NFD produces, so a lost label stops that DaemonSet from scheduling at all.</p>
+<p>A vendor GPU Operator reaches its own node labels in one of two ways, and only one of them is
+unaffected by turning its bundled NFD off. Some ship a cluster-scoped <code>NodeFeatureRule</code> and let
+whichever NFD is running evaluate it — AMD&rsquo;s operator does, and ours evaluates it: our master denies no
+label namespace, honours NodeFeature labels, and is pinned to no namespace. Others read a label an NFD
+<em>source</em> produces, which exists only where that source is enabled — see <a href="#nvidia">NVIDIA</a>
+.</p>
+<p><strong>Bringing your own NFD.</strong> Turning ours off hands the job to a cluster&rsquo;s own, through whichever lever
+the install mode gives you: <code>--set node-feature-discovery.enabled=false</code> in chart mode, or
+<code>--disable-applications=node-feature-discovery</code> on the worker in image mode — <a href="/gpustack-operator/v0.9.0/docs/operate/installation-modes/#chart-mode-and-image-mode">Installation
+Modes</a>
+ has the difference.</p>
+<p>Either way the worker still applies the <code>gpustack-cpu-info</code> NodeFeatureRule itself, so that one is never
+the replacement&rsquo;s to install, only to evaluate. Ours is configured for six things an NFD must do
+here, and a replacement must be too:</p>
+<ol>
+<li>A worker collecting <code>pci</code>, with <code>vendor</code> among its <code>deviceLabelFields</code> and device classes <code>02</code>, <code>03</code>,
+<code>0b</code> and <code>12</code> whitelisted. Those are what produce the <code>pci-&lt;vendor&gt;.present</code> labels, and the
+<code>gpustack-cpu-info</code> NodeFeatureRule matches the same classes.</li>
+<li>A worker collecting <code>system</code>, which publishes <code>system-os_release.*</code>. This chain reads none of it;
+the NVIDIA GPU Operator does, and ours publishes it so that operator can run with its own NFD off
+— <a href="#nvidia">NVIDIA</a>
+.</li>
+<li>A master that evaluates <code>NodeFeature</code> objects from <strong>every</strong> namespace. The worker&rsquo;s and the
+device-managers&rsquo; own <code>&lt;node&gt;-gpustack-*</code> objects are how their detections reach the Node.</li>
+<li><code>restrictions.denyNodeFeatureLabels: false</code> and <code>disableExtendedResources: false</code>, since those
+detections arrive as labels <em>and</em> as extended resources.</li>
+<li>A <code>denyLabelNs</code> that admits <code>acceleratable.feature.gpustack.ai</code> and <code>general.feature.gpustack.ai</code>.</li>
+<li>One owner for the NFD CRDs. Vendor charts bundle an NFD version of their own, so decide which
+release installs them before installing two that both want to.</li>
+</ol>
+<p>A vendor chart that bundles NFD as a subchart exposes all five, so its NFD can be the cluster&rsquo;s one.
+The NVIDIA GPU Operator&rsquo;s already publishes <code>vendor</code> as its only <code>deviceLabelFields</code>, which is what
+item 1 asks for, and collects every source, which is item 2; its device classes are the gap.</p>
+<p>It whitelists <code>0300</code> and <code>0302</code> (the GPUs it was written for) and neither <code>0b</code> nor <code>12</code>, so an
+accelerator in either class never gets the label its device manager schedules on, and that DaemonSet
+stays unscheduled with nothing to say why. Both values live under that chart&rsquo;s
+<code>node-feature-discovery.worker.config.sources.pci</code>.</p>
+<p>Item 6 is not a version problem there: both charts vendor NFD 0.19.0, so the CRDs are the same objects
+and all that has to be settled is which release owns them. And the class gap only bites once a second
+manufacturer is present: the display-controller classes it does whitelist cover NVIDIA and AMD, so a
+cluster holding only those is already served by its list.</p>
+<p>Read the six items as a checklist rather than a recipe: every cluster this page was written against
+ran the NFD this chart bundles, so a handover has not been observed end to end.</p>
+<h2 id="resource-removal-lag">Resource removal lag</h2>
+<p>Removing a vendor&rsquo;s device plugin does not immediately remove its extended resource from the Node
+object: the kubelet only drops it once it reconverges. A scheduler can keep seeing the old resource as
+allocatable for a window after the plugin is gone, so &ldquo;disabled&rdquo; is not the same moment as &ldquo;gone&rdquo; from
+a scheduling decision&rsquo;s point of view.</p>
+<h2 id="per-manufacturer">Per manufacturer</h2>
+<h3 id="amd">AMD</h3>
+<p>Read against <strong>AMD GPU Operator v1.5.1</strong> —
+<a href="https://instinct.docs.amd.com/projects/gpu-operator/en/latest/index.html">Overview</a>
+ ·
+<a href="https://instinct.docs.amd.com/projects/gpu-operator/en/latest/installation/kubernetes-helm.html">Helm Chart Install</a>
+ ·
+<a href="https://instinct.docs.amd.com/projects/container-toolkit/en/latest/index.html">Toolkit Install</a>
+.</p>
+<p><strong>Install before GPUStack</strong> — the ROCm driver alone. Per <a href="#allocator-injection">Allocator
+injection</a>
+, our allocator injects <code>/dev/kfd</code> and each granted accelerator&rsquo;s
+DRM nodes itself, so neither the AMD Container Toolkit nor <code>amd-container-runtime</code> is needed.</p>
+<p>A non-root workload still needs <code>video</code> and <code>render</code> supplementary-group membership on its container&rsquo;s
+user: the device plugin API has no field to grant a supplementary group, so this is the workload&rsquo;s or
+the cluster&rsquo;s own <code>securityContext</code> to set. Measured, the failure mode without it is <strong>zero enumerated
+ROCm agents, not an error</strong>: <code>rocm-smi</code> reads sysfs and keeps reporting the accelerator regardless, so
+it is not a valid check here; use <code>rocminfo</code> instead.</p>
+<p><strong>Vendor GPU Operator</strong> — the AMD GPU Operator, driven by a <code>DeviceConfig</code> CR the chart creates.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Component</th>
+          <th>Keep / disable</th>
+          <th>Mechanism</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Driver</td>
+          <td>Keep</td>
+          <td><code>DeviceConfig.spec.driver.enable</code> (default <code>true</code>)</td>
+      </tr>
+      <tr>
+          <td>Metrics exporter (DCGM-class)</td>
+          <td>Keep</td>
+          <td><code>DeviceConfig.spec.metricsExporter.enable</code> — <strong>default <code>false</code></strong>, enable it</td>
+      </tr>
+      <tr>
+          <td>Device plugin</td>
+          <td>Disable</td>
+          <td><code>DeviceConfig.spec.devicePlugin.enableDevicePlugin: false</code></td>
+      </tr>
+      <tr>
+          <td>Node Labeller</td>
+          <td>Disable</td>
+          <td><code>DeviceConfig.spec.devicePlugin.enableNodeLabeller: false</code></td>
+      </tr>
+      <tr>
+          <td>Bundled Node Feature Discovery</td>
+          <td>Disable</td>
+          <td><code>--set node-feature-discovery.enabled=false</code></td>
+      </tr>
+      <tr>
+          <td>Bundled Kernel Module Management</td>
+          <td>Disable when the driver is pre-installed</td>
+          <td><code>--set kmm.enabled=false --set kmm.watch=false</code></td>
+      </tr>
+      <tr>
+          <td>DRA driver</td>
+          <td>Leave enabled to test whole-card allocation</td>
+          <td><code>DeviceConfig.spec.draDriver.enable</code> — mutually exclusive with <code>devicePlugin.enableDevicePlugin</code> on one CR</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Install it</strong> — the chart&rsquo;s own switches cover the two bundled add-ons; the device plugin and the node
+labeller are <code>DeviceConfig</code> fields, so they are turned off on the CR the chart just created.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm repo add rocm https://rocm.github.io/gpu-operator
+</span></span><span class="line"><span class="cl">helm repo update
+</span></span><span class="line"><span class="cl">helm install amd-gpu-operator rocm/gpu-operator-charts <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --namespace kube-amd-gpu --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --version<span class="o">=</span>v1.5.1 <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set node-feature-discovery.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set kmm.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set kmm.watch<span class="o">=</span><span class="nb">false</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">kubectl -n kube-amd-gpu patch deviceconfig &lt;name&gt; --type merge -p <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="s1">&#39;{&#34;spec&#34;:{&#34;devicePlugin&#34;:{&#34;enableDevicePlugin&#34;:false,&#34;enableNodeLabeller&#34;:false},&#34;metricsExporter&#34;:{&#34;enable&#34;:true}}}&#39;</span></span></span></code></pre></div>
+</div><p><strong>Already installed</strong> — the operator&rsquo;s device plugin advertises <code>amd.com/gpu</code>, the same name ours
+does, so it has to stop before GPUStack goes on that node:</p>
+<ol>
+<li><strong>Device plugin and Node Labeller</strong> — turn both off on the existing <code>DeviceConfig</code>, the same patch as
+above against the CR the running release created. Do not delete the DaemonSet: the controller
+recreates whatever the CR still asks for.</li>
+<li><strong>Bundled Node Feature Discovery</strong> — if that release brought its own, <code>helm upgrade</code> it with the
+values it was installed with plus <code>--set node-feature-discovery.enabled=false</code>.</li>
+<li><strong>Verify</strong> — wait for <code>amd.com/gpu</code> to leave the Node before installing GPUStack;
+<code>kubectl get node &lt;node&gt; -o jsonpath='{.status.allocatable}'</code> no longer lists it. The kubelet drops
+it a moment after the plugin goes, not at the same instant.</li>
+</ol>
+<h3 id="ascend">Ascend</h3>
+<p>Read against the <strong>Ascend NPU driver and firmware</strong> package —
+<a href="https://www.hiascend.com/hardware/firmware-drivers">Driver Install</a>
+ — and, for the Atlas A5
+statements below, <strong>MindCluster 26.1.0</strong>, the release carried by the A5 host they were checked on —
+<a href="https://www.hiascend.com/software/mindx-dl">MindCluster</a>
+.</p>
+<p><strong>Install before GPUStack</strong> — the Ascend NPU driver and firmware, and the Ascend Docker Runtime: per
+<a href="#allocator-injection">Allocator injection</a>
+, our allocator emits <code>ASCEND_VISIBLE_DEVICES</code> and no
+device node, so that runtime is what turns an allocation into <code>/dev</code> entries.</p>
+<p>Register the runtime under the handler name <code>ascend</code>, which is the RuntimeClass this chart creates for
+this manufacturer, or set <code>deviceManager.createRuntimeClasses=false</code> and attach your own.</p>
+<p><strong>Atlas A5 (the 950 series) needs MindCluster 26.0.0 or newer.</strong> A5 support landed in that release,
+whose notes carry the line <em>&ldquo;Ascend Docker Runtime supports the Atlas 350 PCIe card&rdquo;</em> — this
+generation&rsquo;s PCIe card. 910B and earlier are unaffected: their line ends at 7.3.x, and the vendor&rsquo;s
+releases run 5.x, 6.x, 7.x then 26.x with nothing in between.</p>
+<p><strong>An older runtime refuses the allocation, and blames the wrong thing.</strong> It maps the <code>Ascend950</code> chip
+name to no device type it knows, so it falls back to the manager-device list every earlier generation
+used — and that list carries <code>/dev/devmm_svm</code>, which an A5 host does not have. Adding a device node
+that is not there is fatal, so container creation fails, naming that device rather than the version
+behind it.</p>
+<p>The cards are not the gap: <code>/dev/davinci&lt;N&gt;</code> is built from the requested index with no chip name
+involved, so an older runtime would have injected them, but it never gets that far.</p>
+<p><code>ascend-docker-runtime --version</code> does not answer this. It is a <code>runc</code> wrapper that hands every
+unrecognized argument to the host&rsquo;s own <code>runc</code>, so <code>--version</code> prints <code>runc</code>&rsquo;s banner and says nothing
+about the vendor release. Read the version the installer recorded instead:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">grep <span class="s1">&#39;^version=&#39;</span> /usr/local/Ascend/Ascend-Docker-Runtime/ascend_docker_runtime_install.info
+</span></span><span class="line"><span class="cl"><span class="c1"># version=v7.3.0    &lt;- predates A5 support</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># version=v26.1.0   &lt;- serves A5</span></span></span></code></pre></div>
+</div><p><code>gpustack-operator device-manager preflight</code> reads the same file and reports it as the
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/#the-a5-host-state-rows"><code>ascend-docker-runtime</code> check</a>
+ on each A5 accelerator,
+so a node too old to serve them is named before a workload lands on it.</p>
+<h4 id="a5-the-host-ranktable-must-be-absent-or-version-20">A5: the host ranktable must be absent or version 2.0</h4>
+<p><code>/etc/hccl_rootinfo.json</code> is optional state generated by <code>mindcluster-tools</code>, owned by no package.
+<code>ascend-docker-runtime</code> mounts it into every container whenever the host carries it, on presence
+alone and with no version check.</p>
+<p>Its format is fixed by the chip generation: <strong>1.0 serves A2</strong> (910/910B/310P), <strong>1.2 serves A3</strong>
+(910C), <strong>2.0 serves A5</strong>. A5 loads <code>libhccl_v2</code>, which refuses anything but 2.0:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Config_Error_Ranktable(EI0014): Value 1.0 for ranktable variable version is invalid.
+</span></span><span class="line"><span class="cl">Expected value: 2.0.</span></span></code></pre></div>
+</div><p>So a table left behind by an older fleet stops every <strong>multi-card</strong> job on the node: single-card
+allocations never build a communicator and are unaffected. No environment variable disables the
+check, and the path is compiled into the library, so the file must be corrected rather than worked
+around:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># absent is the healthy state -- HCCL then negotiates through rootInfo</span>
+</span></span><span class="line"><span class="cl"><span class="nb">test</span> -e /etc/hccl_rootinfo.json <span class="o">&amp;&amp;</span> grep -o <span class="s1">&#39;&#34;version&#34;[^,]*&#39;</span> /etc/hccl_rootinfo.json
+</span></span><span class="line"><span class="cl"><span class="c1"># &#34;version&#34;: &#34;1.0&#34;   &lt;- breaks multi-card HCCL on A5; remove it or regenerate as 2.0</span></span></span></code></pre></div>
+</div><p><code>gpustack-operator device-manager preflight</code> reports this as the <a href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/#the-a5-host-state-rows"><code>hccl-ranktable</code>
+check</a>
+ on each A5 accelerator. A multi-node deployment
+does need a ranktable; this rule covers the single-node case.</p>
+<h3 id="cambricon">Cambricon</h3>
+<p>Read against <strong>Cambricon driver 5.10.22</strong> (Neuware SDK 1.15.0) —
+<a href="https://www.cambricon.com/docs/sdk_1.15.0/driver_5.10.22/user_guide/index.html">Driver Install</a>
+.</p>
+<p><strong>Install before GPUStack</strong> — the Cambricon MLU driver alone. Per <a href="#allocator-injection">Allocator
+injection</a>
+, our allocator injects the card&rsquo;s own node and the host&rsquo;s control
+nodes on both the whole-card and the sliced path, so <code>cntoolkit</code> is not required. It still sets the
+<code>CAMBRICON_VISIBLE_DEVICES</code> a deployment running <code>cambricon-container-runtime</code> keys on, naming the
+same cards the injected nodes do.</p>
+<h3 id="hygon">Hygon</h3>
+<p>Read against the <strong>Hygon DCU Operator</strong> — its documentation tree publishes only a <code>latest</code> revision,
+with no pinned semantic version —
+<a href="https://developer.sourcefind.cn/document/7541efc4-54b1-11f1-8265-0242ac150003">Overview</a>
+.</p>
+<p><strong>Install before GPUStack</strong> — the Hygon DCU driver and firmware, with the device files (<code>/dev/kfd</code>,
+<code>/dev/mkfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>) visible on the node. Per <a href="#allocator-injection">Allocator
+injection</a>
+, our allocator injects those nodes directly, and the DCU Operator
+ships no container runtime of its own, so no container toolkit is required.</p>
+<p><strong>Vendor GPU Operator</strong> — the DCU Operator, driven by a single <code>DeviceConfig</code> CR (<code>kubectl explain deviceconfig.spec</code>); every component below is a field under that one CR, not a separate CRD.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Component</th>
+          <th>Keep / disable</th>
+          <th>Mechanism</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>DCU-Exporter (metrics)</td>
+          <td>Keep</td>
+          <td><code>DeviceConfig.spec.metricsExporter.enable</code> — disabled by default, enable it</td>
+      </tr>
+      <tr>
+          <td>DCU-DCGM (diagnostics)</td>
+          <td>Keep</td>
+          <td><code>DeviceConfig.spec.dcgm.enable</code> — disabled by default, enable it</td>
+      </tr>
+      <tr>
+          <td>DCU-Device-Plugin</td>
+          <td>Disable</td>
+          <td><code>DeviceConfig.spec.devicePlugin.enableDevicePlugin: false</code></td>
+      </tr>
+      <tr>
+          <td>DCU-Label-Node (NFD-equivalent)</td>
+          <td>Disable</td>
+          <td><code>DeviceConfig.spec.devicePlugin.enableNodeLabeller: false</code></td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Install it</strong> — the vendor&rsquo;s install chapter sits behind its authenticated documentation portal, so no
+install command is reproduced here. Whatever installs the operator, turn the two components off on the
+<code>DeviceConfig</code> it creates.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n kube-system patch deviceconfig &lt;name&gt; --type merge -p <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="s1">&#39;{&#34;spec&#34;:{&#34;devicePlugin&#34;:{&#34;enableDevicePlugin&#34;:false,&#34;enableNodeLabeller&#34;:false},&#34;metricsExporter&#34;:{&#34;enable&#34;:true},&#34;dcgm&#34;:{&#34;enable&#34;:true}}}&#39;</span></span></span></code></pre></div>
+</div><p><strong>Already installed</strong> — the operator&rsquo;s device plugin advertises <code>hygon.com/dcu</code>, the same name ours
+does, so it has to stop before GPUStack goes on that node:</p>
+<ol>
+<li><strong>Device plugin and Node Labeller</strong> — turn <code>enableDevicePlugin</code> and <code>enableNodeLabeller</code> off on the
+existing <code>DeviceConfig</code>, with the patch above against the CR the running release created. Do not
+delete the DaemonSets: the controller recreates whatever the CR still asks for.</li>
+<li><strong>Verify</strong> — wait for <code>hygon.com/dcu</code> to leave the Node before installing GPUStack.</li>
+</ol>
+<h3 id="iluvatar">Iluvatar</h3>
+<p>Read against <strong>ix-GPU-Operator v4.4.0</strong> and <strong>ix-Container-Toolkit v1.1.0</strong> —
+<a href="https://developer.iluvatar.com/docs/generaldocs_ix_gpu_operator?category=%E4%BA%91%E5%8E%9F%E7%94%9F%E4%B8%8E%E9%9B%86%E7%BE%A4%E9%83%A8%E7%BD%B2&amp;manual=generaldocs_k8stools_all">Helm Chart Install</a>
+ ·
+<a href="https://developer.iluvatar.com/docs/generaldocs_ix_container_toolkit?category=%E4%BA%91%E5%8E%9F%E7%94%9F%E4%B8%8E%E9%9B%86%E7%BE%A4%E9%83%A8%E7%BD%B2&amp;manual=generaldocs_k8stools_all">Toolkit Install</a>
+.</p>
+<p><strong>Install before GPUStack</strong> — the Iluvatar driver and the ix-Container-Toolkit: per <a href="#allocator-injection">Allocator
+injection</a>
+, our allocator emits <code>IX_VISIBLE_DEVICES</code> and no device node. The
+two are paired by version — a v4.4.0 driver needs the v1.1.0 toolkit, and the vendor states the two
+must match on host and in-container.</p>
+<p>Register the runtime under the handler name <code>iluvatar</code>, which is the RuntimeClass this chart creates
+for this manufacturer, or set <code>deviceManager.createRuntimeClasses=false</code> and attach your own.</p>
+<p><strong>Vendor GPU Operator</strong> — the ix-GPU-Operator, a Helm chart with one switch per component.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Component</th>
+          <th>Keep / disable</th>
+          <th>Mechanism</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Driver (<code>ix-driver</code>)</td>
+          <td>Disable when the driver is pre-installed</td>
+          <td><code>ixDriver.enabled</code> — default <code>false</code> already</td>
+      </tr>
+      <tr>
+          <td>ix-Exporter (metrics)</td>
+          <td>Keep</td>
+          <td><code>ixExporter.enabled</code> (default <code>true</code>)</td>
+      </tr>
+      <tr>
+          <td>ix-Device-Plugin</td>
+          <td>Disable</td>
+          <td><code>--set ixDevicePlugin.enabled=false</code></td>
+      </tr>
+      <tr>
+          <td>ix-Feature-Discovery (NFD-equivalent)</td>
+          <td>Disable</td>
+          <td><code>--set ixfd.enabled=false</code> — bundles upstream Node Feature Discovery under the release name</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Install it</strong> — the OCI chart, with the driver left to the node and the two competing components off.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm install --wait ix-gpu-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  oci://registry.iluvatar.com.cn:10443/k8s/ix-gpu-operator --version 1.0.0 <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --create-namespace --namespace ix-gpu-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --insecure-skip-tls-verify <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set global.repository<span class="o">=</span><span class="s2">&#34;registry.iluvatar.com.cn/k8s&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set global.version<span class="o">=</span>4.4.0 <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set ixDriver.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set ixDevicePlugin.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set ixfd.enabled<span class="o">=</span>false</span></span></code></pre></div>
+</div><p><strong>Already installed</strong> — ix-Device-Plugin advertises <code>iluvatar.com/gpu</code>, the same name ours does, so it
+has to stop before GPUStack goes on that node:</p>
+<ol>
+<li><strong>ix-Device-Plugin and ix-Feature-Discovery</strong> — <code>helm upgrade</code> the release with the values it was
+installed with plus <code>--set ixDevicePlugin.enabled=false --set ixfd.enabled=false</code>. The operator
+removes both workloads itself; deleting one by hand only makes it come back on the next reconcile.</li>
+<li><strong>Verify</strong> — wait for <code>iluvatar.com/gpu</code> to leave the Node before installing GPUStack.</li>
+</ol>
+<p>Below software-stack v4.3.0 the operator is deployed from YAML manifests with no per-component toggle.
+There the only lever is the whole manifest: delete it, and install the driver and ix-Container-Toolkit
+on the node yourself.</p>
+<h3 id="metax">MetaX</h3>
+<p>Read against <strong>MetaX Kubernetes GPU Operator v0.15.3</strong> —
+<a href="https://developer.metax-tech.com/api/client/document/preview/1411/k8s/00_overview.html">Overview</a>
+ ·
+<a href="https://developer.metax-tech.com/api/client/document/preview/1411/k8s/02_start.html">Helm Chart Install</a>
+ ·
+<a href="https://developer.metax-tech.com/api/client/document/preview/1411/k8s/03_component.html">Components</a>
+.</p>
+<p><strong>Install before GPUStack</strong> — the MetaX driver and the MXMACA SDK. Per <a href="#allocator-injection">Allocator
+injection</a>
+, our allocator injects the three control nodes (<code>/dev/mxcd</code>,
+<code>/dev/mxnd</code>, <code>/dev/mxgd</code>) and each granted accelerator&rsquo;s DRM nodes directly, so no container toolkit
+is required.</p>
+<p><strong>Vendor GPU Operator</strong> — the MetaX GPU Operator. Its <code>minimalMode</code> is the install shape that fits
+here: it deploys neither the kernel driver nor the MXMACA SDK, leaving both to the node.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Component</th>
+          <th>Keep / disable</th>
+          <th>Mechanism</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Kernel driver and MXMACA SDK</td>
+          <td>Not deployed</td>
+          <td><code>--set minimalMode=true</code> leaves both to the node</td>
+      </tr>
+      <tr>
+          <td><code>mx-exporter</code> (metrics)</td>
+          <td>Keep</td>
+          <td>optional under <code>minimalMode</code></td>
+      </tr>
+      <tr>
+          <td><code>controller-exporter</code></td>
+          <td>Keep</td>
+          <td>optional under <code>minimalMode</code></td>
+      </tr>
+      <tr>
+          <td><code>gpu-device</code> (device plugin)</td>
+          <td><strong>Cannot be disabled</strong></td>
+          <td>the vendor marks it mandatory in every install mode, <code>minimalMode</code> included</td>
+      </tr>
+      <tr>
+          <td><code>gpu-label</code> (NFD-equivalent)</td>
+          <td><strong>Cannot be disabled</strong></td>
+          <td>same marking</td>
+      </tr>
+      <tr>
+          <td><code>gpu-scheduler</code></td>
+          <td>Disable</td>
+          <td>optional — leave it undeployed</td>
+      </tr>
+      <tr>
+          <td><code>topo-discovery</code></td>
+          <td>Disable</td>
+          <td>optional — leave it undeployed</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Install it</strong> — substitute your own registry for <code>DOMAIN/PROJECT</code>. <code>minimalMode</code> is fixed at install
+time and cannot be switched on a running release.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm install oci://DOMAIN/PROJECT/metax-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --version VERSION <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --create-namespace -n metax-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --generate-name <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --wait <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set <span class="nv">registry</span><span class="o">=</span>DOMAIN/PROJECT <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set <span class="nv">minimalMode</span><span class="o">=</span>true</span></span></code></pre></div>
+</div><p><strong>Already installed</strong> — <code>gpu-device</code> advertises <code>metax-tech.com/gpu</code>, the same name ours does, and the
+vendor marks it mandatory in every install mode, so the two cannot share a node. The operator has to
+go:</p>
+<ol>
+<li><strong>Kernel driver and MXMACA SDK</strong> — make sure both are on the node independently of the operator.
+Under <code>minimalMode</code> they already are; otherwise install them first, or uninstalling takes them with
+it.</li>
+<li><strong>The whole release</strong> — <code>helm uninstall</code> it. <code>gpu-device</code> and <code>gpu-label</code> have no switch, so there
+is nothing narrower to turn off.</li>
+<li><strong>Verify</strong> — wait for <code>metax-tech.com/gpu</code> to leave the Node before installing GPUStack.</li>
+</ol>
+<h3 id="moore-threads">Moore Threads</h3>
+<p>Read against <strong>MT GPU Operator v2.1.0</strong> (KUAE Cloud Native) —
+<a href="https://docs.mthreads.com/cloud-native/cloud-native-doc-online/introduction/">Overview</a>
+ ·
+<a href="https://docs.mthreads.com/cloud-native/cloud-native-doc-online/install_guide#mt-gpu-operator">Helm Chart Install</a>
+.</p>
+<p><strong>Install before GPUStack</strong> — the Moore Threads driver and the MT Container Toolkit: per <a href="#allocator-injection">Allocator
+injection</a>
+, our allocator emits <code>MTHREADS_VISIBLE_DEVICES</code> and no device node.
+Both can come from the operator&rsquo;s own <code>full</code> mode below.</p>
+<p><strong>Vendor GPU Operator</strong> — the MT GPU Operator, installed in one of two modes rather than by a single
+toggle. <code>full</code> is the <code>mt-gpu-operator</code> Helm chart pair; <code>core</code> is a <code>kubectl apply -f</code> of plain
+manifests carrying only the device plugin and the exporter.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Component</th>
+          <th>Keep / disable</th>
+          <th>Mechanism</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Driver (<code>driverToolkit</code>)</td>
+          <td>Keep</td>
+          <td><code>mtGpuClusterPolicyClusterpolicy.driverToolkit.enabled</code> (default <code>true</code>)</td>
+      </tr>
+      <tr>
+          <td>Container toolkit</td>
+          <td>Keep</td>
+          <td><code>mtGpuClusterPolicyClusterpolicy.containerToolkit.enabled</code> (default <code>true</code>)</td>
+      </tr>
+      <tr>
+          <td>DCGM / DCGM exporter</td>
+          <td>Keep</td>
+          <td><code>.dcgm.enabled</code> / <code>.dcgmExporter.enabled</code></td>
+      </tr>
+      <tr>
+          <td>Bundled NFD</td>
+          <td>Disable</td>
+          <td><code>.nfd.enabled=false</code></td>
+      </tr>
+      <tr>
+          <td>sGPU scheduler + admission webhook</td>
+          <td>Disable</td>
+          <td><code>.gpuScheduler.enabled</code> / <code>.gpuWebhook.enabled</code> — default <code>false</code> already</td>
+      </tr>
+      <tr>
+          <td><code>kured</code>, node-problem-detector, <code>aiOps</code></td>
+          <td>Disable</td>
+          <td><code>.kured.enabled=false</code>, <code>.nodeProblemDetector.enabled=false</code>, <code>.aiOps.enabled=false</code></td>
+      </tr>
+      <tr>
+          <td>Device plugin</td>
+          <td>No switch</td>
+          <td>it ships inside the operator&rsquo;s reconciliation loop under <code>full</code> mode</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Install it</strong> — from the chart directories the vendor&rsquo;s bundle unpacks, with the cluster-level add-ons
+off. No key disables the device plugin under <code>full</code> mode, so a node that must run ours instead is
+served by <code>core</code> mode with that manifest&rsquo;s device plugin removed.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm install --wait mt-gpu-operator mt-gpu-operator
+</span></span><span class="line"><span class="cl">helm install --wait mt-gpu-operator-custom-resources mt-gpu-operator-custom-resources <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set mtGpuClusterPolicyClusterpolicy.nfd.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set mtGpuClusterPolicyClusterpolicy.kured.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set mtGpuClusterPolicyClusterpolicy.nodeProblemDetector.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set mtGpuClusterPolicyClusterpolicy.aiOps.enabled<span class="o">=</span>false</span></span></code></pre></div>
+</div><p><strong>Already installed</strong> — the vendor&rsquo;s device plugin advertises <code>mthreads.com/gpu</code>, the same name ours
+does, and <code>full</code> mode exposes no key that removes it, so what to do depends on which mode installed it:</p>
+<ol>
+<li><strong>Cluster-level add-ons</strong> (bundled NFD, <code>kured</code>, node-problem-detector, <code>aiOps</code>) — under <code>full</code>,
+<code>helm upgrade</code> the <code>mt-gpu-operator-custom-resources</code> release with the switches above. <code>core</code> ships
+none of them.</li>
+<li><strong>Device plugin</strong> — no key removes it under <code>full</code>, so the mode that installed it decides:
+<ul>
+<li><strong><code>full</code></strong> — either leave that node to the vendor stack, or move it to <code>core</code>: uninstall both
+charts, keep the driver and MT Container Toolkit on the node by installing them outside the
+operator, and go on below.</li>
+<li><strong><code>core</code></strong> — there is no controller, so edit the manifests directly: drop the device plugin from
+<code>deployments.yaml</code>, leave the exporter, and re-apply.</li>
+</ul>
+</li>
+<li><strong>Verify</strong> — wait for <code>mthreads.com/gpu</code> to leave the Node before installing GPUStack.</li>
+</ol>
+<h3 id="nvidia">NVIDIA</h3>
+<p>Read against <strong>NVIDIA GPU Operator v26.3.3</strong> —
+<a href="https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html">Overview</a>
+ ·
+<a href="https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html">Helm Chart Install</a>
+.</p>
+<p><strong>Install before GPUStack</strong> — the NVIDIA driver and the NVIDIA Container Toolkit: per <a href="#allocator-injection">Allocator
+injection</a>
+, our allocator emits <code>NVIDIA_VISIBLE_DEVICES</code> by default and no
+device node. The toolkit is what the other channel needs too — it is what writes the node&rsquo;s CDI
+specifications. Both can come from the operator itself.</p>
+<p><strong>The toolkit is also what MIG needs</strong>, not only workloads: the Device Manager Pod reads the management
+library through it, and the chart declares <code>NVIDIA_MIG_CONFIG_DEVICES</code> / <code>NVIDIA_MIG_MONITOR_DEVICES</code> on
+that Pod so the runtime stops hiding the driver&rsquo;s MIG capabilities from it — see
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/#prerequisites">MIG prerequisites</a>
+ for the two ways to break that.</p>
+<p><strong>Vendor GPU Operator</strong> — the NVIDIA GPU Operator, a Helm chart with one switch per component.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Component</th>
+          <th>Keep / disable</th>
+          <th>Mechanism</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Driver</td>
+          <td>Keep</td>
+          <td><code>driver.enabled</code> (default <code>true</code>)</td>
+      </tr>
+      <tr>
+          <td>Container Toolkit</td>
+          <td>Keep</td>
+          <td><code>toolkit.enabled</code> (default <code>true</code>)</td>
+      </tr>
+      <tr>
+          <td>DCGM exporter</td>
+          <td>Keep</td>
+          <td><code>dcgmExporter.enabled</code> (default <code>true</code>)</td>
+      </tr>
+      <tr>
+          <td>Device plugin</td>
+          <td>Disable</td>
+          <td><code>--set devicePlugin.enabled=false</code></td>
+      </tr>
+      <tr>
+          <td>GPU Feature Discovery</td>
+          <td>Keep</td>
+          <td><code>gfd.enabled</code> (default <code>true</code>)</td>
+      </tr>
+      <tr>
+          <td>Bundled Node Feature Discovery</td>
+          <td>Disable — or keep it and turn ours off instead</td>
+          <td><code>--set nfd.enabled=false</code>, or <a href="#one-node-feature-discovery-per-cluster">hand the job over</a>
+</td>
+      </tr>
+      <tr>
+          <td>MIG Manager</td>
+          <td>Disable</td>
+          <td><code>--set migManager.enabled=false</code> — it reconfigures MIG geometry from node labels and fights this operator&rsquo;s Allocate-time MIG actuation. One profile does not: <a href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/#across-a-fleet-with-the-nvidia-gpu-operator">NVIDIA MIG</a>
+</td>
+      </tr>
+      <tr>
+          <td>CDI</td>
+          <td>Disable</td>
+          <td><code>--set cdi.enabled=false</code> — default <code>true</code> from v25.10, see below</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Check the node is not opted out.</strong> Some GPU distributions ship their nodes already labelled
+<code>nvidia.com/gpu.deploy.operands=false</code>, which tells this operator to place nothing on them at all. Its
+<code>ClusterPolicy</code> still reports <code>ready</code>, so the only symptom is that no operand ever appears. Set it to
+<code>true</code> on the nodes you want managed.</p>
+<p><strong>Install it</strong> — the driver, toolkit, exporter and feature discovery stay, the three competing
+components go.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
+</span></span><span class="line"><span class="cl">helm repo update
+</span></span><span class="line"><span class="cl">helm install --wait --generate-name <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -n gpu-operator --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  nvidia/gpu-operator --version<span class="o">=</span>v26.3.3 <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set devicePlugin.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set nfd.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set migManager.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set cdi.enabled<span class="o">=</span>false</span></span></code></pre></div>
+</div><p><strong>Already installed</strong> — the operator&rsquo;s device plugin advertises <code>nvidia.com/gpu</code>, the same name ours
+does, and its MIG Manager drives the same hardware our allocator does, so both have to stop before
+GPUStack goes on that node.</p>
+<p>One <code>helm upgrade</code>, with the values the release was installed with plus the three switches below. The
+operator removes those DaemonSets itself; deleting one by hand only makes it come back, because the
+<code>ClusterPolicy</code> still asks for it.</p>
+<ol>
+<li><strong>Device plugin</strong> — <code>--set devicePlugin.enabled=false</code>. It advertises the resource name ours does.</li>
+<li><strong>MIG Manager</strong> — <code>--set migManager.enabled=false</code>. A node whose geometry it had been maintaining
+keeps whatever it was left in, and our allocator reconfigures that at <code>Allocate</code> time from then on.</li>
+<li><strong>Bundled Node Feature Discovery</strong> — <code>--set nfd.enabled=false</code>. Ours publishes the
+<code>system-os_release.*</code> labels that release had been publishing, so nothing has to be carried over by
+hand. Keeping this one and turning ours off is the other way round — <a href="#one-node-feature-discovery-per-cluster">One NFD per
+cluster</a>
+.</li>
+<li><strong>Driver, container toolkit, DCGM exporter, GPU Feature Discovery</strong> — leave running. GPUStack needs
+the first two.</li>
+<li><strong>Verify</strong> — wait for <code>nvidia.com/gpu</code> to leave the Node before installing GPUStack.</li>
+</ol>
+<p><strong>CDI mode.</strong> <code>--set cdi.enabled=false</code> is the narrower choice for a node this operator&rsquo;s allocator
+must control end to end. Leaving it on is workable.</p>
+<blockquote>
+<p><strong>Why</strong> — GPU Operator &gt;= 25.10 defaults <code>cdi.enabled: true</code>, and the older <code>cdi.default</code> field is
+deprecated and has no effect once <code>cdi.enabled</code> exists. With CDI on, the toolkit resolves a bare
+accelerator UUID against the node&rsquo;s specifications, and a name it cannot resolve fails container
+creation loudly rather than silently — which is what makes leaving it on workable rather than wrong.</p>
+</blockquote>
+<p><strong>A node serving MIG wants CDI off.</strong> Our own side of it is safe whatever the toolkit does: a
+partition allocation is always carried by the variable, never by a CDI request.</p>
+<blockquote>
+<p><strong>Why</strong> — in <code>cdi</code> mode the runtime resolves whatever <code>NVIDIA_VISIBLE_DEVICES</code> holds against the
+node&rsquo;s specifications, and the MIG instance our allocator materializes at <code>Allocate</code> time is named
+in none of them, so a partition request has nothing to resolve against.</p>
+</blockquote>
+<p><strong>Which channel carries our own grant.</strong> Prefer <code>auto</code>, set through
+<a href="/gpustack-operator/v0.9.0/docs/reference/settings/#per-manufacturer-overrides"><code>GPUSTACK_NVIDIA_DEVICE_INJECTION_STRATEGY</code></a>
+, over naming a
+channel yourself. It answers per container, independently of the switch above.</p>
+<blockquote>
+<p><strong>Why</strong> — two channels exist, and which one a node uses is what decides whether it needs the vendor
+runtime at all: the default names the accelerator in <code>NVIDIA_VISIBLE_DEVICES</code>, which only
+<code>nvidia-container-runtime</code> reads, while the other requests it as a CDI device the container engine
+resolves by itself under plain <code>runc</code>. Whether a node can use the second is a property of its
+container engine, which is what <code>auto</code> reads and a human would otherwise have to. It uses CDI only
+where the vendor&rsquo;s own specifications already name the exact accelerator being granted, and writes
+no specification of its own. <a href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/#exclusive-and-shared">Device
+Discovery</a>
+ has the mechanism, and
+<a href="/gpustack-operator/v0.9.0/docs/reference/settings/#per-manufacturer-overrides">Settings</a>
+ what it checks, when it declines, and the one
+engine that has to be told.</p>
+</blockquote>
+<p><code>auto</code> leaves a Pod that names a <code>runtimeClassName</code> to that handler, whose configuration it cannot
+read — correctly, since the handler is what injects. Whether that covers the Instances this operator
+creates depends on the class existing: the worker attaches <code>runtimeClassName: nvidia</code> only where it
+finds one, so with <code>deviceManager.createRuntimeClasses=false</code> and none supplied, an Instance runs
+under the engine&rsquo;s default handler and <code>auto</code> answers for it like any other Pod.</p>
+<h3 id="t-head">T-Head</h3>
+<p>Read against the <strong>T-Head SAIL SDK</strong> (also called the PPU SDK), HGGCRT v3 —
+<a href="https://developer.t-head.cn/docs_center/doc_detail/index.html?projectId=39&amp;chapterId=194">Driver Install</a>
+ ·
+<a href="https://developer.t-head.cn/docs_center/doc_detail/index.html?projectId=33&amp;chapterId=118">Overview</a>
+.</p>
+<p><strong>Install before GPUStack</strong> — the PPU SDK alone. It ships as a self-extracting Runfile from T-Head&rsquo;s
+download centre, installs to <code>/usr/local/PPU_SDK</code> by default, and is verified with <code>ppu-smi</code> (which
+prints the driver version) and <code>hgcc --version</code>. Take HGGCRT v3 rather than v2: it is backward
+compatible with the v2 API.</p>
+<p>Per <a href="#allocator-injection">Allocator injection</a>
+, our allocator injects T-Head accelerators as <code>/dev</code>
+nodes directly, which is the mechanism the vendor&rsquo;s own container guide uses — it isolates a
+container by passing those nodes to <code>docker run --device</code>, with no vendor runtime in the path. Which
+nodes a container receives is in <a href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/">Device Discovery</a>
+.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/">Device Discovery</a>
+ (how the allocator and
+<code>runtimeInjects*</code> decide what a Pod&rsquo;s container receives)</li><li><a href="/gpustack-operator/v0.9.0/docs/reference/settings/">Settings &amp; Environment
+Variables</a>
+ (per-manufacturer overrides and toolkit paths)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0/docs/operate/installation-modes/">Installation Modes</a>
+ — what the chart owns, what the
+worker applies.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/docs/getting-started/vendor-prerequisites.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#allocator-injection">Allocator injection</a></li>
+    <li><a href="#device-plugin-name-collisions">Device plugin name collisions</a></li>
+    <li><a href="#one-node-feature-discovery-per-cluster">One Node Feature Discovery per cluster</a></li>
+    <li><a href="#resource-removal-lag">Resource removal lag</a></li>
+    <li><a href="#per-manufacturer">Per manufacturer</a>
+      <ul>
+        <li><a href="#amd">AMD</a></li>
+        <li><a href="#ascend">Ascend</a></li>
+        <li><a href="#cambricon">Cambricon</a></li>
+        <li><a href="#hygon">Hygon</a></li>
+        <li><a href="#iluvatar">Iluvatar</a></li>
+        <li><a href="#metax">MetaX</a></li>
+        <li><a href="#moore-threads">Moore Threads</a></li>
+        <li><a href="#nvidia">NVIDIA</a></li>
+        <li><a href="#t-head">T-Head</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+/* Light rules adapted from: hugo gen chromastyles --style=github.
+   Hugo expands the shared dark palette below; regenerating this file would remove it. */
+
+/* Background */ .bg { background-color:var(--code-bg); }
+/* PreWrapper */ .chroma { background-color:var(--code-bg); }
+/* Error */ .chroma .err { color:#f6f8fa;background-color:#82071e }
+/* LineLink */ .chroma .lnlinks { outline:none;text-decoration:none;color:inherit }
+/* LineTableTD */ .chroma .lntd { vertical-align:top;padding:0;margin:0;border:0; }
+/* LineTable */ .chroma .lntable { border-spacing:0;padding:0;margin:0;border:0; }
+/* LineHighlight */ .chroma .hl { background-color:#e5e5e5 }
+/* LineNumbersTable */ .chroma .lnt { white-space:pre;-webkit-user-select:none;user-select:none;margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f }
+/* LineNumbers */ .chroma .ln { white-space:pre;-webkit-user-select:none;user-select:none;margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f }
+/* Line */ .chroma .line { display:flex; }
+/* Keyword */ .chroma .k { color:#cf222e }
+/* KeywordConstant */ .chroma .kc { color:#cf222e }
+/* KeywordDeclaration */ .chroma .kd { color:#cf222e }
+/* KeywordNamespace */ .chroma .kn { color:#cf222e }
+/* KeywordPseudo */ .chroma .kp { color:#cf222e }
+/* KeywordReserved */ .chroma .kr { color:#cf222e }
+/* KeywordType */ .chroma .kt { color:#cf222e }
+/* NameAttribute */ .chroma .na { color:#1f2328 }
+/* NameClass */ .chroma .nc { color:#1f2328 }
+/* NameConstant */ .chroma .no { color:#0550ae }
+/* NameDecorator */ .chroma .nd { color:#0550ae }
+/* NameEntity */ .chroma .ni { color:#6639ba }
+/* NameLabel */ .chroma .nl { color:#900;font-weight:bold }
+/* NameNamespace */ .chroma .nn { color:#24292e }
+/* NameOther */ .chroma .nx { color:#1f2328 }
+/* NameTag */ .chroma .nt { color:#0550ae }
+/* NameBuiltin */ .chroma .nb { color:#6639ba }
+/* NameBuiltinPseudo */ .chroma .bp { color:#6a737d }
+/* NameVariable */ .chroma .nv { color:#953800 }
+/* NameVariableClass */ .chroma .vc { color:#953800 }
+/* NameVariableGlobal */ .chroma .vg { color:#953800 }
+/* NameVariableInstance */ .chroma .vi { color:#953800 }
+/* NameVariableMagic */ .chroma .vm { color:#953800 }
+/* NameFunction */ .chroma .nf { color:#6639ba }
+/* NameFunctionMagic */ .chroma .fm { color:#6639ba }
+/* LiteralString */ .chroma .s { color:#0a3069 }
+/* LiteralStringAffix */ .chroma .sa { color:#0a3069 }
+/* LiteralStringBacktick */ .chroma .sb { color:#0a3069 }
+/* LiteralStringChar */ .chroma .sc { color:#0a3069 }
+/* LiteralStringDelimiter */ .chroma .dl { color:#0a3069 }
+/* LiteralStringDoc */ .chroma .sd { color:#0a3069 }
+/* LiteralStringDouble */ .chroma .s2 { color:#0a3069 }
+/* LiteralStringEscape */ .chroma .se { color:#0a3069 }
+/* LiteralStringHeredoc */ .chroma .sh { color:#0a3069 }
+/* LiteralStringInterpol */ .chroma .si { color:#0a3069 }
+/* LiteralStringOther */ .chroma .sx { color:#0a3069 }
+/* LiteralStringRegex */ .chroma .sr { color:#0a3069 }
+/* LiteralStringSingle */ .chroma .s1 { color:#0a3069 }
+/* LiteralStringSymbol */ .chroma .ss { color:#032f62 }
+/* LiteralNumber */ .chroma .m { color:#0550ae }
+/* LiteralNumberBin */ .chroma .mb { color:#0550ae }
+/* LiteralNumberFloat */ .chroma .mf { color:#0550ae }
+/* LiteralNumberHex */ .chroma .mh { color:#0550ae }
+/* LiteralNumberInteger */ .chroma .mi { color:#0550ae }
+/* LiteralNumberIntegerLong */ .chroma .il { color:#0550ae }
+/* LiteralNumberOct */ .chroma .mo { color:#0550ae }
+/* Operator */ .chroma .o { color:#0550ae }
+/* OperatorWord */ .chroma .ow { color:#0550ae }
+/* Punctuation */ .chroma .p { color:#1f2328 }
+/* Comment */ .chroma .c { color:#57606a }
+/* CommentHashbang */ .chroma .ch { color:#57606a }
+/* CommentMultiline */ .chroma .cm { color:#57606a }
+/* CommentSingle */ .chroma .c1 { color:#57606a }
+/* CommentSpecial */ .chroma .cs { color:#57606a }
+/* CommentPreproc */ .chroma .cp { color:#57606a }
+/* CommentPreprocFile */ .chroma .cpf { color:#57606a }
+/* GenericDeleted */ .chroma .gd { color:#82071e;background-color:#ffebe9 }
+/* GenericEmph */ .chroma .ge { color:#1f2328 }
+/* GenericInserted */ .chroma .gi { color:#116329;background-color:#dafbe1 }
+/* GenericOutput */ .chroma .go { color:#1f2328 }
+/* GenericUnderline */ .chroma .gl { text-decoration:underline }
+/* TextWhitespace */ .chroma .w { color:#fff }
+
+/* Share the dark palette across explicit and system theme selectors. */
+
+
+:root[data-theme="dark"] .chroma .err { color:#ffdcd7;background-color:#67060c }
+:root[data-theme="dark"] .chroma .lnt { color:#6e7681 }
+:root[data-theme="dark"] .chroma .ln { color:#6e7681 }
+:root[data-theme="dark"] .chroma .hl { background-color:#2d333b }
+:root[data-theme="dark"] .chroma .k,
+:root[data-theme="dark"] .chroma .kc,
+:root[data-theme="dark"] .chroma .kd,
+:root[data-theme="dark"] .chroma .kn,
+:root[data-theme="dark"] .chroma .kp,
+:root[data-theme="dark"] .chroma .kr,
+:root[data-theme="dark"] .chroma .kt,
+:root[data-theme="dark"] .chroma .nl { color:#ff7b72 }
+:root[data-theme="dark"] .chroma .na,
+:root[data-theme="dark"] .chroma .nc,
+:root[data-theme="dark"] .chroma .nn,
+:root[data-theme="dark"] .chroma .nx,
+:root[data-theme="dark"] .chroma .p,
+:root[data-theme="dark"] .chroma .ge,
+:root[data-theme="dark"] .chroma .go { color:#e4e6e9 }
+:root[data-theme="dark"] .chroma .no,
+:root[data-theme="dark"] .chroma .nd,
+:root[data-theme="dark"] .chroma .nt,
+:root[data-theme="dark"] .chroma .m,
+:root[data-theme="dark"] .chroma .mb,
+:root[data-theme="dark"] .chroma .mf,
+:root[data-theme="dark"] .chroma .mh,
+:root[data-theme="dark"] .chroma .mi,
+:root[data-theme="dark"] .chroma .il,
+:root[data-theme="dark"] .chroma .mo,
+:root[data-theme="dark"] .chroma .o,
+:root[data-theme="dark"] .chroma .ow { color:#79c0ff }
+:root[data-theme="dark"] .chroma .ni,
+:root[data-theme="dark"] .chroma .nb,
+:root[data-theme="dark"] .chroma .nf,
+:root[data-theme="dark"] .chroma .fm { color:#d2a8ff }
+:root[data-theme="dark"] .chroma .bp { color:#9198a1 }
+:root[data-theme="dark"] .chroma .nv,
+:root[data-theme="dark"] .chroma .vc,
+:root[data-theme="dark"] .chroma .vg,
+:root[data-theme="dark"] .chroma .vi,
+:root[data-theme="dark"] .chroma .vm { color:#ffa657 }
+:root[data-theme="dark"] .chroma .s,
+:root[data-theme="dark"] .chroma .sa,
+:root[data-theme="dark"] .chroma .sb,
+:root[data-theme="dark"] .chroma .sc,
+:root[data-theme="dark"] .chroma .dl,
+:root[data-theme="dark"] .chroma .sd,
+:root[data-theme="dark"] .chroma .s2,
+:root[data-theme="dark"] .chroma .se,
+:root[data-theme="dark"] .chroma .sh,
+:root[data-theme="dark"] .chroma .si,
+:root[data-theme="dark"] .chroma .sx,
+:root[data-theme="dark"] .chroma .sr,
+:root[data-theme="dark"] .chroma .s1,
+:root[data-theme="dark"] .chroma .ss { color:#a5d6ff }
+:root[data-theme="dark"] .chroma .c,
+:root[data-theme="dark"] .chroma .ch,
+:root[data-theme="dark"] .chroma .cm,
+:root[data-theme="dark"] .chroma .c1,
+:root[data-theme="dark"] .chroma .cs,
+:root[data-theme="dark"] .chroma .cp,
+:root[data-theme="dark"] .chroma .cpf { color:#8b949e }
+:root[data-theme="dark"] .chroma .gd { color:#ffdcd7;background-color:#67060c }
+:root[data-theme="dark"] .chroma .gi { color:#7ee787;background-color:#0d4429 }
+:root[data-theme="dark"] .chroma .w { color:#e4e6e9 }
+
+
+@media (prefers-color-scheme: dark) {
+
+:root:not([data-theme="light"]) .chroma .err { color:#ffdcd7;background-color:#67060c }
+:root:not([data-theme="light"]) .chroma .lnt { color:#6e7681 }
+:root:not([data-theme="light"]) .chroma .ln { color:#6e7681 }
+:root:not([data-theme="light"]) .chroma .hl { background-color:#2d333b }
+:root:not([data-theme="light"]) .chroma .k,
+:root:not([data-theme="light"]) .chroma .kc,
+:root:not([data-theme="light"]) .chroma .kd,
+:root:not([data-theme="light"]) .chroma .kn,
+:root:not([data-theme="light"]) .chroma .kp,
+:root:not([data-theme="light"]) .chroma .kr,
+:root:not([data-theme="light"]) .chroma .kt,
+:root:not([data-theme="light"]) .chroma .nl { color:#ff7b72 }
+:root:not([data-theme="light"]) .chroma .na,
+:root:not([data-theme="light"]) .chroma .nc,
+:root:not([data-theme="light"]) .chroma .nn,
+:root:not([data-theme="light"]) .chroma .nx,
+:root:not([data-theme="light"]) .chroma .p,
+:root:not([data-theme="light"]) .chroma .ge,
+:root:not([data-theme="light"]) .chroma .go { color:#e4e6e9 }
+:root:not([data-theme="light"]) .chroma .no,
+:root:not([data-theme="light"]) .chroma .nd,
+:root:not([data-theme="light"]) .chroma .nt,
+:root:not([data-theme="light"]) .chroma .m,
+:root:not([data-theme="light"]) .chroma .mb,
+:root:not([data-theme="light"]) .chroma .mf,
+:root:not([data-theme="light"]) .chroma .mh,
+:root:not([data-theme="light"]) .chroma .mi,
+:root:not([data-theme="light"]) .chroma .il,
+:root:not([data-theme="light"]) .chroma .mo,
+:root:not([data-theme="light"]) .chroma .o,
+:root:not([data-theme="light"]) .chroma .ow { color:#79c0ff }
+:root:not([data-theme="light"]) .chroma .ni,
+:root:not([data-theme="light"]) .chroma .nb,
+:root:not([data-theme="light"]) .chroma .nf,
+:root:not([data-theme="light"]) .chroma .fm { color:#d2a8ff }
+:root:not([data-theme="light"]) .chroma .bp { color:#9198a1 }
+:root:not([data-theme="light"]) .chroma .nv,
+:root:not([data-theme="light"]) .chroma .vc,
+:root:not([data-theme="light"]) .chroma .vg,
+:root:not([data-theme="light"]) .chroma .vi,
+:root:not([data-theme="light"]) .chroma .vm { color:#ffa657 }
+:root:not([data-theme="light"]) .chroma .s,
+:root:not([data-theme="light"]) .chroma .sa,
+:root:not([data-theme="light"]) .chroma .sb,
+:root:not([data-theme="light"]) .chroma .sc,
+:root:not([data-theme="light"]) .chroma .dl,
+:root:not([data-theme="light"]) .chroma .sd,
+:root:not([data-theme="light"]) .chroma .s2,
+:root:not([data-theme="light"]) .chroma .se,
+:root:not([data-theme="light"]) .chroma .sh,
+:root:not([data-theme="light"]) .chroma .si,
+:root:not([data-theme="light"]) .chroma .sx,
+:root:not([data-theme="light"]) .chroma .sr,
+:root:not([data-theme="light"]) .chroma .s1,
+:root:not([data-theme="light"]) .chroma .ss { color:#a5d6ff }
+:root:not([data-theme="light"]) .chroma .c,
+:root:not([data-theme="light"]) .chroma .ch,
+:root:not([data-theme="light"]) .chroma .cm,
+:root:not([data-theme="light"]) .chroma .c1,
+:root:not([data-theme="light"]) .chroma .cs,
+:root:not([data-theme="light"]) .chroma .cp,
+:root:not([data-theme="light"]) .chroma .cpf { color:#8b949e }
+:root:not([data-theme="light"]) .chroma .gd { color:#ffdcd7;background-color:#67060c }
+:root:not([data-theme="light"]) .chroma .gi { color:#7ee787;background-color:#0d4429 }
+:root:not([data-theme="light"]) .chroma .w { color:#e4e6e9 }
+
+}

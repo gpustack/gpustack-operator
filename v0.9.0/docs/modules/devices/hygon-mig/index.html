@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  
+  <title>Hygon MIG Operations · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0/docs/modules/devices/hygon-mig/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0"
+    data-home="/gpustack-operator/v0.9.0/" data-page="/gpustack-operator/v0.9.0/docs/modules/devices/hygon-mig/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/" >Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/" >Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/" >Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/hygon-mig/" aria-current="page">Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/" >Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0/docs/modules/devices/">Heterogeneous Devices</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Hygon MIG Operations</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="hygon-mig-operations">Hygon MIG Operations</h1>
+<p>An administrator sets the node&rsquo;s partitioning mode. The Device Manager reads it and publishes it
+in <code>Devices</code>; GPUStack does not change the mode. When a workload is scheduled, GPUStack creates its
+GPU and Compute Instance pair and removes the pair when the Pod exits.</p>
+<p>Hygon calls the feature MIG. Its management library exports NVML symbol names, and <code>hy-smi mig</code>
+mirrors <code>nvidia-smi mig</code>. Hygon therefore uses <code>mig</code> in its resource key (see <a href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/#two-families-two-accelerator-populations">Accelerator
+Requests</a>
+).</p>
+<p>The mode applies to the whole node. Once partitioned, that node serves only partition requests. Read
+<a href="#limitations">Limitations</a>
+ before planning a rollout.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#prerequisites">Prerequisites</a>
+</li>
+<li><a href="#how-partition-profiles-are-discovered">How partition profiles are discovered</a>
+</li>
+<li><a href="#requesting-a-partition">Requesting a partition</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+<li><a href="#enabling-partitioning-on-a-node">Enabling partitioning on a node</a>
+</li>
+<li><a href="#disabling-partitioning-on-a-node">Disabling partitioning on a node</a>
+</li>
+<li><a href="#node-reboot-recovery">Node reboot recovery</a>
+</li>
+<li><a href="#operator-boundaries">Operator boundaries</a>
+</li>
+</ul>
+<h2 id="prerequisites">Prerequisites</h2>
+<p><strong>The driver must have been installed with virtualization support.</strong> The vendor&rsquo;s installer takes a
+flag for it; a driver installed without it reports no partition profiles at all, and the node simply
+never advertises the family.</p>
+<p><strong>Change the mode only on a node free of accelerator workloads, device manager included.</strong> The switch
+is refused while any process holds the driver, and the device-manager Pod is such a process — it
+holds <code>/dev/kfd</code> for its whole life. The vendor tool reports:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Error: Set system level mig mode failed. The device is exist and may be in use.</span></span></code></pre></div>
+</div><p>which names no holder. Find them through the control node&rsquo;s open file descriptors:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> <span class="k">for</span> p in /proc/<span class="o">[</span>0-9<span class="o">]</span>*<span class="p">;</span> <span class="k">do</span> <span class="nv">pid</span><span class="o">=</span><span class="si">${</span><span class="nv">p</span><span class="p">#/proc/</span><span class="si">}</span><span class="p">;</span> <span class="nv">n</span><span class="o">=</span><span class="k">$(</span>ls -l <span class="s2">&#34;</span><span class="nv">$p</span><span class="s2">&#34;</span>/fd 2&gt;/dev/null <span class="p">|</span> grep -c kfd<span class="k">)</span><span class="p">;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="go">    [ &#34;$n&#34; -gt 0 ] 2&gt;/dev/null &amp;&amp; echo &#34;pid=$pid fds=$n $(tr -d &#39;\0&#39; &lt; &#34;$p&#34;/cmdline)&#34;; done
+</span></span></span></code></pre></div>
+</div><p>Empty output is the precondition. The vendor&rsquo;s own <code>hymgr</code> daemon holds <code>/dev/mkfd</code> permanently and
+does <strong>not</strong> block the switch; only <code>/dev/kfd</code> holders do.</p>
+<p><strong>A mode change is not noticed until the device manager restarts.</strong> The re-detect trigger watches the
+device set and health, not the mode, so <code>hy-smi -mig</code> never reaches the cluster by itself. This is
+pre-existing in the shared detector, already true for <a href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/">NVIDIA MIG</a>
+; restart the node&rsquo;s
+device-manager DaemonSet after every change.</p>
+<h2 id="how-partition-profiles-are-discovered">How partition profiles are discovered</h2>
+<p><strong>Profiles are discovered from the driver, never computed.</strong> Where <a href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/#how-partition-profiles-are-discovered">NVIDIA&rsquo;s are a fixed per-product
+set</a>
+, the detector here offers exactly the
+GPU-instance profiles the driver reports for the card in front of it, with the geometry and the legal
+placements the driver gives.</p>
+<p>On a C-3000 &ldquo;BW&rdquo; card (four GPU slices, 80 compute units, 65520 MiB) the driver reports three:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Profile</th>
+          <th>Slices</th>
+          <th>Compute units</th>
+          <th>Memory</th>
+          <th>Per card</th>
+          <th>Legal placements</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>2g.15gb</code></td>
+          <td>1</td>
+          <td>20</td>
+          <td>16380 MiB</td>
+          <td>4</td>
+          <td><code>0:1 1:1 2:1 3:1</code></td>
+      </tr>
+      <tr>
+          <td><code>4g.31gb</code></td>
+          <td>2</td>
+          <td>40</td>
+          <td>32760 MiB</td>
+          <td>2</td>
+          <td><code>0:2 2:2</code></td>
+      </tr>
+      <tr>
+          <td><code>8g.63gb</code></td>
+          <td>4</td>
+          <td>80</td>
+          <td>65520 MiB</td>
+          <td>1</td>
+          <td><code>0:4</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>A card offering no profile of a given width simply has none: every card measured offers nothing
+three slices wide, and that gap is normal rather than a fault.</p>
+<p><strong>A card&rsquo;s compute-unit count comes from the profiles while the mode is on.</strong> The HSA runtime, which
+the detector reads it from otherwise, exposes at most one partition per process once the node is
+partitioned, so it answers for one card with a partition&rsquo;s geometry rather than for every card with
+the card&rsquo;s. Each profile carries the card&rsquo;s real count factored as its own units times the instances
+that fill the card, and every profile of a measured card agreed.</p>
+<h3 id="the-drivers-registry-etcdmi_mig_config">The driver&rsquo;s registry, <code>/etc/dmi_mig_config</code></h3>
+<p>The driver keeps its own on-disk record of what exists, and this operator reads and depends on all
+three parts of it. It is the vendor&rsquo;s directory, created and populated by the driver:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">/etc/dmi_mig_config/
+</span></span><span class="line"><span class="cl">├── dev0 … dev&lt;N&gt;     one line per physical card: its PCI address, e.g. 0000:09:00.0
+</span></span><span class="line"><span class="cl">├── gi/               one file per live GPU instance
+</span></span><span class="line"><span class="cl">└── ci/               one file per live compute instance, dev&lt;N&gt;gi&lt;G&gt;ci&lt;C&gt;.conf</span></span></code></pre></div>
+</div><p>Two of those are the only source for what they carry, because the management library does not answer
+for either:</p>
+<ul>
+<li><strong><code>dev&lt;N&gt;</code> is how a device index becomes a card.</strong> <code>nvmlDeviceGetPciInfo</code> returns success and writes
+an empty string, and <code>nvmlDeviceGetUUID</code> is not an exported symbol at all, so tying a Multi-Instance
+handle back to a physical card goes through this file or nowhere.</li>
+<li><strong>A <code>ci/*.conf</code> is where a partition&rsquo;s identity lives.</strong> It is the GPU-instance block and the
+compute-instance block concatenated, ending in a <code>mig_uuid:</code> line. The library exposes no getter for
+it.</li>
+</ul>
+<p><strong>The device manager mounts this directory writable, and that is the one privilege partitioning adds.</strong>
+It creates and destroys instances through the library from inside its own process, and the driver writes
+and removes these files as a side effect of those calls — so a read-only mount would fail the create
+rather than merely hide the record.</p>
+<h2 id="requesting-a-partition">Requesting a partition</h2>
+<p>A partition request names <strong>both</strong> the family and the profile, and asks for exactly one of each:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">hygon.com/dcu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">hygon.com/dcu.partitioned.mig-2g.15gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">requests</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">hygon.com/dcu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">hygon.com/dcu.partitioned.mig-2g.15gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><p>Naming only the profile allocates nothing; naming only the family is refused at admission with a
+message saying a profile is required.</p>
+<p><strong>What the container gets.</strong> The device manager reserves a GPU instance of the profile at a free
+placement, creates the whole-instance compute instance inside it, and injects:</p>
+<ul>
+<li>the node&rsquo;s control device nodes, <code>/dev/kfd</code> and <code>/dev/mkfd</code>;</li>
+<li>the card&rsquo;s own DRM nodes;</li>
+<li>the vendor user-space runtime;</li>
+<li>the instance&rsquo;s registry file, bound at <strong>its own host path</strong>, read-only;</li>
+<li><code>DMI_MIG_VISIBLE_DEVICE=MIG-&lt;uuid&gt;</code>.</li>
+</ul>
+<p>The registry file is the load-bearing one. The vendor runtime scans <code>/etc/dmi_mig_config/ci</code> by
+absolute path, so a file bound anywhere else is not found and the workload reports no devices at all.</p>
+<p>A container holding a <code>2g.15gb</code> partition sees exactly one device of 20 compute units and 16380 MiB.</p>
+<h2 id="limitations">Limitations</h2>
+<p><strong>A container can use exactly one partition.</strong> The vendor runtime makes one partition visible
+whatever it is given: binding two registry files, passing a comma-separated list of <code>MIG-</code>-prefixed
+identifiers, and passing <code>all</code> each yield a single visible device, on two driver generations.</p>
+<p>A request granted more than one accelerator is therefore refused rather than half-served: carving on
+every card would consume quota the workload can never reach. Split such a workload into one Pod per
+partition.</p>
+<p><strong>A partitioned node serves only partitions.</strong> With the mode on, a container given the device nodes
+but no registry file finds <strong>no device at all</strong> (measured on a node where five of eight cards held
+no instance whatsoever).</p>
+<p>So a partitioned node can serve neither whole-card nor logically sliced requests, and the operator
+stops advertising both: <code>hygon.com/dcu</code> and <code>hygon.com/dcu.sliced</code> go to zero while
+<code>hygon.com/dcu.partitioned</code> carries the node&rsquo;s whole capacity. Plan a node as partitioned or not,
+never as mixed.</p>
+<p><strong>The mode is node-wide.</strong> The vendor&rsquo;s switch takes no device selector, and neither does the
+library&rsquo;s query. There is no such thing as one card of a host being partitioned while another is
+not: the mixed-population layout NVIDIA supports has no analogue here.</p>
+<p><strong>A directory in the registry poisons an instance id.</strong> The driver writes plain files under
+<code>/etc/dmi_mig_config/ci</code>, and a container is given one of them as a bind mount. A container runtime
+asked to bind a source that does not exist creates it (as a directory), so an instance destroyed
+between its allocation and its container starting leaves a directory sitting on its name.</p>
+<p>The driver can then never write that name again: creating a compute instance whose id maps to it
+fails with <code>INSUFFICIENT_RESOURCES</code>, and because ids are handed back out after a destroy, the failure
+outlives everything that caused it. The device manager sweeps such directories away on every reclaim
+pass; if you meet one on a node running an older build, remove it with <code>rmdir</code>, which <code>rm</code> refuses.</p>
+<p><strong>A recreated partition is a new grant.</strong> Unlike NVIDIA&rsquo;s placement-derived MIG UUIDs, this vendor
+issues a fresh identity every time an instance is created, even for the same profile at the same
+placement on the same card. An identity recorded against a destroyed partition never matches its
+replacement, which is what makes the operator&rsquo;s own reuse checks exact, but it also means a
+partition identity is not a durable name for a slot.</p>
+<h2 id="enabling-partitioning-on-a-node">Enabling partitioning on a node</h2>
+<p>The mode switch itself is Hygon&rsquo;s procedure, not this operator&rsquo;s: <a href="https://developer.sourcefind.cn/document/9169ef18-c10d-11f0-b077-0242ac150003?id=4a82aeed-e242-11f0-b9e4-0242ac150003&amp;title=3&#43;DCU&#43;Multi-Instance%E4%BD%BF%E7%94%A8%E6%89%8B%E5%86%8C&amp;version=9169ef18-c10d-11f0-b077-0242ac150003">DCU Multi-Instance
+使用手册</a>
+
+is the authority on <code>hy-smi -mig</code> and on the driver support it needs.</p>
+<p>Two things below correct that manual: the long option is <code>--multi-instance-gpu</code>, not the
+<code>--multi-instance-dcu</code> its screenshot shows, and the switch takes no <code>-i</code>.</p>
+<ol>
+<li>
+<p><strong>Drain the node&rsquo;s accelerator workloads</strong>, and park the device-manager DaemonSet — it holds
+<code>/dev/kfd</code> and will otherwise block the switch. Confirm with the descriptor scan above.</p>
+</li>
+<li>
+<p><strong>Turn the mode on</strong>, node-wide:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> sudo hy-smi -mig <span class="m">1</span>
+</span></span><span class="line"><span class="cl"><span class="go">Enabled mig mode successful.
+</span></span></span></code></pre></div>
+</div></li>
+<li>
+<p><strong>Carve nothing by hand.</strong> The operator creates and destroys instances per allocation; instances
+left over from manual experimentation are collected as unclaimed on the next partition activity.</p>
+</li>
+<li>
+<p><strong>Restart the device-manager DaemonSet.</strong> Until it restarts, the cluster still sees the node&rsquo;s
+pre-change capability.</p>
+</li>
+<li>
+<p><strong>Confirm</strong> the node advertises the family and its profiles, and no longer advertises whole cards:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get node &lt;node&gt; -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.allocatable}&#39;</span> <span class="p">|</span> tr <span class="s1">&#39;,&#39;</span> <span class="s1">&#39;\n&#39;</span> <span class="p">|</span> grep hygon
+</span></span><span class="line"><span class="cl"><span class="go">&#34;hygon.com/dcu&#34;:&#34;0&#34;
+</span></span></span><span class="line"><span class="cl"><span class="go">&#34;hygon.com/dcu.partitioned&#34;:&#34;32&#34;
+</span></span></span><span class="line"><span class="cl"><span class="go">&#34;hygon.com/dcu.sliced&#34;:&#34;0&#34;
+</span></span></span></code></pre></div>
+</div></li>
+</ol>
+<blockquote>
+<p><strong>Never leave a partitioned node with no instances and expect it to work for anything else.</strong> With
+the mode on and nothing carved, every card is unusable — the software stack fails to initialize.
+That is the state between step 2 and the first allocation, and it is why step 1 drains first.</p>
+</blockquote>
+<h2 id="disabling-partitioning-on-a-node">Disabling partitioning on a node</h2>
+<p>The teardown order is forced by the driver, and each step refuses if the next has not happened:</p>
+<ol>
+<li>
+<p><strong>Drain the node&rsquo;s partition workloads.</strong> An instance a process holds cannot be destroyed; the
+driver refuses it, and the operator&rsquo;s reclaim leaves it alone and retries.</p>
+</li>
+<li>
+<p><strong>Let the operator reclaim its instances</strong>, or destroy them by hand — compute instances first,
+then their GPU instances:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> sudo hy-smi mig -dci -i &lt;card&gt;
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> sudo hy-smi mig -dgi -i &lt;card&gt;
+</span></span></code></pre></div>
+</div></li>
+<li>
+<p><strong>Park the device-manager DaemonSet</strong>, for the same reason as enabling.</p>
+</li>
+<li>
+<p><strong>Turn the mode off:</strong></p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> sudo hy-smi -mig <span class="m">0</span>
+</span></span></code></pre></div>
+</div><p>It is refused while any GPU instance survives anywhere on the node.</p>
+</li>
+<li>
+<p><strong>Restart the device-manager DaemonSet</strong>, and confirm the node advertises whole cards and logical
+slices again.</p>
+</li>
+</ol>
+<h2 id="node-reboot-recovery">Node reboot recovery</h2>
+<p>Instances do <strong>not</strong> survive a reboot, and neither does the registry: <code>/etc/dmi_mig_config</code> is
+recreated by the driver when the mode comes up. The mode itself is a driver setting — check it after
+a reboot rather than assuming it, and restart the device manager if it changed.</p>
+<p>The operator needs no recovery step of its own. Ownership records whose Pods are gone are reclaimed
+on the next pass, and a record naming an instance the driver no longer has is refused rather than
+acted on.</p>
+<h2 id="operator-boundaries">Operator boundaries</h2>
+<ul>
+<li><strong>Enable, disable or reconfigure the mode.</strong> It is node-wide, it is refused while the device
+manager is running, and turning it on with nothing carved makes every card unusable. It is a
+provisioning action, like installing the driver.</li>
+<li><strong>Serve a workload from more than one partition.</strong> See <a href="#limitations">Limitations</a>
+.</li>
+<li><strong>Mix partitioned and whole cards on one node.</strong> The hardware does not offer it.</li>
+<li><strong>Preserve a partition across its Pod.</strong> An instance is created for an allocation and destroyed
+when the allocation goes; nothing is kept warm.</li>
+</ul>
+<p><strong>See also</strong> — <a href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/">Accelerator Requests</a>
+ (the request vocabulary and the
+two-family split) · <a href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+ (the runbook this one mirrors) · <a href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/">T-Head
+MIG Operations</a>
+ (the other vendor sharing the <code>mig</code> word) · <a href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/">Device
+Discovery</a>
+ (how a card&rsquo;s capability reaches the cluster).</p>
+
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/docs/modules/devices/hygon-mig.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#prerequisites">Prerequisites</a></li>
+    <li><a href="#how-partition-profiles-are-discovered">How partition profiles are discovered</a>
+      <ul>
+        <li><a href="#the-drivers-registry-etcdmi_mig_config">The driver’s registry, <code>/etc/dmi_mig_config</code></a></li>
+      </ul>
+    </li>
+    <li><a href="#requesting-a-partition">Requesting a partition</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+    <li><a href="#enabling-partitioning-on-a-node">Enabling partitioning on a node</a></li>
+    <li><a href="#disabling-partitioning-on-a-node">Disabling partitioning on a node</a></li>
+    <li><a href="#node-reboot-recovery">Node reboot recovery</a></li>
+    <li><a href="#operator-boundaries">Operator boundaries</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

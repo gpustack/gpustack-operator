@@ -1,0 +1,860 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  
+  <title>Topology-Aware Scheduling · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0"
+    data-home="/gpustack-operator/v0.9.0/" data-page="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/" >Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/" >Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/" >Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/" aria-current="page">Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/" >Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0/docs/modules/topology/">Topology Management</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Topology-Aware Scheduling</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="topology-aware-scheduling">Topology-Aware Scheduling</h1>
+<p>GPUStack treats topology as a capacity boundary: Kueue admits the complete PodSet only when one
+requested domain has enough capacity. It first establishes an ordered, validated hierarchy for each
+Node, then makes every generated queue topology-aware so that admission can enforce it.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#the-discovery-boundary">The discovery boundary</a>
+</li>
+<li><a href="#the-topologysource-contract">The TopologySource contract</a>
+</li>
+<li><a href="#hierarchy-profiles">Hierarchy profiles</a>
+</li>
+<li><a href="#profiles-in-the-kueue-chain">Profiles in the Kueue chain</a>
+</li>
+<li><a href="#per-replica-topology-requests">Per-replica topology requests</a>
+</li>
+<li><a href="#placement-of-node-delivered-models">Placement of node-delivered models</a>
+</li>
+<li><a href="#capacity-and-lifecycle-limits">Capacity and lifecycle limits</a>
+</li>
+<li><a href="#failure-surfaces">Failure surfaces</a>
+</li>
+</ul>
+<h2 id="the-discovery-boundary">The discovery boundary</h2>
+<p>GPUStack does not infer physical locality. It consumes facts from one of two boundaries:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Boundary</th>
+          <th>Discovers locality</th>
+          <th>GPUStack owns</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Topograph</td>
+          <td>A selected Topograph provider and its Kubernetes engine</td>
+          <td>The pinned optional chart, selection of the labels that form a hierarchy, and their Kueue projection</td>
+      </tr>
+      <tr>
+          <td><code>TopologySource</code></td>
+          <td>Existing Node labels, a ConfigMap snapshot, or an HTTPS inventory endpoint</td>
+          <td>Input validation, writing-source ownership, profile assignment, and Kueue projection</td>
+      </tr>
+  </tbody>
+</table>
+<p>Topograph exists to discover relationships that ordinary cloud and Kubernetes metadata do not
+express, including fabric and accelerator domains. Its Kubernetes engine owns labels below
+<code>fabric.topograph.run/</code> and <code>accelerator.topograph.run/</code>; GPUStack consumes them and never rewrites
+them. Topograph is provider-neutral even though NVIDIA initiated it.</p>
+<p>Cloud providers may supply <code>topology.kubernetes.io/region</code> and <code>topology.kubernetes.io/zone</code>;
+Kubernetes supplies <code>kubernetes.io/hostname</code>. These keys are read-only inputs to GPUStack. A
+ConfigMap or webhook inventory publishes its own region, zone, and rack under
+<code>topology.gpustack.ai/region</code>, <code>topology.gpustack.ai/zone</code>, and <code>topology.gpustack.ai/rack</code>.</p>
+<p>There is no well-known Kubernetes rack key. <code>spec.levels</code> names the keys actually used by that
+source; GPUStack never copies values between the standard and private keys.</p>
+<h2 id="the-topologysource-contract">The TopologySource contract</h2>
+<p><code>TopologySource</code> is cluster-scoped because its output changes cluster-wide admission. Its
+<code>nodeSelector</code> chooses the Nodes it may describe, <code>levels</code> lists label keys from coarsest to finest,
+and exactly one source arm supplies the inventory:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Arm</th>
+          <th>Behavior</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>nodeLabels</code></td>
+          <td>Read-only validation of labels that already exist on selected Nodes</td>
+      </tr>
+      <tr>
+          <td><code>configMap</code></td>
+          <td>Reads a versioned YAML or JSON snapshot from a referenced key</td>
+      </tr>
+      <tr>
+          <td><code>webhook</code></td>
+          <td>Polls an authenticated HTTPS endpoint for the same snapshot</td>
+      </tr>
+  </tbody>
+</table>
+<p>Creating a <code>TopologySource</code> is a privileged operation. For webhook sources, the endpoint is trusted
+to receive its referenced bearer token or client certificate, and the worker makes requests from
+the cluster network. Redirects are disabled so credentials are not forwarded to another endpoint.</p>
+<p>The writing arms publish <code>topology.gpustack.ai/*</code> (except the generated profile key) and, when
+configured, one administrator-owned prefix. They cannot publish GPUStack feature labels,
+Topograph labels, Kubernetes well-known labels, or arbitrary third-party keys.</p>
+<p>Each writing source reconciles a separate NFD <code>NodeFeature</code> per described Node. Its <code>spec.labels</code>
+contains exactly that source&rsquo;s writable snapshot labels; NFD projects those labels onto the Node.
+The source controller does not directly write Node labels or an ownership-ledger annotation.
+Snapshot omission, source deletion, and expiry remove the owned <code>NodeFeature</code>; an unexpected
+<code>NodeFeature</code> edit is repaired on reconciliation.</p>
+<p>The existing <code>status.mutatedNodes</code> field counts NodeFeatures changed in the latest reconciliation;
+it no longer means the source controller directly mutated those Nodes.</p>
+<p>Writing sources reconcile on inventory changes, their owned <code>NodeFeature</code> changes, and Node
+creation or deletion; they do not watch Node label drift. Read-only <code>nodeLabels</code> sources continue
+to watch Node label changes. After changing an existing Node&rsquo;s selector labels, refresh the
+ConfigMap snapshot or update the source to trigger a writing-source reconciliation.</p>
+<p>A snapshot may repeat an existing standard region or zone value as a read-only parent of a finer
+level. The source checks that the value already matches the Node. Missing or differing values reject
+the whole snapshot; GPUStack neither creates nor changes those cloud labels.</p>
+<p>The complete snapshot is rejected before any <code>NodeFeature</code> changes when it names an unselected Node, an
+undeclared level, an invalid label, an incomplete parent chain, or one child value under two parent
+tuples. <code>revision</code> is an opaque, non-empty identifier; it establishes which complete snapshot was
+last applied, not an ordering scheme.</p>
+<h2 id="hierarchy-profiles">Hierarchy profiles</h2>
+<p>The worker selects exactly one Ready <code>TopologySource</code> for a Node. Zero or multiple
+matching sources deliberately fall back to a hostname-only hierarchy. When the inventory is
+ambiguous, no tree is invented: flattening two conflicting sources into one would misplace Pods.</p>
+<p>The worker takes the longest populated prefix of the selected level list and always appends
+<code>kubernetes.io/hostname</code>. Missing a finer suffix is valid, but a child without its parent is not.
+Contiguous Topograph fabric tiers are normalized to coarsest-to-finest order before validation.</p>
+<p>The ordered label-key list is hashed into <code>topology.gpustack.ai/profile</code>. Nodes with the same list
+share a generated Kueue <code>Topology</code>; the domain values remain opaque Node labels. A profile therefore
+describes the hierarchy shape, not a particular region, zone, rack, switch, or host.</p>
+<p>The worker assigns a stable profile ID to each ordered hierarchy and names its Kueue Topology
+<code>gpustack-&lt;profile&gt;</code>. It mirrors the profile onto the Node&rsquo;s <code>Devices</code> ledger, so accelerator
+admission checks the same hierarchy as the flavor and Kueue placement.</p>
+<h2 id="profiles-in-the-kueue-chain">Profiles in the Kueue chain</h2>
+<p>Every generated <code>ResourceFlavor</code> pins the Node&rsquo;s topology profile and references the matching Kueue
+<code>Topology</code>. Hardware identity and topology profile together form flavor identity, so capacity from
+different hierarchy shapes is never silently combined.</p>
+<p>The worker admits a queue only when every flavor is topology-aware, its referenced
+Topology exists, selectors do not overlap, and quota is conserved across the split. The resulting
+ClusterQueue is TAS-only: Kueue evaluates the full PodSet requests, including CPU, memory, and
+GPUStack resources, against the selected domains.</p>
+<p>Kueue assigns one flavor per covered resource in a PodSet. Capacity fragmented across incompatible
+profiles cannot be added together to satisfy one PodSet, even when the ClusterQueue&rsquo;s aggregate
+quota appears sufficient.</p>
+<h2 id="per-replica-topology-requests">Per-replica topology requests</h2>
+<p><code>roles[].topology.requiredLevel</code> names a level label key, not a concrete domain value. GPUStack puts
+the Kueue <code>podset-required-topology</code> annotation on every Pod in that replica group; Kueue&rsquo;s Pod
+integration records it as the generated Workload PodSet&rsquo;s required topology request.</p>
+<p>A role replica owns one Workload and its <code>size</code> Pods form the fate-sharing PodSet. For example,
+<code>replicas: 3</code> and <code>size: 8</code> produces three independent eight-Pod topology decisions, not one
+twenty-four-Pod decision. Different roles and replicas are not required to share a domain.</p>
+<p>Several roles still admit as one set. The <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/#prefill-and-decode">joint admission check</a>
+
+holds every group until the whole set has reserved quota, and no role Pod binds to a Node before
+then. While the set waits, a group that fits keeps its quota reservation and topology assignment,
+so the domain it holds stays idle. When no role fits, no Workload of the set reserves anything.</p>
+<blockquote>
+<p><strong>Why the check answers <code>Pending</code>, never <code>Retry</code></strong> — a <code>Retry</code> makes Kueue evict the Workload, and
+sibling roles waiting on each other would trade the same quota back and forth. The hold ends when
+the set is admitted, when the deployment is deleted, or when the check parks a set that has not
+assembled for 30 minutes (<code>QuotaReserved</code> reason <code>Parked</code> in the
+<a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/#status">status reference</a>
+).</p>
+</blockquote>
+<p>Omitting <code>requiredLevel</code> adds no explicit topology request. The queue is still topology-aware, and
+Kueue may choose any compatible hierarchy. The <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/#topology-placement">field contract</a>
+
+defines the implicit hostname level.</p>
+<h2 id="placement-of-node-delivered-models">Placement of node-delivered models</h2>
+<p>When the worker creates a Pod whose hub weights the node delivers (a <code>ModelDeployment</code>
+replica under <code>Node</code> delivery, or an <code>Instance</code>), it adds one preferred node-affinity term per
+digest. The term names, by <code>kubernetes.io/hostname</code>, the nodes whose
+<a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/node-store/"><code>NodeModelStore</code></a>
+ lists that digest <code>Ready</code>.</p>
+<p>Kueue copies the Pod&rsquo;s affinity into the PodSet. With <code>TASRespectNodeAffinityPreferred</code> on, the
+chart&rsquo;s default, TAS ranks the nodes with room by that score before its usual packing order: hot
+nodes take as many of the PodSet&rsquo;s Pods as fit, and the rest go where capacity allows. A full hot
+node is skipped, and nothing waits for one. kube-scheduler gets the Pod with a hostname already
+selected, so it has nothing left to score.</p>
+<p>A node counts while three things hold: its store lists the digest <code>Ready</code>, the store&rsquo;s <code>Ready</code>
+condition is <code>True</code>, and its <code>CSINode</code> lists <code>model.csi.gpustack.ai</code> now. A store the plugin left
+behind keeps a stale <code>Ready</code>, so it does not count. A term names at most 16 nodes, keeping those
+that mount the digest now, then the most recently used, then by name. A digest no node holds adds no
+term.</p>
+<blockquote>
+<p><strong>Why at creation, not in the render</strong> — the render feeds a replica&rsquo;s spec hash, so a preference
+inside it would recreate every replica each time a download finished. Added at creation, it stays
+as it was for the Pod&rsquo;s life, and a change in which nodes hold the weights rolls nothing. Every
+member of a replica created in one pass carries the same term, since Kueue builds the PodSet from
+one member&rsquo;s spec.</p>
+</blockquote>
+<p>A Pod carrying <code>kueue.x-k8s.io/podset-preferred-topology</code> gets no term: with <code>TASBalancedPlacement</code>
+on, as the chart has it, such a PodSet loses its affinity score. No Pod GPUStack renders carries it.
+<code>Engine</code> delivery and claim artifacts get no term either. Reading placements and turning the
+preference off are in <a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/operations/#where-replicas-land">Model Store Operations</a>
+.</p>
+<h2 id="capacity-and-lifecycle-limits">Capacity and lifecycle limits</h2>
+<p>Kueue allows at most 64 flavors in one resource group and forbids repeating a covered resource in
+another group as overflow. GPUStack validates the complete queue plan and refuses a partial update
+when hardware identity multiplied by topology profiles exceeds that limit.</p>
+<p>This release creates fresh TAS queues and supports changes to the ordered level keys of a live
+profile. A change such as region → zone → rack creates replacement Topologies and ResourceFlavors;
+the managed ClusterQueue keeps its name and UID.</p>
+<p>When the new plan drops a flavor that Kueue still reports reservation or usage on, or does not
+report at all, the worker sets <code>HoldAndDrain</code>, waits for Kueue to report zero reserving
+Workloads, switches the complete flavor plan, and restores the queue&rsquo;s previous stop policy. Kueue
+owns eviction and readmission; serving workloads can be interrupted.</p>
+<p>A plan with no flavor left is the exception: the emptied queue stays held until a flavor returns,
+because <a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/#known-behavior-the-deployed-kueue-configuration">a queue without resource groups admits every Workload</a>
+.</p>
+<p>A dropped flavor that Kueue reports idle, an added flavor, or a quota-only change is updated in
+place without a hold. The decision reads only a queue status Kueue wrote for the current generation;
+until then the queue reports <code>TopologyReady=Unknown</code> with reason <code>AwaitingQueueStatus</code>. Old flavors
+and Topologies retire after their references clear.</p>
+<p>Generated Kueue Topology and ResourceFlavor topology fields are immutable. GPUStack reports drift
+instead of modifying them. Queues created by a previously published version are not adopted or
+upgraded by this path; create fresh managed objects for this release.</p>
+<h2 id="failure-surfaces">Failure surfaces</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Symptom</th>
+          <th>Read first</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>TopologySource</code> <code>Ready=False</code></td>
+          <td>Its <code>Valid</code> and <code>OwnershipConflict</code> conditions</td>
+          <td>The inventory is invalid, stale, expired, or contends with another writer</td>
+      </tr>
+      <tr>
+          <td>ClusterQueue <code>TopologyReady=False</code></td>
+          <td>Condition reason and referenced flavors/Topologies</td>
+          <td>A flavor is missing TAS metadata, selectors overlap, quota is not conserved, or the flavor limit was exceeded</td>
+      </tr>
+      <tr>
+          <td>ClusterQueue <code>TopologyReady=Unknown</code>, reason <code>AwaitingQueueStatus</code></td>
+          <td>The queue&rsquo;s Kueue <code>Active</code> condition and the Kueue controller</td>
+          <td>Kueue has not written the queue status for the current generation, so dropping a flavor waits for it</td>
+      </tr>
+      <tr>
+          <td>ModelDeployment remains Pending</td>
+          <td>Its progress message and generated Workload conditions</td>
+          <td>No one domain at the required level fits the complete PodSet</td>
+      </tr>
+      <tr>
+          <td>Aggregate quota looks sufficient</td>
+          <td>Flavor profiles and Workload topology assignment</td>
+          <td>The request cannot combine capacity from different profiles or domains</td>
+      </tr>
+  </tbody>
+</table>
+<p>GPUStack reflects Kueue&rsquo;s inadmissible message with the role and replica; it does not translate
+Kueue prose into a new stable reason. Operational checks and source examples are in
+<a href="/gpustack-operator/v0.9.0/docs/modules/topology/operations/">Topology-Aware Scheduling Operations</a>
+.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/">Scheduling Chain</a>
+ (the flavor and queue owners)</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/">Admission</a>
+ (the gates after queue admission)</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/">Model Deployment</a>
+ (the user-facing field)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/">Admission</a>
+ — the remaining gates after topology-aware quota reservation.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/docs/modules/topology/scheduling.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#the-discovery-boundary">The discovery boundary</a></li>
+    <li><a href="#the-topologysource-contract">The TopologySource contract</a></li>
+    <li><a href="#hierarchy-profiles">Hierarchy profiles</a></li>
+    <li><a href="#profiles-in-the-kueue-chain">Profiles in the Kueue chain</a></li>
+    <li><a href="#per-replica-topology-requests">Per-replica topology requests</a></li>
+    <li><a href="#placement-of-node-delivered-models">Placement of node-delivered models</a></li>
+    <li><a href="#capacity-and-lifecycle-limits">Capacity and lifecycle limits</a></li>
+    <li><a href="#failure-surfaces">Failure surfaces</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

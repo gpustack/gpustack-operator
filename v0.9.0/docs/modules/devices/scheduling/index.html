@@ -1,0 +1,1055 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  
+  <title>Scheduling Chain · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0"
+    data-home="/gpustack-operator/v0.9.0/" data-page="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/" >Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/" >Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/" aria-current="page">Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/" >Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0/docs/modules/devices/">Heterogeneous Devices</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Scheduling Chain</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="scheduling-chain">Scheduling Chain</h1>
+<p>The worker turns Node and <code>Devices</code> signals into capacity labels, Kueue queues and <code>InstanceType</code>
+resources. These are stages 3 and 4 of the chain introduced in
+<a href="/gpustack-operator/v0.9.0/docs/getting-started/architecture/">Architecture</a>
+; <a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/">Admission</a>
+ covers the checks
+a workload then passes.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#stage-3-capacity-profiling">Stage 3: capacity profiling</a>
+</li>
+<li><a href="#unit-spec-defaults">Unit spec defaults</a>
+</li>
+<li><a href="#stage-4-the-kueue-chain">Stage 4: the Kueue chain</a>
+</li>
+<li><a href="#naming-and-grouping">Naming and grouping</a>
+</li>
+<li><a href="#the-controllers">The controllers</a>
+</li>
+</ul>
+<h2 id="stage-3-capacity-profiling">Stage 3: capacity profiling</h2>
+<p>The worker turns Node and <code>Devices</code> signals into the capacity labels the chain consumes, in three
+jobs:</p>
+<ul>
+<li>It reports a NodeFeature <code>${NODE_NAME}-gpustack-worker</code> per Node, stamping
+<code>gpustack.ai/managed=true</code>. Under <code>GPUSTACK_NODE_MANAGEMENT_MANUAL=true</code> (read per-reconcile) it
+skips that injection, honoring only an admin-set <code>managed</code> label, so onboarding is gated
+node-by-node.</li>
+<li>It builds the capacity labels from the Node and its same-named <code>Devices</code> resource: the general(CPU)
+presence marker plus both families&rsquo; per-accelerator capacities.</li>
+<li>It keeps the <a href="#per-card-fit-labels">per-card fit labels</a>
+ on each managed Node, from the same
+<code>Devices</code> ledger.</li>
+</ul>
+<h3 id="logical-slicing-capacities">Logical-slicing capacities</h3>
+<p>For every accelerator model whose <code>.sliced</code> resource is present and greater than zero in the Node
+capacity, the worker publishes four <code>.sliced.*</code> counting keys. The default scheduler and the kubelet
+consume them at admission. Both capacity tables below list suffixes of
+<code>acceleratable.${prefix}${aKey}.…</code> labels:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Label suffix</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>.sliced.units</code></td>
+          <td><code>count × M</code> (M = 1,600,000 credit units per whole accelerator)</td>
+      </tr>
+      <tr>
+          <td><code>.sliced.cores-percentage</code></td>
+          <td><code>Σ per-accelerator slices × 100</code> (compute overcommit) or <code>count × 100</code> (compute non-overcommittable)</td>
+      </tr>
+      <tr>
+          <td><code>.sliced.memory-percentage</code></td>
+          <td><code>count × 100</code></td>
+      </tr>
+      <tr>
+          <td><code>.sliced.memory-mib</code></td>
+          <td><code>Σ count × per-model VRAM MiB</code> (weighted per model so mixed-VRAM models sum correctly)</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="hardware-partitioning-capacities">Hardware-partitioning capacities</h3>
+<p>The <code>.partitioned.*</code> keys follow the same rule for models whose <code>.partitioned</code> resource is present
+and greater than zero. They are counted over the disjoint population of accelerators in a
+partitioning mode, so no accelerator counts in both families:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Label suffix</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>.partitioned.units</code></td>
+          <td><code>partitioned accelerators × M</code> (a partitioned accelerator is worth a whole accelerator&rsquo;s credits, exactly as a logically sliceable one is)</td>
+      </tr>
+      <tr>
+          <td><code>.partitioned.&lt;kind&gt;-&lt;profile&gt;</code></td>
+          <td><code>Σ (allocated + remaining)</code> instances of that profile over the node&rsquo;s partitioned accelerators</td>
+      </tr>
+  </tbody>
+</table>
+<p>The per-profile key is geometry-aware and ledger-derived, not a static ceiling: with one <code>3g.40gb</code>
+carved on an 80 GB accelerator, <code>…partitioned.mig-7g.80gb</code> reads 0 while <code>…partitioned.mig-3g.40gb</code>
+still reads 1 free instance.</p>
+<p>Reading a live instance twice is what the <code>allocated +</code> term prevents:
+the scheduler fits a Pod by subtracting the requests of the Pods already on the node, so a bare
+<code>remaining</code> count would count every live instance again. An accelerator whose ledger is not
+published yet falls back to its static per-profile ceiling, not to zero, so a fresh node advertises
+room instead of nothing.</p>
+<p><code>&lt;profile&gt;</code> is the published name, not always what the manufacturer&rsquo;s CLI prints:</p>
+<ul>
+<li>a manufacturer that writes its two-number geometry without a separator has one added — T-Head&rsquo;s
+<code>4g48gb</code> publishes as <code>4g.48gb</code>, matching how NVIDIA already writes <code>3g.40gb</code>;</li>
+<li>the rule is keyed on the manufacturer, not the shape, so the same string from NVIDIA is published
+untouched;</li>
+<li>any other shape is published as the driver reports it.</li>
+</ul>
+<p>So either manufacturer&rsquo;s partition reads alike in a Pod spec, in the <code>InstanceType</code>&rsquo;s offered inventory
+and in the per-profile ledgers.</p>
+<p>Below that boundary every layer keeps the manufacturer&rsquo;s spelling — the <code>Devices</code> record, the on-disk
+ownership markers, every call into its library — since a name the library does not report cannot create
+a partition. See <a href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/#how-partition-profiles-are-discovered">T-Head MIG
+Operations</a>
+.</p>
+<h3 id="per-accelerator-slice-counts-per-manufacturer">Per-accelerator slice counts, per manufacturer</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Manufacturer</th>
+          <th>Slices per accelerator</th>
+          <th>Compute</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>NVIDIA</td>
+          <td>128</td>
+          <td>time-shared, so overcommittable</td>
+      </tr>
+      <tr>
+          <td>Ascend</td>
+          <td>63</td>
+          <td>time-shared, so overcommittable</td>
+      </tr>
+      <tr>
+          <td>Cambricon</td>
+          <td>16</td>
+          <td>not overcommittable</td>
+      </tr>
+      <tr>
+          <td>Hygon</td>
+          <td>4</td>
+          <td>not overcommittable — a hard spatial partition (<code>vdev.conf</code> assigns each slice a disjoint CU bitmask, so the sum stays within one accelerator)</td>
+      </tr>
+      <tr>
+          <td>MThreads</td>
+          <td>16</td>
+          <td>not overcommittable — <code>cores%</code> is a best-effort relative weight, not a hard partition</td>
+      </tr>
+      <tr>
+          <td>MetaX</td>
+          <td>16</td>
+          <td>not overcommittable</td>
+      </tr>
+  </tbody>
+</table>
+<p>Each count is the maximum the Device Manager records on <strong>each accelerator&rsquo;s</strong> status, bounded by the
+manufacturer runtime&rsquo;s per-device user-process limit; the group aggregates them per model. A
+MIG-enabled accelerator reports zero logical count and its physical MIG profiles instead.</p>
+<p>An overcommittable manufacturer advertises <code>.sliced.cores-percentage = Σ slice count × 100</code>, each slice
+able to claim a full 100 %; the others cap it at <code>count × 100</code>.</p>
+<h3 id="presence-gating-on-capacity">Presence-gating on capacity</h3>
+<p>Both families&rsquo; counting keys are presence-gated on capacity: patched only while the bare pool
+(<code>.sliced</code> / <code>.partitioned</code>) is present and positive in <code>Node.status.capacity</code>, reverse-patched away
+when it disappears or reaches 0. A model with no logical slicing gets none of the four <code>.sliced.*</code>
+capacities; one with no partitioned accelerator gets no <code>.partitioned.*</code> key.</p>
+<blockquote>
+<p><strong>Why capacity and not allocatable</strong> — allocatable also falls to zero when a family is merely
+saturated, which would delete the keys while instances are live.</p>
+</blockquote>
+<p>Stale cleanup covers all four <code>.sliced.*</code> suffixes, <code>.partitioned.units</code> and every per-profile key.
+Enabling or disabling hardware partitioning is manual, through the manufacturer&rsquo;s CLI (<code>nvidia-smi</code>,
+<code>ppu-smi mig</code> for T-Head), and the operator sees it only on the next Device Manager detection.</p>
+<p>The <a href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/#walkthrough-three-mig-configurations-on-one-node">three-configuration
+walkthrough</a>
+ in <a href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/">NVIDIA MIG
+Operations</a>
+ shows the disjoint populations on a recorded 8-accelerator node,
+including a <strong>mixed</strong> one advertising both families;
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/">T-Head</a>
+ covers the same procedure.</p>
+<h3 id="rdma-feature-labels">RDMA feature labels</h3>
+<p>A node with a usable RDMA link also carries <code>feature.gpustack.ai/rdma.capable=true</code>, and
+conditionally two informational keys. No operator-generated flavor pins any of them; <code>rdma.capable</code>
+is the one meant for a workload&rsquo;s own nodeSelector, and withholding it is how a node with no usable
+link stops being selected by one.</p>
+<p>See <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/#the-three-node-labels">Network Topology</a>
+ for
+which link states count as usable, when each informational key is present, and why the accelerator
+interconnect gets no label at all.</p>
+<h3 id="per-card-fit-labels">Per-card fit labels</h3>
+<p>Every capacity key above is a node total, so it cannot say how the free room is spread over the
+node&rsquo;s accelerators. Two labels per accelerator model say what one accelerator can still give:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Label</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>sliced-max-free-units.fit.gpustack.ai/&lt;aKey&gt;</code></td>
+          <td>the largest free <code>units</code> on any one accelerator of the model that can serve a logical slice and still has a free slot for one</td>
+      </tr>
+      <tr>
+          <td><code>shared-free-cards.fit.gpustack.ai/&lt;aKey&gt;</code></td>
+          <td>how many accelerators of the model can still grant an ownership share</td>
+      </tr>
+  </tbody>
+</table>
+<ul>
+<li>Both values use Gate 3&rsquo;s own per-accelerator predicates. For a single Pod asking for one
+accelerator, a label admits a node exactly when <a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/#gate-3--the-per-accelerator-admissioncheck">Gate 3</a>
+
+would.</li>
+<li>A value is <code>0</code> when every accelerator of that population is full. A label disappears when the model
+has no accelerator of that population, and when the node stops being managed.</li>
+<li>An accelerator hosting its full <code>logicalSliced.count</code> of slices is full for the sliced label, however
+much memory it has left: it takes no further slice. On Hygon that is four.</li>
+<li>A label is written only when its value changes, after a 3 s window that coalesces ledger bursts. The
+cost is at most one Node metadata patch per allocation or release burst per node.</li>
+<li>The labels filter only; no capacity or quota is ever charged against them.</li>
+</ul>
+<p>The Workload webhook turns them into a placement constraint: it ANDs <code>Gt U-1</code> or <code>Gt N-1</code> into the
+required node affinity of the Workload&rsquo;s PodSet template, which Kueue&rsquo;s topology-aware scheduling
+reads. How it recognizes this operator&rsquo;s Workloads in a shared Kueue, and what it leaves out, is
+under <a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/#gate-3--the-per-accelerator-admissioncheck">Gate 3</a>
+.</p>
+<p>The pin stays on the Workload and never reaches the Pod; why that must hold is under
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/#gate-3--the-per-accelerator-admissioncheck">Gate 3</a>
+ too.</p>
+<h2 id="unit-spec-defaults">Unit spec defaults</h2>
+<p>The unit spec (unitCPU / unitRAM / localStorage) is not derived from node capacity at all. The
+InstanceType default follows acceleratable-ness: <code>1c / 2Gi / 100Gi</code> non-accelerated; accelerated, a
+per-product preset keyed by the accelerator&rsquo;s manufacturer and product name, falling back to
+<code>4c / 16Gi / 100Gi</code>.</p>
+<p>The tier per product family is in <a href="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/">Instance Type Unit Resources
+Reference</a>
+; an admin overrides it through the InstanceType
+API without touching any Node.</p>
+<h2 id="stage-4-the-kueue-chain">Stage 4: the Kueue chain</h2>
+<p>The capacity and topology-profile labels drive a Kueue chain built by the worker. One isolated
+ClusterQueue per pool: with exclusive / shared / sliced / partitioned in one queue there is no
+cross-queue borrowing to broker, so <code>spec.cohortName</code> stays empty.</p>
+<p>Kueue assigns a ResourceFlavor per PodSet, not per Workload. Each PodSet forms its own assignment
+group and a candidate flavor is evaluated against that PodSet&rsquo;s own <code>nodeSelector</code>, so one ClusterQueue
+can serve two accelerator models at once: a Workload&rsquo;s PodSets may land on different flavors of the
+same pool.</p>
+<p>Every generated flavor also pins <code>topology.gpustack.ai/profile</code> and references the Kueue <code>Topology</code>
+for that ordered level set. Kueue TAS chooses a domain for the complete PodSet; a
+<code>ModelDeployment</code> can require a level without naming its concrete value. The discovery, profile,
+quota-conservation, and request path is in <a href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/">Topology-Aware
+Scheduling</a>
+.</p>
+<p>TAS also ranks the domains that fit by a Pod&rsquo;s preferred node affinity, which is how a node-delivered
+model&rsquo;s Pods <a href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/#placement-of-node-delivered-models">prefer the nodes holding its
+weights</a>
+.</p>
+<h2 id="naming-and-grouping">Naming and grouping</h2>
+<p>The <code>ResourceFlavor</code> is the finest grain and setting-independent: always the CPU key, plus the
+accelerator key when accelerated, so the aggregation layer re-groups without rewriting a flavor. That
+layer (<code>ClusterQueue</code> / <code>InstanceType</code> / <code>InstanceTypeFlavor</code>) is grouped by the editable
+<a href="/gpustack-operator/v0.9.0/docs/reference/settings/#online-adjustable-settings"><code>instance-type-aware-cpu-manufacturer</code></a>
+ (default <code>false</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <pre tabindex="0"><code>ResourceFlavor (always the finest grain, setting-independent):
+  gpustack--${gKey}-${os}-${arch}-${cpu}c              # non-accelerated (c = CPU cores)
+  gpustack--${gKey}--${aKey}-${os}-${arch}-${acc}d     # accelerated     (d = devices)
+
+ClusterQueue / InstanceType — grouped by instance-type-aware-cpu-manufacturer:
+  aware=false (default):  gpustack--generic-${os}-${arch}           # all CPUs collapse into one generic pool
+                          gpustack--${aKey}-${os}-${arch}           # one pool per accelerator (CPU ignored)
+  aware=true:             gpustack--${gKey}-${os}-${arch}           # split per CPU
+                          gpustack--${gKey}--${aKey}-${os}-${arch}  # split per (CPU, accelerator)
+
+InstanceTypeFlavor (catalog, no os/arch): mirrors the same grouping —
+  gpustack--generic / gpustack--${aKey}   (aware=false)
+  gpustack--${gKey}  / gpustack--${gKey}--${aKey}   (aware=true)</code></pre>
+</div><p>Two discriminators keep the pools clean, and one annotation carries the raw CPU detail:</p>
+<ul>
+<li><code>feature.gpustack.ai/acceleratable=true|false</code>, on every flavor and queue, lets a collapsed generic
+queue select &ldquo;all non-accelerated flavors&rdquo; and stops an <em>aware</em> generic queue (<code>general.${gKey}=true</code>)
+matching an accelerated flavor carrying the same key.</li>
+<li>When <code>instance-type-mixed-on-node=false</code>, the worker publishes <code>feature.gpustack.ai/cpu-only=true</code>
+through NFD only for Nodes without a detected accelerator; CPU flavors select it to exclude GPU Nodes.</li>
+<li><code>note.gpustack.ai/cpuDetail</code> carries the raw CPU detail: always on a CPU flavor, on an accelerated one
+only when awareness is on. The defaulting webhook folds it back into the type&rsquo;s spec — see
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/#the-instancetype-and-instance-webhooks">Admission</a>
+.</li>
+</ul>
+<h2 id="the-controllers">The controllers</h2>
+<p>The worker keeps five sets of objects converged:</p>
+<div class="diagram-block">
+  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
+  <p class="diagram-status" role="status">Rendering diagram…</p>
+  <details class="diagram-source"><summary>Mermaid source</summary>
+    <div class="code-block">
+      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+      <pre><code>flowchart LR
+    NODE[&#34;Node&lt;br/&gt;(capacity labels &#43; gpustack.ai/managed)&#34;]
+    DEV[&#34;Devices&lt;br/&gt;(per-accelerator allocation ledger)&#34;]
+
+    subgraph controllers[&#34;worker controllers&#34;]
+        RF[&#34;ResourceFlavor&#34;]
+        IT[&#34;InstanceType&#34;]
+        CQ[&#34;ClusterQueue&lt;br/&gt;(isolated, no cohort)&#34;]
+        LQ[&#34;LocalQueue&#34;]
+        AC[&#34;AdmissionCheck&#34;]
+    end
+
+    NODE -- &#34;one flavor per&lt;br/&gt;(key, os, arch, count)&#34; --&gt; RF
+    RF -- &#34;authors the pool&#39;s InstanceType,&lt;br/&gt;create-only&#34; --&gt; IT
+    DEV -- &#34;drives the status&#34; --&gt; IT
+    IT -- &#34;keeps the queue existing and&lt;br/&gt;stopped only as configured&#34; --&gt; CQ
+    RF -- &#34;fills resource groups&#34; --&gt; CQ
+    CQ --&gt; LQ
+    NS[&#34;Namespace (non-system)&#34;] -- &#34;one per namespace&#34; --&gt; LQ
+    DEV -- &#34;per-accelerator feasibility&#34; --&gt; AC
+    AC --&gt; CQ</code></pre>
+    </div>
+  </details>
+</div><h3 id="capacity-flavors">Capacity flavors</h3>
+<p>One controller indexes managed nodes by <code>(key, os, arch, count, topology profile)</code>, one
+<code>ResourceFlavor</code> per group. <code>spec.nodeLabels</code> pins workloads — the feature key
+<code>{general.|acceleratable.}feature.gpustack.ai/${key}=true</code>, full <code>kubernetes.io/os|arch</code>, and
+<code>topology.gpustack.ai/profile</code> — plus a blanket <code>{Operator: Exists}</code> toleration, eligibility being by
+nodeLabels, not taints. <code>spec.topologyName</code> references the generated Kueue Topology for that profile.</p>
+<p>Labels carry the pool identity (<code>.count</code>, <code>.capacity = contributing nodes × count</code>);
+<code>note.gpustack.ai/*</code> annotations the per-accelerator VRAM and device descriptors — device information
+only, no unit spec.</p>
+<p>A flavor whose group has no contributing node is deleted. The name comes from the first contributing
+node, and every contributor to a flavor name shares it.</p>
+<p>After syncing a flavor, and only under <code>instance-type-derived-from-node=true</code> (default), the worker
+authors the pool&rsquo;s <code>InstanceType</code>, <strong>create-only</strong>, at the setting-correct name and identity
+(<code>generalGroup</code>/<code>acceleratorGroup</code>/<code>acceleratable</code>/<code>os</code>/<code>arch</code>; the CPU key is the <code>generic</code> sentinel
+when awareness is off) with the <a href="#unit-spec-defaults">default unit spec</a>
+.</p>
+<p>An existing type is untouched, admin- or operator-authored. The worker watches the types it authored
+and re-authors a deleted one.</p>
+<h3 id="the-instancetype-lifecycle">The InstanceType lifecycle</h3>
+<p>A second controller keeps the backing <code>ClusterQueue</code> existing and the materialized <code>InstanceType</code>&rsquo;s
+status fresh, but not its quota. It does not author InstanceTypes and never deletes one for lack of
+flavors.</p>
+<ul>
+<li><strong>Creation and identity.</strong> A missing queue is created under the name-identical name, stamped at
+creation with the pool&rsquo;s schedule labels (the <code>feature.gpustack.ai/acceleratable</code> boolean, the
+feature key(s) selected by <code>instance-type-aware-cpu-manufacturer</code>, <code>kubernetes.io/os|arch</code> — all
+from the InstanceType <strong>spec</strong> identity) and the fixed no-borrow <strong>isolation</strong> (empty cohort, no
+reclaim/borrow preemption). A stale feature-key label is pruned when the group or acceleratable
+changes, so the re-pointed queue&rsquo;s selectors match.</li>
+<li><strong>The empty-plan hold.</strong> The queue is created on <code>Hold</code>, marked
+<code>topology.gpustack.ai/empty-plan-hold</code>, because the queue has no resource groups yet and
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/#known-behavior-the-deployed-kueue-configuration">a queue without them admits every Workload</a>
+.
+The update that fills the groups drops the marker, and the hold is then released unless the type is
+<code>Inactive</code>.</li>
+<li><strong>Status and recreation.</strong> The queue is watched to keep the type&rsquo;s <code>.status</code> fresh (the
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/#four-view-status">four-view</a>
+ / CPU projection + <code>status.entrance</code>), and to recreate a
+queue an admin deleted while the InstanceType still lives.</li>
+<li><strong>Teardown.</strong> Deleting the type runs a delete-then-wait teardown: mark the type <code>Inactive</code>, delete
+the queue once, and hold a <code>gpustack.ai/controlled</code> finalizer until Kueue has removed it. It does
+not drain; the quota controller below sees the deletion and drives that.</li>
+<li><strong>Inactive and the stop policy.</strong> The type&rsquo;s <code>spec.inactive</code> is synced with the queue&rsquo;s
+<code>StopPolicy</code>: <code>Hold</code> when <code>Inactive</code> (blocking new admission without evicting running workloads,
+never <code>HoldAndDrain</code>), <code>None</code> when an admin reactivates, and <code>Inactive=true</code> backfilled one-way and
+stickily whenever the queue is stopped by any means.</li>
+</ul>
+<p>While the pool is in a drained state waiting for flavors (the marker below), this sync writes its
+<code>Hold</code>/<code>None</code> pair onto the stop policy the drain saved and later restores, and pauses the backfill:
+an <code>Inactive</code> change made while an emptied pool waits for a flavor is what the pool comes back with.</p>
+<p>It neither releases a marked empty-plan <code>Hold</code> nor mirrors it into <code>Inactive</code>; once the marker is
+gone it treats the <code>Hold</code> like an admin&rsquo;s, released only while the type is not <code>Inactive</code>. Clearing
+<code>Inactive</code> on a queue that has no resource groups marks its <code>Hold</code> rather than releasing it.</p>
+<h3 id="queue-quota-and-draining">Queue quota and draining</h3>
+<p>A third controller fills the queue&rsquo;s quota and admission gating — resource groups, the <code>HoldAndDrain</code>
+drain policy (admin <code>Hold</code>/<code>None</code> belongs to the lifecycle controller above), the AdmissionCheck
+references — resolved from the pool&rsquo;s ResourceFlavors alone, never the owning InstanceType.</p>
+<ul>
+<li><strong>Groups</strong> — from the live topology-aware flavors, smallest per-node count first so Kueue packs small nodes first. An
+accelerated queue advertises only <code>credits.gpustack.ai/${manufacturer}</code> (nominal <code>capacity × M</code>; one
+whole accelerator = <code>M = 1,600,000</code> credits, so Kueue&rsquo;s int64 accounting never rounds fractional
+shared/sliced credits up to 1), a non-accelerated queue only CPU.</li>
+<li><strong>AdmissionCheck</strong> — <code>gpustack-node-devices</code>, referenced on an accelerated queue once Active, whoever
+authored its InstanceType, and only while <a href="/gpustack-operator/v0.9.0/docs/reference/settings/#authoring-the-instancetype"><code>instance-type-derived-from-node</code></a>
+ is on.
+<code>gpustack-model-deployment-joint</code> is referenced on every queue once Active, whatever that setting says.</li>
+<li><strong>Finalizing flavor</strong> — a flavor whose nodes left is deleted, but Kueue holds <code>resource-in-use</code>
+until no ClusterQueue references it, and dropping it from the groups is the update Kueue waits
+for. A workload on a dropped partial-pool flavor is evicted and re-admitted on
+the pool&rsquo;s remaining flavors — its node has left, so it must move regardless.</li>
+<li><strong>Queue being deleted</strong> (admin delete or InstanceType teardown) — <code>HoldAndDrain</code> unconditionally, so
+Kueue evicts the admitted workloads and can drop its own finalizer and remove the queue; Kueue never
+evicts on delete by itself.</li>
+<li><strong>No live flavor left</strong> while the queue carries quota — gated by
+<code>instance-type-drain-when-no-flavors</code> (default true): <code>HoldAndDrain</code>, requeue until every reservation
+clears, then empty the groups so Kueue&rsquo;s counters never go negative. The emptied queue stays
+<code>HoldAndDrain</code> until a flavor returns, so it never admits without resource groups.</li>
+<li><strong>No resource groups yet</strong> and not stopped — the pool has no flavor, or its flavors fail topology
+readiness: <code>Hold</code>, marked <code>topology.gpustack.ai/empty-plan-hold</code>. The update that fills the groups
+drops the marker, and the hold is released unless the type is <code>Inactive</code>. It is <code>Hold</code>,
+not <code>HoldAndDrain</code>, so the type&rsquo;s Instances are not stopped; an admin
+<code>Hold</code> carries no marker and is left alone.</li>
+<li><strong>Topology readiness</strong> — refuse a partial queue plan when a flavor lacks its profile or Topology,
+selectors overlap, quota changes across the profile split, the same resource would occur in two
+groups, or one resource group would exceed the <a href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/#capacity-and-lifecycle-limits">flavor limit</a>
+.</li>
+</ul>
+<p>Once flavors return it switches the held queue to the new plan, and only then <strong>restores</strong> the stop
+policy the queue had before the drain (<code>None</code>, or an admin <code>Hold</code>, including one set or cleared while
+it waited). A recovered pool admits again without an admin.
+A drained queue also stops its running Instances — see <a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/#running-instance-stop">Running-instance stop</a>
+.</p>
+<h3 id="a-localqueue-in-every-namespace">A LocalQueue in every namespace</h3>
+<p>Every non-system Namespace gets one <code>LocalQueue</code>, so workloads can submit from anywhere.</p>
+<p>Workloads reference it through the <code>kueue.x-k8s.io/queue-name</code> <strong>label</strong> (63-char limit) while
+ClusterQueue names may be longer, so it is named <code>gpustack-fnv64-${fnv64a(ClusterQueue name)}</code> — always
+31 characters — and records the full name in the <code>schedule.gpustack.ai/queue</code> annotation.</p>
+<h3 id="the-per-accelerator-admission-check">The per-accelerator admission check</h3>
+<p>The per-accelerator <strong>AdmissionCheck</strong>, third of the five gates; its behavior is in
+<a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/#gate-3--the-per-accelerator-admissioncheck">Admission</a>
+.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/">Device Discovery</a>
+ (where the capacity signals come from)</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/">Topology-Aware Scheduling</a>
+ (how topology profiles enter this chain)</li><li><a href="/gpustack-operator/v0.9.0/docs/walkthroughs/devices/scheduling/">Walkthrough</a>
+ (the same objects on a live cluster)</li><li><a href="/gpustack-operator/v0.9.0/docs/reference/settings/#online-adjustable-settings">Settings</a></li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/">Admission</a>
+ — the five gates a request passes.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/docs/modules/devices/scheduling.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#stage-3-capacity-profiling">Stage 3: capacity profiling</a>
+      <ul>
+        <li><a href="#logical-slicing-capacities">Logical-slicing capacities</a></li>
+        <li><a href="#hardware-partitioning-capacities">Hardware-partitioning capacities</a></li>
+        <li><a href="#per-accelerator-slice-counts-per-manufacturer">Per-accelerator slice counts, per manufacturer</a></li>
+        <li><a href="#presence-gating-on-capacity">Presence-gating on capacity</a></li>
+        <li><a href="#rdma-feature-labels">RDMA feature labels</a></li>
+        <li><a href="#per-card-fit-labels">Per-card fit labels</a></li>
+      </ul>
+    </li>
+    <li><a href="#unit-spec-defaults">Unit spec defaults</a></li>
+    <li><a href="#stage-4-the-kueue-chain">Stage 4: the Kueue chain</a></li>
+    <li><a href="#naming-and-grouping">Naming and grouping</a></li>
+    <li><a href="#the-controllers">The controllers</a>
+      <ul>
+        <li><a href="#capacity-flavors">Capacity flavors</a></li>
+        <li><a href="#the-instancetype-lifecycle">The InstanceType lifecycle</a></li>
+        <li><a href="#queue-quota-and-draining">Queue quota and draining</a></li>
+        <li><a href="#a-localqueue-in-every-namespace">A LocalQueue in every namespace</a></li>
+        <li><a href="#the-per-accelerator-admission-check">The per-accelerator admission check</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+    
+    
+    
+    <script src="/gpustack-operator/v0.9.0/vendor/mermaid/mermaid.min.70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de.js" integrity="sha256-cBN&#43;d7snO7LvlyuG6LBADMqL5TyyW/xFkRoYbcmGZd4=" defer></script>
+  
+  <script src="/gpustack-operator/v0.9.0/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

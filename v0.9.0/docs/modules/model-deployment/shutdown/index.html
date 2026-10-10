@@ -1,0 +1,897 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  
+  <title>Model Deployment Shutdown · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0"
+    data-home="/gpustack-operator/v0.9.0/" data-page="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/" >Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/" >Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/" >Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/" >Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/" aria-current="page">Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Deployment Shutdown</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-deployment-shutdown">Model Deployment Shutdown</h1>
+<p>A <code>ModelDeployment</code> replica drains during the interval between Pod deletion and engine exit.
+The grace period bounds how long it can wait for running requests and engine shutdown.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#the-drain-window">The drain window</a>
+</li>
+<li><a href="#the-retirement-protocol">The retirement protocol</a>
+</li>
+<li><a href="#coverage-limits">Coverage limits</a>
+</li>
+</ul>
+<h2 id="the-drain-window">The drain window</h2>
+<p>A replica whose command line the operator builds drains before its engine stops, whatever deleted
+its Pod: a rollout, a node drain, a preemption or <code>kubectl delete pod</code>. A removal the spec makes —
+a <code>replicas</code> reduction, a surplus shed, a dropped role — goes through
+<a href="#the-retirement-protocol">the retirement protocol</a>
+ first, and its Pod is deleted when that
+finishes.</p>
+<p>An edit that replaces a role&rsquo;s configuration deletes that role&rsquo;s old replicas one at a time, and
+each deleted replica drains exactly as below. The protocol reads a leaving replica as it is
+deployed — the size and command it was created with — so an edit elsewhere does not change how it
+is classified: a take-over replica is still held, a prefill or decode replica still refused.</p>
+<p><code>G</code> below is the role&rsquo;s grace: <code>roles[].terminationGracePeriodSeconds</code>, 30 when unset, written to
+the Pod&rsquo;s field of the same name.</p>
+<table>
+  <thead>
+      <tr>
+          <th>From the delete</th>
+          <th>At the default</th>
+          <th>Action</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>0 s</td>
+          <td>0 s</td>
+          <td>the routers drop the replica, and the kubelet starts the engine container&rsquo;s preStop hook</td>
+      </tr>
+      <tr>
+          <td>0–5 s</td>
+          <td>0–5 s</td>
+          <td>the engine keeps serving normally, including a request routed to it just before the delete</td>
+      </tr>
+      <tr>
+          <td>5 s to <code>G</code> − 5</td>
+          <td>5–25 s</td>
+          <td>the hook reads the engine&rsquo;s in-flight gauges once a second and returns on the second idle read</td>
+      </tr>
+      <tr>
+          <td><code>G</code> − 3 at the latest</td>
+          <td>27 s</td>
+          <td>the engine receives SIGTERM once the hook returns: the hook starts no read after <code>G</code> − 5, and its last read can take 2 s more</td>
+      </tr>
+      <tr>
+          <td><code>G</code></td>
+          <td>30 s</td>
+          <td>the kubelet kills what is left</td>
+      </tr>
+  </tbody>
+</table>
+<p>The hook of an idle replica therefore returns about 6 s after its delete, whatever <code>G</code> is, and vLLM
+or an SGLang server exits a few seconds later. The first 5 s and the last 5 s are constants; only
+the wait between them moves with <code>G</code>, which admission takes from 15 to 3600.</p>
+<blockquote>
+<p><strong>Why</strong> — every supported router drops a replica on its deletion timestamp rather than on its
+readiness, but a router can pick the replica in the instant before it learns of the delete; the
+first 5 s is where that request lands. The wait happens before SIGTERM because vLLM aborts every
+running request on the signal by default, and serves nothing new while it drains if told to wait.</p>
+</blockquote>
+<p><strong>Raising <code>G</code> costs accelerators and quota.</strong> It is a ceiling, not a wait: an idle replica still
+leaves when its engine exits. A busy or slow one holds its accelerators and quota up to <code>G</code> on every
+delete, and a rollout waits each departing replica out one at a time per role, so the cost multiplies
+into every rollout. What it buys is a longer wait for running requests, and a clean exit for an
+engine slow to stop after SIGTERM.</p>
+<p><strong>An SGLang prefill or decode role needs up to about 20 s after SIGTERM, even idle, so set its
+<code>terminationGracePeriodSeconds</code> to about 45.</strong> Measured idle, a decoder left 26 s and a prefiller
+28 s after its delete, 2 s short of the kill at the default 30 s. From SGLang 0.5.14 on, its
+split-role scheduler ignores the shutdown request SIGTERM leads to, and the engine waits a fixed 15 s
+for that scheduler before killing it.</p>
+<blockquote>
+<p><strong>Why it is left alone</strong> — no flag shortens that wait; <code>SGL_FORCE_SHUTDOWN</code> skips only the drain.
+A grace of 45 buys a clean exit rather than a kill, since the engine kills its scheduler itself
+either way. The replica is idle by then, so the kill at 30 s cuts no request.</p>
+</blockquote>
+<p>The hook sums these gauges from the listener the Pod&rsquo;s
+<a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/#scraping-the-pods">scrape annotations</a>
+ name. On a direct decoder that is
+the engine behind the routing proxy, not the port the Service fronts.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Engine</th>
+          <th>Gauges summed</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>vLLM</td>
+          <td><code>vllm:num_requests_running</code>, <code>vllm:num_requests_waiting</code> — the second includes a decoder&rsquo;s requests still waiting for their KV</td>
+      </tr>
+      <tr>
+          <td>SGLang</td>
+          <td><code>sglang:num_running_reqs</code>, <code>sglang:num_queue_reqs</code>, <code>sglang:num_prefill_bootstrap_queue_reqs</code>, <code>sglang:num_prefill_inflight_queue_reqs</code>, <code>sglang:num_decode_prealloc_queue_reqs</code>, <code>sglang:num_decode_transfer_queue_reqs</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>A listener that refuses the read, answers an HTTP error or fails the TLS handshake ends the hook at
+once, since there is nothing it can measure. A read that times out counts as busy, and so does a
+sample the hook cannot parse.</p>
+<p>Adding the hook and the grace changed every replica&rsquo;s Pod spec, so upgrading to the release that
+carries them turns each existing replica over once; see
+<a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/#rollout-behavior">Rollout behavior</a>
+.</p>
+<p>Changing a role&rsquo;s <code>terminationGracePeriodSeconds</code> turns its replicas over the same way, and each
+replica that leaves in that rollout leaves with the grace it was created with. Writing 30 onto a
+role that set none renders the same Pods, so it turns nothing over.</p>
+<h2 id="the-retirement-protocol">The retirement protocol</h2>
+<p><strong>A replica the spec takes capacity away from is withdrawn and drained before it is deleted, and
+the deletion waits for that to finish.</strong> The protocol covers a <code>replicas</code> reduction, a shed of
+surplus replicas, and a replica of a role the spec has dropped. Its progress is the
+<a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/#status"><code>status.retirement</code> field</a>
+, and the replica stays in place, still counted,
+for as long as the protocol holds it.</p>
+<p>For <code>llm-d-router</code>, withdrawal also waits for recent dispatches reported for a target member.
+This applies after the Router removes that member from selection. These records do not increase
+the serving count. A dispatch to an unrelated survivor does not hold the target.</p>
+<p>Without <code>spec.router</code>, withdrawal cannot observe established connections made directly through the
+role&rsquo;s Service. An admitted, running replica stays held during scale-down or surplus removal.
+The withdrawal budget expires after 30 seconds and retirement ends as <code>Aborted</code>, retaining its Pods,
+Workload and capacity. Removing the Service endpoint does not prove those connections have ended.
+Groups that never executed or received admission follow their separate cleanup path.</p>
+<p>Two mechanisms are involved and they answer different questions. The protocol decides <strong>whether the
+Pod may be deleted</strong>; the <a href="#the-drain-window">drain window</a>
+ above decides <strong>how long the engine
+takes to exit once it is</strong>, on the kubelet&rsquo;s grace clock after the delete. A replica passes the
+first and still spends the second.</p>
+<h3 id="reading-a-members-work">Reading a member&rsquo;s work</h3>
+<p>The read is one bounded, read-only <code>pods/exec</code> into the member&rsquo;s own <code>main</code> container, which
+fetches that engine&rsquo;s <code>/metrics</code> over loopback on the port the member&rsquo;s own
+<a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/#scraping-the-pods">scrape annotations</a>
+ name. Reading it from inside the member is what
+makes the answer per-member: a scrape through the Service would land on whichever replica answered
+and could not say which one was idle.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Bound</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>response size</td>
+          <td>1 MiB</td>
+      </tr>
+      <tr>
+          <td>the engine&rsquo;s own answer</td>
+          <td>2 s</td>
+      </tr>
+      <tr>
+          <td>the whole read including the connection</td>
+          <td>5 s</td>
+      </tr>
+  </tbody>
+</table>
+<p>The gauges read are the same ones the hook sums, and they are named once in the tree, so the
+protocol and the hook cannot disagree about what counts as work in flight.</p>
+<p><strong>A member must read idle twice, on complete envelopes, before the deletion commits.</strong> Both reads
+have to carry every expected gauge, and a single unlucky zero cannot carry the protocol past a
+member that is still working. A second read that finds work holds the operation.</p>
+<p><strong>Not every member of a replica is read, because not every member can answer.</strong> The protocol works
+out which members of the target can speak for it as a whole, and reads only those: a replica of one
+Pod answers through itself, and a leader-served replica of several answers through the member
+carrying rank 0.</p>
+<p>Selecting them does not narrow the deletion, which still covers every member the reservation bound,
+so a replica is only held when the operator cannot tell which member its answer comes from. See
+<a href="#coverage-limits">Coverage limits</a>
+ for what a hold there means.</p>
+<h3 id="what-the-drain-read-refuses">What the drain read refuses</h3>
+<p>Every one of these holds the replica in place, and the <code>reason</code> on the reservation names which one
+applied. They are the ordinary outcomes of a replica that is busy, loading, or not
+the shape the protocol knows how to measure.</p>
+<table>
+  <thead>
+      <tr>
+          <th>The member</th>
+          <th>Verdict</th>
+          <th>Why</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>still serving requests</td>
+          <td>held</td>
+          <td>there is work in flight, which is what the read is for</td>
+      </tr>
+      <tr>
+          <td>answers with some gauges missing</td>
+          <td>held</td>
+          <td>a partial envelope is not evidence of an empty queue, and a reader cannot sum what it did not find</td>
+      </tr>
+      <tr>
+          <td>the exec fails, times out, or returns a body that is not metrics</td>
+          <td>held</td>
+          <td>nothing was measured, and an absence of measurement is not a measurement of absence</td>
+      </tr>
+      <tr>
+          <td>the container has restarted</td>
+          <td>held</td>
+          <td>the gauges now served come from an engine that did not exist when the protocol began watching</td>
+      </tr>
+      <tr>
+          <td>a prefill or decode replica</td>
+          <td>refused</td>
+          <td>see below</td>
+      </tr>
+      <tr>
+          <td>a take-over role</td>
+          <td>held</td>
+          <td>the operator renders no endpoint for it, so there is nothing to read</td>
+      </tr>
+      <tr>
+          <td>an engine with no gauge list</td>
+          <td>refused</td>
+          <td>no such measurement exists for it</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>A restarted container is held, and the hold is bounded.</strong> The gauges a
+restarted engine serves describe a fresh process, so they cannot speak for the work the protocol
+set out to account for. The drain budget and the operation&rsquo;s total still apply, so a replica that
+keeps crash-looping ends as <code>Aborted</code> with its capacity retained, and never blocks the queue.</p>
+<blockquote>
+<p>A restart throws away a loaded model and any request it was serving, so the replica is not worth
+less for it. The protocol cannot tell whether a restarted engine is a replacement it should wait
+for or a crash loop it should give up on, and the budget is what resolves that question.</p>
+</blockquote>
+<p><strong>A prefill or decode replica is refused outright.</strong> Its queues are visible from both engines, so
+this is not a case of unmeasured work.</p>
+<p>What is not verifiable is the release. A decode replica reading zero is an engine about to be
+handed work, and nothing in either engine&rsquo;s metrics proves it will not be. The shape stays refused
+until a decoder-side release can be verified, because the other answer deletes a decode replica in
+the middle of a prefill.</p>
+<p>Both engines report a decoder&rsquo;s work while it waits to receive its KV: a prefill half holds it in
+its transfer queue, and a decode half holds it in its own prealloc and transfer queues.</p>
+<p>The refusal is read from the member Pod&rsquo;s own rendered command, so it still applies to a replica
+whose role the spec has already dropped. Both engines are covered: a vLLM
+member is recognized by its data-parallel balance flags, and an SGLang member by its
+<code>--disaggregation-mode prefill</code> or <code>decode</code>.</p>
+<h2 id="coverage-limits">Coverage limits</h2>
+<ul>
+<li><strong>A request still running at <code>G</code> − 5 is cut</strong>, 25 s after the delete at the default. vLLM aborts it
+when SIGTERM arrives; SGLang keeps draining it on its own until the kill at <code>G</code>. No supported
+router moves a running request to another replica: the SGLang gateway retries only while the
+response has not started, and the other two routers do not retry.</li>
+<li><strong>An SGLang prefill or decode replica whose hook returns later than <code>G</code> − 20 is killed at <code>G</code></strong>,
+since its engine then has less than the 20 s it takes to exit: 10 s after the delete at the
+default, 25 s at 45. The replica is idle by that point, or its hook gave up on it, so the kill cuts
+no request the deadline would not.</li>
+<li><strong>A take-over role</strong> (one that sets <code>command</code>) gets no hook, because the operator cannot claim
+that container serves the gauges. Its Pod gets the role&rsquo;s <code>terminationGracePeriodSeconds</code> as given,
+and keeps the Kubernetes default when the role sets none.</li>
+<li><strong>A role that moves the engine with its own <code>--port</code></strong> gets only the first 5 s: nothing answers the
+hook on the port the operator rendered.</li>
+<li><strong>A replica of several Pods drains through its leader, and every member is still deleted.</strong> The
+other members serve no metrics, so their hooks return after the first 5 s, and they receive SIGTERM
+while the leader is still draining. The protocol reads the members whose answer stands for the whole
+replica, which on a leader-served replica is the leader alone.</li>
+<li><strong>A replica whose answering member cannot be named is held</strong> — none of its members carries the
+leader index, more than one does, its members disagree on the shape, or its role says a size the
+replica does not have — and the <code>reason</code> names which. Selecting the leader does not narrow the
+deletion: as <a href="#the-retirement-protocol">the protocol above</a>
+ states, it still covers every member
+the reservation bound.</li>
+<li><strong>A prefill or decode replica is refused by the protocol</strong>, so it is never deleted through one.
+The <a href="#the-drain-window">drain window</a>
+ still applies to it once something else deletes its Pod.</li>
+<li><strong>A direct decoder on a cluster below Kubernetes 1.29</strong> runs its routing proxy as a classic
+container, which stops at the delete while the engine behind it drains, so a request in flight
+through the proxy still resets. The proxy&rsquo;s image has no shell to run a hook of its own.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/">Model Deployment</a>
+ for what turns a replica over</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
+ for the scrape endpoints the hook
+reads.</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/">Model Deployment Status</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/docs/modules/model-deployment/shutdown.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#the-drain-window">The drain window</a></li>
+    <li><a href="#the-retirement-protocol">The retirement protocol</a>
+      <ul>
+        <li><a href="#reading-a-members-work">Reading a member&rsquo;s work</a></li>
+        <li><a href="#what-the-drain-read-refuses">What the drain read refuses</a></li>
+      </ul>
+    </li>
+    <li><a href="#coverage-limits">Coverage limits</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,1560 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  
+  <title>Instance Type Unit Resources Reference · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0"
+    data-home="/gpustack-operator/v0.9.0/" data-page="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0/docs/getting-started/vendor-prerequisites/" >Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.9.0/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/preflight/" >Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/" >Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/deployment/" >Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-type-unit-resources/" aria-current="page">Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0/docs/reference/">Reference</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Instance Type Unit Resources Reference</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="instance-type-unit-resources-reference">Instance Type Unit Resources Reference</h1>
+<p>With <code>instance-type-derived-from-node</code> enabled, the operator summarizes a node into an
+<code>InstanceType</code> and stamps its <strong>unit resources</strong>: the CPU and RAM for <em>one unit</em>, which for an
+acceleratable type is <strong>one whole accelerator</strong>.</p>
+<p>Chosen once, at creation: <code>spec.unitResources</code> is immutable afterwards and the operator never
+updates a type it did not just create, so a type you authored, or one an earlier version created,
+is never touched.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#preset-scope">Preset scope</a>
+</li>
+<li><a href="#the-tiers">The tiers</a>
+</li>
+<li><a href="#nvidia">NVIDIA</a>
+</li>
+<li><a href="#ascend">Ascend</a>
+</li>
+<li><a href="#amd">AMD</a>
+</li>
+<li><a href="#cambricon">Cambricon</a>
+</li>
+<li><a href="#hygon">Hygon</a>
+</li>
+<li><a href="#metax">MetaX</a>
+</li>
+<li><a href="#mthreads">MThreads</a>
+</li>
+<li><a href="#iluvatar">Iluvatar</a>
+</li>
+<li><a href="#t-head">T-Head</a>
+</li>
+<li><a href="#intel">Intel</a>
+</li>
+<li><a href="#kunlun">Kunlun</a>
+</li>
+<li><a href="#biren">Biren</a>
+</li>
+<li><a href="#hardware-without-a-preset">Hardware without a preset</a>
+</li>
+</ul>
+<h2 id="preset-scope">Preset scope</h2>
+<ul>
+<li><strong>It is the default request.</strong> An Instance omitting <code>cpu</code>/<code>ram</code> is sized from it — by accelerator
+count for a whole accelerator, by memory percentage for a slice or partition.</li>
+<li><strong>It caps an explicit request.</strong> An Instance setting <code>cpu</code>/<code>ram</code> is capped against it.</li>
+</ul>
+<p>With <code>instance-general-resources-overcommit</code> enabled (the default), the preset is the container
+<em>limit</em> and the scheduler sees <code>100m</code> CPU per core, <code>128Mi</code> per Gi instead: an <code>xlarge</code> accelerator
+asks for 1.2 CPU / 24Gi. With it disabled, the limit <em>is</em> the request; check the presets against
+what your nodes provide per accelerator.</p>
+<h2 id="the-tiers">The tiers</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Tier</th>
+          <th>VRAM band</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>fallback</code></td>
+          <td>anything not listed below</td>
+          <td><code>4</code></td>
+          <td><code>16Gi</code></td>
+      </tr>
+      <tr>
+          <td><code>small</code></td>
+          <td>≤ 16 GiB</td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+      </tr>
+      <tr>
+          <td><code>medium</code></td>
+          <td>&gt; 16, ≤ 48 GiB</td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+      </tr>
+      <tr>
+          <td><code>large</code></td>
+          <td>&gt; 48, ≤ 96 GiB</td>
+          <td><code>12</code></td>
+          <td><code>128Gi</code></td>
+      </tr>
+      <tr>
+          <td><code>xlarge</code></td>
+          <td>&gt; 96 GiB</td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+      </tr>
+  </tbody>
+</table>
+<p><code>spec.localStorage</code> is always <code>100Gi</code>, never preset per product; a CPU-only derived type is always
+<code>1</code> CPU / <code>2Gi</code>.</p>
+<p><strong>An accelerator not listed below gets <code>fallback</code></strong>: <code>4</code> CPU / <code>16Gi</code>, what every accelerator got
+before presets existed.</p>
+<p>A family&rsquo;s tier starts from its VRAM band, then drops to what its <strong>lowest</strong> published
+multi-accelerator host configuration supports on both axes; single-accelerator cloud tiers are
+ignored, tracking the buyer&rsquo;s instance size rather than the accelerator. The CPU ladder stops at
+<code>12</code> on purpose: the preset is also the defaulted request, so with overcommit disabled a generous
+CPU number is the first thing that leaves single-accelerator Pods <code>Pending</code>.</p>
+<p><code>Anchor</code> is the published configuration each preset was taken from, per accelerator.</p>
+<h2 id="nvidia">NVIDIA</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>nvidia-b200</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>DGX B200 14c/256g; AWS p6-b200 24c/256g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-b300</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>AWS p6-b300 24c/512g; OCI BM.GPU.B300.8 16c/512g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-gb200</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>GB200 NVL72 36c/240g; Azure ND128isr 32c/216g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-gb300</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>GB300 NVL72 36c/240g; Azure ND128isr 32c/216g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-h100</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Azure ND96isr 12c/237g; DGX H100 14c/256g; AWS p5 24c/256g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-h200</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Azure ND96isr 12c/231g; DGX H200 14c/256g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-h800</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Tencent HCCPNV5 24c/256g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-gh200</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>GH200 superchip 72c/480g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-gb10</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>DGX Spark 20c/128g, where the 128g is unified CPU/GPU memory</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-a100</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>any A100 whose name carries no capacity</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-a100-80gb</code></td>
+          <td><code>large</code></td>
+          <td><code>12</code></td>
+          <td><code>128Gi</code></td>
+          <td>GCP a2-ultragpu 12c/170g; Alibaba gn7e 16c/125g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-a100-40gb</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Azure ND96asr 12c/112g; GCP a2-highgpu 12c/85g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-a800</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>any A800 whose name carries no capacity</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-a800-80gb</code></td>
+          <td><code>large</code></td>
+          <td><code>12</code></td>
+          <td><code>128Gi</code></td>
+          <td>Alibaba ebmgn7ex 16c/128g; Volcengine 16c/256g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-a800-40gb</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>mirrors A100 40GB</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-a30</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>Leafcloud / AceCloud 8c/32g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-a10</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>AWS g5 multi-accelerator 24c/96g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-a10g</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>AWS g5 multi-accelerator 24c/96g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-l4</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>GCP g2 12c/48g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-l40</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>CoreWeave 16c/128g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-l40s</code></td>
+          <td><code>large</code></td>
+          <td><code>12</code></td>
+          <td><code>128Gi</code></td>
+          <td>AWS g6e 24c/192g; CoreWeave 16c/128g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-t4</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>Tencent GN7 / Huawei pi2 8c/32g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-v100</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>AWS p3 8c/61g; Alibaba gn6v 8c/32g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-v100-32gb</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>AWS p3dn 12c/96g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-v100s</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>Tencent GN10X 9c/40g; Huawei p2vs 8c/64g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-rtx-pro-4500</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>AWS g7 multi-accelerator 24c/96g; RunPod workstation 12c/54g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-rtx-6000</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>Lambda 14c/46g; DigitalOcean 8c/64g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-rtx-4000</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>DigitalOcean 8c/32g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-rtx-a6000</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>Paperspace 8c/45g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-rtx-a5000</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>Paperspace 8c/45g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-rtx-a4000</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>Paperspace 8c/45g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-rtx-3090</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>AutoDL / Featurize 8c/32g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-rtx-4090</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>AutoDL / Matpool 10–16c/64g; 8-accelerator boxes 24c/64g</td>
+      </tr>
+      <tr>
+          <td><code>nvidia-rtx-5090</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Yotta Labs 14c/115g</td>
+      </tr>
+  </tbody>
+</table>
+<p><code>nvidia-rtx-6000</code> also covers <code>Quadro RTX 6000</code>, <code>nvidia-rtx-4090</code> the 4090D.</p>
+<h2 id="ascend">Ascend</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ascend-310p</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Tianyi PAK1 18c/72g; PAK2 16c/128g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-310p1</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Tianyi PAK1 18c/72g; PAK2 16c/128g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-310p2</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Tianyi PAK1 18c/72g; PAK2 16c/128g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-310p3</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Tianyi PAK1 18c/72g; PAK2 16c/128g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-310p4</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Tianyi PAK1 18c/72g; PAK2 16c/128g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-310p5</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Tianyi PAK1 18c/72g; PAK2 16c/128g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-310p7</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Tianyi PAK1 18c/72g; PAK2 16c/128g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910b</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>KunLun G5680 V2 24c/64g; Atlas 800T A2 24c/192g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910b1</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>KunLun G5680 V2 24c/64g; Atlas 800T A2 24c/192g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910b2</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>KunLun G5680 V2 24c/64g; Atlas 800T A2 24c/192g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910b2c</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>KunLun G5680 V2 24c/64g; Atlas 800T A2 24c/192g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910b3</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>KunLun G5680 V2 24c/64g; Atlas 800T A2 24c/192g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910b4</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>KunLun G5680 V2 24c/64g; Atlas 800T A2 24c/192g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910-9362</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Atlas 800T A3 32c/256g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910-9363</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Atlas 800T A3 32c/256g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910-9372</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Atlas 800T A3 32c/256g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910-9381</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Atlas 800T A3 32c/256g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910-9382</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Atlas 800T A3 32c/256g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910-9391</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Atlas 800T A3 32c/256g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-910-9392</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Atlas 800T A3 32c/256g</td>
+      </tr>
+      <tr>
+          <td><code>ascend-950</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>no published configuration; placed by its VRAM band</td>
+      </tr>
+      <tr>
+          <td><code>ascend-950pr</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>inherited from <code>ascend-950</code></td>
+      </tr>
+      <tr>
+          <td><code>ascend-950dt</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>inherited from <code>ascend-950</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>910B is held one tier below its VRAM band because the KunLun G5680 V2 gives 64GB per accelerator;
+<code>ascend-910b4</code> also covers <code>910B4-1</code>.</p>
+<p>The 950 rows sit at the top of the ladder on VRAM alone (128GB on the PR part, 144GB on the DT
+part, both above every band below them), since no host configuration has been published to anchor
+them against. The detector resolves any <code>950*</code> chip name to one family, so a suffix this table has
+yet to list still schedules; it just takes the fallback unit resources until a row is added.</p>
+<h2 id="amd">AMD</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>amd-mi300x</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Azure ND96isr 12c/231g; OCI 14c/256g; Supermicro TNMR2 24c/288g</td>
+      </tr>
+      <tr>
+          <td><code>amd-mi308x</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>inherited from MI300X, which has no configuration of its own</td>
+      </tr>
+      <tr>
+          <td><code>amd-mi325x</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>TensorWave 16c/384g; Supermicro G1 16c/288g</td>
+      </tr>
+      <tr>
+          <td><code>amd-mi350x</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>Supermicro AS-8126GS 16c/384g</td>
+      </tr>
+      <tr>
+          <td><code>amd-mi355x</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td>OCI BM.GPU.MI355X.8 16c/384g</td>
+      </tr>
+      <tr>
+          <td><code>amd-mi250</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td></td>
+      </tr>
+      <tr>
+          <td><code>amd-mi250x</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Pawsey Setonix standard node 16c/64g; Frontier / LUMI-G 16c/128g</td>
+      </tr>
+      <tr>
+          <td><code>amd-mi210</code></td>
+          <td><code>large</code></td>
+          <td><code>12</code></td>
+          <td><code>128Gi</code></td>
+          <td>Dell PowerEdge R750xa 16c/128g</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="cambricon">Cambricon</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>cambricon-mlu370</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Tianyi PCH1 16c/64g; 8-accelerator server 7c/64g</td>
+      </tr>
+      <tr>
+          <td><code>cambricon-mlu590</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td></td>
+      </tr>
+  </tbody>
+</table>
+<p><code>cambricon-mlu370</code> covers <code>MLU370</code> and its <code>-S4</code> / <code>-X4</code> / <code>-X8</code> variants. The bare name <code>MLU</code> is
+the driver&rsquo;s unknown-accelerator sentinel, deliberately never matched.</p>
+<h2 id="hygon">Hygon</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>hygon-z100</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>Zhongke Kekong X7840H0 6c/32g</td>
+      </tr>
+      <tr>
+          <td><code>hygon-z100l</code></td>
+          <td><code>small</code></td>
+          <td><code>8</code></td>
+          <td><code>32Gi</code></td>
+          <td>Zhongke Kekong X7840H0 6c/32g</td>
+      </tr>
+      <tr>
+          <td><code>hygon-k100</code></td>
+          <td><code>large</code></td>
+          <td><code>12</code></td>
+          <td><code>128Gi</code></td>
+          <td>Tianyi 4U8 8c/128g; H3C R5330 G7 32c/128g</td>
+      </tr>
+      <tr>
+          <td><code>hygon-bw100</code></td>
+          <td><code>large</code></td>
+          <td><code>12</code></td>
+          <td><code>128Gi</code></td>
+          <td></td>
+      </tr>
+      <tr>
+          <td><code>hygon-bw1000</code></td>
+          <td><code>xlarge</code></td>
+          <td><code>12</code></td>
+          <td><code>192Gi</code></td>
+          <td></td>
+      </tr>
+  </tbody>
+</table>
+<p><code>hygon-k100</code> also covers <code>K100_AI</code>.</p>
+<h2 id="metax">MetaX</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>metax-mxc500</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Lenovo WA5480G3 14c/64g; Lenovo 4U8 8c/128g</td>
+      </tr>
+      <tr>
+          <td><code>metax-mxc550</code></td>
+          <td><code>large</code></td>
+          <td><code>12</code></td>
+          <td><code>128Gi</code></td>
+          <td>Aituomou cloud 30c/180g; FlagPerf 14c/256g</td>
+      </tr>
+      <tr>
+          <td><code>metax-mxc588</code></td>
+          <td><code>large</code></td>
+          <td><code>12</code></td>
+          <td><code>128Gi</code></td>
+          <td></td>
+      </tr>
+      <tr>
+          <td><code>metax-mxc600</code></td>
+          <td><code>large</code></td>
+          <td><code>12</code></td>
+          <td><code>128Gi</code></td>
+          <td></td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="mthreads">MThreads</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>mthreads-mtt-s4000</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>MCCX D800 8c/128g; AutoDL 15c/100g</td>
+      </tr>
+      <tr>
+          <td><code>mthreads-mtt-s5000</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>inherited from MTT S4000, which has no configuration of its own</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="iluvatar">Iluvatar</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>iluvatar-bi-v100</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td></td>
+      </tr>
+      <tr>
+          <td><code>iluvatar-bi-v150</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Phytium dual-socket machine 64c/64g</td>
+      </tr>
+      <tr>
+          <td><code>iluvatar-mr-v50</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td></td>
+      </tr>
+      <tr>
+          <td><code>iluvatar-mr-v100</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Tenghua 4U8 16c/64g</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="t-head">T-Head</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>thead-ppu-zw810e</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>16 accelerators / 184 cores / 1.8TiB, i.e. 11.5c/112g</td>
+      </tr>
+      <tr>
+          <td><code>thead-ppu-zwm890</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>inherited from ZW810E, which has no configuration of its own</td>
+      </tr>
+  </tbody>
+</table>
+<p>The Iluvatar, MThreads and T-Head product strings come from manufacturer knowledge, unverified
+against a device sample in this repository.</p>
+<h2 id="intel">Intel</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>intel-gaudi2</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>HLS-Gaudi2 reference server 10c/128g</td>
+      </tr>
+      <tr>
+          <td><code>intel-gaudi3</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>IBM Cloud gx3d 20c/224g; Dell XE9680 15c/128g; Dell recommended 8c/256g</td>
+      </tr>
+      <tr>
+          <td><code>intel-max-1550</code></td>
+          <td><code>large</code></td>
+          <td><code>12</code></td>
+          <td><code>128Gi</code></td>
+          <td>Argonne Aurora blade 17c/171g; Dell XE9640 24c/128g</td>
+      </tr>
+      <tr>
+          <td><code>intel-max-1100</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>Dell R760xa 28c/256g; Kelvin2 16c/125g</td>
+      </tr>
+  </tbody>
+</table>
+<p>Not reachable yet: the operator has no manufacturer key for Intel, so a node carrying one is not
+summarized into an accelerated <code>InstanceType</code>.</p>
+<h2 id="kunlun">Kunlun</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>kunlun-p800</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td>8-accelerator machine 8c/64g; Inspur R3418/R3428 8c/256g</td>
+      </tr>
+  </tbody>
+</table>
+<p>Not reachable yet: the operator has no manufacturer key for Kunlun.</p>
+<h2 id="biren">Biren</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Tier</th>
+          <th>Unit CPU</th>
+          <th>Unit RAM</th>
+          <th>Anchor</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>biren-br100</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td></td>
+      </tr>
+      <tr>
+          <td><code>biren-br104</code></td>
+          <td><code>medium</code></td>
+          <td><code>8</code></td>
+          <td><code>64Gi</code></td>
+          <td></td>
+      </tr>
+  </tbody>
+</table>
+<p>Not reachable yet: the operator has no manufacturer key for Biren.</p>
+<h2 id="hardware-without-a-preset">Hardware without a preset</h2>
+<p>Create the <code>InstanceType</code> yourself: an administrator-created type is never touched by the operator,
+and no preset overrides it. There is no setting to override the table; it ships in the operator
+image. Two things to know first:</p>
+<ul>
+<li>Presets apply only to types created after the upgrade, since <code>spec.unitResources</code> is immutable and
+the operator only ever creates; an upgraded cluster carries mixed old and new sizing.</li>
+<li>Deleting a derived <code>InstanceType</code> has the operator author it again at the current presets (the
+supported way to re-size a pool the operator owns); the pool is not schedulable in between.</li>
+</ul>
+<p>The table lives in <code>pkg/nodefeature/unit_resources_preset.yaml</code>, with the rules an edit must satisfy
+at the top of that file; when either changes, compare the rows here with the preset data.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/scheduling/#unit-spec-defaults">Scheduling Chain</a>
+
+(where the unit spec is stamped)</li><li><a href="/gpustack-operator/v0.9.0/docs/modules/devices/admission/#the-instancetype-and-instance-webhooks">Admission</a>
+
+(what the webhooks enforce on it)</li><li><a href="/gpustack-operator/v0.9.0/docs/walkthroughs/devices/scheduling/#4-managing-a-custom-instancetype">Walkthrough</a></li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0/docs/reference/settings/#online-adjustable-settings">Settings</a>
+ — the switches named on this page.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1259d0f1aedf7b4d8b3c9302241e4f83c89a4c53/docs/reference/instance-type-unit-resources.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#preset-scope">Preset scope</a></li>
+    <li><a href="#the-tiers">The tiers</a></li>
+    <li><a href="#nvidia">NVIDIA</a></li>
+    <li><a href="#ascend">Ascend</a></li>
+    <li><a href="#amd">AMD</a></li>
+    <li><a href="#cambricon">Cambricon</a></li>
+    <li><a href="#hygon">Hygon</a></li>
+    <li><a href="#metax">MetaX</a></li>
+    <li><a href="#mthreads">MThreads</a></li>
+    <li><a href="#iluvatar">Iluvatar</a></li>
+    <li><a href="#t-head">T-Head</a></li>
+    <li><a href="#intel">Intel</a></li>
+    <li><a href="#kunlun">Kunlun</a></li>
+    <li><a href="#biren">Biren</a></li>
+    <li><a href="#hardware-without-a-preset">Hardware without a preset</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>
