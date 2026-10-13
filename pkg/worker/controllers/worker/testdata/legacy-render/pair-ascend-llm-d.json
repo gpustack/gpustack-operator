@@ -1,0 +1,361 @@
+[
+  {
+    "metadata": {
+      "generateName": "qwen-prefill-",
+      "namespace": "team-a",
+      "labels": {
+        "app.kubernetes.io/component": "prefill",
+        "app.kubernetes.io/instance": "qwen",
+        "app.kubernetes.io/name": "model-deployment",
+        "app.kubernetes.io/part-of": "gpustack-operator-worker",
+        "kueue.x-k8s.io/pod-group-name": "gpustack-fnv64-d8143bebd0d350d8",
+        "kueue.x-k8s.io/queue-name": "entrance-for-atlas-910b",
+        "modeldeployment.gpustack.ai/member-index": "0",
+        "modeldeployment.gpustack.ai/pod-ordinal": "0",
+        "modeldeployment.gpustack.ai/role-kind": "prefill",
+        "resource.gpustack.ai/type": "modeldeployments"
+      },
+      "annotations": {
+        "kueue.x-k8s.io/pod-group-serving": "true",
+        "kueue.x-k8s.io/pod-group-total-count": "1",
+        "kueue.x-k8s.io/role-hash": "prefill",
+        "modeldeployment.gpustack.ai/pod-spec-hash": "279fa6dbc99f6b2a8e2b202604706c5448348619ccfd8cf17c3527a6ae13cee9",
+        "note.gpustack.ai/role": "prefill",
+        "prometheus.io/path": "/metrics",
+        "prometheus.io/port": "8000",
+        "prometheus.io/scheme": "http",
+        "prometheus.io/scrape": "true"
+      },
+      "ownerReferences": [
+        {
+          "apiVersion": "worker.gpustack.ai/v1alpha1",
+          "kind": "ModelDeployment",
+          "name": "qwen",
+          "uid": "md-uid",
+          "controller": true,
+          "blockOwnerDeletion": false
+        }
+      ]
+    },
+    "spec": {
+      "volumes": [
+        {
+          "name": "gpustack-ascend-driver",
+          "hostPath": {
+            "path": "/usr/local/Ascend/driver",
+            "type": "Directory"
+          }
+        },
+        {
+          "name": "model-shm",
+          "emptyDir": {
+            "medium": "Memory",
+            "sizeLimit": "16Gi"
+          }
+        }
+      ],
+      "containers": [
+        {
+          "name": "main",
+          "image": "vllm/vllm-ascend:v0.23.0",
+          "command": [
+            "vllm",
+            "serve",
+            "Qwen/Qwen2.5-72B-Instruct",
+            "--kv-transfer-config",
+            "{\"kv_connector\":\"MooncakeConnectorV1\",\"kv_role\":\"kv_producer\",\"kv_port\":8998,\"kv_connector_extra_config\":{\"prefill\":{\"tp_size\":1,\"dp_size\":1},\"decode\":{\"tp_size\":1,\"dp_size\":1}}}",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8000"
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "containerPort": 8000,
+              "protocol": "TCP"
+            },
+            {
+              "name": "mc-bootstrap",
+              "containerPort": 8998,
+              "protocol": "TCP"
+            }
+          ],
+          "env": [
+            {
+              "name": "MC_TE_METRIC",
+              "value": "1"
+            }
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "16",
+              "ephemeral-storage": "15Gi",
+              "huawei.com/npu": "1",
+              "memory": "64Gi"
+            },
+            "requests": {
+              "cpu": "1600m",
+              "ephemeral-storage": "1920Mi",
+              "huawei.com/npu": "1",
+              "memory": "8Gi"
+            }
+          },
+          "volumeMounts": [
+            {
+              "name": "gpustack-ascend-driver",
+              "readOnly": true,
+              "mountPath": "/usr/local/Ascend/driver"
+            },
+            {
+              "name": "model-shm",
+              "mountPath": "/dev/shm"
+            }
+          ],
+          "livenessProbe": {
+            "httpGet": {
+              "path": "/health",
+              "port": 8000,
+              "scheme": "HTTP"
+            },
+            "timeoutSeconds": 3,
+            "periodSeconds": 10,
+            "failureThreshold": 6
+          },
+          "readinessProbe": {
+            "httpGet": {
+              "path": "/health",
+              "port": 8000,
+              "scheme": "HTTP"
+            },
+            "timeoutSeconds": 3,
+            "periodSeconds": 10,
+            "failureThreshold": 3
+          },
+          "startupProbe": {
+            "httpGet": {
+              "path": "/health",
+              "port": 8000,
+              "scheme": "HTTP"
+            },
+            "timeoutSeconds": 3,
+            "periodSeconds": 10,
+            "failureThreshold": 180
+          },
+          "lifecycle": {
+            "preStop": {
+              "exec": {
+                "command": [
+                  "python3",
+                  "-c",
+                  "import socket, ssl, sys, time, urllib.request\nstart = time.monotonic()\ntime.sleep(5)\nnames = [\"vllm:num_requests_running\", \"vllm:num_requests_waiting\"]\ncontext = ssl.create_default_context()\ncontext.check_hostname = False\ncontext.verify_mode = ssl.CERT_NONE\nidle = 0\nwhile time.monotonic() - start \u003c 25:\n    try:\n        body = urllib.request.urlopen(\"http://127.0.0.1:8000/metrics\", timeout=1, context=context).read().decode()\n    except Exception as err:\n        if not isinstance(getattr(err, \"reason\", err), (TimeoutError, socket.timeout)):\n            sys.exit(0)\n        body = None\n    busy = 1.0 if body is None else 0.0\n    for line in (body or \"\").splitlines():\n        name = line.split(\"{\", 1)[0].split(\" \", 1)[0]\n        if name not in names:\n            continue\n        sample = line.rsplit(\"}\", 1)[1] if \"{\" in line else line[len(name):]\n        try:\n            busy += float(sample.split()[0])\n        except (IndexError, ValueError):\n            busy += 1.0\n    idle = idle + 1 if busy == 0 else 0\n    if idle == 2:\n        sys.exit(0)\n    time.sleep(1)\nsys.exit(0)\n"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "restartPolicy": "Always",
+      "terminationGracePeriodSeconds": 30,
+      "automountServiceAccountToken": false,
+      "runtimeClassName": "ascend",
+      "enableServiceLinks": false
+    },
+    "status": {}
+  },
+  {
+    "metadata": {
+      "generateName": "qwen-decode-",
+      "namespace": "team-a",
+      "labels": {
+        "app.kubernetes.io/component": "decode",
+        "app.kubernetes.io/instance": "qwen",
+        "app.kubernetes.io/name": "model-deployment",
+        "app.kubernetes.io/part-of": "gpustack-operator-worker",
+        "kueue.x-k8s.io/pod-group-name": "gpustack-fnv64-058a40297d4ce6a4",
+        "kueue.x-k8s.io/queue-name": "entrance-for-atlas-910b",
+        "modeldeployment.gpustack.ai/member-index": "0",
+        "modeldeployment.gpustack.ai/pod-ordinal": "0",
+        "modeldeployment.gpustack.ai/role-kind": "decode",
+        "resource.gpustack.ai/type": "modeldeployments"
+      },
+      "annotations": {
+        "kueue.x-k8s.io/pod-group-serving": "true",
+        "kueue.x-k8s.io/pod-group-total-count": "1",
+        "kueue.x-k8s.io/role-hash": "decode",
+        "modeldeployment.gpustack.ai/pod-spec-hash": "39fc1dfdbf61c5b4340742891104f137152a2e049fe2da9c369eae1234433ea4",
+        "note.gpustack.ai/role": "decode",
+        "prometheus.io/path": "/metrics",
+        "prometheus.io/port": "8200",
+        "prometheus.io/scheme": "http",
+        "prometheus.io/scrape": "true"
+      },
+      "ownerReferences": [
+        {
+          "apiVersion": "worker.gpustack.ai/v1alpha1",
+          "kind": "ModelDeployment",
+          "name": "qwen",
+          "uid": "md-uid",
+          "controller": true,
+          "blockOwnerDeletion": false
+        }
+      ]
+    },
+    "spec": {
+      "volumes": [
+        {
+          "name": "gpustack-ascend-driver",
+          "hostPath": {
+            "path": "/usr/local/Ascend/driver",
+            "type": "Directory"
+          }
+        },
+        {
+          "name": "model-shm",
+          "emptyDir": {
+            "medium": "Memory",
+            "sizeLimit": "16Gi"
+          }
+        }
+      ],
+      "initContainers": [
+        {
+          "name": "routing-proxy",
+          "image": "gpustack.example/disagg-sidecar:v0.10.0-fixture",
+          "args": [
+            "--port=8000",
+            "--model-server-port=8200",
+            "--kv-connector=nixlv2",
+            "--secure-proxy=false"
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "containerPort": 8000,
+              "protocol": "TCP"
+            }
+          ],
+          "env": [
+            {
+              "name": "POD_IP",
+              "valueFrom": {
+                "fieldRef": {
+                  "fieldPath": "status.podIP"
+                }
+              }
+            }
+          ],
+          "resources": {},
+          "restartPolicy": "Always",
+          "imagePullPolicy": "IfNotPresent",
+          "securityContext": {
+            "runAsNonRoot": true,
+            "allowPrivilegeEscalation": false
+          }
+        }
+      ],
+      "containers": [
+        {
+          "name": "main",
+          "image": "vllm/vllm-ascend:v0.23.0",
+          "command": [
+            "vllm",
+            "serve",
+            "Qwen/Qwen2.5-72B-Instruct",
+            "--kv-transfer-config",
+            "{\"kv_connector\":\"MooncakeConnectorV1\",\"kv_role\":\"kv_consumer\",\"kv_port\":8998,\"kv_connector_extra_config\":{\"prefill\":{\"tp_size\":1,\"dp_size\":1},\"decode\":{\"tp_size\":1,\"dp_size\":1}}}",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8200"
+          ],
+          "ports": [
+            {
+              "name": "model-server",
+              "containerPort": 8200,
+              "protocol": "TCP"
+            }
+          ],
+          "env": [
+            {
+              "name": "MC_TE_METRIC",
+              "value": "1"
+            }
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "16",
+              "ephemeral-storage": "15Gi",
+              "huawei.com/npu": "1",
+              "memory": "64Gi"
+            },
+            "requests": {
+              "cpu": "1600m",
+              "ephemeral-storage": "1920Mi",
+              "huawei.com/npu": "1",
+              "memory": "8Gi"
+            }
+          },
+          "volumeMounts": [
+            {
+              "name": "gpustack-ascend-driver",
+              "readOnly": true,
+              "mountPath": "/usr/local/Ascend/driver"
+            },
+            {
+              "name": "model-shm",
+              "mountPath": "/dev/shm"
+            }
+          ],
+          "livenessProbe": {
+            "httpGet": {
+              "path": "/v1/models",
+              "port": 8000,
+              "scheme": "HTTP"
+            },
+            "timeoutSeconds": 3,
+            "periodSeconds": 10,
+            "failureThreshold": 6
+          },
+          "readinessProbe": {
+            "httpGet": {
+              "path": "/v1/models",
+              "port": 8000,
+              "scheme": "HTTP"
+            },
+            "timeoutSeconds": 3,
+            "periodSeconds": 10,
+            "failureThreshold": 3
+          },
+          "startupProbe": {
+            "httpGet": {
+              "path": "/v1/models",
+              "port": 8000,
+              "scheme": "HTTP"
+            },
+            "timeoutSeconds": 3,
+            "periodSeconds": 10,
+            "failureThreshold": 180
+          },
+          "lifecycle": {
+            "preStop": {
+              "exec": {
+                "command": [
+                  "python3",
+                  "-c",
+                  "import socket, ssl, sys, time, urllib.request\nstart = time.monotonic()\ntime.sleep(5)\nnames = [\"vllm:num_requests_running\", \"vllm:num_requests_waiting\"]\ncontext = ssl.create_default_context()\ncontext.check_hostname = False\ncontext.verify_mode = ssl.CERT_NONE\nidle = 0\nwhile time.monotonic() - start \u003c 25:\n    try:\n        body = urllib.request.urlopen(\"http://127.0.0.1:8200/metrics\", timeout=1, context=context).read().decode()\n    except Exception as err:\n        if not isinstance(getattr(err, \"reason\", err), (TimeoutError, socket.timeout)):\n            sys.exit(0)\n        body = None\n    busy = 1.0 if body is None else 0.0\n    for line in (body or \"\").splitlines():\n        name = line.split(\"{\", 1)[0].split(\" \", 1)[0]\n        if name not in names:\n            continue\n        sample = line.rsplit(\"}\", 1)[1] if \"{\" in line else line[len(name):]\n        try:\n            busy += float(sample.split()[0])\n        except (IndexError, ValueError):\n            busy += 1.0\n    idle = idle + 1 if busy == 0 else 0\n    if idle == 2:\n        sys.exit(0)\n    time.sleep(1)\nsys.exit(0)\n"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "restartPolicy": "Always",
+      "terminationGracePeriodSeconds": 30,
+      "automountServiceAccountToken": false,
+      "runtimeClassName": "ascend",
+      "enableServiceLinks": false
+    },
+    "status": {}
+  }
+]

@@ -1061,6 +1061,10 @@ func convertModelDeploymentAdditionalVolumes(
 			}
 		case av.HostPath != nil:
 			vs.HostPath = av.HostPath.DeepCopy()
+		case av.PersistentVolumeClaim != nil:
+			// The claim name and its own read-only are copied as they arrive: a Pod volume
+			// reaches a claim in the Pod's namespace only, so there is no namespace to add.
+			vs.PersistentVolumeClaim = av.PersistentVolumeClaim.DeepCopy()
 		default:
 			continue
 		}

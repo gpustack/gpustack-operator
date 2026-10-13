@@ -1,0 +1,91 @@
+[
+  {
+    "metadata": {
+      "generateName": "qwen-server-",
+      "namespace": "team-a",
+      "labels": {
+        "app.kubernetes.io/component": "server",
+        "app.kubernetes.io/instance": "qwen",
+        "app.kubernetes.io/name": "model-deployment",
+        "app.kubernetes.io/part-of": "gpustack-operator-worker",
+        "kueue.x-k8s.io/pod-group-name": "gpustack-fnv64-bdf8eb21739dcea9",
+        "kueue.x-k8s.io/queue-name": "queue-for-h20-8x",
+        "modeldeployment.gpustack.ai/member-index": "0",
+        "modeldeployment.gpustack.ai/pod-ordinal": "0",
+        "modeldeployment.gpustack.ai/role-kind": "server",
+        "resource.gpustack.ai/type": "modeldeployments"
+      },
+      "annotations": {
+        "kueue.x-k8s.io/pod-group-serving": "true",
+        "kueue.x-k8s.io/pod-group-total-count": "1",
+        "kueue.x-k8s.io/role-hash": "server",
+        "modeldeployment.gpustack.ai/pod-spec-hash": "3d8cc5448615d29563595b966b2d8845d9b0b61e9d10bc8693c0649ab8ec027f",
+        "note.gpustack.ai/role": "server"
+      },
+      "ownerReferences": [
+        {
+          "apiVersion": "worker.gpustack.ai/v1alpha1",
+          "kind": "ModelDeployment",
+          "name": "qwen",
+          "uid": "md-uid",
+          "controller": true,
+          "blockOwnerDeletion": false
+        }
+      ]
+    },
+    "spec": {
+      "volumes": [
+        {
+          "name": "model-shm",
+          "emptyDir": {
+            "medium": "Memory",
+            "sizeLimit": "16Gi"
+          }
+        }
+      ],
+      "containers": [
+        {
+          "name": "main",
+          "image": "vllm/vllm-openai:v0.25.1",
+          "command": [
+            "vllm",
+            "serve",
+            "Qwen/Qwen2.5-72B-Instruct"
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "containerPort": 8000,
+              "protocol": "TCP"
+            }
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "16",
+              "ephemeral-storage": "15Gi",
+              "memory": "64Gi",
+              "nvidia.com/gpu": "1"
+            },
+            "requests": {
+              "cpu": "1600m",
+              "ephemeral-storage": "1920Mi",
+              "memory": "8Gi",
+              "nvidia.com/gpu": "1"
+            }
+          },
+          "volumeMounts": [
+            {
+              "name": "model-shm",
+              "mountPath": "/dev/shm"
+            }
+          ]
+        }
+      ],
+      "restartPolicy": "Always",
+      "automountServiceAccountToken": false,
+      "runtimeClassName": "nvidia",
+      "enableServiceLinks": false
+    },
+    "status": {}
+  }
+]

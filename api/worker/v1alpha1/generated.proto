@@ -3203,6 +3203,11 @@ message ModelDeploymentAdditionalVolume {
   // mount reaches the node's own filesystem rather than a namespaced object, so what it exposes
   // is decided by what the node carries rather than by anything this API can see.
   optional .k8s.io.api.core.v1.HostPathVolumeSource hostPath = 6;
+
+  // PersistentVolumeClaim is the reference to a PersistentVolumeClaim to mount, in the deployment
+  // namespace. claimName is required and names a claim in this namespace; exactly one source is
+  // set on the entry. The existing mount path, sub-path and read-only fields apply.
+  optional .k8s.io.api.core.v1.PersistentVolumeClaimVolumeSource persistentVolumeClaim = 7;
 }
 
 // ModelDeploymentEngine is the engine a deployment runs and the version of it.
@@ -3686,7 +3691,7 @@ message ModelDeploymentRole {
   // so such a deployment renders exactly as it did.
   //
   // +k8s:validation:default="Server"
-  // +k8s:validation:enum=["Server","Prefill","Decode"]
+  // +k8s:validation:enum=["Server","Prefill","Decode","Encode"]
   optional string kind = 8;
 
   // Replicas is how many independent serving instances this role runs. The instances are
@@ -4091,7 +4096,7 @@ message ModelDeploymentRoleStatus {
   // figure down with the kind. The marker sits on the field because the type's own enum marker is a
   // Go-level one and does not become schema validation.
   //
-  // +k8s:validation:enum=["Server","Prefill","Decode"]
+  // +k8s:validation:enum=["Server","Prefill","Decode","Encode"]
   optional string kind = 5;
 
   // AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for

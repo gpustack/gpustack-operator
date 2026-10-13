@@ -35,6 +35,10 @@ type ModelDeploymentAdditionalVolumeApplyConfiguration struct {
 	// mount reaches the node's own filesystem rather than a namespaced object, so what it exposes
 	// is decided by what the node carries rather than by anything this API can see.
 	HostPath *v1.HostPathVolumeSourceApplyConfiguration `json:"hostPath,omitempty"`
+	// PersistentVolumeClaim is the reference to a PersistentVolumeClaim to mount, in the deployment
+	// namespace. claimName is required and names a claim in this namespace; exactly one source is
+	// set on the entry. The existing mount path, sub-path and read-only fields apply.
+	PersistentVolumeClaim *v1.PersistentVolumeClaimVolumeSourceApplyConfiguration `json:"persistentVolumeClaim,omitempty"`
 }
 
 // ModelDeploymentAdditionalVolumeApplyConfiguration constructs a declarative configuration of the ModelDeploymentAdditionalVolume type for use with
@@ -88,5 +92,13 @@ func (b *ModelDeploymentAdditionalVolumeApplyConfiguration) WithSecret(value *v1
 // If called multiple times, the HostPath field is set to the value of the last call.
 func (b *ModelDeploymentAdditionalVolumeApplyConfiguration) WithHostPath(value *v1.HostPathVolumeSourceApplyConfiguration) *ModelDeploymentAdditionalVolumeApplyConfiguration {
 	b.HostPath = value
+	return b
+}
+
+// WithPersistentVolumeClaim sets the PersistentVolumeClaim field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PersistentVolumeClaim field is set to the value of the last call.
+func (b *ModelDeploymentAdditionalVolumeApplyConfiguration) WithPersistentVolumeClaim(value *v1.PersistentVolumeClaimVolumeSourceApplyConfiguration) *ModelDeploymentAdditionalVolumeApplyConfiguration {
+	b.PersistentVolumeClaim = value
 	return b
 }

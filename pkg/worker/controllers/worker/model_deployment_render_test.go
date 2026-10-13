@@ -1578,6 +1578,184 @@ func TestRenderModelDeploymentPod_NoClientConfigWithoutOne(t *testing.T) {
 	}
 }
 
+// TestConvertModelDeploymentAdditionalVolumes asserts how a role's spec.additionalVolumes reach the
+// rendered Pod: one Pod volume and one mount per entry, named from the entry's index, with the
+// mount path, sub-path and read-only carried from the entry. A claim's reference is the entry's own
+// claim name and its own read-only, copied as they arrive: a Pod volume reaches a claim in the
+// Pod's namespace only, so nothing may add a namespace to the reference, and the mount's read-only
+// stays the entry's rather than the source's.
+func TestConvertModelDeploymentAdditionalVolumes(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		entry      workercore.ModelDeploymentAdditionalVolume
+		wantVolume core.Volume
+		wantMount  core.VolumeMount
+	}{
+		{
+			name: "a claim",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/cache",
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/cache"},
+		},
+		{
+			name: "a claim with a sub-path",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/cache",
+				SubPath:               "qwen",
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/cache", SubPath: "qwen"},
+		},
+		{
+			name: "a claim with a read-only entry",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/cache",
+				ReadOnly:              true,
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/cache", ReadOnly: true},
+		},
+		{
+			name: "a read-only claim source is copied and the mount read-only stays the entry's own",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/cache",
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache", ReadOnly: true},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
+						ClaimName: "shared-cache", ReadOnly: true,
+					},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/cache"},
+		},
+		{
+			name: "a config map",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath: "/etc/app",
+				ReadOnly:  true,
+				SubPath:   "conf",
+				ConfigMap: &core.LocalObjectReference{Name: "app-config"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					ConfigMap: &core.ConfigMapVolumeSource{LocalObjectReference: core.LocalObjectReference{Name: "app-config"}},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/etc/app", ReadOnly: true, SubPath: "conf"},
+		},
+		{
+			name: "a secret",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath: "/var/run/creds",
+				ReadOnly:  true,
+				Secret:    &core.LocalObjectReference{Name: "app-creds"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					Secret: &core.SecretVolumeSource{SecretName: "app-creds"},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/var/run/creds", ReadOnly: true},
+		},
+		{
+			name: "a host path",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath: "/host/models",
+				HostPath:  &core.HostPathVolumeSource{Path: "/mnt/models"},
+			},
+			wantVolume: core.Volume{
+				Name:         "additional-0",
+				VolumeSource: core.VolumeSource{HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/host/models"},
+		},
+		{
+			name: "an entry with every source renders the first",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/data",
+				ConfigMap:             &core.LocalObjectReference{Name: "app-config"},
+				Secret:                &core.LocalObjectReference{Name: "app-creds"},
+				HostPath:              &core.HostPathVolumeSource{Path: "/mnt/models"},
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					ConfigMap: &core.ConfigMapVolumeSource{LocalObjectReference: core.LocalObjectReference{Name: "app-config"}},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/data"},
+		},
+		{
+			name: "a claim yields to a host path",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/data",
+				HostPath:              &core.HostPathVolumeSource{Path: "/mnt/models"},
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+			},
+			wantVolume: core.Volume{
+				Name:         "additional-0",
+				VolumeSource: core.VolumeSource{HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/data"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vols, mounts := convertModelDeploymentAdditionalVolumes(
+				[]workercore.ModelDeploymentAdditionalVolume{tc.entry})
+
+			assert.Equal(t, []core.Volume{tc.wantVolume}, vols)
+			assert.Equal(t, []core.VolumeMount{tc.wantMount}, mounts)
+		})
+	}
+
+	// Two roles mount the same claim through their own entries: each Pod volume carries the claim
+	// name as the entry spelled it, so both reference one claim in the Pods' own namespace.
+	t.Run("the same claim name reaches both roles of a pair", func(t *testing.T) {
+		entry := workercore.ModelDeploymentAdditionalVolume{
+			MountPath:             "/cache",
+			PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+		}
+
+		prefillVols, _ := convertModelDeploymentAdditionalVolumes(
+			[]workercore.ModelDeploymentAdditionalVolume{entry})
+		decodeVols, _ := convertModelDeploymentAdditionalVolumes(
+			[]workercore.ModelDeploymentAdditionalVolume{entry})
+
+		require.Len(t, prefillVols, 1)
+		require.Len(t, decodeVols, 1)
+		require.NotNil(t, prefillVols[0].PersistentVolumeClaim)
+		require.NotNil(t, decodeVols[0].PersistentVolumeClaim)
+		assert.Equal(t, "shared-cache", prefillVols[0].PersistentVolumeClaim.ClaimName)
+		assert.Equal(t, "shared-cache", decodeVols[0].PersistentVolumeClaim.ClaimName)
+	})
+}
+
 // TestModelDeploymentPodSpecHash_IsDeterministic states the property the whole rollout rests on: two
 // renders of one spec must fingerprint identically, or the deployment would recreate every replica
 // on every pass forever.

@@ -5643,6 +5643,18 @@ func (m *ModelDeploymentAdditionalVolume) MarshalToSizedBuffer(dAtA []byte) (int
 	_ = i
 	var l int
 	_ = l
+	if m.PersistentVolumeClaim != nil {
+		{
+			size, err := m.PersistentVolumeClaim.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x3a
+	}
 	if m.HostPath != nil {
 		{
 			size, err := m.HostPath.MarshalToSizedBuffer(dAtA[:i])
@@ -11128,6 +11140,10 @@ func (m *ModelDeploymentAdditionalVolume) Size() (n int) {
 		l = m.HostPath.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	if m.PersistentVolumeClaim != nil {
+		l = m.PersistentVolumeClaim.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
 	return n
 }
 
@@ -13912,6 +13928,7 @@ func (this *ModelDeploymentAdditionalVolume) String() string {
 		`ConfigMap:` + strings.Replace(fmt.Sprintf("%v", this.ConfigMap), "LocalObjectReference", "v11.LocalObjectReference", 1) + `,`,
 		`Secret:` + strings.Replace(fmt.Sprintf("%v", this.Secret), "LocalObjectReference", "v11.LocalObjectReference", 1) + `,`,
 		`HostPath:` + strings.Replace(fmt.Sprintf("%v", this.HostPath), "HostPathVolumeSource", "v11.HostPathVolumeSource", 1) + `,`,
+		`PersistentVolumeClaim:` + strings.Replace(fmt.Sprintf("%v", this.PersistentVolumeClaim), "PersistentVolumeClaimVolumeSource", "v11.PersistentVolumeClaimVolumeSource", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -31977,6 +31994,42 @@ func (m *ModelDeploymentAdditionalVolume) Unmarshal(dAtA []byte) error {
 				m.HostPath = &v11.HostPathVolumeSource{}
 			}
 			if err := m.HostPath.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PersistentVolumeClaim", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.PersistentVolumeClaim == nil {
+				m.PersistentVolumeClaim = &v11.PersistentVolumeClaimVolumeSource{}
+			}
+			if err := m.PersistentVolumeClaim.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

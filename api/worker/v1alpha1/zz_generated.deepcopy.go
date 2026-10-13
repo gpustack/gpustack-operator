@@ -2351,6 +2351,11 @@ func (in *ModelDeploymentAdditionalVolume) DeepCopyInto(out *ModelDeploymentAddi
 		*out = new(v1.HostPathVolumeSource)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.PersistentVolumeClaim != nil {
+		in, out := &in.PersistentVolumeClaim, &out.PersistentVolumeClaim
+		*out = new(v1.PersistentVolumeClaimVolumeSource)
+		**out = **in
+	}
 	return
 }
 

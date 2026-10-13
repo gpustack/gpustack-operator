@@ -358,7 +358,7 @@ type ModelDeploymentRole struct {
 	// so such a deployment renders exactly as it did.
 	//
 	// +k8s:validation:default="Server"
-	// +k8s:validation:enum=["Server","Prefill","Decode"]
+	// +k8s:validation:enum=["Server","Prefill","Decode","Encode"]
 	Kind ModelDeploymentRoleKind `json:"kind,omitempty" protobuf:"bytes,8,opt,name=kind,casttype=ModelDeploymentRoleKind"`
 
 	// Replicas is how many independent serving instances this role runs. The instances are
@@ -641,6 +641,9 @@ const (
 	// ModelDeploymentRoleKindDecode is a role that consumes KV blocks a prefiller produced and
 	// generates tokens from them.
 	ModelDeploymentRoleKindDecode ModelDeploymentRoleKind = "Decode"
+	// ModelDeploymentRoleKindEncode is a role that runs the multimodal encoder and hands its
+	// output to a prefiller rather than producing tokens itself.
+	ModelDeploymentRoleKindEncode ModelDeploymentRoleKind = "Encode"
 )
 
 // ModelDeploymentPort defines one port a role's replica exposes beside the engine's own.
@@ -714,6 +717,11 @@ type ModelDeploymentAdditionalVolume struct {
 	// mount reaches the node's own filesystem rather than a namespaced object, so what it exposes
 	// is decided by what the node carries rather than by anything this API can see.
 	HostPath *core.HostPathVolumeSource `json:"hostPath,omitempty" protobuf:"bytes,6,opt,name=hostPath"`
+
+	// PersistentVolumeClaim is the reference to a PersistentVolumeClaim to mount, in the deployment
+	// namespace. claimName is required and names a claim in this namespace; exactly one source is
+	// set on the entry. The existing mount path, sub-path and read-only fields apply.
+	PersistentVolumeClaim *core.PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty" protobuf:"bytes,7,opt,name=persistentVolumeClaim"` // nolint: lll
 }
 
 // ModelDeploymentRoleResources is what one Pod of a role asks of accelerators and fabric interfaces.
@@ -1189,7 +1197,7 @@ type ModelDeploymentRoleStatus struct {
 	// figure down with the kind. The marker sits on the field because the type's own enum marker is a
 	// Go-level one and does not become schema validation.
 	//
-	// +k8s:validation:enum=["Server","Prefill","Decode"]
+	// +k8s:validation:enum=["Server","Prefill","Decode","Encode"]
 	Kind ModelDeploymentRoleKind `json:"kind" protobuf:"bytes,5,name=kind,casttype=ModelDeploymentRoleKind"`
 
 	// AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for

@@ -9240,12 +9240,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentAdditionalVolume(ref com
 							Ref:         ref(corev1.HostPathVolumeSource{}.OpenAPIModelName()),
 						},
 					},
+					"persistentVolumeClaim": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PersistentVolumeClaim is the reference to a PersistentVolumeClaim to mount, in the deployment namespace. claimName is required and names a claim in this namespace; exactly one source is set on the entry. The existing mount path, sub-path and read-only fields apply.",
+							Ref:         ref(corev1.PersistentVolumeClaimVolumeSource{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"mountPath"},
 			},
 		},
 		Dependencies: []string{
-			corev1.HostPathVolumeSource{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+			corev1.HostPathVolumeSource{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName(), corev1.PersistentVolumeClaimVolumeSource{}.OpenAPIModelName()},
 	}
 }
 
@@ -9837,10 +9843,10 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"kind": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable by typing a string is one typo away from silently changing. Two roles may share a kind and differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a deployment declaring one would render a role no reader of the rendered configuration could reach. It defaults to Server, the shape a deployment written before disaggregation existed has, so such a deployment renders exactly as it did.\n\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable by typing a string is one typo away from silently changing. Two roles may share a kind and differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a deployment declaring one would render a role no reader of the rendered configuration could reach. It defaults to Server, the shape a deployment written before disaggregation existed has, so such a deployment renders exactly as it did.\n\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Encode\"` is a role that runs the multimodal encoder and hands its output to a prefiller rather than producing tokens itself.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Decode", "Prefill", "Server"},
+							Enum:        []interface{}{"Decode", "Encode", "Prefill", "Server"},
 						},
 					},
 					"replicas": {
@@ -10278,11 +10284,11 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 					},
 					"kind": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Kind echoes the role's kind, so reading the status alone answers which half of a disaggregated deployment an entry describes. It is ALWAYS present: every role has a kind, defaulted if the user named none, so an absent value would mean the status was written by something that did not know about kinds rather than that the role has none.\n\nThe enum is the same one the spec field carries and has to stay that way: this field is written from the spec field with the unset case resolved, so a value the writer can produce and this list does not name would make every later status write on the object fail, taking every other figure down with the kind. The marker sits on the field because the type's own enum marker is a Go-level one and does not become schema validation.\n\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Description: "Kind echoes the role's kind, so reading the status alone answers which half of a disaggregated deployment an entry describes. It is ALWAYS present: every role has a kind, defaulted if the user named none, so an absent value would mean the status was written by something that did not know about kinds rather than that the role has none.\n\nThe enum is the same one the spec field carries and has to stay that way: this field is written from the spec field with the unset case resolved, so a value the writer can produce and this list does not name would make every later status write on the object fail, taking every other figure down with the kind. The marker sits on the field because the type's own enum marker is a Go-level one and does not become schema validation.\n\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Encode\"` is a role that runs the multimodal encoder and hands its output to a prefiller rather than producing tokens itself.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Decode", "Prefill", "Server"},
+							Enum:        []interface{}{"Decode", "Encode", "Prefill", "Server"},
 						},
 					},
 					"assignedFlavors": {
@@ -10554,11 +10560,11 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterRoleStatus(ref com
 					},
 					"kind": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Kind is the role's effective kind, which is what tells a prefiller from a decoder. It is the resolved value rather than the field, because a role naming no kind is a server and a consumer matching on the empty string would find nothing.\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Description: "Kind is the role's effective kind, which is what tells a prefiller from a decoder. It is the resolved value rather than the field, because a role naming no kind is a server and a consumer matching on the empty string would find nothing.\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Encode\"` is a role that runs the multimodal encoder and hands its output to a prefiller rather than producing tokens itself.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Decode", "Prefill", "Server"},
+							Enum:        []interface{}{"Decode", "Encode", "Prefill", "Server"},
 						},
 					},
 					"selector": {

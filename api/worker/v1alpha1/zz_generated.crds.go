@@ -4782,6 +4782,24 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																			MaxLength:   ptr.To[int64](1024),
 																			Pattern:     `^(/[^/]+)+$`,
 																		},
+																		"persistentVolumeClaim": {
+																			Description: "PersistentVolumeClaim is the reference to a PersistentVolumeClaim to mount, in the deployment\nnamespace. claimName is required and names a claim in this namespace; exactly one source is\nset on the entry. The existing mount path, sub-path and read-only fields apply.",
+																			Type:        "object",
+																			Required: []string{
+																				"claimName",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"claimName": {
+																					Description: "claimName is the name of a PersistentVolumeClaim in the same namespace as the pod using this volume.\nMore info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#persistentvolumeclaims",
+																					Type:        "string",
+																				},
+																				"readOnly": {
+																					Description: "readOnly Will force the ReadOnly setting in VolumeMounts.\nDefault false.",
+																					Type:        "boolean",
+																				},
+																			},
+																			Nullable: true,
+																		},
 																		"readOnly": {
 																			Description: "ReadOnly mounts the volume read-only.",
 																			Type:        "boolean",
@@ -4930,6 +4948,9 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																},
 																{
 																	Raw: []byte(`"Decode"`),
+																},
+																{
+																	Raw: []byte(`"Encode"`),
 																},
 															},
 														},
@@ -5550,6 +5571,9 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																},
 																{
 																	Raw: []byte(`"Decode"`),
+																},
+																{
+																	Raw: []byte(`"Encode"`),
 																},
 															},
 														},

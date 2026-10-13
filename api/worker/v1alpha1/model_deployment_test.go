@@ -123,8 +123,8 @@ func TestModelDeploymentEnumSpellings(t *testing.T) {
 		old          []string
 		defaultValue string
 	}{
-		{"spec role kind", []string{"spec", "roles", "[]", "kind"}, []string{`"Server"`, `"Prefill"`, `"Decode"`}, []string{`"server"`, `"prefill"`, `"decode"`}, `"Server"`},
-		{"status role kind", []string{"status", "roles", "[]", "kind"}, []string{`"Server"`, `"Prefill"`, `"Decode"`}, []string{`"server"`, `"prefill"`, `"decode"`}, ""},
+		{"spec role kind", []string{"spec", "roles", "[]", "kind"}, []string{`"Server"`, `"Prefill"`, `"Decode"`, `"Encode"`}, []string{`"server"`, `"prefill"`, `"decode"`, `"encode"`}, `"Server"`},
+		{"status role kind", []string{"status", "roles", "[]", "kind"}, []string{`"Server"`, `"Prefill"`, `"Decode"`, `"Encode"`}, []string{`"server"`, `"prefill"`, `"decode"`, `"encode"`}, ""},
 		{"engine name", []string{"spec", "engine", "name"}, []string{`"vLLM"`, `"SGLang"`}, []string{`"vllm"`, `"sglang"`}, ""},
 		{"cache connector", []string{"spec", "kvCache", "connector"}, []string{`"Mooncake"`}, []string{`"mooncake"`}, `"Mooncake"`},
 		{"direct protocol", []string{"spec", "kvTransfer", "protocol"}, []string{`"Auto"`, `"TCP"`, `"RDMA"`, `"EFA"`, `"CANN"`, `"ROCM"`}, []string{`"auto"`, `"tcp"`, `"rdma"`, `"efa"`, `"cann"`, `"rocm"`, `"MUSA"`, `"MACA"`}, ""},
