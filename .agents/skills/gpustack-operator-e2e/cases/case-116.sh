@@ -39,6 +39,10 @@
 #              naming that rather than failing. The shape rows still run: they are answered from
 #              the submitted object and fire before the platform is ever read.
 #
+# Existing platform: if an InstanceType already reports the manufacturer named by E2E_C116_VENDOR
+#              (an accelerator cluster, for example E2E_C116_VENDOR=Ascend), the case uses it and
+#              injects nothing, so the label, the setting and the settle wait are skipped.
+#
 # Inputs:      MOCKED: one node label (the CPU vendor) injected through a NodeFeature object and
 #              one settings key (CPU-manufacturer awareness) flipped on — both restored by the
 #              trap. REAL: every manifest goes through `kubectl apply --dry-run=server`, so the
@@ -172,24 +176,30 @@ settle_back() {
   return 0
 }
 
-NODE="$(pick_worker_node)"
-if [ -z "$NODE" ]; then
-  echo "[case-116] no Ready schedulable worker node; this case cannot place its vendor label" >&2
-  exit 2
-fi
-
+INJECTED=false
 cleanup() {
-  kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
-  restore_setting
-  settle_back
+  if [ "$INJECTED" = true ]; then
+    kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
+    restore_setting
+    settle_back
+  fi
 }
 trap cleanup EXIT
 
-echo "[case-116] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
+PLATFORM_TYPE="$(epd_platform_type)"
+if [ -z "$PLATFORM_TYPE" ]; then
+  NODE="$(pick_worker_node)"
+  if [ -z "$NODE" ]; then
+    echo "[case-116] no Ready schedulable worker node; this case cannot place its vendor label" >&2
+    exit 2
+  fi
 
-# The label rides a NodeFeature object (case-4's mechanism): the object stays and keeps re-asserting
-# the label, where a bare `kubectl label` is a cpuid-owned value NFD reverts on its next pass.
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+  echo "[case-116] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
+  INJECTED=true
+
+  # The label rides a NodeFeature object (case-4's mechanism): the object stays and keeps re-asserting
+  # the label, where a bare `kubectl label` is a cpuid-owned value NFD reverts on its next pass.
+  kubectl apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: nfd.k8s-sigs.io/v1alpha1
 kind: NodeFeature
 metadata:
@@ -202,17 +212,17 @@ spec:
     feature.node.kubernetes.io/cpu-model.vendor_id: "${VENDOR}"
   features: {}
 YAML
-set_awareness true
+  set_awareness true
 
-# The pool needs the settings cache to expire, the node flavor to re-derive and the type to be
-# authored, so this poll IS the wait. A timeout is a skip, not a failure: NFD may decline to let an
-# injected object override a label its cpuid source reports, and that is an environment answer.
-PLATFORM_TYPE=""
-for _ in $(seq 1 "$SETTLE_ROUNDS"); do
-  PLATFORM_TYPE="$(epd_platform_type)"
-  [ -n "$PLATFORM_TYPE" ] && break
-  sleep 5
-done
+  # The pool needs the settings cache to expire, the node flavor to re-derive and the type to be
+  # authored, so this poll IS the wait. A timeout is a skip, not a failure: NFD may decline to let an
+  # injected object override a label its cpuid source reports, and that is an environment answer.
+  for _ in $(seq 1 "$SETTLE_ROUNDS"); do
+    PLATFORM_TYPE="$(epd_platform_type)"
+    [ -n "$PLATFORM_TYPE" ] && break
+    sleep 5
+  done
+fi
 
 FALLBACK_TYPE="$(usable_instance_type)"
 if [ -z "$PLATFORM_TYPE" ] && [ -z "$FALLBACK_TYPE" ]; then
@@ -226,7 +236,7 @@ IT="${PLATFORM_TYPE:-$FALLBACK_TYPE}"
 
 if [ -n "$PLATFORM_TYPE" ]; then
   record PASS "a CPU-only pool reports an admitted platform" \
-    "instancetype ${PLATFORM_TYPE} reports manufacturer '${PLATFORM}' from the injected vendor label"
+    "instancetype ${PLATFORM_TYPE} reports manufacturer '${PLATFORM}' from the node labels"
 else
   record SKIP "a CPU-only pool reports an admitted platform" \
     "no InstanceType reported manufacturer '${PLATFORM}' within $((SETTLE_ROUNDS * 5))s, so every matrix row below skips: NFD did not keep the injected cpu-model.vendor_id, or the pool never derived. The shape rows still run: they are refused before the platform is read"

@@ -31,9 +31,10 @@ node groups, and point your local kubeconfig at it.
   fails — and putting a card into MIG mode is by itself enough to fail that
   check. DCGM is **masked**, not merely disabled: it was observed running again
   hours after a clean disable, pulled back in by the vendor's own units.
-- Turns off auto-repair for the `NebiusGPUError` node condition on **MIG-capable
-  GPU** node groups. See [MIG readiness](#mig-readiness) — without this, a
-  partitioning test shuts down the node it runs on.
+- Turns off auto-repair for the `NebiusGPUError` node condition on **every GPU
+  node group** — MIG-capable groups and non-MIG presets raise that condition
+  through different failures, and the default auto-repair rule shuts the node
+  down either way. See [MIG readiness](#mig-readiness).
 - Buys a GPU node group from **preemptible** capacity when its
   `gpu_instance_types` entry sets `preemptible = true`. See
   [Preemptible nodes](#preemptible-nodes).
@@ -56,13 +57,28 @@ shuts it down** — so a MIG test destroys the node it is running on. The first
 symptom is rarely the GPU: unrelated Pods start failing to create, because the
 node hosting a webhook went away.
 
-Two things make a node MIG-ready, and both are in the Terraform:
+The same condition fires on groups that cannot be partitioned at all. On the
+non-MIG L40S preset (`gpu-l40s-d` / `2gpu-64vcpu-384gb`),
+`node-problem-detector-gpu` fails by itself: it runs
+`health-checker run -e mk8s -p 2xL40`, which rejects the platform
+(`Invalid platform "2xL40"`) and exits 1, and the detector sets
+`NebiusGPUError = True` (`reason: GPUHealthCheckFailedMK8S`) on every node of
+the group about 30 seconds after boot. With the default auto-repair live, MK8s
+then cordons and stops those healthy nodes in an endless loop and the node group
+never leaves `PROVISIONING`.
 
-- `auto_repair.conditions` names `NebiusGPUError` with `disabled = true`. The
-  condition is still reported and still visible in `kubectl describe node`; it is
-  simply no longer node-fatal. Every other auto-repair rule keeps its default.
-- `gpustack-node-prep.service` masks `nvidia-dcgm` / `nvidia-dcgm-exporter`,
-  which otherwise hold driver handles that make `nvidia-smi -mig 1` fail.
+So the Terraform turns that auto-repair rule off on **every GPU node group**,
+not only the MIG-capable ones: `auto_repair.conditions` names `NebiusGPUError`
+with `{ status = "TRUE", disabled = true }`. The condition is still reported and
+still visible in `kubectl describe node`; it is simply no longer node-fatal.
+Every other auto-repair rule keeps its default. The `status = "TRUE"` is
+load-bearing: without it the Nebius API stores `CONDITION_STATUS_UNSPECIFIED`,
+which matches nothing, and the disable does not take.
+
+The other MIG-readiness measure stays gated on MIG:
+`gpustack-node-prep.service` masks `nvidia-dcgm` / `nvidia-dcgm-exporter` on
+MIG-capable groups only, because they otherwise hold driver handles that make
+`nvidia-smi -mig 1` fail.
 
 Neither is reversed automatically. If you want the platform's GPU auto-repair
 back on a cluster you are done partitioning, drop the `auto_repair` block and
@@ -75,22 +91,24 @@ node.
 ### Groups that cannot be partitioned
 
 MIG is a datacenter-SXM feature. An `gpu-l40s-*` or `gpu-rtx6000` card has no
-MIG at all, and applying the two preparations above to such a group is pure
-damage: it would lose its GPU telemetry for a capability it will never have, and
-give up platform auto-repair for a `NebiusGPUError` that on those cards can only
-mean the GPU is genuinely broken.
+MIG at all, and masking DCGM on such a group is pure damage: it would lose its
+GPU telemetry for a capability it will never have.
 
-So both are gated on a per-group `mig` flag. It defaults to whether the group's
+That is what the per-group `mig` flag gates. It defaults to whether the group's
 platform appears in `main.tf`'s `mig_platforms` list (`gpu-h100-sxm`,
 `gpu-h200-sxm`, `gpu-b200-sxm`, `gpu-b200-sxm-a`, `gpu-b300-sxm`); anything else
-is treated as non-partitionable and keeps DCGM and its platform auto-repair. A
+is treated as non-partitionable and keeps its DCGM telemetry. The
+`NebiusGPUError` auto-repair disable is deliberately not gated on it — it
+applies to every GPU node group, because on non-MIG presets the detector raises
+the condition on its own (see [MIG readiness](#mig-readiness)): on those cards a
+`NebiusGPUError` no longer means only that the GPU is genuinely broken. A
 non-MIG group still gets the vendor device-plugin static Pod moved aside —
 GPUStack has to own the card either way.
 
 Set `mig` explicitly on a group to override the derivation. Do that as soon as
 Nebius adds a partitionable platform this list does not know about: the default
-would be `false`, auto-repair would stay on, and the first MIG switch would
-**shut the node down**.
+would be `false`, DCGM would stay unmasked, and the first MIG switch would fail
+on the driver handles DCGM holds.
 
 ## InfiniBand fabrics
 
@@ -136,6 +154,13 @@ preemptible capacity: cheaper, and reclaimable by the platform at any time — t
 node can disappear mid-test and its Pods go with it. Use it for a group whose
 loss the test can absorb (a second accelerator flavour, a scale-out node), not
 for the one hosting the thing under test. The CPU group is always on-demand.
+
+On the node template, `preemptible = true` sets both `preemptible = {}` and
+`follows_spot_price = {}`. The spot pricing model is required by the Nebius API
+whenever a template is preemptible — a template naming only `preemptible` is
+rejected at apply time with `spec.pricing_model is invalid` — so the two always
+travel together. The `nebius` CLI equivalents (`>= 0.12.289`) are
+`--template-preemptible --template-follows-spot-price`.
 
 `preemptible` is per group, so a cluster can mix both: below, an on-demand H100
 group and a preemptible L40S one.

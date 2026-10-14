@@ -126,6 +126,21 @@ READY_BOUND="${E2E_C120_READY_BOUND:-1800}"
 MAX_TOKENS="${E2E_C120_MAX_TOKENS:-64}"
 SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
 SETTLE_BOUND="${E2E_C120_SETTLE_BOUND:-180}"
+# The operator prefixes `container-registry` onto every image it chooses, and the two settings below
+# take a reference of the form `namespace/name:tag`. A value that already names a host would render as
+# `<registry>/<host>/...` on a cluster that sets a registry, so drop the host there.
+registry_relative() {
+  case "${1%%/*}" in
+    *.*|*:*|localhost) printf '%s' "${1#*/}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+CLUSTER_REGISTRY="$(kubectl -n "$SYSTEM_NS" get secret gpustack-settings \
+  -o jsonpath='{.data.container-registry}' 2>/dev/null | base64 -d 2>/dev/null)"
+if [ -n "$CLUSTER_REGISTRY" ]; then
+  ROUTER_IMAGE="$(registry_relative "$ROUTER_IMAGE")"
+  SIDECAR_IMAGE="$(registry_relative "$SIDECAR_IMAGE")"
+fi
 # 30 minutes is not slack: this row loads a vision-language model on three roles, and the encoder
 # compiles a model it then never answers with. A smaller bound would report a slow cluster as a
 # broken leg.

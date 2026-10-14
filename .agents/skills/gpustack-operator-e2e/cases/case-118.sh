@@ -38,6 +38,10 @@
 #              (default 128) placeholder replicas, and the case skips, printing the bound, when the
 #              pool's quota could hold more than that.
 #
+# Existing platform: if an InstanceType already reports the manufacturer named by E2E_C118_VENDOR
+#              (an accelerator cluster, for example E2E_C118_VENDOR=Ascend), the case uses it and
+#              injects nothing, so the label, the setting and the settle wait are skipped.
+#
 # Inputs:      MOCKED: one node label (the CPU vendor, "AMD" — the admitted row that needs no
 #              shared claim) injected through a NodeFeature object, and one settings key
 #              (CPU-manufacturer awareness) flipped on; both restored by the trap. REAL: three
@@ -72,6 +76,15 @@ SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
 SETTING=instance-type-aware-cpu-manufacturer
 VENDOR="${E2E_C118_VENDOR:-AMD}"
 PLATFORM="$(printf '%s' "$VENDOR" | tr '[:upper:]' '[:lower:]')"
+
+# A platform whose encoder-cache connector carries the output through a directory (Ascend) is
+# admitted only when the encode and prefill roles mount one shared claim. Name an existing
+# ReadWriteMany claim in E2E_C118_EC_CLAIM; it stays empty for platforms that need none.
+EC_CLAIM="${E2E_C118_EC_CLAIM:-}"
+EC_VOLUMES=""
+if [ -n "$EC_CLAIM" ]; then
+  EC_VOLUMES="$(printf '      additionalVolumes:\n        - mountPath: /ec-cache\n          persistentVolumeClaim:\n            claimName: %s' "$EC_CLAIM")"
+fi
 NF="case118-cpu-vendor"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 MAX_REPLICAS="${E2E_C118_MAX_REPLICAS:-128}"
@@ -178,6 +191,7 @@ EOF
   return 0
 }
 
+INJECTED=false
 cleanup() {
   kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai \
     "$PROBE" "$FILLER" "$SUBJECT" --ignore-not-found --wait=false >/dev/null 2>&1
@@ -194,21 +208,26 @@ cleanup() {
       -l "app.kubernetes.io/instance in (${PROBE},${FILLER},${SUBJECT})" \
       --no-headers 2>/dev/null)" ] && break
   done
-  kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
-  restore_setting
-  settle_back
+  if [ "$INJECTED" = true ]; then
+    kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
+    restore_setting
+    settle_back
+  fi
 }
 trap cleanup EXIT
 
-NODE="$(pick_worker_node)"
-if [ -z "$NODE" ]; then
-  echo "[case-118] no Ready schedulable worker node; this case cannot place its vendor label" >&2
-  exit 2
-fi
+IT="$(epd_platform_type)"
+if [ -z "$IT" ]; then
+  NODE="$(pick_worker_node)"
+  if [ -z "$NODE" ]; then
+    echo "[case-118] no Ready schedulable worker node; this case cannot place its vendor label" >&2
+    exit 2
+  fi
 
-echo "[case-118] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
+  echo "[case-118] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
+  INJECTED=true
 
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+  kubectl apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: nfd.k8s-sigs.io/v1alpha1
 kind: NodeFeature
 metadata:
@@ -221,14 +240,14 @@ spec:
     feature.node.kubernetes.io/cpu-model.vendor_id: "${VENDOR}"
   features: {}
 YAML
-set_awareness true
+  set_awareness true
 
-IT=""
-for _ in $(seq 1 "$SETTLE_ROUNDS"); do
-  IT="$(epd_platform_type)"
-  [ -n "$IT" ] && break
-  sleep 5
-done
+  for _ in $(seq 1 "$SETTLE_ROUNDS"); do
+    IT="$(epd_platform_type)"
+    [ -n "$IT" ] && break
+    sleep 5
+  done
+fi
 
 if [ -z "$IT" ]; then
   record SKIP "the pool this case shorts exists" \
@@ -314,11 +333,13 @@ spec:
       instanceType: ${IT}
       replicas: 1
       image: ${IMAGE}
+${EC_VOLUMES}
     - name: prefill
       kind: Prefill
       instanceType: ${IT}
       replicas: 1
       image: ${IMAGE}
+${EC_VOLUMES}
     - name: decode
       kind: Decode
       instanceType: ${IT}

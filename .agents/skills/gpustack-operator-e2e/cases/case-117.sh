@@ -35,6 +35,10 @@
 #              and may decline an injected override) or the pool never derives, the case prints one
 #              SKIP row naming that and exits 0.
 #
+# Existing platform: if an InstanceType already reports the manufacturer named by E2E_C117_VENDOR
+#              (an accelerator cluster, for example E2E_C117_VENDOR=Ascend), the case uses it and
+#              injects nothing, so the label, the setting and the settle wait are skipped.
+#
 # Inputs:      MOCKED: one node label (the CPU vendor, "AMD" — the platform whose admitted row
 #              needs no shared claim) injected through a NodeFeature object, and one settings key
 #              (CPU-manufacturer awareness) flipped on; both restored by the trap. REAL: one
@@ -69,6 +73,15 @@ SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
 SETTING=instance-type-aware-cpu-manufacturer
 VENDOR="${E2E_C117_VENDOR:-AMD}"
 PLATFORM="$(printf '%s' "$VENDOR" | tr '[:upper:]' '[:lower:]')"
+
+# A platform whose encoder-cache connector carries the output through a directory (Ascend) is
+# admitted only when the encode and prefill roles mount one shared claim. Name an existing
+# ReadWriteMany claim in E2E_C117_EC_CLAIM; it stays empty for platforms that need none.
+EC_CLAIM="${E2E_C117_EC_CLAIM:-}"
+EC_VOLUMES=""
+if [ -n "$EC_CLAIM" ]; then
+  EC_VOLUMES="$(printf '      additionalVolumes:\n        - mountPath: /ec-cache\n          persistentVolumeClaim:\n            claimName: %s' "$EC_CLAIM")"
+fi
 NF="case117-cpu-vendor"
 MD=case117-epd
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
@@ -173,6 +186,7 @@ EOF
   return 0
 }
 
+INJECTED=false
 cleanup() {
   echo
   echo "[case-117] cleanup"
@@ -183,23 +197,28 @@ cleanup() {
     force_release
     [ -z "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${MD}" --no-headers 2>/dev/null)" ] && break
   done
-  kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
-  restore_setting
-  settle_back
+  if [ "$INJECTED" = true ]; then
+    kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
+    restore_setting
+    settle_back
+  fi
 }
 trap cleanup EXIT
 
 # ---------------------------------------------------------------- the fixture
 
-NODE="$(pick_worker_node)"
-if [ -z "$NODE" ]; then
-  echo "[case-117] no Ready schedulable worker node; this case cannot place its vendor label" >&2
-  exit 2
-fi
+IT="$(epd_platform_type)"
+if [ -z "$IT" ]; then
+  NODE="$(pick_worker_node)"
+  if [ -z "$NODE" ]; then
+    echo "[case-117] no Ready schedulable worker node; this case cannot place its vendor label" >&2
+    exit 2
+  fi
 
-echo "[case-117] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
+  echo "[case-117] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
+  INJECTED=true
 
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+  kubectl apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: nfd.k8s-sigs.io/v1alpha1
 kind: NodeFeature
 metadata:
@@ -212,17 +231,17 @@ spec:
     feature.node.kubernetes.io/cpu-model.vendor_id: "${VENDOR}"
   features: {}
 YAML
-set_awareness true
+  set_awareness true
 
-# The poll IS the wait for the settings cache (30s), the node flavor re-derivation and the type
-# authoring. A timeout is a skip, not a failure: NFD owns cpu-model.vendor_id and may decline an
-# injected override, which is an environment answer this case reports rather than argues with.
-IT=""
-for _ in $(seq 1 "$SETTLE_ROUNDS"); do
-  IT="$(epd_platform_type)"
-  [ -n "$IT" ] && break
-  sleep 5
-done
+  # The poll IS the wait for the settings cache (30s), the node flavor re-derivation and the type
+  # authoring. A timeout is a skip, not a failure: NFD owns cpu-model.vendor_id and may decline an
+  # injected override, which is an environment answer this case reports rather than argues with.
+  for _ in $(seq 1 "$SETTLE_ROUNDS"); do
+    IT="$(epd_platform_type)"
+    [ -n "$IT" ] && break
+    sleep 5
+  done
+fi
 
 if [ -z "$IT" ]; then
   record SKIP "an encoder deployment exists with one Service per role" \
@@ -242,7 +261,7 @@ for _ in $(seq 1 "$SETTLE_ROUNDS"); do
 done
 
 record PASS "a CPU-only pool reports an admitted platform" \
-  "instancetype ${IT} reports manufacturer '${PLATFORM}' from the injected vendor label; entrance ${ENTRANCE}"
+  "instancetype ${IT} reports manufacturer '${PLATFORM}' from the node labels; entrance ${ENTRANCE}"
 
 # ---------------------------------------------------------------- the subject
 
@@ -269,11 +288,13 @@ spec:
       instanceType: ${IT}
       replicas: 1
       image: ${IMAGE}
+${EC_VOLUMES}
     - name: prefill
       kind: Prefill
       instanceType: ${IT}
       replicas: 1
       image: ${IMAGE}
+${EC_VOLUMES}
     - name: decode
       kind: Decode
       instanceType: ${IT}

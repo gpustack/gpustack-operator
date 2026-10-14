@@ -135,6 +135,21 @@ READY_BOUND="${E2E_C121_READY_BOUND:-1800}"
 MAX_TOKENS="${E2E_C121_MAX_TOKENS:-64}"
 SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
 SETTLE_BOUND="${E2E_C121_SETTLE_BOUND:-180}"
+# The operator prefixes `container-registry` onto every image it chooses, and the two settings below
+# take a reference of the form `namespace/name:tag`. A value that already names a host would render as
+# `<registry>/<host>/...` on a cluster that sets a registry, so drop the host there.
+registry_relative() {
+  case "${1%%/*}" in
+    *.*|*:*|localhost) printf '%s' "${1#*/}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+CLUSTER_REGISTRY="$(kubectl -n "$SYSTEM_NS" get secret gpustack-settings \
+  -o jsonpath='{.data.container-registry}' 2>/dev/null | base64 -d 2>/dev/null)"
+if [ -n "$CLUSTER_REGISTRY" ]; then
+  ROUTER_IMAGE="$(registry_relative "$ROUTER_IMAGE")"
+  SIDECAR_IMAGE="$(registry_relative "$SIDECAR_IMAGE")"
+fi
 PROBE_NAME=case121-probe
 
 FAILS=0
@@ -699,7 +714,7 @@ fi
 # refuses to start without.
 if [ -n "$DC_POD" ]; then
   EC_FLAG="$(kubectl -n "$NS" get pod "$DC_POD" -o json 2>/dev/null | jq -r \
-    '[(.spec.containers[] | select(.name=="routing-proxy") | .args // [])[]] | map(select(startswith("--ec-connector="))) | first // ""' 2>/dev/null)"
+    '[(.spec.containers[]?, .spec.initContainers[]?) | select(.name=="routing-proxy") | (.args // [])[]] | map(select(startswith("--ec-connector="))) | first // ""' 2>/dev/null)"
   if [ "$EC_FLAG" = "--ec-connector=ec-example" ]; then
     record PASS "decode sidecar connector" "routing-proxy on ${DC_POD} carries --ec-connector=ec-example"
   else

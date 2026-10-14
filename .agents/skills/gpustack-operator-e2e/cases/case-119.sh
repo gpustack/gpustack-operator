@@ -179,6 +179,7 @@ EOF
   return 0
 }
 
+INJECTED=false
 cleanup() {
   echo
   echo "[case-119] cleanup"
@@ -193,23 +194,30 @@ cleanup() {
   done
   kubectl -n "$NS" delete pvc "$CLAIM" --ignore-not-found --wait=false >/dev/null 2>&1
   kubectl delete pv "$PV" --ignore-not-found --wait=false >/dev/null 2>&1
-  kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
-  restore_setting
-  settle_back
+  if [ "$INJECTED" = true ]; then
+    kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
+    restore_setting
+    settle_back
+  fi
 }
 trap cleanup EXIT
 
 # ---------------------------------------------------------------- the fixture
 
-NODE="$(pick_worker_node)"
-if [ -z "$NODE" ]; then
-  echo "[case-119] no Ready schedulable worker node; this case cannot place its vendor label" >&2
-  exit 2
-fi
+IT="$(epd_platform_type)"
+if [ -n "$IT" ]; then
+  NODE="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -n 1)"
+else
+  NODE="$(pick_worker_node)"
+  if [ -z "$NODE" ]; then
+    echo "[case-119] no Ready schedulable worker node; this case cannot place its vendor label" >&2
+    exit 2
+  fi
 
-echo "[case-119] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
+  echo "[case-119] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
+  INJECTED=true
 
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+  kubectl apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: nfd.k8s-sigs.io/v1alpha1
 kind: NodeFeature
 metadata:
@@ -222,21 +230,21 @@ spec:
     feature.node.kubernetes.io/cpu-model.vendor_id: "${VENDOR}"
   features: {}
 YAML
-set_awareness true
+  set_awareness true
 
-IT=""
-for _ in $(seq 1 "$SETTLE_ROUNDS"); do
-  IT="$(epd_platform_type)"
-  [ -n "$IT" ] && break
-  sleep 5
-done
+  for _ in $(seq 1 "$SETTLE_ROUNDS"); do
+    IT="$(epd_platform_type)"
+    [ -n "$IT" ] && break
+    sleep 5
+  done
 
-if [ -z "$IT" ]; then
-  record SKIP "the shared-claim encoder shape exists" \
-    "no InstanceType reported manufacturer '${PLATFORM}' within $((SETTLE_ROUNDS * 5))s, so the encoder shape cannot be admitted on this run: NFD did not keep the injected cpu-model.vendor_id, or the pool never derived"
-  print_rows
-  echo "[case-119] skipped: no platform InstanceType"
-  exit 0
+  if [ -z "$IT" ]; then
+    record SKIP "the shared-claim encoder shape exists" \
+      "no InstanceType reported manufacturer '${PLATFORM}' within $((SETTLE_ROUNDS * 5))s, so the encoder shape cannot be admitted on this run: NFD did not keep the injected cpu-model.vendor_id, or the pool never derived"
+    print_rows
+    echo "[case-119] skipped: no platform InstanceType"
+    exit 0
+  fi
 fi
 
 ENTRANCE="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.entrance}' 2>/dev/null)"
@@ -246,7 +254,7 @@ for _ in $(seq 1 "$SETTLE_ROUNDS"); do
 done
 
 record PASS "a CPU-only pool reports an admitted platform" \
-  "instancetype ${IT} reports manufacturer '${PLATFORM}' from the injected vendor label; entrance ${ENTRANCE}"
+  "instancetype ${IT} reports manufacturer '${PLATFORM}'; entrance ${ENTRANCE}"
 
 # The claim the two roles mount: a hostPath volume under /tmp on the labeled node, manually bound.
 # The pool the labeled node feeds is the only pool the deployment names, so every Pod that mounts
@@ -453,6 +461,8 @@ metadata:
   namespace: ${NS}
 spec:
   restartPolicy: Never
+  tolerations:
+    - operator: Exists
   nodeSelector:
     kubernetes.io/hostname: ${NODE}
   containers:
@@ -507,6 +517,8 @@ metadata:
   namespace: ${NS}
 spec:
   restartPolicy: Never
+  tolerations:
+    - operator: Exists
   nodeSelector:
     kubernetes.io/hostname: ${NODE}
   containers:
