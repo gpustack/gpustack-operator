@@ -27,7 +27,11 @@ func observeModelDeploymentKVEvents(
 ) {
 	if md.Spec.Router == nil {
 		for i := range md.Spec.Roles {
-			if ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i]) != workercore.ModelDeploymentRoleKindServer {
+			// AN ENCODER IS NOT ONE OF THE ROLES THE MESSAGE NAMES. It reads media and hands
+			// embeddings to a prefiller, so it neither produces nor consumes cache blocks; counting
+			// it would report a deployment as needing a router for a role no router could serve.
+			switch ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i]) {
+			case workercore.ModelDeploymentRoleKindPrefill, workercore.ModelDeploymentRoleKindDecode:
 				ModelDeploymentConditionKVEventsPublishing.False(holder,
 					modelDeploymentReasonKVEventsNoRouter,
 					"the deployment declares prefill and decode roles but no router consumes their cache events")
@@ -37,14 +41,19 @@ func observeModelDeploymentKVEvents(
 
 		ModelDeploymentConditionKVEventsPublishing.True(holder,
 			modelDeploymentReasonKVEventsNotApplicable,
-			"the unrouted deployment has only server roles, so nothing consumes cache events")
+			"no role of the unrouted deployment produces cache blocks, so nothing consumes them")
 		return
 	}
 
 	configured := 0
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		if ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindDecode {
+		// A CONSUMER PUBLISHES NOTHING, AND NEITHER DOES AN ENCODER. An encoder was handed media
+		// and produces embeddings for the prefiller, so it is not a producer whose configuration
+		// this operator failed to find -- counting it reported a healthy encoder deployment as
+		// unconfigured, and named a role that publishes no events at all.
+		if kind := ModelDeploymentEffectiveRoleKind(role); kind == workercore.ModelDeploymentRoleKindDecode ||
+			kind == workercore.ModelDeploymentRoleKindEncode {
 			continue
 		}
 		if len(role.Command) > 0 {

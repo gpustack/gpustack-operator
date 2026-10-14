@@ -80,14 +80,24 @@ type Role string
 
 // The roles, plus the absence of one. RoleNone is a value rather than an empty string used bare, so
 // a renderer switching on the role has no unlabelled case.
+//
+// RoleEncode names the encoder stage a deployment may declare: the kind has its own value here so
+// the connector's role-mapping function can return it instead of folding it into RoleNone, and
+// the absence of an entry for it in engineRoleSupport is what makes admission refuse an engine
+// that cannot take it. The encoder-cache leg is rendered separately and does not reach this enum.
 const (
 	RoleNone    Role = ""
 	RolePrefill Role = "prefill"
 	RoleDecode  Role = "decode"
+	RoleEncode  Role = "encode"
 )
 
 // ParseRole converts the role annotation's value. An unset annotation is legal and means the caller
 // has no prefill/decode split, which is the ordinary case for a shared cache.
+//
+// Pod annotations never carry "Encode": the encoder stage is a deployment shape the API server
+// writes, not a Pod-side knob, and accepting it here would let a hand-written annotation opt a
+// container out of the renderer that names the role it set.
 func ParseRole(value string) (Role, error) {
 	switch value {
 	case "":

@@ -729,6 +729,10 @@ func ModelDeploymentEngineUpstreamName(engine string) (string, bool) {
 }
 
 // ModelDeploymentRoleUpstreamKind returns the spelling consumed by routers and Pod selectors.
+//
+// "encode" is the spelling the role-label filter and the per-role Service selector match on for
+// the encoder leg. A missing case here would leave the encoder Pod unlabeled and every selector on
+// this name blind to it.
 func ModelDeploymentRoleUpstreamKind(kind workercore.ModelDeploymentRoleKind) (string, bool) {
 	switch kind {
 	case workercore.ModelDeploymentRoleKindServer:
@@ -737,6 +741,8 @@ func ModelDeploymentRoleUpstreamKind(kind workercore.ModelDeploymentRoleKind) (s
 		return "prefill", true
 	case workercore.ModelDeploymentRoleKindDecode:
 		return "decode", true
+	case workercore.ModelDeploymentRoleKindEncode:
+		return "encode", true
 	default:
 		return "", false
 	}
@@ -766,14 +772,23 @@ func ModelDeploymentEffectiveRoleKind(
 // IT STAYS WITH ONE ROUTER AND ONE ENGINE. The publisher exists to feed that router's prefix-cache
 // data layer, which subscribes per Pod; the other two score on their own observations and subscribe
 // to nothing, so publishing under them would open two sockets on every replica that nothing reads.
+//
+// ENCODE IS NOT A KV PRODUCER: an encoder produces multimodal embeddings, not KV cache blocks, and
+// the publisher it would open has no subscriber on the data-plane side. Refusing it is what keeps a
+// deployment that pairs Encode with Prefill from rendering two sockets on the encoder when only
+// one has a consumer.
 func modelDeploymentPublishesKVEvents(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) bool {
+	kind := ModelDeploymentEffectiveRoleKind(role)
+	if kind == workercore.ModelDeploymentRoleKindDecode || kind == workercore.ModelDeploymentRoleKindEncode {
+		return false
+	}
+
 	return modelDeploymentRoutesManaged(md, manufacturer) &&
 		md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
 		md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
-		len(role.Command) == 0 &&
-		ModelDeploymentEffectiveRoleKind(role) != workercore.ModelDeploymentRoleKindDecode
+		len(role.Command) == 0
 }
 
 // modelDeploymentInjectRole maps this API's role kind onto the renderer's role.
@@ -785,6 +800,10 @@ func modelDeploymentPublishesKVEvents(
 // An unset kind maps to the same place as "server": the CRD schema defaults the field, so nothing
 // arriving from the API server carries an empty one, but a Go caller constructing the value directly
 // does. Reading the zero value as an unknown kind would refuse every such caller.
+//
+// ENCODE HAS ITS OWN VALUE (inject.RoleEncode) and is never folded into RoleNone. Returning the
+// dedicated value is what lets the connector refuse a role the renderer cannot take, and the
+// engine-support table refuse it again at admission -- both on the same answer.
 func modelDeploymentInjectRole(kind workercore.ModelDeploymentRoleKind) (inject.Role, bool) {
 	switch kind {
 	case "", workercore.ModelDeploymentRoleKindServer:
@@ -793,6 +812,8 @@ func modelDeploymentInjectRole(kind workercore.ModelDeploymentRoleKind) (inject.
 		return inject.RolePrefill, true
 	case workercore.ModelDeploymentRoleKindDecode:
 		return inject.RoleDecode, true
+	case workercore.ModelDeploymentRoleKindEncode:
+		return inject.RoleEncode, true
 	default:
 		return "", false
 	}

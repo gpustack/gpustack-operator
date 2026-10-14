@@ -519,7 +519,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       `make generate` ran in the main checkout, and the diff holds generated files only beside the two type edits.
       Verify: `make generate && go build ./... && go test ./api/... -count=1`
 
-- [ ] **T2 · Router image: bump `llm-d-router`**
+- [x] **T2 · Router image: bump `llm-d-router`**
       Blocked by: None
       Owns: `pack/llm-router/**`, `.github/workflows/base-image.yml`
       Gate: review
@@ -528,7 +528,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       `vllm-router` stays at its current tag in this task.
       Verify: `git apply --check` of each patch on its pinned upstream ref.
 
-- [ ] **T2b · Router image: `vllm-router` with the EPD feature**
+- [x] **T2b · Router image: `vllm-router` with the EPD feature**
       Blocked by: T2
       Owns: `pack/llm-router/**`, `.github/workflows/base-image.yml`
       Gate: review
@@ -565,7 +565,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
 
 **Phase 1. Role plumbing.**
 
-- [ ] **T4 · Role-kind plumbing and guard test**
+- [x] **T4 · Role-kind plumbing and guard test**
       Blocked by: T0, T1
       Owns: `pkg/worker/controllers/worker/model_deployment_connector*.go`, `pkg/worker/controllers/worker/model_deployment.go`, `pkg/worker/kvcache/inject/types*.go`
       Gate: review
@@ -578,7 +578,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
 
 **Phase 2. Admission, volume, engines, routers.**
 
-- [ ] **T5 · Admission rules and the admitted matrix**
+- [x] **T5 · Admission rules and the admitted matrix**
       Blocked by: T1, T4
       Owns: `pkg/worker/webhooks/worker/model_deployment*.go`
       Gate: review
@@ -647,7 +647,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       The change lists each moved default for the release notes.
       Verify: `make lint && go test ./pkg/worker/settings/... -count=1`
 
-- [ ] **T12a · Services, front door, status and joint admission**
+- [x] **T12a · Services, front door, status and joint admission**
       Blocked by: T4
       Owns: `pkg/worker/controllers/worker/model_deployment_service.go`, `pkg/worker/controllers/worker/model_deployment_status.go`, `pkg/worker/controllers/worker/model_deployment_kv_events.go`, `pkg/worker/controllers/worker/model_deployment_joint_admission_test.go`
       Acceptance: `<deployment>-<role>` Service exists for `Encode`.

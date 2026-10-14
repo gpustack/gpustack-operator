@@ -2055,10 +2055,16 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 		// because the accelerator is the role's: it selects the store connector the engine
 		// registers, and only the role's InstanceType knows it.
 		//
+		// ENCODE STAYS OUT OF THE KV CONNECTOR PATH. The encoder-cache leg is rendered separately
+		// and does not reach the shared KV connector, so this path deliberately skips Encode even
+		// when a connection is present. The early skip is the durable contract: an encoder does
+		// not connect to the KV store, and the synthesizer for it has no term to add here.
 		kvTransfer := modelDeploymentUsesKVTransfer(md, role, instType.Status.Detail.Manufacturer)
 		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, instType.Status.Detail.Manufacturer)
 		routingSidecar := modelDeploymentFrontsDecodeWithSidecar(md, role)
-		if ModelDeploymentMaySynthesizeConnector(md) &&
+		roleKind := ModelDeploymentEffectiveRoleKind(role)
+		if roleKind != workercore.ModelDeploymentRoleKindEncode &&
+			ModelDeploymentMaySynthesizeConnector(md) &&
 			(connection != nil || kvTransfer || publishKVEvents || routingSidecar) {
 			roleConnection := ModelDeploymentConnectorInput{}
 			if connection != nil {
