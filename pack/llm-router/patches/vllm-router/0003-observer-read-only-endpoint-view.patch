@@ -1,14 +1,29 @@
-Read native registry and effective circuit state without changing request routing state.
-An unstable SGLang circuit sample refuses the complete view.
+Read native registry membership and effective circuit state without changing routing.
+The selection fields use the native health and circuit predicates. Pod hints are
+address echoes; the operator binds them to Kubernetes identities. Boot
+generation is initialized once per process. The view revision changes when
+the serialized worker array differs from the preceding observer response.
+
+AGAINST: vllm-project/router v0.1.16.1 (commit
+91b65ee4bdfbe98863a32a2205dced5dbb249ffe) with PR 266 (EPD, commit
+516f1cb90eefe565c9fc894d72c8748eae25085b) cherry-picked on top (see
+0001-epd-routing.patch), plus the lazy-Mooncake patch (0002). The image
+build applies this patch with git apply; a pin whose hunks no longer
+match fails loudly and surfaces at build time, not in a cluster.
+
+WHEN TO REMOVE: when upstream rewires circuit-breaker observability or its
+representation of an "effective" state, this patch becomes redundant. Until
+then the operator's SGLang detection and its ClusterQueue-aware admission
+both depend on the read-only observer view that this patch defines.
 
 diff --git a/src/core/circuit_breaker.rs b/src/core/circuit_breaker.rs
-index 5c37423..b6499bb 100644
 --- a/src/core/circuit_breaker.rs
 +++ b/src/core/circuit_breaker.rs
 @@ -100,6 +100,54 @@ impl CircuitBreaker {
+         self.check_and_update_state();
          *self.state.read().unwrap()
      }
-
+ 
 +    /// Read the effective state without changing native routing state.
 +    pub fn observe_effective(&self) -> (CircuitState, bool) {
 +        let state_guard = self.state.read().unwrap();
@@ -60,13 +75,14 @@ index 5c37423..b6499bb 100644
      /// Record the outcome of a request
      pub fn record_outcome(&self, success: bool) {
          if success {
+
 diff --git a/src/lib.rs b/src/lib.rs
-index 5c4c406..8388376 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -6,6 +6,7 @@ use std::collections::HashMap;
- pub mod core;
+@@ -15,6 +15,7 @@ pub mod core;
  pub mod data_connector;
+ pub mod kv_hash;
+ pub mod kv_index;
  pub mod metrics;
 +pub mod observer;
  pub mod middleware;
@@ -376,11 +392,11 @@ index 0000000..9c20b98
 +        run_case(CircuitState::HalfOpen, false, false).await;
 +    }
 +}
+
 diff --git a/src/server.rs b/src/server.rs
-index d7c16df..08d8ac0 100644
 --- a/src/server.rs
 +++ b/src/server.rs
-@@ -749,7 +749,9 @@ pub fn build_app_with_request_tracing(
+@@ -849,7 +849,9 @@ pub fn build_app_with_request_tracing(
          .route("/health_generate", get(health_generate))
          .route("/v1/models", get(v1_models))
          .route("/get_model_info", get(get_model_info))

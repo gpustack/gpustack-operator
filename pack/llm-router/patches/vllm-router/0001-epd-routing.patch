@@ -1,0 +1,2624 @@
+Add encode-prefill-decode (EPD) routing from upstream PR 266, applied as a cherry-pick
+of commit 516f1cb90eefe565c9fc894d72c8748eae25085b ("[Feature] Add EPD
+routing with JSON metadata") onto vllm-project/router v0.1.16.1.
+
+CONTEXT: PR 266 introduces an EPD router that lets the operator send a request
+with metadata describing its endpoint topology. PR 266 was merged on default
+branch but the next released tag (v0.1.16.1) was cut BEFORE 516f1cb landed.
+The build has to bridge that gap.
+
+The cherry-pick applies cleanly onto v0.1.16.1 with zero textual conflicts,
+because v0.1.16.1's src/config/types.rs, src/config/validation.rs,
+src/lib.rs, src/main.rs, src/routers/http/{mod.rs,router.rs,epd.rs},
+src/server.rs, and Cargo.toml already carry the upstream shape that 516f1cb
+adds; the patch only edits them in ways the merge parent had already
+prepared for.
+
+CONTRAST WITH OPTIONS: building from the bare commit 516f1cb would require
+the Dockerfile to drop --branch (a bare SHA does not resolve a shallow
+refspec) and replace it with a fetch-by-SHA. This 0001 cherry-pick keeps
+the existing tag-based Dockerfile flow and survives future v0.1.17+ tag bumps
+without revisiting the Dockerfile -- it stops being needed the day upstream
+cuts a tag containing 516f1cb.
+
+OPERATOR IMPACT: under the v0.1.16.1 + 0001 + 0002 + 0003 + 0004 stack the
+EPD request path is live, /v1/chat/completions honours the operator-declared
+endpoint metadata, and the rest of the operator's patches (0002 lazy
+Mooncake, 0003 read-only observer endpoint, 0004 Kubernetes discovery
+readiness-loss deselect) rebase onto the new tree.
+
+AGAINST: vllm-project/router v0.1.16.1 (commit
+91b65ee4bdfbe98863a32a2205dced5dbb249ffe). The image build applies
+this patch with git apply; a future upstream tag that absorbs 516f1cb
+will fail loudly and surface at build time, not in a cluster.
+
+WHEN TO REMOVE: when upstream cuts a tag whose tree contains the merge
+commit 516f1cb (or any descendant that carries the EPD routing feature
+on top of an already-tagged release). At that point bump
+VLLM_ROUTER_VERSION to that tag and delete this patch file. The cherry-pick
+was authored against the parent of v0.1.16.1's relevant files, so the
+diff is small and a rebase is unlikely to be needed beyond confirming the
+merge sits cleanly inside the next tag.
+diff --git a/Cargo.toml b/Cargo.toml
+index 7a63b27..d5529bc 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -28,6 +28,7 @@ tower-http = { version = "0.6", features = [
+ ] }
+ serde = { version = "1.0", features = ["derive"] }
+ serde_json = { version = "1.0", features = ["preserve_order"] }
++sha2 = "0.10"
+ bytes = "1.8.0"
+ rand = "0.9.2"
+ reqwest = { version = "0.13", features = ["stream", "blocking", "json"] }
+@@ -89,7 +90,6 @@ wasmtime = { version = "36", default-features = false, features = [
+     "runtime",
+ ] }
+ wasmtime-wasi = "36"
+-sha2 = "0.10"
+ async-channel = "2"
+ # Must match vllm-proto (tonic 0.14 / prost 0.14). otel-otlp keeps its own
+ # tonic 0.12 copy for traces.
+diff --git a/docs/epd.md b/docs/epd.md
+new file mode 100644
+index 0000000..c2a8cb3
+--- /dev/null
++++ b/docs/epd.md
+@@ -0,0 +1,103 @@
++# Encoder + PD / E/P/D routing (experimental)
++
++The native Rust router can orchestrate remote encoders before forwarding a chat
++request to a combined prefill/decode worker or separate P and D workers. Embeddings move through vLLM's EC
++connector; the router only handles JSON placeholder metadata and transfer handles.
++No PyTorch dependency or tensor deserialization is needed in the router.
++
++Use vLLM with JSON metadata inputs (vllm-project/vllm#56090). Configure E workers
++as EC producers and PD workers as matching EC consumers, as for the vLLM encoder
++disaggregation example. The example connector needs a shared filesystem; NIXL
++and Mooncake need their usual backend dependencies and network connectivity.
++
++```bash
++cargo build --release --bin vllm-router
++target/release/vllm-router \
++  --host 0.0.0.0 --port 8000 \
++  --worker-urls http://pd0:8000 http://pd1:8000 \
++  --policy random \
++  --epd-config '{
++    "encoder_urls": ["http://e0:8000", "http://e1:8000"],
++    "consumer_zmq_addrs": {
++      "http://pd0:8000": "tcp://pd0:14579",
++      "http://pd1:8000": "tcp://pd1:14579"
++    }
++  }'
++```
++
++`consumer_zmq_addrs` is for Mooncake PUSH and must map each configured PD HTTP URL
++to that worker's configured EC control address. For NIXL PULL or the shared-file
++example connector, omit this map. The PD worker is selected before encoding so
++the producer and the HTTP request use the same destination. Media items are
++assigned to encoders round-robin; images landing on the same encoder are
++batched into a single request, like the Python EPD proxy.
++
++Send ordinary OpenAI chat requests to `/v1/chat/completions`. Each raw media item
++is sent to an encoder. Published metadata replaces that item with an embeds
++reference; when an encoder reports no metadata, the original media is kept with
++its content-derived uuid pinned and its transfer is forwarded, so the consumer
++re-preprocesses into the same mm_hash and can still reuse the published
++embedding. Repeated images keep their original positions and independent
++transfer IDs.
++Other request fields, including sampling options, pass through unchanged.
++Text-only and existing embeds inputs do not call the encoders. PD responses,
++including SSE streams, use the existing transparent forwarding path.
++
++Encoder failures are returned without submitting a partially prepared PD
++request. There is no automatic replay of EPD requests in this prototype.
++Abandoned Mooncake pushes receive best-effort cancellation over their existing
++ZMQ control channel; backend expiration remains the fallback if cancellation
++cannot reach the consumer. After a successful PD response header, the consumer
++owns request completion/abort cleanup.
++
++## Scope
++
++- Native binary CLI only; the Python launcher does not expose `--epd-config` yet.
++- Regular E+PD or static vLLM E/P/D mode, DP=1, no IGW.
++- HTTP(S) backends only; gRPC encoder and consumer URLs are rejected at startup.
++- Keep the existing backend's TP/PP constraints; this does not add parallelism support.
++- Static E URLs; E health-aware routing and dynamic consumer discovery are not added.
++  The service registry has no encoder role, and vLLM does not publish EC control
++  addresses, so Mooncake PUSH cannot resolve a newly registered consumer. Dynamic
++  discovery for NIXL PULL or the example connector is a smaller follow-up.
++- JSON metadata only, not legacy tensor-base64 metadata from old E servers.
++- No early metadata publication, encoder batching changes, or engine/scheduler changes.
++- Image E2E validation is performed separately; do not infer audio/video coverage
++  or production readiness from the metadata rewrite code alone.
++
++## Separate prefill and decode
++
++Add `--epd-config` to the existing static P/D router. Its EC control address map
++must reference **P**, not D. P is an EC consumer and KV producer; D is only a KV
++consumer. Both accept JSON placeholder metadata (`--enable-mm-embeds`).
++For Qwen3.5 with current vLLM NIXL KV transfer, P and D also require
++`VLLM_SSM_CONV_STATE_LAYOUT=DS` for Mamba state transfer.
++
++```bash
++target/release/vllm-router --host 0.0.0.0 --port 8000 \
++  --vllm-pd-disaggregation --kv-connector nixl \
++  --prefill http://p0:8000 --prefill http://p1:8000 \
++  --decode http://d0:8000 --decode http://d1:8000 --policy random \
++  --epd-config '{
++    "encoder_urls": ["http://e0:8000", "http://e1:8000"],
++    "consumer_zmq_addrs": {
++      "http://p0:8000": "tcp://p0:14579",
++      "http://p1:8000": "tcp://p1:14579"
++    }
++  }'
++```
++
++The router selects P/D, prepares E metadata for P, then uses the existing KV
++handoff. D receives the same placeholder layout with KV transfer parameters,
++without P's EC handles. P errors or missing NIXL KV handles stop the pipeline.
++Dynamic P/D discovery is not supported with EPD yet.
++
++```bash
++cargo test --test test_pd_routing test_epd_handoff
++```
++
++Focused tests:
++
++```bash
++cargo test --lib routers::http::epd::tests
++```
+diff --git a/src/config/types.rs b/src/config/types.rs
+index c58963f..63e0d59 100644
+--- a/src/config/types.rs
++++ b/src/config/types.rs
+@@ -11,6 +11,9 @@ use crate::program_scheduling::{
+ /// Main router configuration
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct RouterConfig {
++    /// Optional encoder orchestration for E+PD or E/P/D routing.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub epd: Option<EpdConfig>,
+     /// Routing mode configuration
+     pub mode: RoutingMode,
+     /// Worker connection mode
+@@ -94,6 +97,16 @@ fn default_profile_timeout_secs() -> u64 {
+     10
+ }
+ 
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct EpdConfig {
++    pub encoder_urls: Vec<String>,
++    /// Mooncake consumer control addresses, keyed by the P or combined PD HTTP URL.
++    /// Omit for pull-based NIXL or the shared-file example connector.
++    #[serde(default)]
++    pub consumer_zmq_addrs: HashMap<String, String>,
++}
++
+ fn default_history_backend() -> HistoryBackend {
+     HistoryBackend::Memory
+ }
+@@ -907,6 +920,7 @@ impl Default for RouterConfig {
+             history_backend: default_history_backend(),
+             enable_profiling: false,
+             profile_timeout_secs: default_profile_timeout_secs(),
++            epd: None,
+             kv_connector: KvConnector::default(),
+             program_scheduling: None,
+         }
+@@ -1624,6 +1638,7 @@ mod tests {
+             history_backend: default_history_backend(),
+             enable_profiling: false,
+             profile_timeout_secs: default_profile_timeout_secs(),
++            epd: None,
+             kv_connector: KvConnector::default(),
+             program_scheduling: None,
+         };
+@@ -1691,6 +1706,7 @@ mod tests {
+             history_backend: default_history_backend(),
+             enable_profiling: false,
+             profile_timeout_secs: default_profile_timeout_secs(),
++            epd: None,
+             kv_connector: KvConnector::default(),
+             program_scheduling: None,
+         };
+@@ -1754,6 +1770,7 @@ mod tests {
+             history_backend: default_history_backend(),
+             enable_profiling: false,
+             profile_timeout_secs: default_profile_timeout_secs(),
++            epd: None,
+             kv_connector: KvConnector::default(),
+             program_scheduling: None,
+         };
+diff --git a/src/config/validation.rs b/src/config/validation.rs
+index 948f1b1..b4e4bf8 100644
+--- a/src/config/validation.rs
++++ b/src/config/validation.rs
+@@ -23,6 +23,7 @@ impl ConfigValidator {
+         if let Some(program_scheduling) = &config.program_scheduling {
+             Self::validate_program_scheduling(program_scheduling)?;
+         }
++        Self::validate_epd(config)?;
+ 
+         if let Some(discovery) = &config.discovery {
+             Self::validate_discovery(discovery, &config.mode)?;
+@@ -182,6 +183,74 @@ impl ConfigValidator {
+         Ok(())
+     }
+ 
++    fn validate_epd(config: &RouterConfig) -> ConfigResult<()> {
++        let Some(epd) = &config.epd else {
++            return Ok(());
++        };
++        let worker_urls: Vec<&String> = match &config.mode {
++            RoutingMode::Regular { worker_urls } => worker_urls.iter().collect(),
++            RoutingMode::VllmPrefillDecode {
++                prefill_urls,
++                discovery_address: None,
++                ..
++            } => prefill_urls.iter().map(|(url, _)| url).collect(),
++            _ => {
++                return Err(ConfigError::ValidationFailed {
++                    reason: "EPD requires regular E+PD or static vLLM E/P/D routing".into(),
++                })
++            }
++        };
++        if config.intra_node_data_parallel_size != 1 || config.enable_igw {
++            return Err(ConfigError::ValidationFailed {
++                reason: "EPD currently requires DP=1 and proxy mode".into(),
++            });
++        }
++        if epd.encoder_urls.is_empty() {
++            return Err(ConfigError::MissingRequired {
++                field: "epd.encoder_urls".into(),
++            });
++        }
++        Self::validate_urls(&epd.encoder_urls)?;
++        for url in epd.encoder_urls.iter().chain(worker_urls.iter().copied()) {
++            if !url.starts_with("http://") && !url.starts_with("https://") {
++                return Err(ConfigError::InvalidValue {
++                    field: "epd.worker_url".into(),
++                    value: url.clone(),
++                    reason: "EPD requires HTTP(S) encoder and consumer URLs".into(),
++                });
++            }
++        }
++        if !epd.consumer_zmq_addrs.is_empty() {
++            if worker_urls.is_empty()
++                || epd.consumer_zmq_addrs.len() != worker_urls.len()
++                || worker_urls
++                    .iter()
++                    .any(|url| !epd.consumer_zmq_addrs.contains_key(*url))
++            {
++                return Err(ConfigError::ValidationFailed {
++                    reason:
++                        "EPD consumer_zmq_addrs must map every embedding consumer URL exactly once"
++                            .into(),
++                });
++            }
++            for addr in epd.consumer_zmq_addrs.values() {
++                let parsed = url::Url::parse(addr).map_err(|e| ConfigError::ValidationFailed {
++                    reason: format!("Invalid EC address: {e}"),
++                })?;
++                if parsed.scheme() != "tcp"
++                    || parsed.host_str().is_none()
++                    || parsed.port().is_none()
++                {
++                    return Err(ConfigError::ValidationFailed {
++                        reason: "EC addresses must be tcp://host:port".into(),
++                    });
++                }
++            }
++        }
++
++        Ok(())
++    }
++
+     /// Validate routing mode configuration
+     fn validate_mode(mode: &RoutingMode, has_service_discovery: bool) -> ConfigResult<()> {
+         match mode {
+@@ -875,6 +944,48 @@ mod tests {
+         assert!(ConfigValidator::validate(&config).is_ok());
+     }
+ 
++    #[test]
++    fn test_validate_epd_requires_http_workers() {
++        for (encoder_scheme, consumer_scheme, supported) in [
++            ("http", "http", true),
++            ("https", "https", true),
++            ("grpc", "http", false),
++            ("http", "grpc", false),
++        ] {
++            let consumer = format!("{consumer_scheme}://consumer:8000");
++            for mode in [
++                RoutingMode::Regular {
++                    worker_urls: vec![consumer.clone()],
++                },
++                RoutingMode::VllmPrefillDecode {
++                    prefill_urls: vec![(consumer.clone(), None)],
++                    decode_urls: vec![format!("{consumer_scheme}://decode:8000")],
++                    prefill_policy: None,
++                    decode_policy: None,
++                    discovery_address: None,
++                },
++            ] {
++                let mut config = RouterConfig::new(mode, PolicyConfig::Random);
++                config.epd = Some(EpdConfig {
++                    encoder_urls: vec![format!("{encoder_scheme}://encoder:8000")],
++                    consumer_zmq_addrs: Default::default(),
++                });
++                let result = ConfigValidator::validate(&config);
++                if supported {
++                    result.unwrap();
++                } else {
++                    assert!(
++                        result
++                            .unwrap_err()
++                            .to_string()
++                            .contains("EPD requires HTTP(S)"),
++                        "encoder={encoder_scheme}, consumer={consumer_scheme}"
++                    );
++                }
++            }
++        }
++    }
++
+     #[test]
+     fn test_validate_cache_aware_thresholds() {
+         let config = RouterConfig::new(
+diff --git a/src/lib.rs b/src/lib.rs
+index 735c407..2fc5d3f 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -188,6 +188,7 @@ impl Router {
+         };
+ 
+         Ok(config::RouterConfig {
++            epd: None,
+             mode,
+             policy,
+             host: self.host.clone(),
+@@ -542,6 +543,7 @@ impl Router {
+                 service_discovery_config,
+                 prometheus_config,
+                 request_timeout_secs: self.request_timeout_secs,
++                pool_idle_timeout_secs: server::DEFAULT_POOL_IDLE_TIMEOUT_SECS,
+                 request_id_headers: self.request_id_headers.clone(),
+                 trace_config: if self.enable_trace {
+                     Some(config::TraceConfig {
+diff --git a/src/main.rs b/src/main.rs
+index a003ae5..d9328fa 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -104,6 +104,9 @@ Examples:
+ 
+ "#)]
+ struct CliArgs {
++    /// E+PD or E/P/D encoder orchestration as JSON (encoder_urls, consumer_zmq_addrs).
++    #[arg(long)]
++    epd_config: Option<String>,
+     /// Host address to bind the router server
+     #[arg(long, default_value = "127.0.0.1")]
+     host: String,
+@@ -280,6 +283,12 @@ struct CliArgs {
+     #[arg(long, default_value_t = 1800)]
+     request_timeout_secs: u64,
+ 
++    /// Idle timeout in seconds for pooled backend HTTP connections. Should be
++    /// lower than the backend's keep-alive timeout (vLLM defaults to 5s); 0
++    /// disables connection reuse entirely
++    #[arg(long, default_value_t = vllm_router_rs::server::DEFAULT_POOL_IDLE_TIMEOUT_SECS)]
++    pool_idle_timeout_secs: u64,
++
+     /// Maximum number of concurrent requests allowed
+     #[arg(long, default_value_t = 32768)]
+     max_concurrent_requests: usize,
+@@ -539,6 +548,14 @@ impl CliArgs {
+ 
+         // Build RouterConfig
+         Ok(RouterConfig {
++            epd: self
++                .epd_config
++                .as_deref()
++                .map(serde_json::from_str)
++                .transpose()
++                .map_err(|e| vllm_router_rs::config::ConfigError::ValidationFailed {
++                    reason: format!("Invalid --epd-config: {e}"),
++                })?,
+             mode,
+             policy,
+             connection_mode,
+@@ -638,6 +655,7 @@ impl CliArgs {
+             service_discovery_config,
+             prometheus_config,
+             request_timeout_secs: self.request_timeout_secs,
++            pool_idle_timeout_secs: self.pool_idle_timeout_secs,
+             request_id_headers: if self.request_id_headers.is_empty() {
+                 None
+             } else {
+diff --git a/src/routers/http/epd.rs b/src/routers/http/epd.rs
+new file mode 100644
+index 0000000..6b0692e
+--- /dev/null
++++ b/src/routers/http/epd.rs
+@@ -0,0 +1,979 @@
++use crate::config::EpdConfig;
++use axum::http::{HeaderMap, StatusCode};
++use futures_util::future::join_all;
++use reqwest::{Client, RequestBuilder};
++use serde_json::{json, Map, Value};
++use sha2::{Digest, Sha256};
++use std::collections::HashMap;
++use std::sync::atomic::{AtomicUsize, Ordering};
++use std::time::Instant;
++use uuid::Uuid;
++
++type EpdError = (StatusCode, String);
++
++struct MediaItem {
++    message_index: usize,
++    content_index: usize,
++    kind: &'static str,
++    content_id: String,
++    transfer_id: String,
++    media: Value,
++}
++
++#[derive(Debug)]
++pub(super) struct EncoderStage {
++    config: EpdConfig,
++    next_encoder: AtomicUsize,
++}
++
++/// Cancel abandoned Mooncake pushes when preparation or the P/PD request ends early.
++pub(super) struct EcTransferGuard {
++    control_addr: String,
++    transfer_ids: Vec<String>,
++}
++
++impl EcTransferGuard {
++    fn retain(&mut self, transfer_ids: Vec<String>) {
++        let mut abandoned = Self {
++            control_addr: self.control_addr.clone(),
++            transfer_ids: std::mem::replace(&mut self.transfer_ids, transfer_ids),
++        };
++        abandoned
++            .transfer_ids
++            .retain(|id| !self.transfer_ids.contains(id));
++    }
++
++    pub(super) fn disarm(&mut self) {
++        self.transfer_ids.clear();
++    }
++}
++
++impl Drop for EcTransferGuard {
++    fn drop(&mut self) {
++        if self.transfer_ids.is_empty() {
++            return;
++        }
++        let transfer_ids = std::mem::take(&mut self.transfer_ids);
++        let control_addr = self.control_addr.clone();
++        // No blocking ZMQ operations on the HTTP runtime threads.
++        tokio::task::spawn_blocking(move || {
++            if let Err(error) = cancel_ec_transfers(&control_addr, &transfer_ids) {
++                tracing::warn!(%error, %control_addr, "Could not discover EC consumer shards for cancellation");
++            }
++        });
++    }
++}
++
++fn ec_control_request(
++    context: &zmq::Context,
++    address: &str,
++    request: &Value,
++) -> anyhow::Result<Value> {
++    let socket = context.socket(zmq::REQ)?;
++    socket.set_linger(0)?;
++    socket.set_sndtimeo(1000)?;
++    socket.set_rcvtimeo(1000)?;
++    socket.connect(address)?;
++    socket.send(serde_json::to_vec(request)?.as_slice(), 0)?;
++    let mut response: Value = serde_json::from_slice(&socket.recv_bytes(0)?)?;
++    anyhow::ensure!(
++        response["ok"] == true,
++        "EC control request failed: {}",
++        response["error"]
++    );
++    Ok(response["result"].take())
++}
++
++fn cancel_ec_transfers(control_addr: &str, transfer_ids: &[String]) -> anyhow::Result<()> {
++    let context = zmq::Context::new();
++    let peers = ec_control_request(&context, control_addr, &json!({"op": "peers"}))?;
++    let ports: Vec<u16> = serde_json::from_value(peers["ports"].clone())?;
++    anyhow::ensure!(
++        !ports.is_empty() && !ports.contains(&0),
++        "Invalid EC consumer shard ports"
++    );
++    let (prefix, _) = control_addr
++        .rsplit_once(':')
++        .ok_or_else(|| anyhow::anyhow!("Invalid EC control address: {control_addr}"))?;
++    for port in ports {
++        let address = format!("{prefix}:{port}");
++        for transfer_id in transfer_ids {
++            let request = json!({"op": "cancel", "transfer_id": transfer_id, "abandon": true});
++            if let Err(error) = ec_control_request(&context, &address, &request) {
++                tracing::warn!(%error, %address, %transfer_id, "Could not cancel abandoned EC transfer");
++            }
++        }
++    }
++    Ok(())
++}
++
++impl EncoderStage {
++    pub(super) fn new(config: EpdConfig) -> Self {
++        Self {
++            config,
++            next_encoder: AtomicUsize::new(0),
++        }
++    }
++
++    pub(super) async fn prepare(
++        &self,
++        client: &Client,
++        mut body: Value,
++        consumer_url: &str,
++        headers: Option<&HeaderMap>,
++        api_key: Option<&str>,
++    ) -> Result<(Value, Option<EcTransferGuard>), EpdError> {
++        let started = Instant::now();
++        let items = collect_media_items(&body)?;
++        if items.is_empty() {
++            return Ok((body, None));
++        }
++        let mut embed_positions = Vec::new();
++        for (message_index, message) in body["messages"]
++            .as_array()
++            .into_iter()
++            .flatten()
++            .enumerate()
++        {
++            for (content_index, item) in message
++                .get("content")
++                .and_then(Value::as_array)
++                .into_iter()
++                .flatten()
++                .enumerate()
++            {
++                if matches!(
++                    item.get("type").and_then(Value::as_str),
++                    Some("image_embeds" | "audio_embeds" | "video_embeds")
++                ) {
++                    embed_positions.push((message_index, content_index));
++                }
++            }
++        }
++        let consumer_addr = self.config.consumer_zmq_addrs.get(consumer_url);
++        if !self.config.consumer_zmq_addrs.is_empty() && consumer_addr.is_none() {
++            return Err((
++                StatusCode::SERVICE_UNAVAILABLE,
++                "Selected embedding consumer has no EC control address".into(),
++            ));
++        }
++        let mut pending = consumer_addr.map(|control_addr| EcTransferGuard {
++            control_addr: control_addr.clone(),
++            transfer_ids: items.iter().map(|item| item.transfer_id.clone()).collect(),
++        });
++        let request_id = headers
++            .and_then(|h| h.get("x-request-id"))
++            .and_then(|v| v.to_str().ok())
++            .map(str::to_owned)
++            .unwrap_or_else(|| Uuid::new_v4().to_string());
++        let start = self.next_encoder.fetch_add(items.len(), Ordering::Relaxed);
++        // Round-robin per item, then batch the images of one request that land
++        // on the same encoder into a single call, like the Python EPD proxy.
++        // Audio and video items stay singleton groups.
++        let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
++        let mut image_group_of: HashMap<usize, usize> = HashMap::new();
++        for (index, item) in items.iter().enumerate() {
++            let encoder = start.wrapping_add(index) % self.config.encoder_urls.len();
++            if item.kind == "image_url" {
++                match image_group_of.get(&encoder) {
++                    Some(&group) => groups[group].1.push(index),
++                    None => {
++                        image_group_of.insert(encoder, groups.len());
++                        groups.push((encoder, vec![index]));
++                    }
++                }
++            } else {
++                groups.push((encoder, vec![index]));
++            }
++        }
++        let replies = join_all(groups.iter().map(|(encoder, indices)| {
++            let encoder_url = &self.config.encoder_urls[*encoder];
++            let mut request = client
++                .post(format!(
++                    "{}/v1/chat/completions",
++                    encoder_url.trim_end_matches('/')
++                ))
++                .header(
++                    "x-request-id",
++                    format!(
++                        "{request_id}:{}:{:.6}",
++                        indices[0], items[indices[0]].transfer_id
++                    ),
++                );
++            if let Some(key) = api_key {
++                request = request.bearer_auth(key);
++            } else if let Some(auth) = headers.and_then(|h| h.get("authorization")) {
++                request = request.header("authorization", auth);
++            }
++            encode_group(
++                request,
++                &items,
++                indices,
++                &body,
++                consumer_addr.map(String::as_str),
++            )
++        }))
++        .await;
++        let replies: Vec<Value> = replies.into_iter().collect::<Result<_, _>>()?;
++        let mut handles = Map::new();
++        // Sort transfers by content position, including caller-supplied embeds.
++        let mut transfers = Vec::new();
++        let mut used_transfer_ids = Vec::new();
++        let mut rewritten = 0;
++        for ((_, indices), mut reply) in groups.iter().zip(replies) {
++            let Some(Value::Object(params)) = reply.get_mut("ec_transfer_params").map(Value::take)
++            else {
++                // No EC report at all: keep the raw media but pin its uuid so
++                // the consumer derives the same mm_hash the encoder used.
++                for &index in indices {
++                    let item = &items[index];
++                    body["messages"][item.message_index]["content"][item.content_index] =
++                        item.media.clone();
++                }
++                continue;
++            };
++            // Position is the reliable correlation when the engine rehashes
++            // uuids with processing options; the uuid key and the single-entry
++            // shape are fallbacks for encoders without position metadata.
++            let mut by_position: HashMap<usize, (&String, &Value)> = HashMap::new();
++            if indices.len() > 1 {
++                for (mm_hash, reported) in params.iter() {
++                    if let Some(item_indices) =
++                        reported.get("item_indices").and_then(Value::as_array)
++                    {
++                        for local in item_indices {
++                            let local = local
++                                .as_u64()
++                                .map(|v| v as usize)
++                                .filter(|&v| v < indices.len())
++                                .ok_or_else(|| {
++                                    (StatusCode::BAD_GATEWAY, "Invalid encoder item index".into())
++                                })?;
++                            if by_position.insert(local, (mm_hash, reported)).is_some() {
++                                return Err((
++                                    StatusCode::BAD_GATEWAY,
++                                    "Duplicate encoder item index".into(),
++                                ));
++                            }
++                        }
++                    }
++                }
++            }
++            for (local, &index) in indices.iter().enumerate() {
++                let item = &items[index];
++                let entry = by_position
++                    .get(&local)
++                    .map(|(hash, reported)| ((*hash).clone(), (*reported).clone()))
++                    .or_else(|| {
++                        params
++                            .get_key_value(&item.content_id)
++                            .map(|(hash, reported)| (hash.clone(), reported.clone()))
++                    })
++                    .or_else(|| {
++                        if indices.len() == 1 && params.len() == 1 {
++                            params
++                                .iter()
++                                .next()
++                                .map(|(hash, reported)| (hash.clone(), reported.clone()))
++                        } else {
++                            None
++                        }
++                    });
++                let Some((hash, reported)) = entry else {
++                    // Unreported item (e.g. an encoder-side processor cache
++                    // hit): keep the raw media with its uuid pinned.
++                    body["messages"][item.message_index]["content"][item.content_index] =
++                        item.media.clone();
++                    continue;
++                };
++                if let Some(metadata) = reported
++                    .get("metadata")
++                    .and_then(Value::as_object)
++                    .filter(|m| !m.is_empty())
++                {
++                    let metadata = flatten_metadata(metadata)?;
++                    let kind = match item.kind {
++                        "image_url" => "image_embeds",
++                        "video_url" => "video_embeds",
++                        _ => "audio_embeds",
++                    };
++                    body["messages"][item.message_index]["content"][item.content_index] = json!({
++                        "type": kind,
++                        (kind): metadata,
++                        "uuid": item.content_id,
++                    });
++                    transfers.push((
++                        (item.message_index, item.content_index),
++                        json!({
++                            "mm_hash": hash,
++                            "transfer_id": item.transfer_id,
++                        }),
++                    ));
++                    used_transfer_ids.push(item.transfer_id.clone());
++                    rewritten += 1;
++                } else {
++                    // The encoder reported no placeholder metadata (e.g. a
++                    // processor cache hit): keep the raw media with its uuid
++                    // pinned and hand the transfer to the consumer, which can
++                    // then reuse the published embedding after re-preprocessing
++                    // instead of abandoning the transfer.
++                    body["messages"][item.message_index]["content"][item.content_index] =
++                        item.media.clone();
++                    transfers.push((
++                        (item.message_index, item.content_index),
++                        json!({
++                            "mm_hash": hash,
++                            "transfer_id": item.transfer_id,
++                        }),
++                    ));
++                    used_transfer_ids.push(item.transfer_id.clone());
++                }
++                handles.insert(hash, reported);
++            }
++        }
++        if !handles.is_empty() {
++            let mut previous = Vec::new();
++            if let Some(Value::Object(mut existing)) =
++                body.get_mut("ec_transfer_params").map(Value::take)
++            {
++                if let Some(Value::Array(entries)) = existing.remove("ec_items") {
++                    previous = entries;
++                }
++                existing.extend(handles);
++                handles = existing;
++            }
++            if previous.len() == embed_positions.len() {
++                transfers.extend(embed_positions.into_iter().zip(previous.drain(..)));
++            }
++            transfers.sort_by_key(|(position, _)| *position);
++            previous.extend(transfers.into_iter().map(|(_, entry)| entry));
++            if !previous.is_empty() {
++                handles.insert("ec_items".into(), Value::Array(previous));
++            }
++            body["ec_transfer_params"] = Value::Object(handles);
++        }
++        if let Some(pending) = pending.as_mut() {
++            pending.retain(used_transfer_ids);
++        }
++        tracing::info!(
++            %request_id,
++            items = items.len(),
++            rewritten,
++            encode_ms = started.elapsed().as_secs_f64() * 1000.0,
++            "EPD encoder stage complete"
++        );
++        Ok((body, pending))
++    }
++}
++
++fn collect_media_items(body: &Value) -> Result<Vec<MediaItem>, EpdError> {
++    let messages = body
++        .get("messages")
++        .and_then(Value::as_array)
++        .ok_or_else(|| (StatusCode::BAD_REQUEST, "messages must be an array".into()))?;
++    let mut items = Vec::new();
++    for (message_index, message) in messages.iter().enumerate() {
++        let Some(content) = message.get("content").and_then(Value::as_array) else {
++            continue;
++        };
++        for (content_index, item) in content.iter().enumerate() {
++            let kind = match item.get("type").and_then(Value::as_str) {
++                Some("image_url") => "image_url",
++                Some("video_url") => "video_url",
++                Some("audio_url") => "audio_url",
++                _ => continue,
++            };
++            let url = item[kind]["url"]
++                .as_str()
++                .filter(|v| !v.is_empty())
++                .ok_or_else(|| {
++                    (
++                        StatusCode::BAD_REQUEST,
++                        format!("{kind}.url must be a nonempty string"),
++                    )
++                })?;
++            // A caller-supplied uuid wins (matches the reference EPD proxy):
++            // it pins the EC cache identity, e.g. for retrying against an
++            // already published embedding. Hash the URL only as a fallback.
++            let content_id = item
++                .get("uuid")
++                .and_then(Value::as_str)
++                .filter(|v| !v.is_empty())
++                .map(str::to_owned)
++                .unwrap_or_else(|| format!("{:x}", Sha256::digest(url.as_bytes())));
++            let transfer_id = Uuid::new_v4().simple().to_string();
++            let mut media = item.clone();
++            media["uuid"] = json!(content_id);
++            items.push(MediaItem {
++                message_index,
++                content_index,
++                kind,
++                content_id,
++                transfer_id,
++                media,
++            });
++        }
++    }
++    Ok(items)
++}
++
++async fn encode_group(
++    request: RequestBuilder,
++    items: &[MediaItem],
++    indices: &[usize],
++    body: &Value,
++    consumer_addr: Option<&str>,
++) -> Result<Value, EpdError> {
++    let mut payload = json!({
++        "model": body.get("model"),
++        "stream": false,
++        "messages": [{
++            "role": "user",
++            "content": indices.iter().map(|&i| items[i].media.clone()).collect::<Vec<_>>(),
++        }],
++    });
++    // Per-request preprocessing options must agree on both sides.
++    for key in [
++        "mm_processor_kwargs",
++        "media_io_kwargs",
++        "priority",
++        "session_id",
++    ] {
++        if let Some(value) = body.get(key) {
++            payload[key] = value.clone();
++        }
++    }
++    if let Some(control_addr) = consumer_addr {
++        payload["ec_transfer_params"] = json!({
++            "consumer_zmq": control_addr,
++            "ec_items": indices
++                .iter()
++                .map(|&i| json!({"transfer_id": items[i].transfer_id}))
++                .collect::<Vec<_>>(),
++        });
++    }
++    let request = request.json(&payload);
++    drop(payload);
++    let response = request.send().await.map_err(|e| {
++        (
++            StatusCode::BAD_GATEWAY,
++            format!("Encoder request failed: {e}"),
++        )
++    })?;
++    if !response.status().is_success() {
++        return Err((response.status(), "Encoder request failed".into()));
++    }
++    response.json::<Value>().await.map_err(|e| {
++        (
++            StatusCode::BAD_GATEWAY,
++            format!("Invalid encoder response: {e}"),
++        )
++    })
++}
++
++fn flatten_metadata(metadata: &Map<String, Value>) -> Result<Map<String, Value>, EpdError> {
++    metadata
++        .iter()
++        .map(|(key, value)| {
++            let values = value.as_array().ok_or_else(|| {
++                (
++                    StatusCode::BAD_GATEWAY,
++                    "Encoder metadata must contain numeric arrays".into(),
++                )
++            })?;
++            let mut flat = Vec::new();
++            for value in values {
++                match value {
++                    Value::Array(values) => flat.extend(values.iter().cloned()),
++                    value => flat.push(value.clone()),
++                }
++            }
++            if !flat.iter().all(Value::is_number) {
++                return Err((
++                    StatusCode::BAD_GATEWAY,
++                    "Encoder metadata must contain numeric arrays".into(),
++                ));
++            }
++            Ok((key.clone(), Value::Array(flat)))
++        })
++        .collect()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use axum::{extract::State, routing::post, Json, Router};
++    use std::sync::{Arc, Mutex};
++
++    #[derive(Clone)]
++    struct MockEncoder {
++        mode: &'static str,
++        seen: Arc<Mutex<Vec<Value>>>,
++    }
++
++    async fn encode(
++        State(state): State<MockEncoder>,
++        Json(body): Json<Value>,
++    ) -> (StatusCode, Json<Value>) {
++        {
++            let mut seen = state.seen.lock().unwrap();
++            seen.push(body.clone());
++        }
++        if state.mode == "fail" {
++            return (
++                StatusCode::SERVICE_UNAVAILABLE,
++                Json(json!({"error":"unavailable"})),
++            );
++        }
++        // Batched requests carry several media parts; dedupe identical media
++        // into one entry and report positions via item_indices, like vLLM.
++        let content = body["messages"][0]["content"].as_array().unwrap();
++        let mut positions: Vec<(String, Vec<usize>)> = Vec::new();
++        for (index, part) in content.iter().enumerate() {
++            let uuid = part["uuid"].as_str().unwrap().to_owned();
++            match positions.iter_mut().find(|(u, _)| *u == uuid) {
++                Some((_, indices)) => indices.push(index),
++                None => positions.push((uuid, vec![index])),
++            }
++        }
++        let mut params = Map::new();
++        for (uuid, mut indices) in positions {
++            if state.mode == "mixed" {
++                // Report only the later item of a batch, leaving the first
++                // unreported (e.g. an encoder-side processor cache hit).
++                indices = indices.into_iter().skip(1).collect();
++            }
++            if indices.is_empty() {
++                continue;
++            }
++            let metadata = match state.mode {
++                "empty" => json!({}),
++                "invalid" => json!({"image_grid_thw": ["invalid"]}),
++                _ => json!({"image_grid_thw": [[1, 2, 3]]}),
++            };
++            params.insert(
++                format!("engine-{uuid}"),
++                json!({
++                    "metadata": metadata,
++                    "item_indices": indices,
++                    "peer_host": "encoder",
++                    "peer_port": 4321,
++                    "size_bytes": 128,
++                }),
++            );
++        }
++        (StatusCode::OK, Json(json!({"ec_transfer_params": params})))
++    }
++
++    async fn mock(
++        mode: &'static str,
++    ) -> (
++        EncoderStage,
++        Arc<Mutex<Vec<Value>>>,
++        tokio::task::JoinHandle<()>,
++    ) {
++        let state = MockEncoder {
++            mode,
++            seen: Arc::new(Mutex::new(Vec::new())),
++        };
++        let seen = state.seen.clone();
++        let app = Router::new()
++            .route("/v1/chat/completions", post(encode))
++            .with_state(state);
++        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let url = format!("http://{}", listener.local_addr().unwrap());
++        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
++        let stage = EncoderStage::new(EpdConfig {
++            encoder_urls: vec![url],
++            consumer_zmq_addrs: Default::default(),
++        });
++        (stage, seen, server)
++    }
++
++    fn request() -> Value {
++        json!({
++            "model": "test",
++            "stream": true,
++            "max_tokens": 16,
++            "chat_template_kwargs": {"enable_thinking": false},
++            "mm_processor_kwargs": {"min_pixels": 64},
++            "messages": [{
++                "role": "user",
++                "content": [
++                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
++                    {"type": "text", "text": "compare"},
++                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
++                ],
++            }],
++        })
++    }
++
++    #[tokio::test]
++    async fn duplicate_images_keep_positions_and_distinct_transfers() {
++        let (stage, seen, server) = mock("normal").await;
++        let mut input = request();
++        input["ec_transfer_params"] = json!({
++            "opaque": {"backend_field": 42},
++            "ec_items": [{"mm_hash": "existing", "transfer_id": "existing-transfer"}],
++        });
++        let (body, pending) = stage
++            .prepare(&Client::new(), input.clone(), "pd", None, None)
++            .await
++            .unwrap();
++        assert!(pending.is_none());
++        let content = &body["messages"][0]["content"];
++        assert_eq!(
++            content[0]["image_embeds"]["image_grid_thw"],
++            json!([1, 2, 3])
++        );
++        assert_eq!(content[1], input["messages"][0]["content"][1]);
++        assert_eq!(content[0]["uuid"], content[2]["uuid"]);
++        let transfers = &body["ec_transfer_params"]["ec_items"];
++        assert_eq!(transfers.as_array().unwrap().len(), 3);
++        assert_eq!(transfers[0], input["ec_transfer_params"]["ec_items"][0]);
++        assert_eq!(
++            body["ec_transfer_params"]["opaque"],
++            input["ec_transfer_params"]["opaque"]
++        );
++        assert_eq!(transfers[1]["mm_hash"], transfers[2]["mm_hash"]);
++        assert_ne!(transfers[1]["transfer_id"], transfers[2]["transfer_id"]);
++        assert_eq!(
++            transfers[1]["mm_hash"],
++            format!("engine-{}", content[0]["uuid"].as_str().unwrap())
++        );
++        assert_eq!(
++            body["ec_transfer_params"][transfers[1]["mm_hash"].as_str().unwrap()]["peer_port"],
++            4321
++        );
++        assert!(body["ec_transfer_params"]
++            .get(content[0]["uuid"].as_str().unwrap())
++            .is_none());
++        assert_eq!(body["stream"], true);
++        assert_eq!(body["chat_template_kwargs"], input["chat_template_kwargs"]);
++        let requests = seen.lock().unwrap();
++        // Both images round-robin onto the single encoder and are batched
++        // into one request.
++        assert_eq!(requests.len(), 1);
++        let request = &requests[0];
++        assert!(request["stream"] == false && request.get("max_tokens").is_none());
++        assert_eq!(request["mm_processor_kwargs"], input["mm_processor_kwargs"]);
++        let sent = request["messages"][0]["content"].as_array().unwrap();
++        assert_eq!(sent.len(), 2);
++        assert!(sent.iter().all(|part| part["uuid"].is_string()));
++        server.abort();
++    }
++
++    #[tokio::test]
++    async fn ec_items_follow_media_order_across_encoders() {
++        // Images [A, B, A] round-robin onto two encoders: E0 gets [A, A]
++        // batched, E1 gets [B]. ec_items must stay in media order
++        // [A, B, A] so the consumer's positional transfer mapping cancels
++        // every reservation on request finish.
++        let spawn = || async {
++            let state = MockEncoder {
++                mode: "normal",
++                seen: Arc::new(Mutex::new(Vec::new())),
++            };
++            let seen = state.seen.clone();
++            let app = Router::new()
++                .route("/v1/chat/completions", post(encode))
++                .with_state(state);
++            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++            let url = format!("http://{}", listener.local_addr().unwrap());
++            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
++            (url, seen, server)
++        };
++        let (url0, seen0, server0) = spawn().await;
++        let (url1, seen1, server1) = spawn().await;
++        let stage = EncoderStage::new(EpdConfig {
++            encoder_urls: vec![url0, url1],
++            consumer_zmq_addrs: Default::default(),
++        });
++        let input = json!({
++            "messages": [{
++                "role": "user",
++                "content": [
++                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
++                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,def"}},
++                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
++                ],
++            }],
++        });
++        let (body, _) = stage
++            .prepare(&Client::new(), input, "pd", None, None)
++            .await
++            .unwrap();
++        // The split across two encoders actually happened.
++        assert_eq!(seen0.lock().unwrap().len(), 1);
++        assert_eq!(seen1.lock().unwrap().len(), 1);
++        assert_eq!(
++            seen0.lock().unwrap()[0]["messages"][0]["content"]
++                .as_array()
++                .unwrap()
++                .len(),
++            2
++        );
++        let content = &body["messages"][0]["content"];
++        let uuid_a = content[0]["uuid"].as_str().unwrap();
++        let uuid_b = content[1]["uuid"].as_str().unwrap();
++        assert_ne!(uuid_a, uuid_b);
++        assert_eq!(content[2]["uuid"].as_str().unwrap(), uuid_a);
++        let hashes: Vec<String> = body["ec_transfer_params"]["ec_items"]
++            .as_array()
++            .unwrap()
++            .iter()
++            .map(|item| item["mm_hash"].as_str().unwrap().to_owned())
++            .collect();
++        assert_eq!(
++            hashes,
++            [
++                format!("engine-{uuid_a}"),
++                format!("engine-{uuid_b}"),
++                format!("engine-{uuid_a}"),
++            ]
++        );
++        server0.abort();
++        server1.abort();
++    }
++
++    #[tokio::test]
++    async fn existing_and_new_transfers_follow_content_order() {
++        let (stage, _, server) = mock("normal").await;
++        let embed = json!({
++            "type": "image_embeds",
++            "image_embeds": {"image_grid_thw": [1, 2, 3]},
++            "uuid": "cached",
++        });
++        let raw = json!({"type": "image_url", "image_url": {"url": "new-image"}});
++        let cached = json!({"mm_hash": "cached-hash", "transfer_id": "cached-transfer"});
++        for content in [json!([raw, embed]), json!([embed, raw])] {
++            let raw_index = usize::from(content[0]["type"] == "image_embeds");
++            let input = json!({
++                "messages": [{"role": "user", "content": content}],
++                "ec_transfer_params": {
++                    "cached-hash": {"peer_port": 42},
++                    "ec_items": [cached],
++                },
++            });
++            let (body, _) = stage
++                .prepare(&Client::new(), input, "pd", None, None)
++                .await
++                .unwrap();
++            let transfers = body["ec_transfer_params"]["ec_items"].as_array().unwrap();
++            assert_eq!(transfers.len(), 2);
++            assert_eq!(transfers[1 - raw_index], cached);
++            assert_ne!(transfers[raw_index]["transfer_id"], cached["transfer_id"]);
++            assert_eq!(body["messages"][0]["content"][1 - raw_index], embed);
++            assert_eq!(body["ec_transfer_params"]["cached-hash"]["peer_port"], 42);
++        }
++        server.abort();
++    }
++
++    #[tokio::test]
++    async fn missing_metadata_keeps_raw_media_with_uuid_and_forwards_transfers() {
++        let (stage, seen, server) = mock("empty").await;
++        let mut input = request();
++        input["ec_transfer_params"] = json!({
++            "opaque": {"backend_field": 42},
++            "ec_items": [{"mm_hash": "existing", "transfer_id": "existing-transfer"}],
++        });
++        let (body, _) = stage
++            .prepare(&Client::new(), input.clone(), "pd", None, None)
++            .await
++            .unwrap();
++        // Raw media is kept with the content-derived uuid pinned, so the
++        // consumer derives the same mm_hash and can reuse the embedding.
++        let seen = seen.lock().unwrap();
++        let uuid = seen[0]["messages"][0]["content"][0]["uuid"]
++            .as_str()
++            .unwrap()
++            .to_owned();
++        let content = &body["messages"][0]["content"];
++        for index in [0, 2] {
++            let mut expected = input["messages"][0]["content"][index].clone();
++            expected["uuid"] = json!(uuid);
++            assert_eq!(content[index], expected);
++        }
++        assert_eq!(content[1], input["messages"][0]["content"][1]);
++        assert_eq!(
++            body["ec_transfer_params"]["opaque"],
++            input["ec_transfer_params"]["opaque"]
++        );
++        // Raw-fallback transfers are forwarded to the consumer, not abandoned.
++        let transfers = body["ec_transfer_params"]["ec_items"].as_array().unwrap();
++        assert_eq!(transfers.len(), 3);
++        assert_eq!(transfers[0], input["ec_transfer_params"]["ec_items"][0]);
++        assert_eq!(transfers[1]["mm_hash"], format!("engine-{uuid}"));
++        assert_ne!(transfers[1]["transfer_id"], transfers[2]["transfer_id"]);
++        let handle = &body["ec_transfer_params"][format!("engine-{uuid}")];
++        assert_eq!(handle["metadata"], json!({}));
++        assert_eq!(handle["peer_port"], 4321);
++        server.abort();
++    }
++
++    #[tokio::test]
++    async fn encoder_failure_does_not_forward_metadata_only_input() {
++        let (stage, _, server) = mock("fail").await;
++        let error = stage
++            .prepare(&Client::new(), request(), "pd", None, None)
++            .await
++            .err()
++            .unwrap();
++        assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
++        server.abort();
++    }
++
++    #[tokio::test]
++    async fn existing_embeds_bypass_encoders() {
++        let (stage, seen, server) = mock("normal").await;
++        let input = json!({
++            "messages": [{
++                "role": "user",
++                "content": [{
++                    "type": "image_embeds",
++                    "image_embeds": {"image_grid_thw": [1, 2, 3]},
++                    "uuid": "known",
++                }],
++            }],
++        });
++        let (body, _) = stage
++            .prepare(&Client::new(), input.clone(), "pd", None, None)
++            .await
++            .unwrap();
++        assert_eq!(input, body);
++        assert!(seen.lock().unwrap().is_empty());
++        server.abort();
++    }
++
++    #[tokio::test]
++    async fn abandoned_pushes_cancel_all_consumer_shards() {
++        for mode in [
++            "normal",
++            "empty",
++            "mixed",
++            "invalid",
++            "fail",
++            "cancel_error",
++        ] {
++            let (mut stage, seen, server) = mock(mode).await;
++            let (send_address, recv_address) = tokio::sync::oneshot::channel();
++            let control = tokio::task::spawn_blocking(move || {
++                let context = zmq::Context::new();
++                let sockets = [0, 1].map(|_| {
++                    let socket = context.socket(zmq::REP).unwrap();
++                    socket.set_rcvtimeo(5000).unwrap();
++                    socket.set_sndtimeo(5000).unwrap();
++                    socket.set_linger(0).unwrap();
++                    socket.bind("tcp://127.0.0.1:*").unwrap();
++                    socket
++                });
++                let addresses = sockets
++                    .each_ref()
++                    .map(|s| s.get_last_endpoint().unwrap().unwrap());
++                let ports = addresses
++                    .each_ref()
++                    .map(|a| a.rsplit_once(':').unwrap().1.parse::<u16>().unwrap());
++                send_address.send(addresses[0].clone()).unwrap();
++                let discovery: Value =
++                    serde_json::from_slice(&sockets[0].recv_bytes(0).unwrap()).unwrap();
++                assert_eq!(discovery, json!({"op": "peers"}));
++                sockets[0]
++                    .send(
++                        json!({"ok": true, "result": {"ports": ports}})
++                            .to_string()
++                            .as_bytes(),
++                        0,
++                    )
++                    .unwrap();
++                let mut cancelled = [Vec::new(), Vec::new()];
++                // "mixed" leaves the unreported item's transfer abandoned while
++                // the reported one is disarmed below.
++                let expected = if mode == "mixed" { 1 } else { 2 };
++                for (rank, socket) in sockets.iter().enumerate() {
++                    for _ in 0..expected {
++                        let message: Value =
++                            serde_json::from_slice(&socket.recv_bytes(0).unwrap()).unwrap();
++                        cancelled[rank].push(message);
++                        let response = if mode == "cancel_error" && rank == 0 {
++                            json!({"ok": false, "error": "injected failure"})
++                        } else {
++                            json!({"ok": true, "result": {"cancelled": true}})
++                        };
++                        socket.send(response.to_string().as_bytes(), 0).unwrap();
++                    }
++                }
++                cancelled
++            });
++            let address = recv_address.await.unwrap();
++            stage
++                .config
++                .consumer_zmq_addrs
++                .insert("selected-pd".into(), address.clone());
++            let result = stage
++                .prepare(&Client::new(), request(), "selected-pd", None, None)
++                .await;
++            let ids: Vec<Value> = seen
++                .lock()
++                .unwrap()
++                .iter()
++                .flat_map(|r| {
++                    assert_eq!(r["ec_transfer_params"]["consumer_zmq"], address);
++                    r["ec_transfer_params"]["ec_items"]
++                        .as_array()
++                        .unwrap()
++                        .iter()
++                        .map(|entry| entry["transfer_id"].clone())
++                        .collect::<Vec<_>>()
++                })
++                .collect();
++            if matches!(mode, "invalid" | "fail") {
++                assert!(result.is_err());
++            } else {
++                let (_, mut pending) = result.unwrap();
++                if mode == "mixed" {
++                    let pending = pending.as_mut().unwrap();
++                    assert_eq!(pending.transfer_ids.len(), 1);
++                    pending.disarm();
++                }
++                drop(pending);
++            }
++            let cancelled = control.await.unwrap();
++            assert_eq!(cancelled[0], cancelled[1]);
++            assert!(cancelled[0].iter().all(|r| r["op"] == "cancel"
++                && r["abandon"] == true
++                && ids.contains(&r["transfer_id"])));
++            if mode == "mixed" {
++                assert_eq!(cancelled[0][0]["transfer_id"], ids[0]);
++            } else {
++                assert_ne!(
++                    cancelled[0][0]["transfer_id"],
++                    cancelled[0][1]["transfer_id"]
++                );
++            }
++            server.abort();
++        }
++    }
++
++    #[test]
++    fn control_request_rejects_remote_errors() {
++        let context = zmq::Context::new();
++        let socket = context.socket(zmq::REP).unwrap();
++        socket.set_rcvtimeo(5000).unwrap();
++        socket.set_sndtimeo(5000).unwrap();
++        socket.set_linger(0).unwrap();
++        socket.bind("tcp://127.0.0.1:*").unwrap();
++        let address = socket.get_last_endpoint().unwrap().unwrap();
++        let server = std::thread::spawn(move || {
++            socket.recv_bytes(0).unwrap();
++            socket
++                .send(
++                    b"{\"ok\":false,\"error\":\"injected failure\"}".as_slice(),
++                    0,
++                )
++                .unwrap();
++        });
++        let result = ec_control_request(&context, &address, &json!({"op": "peers"}));
++        server.join().unwrap();
++        assert!(result.unwrap_err().to_string().contains("injected failure"));
++    }
++}
+diff --git a/src/routers/http/mod.rs b/src/routers/http/mod.rs
+index fa2acae..2fcb690 100644
+--- a/src/routers/http/mod.rs
++++ b/src/routers/http/mod.rs
+@@ -1,6 +1,7 @@
+ //! HTTP router implementations
+ 
+ pub mod dp_utils;
++mod epd;
+ pub mod logprobs_merge;
+ pub mod openai_router;
+ pub mod pd_router;
+diff --git a/src/routers/http/router.rs b/src/routers/http/router.rs
+index f7140ac..07d3bab 100644
+--- a/src/routers/http/router.rs
++++ b/src/routers/http/router.rs
+@@ -144,6 +144,7 @@ struct TypedDispatch<'a> {
+ /// Regular router that uses injected load balancing policies
+ #[derive(Debug)]
+ pub struct Router {
++    epd: Option<super::epd::EncoderStage>,
+     worker_registry: Arc<WorkerRegistry>,
+     policy_registry: Arc<PolicyRegistry>,
+     client: Client,
+@@ -346,6 +347,11 @@ impl Router {
+         });
+ 
+         Ok(Router {
++            epd: ctx
++                .router_config
++                .epd
++                .clone()
++                .map(super::epd::EncoderStage::new),
+             worker_registry: ctx.worker_registry.clone(),
+             policy_registry: ctx.policy_registry.clone(),
+             client: ctx.client.clone(),
+@@ -2421,6 +2427,7 @@ impl RouterTrait for Router {
+         body: serde_json::Value,
+     ) -> Response {
+         debug!("Transparent proxy: routing {} {} to backend", method, path);
++        let start = Instant::now();
+ 
+         // Select a worker (filter by availability like select_worker_for_model)
+         let all_workers = self.worker_registry.get_all();
+@@ -2430,6 +2437,7 @@ impl RouterTrait for Router {
+             .cloned()
+             .collect();
+         if workers.is_empty() {
++            RouterMetrics::record_request_error(path, "no_available_workers");
+             return (
+                 StatusCode::SERVICE_UNAVAILABLE,
+                 "No available workers".to_string(),
+@@ -2437,7 +2445,14 @@ impl RouterTrait for Router {
+                 .into_response();
+         }
+ 
+-        let request_text = serde_json::to_string(&body).ok();
++        let policy = self.policy_registry.get_default_policy();
++        // Serializing the whole body is expensive when it carries base64
++        // media; only consumers that actually read the text pay for it.
++        let request_text = if policy.needs_request_text() || self.program_scheduler.is_some() {
++            serde_json::to_string(&body).ok()
++        } else {
++            None
++        };
+         let model_id = body.get("model").and_then(serde_json::Value::as_str);
+         let is_stream = body
+             .get("stream")
+@@ -2455,7 +2470,10 @@ impl RouterTrait for Router {
+                 .await
+             {
+                 Ok(completion) => completion,
+-                Err(error) => return Self::schedule_error_response(error),
++                Err(error) => {
++                    RouterMetrics::record_request_error(path, "program_scheduling_error");
++                    return Self::schedule_error_response(error);
++                }
+             }
+         } else {
+             None
+@@ -2465,7 +2483,6 @@ impl RouterTrait for Router {
+                 .get_by_url(&completion.dispatch().target_id)
+                 .filter(|worker| worker.is_available())
+         } else {
+-            let policy = self.policy_registry.get_default_policy();
+             let request_headers = Self::headers_to_request_headers(headers);
+             policy
+                 .select_worker_with_headers(
+@@ -2479,6 +2496,7 @@ impl RouterTrait for Router {
+             if let Some(completion) = &program_completion {
+                 completion.finish(false);
+             }
++            RouterMetrics::record_request_error(path, "no_available_workers");
+             return (
+                 StatusCode::SERVICE_UNAVAILABLE,
+                 "Failed to select the Program target".to_string(),
+@@ -2487,6 +2505,43 @@ impl RouterTrait for Router {
+         };
+         let url = worker.endpoint_url(path);
+ 
++        // Match the typed path's load accounting so cache-aware imbalance
++        // detection also sees transparent (EPD) traffic.
++        let load_tracked = policy.name() == "cache_aware" || program_completion.is_some();
++        if load_tracked {
++            worker.increment_load();
++            RouterMetrics::set_running_requests(worker.url(), worker.load());
++        }
++
++        let (body, mut transfers) = if let Some(epd) = &self.epd {
++            if *method == Method::POST && path == "/v1/chat/completions" {
++                match epd
++                    .prepare(
++                        &self.client,
++                        body,
++                        worker.url(),
++                        headers,
++                        self.api_key.as_deref(),
++                    )
++                    .await
++                {
++                    Ok(value) => value,
++                    Err(error) => {
++                        RouterMetrics::record_request_error(path, "encoder_error");
++                        if load_tracked {
++                            worker.decrement_load();
++                            RouterMetrics::set_running_requests(worker.url(), worker.load());
++                        }
++                        return error.into_response();
++                    }
++                }
++            } else {
++                (body, None)
++            }
++        } else {
++            (body, None)
++        };
++
+         debug!("Transparent proxy: forwarding to {}", url);
+ 
+         // Build the request
+@@ -2498,6 +2553,11 @@ impl RouterTrait for Router {
+             Method::PATCH => self.client.patch(&url),
+             Method::HEAD => self.client.head(&url),
+             _ => {
++                if load_tracked {
++                    worker.decrement_load();
++                    RouterMetrics::set_running_requests(worker.url(), worker.load());
++                }
++                RouterMetrics::record_request_error(path, "unsupported_method");
+                 return (
+                     StatusCode::METHOD_NOT_ALLOWED,
+                     format!("Method {} not supported", method),
+@@ -2515,12 +2575,35 @@ impl RouterTrait for Router {
+         }
+ 
+         // Add authorization if configured
++        if self.epd.is_some() {
++            if let Some(headers) = headers {
++                for (name, value) in headers {
++                    // When a backend api_key is configured it must win:
++                    // RequestBuilder::header appends, and vLLM reads the
++                    // first Authorization value.
++                    if self.api_key.is_some() && name == http::header::AUTHORIZATION {
++                        continue;
++                    }
++                    if !matches!(
++                        name.as_str(),
++                        "host"
++                            | "content-length"
++                            | "content-type"
++                            | "connection"
++                            | "transfer-encoding"
++                    ) && !header_utils::TRACE_HEADER_NAMES.contains(&name.as_str())
++                    {
++                        request_builder = request_builder.header(name, value);
++                    }
++                }
++            }
++        }
+         if let Some(ref key) = self.api_key {
+             request_builder = request_builder.header("Authorization", format!("Bearer {}", key));
+         }
+ 
+         // Send request
+-        match otel_http::send_client_request(
++        let response = match otel_http::send_client_request(
+             request_builder,
+             headers,
+             ClientRequestOptions {
+@@ -2534,6 +2617,18 @@ impl RouterTrait for Router {
+         {
+             Ok(response) => {
+                 let status = response.status();
++                // Keep the circuit breaker informed, as the typed path does:
++                // 2xx/4xx count as success, 5xx as worker failure.
++                let was_available = worker.is_available();
++                worker.record_outcome(status.is_success() || status.is_client_error());
++                if was_available != worker.is_available() {
++                    self.worker_registry.notify_worker_state_change();
++                }
++                if status.is_success() {
++                    if let Some(transfers) = transfers.as_mut() {
++                        transfers.disarm();
++                    }
++                }
+                 let headers = response.headers().clone();
+                 let mut response_builder = Response::builder().status(status.as_u16());
+ 
+@@ -2635,15 +2730,35 @@ impl RouterTrait for Router {
+                 }
+             }
+             Err(error) => {
++                // The 502 response below still flows through
++                // hold_load_until_body_done, which releases the load once
++                // its body finishes or is dropped — do not decrement here.
+                 if let Some(completion) = &program_completion {
+                     completion.finish(false);
+                 }
++                // Transport failure: the worker never produced a response.
++                let was_available = worker.is_available();
++                worker.record_outcome(false);
++                if was_available != worker.is_available() {
++                    self.worker_registry.notify_worker_state_change();
++                }
+                 (
+                     StatusCode::BAD_GATEWAY,
+                     format!("Backend request failed: {error}"),
+                 )
+                     .into_response()
+             }
++        };
++        if response.status().is_success() {
++            RouterMetrics::record_request(path);
++            RouterMetrics::record_generate_duration(start.elapsed());
++        } else {
++            RouterMetrics::record_request_error(path, "backend_error");
++        }
++        if load_tracked {
++            hold_load_until_body_done(response, worker)
++        } else {
++            response
+         }
+     }
+ }
+@@ -2668,6 +2783,7 @@ mod tests {
+ 
+         let (_, rx) = tokio::sync::watch::channel(HashMap::new());
+         Router {
++            epd: None,
+             worker_registry,
+             policy_registry,
+             worker_startup_timeout_secs: 5,
+@@ -2710,6 +2826,7 @@ mod tests {
+             circuit_breaker_config: CircuitBreakerConfig::default(),
+             health_config: HealthConfig::default(),
+             frontend: crate::backend::EngineFrontend::new(),
++            epd: None,
+             _worker_loads: Arc::new(rx),
+             _load_monitor_handle: None,
+             program_scheduler: None,
+@@ -2858,6 +2975,73 @@ mod tests {
+         assert!(err.contains("mixed"), "{err}");
+     }
+ 
++    #[tokio::test]
++    async fn transparent_epd_records_request_metrics() {
++        use axum::{routing::post, Json};
++        use serde_json::{json, Value};
++
++        let recorder = metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
++        let handle = recorder.handle();
++        let _metrics = metrics::set_default_local_recorder(&recorder);
++        let app = axum::Router::new().route(
++            "/v1/chat/completions",
++            post(|Json(body): Json<Value>| async move {
++                if body["fail"] == true {
++                    (StatusCode::BAD_REQUEST, "invalid request").into_response()
++                } else if body["stream"] == true {
++                    ([("content-type", "text/event-stream")], "data: [DONE]\n\n").into_response()
++                } else {
++                    Json(json!({"choices": []})).into_response()
++                }
++            }),
++        );
++        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let url = format!("http://{}", listener.local_addr().unwrap());
++        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
++        let mut router = create_test_regular_router();
++        router.worker_registry = Arc::new(WorkerRegistry::new());
++        router
++            .worker_registry
++            .register(Arc::new(BasicWorker::new(url, WorkerType::Regular)));
++        router.epd = Some(super::super::epd::EncoderStage::new(
++            crate::config::EpdConfig {
++                encoder_urls: vec!["http://unused".into()],
++                consumer_zmq_addrs: Default::default(),
++            },
++        ));
++        for (body, status) in [
++            (json!({"messages": []}), StatusCode::OK),
++            (json!({"messages": [], "stream": true}), StatusCode::OK),
++            (
++                json!({"messages": [], "fail": true}),
++                StatusCode::BAD_REQUEST,
++            ),
++            (json!({"messages": null}), StatusCode::BAD_REQUEST),
++        ] {
++            let response = router
++                .route_transparent(None, "/v1/chat/completions", &Method::POST, body)
++                .await;
++            assert_eq!(response.status(), status);
++            axum::body::to_bytes(response.into_body(), 4096)
++                .await
++                .unwrap();
++        }
++        let exported = handle.render();
++        assert!(exported.contains("vllm_router_requests_total{route=\"/v1/chat/completions\"} 2"));
++        assert!(exported.contains("vllm_router_generate_duration_seconds_count 2"));
++        for error in ["encoder_error", "backend_error"] {
++            assert!(
++                exported
++                    .lines()
++                    .any(|line| line.starts_with("vllm_router_request_errors_total{")
++                        && line.contains(&format!("error_type=\"{error}\""))
++                        && line.ends_with(" 1")),
++                "{exported}"
++            );
++        }
++        server.abort();
++    }
++
+     #[tokio::test]
+     async fn streaming_body_holds_load_until_consumed_or_dropped() {
+         let worker: Arc<dyn Worker> = Arc::new(BasicWorker::new(
+@@ -2965,6 +3149,7 @@ mod tests {
+         Router {
+             worker_registry,
+             policy_registry,
++            epd: None,
+             worker_startup_timeout_secs: 5,
+             worker_startup_check_interval_secs: 1,
+             intra_node_data_parallel_size: 1,
+diff --git a/src/routers/http/vllm_pd_router.rs b/src/routers/http/vllm_pd_router.rs
+index 2d7909c..20e79be 100644
+--- a/src/routers/http/vllm_pd_router.rs
++++ b/src/routers/http/vllm_pd_router.rs
+@@ -37,6 +37,7 @@ struct MooncakePrefillInfo {
+ /// vLLM PD Router that extends PdRouterBase with vLLM-specific request handling
+ #[derive(Debug)]
+ pub struct VllmPDRouter {
++    epd: Option<super::epd::EncoderStage>,
+     /// Underlying PD router for most functionality
+     pd_router: PdRouterBase,
+     /// Service discovery registry for dynamic ZMQ address resolution
+@@ -1286,6 +1287,39 @@ impl VllmPDRouter {
+     ) -> Result<Response, PDRouterError> {
+         debug!("ENTERED process_vllm_two_stage_request method");
+         let start_time = Instant::now();
++        if !original_request.is_object() {
++            return Ok((
++                StatusCode::BAD_REQUEST,
++                "Request body must be a JSON object",
++            )
++                .into_response());
++        }
++
++        // The encoder stage must run before the NIXL concurrent fast path:
++        // once a push identity is cached, try_build_concurrent_requests
++        // returns early, and multimodal requests reaching P/D without
++        // published embeddings break encoder-disaggregated workers.
++        let (original_request, mut ec_transfers) = if path == "/v1/chat/completions" {
++            if let Some(epd) = &self.epd {
++                match epd
++                    .prepare(
++                        &self.http_client,
++                        original_request,
++                        prefill_worker.base_url(),
++                        headers,
++                        std::env::var("OPENAI_API_KEY").ok().as_deref(),
++                    )
++                    .await
++                {
++                    Ok(prepared) => prepared,
++                    Err(error) => return Ok(error.into_response()),
++                }
++            } else {
++                (original_request, None)
++            }
++        } else {
++            (original_request, None)
++        };
+ 
+         if let Some((prefill_request, decode_request, request_id)) = self
+             .try_build_concurrent_requests(&original_request, &prefill_worker, &decode_worker, path)
+@@ -1301,6 +1335,7 @@ impl VllmPDRouter {
+                     path,
+                     headers,
+                     start_time,
++                    ec_transfers,
+                 )
+                 .await;
+         }
+@@ -1426,6 +1461,33 @@ impl VllmPDRouter {
+             prefill_response.headers()
+         );
+ 
++        if !prefill_response.status().is_success() {
++            prefill_worker.decrement_load();
++            let status = prefill_response.status();
++            let content_type = prefill_response
++                .headers()
++                .get(http::header::CONTENT_TYPE)
++                .cloned();
++            let detail = prefill_response.text().await.unwrap_or_default();
++            self.stop_profiling(&prefill_base_url).await;
++            let duration = start_time.elapsed();
++            RouterMetrics::record_pd_prefill_error(&prefill_base_url);
++            RouterMetrics::record_pd_request(path);
++            RouterMetrics::record_pd_request_duration(path, duration);
++            if status.is_client_error() {
++                let mut response = (status, detail).into_response();
++                if let Some(content_type) = content_type {
++                    response
++                        .headers_mut()
++                        .insert(http::header::CONTENT_TYPE, content_type);
++                }
++                return Ok(response);
++            }
++            return Err(PDRouterError::NetworkError {
++                message: format!("Prefill server {prefill_url} returned {status}: {detail}"),
++            });
++        }
++
+         // Extract prefill response body to get kv_transfer_params
+         let prefill_bytes = match prefill_response.bytes().await {
+             Ok(bytes) => bytes,
+@@ -1471,6 +1533,33 @@ impl VllmPDRouter {
+             }
+         };
+ 
++        if self.epd.is_some()
++            && !matches!(self.kv_connector, KvConnector::Mooncake)
++            && !matches!(self.moriio_transfer_mode(), Some(MoriIOTransferMode::Write))
++            && !prefill_response_json
++                .get("kv_transfer_params")
++                .is_some_and(Value::is_object)
++        {
++            prefill_worker.decrement_load();
++            self.stop_profiling(&prefill_base_url).await;
++            let duration = start_time.elapsed();
++            RouterMetrics::record_pd_prefill_error(&prefill_base_url);
++            RouterMetrics::record_pd_request(path);
++            RouterMetrics::record_pd_request_duration(path, duration);
++            return Err(PDRouterError::NetworkError {
++                message:
++                    "Prefill returned no KV transfer parameters; refusing metadata-only decode"
++                        .into(),
++            });
++        }
++
++        // Prefill succeeded and consumed the embeddings; the pending EC
++        // transfers are now owned by the decode phase, so disarm the
++        // cancel-on-abandon guard.
++        if let Some(transfers) = ec_transfers.as_mut() {
++            transfers.disarm();
++        }
++
+         // Stop profiling on prefill server after its work is done
+         self.stop_profiling(&prefill_base_url).await;
+ 
+@@ -1482,6 +1571,12 @@ impl VllmPDRouter {
+ 
+         // Stage 2: Prepare decode request with kv_transfer_params
+         let mut decode_request = original_request.clone();
++        if self.epd.is_some() {
++            // D receives the prompt layout and KV, not P's EC reservations.
++            if let Some(obj) = decode_request.as_object_mut() {
++                obj.remove("ec_transfer_params");
++            }
++        }
+         if let Some(params) = self
+             .build_decode_kv_transfer_params(
+                 &prefill_base_url,
+@@ -1704,6 +1799,12 @@ impl VllmPDRouter {
+             .ok()?;
+ 
+         let mut decode_request = original_request.clone();
++        if self.epd.is_some() {
++            // D receives the prompt layout and KV, not P's EC reservations.
++            if let Some(obj) = decode_request.as_object_mut() {
++                obj.remove("ec_transfer_params");
++            }
++        }
+         decode_request["kv_transfer_params"] =
+             Self::build_nixl_push_decode_params(&identity, &request_id);
+ 
+@@ -1721,6 +1822,7 @@ impl VllmPDRouter {
+         path: &str,
+         headers: Option<&HeaderMap>,
+         start_time: Instant,
++        mut ec_transfers: Option<super::epd::EcTransferGuard>,
+     ) -> Result<Response, PDRouterError> {
+         let prefill_base_url = prefill_worker.base_url().to_string();
+         let prefill_dp_rank = prefill_worker.dp_rank();
+@@ -1787,6 +1889,18 @@ impl VllmPDRouter {
+                 RouterMetrics::record_pd_prefill_error(&prefill_base_url);
+                 RouterMetrics::record_pd_request(path);
+                 RouterMetrics::record_pd_request_duration(path, start_time.elapsed());
++                if resp.status().is_client_error() {
++                    let status = resp.status();
++                    let content_type = resp.headers().get(http::header::CONTENT_TYPE).cloned();
++                    let mut response =
++                        (status, resp.bytes().await.unwrap_or_default()).into_response();
++                    if let Some(content_type) = content_type {
++                        response
++                            .headers_mut()
++                            .insert(http::header::CONTENT_TYPE, content_type);
++                    }
++                    return Ok(response);
++                }
+                 return Err(PDRouterError::NetworkError {
+                     message: format!(
+                         "Prefill request failed to {} with status {}",
+@@ -1813,6 +1927,12 @@ impl VllmPDRouter {
+         if let Some(prefill_json) = prefill_response_json.as_ref() {
+             self.maybe_cache_nixl_push_identity(&prefill_base_url, prefill_dp_rank, prefill_json);
+         }
++        // Prefill succeeded and consumed the embeddings; the pending EC
++        // transfers are now owned by the decode phase, so disarm the
++        // cancel-on-abandon guard.
++        if let Some(transfers) = ec_transfers.as_mut() {
++            transfers.disarm();
++        }
+ 
+         let decode_response = match decode_result {
+             Ok(resp) => resp,
+@@ -1876,7 +1996,10 @@ impl VllmPDRouter {
+         ctx: &Arc<crate::server::AppContext>,
+     ) -> Result<Self, String> {
+         let kv_connector = ctx.router_config.kv_connector;
+-        let http_client = reqwest::Client::new();
++        // Carries the configured request/connect timeouts; a bare
++        // reqwest::Client::new() would let a stalled encoder hold the
++        // request and its concurrency permit indefinitely.
++        let http_client = ctx.client.clone();
+ 
+         if let Some(ref addr) = discovery_address {
+             // Discovery mode
+@@ -1903,6 +2026,11 @@ impl VllmPDRouter {
+             );
+ 
+             Ok(Self {
++                epd: ctx
++                    .router_config
++                    .epd
++                    .clone()
++                    .map(super::epd::EncoderStage::new),
+                 pd_router,
+                 service_registry: Arc::new(service_registry),
+                 http_client,
+@@ -1993,6 +2121,11 @@ impl VllmPDRouter {
+             }
+ 
+             Ok(Self {
++                epd: ctx
++                    .router_config
++                    .epd
++                    .clone()
++                    .map(super::epd::EncoderStage::new),
+                 pd_router,
+                 service_registry: Arc::new(service_registry),
+                 http_client,
+diff --git a/src/server.rs b/src/server.rs
+index 70c26dd..a26ad94 100644
+--- a/src/server.rs
++++ b/src/server.rs
+@@ -261,6 +261,25 @@ async fn v1_chat_completions(
+     state.router.route_chat(Some(&headers), &body, None).await
+ }
+ 
++async fn epd_chat_completions(
++    State(state): State<Arc<AppState>>,
++    headers: http::HeaderMap,
++    Json(body): Json<serde_json::Value>,
++) -> Response {
++    if let Err(response) = authorize_request(&state, &headers).await {
++        return response;
++    }
++    state
++        .router
++        .route_transparent(
++            Some(&headers),
++            "/v1/chat/completions",
++            &http::Method::POST,
++            body,
++        )
++        .await
++}
++
+ async fn v1_completions(
+     State(state): State<Arc<AppState>>,
+     headers: http::HeaderMap,
+@@ -702,6 +721,13 @@ async fn delete_worker(
+     }
+ }
+ 
++/// Default idle timeout for pooled backend connections, in seconds.
++/// Kept below vLLM's server-side keep-alive timeout
++/// (`VLLM_HTTP_TIMEOUT_KEEP_ALIVE`, 5s by default) so the router retires a
++/// pooled connection before the backend closes it; reusing a connection the
++/// backend already closed races and surfaces as sporadic transport-error 502s.
++pub const DEFAULT_POOL_IDLE_TIMEOUT_SECS: u64 = 2;
++
+ pub struct ServerConfig {
+     pub host: String,
+     pub port: u16,
+@@ -715,6 +741,9 @@ pub struct ServerConfig {
+     pub service_discovery_config: Option<ServiceDiscoveryConfig>,
+     pub prometheus_config: Option<PrometheusConfig>,
+     pub request_timeout_secs: u64,
++    /// Idle timeout in seconds for pooled backend connections. A value of 0
++    /// disables connection reuse entirely.
++    pub pool_idle_timeout_secs: u64,
+     pub request_id_headers: Option<Vec<String>>,
+     pub trace_config: Option<TraceConfig>,
+ }
+@@ -774,7 +803,14 @@ pub fn build_app_with_wasm_middleware(
+     let mut protected_routes = Router::new()
+         .route("/generate", post(generate))
+         .route("/inference/v1/generate", post(inference_generate))
+-        .route("/v1/chat/completions", post(v1_chat_completions))
++        .route(
++            "/v1/chat/completions",
++            if app_state.context.router_config.epd.is_some() {
++                post(epd_chat_completions)
++            } else {
++                post(v1_chat_completions)
++            },
++        )
+         .route("/v1/completions", post(v1_completions))
+         .route("/rerank", post(rerank))
+         .route("/v1/rerank", post(v1_rerank))
+@@ -920,13 +956,19 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
+     );
+ 
+     println!("DEBUG: Creating HTTP client");
+-    let client = Client::builder()
+-        .pool_idle_timeout(Some(Duration::from_secs(50)))
++    let mut client_builder = Client::builder()
+         .pool_max_idle_per_host(500)
+         .timeout(Duration::from_secs(config.request_timeout_secs))
+         .connect_timeout(Duration::from_secs(10))
+         .tcp_nodelay(true)
+-        .tcp_keepalive(Some(Duration::from_secs(30)))
++        .tcp_keepalive(Some(Duration::from_secs(30)));
++    if config.pool_idle_timeout_secs == 0 {
++        client_builder = client_builder.pool_max_idle_per_host(0);
++    } else {
++        client_builder = client_builder
++            .pool_idle_timeout(Some(Duration::from_secs(config.pool_idle_timeout_secs)));
++    }
++    let client = client_builder
+         .build()
+         .expect("Failed to create HTTP client");
+     println!("DEBUG: HTTP client created");
+diff --git a/tests/api_endpoints_test.rs b/tests/api_endpoints_test.rs
+index 6401788..993ccf0 100644
+--- a/tests/api_endpoints_test.rs
++++ b/tests/api_endpoints_test.rs
+@@ -61,6 +61,7 @@ impl TestContext {
+             history_backend: vllm_router_rs::config::HistoryBackend::Memory,
+             enable_profiling: false,
+             profile_timeout_secs: 30,
++            epd: None,
+             kv_connector: vllm_router_rs::config::KvConnector::Nixl,
+             program_scheduling: None,
+         };
+@@ -1605,6 +1606,7 @@ mod error_tests {
+             history_backend: vllm_router_rs::config::HistoryBackend::Memory,
+             enable_profiling: false,
+             profile_timeout_secs: 30,
++            epd: None,
+             kv_connector: vllm_router_rs::config::KvConnector::Nixl,
+             program_scheduling: None,
+         };
+@@ -1968,6 +1970,7 @@ mod pd_mode_tests {
+             history_backend: vllm_router_rs::config::HistoryBackend::Memory,
+             enable_profiling: false,
+             profile_timeout_secs: 30,
++            epd: None,
+             kv_connector: vllm_router_rs::config::KvConnector::Nixl,
+             program_scheduling: None,
+         };
+@@ -2134,6 +2137,7 @@ mod request_id_tests {
+             history_backend: vllm_router_rs::config::HistoryBackend::Memory,
+             enable_profiling: false,
+             profile_timeout_secs: 30,
++            epd: None,
+             kv_connector: vllm_router_rs::config::KvConnector::Nixl,
+             program_scheduling: None,
+         };
+diff --git a/tests/grpc_vs_http_e2e.rs b/tests/grpc_vs_http_e2e.rs
+index 4ac2595..796de37 100644
+--- a/tests/grpc_vs_http_e2e.rs
++++ b/tests/grpc_vs_http_e2e.rs
+@@ -31,6 +31,7 @@ use vllm_router_rs::routers::http::router::Router;
+ 
+ fn test_config(worker_urls: Vec<String>) -> RouterConfig {
+     RouterConfig {
++        epd: None,
+         mode: RoutingMode::Regular { worker_urls },
+         policy: PolicyConfig::RoundRobin,
+         host: "127.0.0.1".to_string(),
+diff --git a/tests/test_dp_routing.rs b/tests/test_dp_routing.rs
+index e33264b..de9f5b8 100644
+--- a/tests/test_dp_routing.rs
++++ b/tests/test_dp_routing.rs
+@@ -278,6 +278,7 @@ mod dp_e2e_tests {
+             history_backend: vllm_router_rs::config::HistoryBackend::Memory,
+             enable_profiling: false,
+             profile_timeout_secs: 30,
++            epd: None,
+             kv_connector: vllm_router_rs::config::KvConnector::Nixl,
+             program_scheduling: None,
+         }
+@@ -327,6 +328,7 @@ mod dp_e2e_tests {
+             history_backend: vllm_router_rs::config::HistoryBackend::Memory,
+             enable_profiling: false,
+             profile_timeout_secs: 30,
++            epd: None,
+             kv_connector: vllm_router_rs::config::KvConnector::Nixl,
+             program_scheduling: None,
+         }
+diff --git a/tests/test_pd_routing.rs b/tests/test_pd_routing.rs
+index a9ea85f..9ad36b9 100644
+--- a/tests/test_pd_routing.rs
++++ b/tests/test_pd_routing.rs
+@@ -5,9 +5,451 @@ mod test_pd_routing {
+     };
+     use vllm_router_rs::routers::RouterFactory;
+ 
+-    // ========================================================================
+-    // Phase 1: Basic PD Components and Router Creation
+-    // ========================================================================
++    #[tokio::test]
++    async fn test_epd_handoff_preserves_metadata_and_isolates_ec_handles() {
++        use axum::{
++            extract::State,
++            http::StatusCode,
++            response::IntoResponse,
++            routing::{get, post},
++            Json, Router,
++        };
++        use serde_json::{json, Value};
++        use std::sync::{Arc, Mutex};
++        use vllm_router_rs::config::{ConfigValidator, EpdConfig};
++
++        type Seen = Arc<Mutex<Vec<(String, Value)>>>;
++        async fn encode(
++            State(seen): State<Seen>,
++            Json(body): Json<Value>,
++        ) -> axum::response::Response {
++            seen.lock().unwrap().push(("E".into(), body.clone()));
++            if body["model"] == "encoder-fail" {
++                return (StatusCode::SERVICE_UNAVAILABLE, "injected encoder error").into_response();
++            }
++            let hash = body["messages"][0]["content"][0]["uuid"].as_str().unwrap();
++            Json(json!({
++                "ec_transfer_params": {
++                    (format!("engine-{hash}")): {
++                        "metadata": {"image_grid_thw": [[1, 2, 3]]},
++                        "peer_host": "encoder",
++                        "peer_port": 4321,
++                        "size_bytes": 128,
++                    },
++                },
++            }))
++            .into_response()
++        }
++        async fn prefill(
++            State(seen): State<Seen>,
++            Json(body): Json<Value>,
++        ) -> axum::response::Response {
++            seen.lock().unwrap().push(("P".into(), body.clone()));
++            if matches!(body["model"].as_str(), Some("prefill-400" | "prefill-422")) {
++                let status = if body["model"] == "prefill-400" {
++                    StatusCode::BAD_REQUEST
++                } else {
++                    StatusCode::UNPROCESSABLE_ENTITY
++                };
++                return (
++                    status,
++                    Json(json!({"error": "invalid sampling parameters"})),
++                )
++                    .into_response();
++            }
++            if body["model"] == "fail" {
++                return (StatusCode::INTERNAL_SERVER_ERROR, "injected prefill error")
++                    .into_response();
++            }
++            if body["model"] == "missing-kv" {
++                return Json(json!({"choices":[]})).into_response();
++            }
++            Json(json!({
++                "kv_transfer_params": {
++                    "remote_engine_id": "P",
++                    "do_remote_prefill": true,
++                },
++            }))
++            .into_response()
++        }
++        async fn decode(
++            State(seen): State<Seen>,
++            Json(body): Json<Value>,
++        ) -> axum::response::Response {
++            seen.lock().unwrap().push(("D".into(), body.clone()));
++            if body["stream"] == true {
++                return ([("content-type", "text/event-stream")], "data: [DONE]\n\n")
++                    .into_response();
++            }
++            Json(json!({"choices":[{"message":{"content":"A"}}]})).into_response()
++        }
++        let seen: Seen = Arc::new(Mutex::new(Vec::new()));
++        let app = Router::new()
++            .route("/e/health", get(|| async { "ok" }))
++            .route("/p/health", get(|| async { "ok" }))
++            .route("/d/health", get(|| async { "ok" }))
++            .route("/e/v1/chat/completions", post(encode))
++            .route("/p/v1/chat/completions", post(prefill))
++            .route("/d/v1/chat/completions", post(decode))
++            .with_state(seen.clone());
++        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let base = format!("http://{}", listener.local_addr().unwrap());
++        let server = tokio::spawn(async move {
++            axum::serve(listener, app).await.unwrap();
++        });
++        let mut config = RouterConfig {
++            mode: RoutingMode::VllmPrefillDecode {
++                prefill_urls: vec![(format!("{base}/p"), None)],
++                decode_urls: vec![format!("{base}/d")],
++                prefill_policy: None,
++                decode_policy: None,
++                discovery_address: None,
++            },
++            policy: PolicyConfig::Random,
++            epd: Some(EpdConfig {
++                encoder_urls: vec![format!("{base}/e")],
++                consumer_zmq_addrs: Default::default(),
++            }),
++            worker_startup_timeout_secs: 5,
++            ..RouterConfig::default()
++        };
++        // Mooncake EC reservations belong to P, not D.
++        config
++            .epd
++            .as_mut()
++            .unwrap()
++            .consumer_zmq_addrs
++            .insert(format!("{base}/d"), "tcp://localhost:1234".into());
++        assert!(ConfigValidator::validate(&config).is_err());
++        config.epd.as_mut().unwrap().consumer_zmq_addrs.clear();
++        ConfigValidator::validate(&config).unwrap();
++        let context = Arc::new(
++            vllm_router_rs::server::AppContext::new(
++                config,
++                reqwest::Client::new(),
++                64,
++                None,
++                vec![],
++            )
++            .unwrap(),
++        );
++        let router = RouterFactory::create_router(&context).await.unwrap();
++        for (model, stream, status) in [
++            ("test", false, StatusCode::OK),
++            ("test", true, StatusCode::OK),
++            ("fail", false, StatusCode::INTERNAL_SERVER_ERROR),
++            ("prefill-400", false, StatusCode::BAD_REQUEST),
++            ("prefill-422", false, StatusCode::UNPROCESSABLE_ENTITY),
++            ("missing-kv", false, StatusCode::INTERNAL_SERVER_ERROR),
++            ("encoder-fail", false, StatusCode::SERVICE_UNAVAILABLE),
++            ("bad-input", false, StatusCode::BAD_REQUEST),
++        ] {
++            seen.lock().unwrap().clear();
++            let mut body = json!({
++                "model": model,
++                "stream": stream,
++                "max_tokens": 16,
++                "structured_outputs": {"choice": ["A", "B"]},
++                "messages": [{
++                    "role": "user",
++                    "content": [
++                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
++                        {"type": "text", "text": "choose"},
++                    ],
++                }],
++            });
++            if model == "bad-input" {
++                body["messages"] = Value::Null;
++            }
++            let response = router
++                .route_transparent(
++                    None,
++                    "/v1/chat/completions",
++                    &axum::http::Method::POST,
++                    body,
++                )
++                .await;
++            assert_eq!(response.status(), status, "model={model}, stream={stream}");
++            if model.starts_with("prefill-") {
++                assert_eq!(response.headers()["content-type"], "application/json");
++            }
++            let bytes = axum::body::to_bytes(response.into_body(), 4096)
++                .await
++                .unwrap();
++            if stream {
++                assert!(String::from_utf8_lossy(&bytes).contains("[DONE]"));
++            }
++            if model.starts_with("prefill-") {
++                assert_eq!(
++                    serde_json::from_slice::<Value>(&bytes).unwrap(),
++                    json!({"error": "invalid sampling parameters"})
++                );
++            }
++            let seen = seen.lock().unwrap();
++            let phases: Vec<_> = seen.iter().map(|(phase, _)| phase.as_str()).collect();
++            assert_eq!(
++                phases,
++                match model {
++                    "bad-input" => vec![],
++                    "encoder-fail" => vec!["E"],
++                    "test" => vec!["E", "P", "D"],
++                    _ => vec!["E", "P"],
++                }
++            );
++            if seen.len() < 2 {
++                continue;
++            }
++            let p = &seen[1].1;
++            assert_eq!(p["max_tokens"], 1);
++            assert_eq!(p["stream"], false);
++            assert!(p["ec_transfer_params"]["ec_items"].is_array());
++            let uuid = p["messages"][0]["content"][0]["uuid"].as_str().unwrap();
++            let hash = format!("engine-{uuid}");
++            assert_eq!(p["ec_transfer_params"]["ec_items"][0]["mm_hash"], hash);
++            assert_eq!(p["ec_transfer_params"][&hash]["peer_port"], 4321);
++            assert!(p["ec_transfer_params"].get(uuid).is_none());
++            assert_eq!(
++                p["messages"][0]["content"][0]["image_embeds"]["image_grid_thw"],
++                json!([1, 2, 3])
++            );
++            if status.is_success() {
++                let d = &seen[2].1;
++                assert_eq!(d["max_tokens"], 16);
++                assert_eq!(d["messages"], p["messages"]);
++                assert_eq!(d["structured_outputs"], p["structured_outputs"]);
++                assert!(d.get("ec_transfer_params").is_none());
++                assert_eq!(d["kv_transfer_params"]["remote_engine_id"], "P");
++            }
++        }
++        server.abort();
++    }
++
++    /// With the NIXL connector, the first request caches the prefill push
++    /// identity and subsequent requests take the concurrent fast path. The
++    /// encoder stage must still run for those requests; otherwise raw media
++    /// reaches P/D without a published embedding.
++    #[tokio::test]
++    async fn test_epd_nixl_push_still_encodes_after_identity_cached() {
++        use axum::{
++            extract::State,
++            response::IntoResponse,
++            routing::{get, post},
++            Json, Router,
++        };
++        use serde_json::{json, Value};
++        use std::sync::{Arc, Mutex};
++        use vllm_router_rs::config::{EpdConfig, KvConnector};
++
++        type Seen = Arc<Mutex<Vec<(String, Value)>>>;
++        async fn encode(
++            State(seen): State<Seen>,
++            Json(body): Json<Value>,
++        ) -> axum::response::Response {
++            seen.lock().unwrap().push(("E".into(), body.clone()));
++            let uuid = body["messages"][0]["content"][0]["uuid"].as_str().unwrap();
++            Json(json!({
++                "ec_transfer_params": {
++                    (format!("engine-{uuid}")): {
++                        "metadata": {"image_grid_thw": [[1, 2, 3]]},
++                        "peer_host": "encoder",
++                        "peer_port": 4321,
++                        "size_bytes": 128,
++                    },
++                },
++            }))
++            .into_response()
++        }
++        async fn prefill(
++            State(seen): State<Seen>,
++            Json(body): Json<Value>,
++        ) -> axum::response::Response {
++            seen.lock().unwrap().push(("P".into(), body.clone()));
++            if body["model"] == "prefill-422" {
++                return (
++                    axum::http::StatusCode::UNPROCESSABLE_ENTITY,
++                    Json(json!({"error": "invalid sampling parameters"})),
++                )
++                    .into_response();
++            }
++            Json(json!({
++                "kv_transfer_params": {
++                    "remote_engine_id": "P",
++                    "remote_host": "127.0.0.1",
++                    "remote_port": 9100,
++                    "transfer_mode": "push",
++                },
++            }))
++            .into_response()
++        }
++        async fn decode(
++            State(seen): State<Seen>,
++            Json(body): Json<Value>,
++        ) -> axum::response::Response {
++            seen.lock().unwrap().push(("D".into(), body.clone()));
++            Json(json!({"choices":[{"message":{"content":"A"}}]})).into_response()
++        }
++        let seen: Seen = Arc::new(Mutex::new(Vec::new()));
++        let app = Router::new()
++            .route("/e/health", get(|| async { "ok" }))
++            .route("/p/health", get(|| async { "ok" }))
++            .route("/d/health", get(|| async { "ok" }))
++            .route("/e/v1/chat/completions", post(encode))
++            .route("/p/v1/chat/completions", post(prefill))
++            .route("/d/v1/chat/completions", post(decode))
++            .route("/p/generate", post(prefill))
++            .route("/d/generate", post(decode))
++            .with_state(seen.clone());
++        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let base = format!("http://{}", listener.local_addr().unwrap());
++        let server = tokio::spawn(async move {
++            axum::serve(listener, app).await.unwrap();
++        });
++        let config = RouterConfig {
++            mode: RoutingMode::VllmPrefillDecode {
++                prefill_urls: vec![(format!("{base}/p"), None)],
++                decode_urls: vec![format!("{base}/d")],
++                prefill_policy: None,
++                decode_policy: None,
++                discovery_address: None,
++            },
++            policy: PolicyConfig::Random,
++            epd: Some(EpdConfig {
++                encoder_urls: vec![format!("{base}/e")],
++                consumer_zmq_addrs: Default::default(),
++            }),
++            kv_connector: KvConnector::Nixl,
++            worker_startup_timeout_secs: 5,
++            ..RouterConfig::default()
++        };
++        let context = Arc::new(
++            vllm_router_rs::server::AppContext::new(
++                config,
++                reqwest::Client::new(),
++                64,
++                None,
++                vec![],
++            )
++            .unwrap(),
++        );
++        let router = RouterFactory::create_router(&context).await.unwrap();
++
++        let chat_body = || {
++            json!({
++                "model": "test",
++                "max_tokens": 16,
++                "messages": [{
++                    "role": "user",
++                    "content": [
++                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
++                        {"type": "text", "text": "choose"},
++                    ],
++                }],
++            })
++        };
++
++        // Invalid transparent bodies must be rejected before either PD path mutates them.
++        for body in [Value::Null, json!([]), json!("text"), json!(7)] {
++            let response = router
++                .route_transparent(None, "/generate", &axum::http::Method::POST, body)
++                .await;
++            assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
++        }
++        assert!(seen.lock().unwrap().is_empty());
++
++        // First request: no cached push identity, sequential path.
++        let response = router
++            .route_transparent(
++                None,
++                "/v1/chat/completions",
++                &axum::http::Method::POST,
++                chat_body(),
++            )
++            .await;
++        assert_eq!(response.status(), axum::http::StatusCode::OK);
++        let _ = axum::body::to_bytes(response.into_body(), 4096).await;
++        let phases: Vec<_> = seen
++            .lock()
++            .unwrap()
++            .iter()
++            .map(|(phase, _)| phase.clone())
++            .collect();
++        assert_eq!(phases, ["E", "P", "D"]);
++
++        // Second request: the push identity is now cached, so the concurrent
++        // fast path runs. The encoder must still be called and P/D must
++        // receive the rewritten embeds metadata, not raw media.
++        seen.lock().unwrap().clear();
++        let response = router
++            .route_transparent(
++                None,
++                "/v1/chat/completions",
++                &axum::http::Method::POST,
++                chat_body(),
++            )
++            .await;
++        assert_eq!(response.status(), axum::http::StatusCode::OK);
++        let _ = axum::body::to_bytes(response.into_body(), 4096).await;
++        let seen_requests = seen.lock().unwrap().clone();
++        let phases: Vec<_> = seen_requests
++            .iter()
++            .map(|(phase, _)| phase.as_str())
++            .collect();
++        // P and D are dispatched concurrently, so only their set is stable.
++        assert_eq!(phases[0], "E");
++        let mut pd: Vec<_> = phases[1..].to_vec();
++        pd.sort_unstable();
++        assert_eq!(pd, ["D", "P"]);
++
++        let p = &seen_requests[1..]
++            .iter()
++            .find(|(phase, _)| phase == "P")
++            .expect("prefill request")
++            .1;
++        let d = &seen_requests[1..]
++            .iter()
++            .find(|(phase, _)| phase == "D")
++            .expect("decode request")
++            .1;
++        assert_eq!(
++            p["messages"][0]["content"][0]["image_embeds"]["image_grid_thw"],
++            json!([1, 2, 3])
++        );
++        assert!(d.get("ec_transfer_params").is_none());
++        assert_eq!(d["kv_transfer_params"]["do_remote_prefill"], true);
++        assert_eq!(d["kv_transfer_params"]["remote_engine_id"], "P");
++
++        seen.lock().unwrap().clear();
++        for body in [Value::Null, json!([]), json!("text"), json!(7)] {
++            let response = router
++                .route_transparent(None, "/generate", &axum::http::Method::POST, body)
++                .await;
++            assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
++        }
++        assert!(seen.lock().unwrap().is_empty());
++        let mut invalid = chat_body();
++        invalid["model"] = json!("prefill-422");
++        let response = router
++            .route_transparent(
++                None,
++                "/v1/chat/completions",
++                &axum::http::Method::POST,
++                invalid,
++            )
++            .await;
++        assert_eq!(
++            response.status(),
++            axum::http::StatusCode::UNPROCESSABLE_ENTITY
++        );
++        assert_eq!(response.headers()["content-type"], "application/json");
++        let bytes = axum::body::to_bytes(response.into_body(), 4096)
++            .await
++            .unwrap();
++        assert_eq!(
++            serde_json::from_slice::<Value>(&bytes).unwrap(),
++            json!({"error": "invalid sampling parameters"})
++        );
++        server.abort();
++    }
+ 
+     #[test]
+     fn test_worker_types() {
+@@ -130,6 +572,7 @@ mod test_pd_routing {
+                 history_backend: vllm_router_rs::config::HistoryBackend::Memory,
+                 enable_profiling: false,
+                 profile_timeout_secs: 30,
++                epd: None,
+                 kv_connector: vllm_router_rs::config::KvConnector::Nixl,
+             };
+ 

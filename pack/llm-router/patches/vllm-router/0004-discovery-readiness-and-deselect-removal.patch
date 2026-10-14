@@ -1,106 +1,61 @@
-Stop selecting a worker once it loses readiness, selector membership,
-termination, or a verifiable current state, and make that withdrawal identity-correct
-and reversible.
+Withdraw a worker from the router when its Pod loses readiness, leaves the
+selector, terminates, or is replaced by another identity at the same address.
+The discovery tracker is keyed on Pod UID and stays consistent across the
+rest of the operator's patches.
 
-THE DEFECT, in four parts that hide each other. The Kubernetes watcher watches all Pods
-and applies the label selector in a client-side filter
-(src/service_discovery.rs): the stream was consumed through applied_objects() and then
-passed through a filter_map that dropped any Pod not matching the selector. A Pod that
-loses the eligibility label therefore never reached the handler at all -- a filter can
-only discard objects, and a withdrawal is exactly the case where the object is still
-there. Second, the same filter_map discarded the Delete event and the Init and
-InitDone arms of the relist. What applied_objects() actually does is decode an Event
-into the object it carries and, with emit_deleted false, pass Apply and InitApply
-through while discarding Delete, Init and InitDone: upstream therefore still saw each
-object of a relist, and never saw the point at which the watcher states that an object
-previously Applied is now absent, which is why an abruptly removed worker stayed
-registered for the life of the process. Third, handle_pod_event had a branch for a
-healthy Pod and no branch at all for an unhealthy one, so even a Pod that did arrive
-with readiness lost was silently ignored, and the deletion-timestamp branch that
-upstream did have was reachable only after a PodInfo had been rebuilt from the current
-object.
+THE DEFECT: src/service_discovery.rs (v0.1.16.1) tracks pods in
+HashSet<PodInfo> by value and forwards each Kubernetes event to a handler
+that filters by selector, parses the status, and registers the resulting
+worker URL. A pod that loses readiness, has its selector label removed, or
+enters termination is still delivered to the watcher; the handler either
+admits it as a fresh worker or silently drops the registration without
+ever telling the router. Workers serving to a participant that is no longer
+healthy stay selectable, and a same-name replacement at the same address
+gets admitted alongside the previous owner -- a later Delete event for the
+old UID then withdraws the current occupant from the router.
 
-Behind all three sat a fourth problem that made a partial fix useless rather than
-wrong. The tracker was a HashSet<PodInfo> and PodInfo derives PartialEq, Eq and Hash
-over the whole struct, including is_ready, status and ip. A Ready -> NotReady
-transition, a phase change or an address change all produce a PodInfo that no longer
-compares equal to the registered one, so any removal looked up by the current PodInfo
-would MISS the live entry and the worker would stay in the pool; and because the
-address is part of the key, a same-name replacement that reused an address aliased the
-previous identity.
+THE FIX: the tracker becomes HashMap<String, PodInfo> keyed on Pod UID, the
+PodInfo struct gains a `uid` field, and handle_watch_event gains four
+withdrawal decisions (readiness loss, selector miss, terminating status,
+relist absence) plus a take-over step that withdraws a previous owner at
+the same address before admitting its replacement. A late Delete for a
+replaced UID finds nothing to withdraw and cannot reach the current
+occupant. Pods whose UID is absent or empty are refused at from_pod() so
+they cannot be admitted as workers that can never be reliably removed.
 
-THE FIX. The watch stream is consumed as raw Events and the selector decision moved
-into the handler, where the Pod itself is in hand: a Pod that is terminating, no longer
-matches the selectors, or is present but not healthy is a withdrawal. Termination is
-checked FIRST, before any status is parsed and before selector membership, because a
-terminating Pod can still report Ready=True and Running, and reading health first would
-re-register it and leave the withdrawal to the final Delete event -- the preStop path
-this replaces. Apply and Delete are handled directly, and the relist is implemented as
-the contract describes: Init opens a set, InitApply records UIDs, InitDone withdraws
-every tracked UID the listing did not contain.
+Equality and hashing for PodInfo intentionally ignore `uid`: the tracker
+keys on UID separately, but value equality inside tests and downstream
+consumers compares the worker itself. A manual PartialEq / Eq / Hash pair
+on the routing-relevant fields (name, ip, status, is_ready, pod_type,
+bootstrap_port) keeps the Eq/Hash contract sound -- a derive that included
+uid would compare uids that are deliberately distinct on identical workers.
+Eleven new tests cover the withdrawal and take-over paths; they use a
+StubRouter (implements WorkerManagement and RouterTrait, routing methods
+return 501) instead of a real Router, because Router::add_worker does an
+HTTP health check that fails against the synthetic addresses the tests
+construct. The 11 tests assert on tracker state, not on router HTTP
+behaviour, and the stub is sufficient.
 
-The tracker becomes a HashMap keyed on the Pod UID, and the stored value is the PodInfo
-the worker was REGISTERED with rather than as it is now, so a withdrawal issued for an
-old identity removes that old URL and role. A UID-keyed map alone does not make that
-true at the router, because the router is keyed by URL: if a new UID were admitted at
-an address the old UID still held, the map would carry both, and a later Delete for the
-old UID would remove the CURRENT occupant from the pool. register_worker therefore
-reconciles address ownership before admitting a new UID -- any other UID registered at
-the same address is withdrawn first, and a failed withdrawal holds the new add -- so an
-address has exactly one owner and a late delete for a replaced UID finds nothing to act
-on. A Pod whose UID is absent OR EMPTY is refused rather than admitted, because an
-empty string is not an identity: it is the one value every unidentified Pod shares, so
-it would alias unrelated Pods into one registration and make a later withdrawal remove
-the wrong worker.
+AGAINST: vllm-project/router v0.1.16.1 (commit
+91b65ee4bdfbe98863a32a2205dced5dbb249ffe) with PR 266 (EPD, commit
+516f1cb90eefe565c9fc894d72c8748eae25085b) cherry-picked on top
+(0001-epd-routing.patch), plus the lazy-Mooncake patch (0002) and the
+read-only observer patch (0003). The defect is present in the same shape
+on the default branch at the time of writing. The image build applies
+this patch with git apply after 0001, 0002, 0003; a pin whose hunks no
+longer match fails loudly and surfaces at build time, not in a cluster.
 
-A Pod that still matches the selectors but whose current status or address cannot be
-read is WITHDRAWN, not retained. Eligibility is not health, and a registration that
-cannot be shown healthy must not stay selectable.
-
-A registration is dropped only after the router has actually been told, and a failure
-returns false rather than being swallowed. The watcher loop treats that false as a
-reason to end the stream, so the existing backoff recreates the watcher and the relist
-that comes with it reconciles whatever is still held. That is the only retry added here:
-no second timer, no polling loop, and the failed withdrawal is not left waiting for a
-Pod event that may never arrive. The backoff is taken alone on that path rather than
-followed by the full check-interval sleep, which would push the retry past any sensible
-withdrawal budget. The first error is what is logged, on every attempt.
-
-P/D behaviour is preserved: the add and remove paths keep the existing VllmPDRouter
-prefill/decode routing, bootstrap port handling and the regular-mode fallbacks, and are
-only reached from the new decision points.
-
-AGAINST: vllm-project/router v0.1.15 (commit
-1fbcde7443d75b36befb61bc081f64c2a1f13a4b), the pin named by
-VLLM_ROUTER_VERSION in pack/llm-router/Dockerfile. The image build applies this patch
-with git apply from the clone root, which fails loudly on a pin whose hunks no longer
-match, so a version bump that absorbs or breaks the patch is detected at build time
-rather than in a cluster.
-
-The added tests drive the discovery decisions through handle_watch_event and assert on
-the tracker and the router: readiness loss withdraws while a healthy observation of the
-same identity does not; a label deselect withdraws; a terminating Pod withdraws both
-while reporting Ready and with no status at all; a relist withdraws an absent UID and
-keeps a listed one; a new UID takes an address over from its previous owner, and a late
-delete for the replaced UID then cannot reach the current owner; an eligible Pod whose
-current status is unusable withdraws; an absent or empty UID is refused; a withdrawal
-drops only the exact registration it removed; a delete for an untracked UID is a
-delivered no-op.
-
-The successful-insert leg is not asserted here: Router::add_worker polls the worker's
-health endpoint, so a registration that is genuinely added cannot be observed with the
-in-crate test router. The full add/withdraw/re-add round trip, and the ordering of a
-replacement against a late delete, are measured against the built binary on placement
-evidence in the operator's event-matrix harness rather than claimed from a unit test.
-
-TO REFRESH after a pin bump: clone the new pin, git apply this patch, resolve
-any rejects, regenerate with git diff, and keep this header on top.
+WHEN TO REMOVE: when upstream restructures service discovery so that a
+pod losing readiness, leaving the selector, or entering termination
+withdraws the worker from the router. Until then the EPD + Kubernetes
+service discovery path this patch fixes is a regression vs the operator's
+prior baseline.
 
 diff --git a/src/service_discovery.rs b/src/service_discovery.rs
-index d765800..798eab7 100644
+index d765800..fc5b063 100644
 --- a/src/service_discovery.rs
 +++ b/src/service_discovery.rs
-@@ -1,11 +1,10 @@
+@@ -1,14 +1,14 @@
  use crate::routers::RouterTrait;
  
 -use futures::{StreamExt, TryStreamExt};
@@ -115,15 +70,61 @@ index d765800..798eab7 100644
      Client,
  };
  use std::collections::{HashMap, HashSet};
-@@ -62,6 +61,7 @@ pub enum PodType {
- #[derive(Debug, Clone, PartialEq, Eq, Hash)]
++use std::hash::{Hash, Hasher};
+ use std::net::{IpAddr, SocketAddr};
+ 
+ use rustls;
+@@ -59,9 +59,17 @@ pub enum PodType {
+ }
+ 
+ /// Represents a Kubernetes pod's information used for worker management
+-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
++///
++/// Equality and hashing intentionally ignore `uid`. The discovery tracker is
++/// keyed on `uid` separately (`HashMap<String, PodInfo>` in
++/// `handle_watch_event`); identity inside the tracker is the UID, while value
++/// equality inside tests and downstream consumers compares the worker itself.
++/// Two `PodInfo`s describe the same worker when their routing-relevant
++/// fields agree, regardless of which Pod incarnation produced them.
++#[derive(Debug, Clone)]
  pub struct PodInfo {
      pub name: String,
 +    pub uid: String,
      pub ip: IpAddr,
      pub status: String,
      pub is_ready: bool,
-@@ -106,6 +106,12 @@ impl PodInfo {
+@@ -69,6 +77,30 @@ pub struct PodInfo {
+     pub bootstrap_port: Option<u16>,
+ }
+ 
++impl PartialEq for PodInfo {
++    fn eq(&self, other: &Self) -> bool {
++        self.name == other.name
++            && self.ip == other.ip
++            && self.status == other.status
++            && self.is_ready == other.is_ready
++            && self.pod_type == other.pod_type
++            && self.bootstrap_port == other.bootstrap_port
++    }
++}
++
++impl Eq for PodInfo {}
++
++impl Hash for PodInfo {
++    fn hash<H: Hasher>(&self, state: &mut H) {
++        self.name.hash(state);
++        self.ip.hash(state);
++        self.status.hash(state);
++        self.is_ready.hash(state);
++        self.pod_type.hash(state);
++        self.bootstrap_port.hash(state);
++    }
++}
++
+ impl PodInfo {
+     /// Check if a pod matches any of the given selectors
+     fn matches_selector(pod: &Pod, selector: &HashMap<String, String>) -> bool {
+@@ -106,6 +138,12 @@ impl PodInfo {
      /// Unified PodInfo creation with optional PD configuration
      pub fn from_pod(pod: &Pod, config: Option<&ServiceDiscoveryConfig>) -> Option<Self> {
          let name = pod.metadata.name.clone()?;
@@ -136,7 +137,7 @@ index d765800..798eab7 100644
          let status = pod.status.clone()?;
          let pod_ip: IpAddr = status.pod_ip?.parse().ok()?;
  
-@@ -155,6 +161,7 @@ impl PodInfo {
+@@ -155,6 +193,7 @@ impl PodInfo {
  
          Some(PodInfo {
              name,
@@ -144,7 +145,7 @@ index d765800..798eab7 100644
              ip: pod_ip,
              status: pod_status,
              is_ready,
-@@ -230,8 +237,18 @@ pub async fn start_service_discovery(
+@@ -230,8 +269,18 @@ pub async fn start_service_discovery(
  
      // Create the task that will run in the background
      let handle = task::spawn(async move {
@@ -165,7 +166,7 @@ index d765800..798eab7 100644
  
          // Create a watcher for pods
          let pods: Api<Pod> = if let Some(namespace) = &config.namespace {
-@@ -251,88 +268,97 @@ pub async fn start_service_discovery(
+@@ -251,88 +300,97 @@ pub async fn start_service_discovery(
  
          loop {
              // Create a watcher with the proper parameters according to the kube-rs API
@@ -335,7 +336,7 @@ index d765800..798eab7 100644
              // If the watcher exits for some reason, wait a bit before restarting
              warn!(
                  "Kubernetes watcher exited, restarting in {} seconds",
-@@ -345,150 +371,438 @@ pub async fn start_service_discovery(
+@@ -345,158 +403,615 @@ pub async fn start_service_discovery(
      Ok(handle)
  }
  
@@ -864,7 +865,7 @@ index d765800..798eab7 100644
 -        );
 +        // Regular mode removal
 +        router.remove_worker(&worker_url);
-     }
++    }
 +
 +    // Only now is the registration dropped, because the router has actually been
 +    // told. Guarded on the exact PodInfo so a concurrent update for the same UID,
@@ -877,12 +878,189 @@ index d765800..798eab7 100644
 +        {
 +            tracker.remove(&registered.uid);
 +        }
-+    }
+     }
 +    true
  }
  
  #[cfg(test)]
-@@ -509,6 +823,10 @@ mod tests {
+ mod tests {
+     use super::*;
++    use axum::{
++        body::Body,
++        http::Request,
++        response::{IntoResponse, Response},
++    };
+     use k8s_openapi::api::core::v1::{Pod, PodCondition, PodSpec, PodStatus};
+     use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+     use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
++    use std::sync::Mutex as StdMutex;
++
++    // A router that records add/remove calls and always succeeds.
++    //
++    // The real Router::add_worker does an HTTP health check against the worker URL,
++    // which fails in unit tests because the URL points at a synthetic address.
++    // The new discovery tests assert on tracker state, not on the router's
++    // HTTP behaviour, so the router here only needs to:
++    //   1. Always succeed on add_worker.
++    //   2. Track which URLs have been added/removed.
++    //   3. Return them from get_worker_urls.
++    // Routing methods are stubbed to 501 since none of the discovery tests
++    // exercise them.
++    struct StubRouter {
++        urls: StdMutex<HashSet<String>>,
++    }
++
++    impl StubRouter {
++        fn new() -> Self {
++            Self {
++                urls: StdMutex::new(HashSet::new()),
++            }
++        }
++    }
++
++    impl std::fmt::Debug for StubRouter {
++        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++            f.debug_struct("StubRouter").finish()
++        }
++    }
++
++    #[async_trait::async_trait]
++    impl crate::routers::WorkerManagement for StubRouter {
++        async fn add_worker(&self, worker_url: &str) -> Result<String, String> {
++            self.urls.lock().unwrap().insert(worker_url.to_string());
++            Ok(worker_url.to_string())
++        }
++
++        fn remove_worker(&self, worker_url: &str) {
++            self.urls.lock().unwrap().remove(worker_url);
++        }
++
++        fn get_worker_urls(&self) -> Vec<String> {
++            self.urls.lock().unwrap().iter().cloned().collect()
++        }
++    }
++
++    #[async_trait::async_trait]
++    impl crate::routers::RouterTrait for StubRouter {
++        fn as_any(&self) -> &dyn std::any::Any {
++            self
++        }
++
++        async fn health(&self, _req: Request<Body>) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn health_generate(&self, _req: Request<Body>) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn get_server_info(&self, _req: Request<Body>) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn get_models(&self, _req: Request<Body>) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn get_model_info(&self, _req: Request<Body>) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn route_generate(
++            &self,
++            _headers: Option<&axum::http::HeaderMap>,
++            _body: &crate::protocols::spec::GenerateRequest,
++            _model_id: Option<&str>,
++        ) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn route_inference_generate(
++            &self,
++            _headers: Option<&axum::http::HeaderMap>,
++            _body: &crate::protocols::spec::InferenceGenerateRequest,
++            _model_id: Option<&str>,
++        ) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn route_chat(
++            &self,
++            _headers: Option<&axum::http::HeaderMap>,
++            _body: &crate::protocols::spec::ChatCompletionRequest,
++            _model_id: Option<&str>,
++        ) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn route_completion(
++            &self,
++            _headers: Option<&axum::http::HeaderMap>,
++            _body: &crate::protocols::spec::CompletionRequest,
++            _model_id: Option<&str>,
++        ) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn route_responses(
++            &self,
++            _headers: Option<&axum::http::HeaderMap>,
++            _body: &crate::protocols::spec::ResponsesRequest,
++            _model_id: Option<&str>,
++        ) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn get_response(
++            &self,
++            _headers: Option<&axum::http::HeaderMap>,
++            _response_id: &str,
++        ) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn cancel_response(
++            &self,
++            _headers: Option<&axum::http::HeaderMap>,
++            _response_id: &str,
++        ) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn route_embeddings(
++            &self,
++            _headers: Option<&axum::http::HeaderMap>,
++            _body: &crate::protocols::spec::EmbeddingRequest,
++            _model_id: Option<&str>,
++        ) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn route_rerank(
++            &self,
++            _headers: Option<&axum::http::HeaderMap>,
++            _body: &crate::protocols::spec::RerankRequest,
++            _model_id: Option<&str>,
++        ) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn flush_cache(&self) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        async fn get_worker_loads(&self) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++        fn router_type(&self) -> &'static str {
++            "stub"
++        }
++        fn readiness(&self) -> Response {
++            axum::http::StatusCode::OK.into_response()
++        }
++        async fn route_transparent(
++            &self,
++            _headers: Option<&axum::http::HeaderMap>,
++            _path: &str,
++            _method: &axum::http::Method,
++            _body: serde_json::Value,
++        ) -> Response {
++            axum::http::StatusCode::NOT_IMPLEMENTED.into_response()
++        }
++    }
++
++    fn stub_router() -> std::sync::Arc<dyn crate::routers::RouterTrait> {
++        std::sync::Arc::new(StubRouter::new())
++    }
+ 
+     // Helper function to create a Pod for testing PodInfo::from_pod
+     fn create_k8s_pod(
+@@ -509,6 +1024,10 @@ mod tests {
          let mut pod = Pod {
              metadata: ObjectMeta {
                  name: name.map(String::from),
@@ -893,7 +1071,32 @@ index d765800..798eab7 100644
                  deletion_timestamp,
                  ..Default::default()
              },
-@@ -832,6 +1150,7 @@ mod tests {
+@@ -555,6 +1074,9 @@ mod tests {
+         Pod {
+             metadata: ObjectMeta {
+                 name: Some(name.to_string()),
++                // from_pod refuses Pods without a UID, and the discovery tracker
++                // is keyed on UID. Each PD fixture gets its own.
++                uid: Some(format!("uid-{}", name)),
+                 labels: Some(labels),
+                 annotations: Some(annotations),
+                 ..Default::default()
+@@ -577,7 +1099,13 @@ mod tests {
+         }
+     }
+ 
+-    // Helper to create a Router instance for testing event handlers
++    // Helper to create a Router instance for testing event handlers.
++    //
++    // Kept alongside `stub_router` for reference: the new event-handler tests
++    // use `stub_router` because the real Router's HTTP health check fails
++    // against the synthetic worker URLs those tests construct. This helper
++    // remains in case a non-stubbed path is added later.
++    #[allow(dead_code)]
+     async fn create_test_router() -> Arc<dyn RouterTrait> {
+         use crate::config::RouterConfig;
+         use crate::middleware::TokenBucket;
+@@ -832,6 +1360,7 @@ mod tests {
      fn test_pod_info_is_healthy() {
          let healthy_pod = PodInfo {
              name: "p1".into(),
@@ -901,7 +1104,7 @@ index d765800..798eab7 100644
              ip: "1.1.1.1".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -842,6 +1161,7 @@ mod tests {
+@@ -842,6 +1371,7 @@ mod tests {
  
          let not_ready_pod = PodInfo {
              name: "p2".into(),
@@ -909,7 +1112,7 @@ index d765800..798eab7 100644
              ip: "1.1.1.2".parse().unwrap(),
              status: "Running".into(),
              is_ready: false,
-@@ -852,6 +1172,7 @@ mod tests {
+@@ -852,6 +1382,7 @@ mod tests {
  
          let not_running_pod = PodInfo {
              name: "p3".into(),
@@ -917,7 +1120,7 @@ index d765800..798eab7 100644
              ip: "1.1.1.3".parse().unwrap(),
              status: "Pending".into(),
              is_ready: true,
-@@ -865,6 +1186,7 @@ mod tests {
+@@ -865,6 +1396,7 @@ mod tests {
      fn test_pod_info_worker_url_ipv4() {
          let pod_info = PodInfo {
              name: "p1".into(),
@@ -925,7 +1128,7 @@ index d765800..798eab7 100644
              ip: "1.2.3.4".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -878,6 +1200,7 @@ mod tests {
+@@ -878,6 +1410,7 @@ mod tests {
      fn test_pod_info_worker_url_ipv6() {
          let pod_info = PodInfo {
              name: "p1".into(),
@@ -933,7 +1136,7 @@ index d765800..798eab7 100644
              ip: "2803:6086:5cd3:6062:c68d:e7c7:480:10".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -894,6 +1217,7 @@ mod tests {
+@@ -894,6 +1427,7 @@ mod tests {
      fn test_pod_info_equality_with_pod_type() {
          let pod1 = PodInfo {
              name: "pod1".into(),
@@ -941,7 +1144,7 @@ index d765800..798eab7 100644
              ip: "1.2.3.4".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -903,6 +1227,7 @@ mod tests {
+@@ -903,6 +1437,7 @@ mod tests {
  
          let pod2 = PodInfo {
              name: "pod1".into(),
@@ -949,7 +1152,7 @@ index d765800..798eab7 100644
              ip: "1.2.3.4".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -912,6 +1237,7 @@ mod tests {
+@@ -912,6 +1447,7 @@ mod tests {
  
          let pod3 = PodInfo {
              name: "pod1".into(),
@@ -957,7 +1160,7 @@ index d765800..798eab7 100644
              ip: "1.2.3.4".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -923,269 +1249,376 @@ mod tests {
+@@ -923,269 +1459,376 @@ mod tests {
          assert_ne!(pod1, pod3);
      }
  
@@ -970,26 +1173,8 @@ index d765800..798eab7 100644
 -            ip: "1.2.3.4".parse().unwrap(),
 -            status: "Pending".into(),
 -            is_ready: false,
-+    // The tracker is keyed on Pod UID and holds the PodInfo a worker was registered
-+    // with, so these tests drive the discovery decisions through handle_watch_event
-+    // and assert on the tracker and the router rather than on logs.
-+    fn tracker_with(entries: Vec<PodInfo>) -> Arc<Mutex<HashMap<String, PodInfo>>> {
-+        let mut map = HashMap::new();
-+        for entry in entries {
-+            map.insert(entry.uid.clone(), entry);
-+        }
-+        Arc::new(Mutex::new(map))
-+    }
-+
-+    fn registered(uid: &str, name: &str, ip: &str) -> PodInfo {
-+        PodInfo {
-+            name: name.to_string(),
-+            uid: uid.to_string(),
-+            ip: ip.parse().unwrap(),
-+            status: "Running".into(),
-+            is_ready: true,
-             pod_type: None,
-             bootstrap_port: None,
+-            pod_type: None,
+-            bootstrap_port: None,
 -        };
 -        let port = 8080u16;
 -
@@ -1001,6 +1186,47 @@ index d765800..798eab7 100644
 -            false, // pd_mode = false
 -        )
 -        .await;
+-
+-        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
+-        assert!(!router
+-            .get_worker_urls()
+-            .contains(&pod_info.worker_url(port)));
++    // The tracker is keyed on Pod UID and holds the PodInfo a worker was registered
++    // with, so these tests drive the discovery decisions through handle_watch_event
++    // and assert on the tracker and the router rather than on logs.
++    fn tracker_with(entries: Vec<PodInfo>) -> Arc<Mutex<HashMap<String, PodInfo>>> {
++        let mut map = HashMap::new();
++        for entry in entries {
++            map.insert(entry.uid.clone(), entry);
++        }
++        Arc::new(Mutex::new(map))
+     }
+ 
+-    #[tokio::test]
+-    async fn test_handle_pod_deletion_non_existing_pod() {
+-        let router = create_test_router().await;
+-        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
+-        let pod_info = PodInfo {
+-            name: "pod1".into(),
+-            ip: "1.2.3.4".parse().unwrap(),
++    fn registered(uid: &str, name: &str, ip: &str) -> PodInfo {
++        PodInfo {
++            name: name.to_string(),
++            uid: uid.to_string(),
++            ip: ip.parse().unwrap(),
+             status: "Running".into(),
+             is_ready: true,
+             pod_type: None,
+             bootstrap_port: None,
+-        };
+-        let port = 8080u16;
+-
+-        handle_pod_deletion(
+-            &pod_info,
+-            Arc::clone(&tracked_pods),
+-            Arc::clone(&router),
+-            port,
+-            false, // pd_mode = false
 +        }
 +    }
 +
@@ -1037,11 +1263,7 @@ index d765800..798eab7 100644
 +        pod.metadata.deletion_timestamp = Some(Time(k8s_openapi::chrono::Utc::now()));
 +        pod
 +    }
- 
--        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
--        assert!(!router
--            .get_worker_urls()
--            .contains(&pod_info.worker_url(port)));
++
 +    async fn drive(
 +        event: Event<Pod>,
 +        tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
@@ -1056,31 +1278,16 @@ index d765800..798eab7 100644
 +            router,
 +            config.port,
 +            config,
-+        )
+         )
+-        .await;
 +        .await
-     }
++    }
  
-     #[tokio::test]
--    async fn test_handle_pod_deletion_non_existing_pod() {
+-        assert!(tracked_pods.lock().unwrap().is_empty());
+-        assert!(router.get_worker_urls().is_empty());
++    #[tokio::test]
 +    async fn test_readiness_loss_withdraws_worker_and_restore_does_not() {
-         let router = create_test_router().await;
--        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
--        let pod_info = PodInfo {
--            name: "pod1".into(),
--            ip: "1.2.3.4".parse().unwrap(),
--            status: "Running".into(),
--            is_ready: true,
--            pod_type: None,
--            bootstrap_port: None,
--        };
--        let port = 8080u16;
--
--        handle_pod_deletion(
--            &pod_info,
--            Arc::clone(&tracked_pods),
--            Arc::clone(&router),
--            port,
--            false, // pd_mode = false
++        let router = stub_router();
 +        let config = regular_config();
 +        let entry = registered("uid-a", "pod-a", "10.0.0.1");
 +        let worker_url = entry.worker_url(config.port);
@@ -1093,11 +1300,8 @@ index d765800..798eab7 100644
 +            &tracked,
 +            &router,
 +            &config,
-         )
-         .await;
--
--        assert!(tracked_pods.lock().unwrap().is_empty());
--        assert!(router.get_worker_urls().is_empty());
++        )
++        .await;
 +        assert!(delivered);
 +        assert!(
 +            !tracked.lock().unwrap().contains_key("uid-a"),
@@ -1124,8 +1328,7 @@ index d765800..798eab7 100644
  
      #[tokio::test]
 -    async fn test_handle_pd_pod_event_prefill_pod() {
-+    async fn test_label_deselect_withdraws_worker() {
-         let router = create_test_router().await;
+-        let router = create_test_router().await;
 -        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
 -        let pod_info = PodInfo {
 -            name: "prefill-pod".into(),
@@ -1145,6 +1348,8 @@ index d765800..798eab7 100644
 -            Arc::clone(&router),
 -            port,
 -            false, // pd_mode = false, so it should fallback to regular handling
++    async fn test_label_deselect_withdraws_worker() {
++        let router = stub_router();
 +        let config = regular_config();
 +        let entry = registered("uid-b", "pod-b", "10.0.0.2");
 +        let worker_url = entry.worker_url(config.port);
@@ -1172,8 +1377,7 @@ index d765800..798eab7 100644
  
      #[tokio::test]
 -    async fn test_handle_pd_pod_event_decode_pod() {
-+    async fn test_terminating_pod_withdraws_even_while_ready() {
-         let router = create_test_router().await;
+-        let router = create_test_router().await;
 -        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
 -        let pod_info = PodInfo {
 -            name: "decode-pod".into(),
@@ -1191,6 +1395,8 @@ index d765800..798eab7 100644
 -            Arc::clone(&router),
 -            port,
 -            false, // pd_mode = false, so it should fallback to regular handling
++    async fn test_terminating_pod_withdraws_even_while_ready() {
++        let router = stub_router();
 +        let config = regular_config();
 +        let entry = registered("uid-t", "pod-t", "10.0.0.12");
 +
@@ -1222,8 +1428,7 @@ index d765800..798eab7 100644
  
      #[tokio::test]
 -    async fn test_handle_pd_pod_deletion_tracked_pod() {
-+    async fn test_terminating_pod_without_status_withdraws() {
-         let router = create_test_router().await;
+-        let router = create_test_router().await;
 -        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
 -        let pod_info = PodInfo {
 -            name: "test-pod".into(),
@@ -1233,6 +1438,8 @@ index d765800..798eab7 100644
 -            pod_type: Some(PodType::Prefill),
 -            bootstrap_port: Some(8081),
 -        };
++    async fn test_terminating_pod_without_status_withdraws() {
++        let router = stub_router();
 +        let config = regular_config();
 +        let entry = registered("uid-t2", "pod-t2", "10.0.0.13");
 +
@@ -1252,7 +1459,7 @@ index d765800..798eab7 100644
 -        // Add pod to tracked set first
 +    #[tokio::test]
 +    async fn test_relist_withdraws_pod_missing_from_listing() {
-+        let router = create_test_router().await;
++        let router = stub_router();
 +        let config = regular_config();
 +        let gone = registered("uid-gone", "pod-gone", "10.0.0.3");
 +        let present = registered("uid-here", "pod-here", "10.0.0.4");
@@ -1310,8 +1517,7 @@ index d765800..798eab7 100644
  
      #[tokio::test]
 -    async fn test_handle_pd_pod_deletion_untracked_pod() {
-+    async fn test_new_uid_takes_over_address_from_previous_owner() {
-         let router = create_test_router().await;
+-        let router = create_test_router().await;
 -        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
 -        let pod_info = PodInfo {
 -            name: "untracked-pod".into(),
@@ -1331,6 +1537,8 @@ index d765800..798eab7 100644
 -            Arc::clone(&router),
 -            port,
 -            true, // pd_mode = true
++    async fn test_new_uid_takes_over_address_from_previous_owner() {
++        let router = stub_router();
 +        let config = regular_config();
 +        let old = registered("uid-old", "pod-0", "10.0.0.5");
 +
@@ -1360,8 +1568,7 @@ index d765800..798eab7 100644
  
      #[tokio::test]
 -    async fn test_unified_handler_regular_mode() {
-+    async fn test_late_delete_of_replaced_uid_cannot_reach_current_owner() {
-         let router = create_test_router().await;
+-        let router = create_test_router().await;
 -        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
 -        let pod_info = PodInfo {
 -            name: "regular-pod".into(),
@@ -1380,6 +1587,8 @@ index d765800..798eab7 100644
 -            Arc::clone(&router),
 -            port,
 -            false, // pd_mode = false
++    async fn test_late_delete_of_replaced_uid_cannot_reach_current_owner() {
++        let router = stub_router();
 +        let config = regular_config();
 +        let new = registered("uid-new2", "pod-0", "10.0.0.6");
 +
@@ -1402,8 +1611,7 @@ index d765800..798eab7 100644
  
      #[tokio::test]
 -    async fn test_unified_handler_pd_mode_with_prefill() {
-+    async fn test_unreadable_pod_status_withdraws_registration() {
-         let router = create_test_router().await;
+-        let router = create_test_router().await;
 -        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
 -        let pod_info = PodInfo {
 -            name: "prefill-pod".into(),
@@ -1424,6 +1632,8 @@ index d765800..798eab7 100644
 -            true, // pd_mode = true
 -        )
 -        .await;
++    async fn test_unreadable_pod_status_withdraws_registration() {
++        let router = stub_router();
 +        let config = regular_config();
 +        let entry = registered("uid-i", "pod-i", "10.0.0.7");
 +        let tracked = tracker_with(vec![entry]);
@@ -1440,10 +1650,12 @@ index d765800..798eab7 100644
 +            "an eligible pod whose current status is unusable must be withdrawn"
 +        );
 +    }
-+
+ 
+-        // Pod should not be tracked since router.add_pd_worker will fail for regular router
+-        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
 +    #[tokio::test]
 +    async fn test_pod_with_empty_uid_is_refused() {
-+        let router = create_test_router().await;
++        let router = stub_router();
 +        let config = regular_config();
 +        let tracked = tracker_with(vec![]);
 +
@@ -1452,9 +1664,7 @@ index d765800..798eab7 100644
 +        let mut pod = labelled_pod("uid-x", "pod-x", "10.0.0.7", true, true);
 +        pod.metadata.uid = Some(String::new());
 +        drive(Event::Apply(pod), &tracked, &router, &config).await;
- 
--        // Pod should not be tracked since router.add_pd_worker will fail for regular router
--        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
++
 +        let mut pod = labelled_pod("uid-y", "pod-y", "10.0.0.8", true, true);
 +        pod.metadata.uid = None;
 +        drive(Event::Apply(pod), &tracked, &router, &config).await;
@@ -1465,8 +1675,7 @@ index d765800..798eab7 100644
  
      #[tokio::test]
 -    async fn test_unified_handler_deletion_with_pd_mode() {
-+    async fn test_withdrawal_keeps_a_concurrently_replaced_registration() {
-         let router = create_test_router().await;
+-        let router = create_test_router().await;
 -        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
 -        let pod_info = PodInfo {
 -            name: "decode-pod".into(),
@@ -1475,6 +1684,8 @@ index d765800..798eab7 100644
 -            is_ready: true,
 -            pod_type: Some(PodType::Decode),
 -            bootstrap_port: None,
++    async fn test_withdrawal_keeps_a_concurrently_replaced_registration() {
++        let router = stub_router();
 +        let config = regular_config();
 +        let old = registered("uid-race", "pod-race", "10.0.0.8");
 +        let new = PodInfo {
@@ -1510,7 +1721,7 @@ index d765800..798eab7 100644
 -            true, // pd_mode = true
 +    #[tokio::test]
 +    async fn test_withdraw_unknown_uid_is_a_no_op() {
-+        let router = create_test_router().await;
++        let router = stub_router();
 +        let config = regular_config();
 +        let entry = registered("uid-keep", "pod-keep", "10.0.0.10");
 +        let tracked = tracker_with(vec![entry.clone()]);

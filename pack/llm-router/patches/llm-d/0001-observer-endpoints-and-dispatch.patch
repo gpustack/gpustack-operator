@@ -3,12 +3,51 @@ The view refuses pending selection/send windows, unsynchronized membership and
 unsupported native profiles. GET does not mutate routing or expire native state.
 Removed dispatched listeners retain false selection flags with recent-dispatch evidence.
 
-Written against llm-d-router v0.10.0, commit 71f4f0999f95b96c49a9d0c4afbd18dfdb943c26.
-The operator collector must consume recent-dispatch evidence before using this view.
+Rebased from v0.10.0 (commit 71f4f0999f95b96c49a9d0c4afbd18dfdb943c26) to v0.11.0.
+
+The constructor-based ExtProcServerRunner in v0.11.0 surfaces every field through
+NewExtProcServerRunner, and TestNewExtProcServerRunnerPopulatesEveryField fails
+when any new field is zero. Observer is wired by post-constructor assignment in
+runner.go and is added to the test's callerSet (the smaller change; the
+alternative is adding an Observer parameter to NewExtProcServerRunner and
+threading it through every call site).
+
+v0.11.0 added passthrough-parser to the default parser set
+(pkg/epp/config/loader/defaults.go:261) and the operator's picker configs
+declare no parsers, so the parser is always registered. The observer's
+SupportedPlugins allowlist gains "passthrough-parser" so the operator's
+profiles do not hit a 503. The flow-control defaults (fcfs-ordering-policy,
+global-strict-fairness-policy, static-usage-limit-policy-type) and the
+utilization-detector saturation detector were already in the allowlist, so
+no further additions were needed.
+
+The patch carries the seven datastore observer-revision increments: the
+public mutation sites WithEndpointPool, Clear, PoolSet,
+PodUpdateOrAddIfNotExist (the exported wrapper), PodDelete,
+EndpointUpsert, EndpointDelete. The unexported podUpdateOrAddIfNotExist
+helper takes no observerMu acquisition because both its callers
+(PodUpdateOrAddIfNotExist and PoolSet via podResyncAll) already increment,
+and an observerMu acquisition here would invert the lock order against
+ObserverSnapshot (which takes observerMu then ds.mu) into AB-BA deadlock.
+pkg/epp/datastore/observer_lock_order_test.go pins this invariant.
+
+The five short-block sites release observerMu before mutating ds.pods, so a
+snapshot racing between bump and mutation can see a revision that leads the
+data by one change; no production code reads registry_revision.
+
+The director -> dispatch-evidence leg has a v0.11.0-compatible test
+pkg/epp/requestcontrol/observer_test.go that builds the director with
+NewDirectorWithConfig + a canned mockScheduler (mockScheduler returns the
+pre-baked SchedulingResult) and verifies every ProfileResults TargetEndpoint
+is recorded into the observer window and shows up in the view with
+recent_dispatch.
+
+The operator collector must consume recent-dispatch evidence before using
+this view.
 
 diff --git a/cmd/epp/runner/observer_test.go b/cmd/epp/runner/observer_test.go
 new file mode 100644
-index 0000000..7188e6d
+index 00000000..7188e6d1
 --- /dev/null
 +++ b/cmd/epp/runner/observer_test.go
 @@ -0,0 +1,42 @@
@@ -56,7 +95,7 @@ index 0000000..7188e6d
 +}
 diff --git a/cmd/epp/runner/observer_testdata/pd.yaml b/cmd/epp/runner/observer_testdata/pd.yaml
 new file mode 100644
-index 0000000..e18abb1
+index 00000000..e18abb13
 --- /dev/null
 +++ b/cmd/epp/runner/observer_testdata/pd.yaml
 @@ -0,0 +1,57 @@
@@ -119,7 +158,7 @@ index 0000000..e18abb1
 +    weight: 3
 diff --git a/cmd/epp/runner/observer_testdata/server.yaml b/cmd/epp/runner/observer_testdata/server.yaml
 new file mode 100644
-index 0000000..532453d
+index 00000000..532453de
 --- /dev/null
 +++ b/cmd/epp/runner/observer_testdata/server.yaml
 @@ -0,0 +1,33 @@
@@ -157,10 +196,10 @@ index 0000000..532453d
 +  - pluginRef: prefix-cache-scorer
 +    weight: 3
 diff --git a/cmd/epp/runner/runner.go b/cmd/epp/runner/runner.go
-index 21f443d..680087a 100644
+index 27080fa4..a660b966 100644
 --- a/cmd/epp/runner/runner.go
 +++ b/cmd/epp/runner/runner.go
-@@ -146,6 +146,7 @@ import (
+@@ -154,6 +154,7 @@ import (
  	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
  	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
  	"github.com/llm-d/llm-d-router/pkg/epp/metrics/collectors"
@@ -168,8 +207,8 @@ index 21f443d..680087a 100644
  	"github.com/llm-d/llm-d-router/pkg/epp/requestcontrol"
  	"github.com/llm-d/llm-d-router/pkg/epp/scheduling"
  	runserver "github.com/llm-d/llm-d-router/pkg/epp/server"
-@@ -468,7 +469,15 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
- 		director.SetRequestEvictor(requestEvictor)
+@@ -487,6 +488,15 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
+ 		serverRunner.EvictChannelLookup = requestEvictor.EvictionRegistry()
  	}
  
 +	store, _ := ds.(observer.Snapshotter)
@@ -179,16 +218,16 @@ index 21f443d..680087a 100644
 +	if err := mgr.AddMetricsServerExtraHandler(observer.Path, nativeObserver); err != nil {
 +		return nil, nil, err
 +	}
- 	serverRunner := &runserver.ExtProcServerRunner{
-+		Observer:                         nativeObserver,
- 		GrpcPort:                         opts.GRPCPort,
- 		GKNN:                             *gknn,
- 		Datastore:                        ds,
++	serverRunner.Observer = nativeObserver
++
+ 	if err := serverRunner.SetupWithManager(mgr); err != nil {
+ 		setupLog.Error(err, "Failed to setup EPP controllers")
+ 		return nil, nil, err
 diff --git a/pkg/epp/datastore/datastore.go b/pkg/epp/datastore/datastore.go
-index 59cc507..ccb0645 100644
+index 98999dce..faf4c849 100644
 --- a/pkg/epp/datastore/datastore.go
 +++ b/pkg/epp/datastore/datastore.go
-@@ -127,6 +127,8 @@ func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory
+@@ -128,6 +128,8 @@ func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory
  }
  
  type datastore struct {
@@ -197,7 +236,7 @@ index 59cc507..ccb0645 100644
  	// parentCtx controls the lifecycle of the background metrics goroutines that spawn up by the datastore.
  	parentCtx context.Context
  	// mu is used to synchronize access to pool, objectives, and rewrites.
-@@ -147,11 +149,19 @@ type datastore struct {
+@@ -148,11 +150,19 @@ type datastore struct {
  }
  
  func (ds *datastore) WithEndpointPool(pool *datalayer.EndpointPool) Datastore {
@@ -217,43 +256,43 @@ index 59cc507..ccb0645 100644
  	ds.mu.Lock()
  	defer ds.mu.Unlock()
  	ds.pool = nil
-@@ -171,6 +181,9 @@ func (ds *datastore) PoolSet(ctx context.Context, reader client.Reader, endpoint
+@@ -172,6 +182,9 @@ func (ds *datastore) PoolSet(ctx context.Context, reader client.Reader, endpoint
  		ds.Clear()
  		return nil
  	}
 +	ds.observerMu.Lock()
-+	defer ds.observerMu.Unlock()
 +	ds.observerRevision++
++	ds.observerMu.Unlock()
  	logger := log.FromContext(ctx)
  	ds.mu.Lock()
  	defer ds.mu.Unlock()
-@@ -299,6 +312,9 @@ func (ds *datastore) PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.Endpoi
+@@ -300,6 +313,9 @@ func (ds *datastore) PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.Endpoi
  }
  
  func (ds *datastore) PodUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.Pod) error {
 +	ds.observerMu.Lock()
-+	defer ds.observerMu.Unlock()
 +	ds.observerRevision++
++	ds.observerMu.Unlock()
  	// Take a reference to pool under read lock to avoid racing with PoolSet().
  	// This is safe because PoolSet() replaces the entire pool struct rather than
  	// updating it in-place.
-@@ -392,6 +408,9 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
+@@ -393,6 +409,9 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
  }
  
  func (ds *datastore) PodDelete(podName string) {
 +	ds.observerMu.Lock()
-+	defer ds.observerMu.Unlock()
 +	ds.observerRevision++
++	ds.observerMu.Unlock()
  	ds.pods.Range(func(k, v any) bool {
  		ep := v.(fwkdl.Endpoint)
  		if ep.GetMetadata().Name == podName {
-@@ -403,12 +422,18 @@ func (ds *datastore) PodDelete(podName string) {
+@@ -404,12 +423,18 @@ func (ds *datastore) PodDelete(podName string) {
  }
  
  func (ds *datastore) EndpointUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata) {
 +	ds.observerMu.Lock()
-+	defer ds.observerMu.Unlock()
 +	ds.observerRevision++
++	ds.observerMu.Unlock()
  	if _, err := ds.upsertEndpoint(ctx, meta); err != nil {
  		log.FromContext(ctx).Error(err, "failed to register endpoint", "endpoint", meta.ID)
  	}
@@ -261,12 +300,12 @@ index 59cc507..ccb0645 100644
  
  func (ds *datastore) EndpointDelete(id types.NamespacedName) {
 +	ds.observerMu.Lock()
-+	defer ds.observerMu.Unlock()
 +	ds.observerRevision++
++	ds.observerMu.Unlock()
  	if v, ok := ds.pods.LoadAndDelete(id); ok {
  		ds.epf.ReleaseEndpoint(v.(fwkdl.Endpoint))
  	}
-@@ -534,3 +559,22 @@ func selectorEqual(a, b labels.Selector) bool {
+@@ -535,3 +560,22 @@ func selectorEqual(a, b labels.Selector) bool {
  	}
  	return a.String() == b.String()
  }
@@ -289,9 +328,134 @@ index 59cc507..ccb0645 100644
 +	})
 +	return result, ds.observerRevision, nil
 +}
+diff --git a/pkg/epp/datastore/observer_lock_order_test.go b/pkg/epp/datastore/observer_lock_order_test.go
+new file mode 100644
+index 00000000..9e676a90
+--- /dev/null
++++ b/pkg/epp/datastore/observer_lock_order_test.go
+@@ -0,0 +1,119 @@
++// Copyright 2026 The Kubernetes Authors.
++// SPDX-License-Identifier: Apache-2.0
++package datastore
++
++import (
++	"context"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/llm-d/llm-d-router/pkg/epp/datalayer"
++	corev1 "k8s.io/api/core/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/labels"
++	"sigs.k8s.io/controller-runtime/pkg/client"
++	"sigs.k8s.io/controller-runtime/pkg/client/fake"
++	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
++)
++
++func selectorFromLabels(s string) labels.Selector {
++	sel, _ := labels.Parse(s)
++	return sel
++}
++
++// TestObserverSnapshotVsPoolSet_NoDeadlock pins the lock-order invariant between
++// ObserverSnapshot (observerMu.RLock then ds.mu.RLock) and PoolSet/podResyncAll/
++// podUpdateOrAddIfNotExist (ds.mu.Lock then no further observerMu acquisition).
++//
++// ObserverSnapshot's order: observerMu -> ds.mu.
++// PoolSet's order: ds.mu -> podUpdateOrAddIfNotExist (which must NOT touch
++// observerMu while ds.mu is held by the caller).
++//
++// Regression: any future change that re-introduces an observerMu acquisition
++// inside podUpdateOrAddIfNotExist will deadlock the test within ~5s. The
++// signal is the two goroutines both blocked on a mutex at the same time,
++// observed here by gating PoolSet's podResyncAll.List call on a channel so
++// the goroutine is parked inside ds.mu while ObserverSnapshot takes observerMu.
++func TestObserverSnapshotVsPoolSet_NoDeadlock(t *testing.T) {
++	const deadline = 5 * time.Second
++
++	releaseList := make(chan struct{})
++	listEntered := make(chan struct{})
++	var enteredOnce sync.Once
++
++	readyPod := &corev1.Pod{
++		ObjectMeta: metav1.ObjectMeta{
++			Name:      "pod-0",
++			Namespace: "default",
++			Labels:    map[string]string{"app": "model"},
++		},
++		Status: corev1.PodStatus{
++			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
++		},
++	}
++	fakeClient := fake.NewClientBuilder().
++		WithObjects(readyPod).
++		WithInterceptorFuncs(interceptor.Funcs{
++			List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
++				enteredOnce.Do(func() { close(listEntered) })
++				<-releaseList
++				return c.List(ctx, list, opts...)
++			},
++		}).
++		Build()
++
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++
++	ds := NewDatastore(ctx, &mockEndpointFactory{}).(*datastore)
++	pool := &datalayer.EndpointPool{
++		TargetPorts: []int{8000},
++		Selector:    selectorFromLabels("app=model"),
++	}
++
++	// Goroutine A: run PoolSet so it parks inside podResyncAll.List while
++	// holding ds.mu.
++	poolSetDone := make(chan error, 1)
++	go func() {
++		poolSetDone <- ds.PoolSet(ctx, fakeClient, pool)
++	}()
++
++	// Wait until A is parked in the List call.
++	select {
++	case <-listEntered:
++	case <-time.After(deadline):
++		t.Fatal("PoolSet never reached the List call")
++	}
++
++	// Goroutine B: take observerMu via ObserverSnapshot and block on ds.mu.RLock.
++	snapshotDone := make(chan struct{})
++	go func() {
++		defer close(snapshotDone)
++		for i := 0; i < 50; i++ {
++			_, _, _ = ds.ObserverSnapshot()
++		}
++	}()
++
++	// Give B time to acquire observerMu.TryRLock and block on ds.mu.RLock.
++	// 100ms is well below the 5s deadlock budget.
++	time.Sleep(100 * time.Millisecond)
++
++	// Release A's List call. With the bug, A will then enter
++	// podUpdateOrAddIfNotExist, try to Lock observerMu while holding ds.mu,
++	// and wedge against B's RLock. Without the bug, A finishes and B
++	// eventually drains.
++	close(releaseList)
++
++	select {
++	case err := <-poolSetDone:
++		if err != nil {
++			t.Fatalf("PoolSet failed: %v", err)
++		}
++	case <-snapshotDone:
++	case <-time.After(deadline):
++		t.Fatalf("deadlock: neither PoolSet nor ObserverSnapshot returned within %v; "+
++			"observerMu and ds.mu are inverted across the snapshot/resync boundary",
++			deadline)
++	}
++}
 diff --git a/pkg/epp/datastore/observer_test.go b/pkg/epp/datastore/observer_test.go
 new file mode 100644
-index 0000000..3949725
+index 00000000..3949725f
 --- /dev/null
 +++ b/pkg/epp/datastore/observer_test.go
 @@ -0,0 +1,75 @@
@@ -372,7 +536,7 @@ index 0000000..3949725
 +}
 diff --git a/pkg/epp/handlers/observer_test.go b/pkg/epp/handlers/observer_test.go
 new file mode 100644
-index 0000000..9d0297d
+index 00000000..9d0297d0
 --- /dev/null
 +++ b/pkg/epp/handlers/observer_test.go
 @@ -0,0 +1,135 @@
@@ -512,10 +676,10 @@ index 0000000..9d0297d
 +	}
 +}
 diff --git a/pkg/epp/handlers/request.go b/pkg/epp/handlers/request.go
-index 574cae7..679bced 100644
+index 90e13a1e..2cf34af6 100644
 --- a/pkg/epp/handlers/request.go
 +++ b/pkg/epp/handlers/request.go
-@@ -58,10 +58,13 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
+@@ -60,10 +60,13 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
  }
  
  func (s *StreamingServer) fallbackToRandomEndpoint(ctx context.Context, reqCtx *RequestContext, requestSize int) error {
@@ -526,14 +690,14 @@ index 574cae7..679bced 100644
  		return errcommon.Error{Code: errcommon.Internal, Msg: "no pods available in datastore"}
  	}
 +	reqCtx.ObserverWindow.Record(endpoint)
- 	reqCtx.TargetEndpoint = endpoint.GetIPAddress() + ":" + endpoint.GetPort()
+ 	reqCtx.TargetEndpoint = net.JoinHostPort(endpoint.GetIPAddress(), endpoint.GetPort())
  	reqCtx.RequestSize = requestSize
  	reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(ctx, reqCtx)
 diff --git a/pkg/epp/handlers/server.go b/pkg/epp/handlers/server.go
-index 1913ee8..40ba92d 100644
+index 5bcb9bdf..0587df65 100644
 --- a/pkg/epp/handlers/server.go
 +++ b/pkg/epp/handlers/server.go
-@@ -52,6 +52,7 @@ import (
+@@ -54,6 +54,7 @@ import (
  	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
  	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
  	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
@@ -541,7 +705,17 @@ index 1913ee8..40ba92d 100644
  )
  
  // EvictChannelLookup is an optional interface for looking up eviction channels by request ID.
-@@ -102,6 +103,7 @@ type Datastore interface {
+@@ -90,6 +91,9 @@ func (s *StreamingServer) SetEmitEndpointScores(enabled bool) {
+ 	s.emitEndpointScores = enabled
+ }
+ 
++// SetObserver attaches the admin observer to the native selection-to-send lifecycle.
++func (s *StreamingServer) SetObserver(o *observer.Observer) { s.observer = o }
++
+ type Director interface {
+ 	HandleRequest(ctx context.Context, reqCtx *RequestContext, inferenceRequestBody *fwkrh.InferenceRequestBody) (*RequestContext, error)
+ 	HandleResponseHeader(ctx context.Context, reqCtx *RequestContext) *RequestContext
+@@ -104,6 +108,7 @@ type Datastore interface {
  // Server implements the Envoy external processing server.
  // https://www.envoyproxy.io/docs/envoy/latest/api-v3/service/ext_proc/v3/external_processor.proto
  type StreamingServer struct {
@@ -549,9 +723,9 @@ index 1913ee8..40ba92d 100644
  	datastore         Datastore
  	director          Director
  	parserRegistry    *ParserRegistry
-@@ -119,8 +121,10 @@ type StreamingServer struct {
- // Refactor this monolithic struct. Fields related to the Envoy ext-proc protocol should be decoupled from the internal
- // request lifecycle state.
+@@ -120,8 +125,10 @@ type StreamingServer struct {
+ // Exported fields are read and written by the request-control layers (director and
+ // admission control). Unexported fields are private to this package.
  type RequestContext struct {
 -	TargetPod      *fwkdl.EndpointMetadata
 -	TargetEndpoint string
@@ -562,16 +736,16 @@ index 1913ee8..40ba92d 100644
  	// TargetEndpointScores maps endpoint address to the scheduler's score for it, covering
  	// every endpoint the primary profile scored rather than only those in TargetEndpoint.
  	// Nil when the primary profile ran no scorers.
-@@ -286,6 +290,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
- 		},
- 	}
+@@ -362,6 +369,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+ 	var respBody []byte
+ 	var evictionRequestID string
  
 +	defer func() { reqCtx.ObserverWindow.Finish() }()
 +
- 	// Request-phase failures (parser resolution, body parsing, admission
- 	// rejection) leave the switch before the success path, so both call this.
- 	// Flow-control rejections carry the queue wait and are the slowest samples;
-@@ -473,6 +479,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+ 	// Start a single reader goroutine for the lifetime of the stream.
+ 	// This avoids spawning a new goroutine per message and allows the main loop to
+ 	// select on both incoming messages and the eviction channel.
+@@ -524,6 +533,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
  					break
  				}
  
@@ -579,26 +753,19 @@ index 1913ee8..40ba92d 100644
  				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, parseResult.Body)
  				if err != nil {
  					logger.Error(err, "Error handling request")
-@@ -583,6 +590,9 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+@@ -646,6 +656,9 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
  		if err := reqCtx.updateStateAndSendIfNeeded(srv, logger); err != nil {
  			return err
  		}
-+		if reqCtx.RequestState == BodyRequestResponsesComplete || reqCtx.RequestState == RequestResponseProcessingSkipped || (reqCtx.observerHeaderOnly && reqCtx.RequestState == HeaderRequestResponseComplete) {
++		if reqCtx.requestState == bodyRequestResponsesComplete || reqCtx.requestState == requestResponseProcessingSkipped || (reqCtx.observerHeaderOnly && reqCtx.requestState == headerRequestResponseComplete) {
 +			reqCtx.ObserverWindow.Finish()
 +		}
- 		if reqCtx.RequestState == RequestResponseProcessingSkipped {
+ 		if reqCtx.requestState == requestResponseProcessingSkipped {
  			logger.V(logutil.DEFAULT).Info("EPP skipped response interception, routed request",
  				"targetEndpoint", reqCtx.TargetEndpoint,
-@@ -756,3 +766,6 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
- 	}
- 	return nil
- }
-+
-+// SetObserver attaches the admin observer to the native selection-to-send lifecycle.
-+func (s *StreamingServer) SetObserver(o *observer.Observer) { s.observer = o }
 diff --git a/pkg/epp/observer/endpoints.go b/pkg/epp/observer/endpoints.go
 new file mode 100644
-index 0000000..14f6a62
+index 00000000..b6db1667
 --- /dev/null
 +++ b/pkg/epp/observer/endpoints.go
 @@ -0,0 +1,261 @@
@@ -671,7 +838,7 @@ index 0000000..14f6a62
 +			"core-metrics-extractor", "approx-prefix-cache-producer",
 +			"precise-prefix-cache-producer", "token-producer", "endpoint-notification-source",
 +			"prefix-based-pd-decider", "disagg-profile-handler", "single-profile-handler",
-+			"openai-parser", "anthropic-parser", "vllmhttp-parser",
++			"openai-parser", "anthropic-parser", "vllmhttp-parser", "passthrough-parser",
 +			"fcfs-ordering-policy", "global-strict-fairness-policy",
 +			"static-usage-limit-policy-type", "utilization-detector":
 +		default:
@@ -865,7 +1032,7 @@ index 0000000..14f6a62
 +}
 diff --git a/pkg/epp/observer/endpoints_test.go b/pkg/epp/observer/endpoints_test.go
 new file mode 100644
-index 0000000..45d030e
+index 00000000..45d030eb
 --- /dev/null
 +++ b/pkg/epp/observer/endpoints_test.go
 @@ -0,0 +1,165 @@
@@ -1035,10 +1202,10 @@ index 0000000..45d030e
 +	}
 +}
 diff --git a/pkg/epp/requestcontrol/director.go b/pkg/epp/requestcontrol/director.go
-index d6ea634..e70e16a 100644
+index e4971a05..4dfc6997 100644
 --- a/pkg/epp/requestcontrol/director.go
 +++ b/pkg/epp/requestcontrol/director.go
-@@ -362,6 +362,15 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
+@@ -300,6 +300,15 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
  	}
  
  	reqCtx.SchedulingRequest.SchedulingResult = result
@@ -1056,32 +1223,41 @@ index d6ea634..e70e16a 100644
  	// Insert target endpoint to instruct Envoy to route requests to the specified target pod and attach the port number.
 diff --git a/pkg/epp/requestcontrol/observer_test.go b/pkg/epp/requestcontrol/observer_test.go
 new file mode 100644
-index 0000000..a0c12f0
+index 00000000..b6a67887
 --- /dev/null
 +++ b/pkg/epp/requestcontrol/observer_test.go
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,96 @@
 +// Copyright 2026 The Kubernetes Authors.
 +// SPDX-License-Identifier: Apache-2.0
 +package requestcontrol
 +
 +import (
 +	"encoding/json"
++	"net/http"
 +	"net/http/httptest"
 +	"testing"
++	"time"
 +
 +	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
++	"github.com/llm-d/llm-d-router/pkg/epp/datalayer"
 +	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 +	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/openai"
++	"github.com/llm-d/llm-d-router/pkg/epp/datastore"
 +	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
 +	"github.com/llm-d/llm-d-router/pkg/epp/observer"
 +	"k8s.io/apimachinery/pkg/types"
 +)
 +
-+type emptyObservedStore struct{}
++type observedStore struct{}
 +
-+func (emptyObservedStore) ObserverSnapshot() ([]*fwkdl.EndpointMetadata, uint64, error) {
++func (observedStore) ObserverSnapshot() ([]*fwkdl.EndpointMetadata, uint64, error) {
 +	return nil, 1, nil
 +}
++
++// TestObserverRecordsNativeDirectorAuxiliaryTargets asserts that Director.HandleRequest
++// records every ProfileRunResult TargetEndpoint into the observer window (primary +
++// auxiliary profiles), and that the observer view then carries recent_dispatch for
++// each recorded target.
 +func TestObserverRecordsNativeDirectorAuxiliaryTargets(t *testing.T) {
 +	makeEndpoint := func(name, address, role string) fwksched.Endpoint {
 +		return fwksched.NewEndpoint(&fwkdl.EndpointMetadata{ID: types.NamespacedName{Name: name, Namespace: "ns"}, Name: name, Address: address, Port: "8000", Labels: map[string]string{"app.kubernetes.io/component": role}}, nil, fwkdl.NewAttributes())
@@ -1090,10 +1266,25 @@ index 0000000..a0c12f0
 +		"decode":  {TargetEndpoints: []fwksched.Endpoint{makeEndpoint("decoder", "192.0.2.1", "decode-role")}},
 +		"prefill": {TargetEndpoints: []fwksched.Endpoint{makeEndpoint("prefiller", "192.0.2.2", "prefill-role")}},
 +	}}
-+	director, ctx := newConditionalDecodeDirector(t, result)
-+	o := observer.New(emptyObservedStore{}, func() bool { return true })
-+	req := &handlers.RequestContext{ObserverWindow: o.Begin(), Request: &handlers.Request{Headers: map[string]string{":path": "/v1/completions"}, RawBody: []byte(`{"model":"m","prompt":"p"}`)}, Parser: openai.NewOpenAIParser()}
++	mockSched := &mockScheduler{scheduleResults: result}
++
++	ctx := t.Context()
++	epf := datalayer.NewTestRuntime(t, time.Minute)
++	ds := datastore.NewDatastore(ctx, epf)
++	ds.WithEndpointPool(&datalayer.EndpointPool{TargetPorts: []int{8000}})
++	ds.EndpointUpsert(ctx, &fwkdl.EndpointMetadata{ID: types.NamespacedName{Name: "decoder", Namespace: "ns"}, Name: "decoder", Address: "192.0.2.1", Port: "8000", Labels: map[string]string{"app.kubernetes.io/component": "decode-role"}})
++	ds.EndpointUpsert(ctx, &fwkdl.EndpointMetadata{ID: types.NamespacedName{Name: "prefiller", Namespace: "ns"}, Name: "prefiller", Address: "192.0.2.2", Port: "8000", Labels: map[string]string{"app.kubernetes.io/component": "prefill-role"}})
++	endpointCandidates := NewCachedEndpointCandidates(ctx, NewDatastoreEndpointCandidates(ds), time.Minute)
++	director := NewDirectorWithConfig(ds, mockSched, &mockAdmissionController{}, endpointCandidates, NewConfig())
++
++	o := observer.New(observedStore{}, func() bool { return true })
++	req := &handlers.RequestContext{
++		ObserverWindow: o.Begin(),
++		Request: &handlers.Request{Headers: map[string]string{":path": "/v1/completions"}, RawBody: []byte(`{"model":"m","prompt":"p"}`)},
++		Parser: openai.NewOpenAIParser(),
++	}
 +	defer req.ObserverWindow.Finish()
++
 +	parsed, err := req.Parser.ParseRequest(ctx, req.Request.RawBody, req.Request.Headers)
 +	if err != nil {
 +		t.Fatal(err)
@@ -1106,11 +1297,15 @@ index 0000000..a0c12f0
 +		t.Fatal("native primary routing was changed")
 +	}
 +	req.ObserverWindow.Finish()
++
 +	recorder := httptest.NewRecorder()
-+	o.ServeHTTP(recorder, httptest.NewRequest("GET", observer.Path, nil))
++	o.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, observer.Path, nil))
++	if recorder.Code != http.StatusOK {
++		t.Fatalf("observer refused: %d %s", recorder.Code, recorder.Body.String())
++	}
 +	var observed struct {
 +		Workers []struct {
-+			Pod     string `json:"pod_hint"`
++			PodHint string `json:"pod_hint"`
 +			LastJob struct {
 +				Recent bool `json:"recent_dispatch"`
 +			} `json:"last_job"`
@@ -1119,20 +1314,20 @@ index 0000000..a0c12f0
 +	if err := json.Unmarshal(recorder.Body.Bytes(), &observed); err != nil {
 +		t.Fatal(err)
 +	}
-+	if recorder.Code != 200 || len(observed.Workers) != 2 {
-+		t.Fatalf("native primary/auxiliary target lost: %d %s", recorder.Code, recorder.Body.String())
++	if len(observed.Workers) != 2 {
++		t.Fatalf("native primary/auxiliary target lost: %s", recorder.Body.String())
 +	}
 +	for _, worker := range observed.Workers {
 +		if !worker.LastJob.Recent {
-+			t.Fatal("native target has no dispatch evidence")
++			t.Fatalf("native target %q has no dispatch evidence", worker.PodHint)
 +		}
 +	}
 +}
 diff --git a/pkg/epp/server/runserver.go b/pkg/epp/server/runserver.go
-index 0982639..ab0cedb 100644
+index a8a63640..635d7a98 100644
 --- a/pkg/epp/server/runserver.go
 +++ b/pkg/epp/server/runserver.go
-@@ -45,11 +45,13 @@ import (
+@@ -46,11 +46,13 @@ import (
  	fwkfc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/flowcontrol"
  	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
  	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
@@ -1146,7 +1341,7 @@ index 0982639..ab0cedb 100644
  	GrpcPort int
  	// GrpcListener is an optional pre-bound listener for the ext_proc server.
  	// When set, GrpcPort is ignored. Reserving the port in advance of this
-@@ -231,6 +233,7 @@ func (r *ExtProcServerRunner) AsRunnable(logger logr.Logger) manager.Runnable {
+@@ -263,6 +265,7 @@ func (r *ExtProcServerRunner) AsRunnable(logger logr.Logger) manager.Runnable {
  			poolCap = 4 * 1024 * 1024 // gRPC default 4MB
  		}
  		extProcServer := handlers.NewStreamingServer(r.Datastore, r.Director, r.ParserRegistry, poolCap)
@@ -1154,3 +1349,16 @@ index 0982639..ab0cedb 100644
  		extProcServer.SetEmitEndpointScores(r.EmitEndpointScores)
  		if r.EvictChannelLookup != nil {
  			extProcServer.SetEvictChannelLookup(r.EvictChannelLookup)
+diff --git a/pkg/epp/server/runserver_test.go b/pkg/epp/server/runserver_test.go
+index 55bbb132..4b3f60e1 100644
+--- a/pkg/epp/server/runserver_test.go
++++ b/pkg/epp/server/runserver_test.go
+@@ -62,7 +62,7 @@ type stubBands struct {
+ // a new Options flag reach only one of the two hand-written composite literals.
+ func TestNewExtProcServerRunnerPopulatesEveryField(t *testing.T) {
+ 	// Fields the caller sets after construction, not the factory.
+-	callerSet := map[string]bool{"GrpcListener": true, "EvictChannelLookup": true}
++	callerSet := map[string]bool{"GrpcListener": true, "EvictChannelLookup": true, "Observer": true}
+ 
+ 	opts := server.NewOptions()
+ 	// AddFlags registers the logging flag set that Complete() dereferences.
