@@ -30,7 +30,7 @@ ARG GO_VERSION=1.26-bookworm
 ARG RUST_VERSION=1.95-bookworm
 
 ARG LLMD_ROUTER_VERSION=v0.11.0
-ARG VLLM_ROUTER_VERSION=v0.1.15
+ARG VLLM_ROUTER_VERSION=v0.1.16.1
 ARG SGLANG_GATEWAY_VERSION=gateway-v0.3.1
 
 ######################## llm-d endpoint picker ########################
@@ -149,6 +149,19 @@ EOF
 # applied here would hand the vLLM router's hunks to the SGLang gateway, whose files have
 # the same names but different contents, and the failure would be a confusing reject
 # rather than a missing patch.
+#
+# This stage also carries upstream PR 266 -- commit 516f1cb, the encoder-prefill-decode
+# routing -- as 0001-epd-routing.patch, a cherry-pick onto v0.1.16.1. That tag is the
+# last vllm-project/router release cut before 516f1cb landed, so its tree does not
+# contain the commit and the feature is carried here rather than waited out. The three
+# patches above it (lazy Mooncake, the read-only observer endpoint, the Kubernetes
+# discovery readiness-loss deselect) rebase onto the tree that cherry-pick produces,
+# which is why they travel with it.
+#
+# THE IMAGE MOVES TO THE FIRST UPSTREAM TAG THAT CONTAINS THE COMMIT: when upstream
+# cuts a tag whose tree carries 516f1cb, bump VLLM_ROUTER_VERSION to that tag and delete
+# 0001. The other three patches stay until their own WHEN TO REMOVE condition holds, and
+# each patch header names the tag it is written against under AGAINST.
 #
 # Applied with git apply, which fails the build loudly on a version bump whose hunks no
 # longer match -- that failure is the tripwire, and git is already in the base stage so no
