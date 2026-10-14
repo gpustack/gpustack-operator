@@ -56,6 +56,18 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 			"an NVIDIA combination is admitted only after its proof of concept passes")
 	})
 
+	// THE FLOORS ARE SPELLED THE WAY EACH PROJECT PUBLISHES A TAG, which is what admission compares
+	// against. The values are pinned here because a floor is the one column no user can work
+	// around: a deployment naming exactly the floor has to be admitted, and a floor moved in the
+	// wrong direction refuses work that runs or admits a pair that does not.
+	t.Run("each floor is the release its connector arrives in", func(t *testing.T) {
+		assert.Equal(t, "0.30.0rc1", ModelDeploymentECExampleConnectorFirstAscend,
+			"the Ascend floor is the first vllm-ascend release holding both encoder fixes, and it "+
+				"is spelled the way that project tags a candidate")
+		assert.Equal(t, "0.30.0", ModelDeploymentECCPUConnectorFirstVLLM,
+			"the network floor is the vLLM release the NIXL connectors ship in")
+	})
+
 	t.Run("the two admitted rows are the ones the design names", func(t *testing.T) {
 		ascend, admitted := ModelDeploymentEPDRowFor(
 			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
@@ -63,6 +75,8 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 		require.True(t, admitted, "the Ascend row is admitted")
 		assert.Equal(t, ModelDeploymentECConnectorExample, ascend.Connector)
 		assert.True(t, ascend.SharedVolume, "the Ascend row carries the encoder leg through a claim")
+		assert.Equal(t, ModelDeploymentECExampleConnectorFirstAscend, ascend.EngineFloor,
+			"the Ascend row carries the floor its own platform's releases are compared against")
 
 		rocm, admitted := ModelDeploymentEPDRowFor(
 			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
@@ -70,6 +84,7 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 		require.True(t, admitted, "the ROCm row is admitted")
 		assert.Equal(t, ModelDeploymentECConnectorCPU, rocm.Connector)
 		assert.False(t, rocm.SharedVolume, "the ROCm row carries the encoder leg over the network")
+		assert.Equal(t, ModelDeploymentECCPUConnectorFirstVLLM, rocm.EngineFloor)
 	})
 
 	// THE RETURNED ROW IS A COPY, so a caller holding one cannot reach the table behind it. The

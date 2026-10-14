@@ -153,9 +153,9 @@ func renderLegacyDeploymentPods(
 	return pods
 }
 
-// checkLegacyRenderFixture compares a shape's rendered Pods against its recorded fixture, byte for
-// byte, and names the file and a line diff when they disagree. With -update it records instead.
-func checkLegacyRenderFixture(t *testing.T, name string, pods []*core.Pod) {
+// legacyRenderPodsJSON renders a shape's Pods into the exact text its fixture records, so the
+// fixture comparison and the defaulted-against-explicit equality check below read the same bytes.
+func legacyRenderPodsJSON(t *testing.T, pods []*core.Pod) string {
 	t.Helper()
 
 	var rendered bytes.Buffer
@@ -163,16 +163,26 @@ func checkLegacyRenderFixture(t *testing.T, name string, pods []*core.Pod) {
 	encoder.SetIndent("", "  ")
 	require.NoError(t, encoder.Encode(pods))
 
+	return rendered.String()
+}
+
+// checkLegacyRenderFixture compares a shape's rendered Pods against its recorded fixture, byte for
+// byte, and names the file and a line diff when they disagree. With -update it records instead.
+func checkLegacyRenderFixture(t *testing.T, name string, pods []*core.Pod) {
+	t.Helper()
+
+	rendered := legacyRenderPodsJSON(t, pods)
+
 	path := filepath.Join(legacyRenderDir, name+".json")
 	if *legacyRenderUpdate {
 		require.NoError(t, os.MkdirAll(legacyRenderDir, 0o755))
-		require.NoError(t, os.WriteFile(path, rendered.Bytes(), 0o644))
+		require.NoError(t, os.WriteFile(path, []byte(rendered), 0o644))
 		return
 	}
 
 	recorded, err := os.ReadFile(path)
 	require.NoError(t, err, "the recording is the contract; regenerate it with -update")
-	require.Equal(t, string(recorded), rendered.String(),
+	require.Equal(t, string(recorded), rendered,
 		"the render of %s moved; re-baseline deliberately with -update", path)
 }
 
@@ -202,9 +212,10 @@ func TestModelDeploymentLegacyRender_GoldenPods(t *testing.T) {
 			mutate: func(md *workercore.ModelDeployment) {},
 		},
 		{
-			// The same role with the kind spelled out. The fixture must be byte-identical to
-			// server-defaulted: the two spellings are one kind, and any render that treats them
-			// differently has invented a fourth kind.
+			// The same role with the kind spelled out. Its fixture must render what
+			// server-defaulted renders: the two spellings are one kind, and any render that treats
+			// them differently has invented a fourth kind. The equality itself is asserted by
+			// TestModelDeploymentLegacyRender_DefaultedMatchesExplicit.
 			name: "server-explicit",
 			mutate: func(md *workercore.ModelDeployment) {
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
@@ -273,6 +284,36 @@ func TestModelDeploymentLegacyRender_GoldenPods(t *testing.T) {
 			checkLegacyRenderFixture(t, tc.name, pods)
 		})
 	}
+}
+
+// TestModelDeploymentLegacyRender_DefaultedMatchesExplicit renders the single-role shape with its
+// kind left to the renderer against the same shape with the kind spelled out, and requires the two
+// renders to be byte-identical.
+//
+// The golden-pods table records each spelling against its own file and never compares the two, so
+// this is the only thing proving they are one kind. Without it, a render change that splits the two
+// spellings re-baselines two divergent files and leaves every test green.
+func TestModelDeploymentLegacyRender_DefaultedMatchesExplicit(t *testing.T) {
+	settingtest.MergeDelegatedSettings(t, map[string]string{
+		"model-deployment-routing-sidecar-image": legacyRenderPinnedSidecarImage,
+		"container-registry":                     "",
+		"container-namespace":                    "",
+	})
+
+	render := func(kind workercore.ModelDeploymentRoleKind) string {
+		t.Helper()
+
+		md := newLegacyRenderDeployment()
+		md.Spec.Roles[0].Kind = kind
+
+		pods := renderLegacyDeploymentPods(t, md, legacyRenderCluster(newRenderInstanceType()), nil)
+		require.NotEmpty(t, pods)
+
+		return legacyRenderPodsJSON(t, pods)
+	}
+
+	require.Equal(t, render(workercore.ModelDeploymentRoleKindServer), render(""),
+		"a role whose kind is spelled out and one left to the renderer must render one kind")
 }
 
 // legacyRenderCluster returns the cluster objects every shape renders against: the pool's

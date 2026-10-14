@@ -108,6 +108,7 @@ func TestModelDeploymentEncoderStage_RendersTheAdmittedRow(t *testing.T) {
 		sidecar      string
 		wantArgs     []string
 		wantEnv      map[string][]string
+		absentEnv    []string
 	}{
 		{
 			name: "vllm_on_rocm_pulls_over_the_network", manufacturer: nodefeature.ManufacturerAMD,
@@ -134,6 +135,12 @@ func TestModelDeploymentEncoderStage_RendersTheAdmittedRow(t *testing.T) {
 			// THE SHARED ROW OWNS NO ENVIRONMENT AT ALL: the two ends meet in a directory, so
 			// there is no address to publish and no socket to bind.
 			wantEnv: map[string][]string{},
+			// THE MODEL RUNNER IS THE NETWORK ROW'S PRECONDITION AND NOTHING ELSE ON THIS ONE.
+			// vllm-ascend's second model runner carries no multimodal encoder path, so an encoder
+			// running on it starts, serves nothing, and reports no error naming the cause. Every
+			// role is checked rather than the encoder alone, because the runner is a property of
+			// the row and not of the half of the leg a role carries.
+			absentEnv: []string{"VLLM_USE_V2_MODEL_RUNNER"},
 		},
 	} {
 		for _, position := range []struct {
@@ -211,6 +218,13 @@ func TestModelDeploymentEncoderStage_RendersTheAdmittedRow(t *testing.T) {
 					for _, name := range want {
 						assert.True(t, hasEnv(pods[role].Spec.Containers[0].Env, name),
 							"%s renders %s", role, name)
+					}
+				}
+
+				for _, name := range tc.absentEnv {
+					for role, pod := range pods {
+						assert.False(t, hasEnv(pod.Spec.Containers[0].Env, name),
+							"%s must not render %s on this row", role, name)
 					}
 				}
 			})

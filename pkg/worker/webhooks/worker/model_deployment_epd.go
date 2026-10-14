@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -12,27 +14,95 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
-// modelDeploymentSemver gives the engine version the leading v that semver comparison requires and
-// that the version strings in this API do not carry. A version already carrying one is left alone,
-// so the same helper serves the v-prefixed strings the renderer's own tables use.
+// modelDeploymentCandidate matches the release-candidate tail vllm-ascend publishes, the `rcN` of
+// v0.30.0rc1. The dot ahead of the tail in v0.29.0.rc1 belongs to the release and is trimmed off
+// before this runs, so a tail this matches never carries one.
+var modelDeploymentCandidate = regexp.MustCompile(`^rc(0|[1-9][0-9]*)$`)
+
+// modelDeploymentPost matches the `postN` tail of v0.23.0.post1, on the same terms.
+//
+// A NUMBER WITH A LEADING ZERO IS NOT MATCHED, which is what makes a recognized tail a tail semver
+// can read: it rejects a numeric identifier that carries one. A version written that way is left
+// alone and stays unreadable, which refuses it.
+var modelDeploymentPost = regexp.MustCompile(`^post(0|[1-9][0-9]*)$`)
+
+// modelDeploymentSemver rewrites a version into the spelling semver comparison reads, and leaves a
+// version it cannot read alone so that one still sorts below every valid version.
+//
+// VLLM-ASCEND DOES NOT SPELL A CANDIDATE THE WAY SEMVER REQUIRES. Its tags are v0.30.0rc1 on the
+// current line and v0.29.0.rc1 on the one before it, and semver calls both invalid. An invalid
+// version sorts below every valid one, so a floor written in either spelling would refuse the very
+// tag it names. A tag the project publishes is a version a user may legitimately write here, so the
+// tails are read rather than refused. The leading v is added on the way out for the same reason:
+// it is what these version strings do not carry and what the comparison requires.
+//
+// THE NUMBER AFTER rc IS SEPARATED BY A DOT because semver orders an alphanumeric pre-release
+// identifier lexically, which would place rc10 below rc9.
+//
+// A POST-RELEASE IS NEWER THAN THE RELEASE IT FOLLOWS, and semver has no slot above a release: the
+// next patch release is the only one. Mapping the tail there keeps both orders the project
+// publishes, a post above the release it follows and below the patch that follows that. The post
+// number rides along as a second identifier, so two post-releases of one release keep their own
+// order too.
+//
+// A TAIL THIS DOES NOT RECOGNIZE IS LEFT ALONE, so it stays unreadable and every floor refuses it.
+// That covers a number with a leading zero, which semver rejects, and a release whose patch is too
+// large to count, which no next patch can be built from.
 func modelDeploymentSemver(version string) string {
-	if strings.HasPrefix(version, "v") {
-		return version
+	core := strings.TrimPrefix(version, "v")
+
+	// The release part is the numeric core, and everything after it is a tail this function either
+	// reads or leaves for the comparison to refuse. The dot separating the two belongs to neither,
+	// so the release ends on its last segment rather than on a separator.
+	tail := strings.IndexFunc(core, func(r rune) bool { return (r < '0' || r > '9') && r != '.' })
+	if tail < 0 {
+		return "v" + core
+	}
+	release, suffix := strings.TrimSuffix(core[:tail], "."), core[tail:]
+
+	if candidate := modelDeploymentCandidate.FindStringSubmatch(suffix); candidate != nil {
+		return "v" + release + "-rc." + candidate[1]
 	}
 
-	return "v" + version
+	// The pre-release `-0.N` below the next patch is what puts a post above the release it follows
+	// and below the patch that follows that, and orders two posts of one release against each other.
+	if post := modelDeploymentPost.FindStringSubmatch(suffix); post != nil {
+		if next, ok := modelDeploymentNextPatch(release); ok {
+			return "v" + next + "-0." + post[1]
+		}
+	}
+
+	return "v" + core
+}
+
+// modelDeploymentNextPatch returns release with its last segment raised by one, and whether that
+// segment was a number this could read.
+func modelDeploymentNextPatch(release string) (string, bool) {
+	dot := strings.LastIndexByte(release, '.')
+	if dot < 0 {
+		return "", false
+	}
+
+	patch, err := strconv.Atoi(release[dot+1:])
+	if err != nil {
+		return "", false
+	}
+
+	return release[:dot+1] + strconv.Itoa(patch+1), true
 }
 
 // modelDeploymentMeetsFloor reports whether version is at or above floor.
 //
-// The two are compared as semver, so a pre-release sorts below the release it leads to and an
-// unreadable version sorts below every valid one. Both directions refuse rather than admit: a
-// connector that exists only in 0.30.0 is absent from 0.30.0rc1, and it is absent from a string
-// nothing could read.
+// The two are compared as semver after modelDeploymentSemver has read the spellings a project
+// publishes, so a candidate sorts below the release it leads to and a post-release above the one it
+// follows. An unreadable version still sorts below every valid one. Both directions refuse rather
+// than admit: a connector that exists only in a release is absent from a candidate of it, and it is
+// absent from a string nothing could read.
 func modelDeploymentMeetsFloor(version, floor string) bool {
 	return semver.Compare(modelDeploymentSemver(version), modelDeploymentSemver(floor)) >= 0
 }
@@ -166,10 +236,8 @@ func validateModelDeploymentEPDShape(md *workercore.ModelDeployment) field.Error
 		}
 
 		errs = append(errs, field.Required(encodePath, fmt.Sprintf(
-			"an %q role needs a %q role beside it, and none is declared: the encoder produces "+
-				"embeddings that only a prefiller reads, and the prefiller's own output needs a %q "+
-				"role to generate from",
-			workercore.ModelDeploymentRoleKindEncode, kind, workercore.ModelDeploymentRoleKindDecode)))
+			"an %q role needs a %q role beside it, and none is declared: %s",
+			workercore.ModelDeploymentRoleKindEncode, kind, modelDeploymentEPDSiblingReason(kind))))
 	}
 
 	if md.Spec.Router == nil {
@@ -199,6 +267,18 @@ func validateModelDeploymentEPDShape(md *workercore.ModelDeployment) field.Error
 	errs = append(errs, validateModelDeploymentEPDEncodeShape(md, encodeIdx)...)
 
 	return errs
+}
+
+// modelDeploymentEPDSiblingReason states why a role kind has to be declared beside the Encode role.
+// Each kind carries its own sentence, because one sentence covering both explains the prefiller in
+// the breath of a missing decoder and leaves the reader working out which half is being reported.
+func modelDeploymentEPDSiblingReason(kind workercore.ModelDeploymentRoleKind) string {
+	if kind == workercore.ModelDeploymentRoleKindPrefill {
+		return "the encoder produces embeddings that only a prefiller reads"
+	}
+
+	return fmt.Sprintf("the prefiller's output needs a %q role to generate from",
+		workercore.ModelDeploymentRoleKindDecode)
 }
 
 // validateModelDeploymentEPDEncodeShape holds the rules about the Encode role alone.
@@ -427,17 +507,30 @@ func validateModelDeploymentEPDSideChannelPort(
 	return errs
 }
 
+// modelDeploymentEngineProject names the project a row's floor is a release of, which both refusals
+// below state beside the number. On Ascend the engine is the vllm-ascend plugin and the version is
+// one of its tags; on every other admitted platform it is an upstream vLLM release. Naming the
+// wrong project would send a user after tags that do not carry the connector.
+func modelDeploymentEngineProject(row workerctrl.ModelDeploymentEPDRow) string {
+	if row.Platform == nodefeature.ManufacturerAscend {
+		return string(inject.EngineVLLMAscend)
+	}
+
+	return "vLLM"
+}
+
 // validateModelDeploymentEPDEngineVersion refuses an engine version this row cannot run.
 func validateModelDeploymentEPDEngineVersion(
 	md *workercore.ModelDeployment, row workerctrl.ModelDeploymentEPDRow,
 ) field.ErrorList {
 	versionPath := field.NewPath("spec", "engine", "version")
+	project := modelDeploymentEngineProject(row)
 
 	if md.Spec.Engine.Version == "" {
 		return field.ErrorList{field.Required(versionPath, fmt.Sprintf(
-			"an encoder role needs the engine version to be set: %s first appears in vLLM %s, and a "+
+			"an encoder role needs the engine version to be set: %s first appears in %s %s, and a "+
 				"version this object does not name cannot be compared against that floor",
-			row.Connector, row.EngineFloor))}
+			row.Connector, project, row.EngineFloor))}
 	}
 
 	if modelDeploymentMeetsFloor(md.Spec.Engine.Version, row.EngineFloor) {
@@ -445,8 +538,8 @@ func validateModelDeploymentEPDEngineVersion(
 	}
 
 	return field.ErrorList{field.Invalid(versionPath, md.Spec.Engine.Version, fmt.Sprintf(
-		"%s carries %s from vLLM %s, so this deployment needs that version or later; %s is below it",
-		row.Connector, row.Platform, row.EngineFloor, md.Spec.Engine.Version))}
+		"%s carries %s from %s %s, so this deployment needs that version or later; %s is below it",
+		row.Connector, row.Platform, project, row.EngineFloor, md.Spec.Engine.Version))}
 }
 
 // validateModelDeploymentEPDSharedVolume refuses an encoder leg that the two roles cannot both read.
@@ -502,22 +595,44 @@ func validateModelDeploymentEPDSharedVolume(
 	}
 
 	for _, mismatch := range []struct {
-		name  string
+		// name is the field the two roles have to spell the same way.
+		name string
+		// value is what the encoder's own entry carries there.
+		value string
+		// equal reports whether the two entries agree on it.
 		equal bool
 	}{
-		{"claimName", encodeMount.PersistentVolumeClaim.ClaimName == prefillMount.PersistentVolumeClaim.ClaimName},
-		{"subPath", encodeMount.SubPath == prefillMount.SubPath},
-		{"mountPath", encodeMount.MountPath == prefillMount.MountPath},
+		{
+			"claimName", encodeMount.PersistentVolumeClaim.ClaimName,
+			encodeMount.PersistentVolumeClaim.ClaimName == prefillMount.PersistentVolumeClaim.ClaimName,
+		},
+		{"subPath", encodeMount.SubPath, encodeMount.SubPath == prefillMount.SubPath},
+		{"mountPath", encodeMount.MountPath, encodeMount.MountPath == prefillMount.MountPath},
 	} {
 		if mismatch.equal {
 			continue
 		}
 
-		errs = append(errs, field.Invalid(encodePath.Child("mountPath"), encodeMount.MountPath, fmt.Sprintf(
-			"role %q and role %q must name the same %s for %s to carry the encoder's output between "+
-				"them, and they do not",
-			encode.Name, md.Spec.Roles[prefillIdx].Name, mismatch.name, row.Connector)))
+		errs = append(errs, field.Invalid(
+			modelDeploymentEPDVolumeMismatchField(encodePath, mismatch.name), mismatch.value, fmt.Sprintf(
+				"role %q and role %q must name the same %s for %s to carry the encoder's output between "+
+					"them, and they do not",
+				encode.Name, md.Spec.Roles[prefillIdx].Name, mismatch.name, row.Connector)))
 	}
 
 	return errs
+}
+
+// modelDeploymentEPDVolumeMismatchField returns the field a shared-mount mismatch is reported on.
+//
+// THE FIELD THE USER MUST FIX IS NOT THE SAME FOR THE THREE MISMATCHES, so each one is looked up
+// rather than named: the claim name lives under the source that carries it and the two mount fields
+// sit beside it, exactly as the claim-source rule above spells them. Landing all three on one field
+// sends an edit to a field that is already correct, and leaves the field that is wrong unmentioned.
+func modelDeploymentEPDVolumeMismatchField(volumesPath *field.Path, name string) *field.Path {
+	if name == "claimName" {
+		return volumesPath.Child("persistentVolumeClaim", "claimName")
+	}
+
+	return volumesPath.Child(name)
 }

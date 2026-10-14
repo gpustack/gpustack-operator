@@ -39,9 +39,12 @@ func observeModelDeploymentKVEvents(
 			}
 		}
 
+		// SO THE MESSAGE MAY NAME THE ROLE KIND, because the encoder is not reachable here: the
+		// loop above returned on a prefiller or a decoder, and admission refuses an Encode role
+		// with no router. The kind is new enough that no stored object predates that rule.
 		ModelDeploymentConditionKVEventsPublishing.True(holder,
 			modelDeploymentReasonKVEventsNotApplicable,
-			"no role of the unrouted deployment produces cache blocks, so nothing consumes them")
+			"the unrouted deployment has only server roles, so nothing consumes cache events")
 		return
 	}
 

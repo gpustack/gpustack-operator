@@ -729,7 +729,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 			name:      "picker defaults to the image that carries every router",
 			md:        routedModelDeployment(),
 			container: "epp",
-			want:      "gpustack/llm-router:v0.2.0",
+			want:      "gpustack/llm-router:v0.3.1",
 			why:       "the default names a release of this project's own build, not a moving upstream tag",
 		},
 		{
@@ -738,7 +738,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 			}),
 			container: "router",
-			want:      "gpustack/llm-router:v0.2.0",
+			want:      "gpustack/llm-router:v0.3.1",
 			why:       "one setting says where the binaries come from; the command picks which one runs",
 		},
 		{
@@ -772,33 +772,23 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 // render path could drop a field no case reads and every one of them would stay green; this is the
 // case that cannot, because it compares the bytes of everything at once.
 //
-// THE ORIGINAL DIGESTS WERE CAPTURED FROM THE RENDERER AS IT STOOD BEFORE IT WAS SPLIT into a
-// shared half and a per-router half, and that split had to reproduce every one of them exactly. The
-// table has been RE-BASELINED three times since, each time for a rendering change that was intended:
-// once when the proxy gained its access log and a route timeout filled from a field rather than
-// fixed in the template, once when the default router image became the one build that carries all
-// three routers, and once when the containers running out of that image gained the command naming
-// which of its three programs to run. That last one was found by running it: the image declares no
-// entrypoint, so arguments without a command land in the CMD position and the first flag is read as
-// the program name, which every field-picked case in this file passed over. The metrics listener
-// scheme annotation was then added to each managed router Pod. The SGLang case alone moved again
-// when its picker configuration came to name the engine a Pod without an engine-type label is read
-// as, which the vLLM cases pin as unchanged. It moved once more when that configuration came to
-// carry the engine's KV cache capacity, which is rendered beside the approximate producer alone, so
-// the vLLM cases, whose picker runs the precise producer, pin it as unchanged again. The four cases
-// running the default image moved once more when that default advanced from v0.1.0 to v0.2.0; the
-// case naming its own image did not, pinning the move to the setting's value.
+// A DIGEST MOVES ONLY WHEN THE RENDERED OUTPUT OR THE DEFAULT ROUTER IMAGE CHANGES. Every case
+// running the default image moves together when that image advances, and the one case naming its
+// own image does not, which pins such a move to the setting rather than to the renderer. A case
+// whose engine renders differently from the rest moves alone, so an SGLang-only picker change shows
+// up in its digest while the vLLM cases pin theirs as unchanged.
+//
 // To re-baseline after an intended rendering change: empty the table, run this case, and pin the
 // digests the failures print.
 func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
 		// The digests moved once when the eligibility equality joined the discovery selector
 		// (the endpoint-eligible term a reconciler writes at runtime); they are pinned again here.
-		"a prefill and decode pair": "99610d32170549ce71bf88c2829f71047299cc740c615df7bbadd4b74963550a",
-		"a sole server role":        "988eb796ec383af6711f20dbd71cdba9047d47896f674cee5a8ebbbf371796d7",
+		"a prefill and decode pair": "4104fe673bfc0b8340dc711b564d39638c8015524a69b186f625fca2754630ff",
+		"a sole server role":        "b3765d6528100cf7f889b4400fc469f4690b4394be8ec70e5e415a02ad48abb6",
 		"a router declaring its own image, policy, replicas and extra arguments": "a3eb0fce558ed09aa0f41e6b57cf7e9777bc169ed48709a0f2647064532c43cc",
-		"a role whose command the user took over, so it publishes no events":     "26194d4837676997b1ca4390167058612440528d25dc1959e123b61f28b3396b",
-		"an sglang engine, whose metrics contract differs":                       "9586aff15c8498972303e7bfd7d947c31b7f0bf43833f99c7d038b932b1afc1a",
+		"a role whose command the user took over, so it publishes no events":     "b18d788474ff480f2f1ddd7fa622716e67ca217b75500bde6b6c8a2ae8f39099",
+		"an sglang engine, whose metrics contract differs":                       "2807b587750cdbee319607af9f614f530ce8aff02cd47e40ea99d61b27810050",
 	}
 
 	soleServerRole := func() *workercore.ModelDeployment {

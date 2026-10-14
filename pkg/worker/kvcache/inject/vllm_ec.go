@@ -306,9 +306,9 @@ func renderVLLMEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 // nothing of that kind - so a caller can compare them against what a render produced without
 // normalizing either side.
 //
-// A request naming no connector owns nothing at all, because it renders nothing. That is what keeps
-// a caller which asks for these keys on every deployment from refusing a user's `--ec-transfer-config`
-// on a deployment that never had an encoder-cache leg.
+// A request naming no connector owns nothing because it renders nothing, and the caller in
+// model_deployment_connector.go that builds the operator's owned-key set always names a connector,
+// so the keys are owned on every deployment.
 //
 // The role is taken alongside the request because a request alone cannot answer the question: the
 // same NIXL leg owns one variable as a consumer and three as a producer.

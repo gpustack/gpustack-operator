@@ -31,7 +31,8 @@ The engine's LB mode determines the candidate endpoints. The Router policy choos
 
 `Encode` Pods are excluded from the deployment's answering set.
 They are discovered for stage routing under `llm-d-router`, but the deployment Service never targets them.
-The single-process routers (`vllm-router` and `sglang-gateway`) exclude encoders from their answering selectors.
+Only `llm-d-router` is admitted with an `Encode` role.
+The operator renders no encoder stage for the single-process routers.
 
 For an eligible External Server role, Router discovery and ordinary Services omit `member-index=0`.
 They retain the endpoint eligibility label, so an unhealthy group cannot receive new traffic.
@@ -59,7 +60,8 @@ The `always-disagg-multimodal-decider` inspects incoming requests for media payl
 When media is detected, the decider picks an encoder and routes the media through it.
 Text-only requests bypass the encoder stage and route directly to prefill and decode.
 
-The decode Pod's routing sidecar proxy runs with `--ec-connector=ec-example` or `--ec-connector=ec-nixl`.
+The decode Pod's routing sidecar proxy runs with `--ec-connector` set from the admitted row.
+The `ascend` row gives `--ec-connector=ec-example` and the `amd` row `--ec-connector=ec-nixl`.
 The sidecar calls the selected encoder before forwarding the request to the prefiller.
 
 `Encode` Pods are excluded from KV cache event publisher discovery.

@@ -25,6 +25,23 @@ const ModelDeploymentECConnectorCPU = "ECCPUConnector"
 // https://github.com/vllm-project/vllm/blob/v0.30.0/docs/features/ec_cpu_connector.md
 const ModelDeploymentECCPUConnectorFirstVLLM = "0.30.0"
 
+// ModelDeploymentECExampleConnectorFirstAscend is the lowest vllm-ascend release this row runs on,
+// and it is the lowest release holding BOTH fixes the shared leg needs rather than either one:
+//
+//   - PR 16682 (commit ed0138b1a) skips the language-model forward in the dummy runs, without
+//     which `--mm-encoder-only` aborts the engine at startup. First in v0.28.0.rc1.
+//   - PR 18291 (commit 23d65455b) pins the encoder cache load to the rank's own NPU, without
+//     which a prefill with tensor parallelism above one loads on the wrong device. First in
+//     v0.30.0rc1.
+//
+// v0.23.0, which the row carried before, has neither: an encoder there dies at startup, and a
+// parallel prefill reads a peer's embeddings. v0.30.0rc2 holds the same code as v0.30.0rc1 and
+// fixes only the Dockerfile, so the floor is the first of the two.
+//
+// THE SPELLING IS THE PROJECT'S, NOT SEMVER'S: vllm-ascend tags a candidate `v0.30.0rc1` here and
+// `v0.29.0.rc1` on the previous line, and admission reads both.
+const ModelDeploymentECExampleConnectorFirstAscend = "0.30.0rc1"
+
 // ModelDeploymentEPDRow is one admitted combination: the router that pairs the roles, the engine
 // that serves them, the accelerator platform they run on, and the connector that carries the
 // encoder's output to the prefiller, with the lowest engine version that connector appears in.
@@ -72,19 +89,19 @@ var modelDeploymentEPDMatrix = []ModelDeploymentEPDRow{
 		// https://github.com/vllm-project/vllm-ascend/blob/v0.23.0/docs/source/user_guide/feature_guide/epd_disaggregation.md
 		// It is also the only one that works there, because the network connectors have no NPU copy
 		// path and Ascend's EC and KV legs use files, MemCache and Mooncake over the ascend protocol,
-		// never UCX or NIXL.
+		// never UCX or NIXL. The plugin's own network connector, ECMemcacheConnector, arrived in
+		// v0.30.0rc1 and is not a row here: the operator does not configure it, and ECMooncakeConnector
+		// is still open upstream.
 		//
-		// THE FLOOR IS THE ONE THAT UPSTREAM EXAMPLE RECORDS, reached through vllm-ascend's own
-		// versioning: it cuts a release branch beside each vLLM release and asks for vLLM at the same
-		// version as itself, so the v0.23.0 line is vLLM 0.23.0. That sits above each leg this row
-		// needs on its own -- ECExampleConnector arrived in 0.13.0, and MooncakeConnectorV1 was
-		// recorded at 0.19.1 -- and it is the floor the pair can actually run at, because neither leg
-		// can move up without the plugin moving with it.
+		// THE FLOOR IS ModelDeploymentECExampleConnectorFirstAscend, which states the two upstream
+		// fixes by number. The version on this row is a vllm-ascend release rather than an upstream
+		// one: the runner the operator assembles for an Ascend pool installs that plugin, so the
+		// number a user writes is the one it tags.
 		Router:       workercore.ModelDeploymentRouterLLMD,
 		Engine:       workercore.ModelDeploymentEngineVLLM,
 		Platform:     nodefeature.ManufacturerAscend,
 		Connector:    ModelDeploymentECConnectorExample,
-		EngineFloor:  "0.23.0",
+		EngineFloor:  ModelDeploymentECExampleConnectorFirstAscend,
 		SharedVolume: true,
 	},
 	{

@@ -34,7 +34,7 @@
 #              Ready, schedulable worker node that is not a control-plane node. NO accelerator: the
 #              encoder shape reaches admission through the platform an injected CPU vendor label
 #              builds ("Ascend" — the admitted row whose connector is the mounted directory and
-#              whose floor, 0.23.0, the pinned version 0.30.0 clears). The gpustack-settings Secret
+#              whose floor, 0.30.0rc1, the pinned version 0.30.0 clears). The gpustack-settings Secret
 #              must exist in the system namespace (E2E_SYSTEM_NS, default gpustack-system). The case
 #              creates its own PV and PVC (a hostPath volume under /tmp on the labeled node,
 #              manually bound), so no StorageClass is needed.

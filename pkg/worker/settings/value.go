@@ -135,7 +135,7 @@ var (
 		"Indicates the image a managed router runs, when the ModelDeployment does not name one. "+
 			"It carries every router this operator supports; the rendered command chooses which "+
 			"binary runs.",
-		setting.InitializeFromEnv("gpustack/llm-router:v0.2.0"),
+		setting.InitializeFromEnv("gpustack/llm-router:v0.3.1"),
 		setting.AllowContainerImageReference(),
 	)
 
@@ -158,7 +158,7 @@ var (
 	ModelDeploymentRoutingSidecarImage = settings.NewEditable(
 		"model-deployment-routing-sidecar-image",
 		"Indicates the routing sidecar image a decoder runs to accept a remote prefill handoff.",
-		setting.InitializeFromEnv("gpustack/mirrored-llm-d-router-disagg-sidecar:v0.10.0"),
+		setting.InitializeFromEnv("gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0"),
 		setting.AllowContainerImageReference(),
 	)
 

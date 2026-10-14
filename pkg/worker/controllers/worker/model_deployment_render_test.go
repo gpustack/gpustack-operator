@@ -174,7 +174,7 @@ func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
 			require.Len(t, pod.Spec.InitContainers, 1)
 			sidecar := pod.Spec.InitContainers[0]
 			assert.Equal(t, "routing-proxy", sidecar.Name)
-			assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.10.0", sidecar.Image)
+			assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0", sidecar.Image)
 			require.NotNil(t, sidecar.RestartPolicy)
 			assert.Equal(t, core.ContainerRestartPolicyAlways, *sidecar.RestartPolicy)
 			assert.Contains(t, sidecar.Args, fmt.Sprintf("--port=%d", tc.externalPort))
@@ -377,7 +377,7 @@ func TestRenderModelDeploymentPod_DecodeUsesClassicSidecarBelowTheFloor(t *testi
 
 	sidecar := pod.Spec.Containers[0]
 	assert.Equal(t, "routing-proxy", sidecar.Name, "the proxy is the FIRST regular container, the closest list order gets to starting first")
-	assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.10.0", sidecar.Image)
+	assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0", sidecar.Image)
 	assert.Nil(t, sidecar.RestartPolicy,
 		"a regular container leaves the field nil and lets the Pod's restartPolicy restart it")
 	assert.Contains(t, sidecar.Args, "--port=8000")
@@ -2383,7 +2383,11 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // operator builds began carrying the drain hook and the termination grace it is budgeted against,
 // which left the take-over case's digest where it was. The shared-memory volume then changed
 // every role's Pod, including take-over roles. Every digest here moved by intent
-// rather than by drift. Each case renders ORDINAL ZERO -- the composite's zero value -- which is the
+// rather than by drift. The two direct-decoder cases then moved when the default routing sidecar
+// image advanced from v0.10.0 to v0.11.0, which is the only thing in those two Pods that carries
+// the setting; the seven cases rendering no sidecar stayed where they were, naming the move to
+// the setting's value the same way the router table does. Each case renders ORDINAL ZERO -- the
+// composite's zero value -- which is the
 // one ordinal a digest can name without the table growing a dimension. To re-baseline after an
 // intended rendering change: empty the table, run this case, and pin the digests the failures
 // print.
@@ -2392,8 +2396,8 @@ func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t 
 		"a sole server role": "f32a43254d561da431bd5f1107f97ffc5e3c9382b88db0478edc811a22178392",
 		"a sole server role with a synthesized cache connector":                              "52aff227f37f8ca8d4c311b4008b7650a2823ee0668a9f693ceb14837f8643d6",
 		"a take-over role carrying a connector it must be given no part of":                  "93e925e2bfaa5ab9e152a685a336d1b8031d8904bfb54b240a483f0a517e9a54",
-		"a direct decoder with a native routing sidecar":                                     "9708da967a83ff20e04944fa38033d8fceca8de0379d9a6d7e7847312c997813",
-		"a direct decoder with a classic routing sidecar":                                    "ed7d954b5f334dc1993caab86d7e2fa0f53458eda1db3006dcd2e861ca464a6b",
+		"a direct decoder with a native routing sidecar":                                     "4f1e9ef33849913b2c71688d7e8b77ffd5338b67d3d5ceca6bd098ba343e546d",
+		"a direct decoder with a classic routing sidecar":                                    "cc9d8f1d61e8df9629459f45c5f0508ad12e6515209ae3c5311f10f59c2844ba",
 		"a role naming no image, synthesized from the observed hardware":                     "30d7c6cd55c58ac4a9a502396be0b291a5f9a8872967be0b4dfd430448abcac1",
 		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "3b9148d73e337285192aea35aa995813747fc2ebfefda19d107548b788c11791",
 		"the prefill role of a two-role deployment":                                          "7eef707d65e3c6307219d33612e56de8173d9a7b4ece67ff4239f21cc788ba82",

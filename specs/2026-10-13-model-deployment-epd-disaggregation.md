@@ -158,7 +158,7 @@ Acceptance:
   vLLM needs `0.30.0` for the network transfer connectors.
   SGLang needs `0.5.10` or later, and the operator's own SGLang floor is higher.
   vLLM on ROCm needs `0.30.0` for the same connectors.
-  vLLM-Ascend uses the floor that its upstream example records, and the documentation states it.
+  vLLM-Ascend needs `0.30.0rc1`, the first release with the encoder-only warm-up fix and the cache load device pin, and the documentation states it.
 - A `persistentVolumeClaim` source names a claim in the deployment namespace.
   An `additionalVolumes` entry sets exactly one source, and the claim name is not empty.
 - When the encoder leg is shared storage, `Encode` and `Prefill` must mount the same claim with the same sub-path at the same mount path.
@@ -657,7 +657,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       The documentation states that dynamic P/D discovery is not supported with EPD upstream, unless the proof of concept shows otherwise.
       Verify: `go test ./pkg/worker/kvcache/router/ -count=1`
 
-- [ ] **T11 · Settings: router and sidecar image defaults**
+- [x] **T11 · Settings: router and sidecar image defaults**
       Blocked by: T2, T2b (the image is published and the sidecar is mirrored)
       Owns: `pkg/worker/settings/value.go`, `docs/reference/settings.md`
       Acceptance: the defaults point at the published `llm-router` image and the mirrored sidecar at `v0.11.0`.
@@ -699,7 +699,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       Each header states its hardware need and skip condition, and the case table row matches the header.
       Verify: `make lint agents-shell` and a run on the cluster through the end-to-end skill.
 
-- [ ] **T14b · End-to-end cases with an accelerator (120 to 125)**
+- [x] **T14b · End-to-end cases with an accelerator (120 to 125)**
       Blocked by: T14a, T7a, T7c, T8, T9, T11
       Owns: `.agents/skills/gpustack-operator-e2e/cases/case-120.sh` to `case-125.sh`, `.agents/skills/gpustack-operator-e2e/SKILL.md`
       Acceptance: one functional case per combination: vLLM with `llm-d-router`, with `ec-example`, SGLang, `vllm-router`, Ascend and ROCm.
