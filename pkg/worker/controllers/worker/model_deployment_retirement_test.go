@@ -419,6 +419,209 @@ func TestDrainNeedsTwoConsecutiveCompleteZeros(t *testing.T) {
 	}
 }
 
+// TestEncodeReplicaLeavesOnTheWindowAndNotOnAGauge pins the rule an encoder retires under: the
+// request gauges this protocol drains on are a language model's, an encoder runs none of them, and a
+// bounded wait after the withdrawal is therefore the only honest gate.
+//
+// EVERY ENCODE CASE READS NOTHING. The reader is scripted to report two complete idle reads, which
+// is the strongest possible report of "this replica holds nothing", so a case that deleted before
+// its window would be caught even if the read were consulted. The server cases are the controls: the
+// same fixture on the same reader still drains on two reads, which is what makes the encode cases a
+// statement about the role rather than about a fixture that cannot reach Deleting at all.
+func TestEncodeReplicaLeavesOnTheWindowAndNotOnAGauge(t *testing.T) {
+	testCases := []struct {
+		name string
+		// kinds labels the members' rendered role-kind labels, one per member, so a case can build
+		// a replica whose members disagree.
+		kinds      []workercore.ModelDeploymentRoleKind
+		phaseAgo   time.Duration
+		wantState  workercore.ModelDeploymentRetirementState
+		wantReads  int
+		wantReason string
+	}{
+		{
+			name:      "an encoder inside the window waits on the window rather than on a gauge",
+			kinds:     []workercore.ModelDeploymentRoleKind{workercore.ModelDeploymentRoleKindEncode},
+			phaseAgo:  time.Second,
+			wantState: workercore.ModelDeploymentRetirementStateDraining,
+		},
+		{
+			name:      "an encoder past the window is removed without a single read",
+			kinds:     []workercore.ModelDeploymentRoleKind{workercore.ModelDeploymentRoleKindEncode},
+			phaseAgo:  modelDeploymentRetirementDrainBudget + time.Second,
+			wantState: workercore.ModelDeploymentRetirementStateDeleting,
+		},
+		{
+			name:      "a server is still removed on two idle reads inside the window",
+			kinds:     []workercore.ModelDeploymentRoleKind{workercore.ModelDeploymentRoleKindServer},
+			phaseAgo:  time.Second,
+			wantState: workercore.ModelDeploymentRetirementStateDeleting,
+			wantReads: 2,
+		},
+		{
+			// THE ALL-MEMBERS RULE, pinned. One encoder-labeled member beside a server-labeled one
+			// is a shape this operator has not verified, so the replica takes the queue path: the
+			// server member's gauges are read, and an any-member reading of the same predicate
+			// would delete both without ever asking. The reads are the assertion; the delete that
+			// follows them is what the wrong reading would have produced anyway. It sits INSIDE the
+			// window, because a queue replica past its drain budget aborts before it reads and
+			// would pass this case without ever reaching a gauge.
+			name: "a replica whose members disagree about the role is drained on its gauges",
+			kinds: []workercore.ModelDeploymentRoleKind{
+				workercore.ModelDeploymentRoleKindServer, workercore.ModelDeploymentRoleKindEncode,
+			},
+			phaseAgo:  time.Second,
+			wantState: workercore.ModelDeploymentRetirementStateDeleting,
+			wantReads: 2,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := retirementDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles = []workercore.ModelDeploymentRole{{
+					Name: "encode", Kind: workercore.ModelDeploymentRoleKindEncode, Replicas: 2,
+					InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1", ReplicaSize: int32(len(tc.kinds)),
+				}}
+			})
+			pods := make([]core.Pod, 0, len(tc.kinds))
+			seeded := make([]ctrlcli.Object, 0, len(tc.kinds))
+			answers := map[types.UID][]modelDeploymentDrainAnswer{}
+			for i, kind := range tc.kinds {
+				uid := types.UID("member-" + strconvx.Itoa(i+1))
+				member := renderedMember("encode", 1, i, healthBool(true), string(uid))
+				upstream, ok := ModelDeploymentRoleUpstreamKind(kind)
+				require.True(t, ok)
+				member.Labels[modelDeploymentLabelKeyRoleKind] = upstream
+				member.Annotations[kueuepodconst.GroupTotalCountAnnotation] = strconvx.Itoa(len(tc.kinds))
+				pods = append(pods, member)
+				seeded = append(seeded, member.DeepCopy())
+				answers[uid] = []modelDeploymentDrainAnswer{idleDrain(), idleDrain()}
+			}
+			uids := make([]string, 0, len(tc.kinds))
+			for i := range tc.kinds {
+				uids = append(uids, "member-"+strconvx.Itoa(i+1))
+			}
+			now := time.Now()
+			md = reserve(md, retirementReservation(
+				workercore.ModelDeploymentRetirementStateDraining, "encode", 1, uids,
+				func(r *workercore.ModelDeploymentRetirementStatus) {
+					r.PhaseStartedAt = meta.NewTime(now.Add(-tc.phaseAgo))
+				}))
+			// The members are seeded, because the release capture reads the target back from the
+			// server before it will authorize a delete.
+			md = withResourceVersion(md)
+			seeded = append([]ctrlcli.Object{md.DeepCopy()}, seeded...)
+			cli := newModelDeploymentClient(seeded...)
+			reader := &scriptedDrainReader{answers: answers}
+			r := holdReconciler(cli, reader, now)
+
+			plan := r.planModelDeploymentRetirement(context.Background(), md, pods)
+
+			assert.Equal(t, tc.wantState, plan.Reservation.State)
+			reads := 0
+			for _, count := range reader.reads {
+				reads += count
+			}
+			assert.Equal(t, tc.wantReads, reads,
+				"the gauges an encoder does not publish are never the gate")
+			if tc.wantState == workercore.ModelDeploymentRetirementStateDeleting {
+				assert.Len(t, plan.Deletes, len(tc.kinds))
+				assert.True(t, plan.DeletesAllowed)
+
+				return
+			}
+			assert.Empty(t, plan.Deletes)
+			assert.True(t, plan.Hold, "a held member is still held")
+		})
+	}
+}
+
+// TestEncodeRetirementThatCannotBeCapturedAbortsAtItsDeadline pins the terminal answer the window
+// path needs: a release capture that refuses every pass holds until the overall Deadline and then
+// ends, rather than holding in Draining forever.
+//
+// THE SHAPE IS A MEMBER THAT LEFT THE API MID-OPERATION, which the capture refuses for the right
+// reason and can never be talked out of: its allocation cannot be read from a Pod that is gone, and
+// inventing one from the survivors is the fabrication the capture exists to prevent. The survivor is
+// the member whose delete the hold would otherwise keep intercepting forever.
+func TestEncodeRetirementThatCannotBeCapturedAbortsAtItsDeadline(t *testing.T) {
+	testCases := []struct {
+		name string
+		// deadlineShift places the overall Deadline relative to the reconciler's clock. It is
+		// signed because both directions are the point: a deadline still ahead holds, and the same
+		// refusal at a deadline already passed ends.
+		deadlineShift time.Duration
+		wantState     workercore.ModelDeploymentRetirementState
+		wantInFlight  bool
+	}{
+		{
+			name:          "a capture that refuses holds while the deadline is still ahead",
+			deadlineShift: modelDeploymentRetirementOverallBudget,
+			wantState:     workercore.ModelDeploymentRetirementStateDraining,
+			wantInFlight:  true,
+		},
+		{
+			name:          "a capture that still refuses at the deadline ends the operation",
+			deadlineShift: -time.Second,
+			wantState:     workercore.ModelDeploymentRetirementStateAborted,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := retirementDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles = []workercore.ModelDeploymentRole{{
+					Name: "encode", Kind: workercore.ModelDeploymentRoleKindEncode, Replicas: 2,
+					InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1", ReplicaSize: 2,
+				}}
+			})
+			gone := renderedMember("encode", 1, 0, healthBool(true), "member-1")
+			upstream, ok := ModelDeploymentRoleUpstreamKind(workercore.ModelDeploymentRoleKindEncode)
+			require.True(t, ok)
+			gone.Labels[modelDeploymentLabelKeyRoleKind] = upstream
+			survivor := renderedMember("encode", 1, 1, healthBool(true), "member-2")
+			survivor.Labels[modelDeploymentLabelKeyRoleKind] = upstream
+			gone.Annotations[kueuepodconst.GroupTotalCountAnnotation] = "2"
+			survivor.Annotations[kueuepodconst.GroupTotalCountAnnotation] = "2"
+			// Both members are planned, so the target is whole and the capture is what refuses.
+			// Only the survivor is seeded, which is the state a lost Pod object leaves behind.
+			now := time.Now()
+			md = reserve(md, retirementReservation(
+				workercore.ModelDeploymentRetirementStateDraining, "encode", 1,
+				[]string{"member-1", "member-2"},
+				func(r *workercore.ModelDeploymentRetirementStatus) {
+					r.PhaseStartedAt = meta.NewTime(
+						now.Add(-modelDeploymentRetirementDrainBudget - time.Second))
+					r.Deadline = meta.NewTime(now.Add(tc.deadlineShift))
+				}))
+			md = withResourceVersion(md)
+			cli := newModelDeploymentClient(md.DeepCopy(), survivor.DeepCopy())
+			reader := &scriptedDrainReader{
+				answers: map[types.UID][]modelDeploymentDrainAnswer{"member-2": {idleDrain(), idleDrain()}},
+			}
+			r := holdReconciler(cli, reader, now)
+
+			plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{gone, survivor})
+
+			assert.Equal(t, tc.wantState, plan.Reservation.State)
+			assert.Equal(t, tc.wantInFlight, plan.InFlight)
+			// An abort RETAINS, so the hold stays on in both directions: ending the operation
+			// stops intercepting new deletes, it does not make the survivor undeletable. Nothing is
+			// deleted either way, which is the claim both branches make.
+			assert.True(t, plan.Hold)
+			assert.Empty(t, plan.Deletes, "nothing is deleted when the release cannot be recorded")
+			if tc.wantInFlight {
+				assert.False(t, plan.DeletesAllowed)
+				assert.Contains(t, plan.Reservation.Reason, "already absent")
+
+				return
+			}
+			assert.Contains(t, plan.Reservation.Reason, "retained")
+		})
+	}
+}
+
 // TestDrainHoldsOnAnythingThatIsNotAnObservation is the remaining seam answers, each a distinct
 // refusal: an unbindable collection is not a zero, and neither is an absent one.
 func TestDrainHoldsOnAnythingThatIsNotAnObservation(t *testing.T) {

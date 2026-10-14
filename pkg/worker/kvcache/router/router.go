@@ -102,6 +102,19 @@ type Input struct {
 // compare against it do so through this one name - a second spelling would be the thing that drifts.
 const roleKindDecode = "decode"
 
+// roleKindEncode is the encoder's kind as this package receives it. It joins roleKindDecode for the
+// reason stated on that one: this package compares strings against a convention the API's enum
+// defines, so both kinds are named here rather than imported.
+const roleKindEncode = "encode"
+
+// llmdMultimodalDecider is the plugin that makes the encoder stage conditional. It activates on a
+// request carrying image, audio or video content and declines a text-only one, which is the whole of
+// the no-media path: the decode stage has already picked its Pod by then, so declining sends the
+// request straight to the prefiller and the decoder.
+// (llm-d/llm-d-router@v0.11.0 `pkg/epp/framework/plugins/scheduling/profilehandler/disagg/
+// always_disagg_mm_decider.go:29`, and the E/P/D configuration in `docs/disaggregation.md`).
+const llmdMultimodalDecider = "always-disagg-multimodal-decider"
+
 // Output is a rendered router configuration. A router is configured EITHER by a document it reads at
 // startup OR entirely by its own arguments, so exactly one half is filled and Render refuses every
 // other shape.
@@ -191,12 +204,35 @@ func renderLLMD(input Input) (Output, error) {
 			"type":       "label-selector-filter",
 			"parameters": map[string]any{"matchLabels": map[string]string{kinds[kind]: kind}},
 		})
-		profilePlugins := []any{
-			map[string]any{"pluginRef": filter},
+		profilePlugins := []any{map[string]any{"pluginRef": filter}}
+		if kind == roleKindEncode {
+			// AN ENCODER IS SCORED ON NOTHING, and the shape is upstream's own: the E/P/D
+			// configuration in llm-d/llm-d-router@v0.11.0 `docs/disaggregation.md` gives the
+			// encode profile the role filter and nothing else.
+			//
+			// It has to. An encoder keeps no KV cache, so the queue and KV-cache scorers read
+			// gauges it never exports and rank every candidate identically; the prefix scorer
+			// asks about token overlap, which does not exist before a request has tokens. A
+			// scorer that cannot separate candidates is not a weak preference, it is a cost
+			// paid on every media request.
+			//
+			// THE PICKER IS STILL THERE. Upstream completes any profile naming none at load time
+			// by appending its max-score-picker (`pkg/epp/config/loader/defaults.go:197-216`),
+			// and the profile runner dereferences that picker unconditionally
+			// (`pkg/epp/scheduling/scheduler_profile.go:351`), so a profile that named none
+			// would fail rather than run unscored. Naming it here would say nothing the loader
+			// does not already say, and would put a second answer to the same question in the
+			// document this operator hashes into its router Pod.
+			profiles = append(profiles, map[string]any{
+				"name":    kind,
+				"plugins": profilePlugins,
+			})
+			continue
+		}
+		profilePlugins = append(profilePlugins,
 			map[string]any{"pluginRef": "queue-scorer", "weight": 2},
 			map[string]any{"pluginRef": "kv-cache-utilization-scorer", "weight": 2},
-			map[string]any{"pluginRef": "max-score-picker"},
-		}
+			map[string]any{"pluginRef": "max-score-picker"})
 		if kind != roleKindDecode {
 			profilePlugins = append(profilePlugins,
 				map[string]any{"pluginRef": "prefix-cache-scorer", "weight": 3})
@@ -214,16 +250,29 @@ func renderLLMD(input Input) (Output, error) {
 	prefixProducer := "approx-prefix-cache-producer"
 	if input.KVEvents.Port > 0 {
 		prefixProducer = "precise-prefix-cache-producer"
-		// Excludes decoders from the set of Pods the producer subscribes to. The exclusion is keyed
-		// on the decode kind's own label, so it exists only when a decode role is among the inputs -
-		// keying it on whichever kind sorts first would pin it to an arbitrary role. Appended rather
-		// than assigned, and guarded, because an empty selector would otherwise render a leading
-		// comma - which Kubernetes rejects as a label selector, and which no current caller
-		// produces. The guard is here because this function is a library and its callers are not
-		// its contract.
+		// Excludes every role that keeps no KV cache from the set of Pods the producer
+		// subscribes to. The exclusion is keyed on each kind's own label, so a term exists only
+		// for a kind among the inputs -- keying it on whichever kind sorts first would pin it to
+		// an arbitrary role. Appended rather than assigned, and guarded, because an empty
+		// selector would otherwise render a leading comma - which Kubernetes rejects as a label
+		// selector, and which no current caller produces. The guard is here because this
+		// function is a library and its callers are not its contract.
+		//
+		// DECODE FIRST, THEN ENCODE, and the order is rendered. The selector is a ConfigMap value
+		// whose hash is stamped on the router Pod, so reordering the terms would roll every
+		// prefill/decode router in the cluster for a change nothing reads.
+		//
+		// AN ENCODER IS EXCLUDED FOR THE SAME REASON A DECODER IS, and it is worth stating
+		// because the two look different from outside. A decoder consumes KV and produces none;
+		// an encoder does not hold KV at all. Either way it publishes no events, and leaving one
+		// in the set is a subscriber dialing a socket the engine never opens.
 		publisherSelector := input.EndpointSelector
-		if key, ok := kinds[roleKindDecode]; ok {
-			exclusion := key + "!=" + roleKindDecode
+		for _, kind := range []string{roleKindDecode, roleKindEncode} {
+			key, ok := kinds[kind]
+			if !ok {
+				continue
+			}
+			exclusion := key + "!=" + kind
 			if publisherSelector == "" {
 				publisherSelector = exclusion
 			} else {
@@ -311,6 +360,19 @@ func renderLLMD(input Input) (Output, error) {
 
 	if _, prefill := kinds["prefill"]; prefill {
 		if _, decode := kinds["decode"]; decode {
+			// The encoder stage is wired beside the prefiller's because admission requires an
+			// encoder to declare both halves: a deployment reaching this renderer with an
+			// encoder and no prefiller is refused upstream and never arrives here.
+			stageProfiles := map[string]string{"prefill": "prefill", "decode": "decode"}
+			stageDeciders := map[string]string{"prefill": "prefix-based-pd-decider"}
+			if _, encode := kinds[roleKindEncode]; encode {
+				// Declared before the prefiller's decider, which is the order upstream's E/P/D
+				// configuration lists them in (llm-d/llm-d-router@v0.11.0
+				// `docs/disaggregation.md`, E/P/D Configuration).
+				plugins = append(plugins, map[string]any{"type": llmdMultimodalDecider})
+				stageProfiles["encode"] = "encode"
+				stageDeciders["encode"] = llmdMultimodalDecider
+			}
 			plugins = append(plugins,
 				map[string]any{
 					"type": "prefix-based-pd-decider",
@@ -325,8 +387,8 @@ func renderLLMD(input Input) (Output, error) {
 				map[string]any{
 					"type": "disagg-profile-handler",
 					"parameters": map[string]any{
-						"profiles": map[string]string{"prefill": "prefill", "decode": "decode"},
-						"deciders": map[string]string{"prefill": "prefix-based-pd-decider"},
+						"profiles": stageProfiles,
+						"deciders": stageDeciders,
 					},
 				},
 			)

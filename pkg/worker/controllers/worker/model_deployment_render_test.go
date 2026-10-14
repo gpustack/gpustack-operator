@@ -425,7 +425,7 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("vllm speaks the mooncake handshake", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerNVIDIA)
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerNVIDIA, "")
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=mooncake")
 		assert.Contains(t, sidecar.Args,
@@ -441,7 +441,7 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("vllm on ascend relays through nixlv2", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerAscend)
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerAscend, "")
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=nixlv2",
 			"the Ascend connector speaks the four-null-key handshake the nixlv2 mode relays")
@@ -454,7 +454,7 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("sglang speaks the sglang handshake", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA)
+			workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "")
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=sglang")
 		assert.NotContains(t, sidecar.Args, "mooncake",
@@ -503,7 +503,7 @@ func TestRenderModelDeploymentRoutingSidecar_SGLangBootstrapPortPairsWithThePref
 
 	sidecar := renderModelDeploymentRoutingSidecar(
 		context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-		workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA)
+		workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "")
 	sidecarEnv := argEnvValue(t, sidecar.Env, "SGLANG_BOOTSTRAP_PORT")
 
 	assert.Equal(t, engineArg, sidecarEnv,

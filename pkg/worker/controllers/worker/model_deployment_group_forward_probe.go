@@ -216,6 +216,22 @@ func observeModelDeploymentGroupForward(
 		}
 	}
 
+	// AN ENCODER IS ANSWERED BEFORE THE ENGINE, AND IT IS ANSWERED RATHER THAN UNSUPPORTED. It runs
+	// the multimodal encoder and produces encoder-cache output, so it serves no tokens: there is no
+	// completion request whose bound answer would prove anything about its forward path, and this
+	// leg has no question to ask of it at any engine or version. Asking anyway would spend a request
+	// against an engine that cannot answer it, and the only answer obtainable would be Unknown,
+	// which the health predicate reads as a hold on a healthy group. NotApplicable says the
+	// observation does not exist for the role, which is a different fact from the engine not
+	// offering one, and only the former keeps an encoder out of the hold.
+	if workercore.ModelDeploymentRoleKindEncode == ModelDeploymentEffectiveRoleKind(role) {
+		return modelDeploymentGroupForward{
+			State: modelDeploymentGroupForwardNotApplicable,
+			Reason: "a replica of the Encode role serves no tokens, so its forward path has no " +
+				"cross-member request a bound answer could verify",
+		}
+	}
+
 	engineName := md.Spec.Engine.Name
 	engine, known := modelDeploymentGroupForwardEngines[engineName]
 	if !known {

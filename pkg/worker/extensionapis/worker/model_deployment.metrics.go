@@ -358,6 +358,7 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 	result *worker.ModelDeploymentMetrics, md *workercore.ModelDeployment, read *modelDeploymentPodScrape,
 ) {
 	metricNames := map[string]string{}
+	encode := false
 	switch {
 	case read.router:
 		switch md.Spec.Router.Name {
@@ -389,11 +390,24 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 			metricNames["decode-transfer-waiting"] = "sglang:num_decode_transfer_queue_reqs"
 		}
 	}
+	// AN ENCODER IS NOT A LANGUAGE-MODEL SERVER, and the two halves of that are kept apart below.
+	// Its request gauges are still asked for, because an encoder that publishes one is reporting
+	// real in-flight work, and whether the encoder is the bottleneck is a question this snapshot
+	// exists to answer. What the role cannot provide is the token accounting that follows a request
+	// through a language model. THIS TREE HAS NO VERIFIED READ OF WHICH REQUEST GAUGES AN ENCODER
+	// EXPORTS, so an absent one is recorded and not counted as a failed read rather than being
+	// dropped: dropping it would silently discard a real signal if the engine does publish it.
+	encode = !read.router &&
+		modelDeploymentPodRoleKind(md, &read.pod) == workercore.ModelDeploymentRoleKindEncode
 	for key, source := range metricNames {
 		value, ok := read.value.gauges[key]
 		if !ok {
+			reason := "metric is absent"
+			if encode {
+				reason = modelDeploymentEncodeNoRequestGauge
+			}
 			result.Missing = append(result.Missing, worker.ModelDeploymentMetricMissing{
-				Pod: read.pod.Name, Source: source, Reason: "metric is absent",
+				Pod: read.pod.Name, Source: source, Reason: reason,
 			})
 			continue
 		}
@@ -421,6 +435,13 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 	}
 	idle := h.mergeWindowMetrics(result, md, read)
 	if read.router {
+		return
+	}
+	// EVERY SOURCE BELOW IS A LANGUAGE MODEL'S, AND AN ENCODER RUNS NONE. It produces encoder-cache
+	// output and no tokens, so it holds no prefix cache to hit and answers no prompt, and expecting a
+	// cache-hit ratio of it marks every healthy EPD snapshot partial over a series the role has no
+	// meaning for. The token windows are the same argument and are skipped for the role above.
+	if encode {
 		return
 	}
 	// The decode half of an SGLang pair receives its prompt's cache from the prefill half and
@@ -624,6 +645,9 @@ const (
 		"counts no storage hit"
 	modelDeploymentIdleWindow = "idle sampling window: the Pod's TTFT histogram recorded no new request, so this " +
 		"source has no new sample"
+	modelDeploymentEncodeNoRequestGauge = "unsupported source: the Pod runs the Encode role, and the language-model " +
+		"request queues are not a source an encoder is read as providing, so their absence is not a readable " +
+		"source failing to contribute"
 )
 
 // modelDeploymentNotPartialReasons are the listed entries that do not make a snapshot partial: a
@@ -640,6 +664,7 @@ var modelDeploymentNotPartialReasons = []string{
 	modelDeploymentSGLangNoHostTier,
 	modelDeploymentSGLangNoStorageTier,
 	modelDeploymentIdleWindow,
+	modelDeploymentEncodeNoRequestGauge,
 }
 
 // modelDeploymentMissingIsPartial reports whether a required source is missing.
@@ -746,6 +771,14 @@ func (h *ModelDeploymentMetricsHandler) mergeWindowMetrics(
 	}
 	for _, definition := range modelDeploymentWindowDefinitions(md, read.router) {
 		sources[definition.name] = definition.source
+		// An encoder serves no tokens, so it observes no time to a first token, no gap between two of
+		// them and no time per output token. The prefill and decode halves are the roles that answer
+		// these, and expecting them here would mark every healthy EPD snapshot partial over three
+		// series the role cannot produce.
+		if definition.area == "latency" &&
+			modelDeploymentPodRoleKind(md, &read.pod) == workercore.ModelDeploymentRoleKindEncode {
+			continue
+		}
 		// SGLang observes a KV transfer on the half that sends it, the prefill half.
 		if definition.area == "transfer" && modelDeploymentPodRoleKind(md, &read.pod) != workercore.ModelDeploymentRoleKindPrefill {
 			continue

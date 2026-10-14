@@ -146,11 +146,17 @@ func Render(in Input) (*Result, error) {
 			return nil, err
 		}
 	}
-	if !hasStore && !in.KVTransfer && !in.PublishKVEvents {
+	// An encoder role is exempt from both refusals below. The exemption is on the role rather
+	// than on the engine, because the leg an encoder renders is not a cache this package connects:
+	// there is no store, no point-to-point KV transfer and no event stream on that Pod. Whether a
+	// given engine can render the role stays that engine renderer's answer, which it re-checks
+	// against SupportsRole before writing anything.
+	if !hasStore && !in.KVTransfer && !in.PublishKVEvents && in.Role != RoleEncode {
 		return nil, newRefusal(ReasonConnectionIncomplete,
 			"no shared store, point-to-point transfer, or KV event publisher was requested")
 	}
-	if !hasStore && in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend &&
+	if !hasStore && in.Role != RoleEncode &&
+		in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend &&
 		(in.Engine != EngineSGLang || !in.KVTransfer) {
 		return nil, newRefusal(ReasonConnectionIncomplete,
 			"engine %q requires a shared store connection", in.Engine)

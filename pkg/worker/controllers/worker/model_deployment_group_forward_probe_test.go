@@ -439,6 +439,61 @@ func TestGroupForwardProbeIsUnsupportedWhereNoObservationExists(t *testing.T) {
 	}
 }
 
+// TestGroupForwardProbeDoesNotProbeAnEncoder pins the role the leg has no question about.
+//
+// AN ENCODER SERVES NO TOKENS, so neither engine's completion route is an observation of its forward
+// path: there is nothing to send that a bound answer could prove. Probing one would cost a request
+// against an engine that cannot answer it, and the answer could only ever be Unknown, which reads as
+// a hold on a healthy group. NotApplicable is therefore the whole answer, and it is asked BEFORE the
+// engine, the version and the transport, so no network call can reach an encoder at any engine.
+//
+// THE CASES SHARE ONE LOOP because the role is the only fact varied, and each engine is a separate
+// assertion that the refusal does not depend on which engine happens to be deployed.
+func TestGroupForwardProbeDoesNotProbeAnEncoder(t *testing.T) {
+	testCases := []struct {
+		name    string
+		engine  string
+		version string
+	}{
+		{
+			name:   "a vLLM encoder is not applicable",
+			engine: workercore.ModelDeploymentEngineVLLM, version: "0.29.0",
+		},
+		{
+			name:   "an SGLang encoder is not applicable",
+			engine: workercore.ModelDeploymentEngineSGLang, version: "0.5.18",
+		},
+		{
+			// An engine with no verified observation at all, and a version outside every verified
+			// set: an encoder is refused before either of those questions is asked, so the answer
+			// cannot become Unsupported by the engine the deployment happens to name.
+			name:   "an encoder on an engine with no verified observation is not applicable",
+			engine: "TensorRT", version: "1.0",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md, role := probeDeployment(tc.engine, tc.version, workercore.ModelDeploymentRoleKindEncode)
+			fetch := &probeFetch{}
+			view := modelDeploymentReplicaView{
+				Role: "server", Ordinal: 0, Seated: true,
+				Members: []*core.Pod{
+					probeMember(0, 0, "uid-a"),
+					probeMember(0, 1, "uid-b"),
+				},
+			}
+
+			got := observeModelDeploymentGroupForward(context.Background(), md, role, view, fetch.fetch)
+
+			assert.Equal(t, modelDeploymentGroupForwardNotApplicable, got.State)
+			assert.Contains(t, got.Reason, "Encode")
+			assert.Empty(t, fetch.asked,
+				"nothing is asked of an encoder, which serves no tokens to bind")
+		})
+	}
+}
+
 // TestGroupForwardProbeLeavesTheSingleMemberPathUntouched is the byte-identical guarantee the
 // coordinator asked for. A single-member replica is answered before the engine, the version and
 // the transport are even looked at, so nothing this operator added can reach it: the fetch is

@@ -96,12 +96,13 @@ type roleKindExpectations struct {
 	// Encode produces embeddings; neither is a KV producer.
 	PublishesKVEvents bool
 
-	// EngineSupport records whether vLLM renders this kind as part of the KV split. The renderer
-	// the pair uses does not describe the encoder-cache leg, so Encode answers false on every
-	// engine this API value can map to.
+	// EngineSupportVLLM records whether the vLLM renderer has a term for this kind as part of the
+	// KV split. Encode answers false there: the renderer the pair uses does not describe the
+	// encoder-cache leg.
 	EngineSupportVLLM bool
 	// EngineSupportSGLang records the same answer for the SGLang renderer, kept on the same row
-	// because the answer tracks the renderer not the engine.
+	// because the answer tracks the renderer not the engine. Encode answers true there, since that
+	// engine splits an encoder off its own server rather than through a connector.
 	EngineSupportSGLang bool
 }
 
@@ -149,7 +150,12 @@ var expectedRoleKinds = []roleKindExpectations{
 		Upstream: "encode", UpstreamOK: true,
 		PairPrefill: false, PairDecode: false,
 		UsesKVTransfer: false, RoutesViaSidecar: false, PublishesKVEvents: false,
-		EngineSupportVLLM: false, EngineSupportSGLang: false,
+		// SGLang answers true and vLLM answers false for the same kind, which is the point of
+		// keeping the two on one row: an entry means the RENDERER has a term for the kind, and the
+		// encoder-cache leg reaches each engine by a different one. SGLang splits an encoder off
+		// its own server with --encoder-only; the vLLM family describes it with a connector, and
+		// that renderer has no such term yet.
+		EngineSupportVLLM: false, EngineSupportSGLang: true,
 	},
 }
 

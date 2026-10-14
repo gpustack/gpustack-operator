@@ -595,7 +595,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       A same-name claim in another namespace is never referenced.
       Verify: `go test ./pkg/worker/controllers/worker/ -count=1`
 
-- [ ] **T7a · vLLM engine leg on NVIDIA and ROCm**
+- [x] **T7a · vLLM engine leg on NVIDIA and ROCm**
       Blocked by: T4
       Owns: `pkg/worker/kvcache/inject/vllm*.go`
       Gate: review
@@ -613,7 +613,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       Acceptance: Ascend uses `ECExampleConnector` with the user-attached claim and keeps `MooncakeConnectorV1` for KV.
       Verify: `go test ./pkg/worker/kvcache/inject/ -count=1`
 
-- [ ] **T8 · SGLang engine leg**
+- [x] **T8 · SGLang engine leg**
       Blocked by: T4
       Owns: `pkg/worker/kvcache/inject/sglang*.go`
       Gate: review
@@ -657,7 +657,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       A three-group initial admission test holds all groups back when one lacks quota.
       Verify: `go test ./pkg/worker/controllers/worker/ -count=1`
 
-- [ ] **T12b · Metrics, drain and retirement of `Encode`**
+- [x] **T12b · Metrics, drain and retirement of `Encode`**
       Blocked by: T4
       Owns: `pkg/worker/extensionapis/worker/model_deployment.metrics.go`, `pkg/worker/controllers/worker/model_deployment_drain*.go`, `pkg/worker/controllers/worker/model_deployment_retirement*.go`, `pkg/worker/controllers/worker/model_deployment_group_forward_probe.go`
       Acceptance: a healthy `Encode` Pod is not partial for missing series, and a failed scrape is partial.

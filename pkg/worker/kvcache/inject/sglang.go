@@ -103,6 +103,58 @@ const (
 	// RadixCache, and the first request raises AttributeError on hicache_storage_pass_prefix_keys.
 	sglangHierarchicalCacheArg = "--enable-hierarchical-cache"
 
+	// THE PAIR'S PORTS, AND WHY ONLY ONE OF THEM IS A NUMBER. The encoder serves its requests on
+	// the engine's own --port: an encoder-only server runs its HTTP server on server_args.port
+	// (v0.5.18 `disaggregation/encode_server.py:4110`) and advertises itself as
+	// NetworkAddress(host, server_args.port) (`:3875`), so the address a language-only half dials
+	// is the port the caller already renders for every role and no second number exists for it.
+	//
+	// The reply travels the other way and has NO FIXED PORT AT v0.5.18, which is measured rather
+	// than assumed. The language-only half binds a ZMQ PULL socket on a port the operating system
+	// assigns (v0.5.18 `utils/network.py:202-218`, "the randomly assigned TCP port"), once for the
+	// scheduler-side receiver (v0.5.18 `disaggregation/encode_receiver.py:1611-1620`) and once per
+	// waiting request (`:790-797`), and then hands the encoder its own host and that port inside
+	// the encode request; the encoder PUSHes to it (v0.5.18
+	// `disaggregation/encode_server.py:3010-3038`, `_push_embedding_to_prefill`). So what this leg
+	// needs of an operator is reachability between two Pods rather than a published number, and no
+	// constant is invented here to stand in for one. The number the pair does share before any
+	// request exists is the bootstrap port below, which both halves know from startup.
+	//
+	// The encoder-disaggregation arguments, which name the third stage of a deployment that splits
+	// an encoder off its own server.
+	//
+	// sglangEncoderOnlyArg and sglangLanguageOnlyArg are ServerArgs bool fields (v0.5.18
+	// `server_args.py:3171-3173` and `:3174-3176`), and a bool field is registered with
+	// action="store_true" (v0.5.18 `arg_groups/arg_utils.py:313-319`), so each is a switch that
+	// takes no value.
+	//
+	// sglangEncoderURLsArg is a List[str] (v0.5.18 `server_args.py:3193-3195`) and a list field
+	// carrying no explicit nargs takes "+" (v0.5.18 `arg_groups/arg_utils.py:293-297`), so ONE flag
+	// takes every address, up to the next entry that starts with a dash. That is why the encoder
+	// leg renders this flag last: a value belonging to a flag written after it would be read as
+	// another address, and the engine would dial a Service that does not exist.
+	sglangEncoderOnlyArg  = "--encoder-only"
+	sglangLanguageOnlyArg = "--language-only"
+	sglangEncoderURLsArg  = "--encoder-urls"
+
+	// sglangEncoderBootstrapPortArg names the EncoderBootstrapServer's port (v0.5.18
+	// `server_args.py:3196-3200`). The server runs in the LANGUAGE-ONLY tokenizer manager process
+	// (v0.5.18 `managers/tokenizer_manager.py:673-687`), so this is a prefill port rather than an
+	// encoder one: encoders register there, and a language-only receiver fetches the current URL
+	// list from there. It is rendered because the same process serves it whenever --language-only
+	// is set, whether or not any encoder registers.
+	sglangEncoderBootstrapPortArg = "--encoder-bootstrap-port"
+
+	// SGLangEncoderBootstrapPort is that port. Upstream defaults it to 8997 (v0.5.18
+	// `server_args.py:3196-3200`), and it is rendered explicitly for the reason
+	// sglangBootstrapPortAnnotation gives for the pair above: a default leaves every side to
+	// restate the number on its own, and this one is a port a Pod has to have open.
+	SGLangEncoderBootstrapPort int32 = 8997
+
+	// sglangEncoderBootstrapPortName names that port on the container. A Kubernetes port name is
+	// at most fifteen characters, which is what rules out spelling it "encoder-bootstrap".
+	sglangEncoderBootstrapPortName = "enc-bootstrap"
+
 	// SGLangBootstrapPort is where a disaggregated prefiller serves the bootstrap registry the
 	// decode side learns its transfer endpoints from. Upstream defaults it to 8998
 	// (v0.5.18 `server_args.py:3114-3118`, ServerArgs.disaggregation_bootstrap_port); it is
@@ -123,6 +175,27 @@ const (
 	// reason this engine takes the environment.
 	sglangPodIPFieldPath = "status.podIP"
 )
+
+// SGLangEncoderOwnedArgs returns the encoder-disaggregation arguments this renderer writes, so a
+// caller that refuses a user value for an owned key names them without restating a spelling.
+//
+// It is the whole list rather than one key because the leg has three: the two switches that place
+// a Pod in the encoder or the language-only shape, and the flag carrying the addresses the two
+// halves pair through. A user value for any of them lands after the operator's on the same command
+// line, so leaving one unowned lets a role declared as the encoder start as the language-only
+// server with both ends still advertising the first.
+//
+// The bootstrap port is in the list for the reason the disaggregation mode is in the model's own:
+// it is a pair property, written by the language-only half and dialed by an encoder that
+// registers against it.
+func SGLangEncoderOwnedArgs() []string {
+	return []string{
+		sglangEncoderOnlyArg,
+		sglangLanguageOnlyArg,
+		sglangEncoderURLsArg,
+		sglangEncoderBootstrapPortArg,
+	}
+}
 
 // renderSGLang produces the variables and the argument an SGLang container needs.
 //
@@ -177,6 +250,21 @@ func renderSGLang(in Input) (*Result, error) {
 	// decodeHalf is whether this engine starts in decode mode, which is the disaggregation leg's
 	// own condition below: a lone decode half runs undivided and is a server like any other.
 	decodeHalf := in.Disaggregated && in.Role == RoleDecode
+
+	// AN ENCODER IS REFUSED A CACHE, rather than rendered one it cannot use. The store client below
+	// hangs a hierarchical cache off the engine that writes it, and the encoder builds no language
+	// model to cache anything for, so the render would be a container that starts normally, carries
+	// a full Mooncake configuration and moves no blocks. Refused here, before the store block, so
+	// the answer does not depend on how far the render already got.
+	//
+	// Publishing events is not in the condition because it cannot reach here: Render refuses it for
+	// any engine but vLLM proper, before this renderer runs.
+	if in.Role == RoleEncode && (hasStore || in.KVTransfer) {
+		return nil, newRefusal(ReasonRoleUnsupported,
+			"role %q holds no KV cache, so a shared store or a point-to-point transfer asked of it "+
+				"would leave the encoder carrying a cache configuration that moves nothing",
+			in.Role)
+	}
 	env := []core.EnvVar{}
 	tenantInjected := hasStore && in.Domain != ""
 	tenantEnvName := ""
@@ -286,6 +374,38 @@ func renderSGLang(in Input) (*Result, error) {
 			}
 			result.PodAnnotations[sglangBootstrapPortAnnotation] = strconv.Itoa(int(SGLangBootstrapPort))
 		}
+	}
+
+	// THE ENCODER LEG IS THE THIRD STAGE, AND IT IS WRITTEN LAST because the address flag takes a
+	// list (sglangEncoderURLsArg). Ordering is not a style choice here: the engine's parser reads
+	// every entry after that flag as another address until one starts with a dash, so a flag
+	// rendered after it would have its value dialed as a Service.
+	//
+	// THE TWO HALVES ARE ASYMMETRIC AND THAT IS THE ENGINE'S, NOT OURS. The encoder takes one
+	// switch and builds no language model (v0.5.18 `server_args.py:3171-3173`); the language-only
+	// half takes the second switch and the addresses of every encoder replica (`:3174-3176`,
+	// `:3193-3195`). A decode half is handed neither: it reads the embeddings out of the KV cache
+	// the prefiller already built, which is why the guide's own three-stage example gives it no
+	// encoder flag at all (v0.5.18 `docs/docs/advanced_features/epd_disaggregation.mdx`).
+	switch in.Role {
+	case RoleEncode:
+		result.Args = append(result.Args, sglangEncoderOnlyArg)
+	case RolePrefill:
+		// Only the language-only half needs an address, so only it renders the leg. A prefill half
+		// of a deployment that declares no encoder renders nothing here, which is what keeps a
+		// deployment without an encode role byte for byte what it was.
+		if len(in.EncoderURLs) == 0 {
+			break
+		}
+		result.Args = append(result.Args,
+			sglangLanguageOnlyArg,
+			sglangEncoderBootstrapPortArg, strconv.Itoa(int(SGLangEncoderBootstrapPort)))
+		result.Ports = append(result.Ports, core.ContainerPort{
+			Name: sglangEncoderBootstrapPortName, Protocol: core.ProtocolTCP,
+			ContainerPort: SGLangEncoderBootstrapPort,
+		})
+		result.Args = append(result.Args, sglangEncoderURLsArg)
+		result.Args = append(result.Args, in.EncoderURLs...)
 	}
 
 	return result, nil

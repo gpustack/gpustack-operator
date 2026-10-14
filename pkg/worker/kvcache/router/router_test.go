@@ -375,6 +375,13 @@ func TestRenderLLMD_DecodeDoesNotScorePrefixOverlap(t *testing.T) {
 	}
 }
 
+// TestRenderLLMD_EveryProfileCanPickAnEndpoint holds every profile to naming a picker.
+//
+// AN ENCODER PROFILE IS THE ONE EXCEPTION, and it is not a counterexample to the rule: upstream
+// completes a profile that names no picker at load time by appending max-score-picker
+// (`pkg/epp/config/loader/defaults.go:197-216`), and the profile runner dereferences that picker
+// unconditionally, so every profile runs with one either way. The case renders no encoder role, so
+// the property it asserts holds for every profile it produces.
 func TestRenderLLMD_EveryProfileCanPickAnEndpoint(t *testing.T) {
 	output, err := Render(LLMD, Input{Roles: []Role{
 		{Kind: "prefill", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"},

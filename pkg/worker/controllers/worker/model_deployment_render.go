@@ -576,9 +576,10 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		pod.Spec.TerminationGracePeriodSeconds = ptr.To(*role.TerminationGracePeriodSeconds)
 	}
 	if directDecode {
+		manufacturer := in.InstanceType.Status.Detail.Manufacturer
 		sidecar := renderModelDeploymentRoutingSidecar(
 			ctx, role, enginePort, scheme, md.Spec.Engine.Name, in.NativeSidecar,
-			in.InstanceType.Status.Detail.Manufacturer)
+			manufacturer, modelDeploymentSidecarECConnector(md, manufacturer))
 		if in.NativeSidecar {
 			pod.Spec.InitContainers = []core.Container{sidecar}
 		} else {
@@ -871,10 +872,63 @@ func modelDeploymentCommandPort(engine string, command []string) (int32, error) 
 // (llm-d/llm-d-router@v0.10.0 `pkg/sidecar/proxy/connector_nixlv2.go:162-170,405`). The connector
 // value is the sidecar's own constant vocabulary (`pkg/sidecar/constants/constants.go:21`,
 // KVConnectorNIXLV2), spelled here rather than derived from anything the engine names.
+// The encoder-cache connectors the decode sidecar pulls embeddings through. These are the
+// sidecar's own words, NOT the engine connector names they correspond to: the engine runs
+// ECCPUConnector or ECExampleConnector, while the sidecar either pulls the encoder's output over
+// NIXL or reads it from the directory both roles mount.
+//
+//	llm-d/llm-d-router@v0.11.0 `pkg/sidecar/constants/constants.go:35-39`, validated against
+//	`pkg/sidecar/proxy/options.go:180-183,671-673`.
+//
+// The set is closed and a value outside it is fatal rather than degraded: the sidecar refuses to
+// start on an unrecognized connector, so a decoder rendered with a third spelling never becomes
+// ready and never answers.
+const (
+	// modelDeploymentECConnectorNIXL is the network path, for the platforms whose copy path
+	// NIXL supports.
+	modelDeploymentECConnectorNIXL = "ec-nixl"
+	// modelDeploymentECConnectorExample is the shared-directory path, which needs no copy path
+	// of any kind and is the only one the Ascend example runs.
+	modelDeploymentECConnectorExample = "ec-example"
+)
+
+// modelDeploymentSidecarECConnector returns the encoder-cache connector the decode sidecar drives
+// for this deployment, or "" when it runs no encoder stage at all.
+//
+// AN ABSENT VALUE IS A VALUE HERE. Upstream leaves --ec-connector empty by default and an empty one
+// silently tells the sidecar to skip the encoder stage (the sidecar validates the flag only when it
+// is non-empty, `pkg/sidecar/proxy/options.go:670-675`). Nothing would flag a wrong empty value, so
+// a deployment without an encoder role renders no flag, and one with an encoder role always names
+// a connector.
+//
+// THE PLATFORM DECIDES BECAUSE THE PLATFORM IS THE LEG. There is no copy path for NIXL to take on
+// Ascend, so that platform runs the shared directory the user attaches to both roles, and every
+// platform that does have one pulls over the network.
+//
+// ONE RESOLUTION, RENDERED ONCE. This is the single place the encoder leg's transport is decided
+// for the data plane. The sidecar renderer takes the answer as a value rather than re-deriving the
+// platform beside the KV connector it already dispatches on, because two switches over one platform
+// are two answers to one question, and they would be free to disagree.
+func modelDeploymentSidecarECConnector(
+	md *workercore.ModelDeployment, manufacturer string,
+) string {
+	declaresEncode := slices.ContainsFunc(md.Spec.Roles, func(role workercore.ModelDeploymentRole) bool {
+		return ModelDeploymentEffectiveRoleKind(&role) == workercore.ModelDeploymentRoleKindEncode
+	})
+	if !declaresEncode {
+		return ""
+	}
+	if manufacturer == nodefeature.ManufacturerAscend {
+		return modelDeploymentECConnectorExample
+	}
+
+	return modelDeploymentECConnectorNIXL
+}
+
 func renderModelDeploymentRoutingSidecar(
 	ctx context.Context,
 	role *workercore.ModelDeploymentRole, enginePort int32, engineScheme core.URIScheme,
-	engine string, native bool, manufacturer string,
+	engine string, native bool, manufacturer, ecConnector string,
 ) core.Container {
 	externalPort := modelDeploymentServicePort(role)
 	args := []string{
@@ -902,6 +956,12 @@ func renderModelDeploymentRoutingSidecar(
 			fmt.Sprintf("--mooncake-bootstrap-port=%d", inject.VLLMMooncakeBootstrapPort))
 	}
 	args = append(args, "--secure-proxy=false")
+	// The encoder leg is a separate handshake from the KV one, and it is resolved by the caller
+	// rather than here: this function already dispatches on the platform for the KV connector, and
+	// a second switch over the same platform would be a second place to keep in step with it.
+	if ecConnector != "" {
+		args = append(args, "--ec-connector="+ecConnector)
+	}
 	if engineScheme == core.URISchemeHTTPS {
 		args = append(args, "--enable-tls=decoder", "--tls-insecure-skip-verify=decoder")
 	}

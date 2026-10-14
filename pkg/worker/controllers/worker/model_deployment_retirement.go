@@ -84,6 +84,11 @@ const (
 // simply a new request.
 const modelDeploymentRetirementRetryAnnotation = "modeldeployment.gpustack.ai/retirement-retry"
 
+// modelDeploymentRetirementEncodeWithdrawn is the reason an encoder replica carries while it waits
+// out the Draining budget it can never be released from by a reading.
+const modelDeploymentRetirementEncodeWithdrawn = "the target runs the Encode role, which exports no " +
+	"in-flight queue this protocol can read; it is withdrawn from discovery and leaving on the window"
+
 // modelDeploymentRetirementPlan is what one pass learned about the single reservation in flight.
 //
 // A zero plan is the no-reservation plan, and it is what every delete path sees when no operation
@@ -580,21 +585,54 @@ func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToDraining(
 
 // advanceModelDeploymentRetirementToDeleting reads every member's queues and, when they are idle,
 // commits the delete. It is the only place the protocol deletes anything.
+//
+// AN ENCODER REPLICA IS NEVER JUDGED ON THESE QUEUES. modelDeploymentRetirementReplicaIsEncode
+// reports the target's own role kind and this function asks the engine no question at all when it
+// says so: the gauges read below are a language model's in-flight request counts, an
+// encoder-cache producer exports none of them, and a zero read of a series that role does not
+// publish is not evidence that it holds nothing. Such a replica therefore waits the Draining
+// budget and is then removed on that window alone, which is the same bound the queue path has for
+// a replica that never reaches zero except that the encoder is never given a reason to stop.
+//
+// THE WINDOW IS THE WHOLE OF THE PROTECTION, AND THE POD'S OWN DRAIN HOOK IS NOT PART OF IT. That
+// hook is rendered into every role's Pod, so a change to its program moves pod-spec-hash and rolls
+// every replica of a deployment that has no encoder in it; it is therefore left exactly as it was.
+// Its own read of a body carrying none of the counted gauges still scores it idle, which is why this
+// window is stated rather than assumed. A transfer still in flight when the window ends fails its
+// request visibly.
+//
+// THE WINDOW IS NOT AN ESCAPE FROM A TERMINAL ANSWER. Once it is spent the encoder is on the ordinary
+// pre-delete path, and a capture that keeps refusing ends at the overall Deadline through
+// holdModelDeploymentRetirementBeforeDelete rather than holding in Draining forever.
 func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToDeleting(
 	ctx context.Context, md *workercore.ModelDeployment, plan *modelDeploymentRetirementPlan,
 ) {
 	now := r.modelDeploymentNow()
-	if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementDrainBudget, now) {
-		r.abortModelDeploymentRetirement(plan, now,
-			"the drain budget was exhausted before the target's queues reached zero")
+	// READ ONCE, because the window gate and the Deleting reason below are one decision about the
+	// same target, and a second read of the same predicate is a second answer to it.
+	encode := modelDeploymentRetirementReplicaIsEncode(plan.Target.Members)
+	if encode {
+		// THE WINDOW IS THE GATE, and it is spent into the delete rather than into an abort, which
+		// is the one place this function treats an exhausted budget as the answer instead of a
+		// failure.
+		if !modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementDrainBudget, now) {
+			plan.Reservation.Reason = modelDeploymentRetirementEncodeWithdrawn
 
-		return
-	}
+			return
+		}
+	} else {
+		if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementDrainBudget, now) {
+			r.abortModelDeploymentRetirement(plan, now,
+				"the drain budget was exhausted before the target's queues reached zero")
 
-	if reason, drained := r.observeModelDeploymentRetirementDrained(ctx, md, plan); !drained {
-		plan.Reservation.Reason = reason
+			return
+		}
 
-		return
+		if reason, drained := r.observeModelDeploymentRetirementDrained(ctx, md, plan); !drained {
+			plan.Reservation.Reason = reason
+
+			return
+		}
 	}
 
 	// THE RELEASE EVIDENCE IS CAPTURED AND PERSISTED BEFORE THE DELETE IS AUTHORIZED. This is the
@@ -604,37 +642,62 @@ func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToDeleting(
 	// the operation, because deleting now would destroy the very evidence completion needs.
 	record, err := r.captureModelDeploymentRetirementRelease(ctx, md, plan)
 	if err != nil {
-		plan.Reservation.Reason = fmt.Sprintf(
-			"the target's release cannot be recorded, so nothing is deleted: %v", err)
-		plan.DeletesAllowed = false
-		plan.Deletes = nil
+		r.holdModelDeploymentRetirementBeforeDelete(plan, now, encode, fmt.Sprintf(
+			"the target's release cannot be recorded, so nothing is deleted: %v", err))
 
 		return
 	}
 	if err := r.persistModelDeploymentRetirementRelease(ctx, md, record); err != nil {
-		plan.Reservation.Reason = fmt.Sprintf(
-			"the target's release could not be written, so nothing is deleted: %v", err)
-		plan.DeletesAllowed = false
-		plan.Deletes = nil
+		r.holdModelDeploymentRetirementBeforeDelete(plan, now, encode, fmt.Sprintf(
+			"the target's release could not be written, so nothing is deleted: %v", err))
 
 		return
 	}
 	// The identity is re-read after the write, so a record that did not land for THIS operation
 	// stops here rather than being discovered missing once the delete is committed.
 	if _, err := r.loadModelDeploymentRetirementRelease(md, plan); err != nil {
-		plan.Reservation.Reason = fmt.Sprintf(
-			"the target's release was not recorded for this operation, so nothing is deleted: %v", err)
-		plan.DeletesAllowed = false
-		plan.Deletes = nil
+		r.holdModelDeploymentRetirementBeforeDelete(plan, now, encode, fmt.Sprintf(
+			"the target's release was not recorded for this operation, so nothing is deleted: %v", err))
 
 		return
 	}
 
+	reason := "the target's queues are empty; deleting every member together"
+	if encode {
+		reason = "the target runs the Encode role and its withdrawal window is spent; " +
+			"deleting every member together"
+	}
 	plan.Reservation.State = workercore.ModelDeploymentRetirementStateDeleting
 	plan.Reservation.PhaseStartedAt = meta.NewTime(now)
-	plan.Reservation.Reason = "the target's queues are empty; deleting every member together"
+	plan.Reservation.Reason = reason
 	plan.DeletesAllowed = true
 	plan.Deletes = modelDeploymentRetirementDeleteSet(plan.Target)
+}
+
+// holdModelDeploymentRetirementBeforeDelete is the one answer to a release capture that refuses:
+// nothing is deleted, and the operation keeps the evidence intact.
+//
+// AN ENCODER ABORTS AT THE OVERALL DEADLINE WHERE A QUEUE PATH HAS ALREADY BOUNDED ITSELF. The queue
+// path spends its drain budget before it reaches this point, so a capture that never succeeds is
+// bounded by that budget and ends through abortModelDeploymentRetirement on a later pass. An encoder
+// passes here with its window already spent, because for that role the window IS the gate: without
+// this, a capture that refuses forever — a member whose Pod left the API mid-operation, or an
+// allocation record that cannot be read — would hold the reservation in Draining indefinitely, keep
+// Intercepting the surviving members' deletes, and never reach a terminal state. Holding is the right
+// answer before the Deadline and never after it, which is the rule every other pre-delete phase
+// already follows.
+func (r *ModelDeploymentReconciler) holdModelDeploymentRetirementBeforeDelete(
+	plan *modelDeploymentRetirementPlan, now time.Time, encode bool, reason string,
+) {
+	if encode && !now.Before(plan.Reservation.Deadline.Time) {
+		r.abortModelDeploymentRetirement(plan, now, reason)
+
+		return
+	}
+
+	plan.Reservation.Reason = reason
+	plan.DeletesAllowed = false
+	plan.Deletes = nil
 }
 
 // advanceModelDeploymentRetirementToSettling watches for the delete to have actually happened.
@@ -1105,6 +1168,36 @@ func (r *ModelDeploymentReconciler) modelDeploymentRetirementDrainMembers(
 	}
 
 	return modelDeploymentAnsweringMembers(shape, plan.Target.Members)
+}
+
+// modelDeploymentRetirementReplicaIsEncode reports whether this replica is an encoder, read from the
+// members' own rendered label rather than from the role the spec declares.
+//
+// THE MEMBERS ANSWER, NOT THE ROLE, for the reason the rest of this file gives: the role may already
+// be gone from the spec by the time the members are being removed, which is exactly the case an
+// Encode replica reaches when its role is dropped. The label the renderer stamped is on the Pod, so
+// it outlives the declaration.
+//
+// IT IS ALL MEMBERS OR NONE. A replica whose members disagree has a shape this operator has not
+// verified, and it takes the ordinary queue path rather than a third answer: the drain read already
+// refuses a gauge it cannot see, so the queue path fails safe on a member it does not recognize,
+// where inventing a hold for the disagreement would be a new way to keep a replica forever.
+func modelDeploymentRetirementReplicaIsEncode(members []*core.Pod) bool {
+	if len(members) == 0 {
+		return false
+	}
+
+	upstream, ok := ModelDeploymentRoleUpstreamKind(workercore.ModelDeploymentRoleKindEncode)
+	if !ok {
+		return false
+	}
+	for _, member := range members {
+		if member.Labels[modelDeploymentLabelKeyRoleKind] != upstream {
+			return false
+		}
+	}
+
+	return true
 }
 
 // modelDeploymentRetirementDrainTarget is the one read the protocol asks about a member.

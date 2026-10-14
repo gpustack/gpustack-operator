@@ -83,8 +83,9 @@ type Role string
 //
 // RoleEncode names the encoder stage a deployment may declare: the kind has its own value here so
 // the connector's role-mapping function can return it instead of folding it into RoleNone, and
-// the absence of an entry for it in engineRoleSupport is what makes admission refuse an engine
-// that cannot take it. The encoder-cache leg is rendered separately and does not reach this enum.
+// an absence of an entry for it in engineRoleSupport is what makes admission refuse an engine that
+// cannot take it. The role carries no KV cache: the encoder-cache leg is the engine's own
+// encoder-disaggregation rendering, not the store client every other role is written.
 const (
 	RoleNone    Role = ""
 	RolePrefill Role = "prefill"
@@ -132,7 +133,12 @@ var engineRoleSupport = map[Engine][]Role{
 	// the declared pair: a kind without one, which includes every Pod the injection webhook
 	// admits, renders the shared store alone, exactly as no role does. What the renderer refuses
 	// is the converse, a point-to-point leg with no kind to pair.
-	EngineSGLang: {RoleNone, RolePrefill, RoleDecode},
+	//
+	// RoleEncode is here because this engine has a term for it: SGLang splits an encoder stage off
+	// its own server with --encoder-only (v0.5.18 `server_args.py:3171-3173`), rather than through a
+	// connector this package would have to describe. An entry therefore means the renderer answers,
+	// not that the encoder serves a cache - it holds no KV cache at all.
+	EngineSGLang: {RoleNone, RolePrefill, RoleDecode, RoleEncode},
 }
 
 // SupportsRole reports whether the engine's rendering has a term for the role.
@@ -280,6 +286,18 @@ type Input struct {
 	// KVEventsHost is the dialable host paired with the publisher's fixed ports. The engine binds a
 	// wildcard address, which cannot be published to a consumer as an endpoint.
 	KVEventsHost string
+
+	// EncoderURLs are the addresses of the deployment's encoder replicas, one per replica or per
+	// replica Service, in the engine's own spelling. It is what makes a deployment a three-role one,
+	// and only a prefill half reads it.
+	//
+	// It is an input rather than something resolved here because a replica's address does not exist
+	// until its Service does, and a Service is the caller's object, built at reconcile time rather
+	// than at admission.
+	//
+	// An empty value renders no encoder leg at all, which is what every deployment without an
+	// encoder role declares, so that shape renders exactly as it did before this field existed.
+	EncoderURLs []string
 }
 
 const defaultKVTransferProtocol = "tcp"
@@ -348,7 +366,8 @@ const (
 	// ReasonConnectionIncomplete is an input missing something rendering cannot proceed without:
 	// a Connection missing a value the engine cannot start without, an input that requests none
 	// of the store, direct transfer, or event publishing, an engine that cannot run without a
-	// shared store, or an event publisher with no dialable host.
+	// shared store, or an event publisher with no dialable host. An encoder role is exempt from
+	// the first three of those, because the leg it renders is not a cache this package connects.
 	ReasonConnectionIncomplete Reason = "ConnectionIncomplete"
 
 	// ReasonTransportUnsupported is a pool transport the engine's store backend refuses. It is

@@ -146,6 +146,18 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 	}
 
 	// The undivided shape: one selector naming every Pod that answers.
+	//
+	// AN ENCODER IS REFUSED HERE RATHER THAN LEFT OUT OF THE SELECTOR, because this one selector is
+	// deployment-wide: it IS the answering set, and the encoder is in it. An encoder answers nothing
+	// -- it consumes media and returns embeddings only a prefiller reads -- so a router offered one as
+	// a backend routes requests to a process that cannot generate from them, and the failure would
+	// arrive as a request that never completes. The split shape above is what pairs an encoder, and it
+	// names each half by its own role, which is where an encoder is absent by construction.
+	if declaresRole(input, roleKindEncode) {
+		return Output{}, fmt.Errorf("render %s: a deployment-wide selector would offer the %s role as "+
+			"a backend, so a deployment holding one needs a %s and a %s role beside it",
+			name, roleKindEncode, rolePrefill, roleKindDecode)
+	}
 	deployment := selectorArgs(argvRouterSelectorArg, input.EndpointLabels)
 	if deployment == nil {
 		return Output{}, fmt.Errorf("render %s: no endpoint labels to discover by", name)
@@ -181,6 +193,24 @@ func selectorArgs(flag string, labels map[string]string) []string {
 // rolePrefill is the prefiller's kind as this package receives it, for the same reason
 // roleKindDecode is a string: the caller resolves kinds and this package compares what it is given.
 const rolePrefill = "prefill"
+
+// declaresRole reports whether the deployment declares a role of this kind, whatever that role's
+// selector holds.
+//
+// IT IS SEPARATE FROM roleSelector because the two answer different questions. A selector answers
+// "which Pods does this role name", which is what a flag is built from; this answers "is this role
+// present at all", which is what a refusal is built from. A role declared with an empty selector is
+// present either way, and reading its absence as a reason to render would be exactly the silent
+// omission this package is written against.
+func declaresRole(input Input, kind string) bool {
+	for i := range input.Roles {
+		if input.Roles[i].Kind == kind {
+			return true
+		}
+	}
+
+	return false
+}
 
 func roleSelector(input Input, kind string) map[string]string {
 	for i := range input.Roles {
