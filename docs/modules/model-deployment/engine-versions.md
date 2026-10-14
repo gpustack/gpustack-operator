@@ -23,11 +23,13 @@ those releases, and this documentation does not track them; upgrading is the fix
 | SGLang | alone | `0.5.18`, run as the halves of a pair | `0.3.12.post1` | — |
 | SGLang | prefill/decode, direct transfer over `tcp` | `0.5.18` | `0.3.12.post1` | — |
 | SGLang | with a Mooncake store | `0.5.18`, run as a pair | `0.3.12.post1` | the 0.3.12 line, such as `kvcacheai/mooncake:0.3.12.post1` |
+| vLLM | encoder/prefill/decode, direct transfer over NIXL | `0.30.0`, on ROCm behind `llm-d-router` (unverified); NVIDIA not admitted | compiles its own, not run | — |
+| vLLM-Ascend | encoder/prefill/decode, direct transfer | `0.23.0`, behind `llm-d-router` (unverified) | `0.3.11.post1`, the NPU build | — |
 
 A version counts as run when the shape answered requests and, where it moves KV, the engine or the
 store reported blocks moving: a transfer or a store write, not a Pod reaching `Ready`. The
 vLLM-Ascend rows ran on the runner's `cann9.1-910b-vllm0.23.0-router` tag, named through
-`roles[].image`.
+`roles[].image`. EPD rows are admitted from code analysis and are unverified on live hardware.
 
 ## Reading the table
 
@@ -52,6 +54,12 @@ each engine can use is [the matrix below](#which-transport-each-engine-can-use).
 
 **"Not verified" means no run, not a known failure.** Nothing refuses such a shape; nothing here
 says it works.
+
+**EPD shapes require `engine.version` and enforce the connector floor.** A deployment declaring an `Encode`
+role refuses an empty `engine.version`. Network transfer on ROCm needs vLLM `0.30.0` or later.
+vLLM-Ascend needs `0.23.0` behind `llm-d-router`. Both EPD rows are admitted from code reading and
+remain unverified on live hardware; NVIDIA EPD is not admitted until live runs pass. See
+[Model Deployment Encoder Prefill Decode](epd.md).
 
 ## Which transport each engine can use
 
@@ -125,8 +133,10 @@ On AWS the `RDMA` rows do not apply; [choose `EFA` or
 
 ---
 
-**See also** — [Model Deployment](deployment.md) (the fields these versions go into) ·
+**See also** — [Model Deployment Configuration](deployment.md) (the fields these versions go into) ·
+[Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) ·
+[Model Deployment Encoder Prefill Decode](epd.md) (encoder, prefill and decode disaggregation) ·
 [KV Cache Backend](../kv-cache/backend.md) (the store a client needs) ·
-[RDMA Operations](../rdma/operations.md) (fabric devices and the engine image they need)
+[RDMA Operations](../rdma/operations.md) (fabric devices and the engine image they need).
 
 **Next** → [Model Deployment Status](status.md)

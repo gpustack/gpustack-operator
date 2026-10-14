@@ -28,12 +28,19 @@ func epdRenderDecodePod(
 	})
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 
+	// The renderer no longer re-derives the transport from the node's manufacturer. It is handed
+	// the row's connector already in the sidecar's vocabulary, which is what makes the row the
+	// single source for the flag rather than one of two places that decide it.
+	connector := ModelDeploymentEPDConnector(md.Spec.Router.Name, md.Spec.Engine.Name, manufacturer)
+	require.NotEmpty(t, connector, "%s+%s is not an admitted row", md.Spec.Engine.Name, manufacturer)
+
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment: md, Role: &md.Spec.Roles[2], InstanceType: newRenderInstanceType(
 			func(it *worker.InstanceType) { it.Status.Detail.Manufacturer = manufacturer }),
 		Connector: ModelDeploymentConnectorRender{
 			Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 		},
+		ECConnector:   ModelDeploymentECSidecarConnector(connector),
 		NativeSidecar: true,
 	})
 	require.NoError(t, err)
@@ -55,16 +62,17 @@ func epdRenderDecodePod(
 // A value outside that pair does not degrade: the sidecar refuses to start
 // (`pkg/sidecar/proxy/options.go:671-673`), so a decoder rendered with a third spelling never
 // becomes ready and never answers.
+//
+// THERE IS NO NVIDIA ROW HERE, and its absence is the state of the work rather than an omission: an
+// NVIDIA combination is admitted only after its proof of concept passes, so this table lists exactly
+// the platforms the matrix admits. A case added for one would have to expect no flag at all, which
+// is what the test below already covers for a deployment declaring no encoder.
 func TestRenderModelDeploymentRoutingSidecar_CarriesTheEncoderConnector(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		manufacturer string
 		want         string
 	}{
-		{
-			name: "nvidia pulls over nixl", manufacturer: nodefeature.ManufacturerNVIDIA,
-			want: "--ec-connector=ec-nixl",
-		},
 		{
 			name: "rocm pulls over nixl", manufacturer: nodefeature.ManufacturerAMD,
 			want: "--ec-connector=ec-nixl",
@@ -78,6 +86,15 @@ func TestRenderModelDeploymentRoutingSidecar_CarriesTheEncoderConnector(t *testi
 			sidecar := epdRenderDecodePod(t, tc.manufacturer).Spec.InitContainers[0]
 
 			assert.Contains(t, sidecar.Args, tc.want)
+
+			// The same platform twice must not answer differently: the flag is the row's connector
+			// and nothing else, so reading it back through the row is an equality, not a lookup
+			// that could happen to agree.
+			row := ModelDeploymentEPDConnector(workercore.ModelDeploymentRouterLLMD,
+				workercore.ModelDeploymentEngineVLLM, tc.manufacturer)
+			assert.Contains(t, sidecar.Args,
+				"--ec-connector="+ModelDeploymentECSidecarConnector(row),
+				"the rendered flag is the admitted row's connector, translated once")
 		})
 	}
 }

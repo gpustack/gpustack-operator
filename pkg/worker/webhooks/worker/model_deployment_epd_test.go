@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +15,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
@@ -120,6 +120,27 @@ func epdDropRole(md *workercore.ModelDeployment, name string) {
 		}
 	}
 	md.Spec.Roles = kept
+}
+
+// epdNetworkRowDeployment builds the same three-role shape on the admitted network row: vLLM on
+// ROCm, where the encoder leg is pulled over the network rather than carried through a mounted
+// directory. It is a separate builder rather than a flag on epdDeployment because the two rows
+// differ in what the roles mount, in what their engine version must be, and in what a case is
+// allowed to set -- a helper that took either would have to clear three fields to answer a
+// question about one.
+func epdNetworkRowDeployment(mutate func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
+	md := epdDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Engine.Version = "0.30.0"
+		for i := range md.Spec.Roles {
+			md.Spec.Roles[i].InstanceType = "amd-8x"
+			md.Spec.Roles[i].AdditionalVolumes = nil
+		}
+	})
+	if mutate != nil {
+		mutate(md)
+	}
+
+	return md
 }
 
 // TestModelDeploymentWebhook_EncoderAdmission covers every rule that bears on a deployment declaring
@@ -550,67 +571,137 @@ func TestModelDeploymentWebhook_ReservedTransferPortIsRefusedWhereRendered(t *te
 	assert.Contains(t, err.Error(), "which the operator reserves")
 }
 
-// TestModelDeploymentEPDMatrix pins the table's own shape, so a row cannot be added or edited without
-// something here saying so. The rows are the whole admission answer, and the message a refusal
-// carries is built from them.
-func TestModelDeploymentEPDMatrix(t *testing.T) {
-	t.Run("every row names a router, an engine and a platform the API has", func(t *testing.T) {
-		routers := map[string]bool{
-			workercore.ModelDeploymentRouterLLMD:   true,
-			workercore.ModelDeploymentRouterVLLM:   true,
-			workercore.ModelDeploymentRouterSGLang: true,
-		}
-		engines := map[string]bool{
-			workercore.ModelDeploymentEngineVLLM:   true,
-			workercore.ModelDeploymentEngineSGLang: true,
-		}
+// TestModelDeploymentWebhook_EncoderServingTheSideChannelPortIsRefused is the reservation as a user
+// reaches it, through both spellings a role can name its serving port.
+//
+// THE DECLARED PORT IS THE ONE THE RENDER HONORS. A role declaring ports is held to the first of
+// them and its own --port is not consulted at all (`modelDeploymentTargetPort`), so a case that
+// only passed --port would exercise a spelling the render discards. The flag is refused too, because
+// a role may pass both and a rule reading one leaves the other open.
+//
+// BOTH RUN THROUGH AN ADMISSION rather than beside the rule, so the refusal is read the way a writer
+// meets it: on the object they submitted, naming the field they wrote.
+func TestModelDeploymentWebhook_EncoderServingTheSideChannelPortIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		serving func(md *workercore.ModelDeployment)
+	}{
+		{
+			name: "a declared container port",
+			serving: func(md *workercore.ModelDeployment) {
+				for i := range md.Spec.Roles {
+					md.Spec.Roles[i].Ports = []workercore.ModelDeploymentPort{
+						{Port: inject.VLLMECSideChannelPort, Protocol: core.ProtocolTCP},
+					}
+				}
+			},
+		},
+		{
+			name: "the role's own --port",
+			serving: func(md *workercore.ModelDeployment) {
+				for i := range md.Spec.Roles {
+					md.Spec.Roles[i].ExtraArgs = []string{
+						fmt.Sprintf("--port=%d", inject.VLLMECSideChannelPort),
+					}
+				}
+			},
+		},
+		{
+			// A role may name both. The declared set is the one the render prefers, so the refusal
+			// has to land even where the flag agrees with it.
+			name: "both at once",
+			serving: func(md *workercore.ModelDeployment) {
+				for i := range md.Spec.Roles {
+					md.Spec.Roles[i].Ports = []workercore.ModelDeploymentPort{
+						{Port: inject.VLLMECSideChannelPort, Protocol: core.ProtocolTCP},
+					}
+					md.Spec.Roles[i].ExtraArgs = []string{
+						fmt.Sprintf("--port=%d", inject.VLLMECSideChannelPort),
+					}
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := epdNetworkRowDeployment(tc.serving)
 
-		for _, row := range modelDeploymentEPDMatrix {
-			assert.True(t, routers[row.router], "router %q", row.router)
-			assert.True(t, engines[row.engine], "engine %q", row.engine)
-			assert.NotEmpty(t, row.platform, "row %+v names no platform", row)
-			assert.NotEmpty(t, row.connector, "row %+v names no connector", row)
-			assert.NotEmpty(t, row.engineFloor, "row %+v names no floor", row)
+			_, err := newModelDeploymentWebhookWith(epdPlatformTypes()).ValidateCreate(
+				context.Background(), md)
+			require.Error(t, err,
+				"the encoder and its side channel would contend for one number in one container")
+			assert.Contains(t, err.Error(), "side channel",
+				"the refusal names the socket rather than a bare number")
+		})
+	}
+}
+
+// TestModelDeploymentWebhook_SideChannelPortIsOrdinaryOnTheSharedRow is the other half of the
+// reservation: the number is only special on the row that binds the socket.
+//
+// THE SHARED ROW CARRIES ITS EMBEDDINGS THROUGH A MOUNTED DIRECTORY and opens no second socket, so
+// its encoder is free to serve on any number. Putting 5601 in the vendor-blind reservation the other
+// listeners use would refuse this deployment for a collision it cannot have.
+func TestModelDeploymentWebhook_SideChannelPortIsOrdinaryOnTheSharedRow(t *testing.T) {
+	md := epdDeployment(func(md *workercore.ModelDeployment) {
+		for i := range md.Spec.Roles {
+			md.Spec.Roles[i].Ports = []workercore.ModelDeploymentPort{
+				{Port: inject.VLLMECSideChannelPort, Protocol: core.ProtocolTCP},
+			}
 		}
 	})
 
-	t.Run("no row names the same combination twice", func(t *testing.T) {
-		seen := map[string]bool{}
-		for _, row := range modelDeploymentEPDMatrix {
-			key := strings.Join([]string{row.router, row.engine, row.platform}, "+")
-			assert.False(t, seen[key], "%s is admitted twice", key)
-			seen[key] = true
-		}
-	})
+	row, admitted := workerctrl.ModelDeploymentEPDRowFor(workercore.ModelDeploymentRouterLLMD,
+		md.Spec.Engine.Name, nodefeature.ManufacturerAscend)
+	require.True(t, admitted, "the shared row is admitted")
 
-	t.Run("no NVIDIA row is admitted", func(t *testing.T) {
-		assert.Nil(t, modelDeploymentEPDRowFor(
-			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
-			nodefeature.ManufacturerNVIDIA),
-			"an NVIDIA combination is admitted only after its proof of concept passes")
-	})
+	assert.Empty(t, validateModelDeploymentEPDSideChannelPort(md, row),
+		"a row that binds no side channel may serve on any number")
+}
 
-	t.Run("the two admitted rows are the ones the design names", func(t *testing.T) {
-		assert.Equal(t, modelDeploymentEPDRowFor(
-			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
-			nodefeature.ManufacturerAscend), modelDeploymentEPDRowFor(
-			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
-			nodefeature.ManufacturerAscend))
+// TestModelDeploymentWebhook_EncoderKeysAreOwnedOnEveryRoleThatRendersThem is the refusal half of
+// the encoder stage's key ownership.
+//
+// THE KEYS ARE NOT OPTIONAL ONCE THE LEG RENDERS. The side-channel variables are the only pointer
+// to the socket a consumer is told to dial, and the transfer flag is the whole document, so a user
+// value for either replaces what the operator rendered rather than adding to it -- and because the
+// two halves read the same leg, one role accepting a value the other writes produces a leg whose
+// ends disagree.
+func TestModelDeploymentWebhook_EncoderKeysAreOwnedOnEveryRoleThatRendersThem(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  string
+	}{
+		{name: "the transfer document", key: "--ec-transfer-config"},
+		{name: "the side channel bind address", key: "VLLM_EC_SIDE_CHANNEL_HOST"},
+		{name: "the side channel port", key: "VLLM_EC_SIDE_CHANNEL_PORT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newModelDeploymentWebhookWith(epdPlatformTypes())
+			md := epdDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Version = "0.30.0"
+				// THE CLAIM STAYS. This fixture is built for the shared-volume row, and dropping
+				// the claim would fail the shared-volume rule as well -- so the object would be
+				// invalid for a second reason and `require.Error` would be satisfied by the wrong
+				// refusal. Only the owned key is meant to be wrong here, and the assertion below
+				// says so rather than leaving it to the reader.
+				for i := range md.Spec.Roles {
+					if tc.key == "--ec-transfer-config" {
+						md.Spec.Roles[i].ExtraArgs = []string{tc.key, "{}"}
+						continue
+					}
+					md.Spec.Roles[i].Env = []workercore.ModelDeploymentEnvVar{
+						{Name: tc.key, Value: "1"},
+					}
+				}
+			})
 
-		ascend := modelDeploymentEPDRowFor(
-			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
-			nodefeature.ManufacturerAscend)
-		require.NotNil(t, ascend)
-		assert.Equal(t, modelDeploymentECConnectorExample, ascend.connector)
-		assert.True(t, ascend.sharedVolume, "the Ascend row carries the encoder leg through a claim")
-
-		rocm := modelDeploymentEPDRowFor(
-			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
-			nodefeature.ManufacturerAMD)
-		require.NotNil(t, rocm)
-		assert.Equal(t, modelDeploymentECConnectorCPU, rocm.connector)
-		assert.False(t, rocm.sharedVolume, "the ROCm row carries the encoder leg over the network")
-	})
+			_, err := w.ValidateCreate(context.Background(), md)
+			require.Error(t, err, "%s is set by the operator and must not be supplied", tc.key)
+			assert.Contains(t, err.Error(), "is set by the operator")
+			assert.NotContains(t, err.Error(), "shared claim",
+				"the fixture must be valid for every rule except the one under test")
+		})
+	}
 }
 
 // TestModelDeploymentMeetsFloor covers the version comparison the matrix floors rest on, including

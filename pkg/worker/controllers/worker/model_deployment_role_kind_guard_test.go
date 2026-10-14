@@ -96,13 +96,13 @@ type roleKindExpectations struct {
 	// Encode produces embeddings; neither is a KV producer.
 	PublishesKVEvents bool
 
-	// EngineSupportVLLM records whether the vLLM renderer has a term for this kind as part of the
-	// KV split. Encode answers false there: the renderer the pair uses does not describe the
-	// encoder-cache leg.
+	// EngineSupportVLLM records whether the vLLM renderer has a term for this kind. Encode answers
+	// true there: the renderer takes an encoder-cache leg and reads the kind off it.
 	EngineSupportVLLM bool
 	// EngineSupportSGLang records the same answer for the SGLang renderer, kept on the same row
-	// because the answer tracks the renderer not the engine. Encode answers true there, since that
-	// engine splits an encoder off its own server rather than through a connector.
+	// because the answer tracks the renderer not the engine. Encode answers true there too, though
+	// that engine reaches the encoder stage by a different term: it splits an encoder off its own
+	// server rather than through a connector.
 	EngineSupportSGLang bool
 }
 
@@ -150,12 +150,13 @@ var expectedRoleKinds = []roleKindExpectations{
 		Upstream: "encode", UpstreamOK: true,
 		PairPrefill: false, PairDecode: false,
 		UsesKVTransfer: false, RoutesViaSidecar: false, PublishesKVEvents: false,
-		// SGLang answers true and vLLM answers false for the same kind, which is the point of
-		// keeping the two on one row: an entry means the RENDERER has a term for the kind, and the
-		// encoder-cache leg reaches each engine by a different one. SGLang splits an encoder off
-		// its own server with --encoder-only; the vLLM family describes it with a connector, and
-		// that renderer has no such term yet.
-		EngineSupportVLLM: false, EngineSupportSGLang: true,
+		// BOTH engines answer true for this kind, which is what the row now records: the encoder
+		// stage reached each renderer and each gave it a term, though not the same one. SGLang
+		// splits an encoder off its own server with --encoder-only and is handed the encoder's
+		// addresses; the vLLM family describes the same leg with a connector configured through
+		// --ec-transfer-config. An entry means the RENDERER has a term for the kind, and which term
+		// is the renderer's business, not the guard's.
+		EngineSupportVLLM: true, EngineSupportSGLang: true,
 	},
 }
 

@@ -400,6 +400,12 @@ func TestEncoderCacheOwnedKeys_CoverEverythingTheLegWrites(t *testing.T) {
 		{name: "the NIXL consumer owns the model runner and the document", in: Input{Role: RolePrefill}, ec: nixlLeg(), owned: true},
 		{name: "the shared producer owns the transfer document alone", in: Input{Role: RoleEncode}, ec: sharedLeg(), owned: true},
 		{name: "the shared consumer owns the transfer document alone", in: Input{Role: RolePrefill}, ec: sharedLeg(), owned: true},
+		// The Ascend legs carry the engine explicitly because EncoderCacheOwnedKeys takes no engine:
+		// these two rows are the only thing tying the vendor that has its own refusal to the same
+		// list the NVIDIA rows above pin. The NIXL connector has no Ascend row because it is refused
+		// there rather than rendered, and a refusal renders nothing to own.
+		{name: "the Ascend shared producer owns the transfer document alone", in: Input{Engine: EngineVLLMAscend, Role: RoleEncode}, ec: sharedLeg(), owned: true},
+		{name: "the Ascend shared consumer owns the transfer document alone", in: Input{Engine: EngineVLLMAscend, Role: RolePrefill}, ec: sharedLeg(), owned: true},
 		// The zero request renders nothing, so it owns nothing. A caller that asked for these keys
 		// on every deployment would otherwise refuse a user's --ec-transfer-config on a deployment
 		// that never had an encoder stage at all.

@@ -11,7 +11,8 @@ its own replicas and resources.
 ## Deployment configuration
 
 [Model Deployment Configuration](deployment.md) starts with a minimal manifest and explains
-the role contract. [Prefill and Decode](prefill-decode.md) covers split roles.
+the role contract. [Prefill and Decode](prefill-decode.md) covers split roles, and
+[Encoder, Prefill and Decode](epd.md) covers multimodal disaggregation.
 [Engine Versions](engine-versions.md) records tested version floors.
 
 Follow [Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/prefill-decode.md) for

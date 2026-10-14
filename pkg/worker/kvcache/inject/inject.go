@@ -194,7 +194,7 @@ func Render(in Input) (*Result, error) {
 
 	switch in.Engine {
 	case EngineVLLM, EngineVLLMAscend:
-		return renderVLLM(in)
+		return renderVLLMWithEncoderCache(in, in.EncoderCache)
 	case EngineSGLang:
 		return renderSGLang(in)
 	default:

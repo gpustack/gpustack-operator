@@ -8,6 +8,7 @@ See [Prefill and Decode](prefill-decode.md) for the External DP boundary within 
 ## Contents
 
 - [Which Pods receive traffic](#which-pods-receive-traffic)
+- [Encoder stage routing](#encoder-stage-routing)
 - [Each router's default](#each-routers-default)
 - [Prefix affinity](#prefix-affinity)
 - [Switching to round robin](#switching-to-round-robin)
@@ -25,7 +26,12 @@ The engine's LB mode determines the candidate endpoints. The Router policy choos
 | Internal Server group | Member 0 of each replica. |
 | Qualified External Server group | Every qualified member; each member serves one DP rank. |
 | Prefill or Decode group | Member 0 of each replica, including groups with `size > 1`. |
+| Encode group | Excluded from answering candidates and the deployment-wide Service. |
 | Unknown mode or unverified group | Keep the existing leader restriction; do not expand discovery. |
+
+`Encode` Pods are excluded from the deployment's answering set.
+They are discovered for stage routing under `llm-d-router`, but the deployment Service never targets them.
+The single-process routers (`vllm-router` and `sglang-gateway`) exclude encoders from their answering selectors.
 
 For an eligible External Server role, Router discovery and ordinary Services omit `member-index=0`.
 They retain the endpoint eligibility label, so an unhealthy group cannot receive new traffic.
@@ -39,6 +45,26 @@ All routed roles must use the same serving port. A shared custom port remains su
 Admission rejects vLLM's MultiPort mode because it starts endpoints on additional, incremented ports.
 A decoder proxy's internal backend port remains separate from its published HTTP port.
 See the [External DP walkthrough](../../walkthroughs/model-deployment/external-dp.md) for a minimal per-rank configuration.
+
+## Encoder stage routing
+
+`llm-d-router` configures stage routing for deployments declaring an `Encode` role.
+The router configuration defines an `encode` scheduling profile and an `encode-pods` filter.
+
+The filter selects Pods matching `modeldeployment.gpustack.ai/role-kind: encode`.
+The `encode` profile runs with that filter alone, omitting queue, KV-cache and prefix scorers.
+An encoder keeps no KV cache and tracks no tokens, so those scorers cannot differentiate candidates.
+
+The `always-disagg-multimodal-decider` inspects incoming requests for media payloads.
+When media is detected, the decider picks an encoder and routes the media through it.
+Text-only requests bypass the encoder stage and route directly to prefill and decode.
+
+The decode Pod's routing sidecar proxy runs with `--ec-connector=ec-example` or `--ec-connector=ec-nixl`.
+The sidecar calls the selected encoder before forwarding the request to the prefiller.
+
+`Encode` Pods are excluded from KV cache event publisher discovery.
+The precise prefix cache producer excludes encoders via `modeldeployment.gpustack.ai/role-kind!=encode`.
+Encoders produce no cache blocks, so subscribing to them would dial an unopened socket.
 
 ## Each router's default
 
@@ -168,8 +194,6 @@ the engine Pods' own counts instead, such as each Pod's TTFT histogram `_count`.
 
 ---
 
-**See also** — [Model Deployment Prefill and Decode](prefill-decode.md)
-for `spec.router` and the flags each router refuses · [Model Deployment Metrics](metrics.md) for the router
-counters a deployment's snapshot reads.
+**See also** — [Model Deployment Prefill and Decode](prefill-decode.md) for `spec.router` and the flags each router refuses · [Model Deployment Encoder Prefill Decode](epd.md) for EPD disaggregation and connector options · [Model Deployment Metrics](metrics.md) for the router counters a deployment's snapshot reads.
 
 **Next** → [Model Deployment Status](status.md)

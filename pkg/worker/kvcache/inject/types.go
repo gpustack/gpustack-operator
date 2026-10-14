@@ -124,10 +124,16 @@ func ParseRole(value string) (Role, error) {
 // The renderers read this table rather than restating it, so it is a live constraint rather than
 // documentation. Substituting an entry changes what renders.
 var engineRoleSupport = map[Engine][]Role{
-	// Both vLLM-family engines share renderVLLM, whose vllmKVRole maps all three onto kv_both,
-	// kv_producer and kv_consumer.
-	EngineVLLM:       {RoleNone, RolePrefill, RoleDecode},
-	EngineVLLMAscend: {RoleNone, RolePrefill, RoleDecode},
+	// Both vLLM-family engines share renderVLLMWithEncoderCache, whose vllmKVRole maps the three
+	// cache roles onto kv_both, kv_producer and kv_consumer.
+	//
+	// RoleEncode is here because this renderer has a term for it: the encoder stage is the producer
+	// half of the encoder-cache leg, rendered onto a container that runs no KV cache of any kind,
+	// while the prefill half reads the same leg back as its consumer (read at vLLM v0.30.0
+	// `vllm/config/ec_transfer.py:12-14`). An entry therefore means the renderer answers, not that
+	// the encoder serves a cache.
+	EngineVLLM:       {RoleNone, RolePrefill, RoleDecode, RoleEncode},
+	EngineVLLMAscend: {RoleNone, RolePrefill, RoleDecode, RoleEncode},
 	// SGLang's store client is role-blind, but its disaggregation arguments carry both roles, so
 	// all three render. The two kinds' ONLY rendering is the disaggregation one, and it follows
 	// the declared pair: a kind without one, which includes every Pod the injection webhook
@@ -298,6 +304,16 @@ type Input struct {
 	// An empty value renders no encoder leg at all, which is what every deployment without an
 	// encoder role declares, so that shape renders exactly as it did before this field existed.
 	EncoderURLs []string
+
+	// EncoderCache is the encoder-cache leg this role runs, named by the caller rather than derived
+	// here. The zero value asks for no leg, which renders nothing and leaves every other field of
+	// this struct to render exactly as it did before the leg existed.
+	//
+	// It is an input because the connector the engine must resolve is not this package's to choose:
+	// it is the row admission admitted for this router, engine and accelerator, and a renderer that
+	// picked one itself would be free to disagree with the object that was accepted. EncoderURLs
+	// above is the other half of the same leg on the engine that carries the addresses instead.
+	EncoderCache EncoderCache
 }
 
 const defaultKVTransferProtocol = "tcp"

@@ -12,160 +12,9 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
-	"gpustack.ai/gpustack/pkg/nodefeature"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
-
-// The encoder-cache connectors an admitted row can name. The names are the upstream ones, because
-// they are what a user reads in an engine log when the leg misbehaves.
-//
-// ECExampleConnector passes the encoder's output through a directory both roles mount. It is the
-// only connector the Ascend example runs, and the only one that needs no copy path of any kind.
-const modelDeploymentECConnectorExample = "ECExampleConnector"
-
-// modelDeploymentECConnectorCPU is the network connector the decode sidecar drives, pulling the
-// embeddings out of the encoder's response over NIXL.
-const modelDeploymentECConnectorCPU = "ECCPUConnector"
-
-// modelDeploymentECCPUConnectorFirstVLLM is the vLLM release carrying the network encoder-cache
-// connectors ECCPUConnector and ECMooncakeConnector.
-// https://github.com/vllm-project/vllm/blob/v0.30.0/docs/features/ec_cpu_connector.md
-const modelDeploymentECCPUConnectorFirstVLLM = "0.30.0"
-
-// modelDeploymentEPDRow is one admitted combination: the router that pairs the roles, the engine
-// that serves them, the accelerator platform they run on, and the connector that carries the
-// encoder's output to the prefiller, with the lowest engine version that connector appears in.
-//
-// The four columns are the ones a user writes, and every one of them has refused a real
-// combination: a router that cannot drive an encoder role, an engine with no encoder arguments, a
-// platform whose connector does not exist, and a connector the platform cannot carry. A row is
-// therefore the whole admission answer, and a combination missing from this table is refused rather
-// than admitted and discovered at container start.
-type modelDeploymentEPDRow struct {
-	// router is the router that pairs the three roles.
-	router string
-	// engine is the engine the roles run.
-	engine string
-	// platform is the accelerator manufacturer every role's instance type must report.
-	platform string
-	// connector is the encoder-cache connector this row renders.
-	connector string
-	// engineFloor is the lowest engine version whose connector this row names.
-	engineFloor string
-	// sharedVolume records that the encoder leg reaches the prefiller through a mounted directory
-	// rather than over the network, which is what brings the claim rule to bear on this row.
-	sharedVolume bool
-}
-
-// modelDeploymentEPDMatrix holds every admitted combination.
-//
-// IT STARTS WITH NO NVIDIA ROW, and that is the state of the work rather than an oversight: an
-// NVIDIA combination is admitted only after its proof of concept passes, and none has. The rows
-// below are the two the design admits at once, implemented from the upstream code and marked
-// unverified until their verification passes.
-var modelDeploymentEPDMatrix = []modelDeploymentEPDRow{
-	{
-		// vLLM on Ascend, fronted by llm-d-router, with the encoder's output carried through a
-		// directory the user attaches to both roles as a shared ReadWriteMany claim.
-		//
-		// ECExampleConnector is the connector the upstream Ascend example itself runs:
-		// https://github.com/vllm-project/vllm-ascend/blob/v0.23.0/docs/source/user_guide/feature_guide/epd_disaggregation.md
-		// It is also the only one that works there, because the network connectors have no NPU copy
-		// path and Ascend's EC and KV legs use files, MemCache and Mooncake over the ascend protocol,
-		// never UCX or NIXL.
-		//
-		// THE FLOOR IS THE ONE THAT UPSTREAM EXAMPLE RECORDS, reached through vllm-ascend's own
-		// versioning: it cuts a release branch beside each vLLM release and asks for vLLM at the same
-		// version as itself, so the v0.23.0 line is vLLM 0.23.0. That sits above each leg this row
-		// needs on its own -- ECExampleConnector arrived in 0.13.0, and MooncakeConnectorV1 was
-		// recorded at 0.19.1 -- and it is the floor the pair can actually run at, because neither leg
-		// can move up without the plugin moving with it.
-		router:       workercore.ModelDeploymentRouterLLMD,
-		engine:       workercore.ModelDeploymentEngineVLLM,
-		platform:     nodefeature.ManufacturerAscend,
-		connector:    modelDeploymentECConnectorExample,
-		engineFloor:  "0.23.0",
-		sharedVolume: true,
-	},
-	{
-		// vLLM on ROCm, fronted by llm-d-router, with the encoder's output pulled over NIXL by the
-		// decode sidecar rather than through a mounted directory.
-		//
-		// ECCPUConnector is the connector this platform takes, and the floor is the release the
-		// network connectors appear in. NIXL supports ROCm from v1.3.0
-		// (https://github.com/ai-dynamo/nixl/releases/tag/v1.3.0), so the engine floor and the
-		// transport floor do not bind differently here. No required ROCm test of NIXL's UCX backend
-		// was found upstream, which is why the row is admitted and marked unverified.
-		//
-		// A shared claim buys nothing on this row, so the claim rule does not apply: the sidecar reads
-		// the encoder's response and pulls the embeddings itself.
-		router:      workercore.ModelDeploymentRouterLLMD,
-		engine:      workercore.ModelDeploymentEngineVLLM,
-		platform:    nodefeature.ManufacturerAMD,
-		connector:   modelDeploymentECConnectorCPU,
-		engineFloor: modelDeploymentECCPUConnectorFirstVLLM,
-	},
-}
-
-// modelDeploymentEPDMatrixSummary renders every admitted row, for a refusal to name beside the
-// combination it refused. A user told a combination is not admitted can otherwise only read the
-// table, which is not something they can see.
-func modelDeploymentEPDMatrixSummary() string {
-	rows := make([]string, 0, len(modelDeploymentEPDMatrix))
-	for _, row := range modelDeploymentEPDMatrix {
-		rows = append(rows, fmt.Sprintf(
-			"%s+%s+%s+%s>=%s", row.router, row.engine, row.platform, row.connector, row.engineFloor))
-	}
-
-	return strings.Join(rows, ", ")
-}
-
-// modelDeploymentEPDRowFor returns the admitted row for this combination, or nil.
-func modelDeploymentEPDRowFor(router, engine, platform string) *modelDeploymentEPDRow {
-	for i := range modelDeploymentEPDMatrix {
-		row := &modelDeploymentEPDMatrix[i]
-		if row.router == router && row.engine == engine && row.platform == platform {
-			return row
-		}
-	}
-
-	return nil
-}
-
-// modelDeploymentEPDMatrixNames reports whether any admitted row satisfies the predicate.
-func modelDeploymentEPDMatrixNames(match func(*modelDeploymentEPDRow) bool) bool {
-	for i := range modelDeploymentEPDMatrix {
-		if match(&modelDeploymentEPDMatrix[i]) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// modelDeploymentEPDMatrixGap names the column a combination misses, so a refusal says which side is
-// absent rather than only that the combination is. It returns the empty string when the combination
-// is admitted.
-func modelDeploymentEPDMatrixGap(router, engine, platform string) string {
-	if modelDeploymentEPDRowFor(router, engine, platform) != nil {
-		return ""
-	}
-
-	named := modelDeploymentEPDMatrixNames
-
-	switch {
-	case router == "":
-		return "no router is named, so nothing pairs the three roles"
-	case !named(func(row *modelDeploymentEPDRow) bool { return row.router == router }):
-		return fmt.Sprintf("router %q is not admitted for an encoder role", router)
-	case !named(func(row *modelDeploymentEPDRow) bool { return row.router == router && row.engine == engine }):
-		return fmt.Sprintf("router %q is not admitted with engine %q", router, engine)
-	default:
-		return fmt.Sprintf(
-			"platform %q is not admitted for encoder roles under router %q and engine %q",
-			platform, router, engine)
-	}
-}
 
 // modelDeploymentSemver gives the engine version the leading v that semver comparison requires and
 // that the version strings in this API do not carry. A version already carrying one is left alone,
@@ -267,17 +116,27 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentEPD(
 	}
 
 	router := modelDeploymentRouterName(md)
-	if gap := modelDeploymentEPDMatrixGap(router, md.Spec.Engine.Name, platform); gap != "" {
+	if gap := workerctrl.ModelDeploymentEPDMatrixGap(router, md.Spec.Engine.Name, platform); gap != "" {
 		return append(errs, field.Invalid(field.NewPath("spec", "engine", "name"), md.Spec.Engine.Name, fmt.Sprintf(
 			"%s; an encoder role is admitted only for a combination this operator has run, and the "+
-				"admitted rows are %s", gap, modelDeploymentEPDMatrixSummary()))), nil
+				"admitted rows are %s", gap, workerctrl.ModelDeploymentEPDMatrixSummary()))), nil
 	}
 
-	row := modelDeploymentEPDRowFor(router, md.Spec.Engine.Name, platform)
+	// The gap check above has already refused every combination this cannot answer for, so the row
+	// is here. The second return is stated rather than dropped, because discarding it would leave a
+	// future edit moving the gap check without noticing it had stopped guaranteeing the row.
+	row, admitted := workerctrl.ModelDeploymentEPDRowFor(router, md.Spec.Engine.Name, platform)
+	if !admitted {
+		return append(errs, field.Invalid(field.NewPath("spec", "engine", "name"),
+			md.Spec.Engine.Name, "no admitted row for the combination the gap check reported one "+
+				"for; this is the operator's own tables disagreeing, not a field to correct")), nil
+	}
+
 	errs = append(errs, validateModelDeploymentEPDEngineVersion(md, row)...)
-	if row.sharedVolume {
+	if row.SharedVolume {
 		errs = append(errs, validateModelDeploymentEPDSharedVolume(md, row)...)
 	}
+	errs = append(errs, validateModelDeploymentEPDSideChannelPort(md, row)...)
 
 	return errs, nil
 }
@@ -504,9 +363,73 @@ func (r *ModelDeploymentWebhook) modelDeploymentEPDPlatform(
 	return platform, errs, nil
 }
 
+// validateModelDeploymentEPDSideChannelPort refuses an encoder whose own HTTP port is the port its
+// side channel needs.
+//
+// THE COLLISION IS BETWEEN TWO WRITERS IN ONE CONTAINER. An NIXL producer binds a ZMQ ROUTER socket
+// on the side-channel port in the same container that serves HTTP, so an encoder serving there puts
+// the engine's own server on the socket the consumers dial for embeddings. One of the two loses the
+// bind, and which one is not decided here -- the symptoms land as a leg that never starts or a
+// consumer that connects to an HTTP server, with nothing in either log naming the collision.
+//
+// BOTH SPELLINGS ARE REFUSED, because a role can name its serving port two ways and the render
+// honors either one. A declared `ports` entry is what the operator renders into the engine's
+// --port, and it takes precedence: a role declaring a port is held to the first of them
+// (`modelDeploymentTargetPort`), so a role may pass --port AND declare one. Reading only the flag
+// would leave the declared spelling unguarded, and the refusal would name a number the render does
+// not use.
+//
+// ONLY THE NETWORK ROW CAN COLLIDE, because the side channel is what the network connector renders.
+// The shared-directory row carries its embeddings through a mounted path and binds no second socket,
+// so its encoder is free to serve on that number. This rule therefore stays beside the matrix rather
+// than joining `modelDeploymentRouterReservedPorts`, which is vendor-blind by construction and would
+// have to over-claim the shared row.
+//
+// A ROLE NAMING NEITHER SERVES ON THE DEFAULT, which is not this number, so there is nothing to
+// refuse.
+func validateModelDeploymentEPDSideChannelPort(
+	md *workercore.ModelDeployment, row workerctrl.ModelDeploymentEPDRow,
+) field.ErrorList {
+	if row.Connector != workerctrl.ModelDeploymentECConnectorCPU {
+		return nil
+	}
+
+	encodeIdx := modelDeploymentRoleIndexOfKind(md, workercore.ModelDeploymentRoleKindEncode)
+	if encodeIdx < 0 {
+		return nil
+	}
+
+	role := &md.Spec.Roles[encodeIdx]
+	rolesPath := field.NewPath("spec", "roles").Index(encodeIdx)
+	refusal := func(path *field.Path, value any) field.ErrorList {
+		return field.ErrorList{field.Invalid(path, value, fmt.Sprintf(
+			"role %q serves HTTP on port %d, which is the port %s binds its side channel on: the "+
+				"engine would serve on the socket every consumer dials for embeddings, and one of "+
+				"the two fails to bind",
+			role.Name, inject.VLLMECSideChannelPort, row.Connector))}
+	}
+
+	// The declared set is read first because it is the one the render prefers: where a role
+	// declares a port, the flag is held to it rather than consulted.
+	var errs field.ErrorList
+	for _, port := range role.Ports {
+		if port.Port == inject.VLLMECSideChannelPort {
+			errs = append(errs, refusal(rolesPath.Child("ports"), port.Port)...)
+		}
+	}
+
+	if listen, ok := workerctrl.ModelDeploymentRoleListenPort(md.Spec.Engine.Name, role); ok &&
+		listen == inject.VLLMECSideChannelPort {
+		errs = append(errs, refusal(rolesPath.Child("extraArgs"),
+			fmt.Sprintf("--port=%d", listen))...)
+	}
+
+	return errs
+}
+
 // validateModelDeploymentEPDEngineVersion refuses an engine version this row cannot run.
 func validateModelDeploymentEPDEngineVersion(
-	md *workercore.ModelDeployment, row *modelDeploymentEPDRow,
+	md *workercore.ModelDeployment, row workerctrl.ModelDeploymentEPDRow,
 ) field.ErrorList {
 	versionPath := field.NewPath("spec", "engine", "version")
 
@@ -514,16 +437,16 @@ func validateModelDeploymentEPDEngineVersion(
 		return field.ErrorList{field.Required(versionPath, fmt.Sprintf(
 			"an encoder role needs the engine version to be set: %s first appears in vLLM %s, and a "+
 				"version this object does not name cannot be compared against that floor",
-			row.connector, row.engineFloor))}
+			row.Connector, row.EngineFloor))}
 	}
 
-	if modelDeploymentMeetsFloor(md.Spec.Engine.Version, row.engineFloor) {
+	if modelDeploymentMeetsFloor(md.Spec.Engine.Version, row.EngineFloor) {
 		return nil
 	}
 
 	return field.ErrorList{field.Invalid(versionPath, md.Spec.Engine.Version, fmt.Sprintf(
 		"%s carries %s from vLLM %s, so this deployment needs that version or later; %s is below it",
-		row.connector, row.platform, row.engineFloor, md.Spec.Engine.Version))}
+		row.Connector, row.Platform, row.EngineFloor, md.Spec.Engine.Version))}
 }
 
 // validateModelDeploymentEPDSharedVolume refuses an encoder leg that the two roles cannot both read.
@@ -535,7 +458,7 @@ func validateModelDeploymentEPDEngineVersion(
 // The encoder's own mount is refused read-only, because the encoder writes the embeddings it is
 // asked for and a read-only mount makes that write fail at run time rather than at admission.
 func validateModelDeploymentEPDSharedVolume(
-	md *workercore.ModelDeployment, row *modelDeploymentEPDRow,
+	md *workercore.ModelDeployment, row workerctrl.ModelDeploymentEPDRow,
 ) field.ErrorList {
 	var errs field.ErrorList
 
@@ -559,14 +482,14 @@ func validateModelDeploymentEPDSharedVolume(
 			"role %q is the encoder-cache producer on %s, and %s carries its output through a "+
 				"directory rather than over the network: attach the shared claim the prefiller mounts "+
 				"as an additionalVolumes entry naming a persistentVolumeClaim",
-			encode.Name, row.platform, row.connector)))
+			encode.Name, row.Platform, row.Connector)))
 	}
 
 	if encodeMount.ReadOnly {
 		errs = append(errs, field.Forbidden(encodePath.Child("readOnly"), fmt.Sprintf(
 			"role %q writes the embeddings %s carries, so its mount must not be read-only: the "+
 				"encoder's write would fail once the Pod is running, with nothing in the object to say "+
-				"so", encode.Name, row.connector)))
+				"so", encode.Name, row.Connector)))
 	}
 
 	prefillPath := rolesPath.Index(prefillIdx).Child("additionalVolumes")
@@ -575,7 +498,7 @@ func validateModelDeploymentEPDSharedVolume(
 		return append(errs, field.Required(prefillPath, fmt.Sprintf(
 			"role %q reads the embeddings %s carries out of the directory role %q writes them to, "+
 				"and mounts nothing: attach the same claim role %q mounts",
-			md.Spec.Roles[prefillIdx].Name, row.connector, encode.Name, encode.Name)))
+			md.Spec.Roles[prefillIdx].Name, row.Connector, encode.Name, encode.Name)))
 	}
 
 	for _, mismatch := range []struct {
@@ -593,7 +516,7 @@ func validateModelDeploymentEPDSharedVolume(
 		errs = append(errs, field.Invalid(encodePath.Child("mountPath"), encodeMount.MountPath, fmt.Sprintf(
 			"role %q and role %q must name the same %s for %s to carry the encoder's output between "+
 				"them, and they do not",
-			encode.Name, md.Spec.Roles[prefillIdx].Name, mismatch.name, row.connector)))
+			encode.Name, md.Spec.Roles[prefillIdx].Name, mismatch.name, row.Connector)))
 	}
 
 	return errs

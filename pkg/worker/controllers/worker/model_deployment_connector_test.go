@@ -1601,6 +1601,50 @@ func TestModelDeploymentOwnedAndDefaultedCannotDisagree(t *testing.T) {
 			assertOwnedAndDefaultedAgree(t, in)
 		})
 	}
+
+	// THE ENCODER STAGE IS A THIRD AXIS, and it is the one the ownership table had no rows for when
+	// the encoder cache reached the renderer: the connector's keys are emitted only by a role the
+	// leg reached, so a table that never listed them would stay green through every row above while
+	// a user value for them was honored over the operator's.
+	//
+	// ONLY THE TWO ROLES THAT CARRY A HALF OF IT, named rather than sliced off kinds: a decode role
+	// renders nothing from the leg and a server role is not part of the shape, so running them
+	// would assert nothing while reading as coverage. Every carrier runs both, so a key any backend
+	// emits on either half has to be owned for that engine.
+	encoderKinds := []workercore.ModelDeploymentRoleKind{
+		workercore.ModelDeploymentRoleKindPrefill,
+		workercore.ModelDeploymentRoleKindEncode,
+	}
+	for _, c := range carriers {
+		for _, kind := range encoderKinds {
+			t.Run(c.engine+"_on_"+c.manufacturer+"_encoder_leg_as_"+string(kind), func(t *testing.T) {
+				in := connectorInputForKind(c.engine, c.manufacturer, kind)
+
+				// AN ENCODER IS BUILT WITHOUT THE POOL, which is the input it arrives with rather
+				// than a way of making the assertion pass: the renderer refuses a cache on this role
+				// outright, so a fixture carrying one would report that refusal as the disagreement
+				// the test exists to catch. The transport travels with the pool and goes with it,
+				// since one of the two alone already counts as a pool the role was handed.
+				if kind == workercore.ModelDeploymentRoleKindEncode {
+					in.MasterServerAddress = ""
+					in.Domain = ""
+					in.Protocols = nil
+				}
+
+				switch c.engine {
+				case workercore.ModelDeploymentEngineVLLM:
+					in.EncoderCache = inject.EncoderCache{
+						Connector:         ModelDeploymentECConnectorExample,
+						SharedStoragePath: "/shared/encodings",
+					}
+				default:
+					// SGLang takes addresses rather than a connector, and refuses the pair.
+					in.EncoderURLs = []string{"http://qwen-encode:9100"}
+				}
+				assertOwnedAndDefaultedAgree(t, in)
+			})
+		}
+	}
 }
 
 func assertOwnedAndDefaultedAgree(t *testing.T, in ModelDeploymentConnectorInput) {

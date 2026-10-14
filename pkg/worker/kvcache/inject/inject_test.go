@@ -1114,20 +1114,35 @@ func TestRender_TransportIsCheckedAtTheFunnel(t *testing.T) {
 // handed some engine a leg the admission handler cannot know about would report agreement on an
 // input the disagreement never occurs on.
 //
+// THE ENCODER ROW IS THE ONE THAT CANNOT CARRY THE CONNECTION, and it is built rather than derived
+// for that reason. Every other role is asked with a store, which is what a pooled deployment has;
+// an encoder holds no KV cache at all, so a store would be refused for the role itself and the case
+// would report a disagreement that is about the fixture. The leg it is given instead is the
+// encoder-cache one, which is what an encoder is configured with -- so the row still asks the
+// question the test exists for, on the input that role actually arrives with.
+//
 // The pairs are enumerated from Engines() and the whole role set rather than listed, so an engine
 // added to the package without a table entry fails here instead of silently reporting false.
 func TestSupportsRole_AgreesWithRender(t *testing.T) {
-	roles := map[string]Role{"none": RoleNone, "prefill": RolePrefill, "decode": RoleDecode}
+	roles := map[string]Role{"none": RoleNone, "prefill": RolePrefill, "decode": RoleDecode, "encode": RoleEncode}
 
 	for _, engine := range Engines() {
 		for label, role := range roles {
 			t.Run(string(engine)+"/"+label, func(t *testing.T) {
-				// The connection follows the engine, so this measures the ROLE axis alone. With one
-				// transport for every engine, vLLM-Ascend would be refused on all three roles and
-				// this would report a role disagreement that is not there.
-				_, err := Render(Input{
-					Engine: engine, Role: role, Connection: testConnectionFor(engine),
-				})
+				in := Input{Engine: engine, Role: role}
+				if role == RoleEncode {
+					in.EncoderCache = EncoderCache{
+						Connector: vllmECExampleConnector, SharedStoragePath: "/shared/encodings",
+					}
+				} else {
+					// The connection follows the engine, so this measures the ROLE axis alone. With
+					// one transport for every engine, vLLM-Ascend would be refused on all the
+					// store-carrying roles and this would report a role disagreement that is not
+					// there.
+					in.Connection = testConnectionFor(engine)
+				}
+
+				_, err := Render(in)
 
 				assert.Equal(t, err == nil, SupportsRole(engine, role),
 					"the table and the renderer must answer alike for %q/%q", engine, role)

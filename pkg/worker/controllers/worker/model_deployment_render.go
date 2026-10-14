@@ -208,6 +208,16 @@ const (
 	// startup budget above to load, so only a failure that outlives the readiness one should reach
 	// it.
 	modelDeploymentLivenessFailureThreshold int32 = 6
+
+	// The three values below replace their counterparts above on a prefiller that dials an encoder
+	// stage by address. Its health route answers late, or not at all, while the encoder is busy
+	// with a large media payload or is restarting. With the defaults, an encoder stall would both
+	// withdraw a healthy prefiller and, through the liveness gate, restart it. The wider gates keep
+	// the same ratio between readiness and liveness: sixty and one hundred and twenty seconds at
+	// the period above.
+	modelDeploymentEncoderProbeTimeoutSeconds       int32 = 5
+	modelDeploymentEncoderReadinessFailureThreshold int32 = 6
+	modelDeploymentEncoderLivenessFailureThreshold  int32 = 12
 )
 
 // modelDeploymentListenArgs are the listen and TLS flags each engine registers: the set the render
@@ -259,6 +269,17 @@ type ModelDeploymentRenderInput struct {
 	// Connector is what the engine needs to reach the pool. Its zero value renders a replica with
 	// no connector at all, which is what a deployment whose Binding has not been resolved yet gets.
 	Connector ModelDeploymentConnectorRender
+	// ECConnector is the encoder-cache connector the decode sidecar is told to drive, in the
+	// SIDECAR's own spelling, or empty when this deployment runs no encoder stage.
+	//
+	// IT IS THE MATRIX ROW'S ANSWER, RESOLVED BY THE CALLER rather than re-derived from the
+	// platform here. The row is admission's whole answer for a router/engine/accelerator
+	// combination, and the render already carries a copy of it inside Connector.Args for the engine
+	// half; re-deriving the sidecar half from the platform beside it would be a second switch over
+	// one platform, and two switches are two answers to one question. Empty renders no flag, which
+	// the sidecar reads as "skip the encoder stage" -- so the two reasons an empty value occurs
+	// (no Encode role, or an unadmitted combination) render identically rather than differently.
+	ECConnector string
 	// InterfaceResource is the extended resource selected from the role's effective fabric
 	// protocol. It is empty when the role requests no interface.
 	InterfaceResource core.ResourceName
@@ -498,7 +519,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		probeScheme = core.URISchemeHTTP
 		probePath = modelDeploymentDirectDecodeProbePath
 	}
-	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(servingPort, probeScheme, probePath, gradable)
+	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(
+		servingPort, probeScheme, probePath, gradable, modelDeploymentProbesEncoderStage(md, role, takeOver))
 	ports, err := appendModelDeploymentConnectorPorts(declaredPorts, in.Connector, takeOver)
 	if err != nil {
 		return nil, err
@@ -579,7 +601,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		manufacturer := in.InstanceType.Status.Detail.Manufacturer
 		sidecar := renderModelDeploymentRoutingSidecar(
 			ctx, role, enginePort, scheme, md.Spec.Engine.Name, in.NativeSidecar,
-			manufacturer, modelDeploymentSidecarECConnector(md, manufacturer))
+			manufacturer, in.ECConnector)
 		if in.NativeSidecar {
 			pod.Spec.InitContainers = []core.Container{sidecar}
 		} else {
@@ -891,39 +913,6 @@ const (
 	// of any kind and is the only one the Ascend example runs.
 	modelDeploymentECConnectorExample = "ec-example"
 )
-
-// modelDeploymentSidecarECConnector returns the encoder-cache connector the decode sidecar drives
-// for this deployment, or "" when it runs no encoder stage at all.
-//
-// AN ABSENT VALUE IS A VALUE HERE. Upstream leaves --ec-connector empty by default and an empty one
-// silently tells the sidecar to skip the encoder stage (the sidecar validates the flag only when it
-// is non-empty, `pkg/sidecar/proxy/options.go:670-675`). Nothing would flag a wrong empty value, so
-// a deployment without an encoder role renders no flag, and one with an encoder role always names
-// a connector.
-//
-// THE PLATFORM DECIDES BECAUSE THE PLATFORM IS THE LEG. There is no copy path for NIXL to take on
-// Ascend, so that platform runs the shared directory the user attaches to both roles, and every
-// platform that does have one pulls over the network.
-//
-// ONE RESOLUTION, RENDERED ONCE. This is the single place the encoder leg's transport is decided
-// for the data plane. The sidecar renderer takes the answer as a value rather than re-deriving the
-// platform beside the KV connector it already dispatches on, because two switches over one platform
-// are two answers to one question, and they would be free to disagree.
-func modelDeploymentSidecarECConnector(
-	md *workercore.ModelDeployment, manufacturer string,
-) string {
-	declaresEncode := slices.ContainsFunc(md.Spec.Roles, func(role workercore.ModelDeploymentRole) bool {
-		return ModelDeploymentEffectiveRoleKind(&role) == workercore.ModelDeploymentRoleKindEncode
-	})
-	if !declaresEncode {
-		return ""
-	}
-	if manufacturer == nodefeature.ManufacturerAscend {
-		return modelDeploymentECConnectorExample
-	}
-
-	return modelDeploymentECConnectorNIXL
-}
 
 func renderModelDeploymentRoutingSidecar(
 	ctx context.Context,
@@ -1361,7 +1350,7 @@ func ModelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
 // the route the sidecar forwards to the engine instead -- a different path on the SAME address,
 // which leaves the one-fact property above intact.
 func modelDeploymentProbes(
-	servingPort core.ContainerPort, scheme core.URIScheme, path string, gradable bool,
+	servingPort core.ContainerPort, scheme core.URIScheme, path string, gradable, probesEncoder bool,
 ) (startup, readiness, liveness *core.Probe) {
 	if !gradable {
 		return nil, nil, nil
@@ -1372,6 +1361,14 @@ func modelDeploymentProbes(
 	}
 
 	port := intstr.FromInt32(servingPort.ContainerPort)
+	timeout := modelDeploymentProbeTimeoutSeconds
+	readinessThreshold := modelDeploymentReadinessFailureThreshold
+	livenessThreshold := modelDeploymentLivenessFailureThreshold
+	if probesEncoder {
+		timeout = modelDeploymentEncoderProbeTimeoutSeconds
+		readinessThreshold = modelDeploymentEncoderReadinessFailureThreshold
+		livenessThreshold = modelDeploymentEncoderLivenessFailureThreshold
+	}
 	gate := func(failureThreshold int32) *core.Probe {
 		return &core.Probe{
 			ProbeHandler: core.ProbeHandler{
@@ -1382,14 +1379,27 @@ func modelDeploymentProbes(
 				},
 			},
 			PeriodSeconds:    modelDeploymentProbePeriodSeconds,
-			TimeoutSeconds:   modelDeploymentProbeTimeoutSeconds,
+			TimeoutSeconds:   timeout,
 			FailureThreshold: failureThreshold,
 		}
 	}
 
 	return gate(modelDeploymentStartupFailureThreshold),
-		gate(modelDeploymentReadinessFailureThreshold),
-		gate(modelDeploymentLivenessFailureThreshold)
+		gate(readinessThreshold),
+		gate(livenessThreshold)
+}
+
+// modelDeploymentProbesEncoderStage reports whether a role's gates grade a server that depends on
+// the encoder stage: an operator-built prefiller of an engine that reaches its encoder by address,
+// in a deployment that declares one. Every other role, and every deployment without an encoder,
+// keeps the default gates, so what they render does not change.
+func modelDeploymentProbesEncoderStage(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, takeOver bool,
+) bool {
+	return !takeOver &&
+		modelDeploymentDeclaresEncoder(md) &&
+		modelDeploymentEPDSplitsEncoderByAddress(md.Spec.Engine.Name) &&
+		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindPrefill
 }
 
 // mergeModelDeploymentEnv folds the operator's environment and the role's into one list.

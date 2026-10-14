@@ -606,12 +606,21 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       A user value for an owned key is refused, in every spelling of the flag.
       Verify: `go test ./pkg/worker/kvcache/inject/ -count=1`
 
-- [ ] **T7b · vLLM-Ascend engine leg**
+- [x] **T7b · vLLM-Ascend engine leg**
       Blocked by: T7a
       Owns: `pkg/worker/kvcache/inject/vllm*.go`
       Gate: review
       Acceptance: Ascend uses `ECExampleConnector` with the user-attached claim and keeps `MooncakeConnectorV1` for KV.
       Verify: `go test ./pkg/worker/kvcache/inject/ -count=1`
+
+- [x] **T7c · Controller wiring for the encoder stage**
+      Blocked by: T7a, T7b, T8, T9, T12a
+      Owns: `pkg/worker/controllers/worker/model_deployment.go`, `pkg/worker/controllers/worker/model_deployment_connector*.go`, `pkg/worker/controllers/worker/model_deployment_render.go`, `pkg/worker/kvcache/inject/inject.go`, `pkg/worker/kvcache/inject/types.go`, `pkg/worker/kvcache/inject/inject_test.go`, `pkg/worker/webhooks/worker/model_deployment_epd.go`
+      Gate: review
+      Acceptance: the controller calls the engine renderer for `Encode`, gives `Prefill` its encoder list (the per-role Service address for SGLang) and its encoder-cache request, and reserves the side-channel port on `Encode`.
+      The engine, the platform and the admitted matrix row decide the connector, and the sidecar flag reads the same row.
+      The owned-key set covers the encoder-cache keys, and a role without a front door is never the answering role.
+      Verify: `go test ./pkg/worker/controllers/worker/ ./pkg/worker/kvcache/... -count=1`
 
 - [x] **T8 · SGLang engine leg**
       Blocked by: T4
@@ -622,7 +631,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       Prefill/decode rendering without `Encode` is unchanged.
       Verify: `go test ./pkg/worker/kvcache/inject/ -count=1`
 
-- [ ] **T9 · `llm-d-router` rendering**
+- [x] **T9 · `llm-d-router` rendering**
       Blocked by: T4, T6
       Owns: `pkg/worker/kvcache/router/router*.go`, `pkg/worker/controllers/worker/model_deployment_router.go`, `pkg/worker/controllers/worker/model_deployment_render.go`
       Gate: review
@@ -632,12 +641,20 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       The decode sidecar gets `--ec-connector` for the engine leg.
       Verify: `go test ./pkg/worker/kvcache/router/ ./pkg/worker/controllers/worker/ -count=1`
 
-- [ ] **T10 · `vllm-router` and `sglang-gateway` rendering**
+- [x] **T10 · `sglang-gateway` and `vllm-router` selectors**
       Blocked by: T4, T2b
       Owns: `pkg/worker/kvcache/router/argv*.go`
       Gate: review
-      Acceptance: `vllm-router` receives its encoder list, behind the T3c result.
-      `sglang-gateway` renders prefill/decode as before, and `Encode` is in none of its selectors, in every role order.
+      Acceptance: `sglang-gateway` and `vllm-router` render prefill/decode as before, and `Encode` is in none of their selectors, in every role order.
+      A router that cannot split the roles refuses an `Encode` role.
+      Verify: `go test ./pkg/worker/kvcache/router/ -count=1`
+
+- [ ] **T10b · `vllm-router` encoder list**
+      Blocked by: T3c, T9, T7c
+      Owns: `pkg/worker/kvcache/router/argv*.go`, `pkg/worker/kvcache/router/router.go`
+      Gate: review
+      Acceptance: `vllm-router` receives `--epd-config` with the encoder Service URL and no `consumer_zmq_addrs`, and it stays out of IGW mode.
+      The documentation states that dynamic P/D discovery is not supported with EPD upstream, unless the proof of concept shows otherwise.
       Verify: `go test ./pkg/worker/kvcache/router/ -count=1`
 
 - [ ] **T11 · Settings: router and sidecar image defaults**
@@ -668,14 +685,14 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
 
 **Phase 3. Documents and cases.**
 
-- [ ] **T13 · Documents**
+- [x] **T13 · Documents**
       Blocked by: T5, T7a, T8, T9
       Owns: `docs/modules/model-deployment/epd.md`, `docs/modules/model-deployment/engine-versions.md`, `docs/modules/model-deployment/routing.md`, `docs/modules/model-deployment/status.md`, `docs/modules/model-deployment/_index.md`, `docs/README.md`
       Acceptance: F10 holds, and the limits of F10 sit beside each admission rule.
       `make lint docs` passes.
       Verify: `make lint docs`
 
-- [ ] **T14a · End-to-end cases without an accelerator (116 to 119)**
+- [x] **T14a · End-to-end cases without an accelerator (116 to 119)**
       Blocked by: T5, T6, T12a
       Owns: `.agents/skills/gpustack-operator-e2e/cases/case-116.sh` to `case-119.sh`, `.agents/skills/gpustack-operator-e2e/SKILL.md`
       Acceptance: cases cover admission refusals, three-group joint admission, role Services and the claim mount.
@@ -683,7 +700,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       Verify: `make lint agents-shell` and a run on the cluster through the end-to-end skill.
 
 - [ ] **T14b · End-to-end cases with an accelerator (120 to 125)**
-      Blocked by: T14a, T7a, T8, T9, T11
+      Blocked by: T14a, T7a, T7c, T8, T9, T11
       Owns: `.agents/skills/gpustack-operator-e2e/cases/case-120.sh` to `case-125.sh`, `.agents/skills/gpustack-operator-e2e/SKILL.md`
       Acceptance: one functional case per combination: vLLM with `llm-d-router`, with `ec-example`, SGLang, `vllm-router`, Ascend and ROCm.
       The Ascend and ROCm cases skip with a named reason when the hardware is absent.
@@ -722,7 +739,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
 
 **Agent assignment (proposed).**
 The lead runs T1, T15 and T17, and owns every commit and merge.
-mcode takes T2, T2b, T3a to T3c, T5, T7a, T7b, T9 and T14b.
+mcode takes T2, T2b, T3a to T3c, T5, T7a, T7b, T7c, T9, T10b and T14b.
 qwen takes T0, T4, T8 and T14a, and reviews every omp task.
 omp takes T6, T10, T11, T12a and T12b, and qwen redoes any omp work that review rejects.
 agy takes T13 and T16.
@@ -818,6 +835,15 @@ The cluster comes from `testing/infra`.
   Extending `additionalVolumes` costs one field and one render branch, and other features can use it.
 - **Use the claim source of `ModelArtifact` for the shared volume.**
   It mounts read-only, so the encoder cannot write.
+- **Use vLLM-Ascend `ECMemcacheConnector` instead of the shared volume on Ascend.**
+  The connector ships in vLLM-Ascend `v0.30.0rc1` and `v0.30.0rc2`.
+  It keys a shared encoder cache on `mm_hash` and moves data between the NPU and the pool without a host copy.
+  Both the encoder and the prefill roles use it with `ec_role` `ec_both`, and the pool decides eviction.
+  It removes the ReadWriteMany claim, and a repeated image skips the encoder even without EPD.
+  It needs a MemCache metadata service, a `mmc-local.conf` file for each engine process (`MMC_LOCAL_CONFIG_PATH`) and the `memcache_hybrid` packages that the Ascend images carry.
+  The operator has no MemCache support today, so a deployment would need a new component to run and size the pool.
+  The upstream EPD guide still names `ExampleConnector`, and the connector has unit tests only.
+  The project keeps the shared volume here and treats MemCache as a later spec: first decide how the operator manages the pool (the existing KV cache pool is the closest model), then prove it on hardware.
 
 ## Open Questions
 
