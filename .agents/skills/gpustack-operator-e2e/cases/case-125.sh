@@ -120,6 +120,8 @@ for n in json.load(sys.stdin).get("items",[]):
         continue
     if n.get("spec",{}).get("unschedulable"):
         continue
+    if n.get("metadata",{}).get("labels",{}).get("feature.gpustack.ai/acceleratable") == "true":
+        continue
     ts=n.get("spec",{}).get("taints",[])
     if any(str(t.get("key","")).startswith("node-role.kubernetes.io/") for t in ts):
         continue

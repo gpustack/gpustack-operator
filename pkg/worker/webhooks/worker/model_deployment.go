@@ -1024,6 +1024,7 @@ var modelDeploymentRouterOwnedArgs = map[string][]string{
 		"--prefill-selector",
 		"--decode-selector",
 		"--vllm-pd-disaggregation",
+		"--epd-config",
 	},
 	// The same catalog as the row above MINUS the two flags that project does not have: its
 	// transfer backend is the engine's, and its disaggregation switch is spelled without the
@@ -1291,10 +1292,18 @@ func modelDeploymentRouterReservedPorts(
 		// reservation reads the same rule. It also renders only where the render can synthesize a
 		// connector at all, read from the predicate that gates the render: a pair with neither a
 		// router nor a cache renders none, and its prefiller keeps the port free.
+		//
+		// AN ENCODER ROLE ADDS A SECOND LISTENER on the same prefiller. The language-only engine
+		// binds its encoder bootstrap port as well as its own, so a deployment declaring one reserves
+		// both. A pair with no encoder reserves only the first, which is what keeps 8997 free for a
+		// user to claim on a deployment that never runs an encoder.
 		if kind == workercore.ModelDeploymentRoleKindPrefill &&
 			workerctrl.ModelDeploymentDeclaresBothHalves(md) &&
 			workerctrl.ModelDeploymentMaySynthesizeConnector(md) {
 			reserved = append(reserved, inject.SGLangBootstrapPort)
+			if modelDeploymentDeclaresEncode(md) {
+				reserved = append(reserved, inject.SGLangEncoderBootstrapPort)
+			}
 		}
 	}
 

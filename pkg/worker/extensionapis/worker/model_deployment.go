@@ -23,10 +23,7 @@ func (h *ModelDeploymentHandler) SetupHandler(
 	_ context.Context, opts extensionapi.SetupOptions,
 ) (schema.GroupVersionResource, map[string]rest.Storage, error) {
 	gvr := worker.SchemeGroupVersionResource("modeldeployments")
-	table, err := extensionapi.NewJSONPathTemplateTableConvertor(
-		extensionapi.JSONPathTemplateColumn("Engine", "{.spec.engine.name}"),
-		extensionapi.JSONPathTemplateColumn("Roles", "{.status.roleSummary}"),
-		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"))
+	table, err := modelDeploymentTable()
 	if err != nil {
 		return gvr, nil, err
 	}
@@ -38,6 +35,14 @@ func (h *ModelDeploymentHandler) SetupHandler(
 	return gvr, map[string]rest.Storage{
 		"metrics": newModelDeploymentMetricsHandler(h.ObjectInfo, opts),
 	}, nil
+}
+
+func modelDeploymentTable() (rest.TableConvertor, error) {
+	return extensionapi.NewJSONPathTemplateTableConvertor(
+		extensionapi.JSONPathTemplateColumn("Engine", "{.spec.engine.name}"),
+		extensionapi.JSONPathTemplateColumn("Roles", "{.status.roleSummary}"),
+		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"),
+		extensionapi.JSONPathTemplateColumn("Endpoint", "{.status.endpoint}"))
 }
 
 func (h *ModelDeploymentHandler) New() runtime.Object     { return &worker.ModelDeployment{} }

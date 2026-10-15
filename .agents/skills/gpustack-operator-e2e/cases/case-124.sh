@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 #
-# CASE 124 — The admitted matrix has no NVIDIA row, and the refusal names the platform beside a
-#           list of the rows that do exist (NON-MUTATING: server-side dry runs only)
+# CASE 124 — The admitted matrix admits ascend, nvidia and amd, and every other accelerator
+#           platform is refused, the refusal naming the platform beside the router and engine it
+#           accepted and the rows that do exist (NON-MUTATING: server-side dry runs only)
 #           AUTO-SKIPS without a cluster that has an unadmitted platform to submit
 #
 #   case-124.sh <NS>
 #
-# Goal:        The admitted matrix carries Ascend and AMD and NOTHING ELSE. NVIDIA is absent, and
-#              that is the state of the work rather than an oversight: an NVIDIA combination is
-#              admitted only after its proof of concept passes, and none has. This case is the
-#              reading of that absence, and it reads the one refusal this design will actually meet
-#              in the field — because NVIDIA is the most common accelerator in a cluster that has
-#              never run this feature, and an NVIDIA encoder deployment is exactly what a user will
-#              write first.
+# Goal:        The admitted matrix carries Ascend, NVIDIA and AMD and NOTHING ELSE. NVIDIA joined
+#              only once its live proof of concept passed; every other accelerator platform is
+#              absent, and that is the state of the work rather than an oversight: a combination is
+#              admitted only after a live cluster run passes. This case is the reading of that
+#              absence, and it reads the one refusal this design will actually meet
+#              in the field — because the platform a user has is exactly what they will write an
+#              encoder deployment on first.
 #
 #              The refusal names the PLATFORM column, with the router and the engine it checked and
 #              rejected alongside it, then lists the admitted rows so the reader can see what to
@@ -23,26 +24,25 @@
 #              THE PLATFORM IS READ FROM THE INSTANCE TYPE, NOT DECLARED, so the case does not
 #              invent a manufacturer: it looks for a type the cluster actually has that reports one
 #              the matrix does not cover. Which manufacturers to look for is the OPERATOR'S OWN LIST,
-#              minus the two it admits: the case iterates every accelerator manufacturer this project
-#              declares and takes the first usable type it finds, rather than guessing a couple of
+#              minus the three it admits: the case iterates every accelerator manufacturer this
+#              project declares and takes the first usable type it finds, rather than guessing a couple of
 #              names. Guessing is how a cluster that holds a Hygon or a THead card ends up skipped
 #              for want of a name nobody thought to probe. The general CPU fallback is left out:
 #              "generic" is what an unrecognised cpu-model.vendor_id collapses to, not an
 #              accelerator platform, and submitting it would assert nothing about the matrix.
 #
-#              WHY THERE IS NO FUNCTIONAL HALF HERE. A passing NVIDIA encoder run would require a
-#              proof of concept that has not happened: vLLM with ec-nixl and ec-example on NVIDIA
-#              hardware is spec task T3a, and it is BLOCKED ON A CLUSTER. A matrix table gains an
-#              NVIDIA entry only for a combination with a passing run, so a functional case for
-#              NVIDIA today would assert a behavior the operator does not implement. So the
-#              functional half is absent by construction, the header says so, and one row states it
-#              at the end so a reader scanning only the table sees it too.
+#              WHY THE FUNCTIONAL HALF LIVES ELSEWHERE. The admitted platforms' functional readings
+#              are their own cases (the NVIDIA and AMD network leg is case 120, the Ascend
+#              shared-directory leg is case 121), so there is nothing functional to assert here: a
+#              run on an unadmitted platform is refused at admission, which is exactly the rows
+#              above. This case states that at the end so a reader scanning only the table sees it
+#              too.
 #
 # Environment: Any cluster with a materialized scheduling chain (run case-1 first). Needs at least
 #              one usable InstanceType (not inactive, not terminating) whose reported manufacturer is
 #              one this operator declares and the matrix does not admit — every accelerator
-#              manufacturer the project declares, minus ascend and amd, tried in that order
-#              (cambricon, hygon, iluvatar, metax, mthreads, nvidia, thead). A cluster of Ascend and
+#              manufacturer the project declares, minus ascend, nvidia and amd, tried in that order
+#              (cambricon, hygon, iluvatar, metax, mthreads, thead). A cluster of Ascend, NVIDIA and
 #              AMD types alone has no such type and skips those rows. NO accelerator of any specific
 #              family is required, and none of the roles will ever run: every assertion is a
 #              server-side dry run.
@@ -61,11 +61,13 @@
 #              - two roles of DIFFERENT platforms are refused separately: the mixed-platform rule
 #                answers first, so the refusal names two manufacturers rather than the matrix;
 #              - an admitted combination (llm-d-router + vLLM on an admitted platform) is ACCEPTED
-#                by the same instrument, so the refusals are each their own rule;
+#                by the same instrument, so the refusals are each their own rule; on ascend that
+#                shape carries the two shared-claim mounts the row renders, and on nvidia or amd it
+#                carries none, because the network rows forbid the shared mount;
 #              - on a cluster with no unadmitted platform, the platform rows SKIP naming the
 #                manufacturers that were looked for and the types that were seen, and the accepted
 #                baseline still runs;
-#              - the functional half records a SKIP naming the proof of concept that would admit it.
+#              - the functional half is a SKIP pointing at the cases that carry it.
 #
 # Cleanup:     Nothing to clean. The case creates no object, injects no label, changes no setting
 #              and stores nothing; every assertion is a server-side dry run. Safe to re-run.
@@ -100,14 +102,14 @@ command -v jq >/dev/null 2>&1 || { echo "[case-124] jq is required." >&2; exit 2
 # TWO TYPES ARE SOUGHT, and neither is invented. The platform row needs a type reporting a
 # manufacturer the matrix does NOT cover, and the baseline needs one that reports one it DOES.
 # On a cluster holding any unadmitted accelerator the first is found and the case runs its rows; on
-# a cluster whose only accelerated types are the two admitted platforms the first is empty, the
+# a cluster whose only accelerated types are the three admitted platforms the first is empty, the
 # rows skip naming what was seen, and the baseline still runs against the second.
 #
-# THE UNADMITTED MANUFACTURERS ARE THE OPERATOR'S OWN LIST MINUS THE TWO IT ADMITS, so every
+# THE UNADMITTED MANUFACTURERS ARE THE OPERATOR'S OWN LIST MINUS THE THREE IT ADMITS, so every
 # accelerator this project supports is covered without the case having to know which of them is
-# common. Two of the nine declared are admitted here and are therefore excluded; the general CPU
+# common. Three of the nine declared are admitted here and are therefore excluded; the general CPU
 # fallback is not a manufacturer of an accelerator and is not in the list either.
-UNADMITTED_PLATFORMS="cambricon hygon iluvatar metax mthreads nvidia thead"
+UNADMITTED_PLATFORMS="cambricon hygon iluvatar metax mthreads thead"
 
 # The manufacturer is read from status, not from spec: the platform of a role is whatever its
 # InstanceType reports, which is the same fact the webhook reads. A type reporting nothing is not
@@ -136,7 +138,19 @@ for m in $UNADMITTED_PLATFORMS; do
     break
   fi
 done
-IT="$(usable_type_for ascend)"
+
+# The baseline is ANY admitted platform, tried in the order the matrix admitted them, and the
+# manufacturer is kept beside the type because the shape differs by row: ascend carries the
+# shared claim, nvidia and amd carry the network leg and forbid the mount.
+IT=""
+IT_MFG=""
+for m in ascend nvidia amd; do
+  IT="$(usable_type_for "$m")"
+  if [ -n "$IT" ]; then
+    IT_MFG="$m"
+    break
+  fi
+done
 
 SEEN="$(kubectl get instancetypes.worker.gpustack.ai \
   -o jsonpath='{range .items[*]}{.metadata.name}={.status.detail.manufacturer}{" "}{end}' 2>/dev/null)"
@@ -173,28 +187,30 @@ $1
 YAML
 }
 
-# The ADMITTED Ascend row's shape: encode and prefill mount one claim at one path, the decode role
-# mounts nothing. It names no claim that has to exist — the matrix is read from the object and the
-# claim rules only compare the two mounts to each other.
-baseline_roles() { # instanceType
-  local it="${1:-${IT:-unset}}"
+# The admitted row's shape, per platform: on ascend, encode and prefill mount one claim at one
+# path and decode mounts nothing; on nvidia and amd the leg is carried over the network and no
+# role mounts anything, because the network connector forbids the shared mount. It names no claim
+# that has to exist — the matrix is read from the object and the
+# claim rules only compare the two mounts to each other, so no PVC is created anywhere in this case.
+baseline_roles() { # instanceType manufacturer
+  local it="${1:-${IT:-unset}}" mfg="${2:-${IT_MFG:-ascend}}" claim=""
+  if [ "$mfg" = ascend ]; then
+    claim="    additionalVolumes:
+      - mountPath: /ec-cache
+        persistentVolumeClaim:
+          claimName: case124-shared"
+  fi
   cat <<ROLES
   - name: encode
     kind: Encode
     instanceType: ${it}
     image: ${IMAGE}
-    additionalVolumes:
-      - mountPath: /ec-cache
-        persistentVolumeClaim:
-          claimName: case124-shared
+${claim}
   - name: prefill
     kind: Prefill
     instanceType: ${it}
     image: ${IMAGE}
-    additionalVolumes:
-      - mountPath: /ec-cache
-        persistentVolumeClaim:
-          claimName: case124-shared
+${claim}
   - name: decode
     kind: Decode
     instanceType: ${it}
@@ -239,14 +255,18 @@ accepts() {
 
 # Three roles being accepted at all is the shape this whole rule set exists to guard, so the
 # baseline proves the refusals below are each their own rule rather than one blanket rejection.
+# The shape is whichever admitted platform this cluster has: the ascend row carries the two
+# shared-claim mounts, and the nvidia or amd rows carry none, because the network connector
+# forbids the shared mount on its row.
 if [ -n "$IT" ]; then
-  accepts "an admitted combination is ACCEPTED by the same instrument" "$(baseline_roles "$IT")"
+  accepts "an admitted combination is ACCEPTED by the same instrument" \
+    "$(baseline_roles "$IT" "$IT_MFG")"
 else
   record SKIP "an admitted combination is ACCEPTED by the same instrument" \
     "no usable InstanceType reports an admitted platform (the cluster holds: ${SEEN:-<none>}), so there is no accepted shape to compare the refusals against"
 fi
 
-# ---------------------------------------------------------------- the NVIDIA rows
+# ---------------------------------------------------------------- the unadmitted-platform rows
 
 if [ -n "$OTHER_IT" ]; then
   # THE HEADLINE OF THIS CASE. The matrix gap is read router-first, then engine, then platform, and
@@ -257,7 +277,7 @@ if [ -n "$OTHER_IT" ]; then
   # The admitted rows come from the same sentence, appended by the rule that fires it.
   refuses "a platform the matrix does not admit is refused, all three named" \
     "is not admitted for encoder roles under router" \
-    "$(baseline_roles "$OTHER_IT")" \
+    "$(baseline_roles "$OTHER_IT" "$OTHER_MANUFACTURER")" \
     'and engine' \
     "the admitted rows are"
 
@@ -267,7 +287,7 @@ if [ -n "$OTHER_IT" ]; then
   # either alone leaves the other looking fine.
   ENGINE=SGLang refuses "an unadmitted platform is refused naming the engine too" \
     'is not admitted with engine "SGLang"' \
-    "$(baseline_roles "$OTHER_IT")"
+    "$(baseline_roles "$OTHER_IT" "$OTHER_MANUFACTURER")"
   ENGINE=""
 
   # TWO PLATFORMS IN ONE DEPLOYMENT answer a DIFFERENT rule, and the difference is the point: the
@@ -282,7 +302,7 @@ if [ -n "$OTHER_IT" ]; then
   if [ -n "$IT" ]; then
     refuses "two platforms in one encoder deployment are refused by the mixing rule" \
       "more than one accelerator platform" \
-      "$(baseline_roles "$IT")
+      "$(baseline_roles "$IT" "$IT_MFG")
   - name: decode
     kind: Decode
     instanceType: ${OTHER_IT}
@@ -300,13 +320,14 @@ else
     "no usable InstanceType reports any of the unadmitted manufacturers this operator declares (${UNADMITTED_PLATFORMS// /, }; the cluster holds: ${SEEN:-<none>}), so there is no second manufacturer to mix with"
 fi
 
-# ---------------------------------------------------------------- why there is no functional half
+# ------------------------------------------------- why the functional half lives elsewhere
 
 # Stated as a row rather than left to the header, because a case that reads as a refusal-only case
 # with no functional rows is otherwise indistinguishable from one that forgot to write them. The
-# admission that would admit this combination is spec task T3a, and it is blocked on a cluster.
-record SKIP "NVIDIA serves a multimodal request through the router" \
-  "the matrix carries no NVIDIA row, so there is no object to run. The functional reading is spec task T3a (ec-nixl and ec-example on NVIDIA hardware), which waits for a cluster; the matrix gains an NVIDIA entry only for a combination with a passing run, so until then this case asserts the refusal and nothing else"
+# admitted platforms' functional readings are their own cases, and no unadmitted platform has an
+# object to run until a live proof of concept admits its row.
+record SKIP "an unadmitted platform serves a multimodal request through the router" \
+  "the matrix admits ascend, nvidia and amd only, so any other platform has no object to run. The admitted platforms' functional readings are case 120 (the NVIDIA and AMD network leg) and case 121 (the Ascend shared-directory leg); this case asserts the refusal for every platform that has no row, and nothing else"
 
 # Results.
 print_rows

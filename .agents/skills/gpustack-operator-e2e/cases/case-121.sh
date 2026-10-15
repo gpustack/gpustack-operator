@@ -127,7 +127,8 @@ ROUTER_IMAGE="${E2E_C121_ROUTER_IMAGE:-docker.io/gpustack/llm-router:v0.3.1}"
 SIDECAR_IMAGE="${E2E_C121_SIDECAR_IMAGE:-docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0}"
 WEIGHTS="${E2E_C121_WEIGHTS:-/data/models/model_scope/Qwen/Qwen2.5-VL-7B-Instruct}"
 MODEL="${E2E_C121_MODEL:-/models/Qwen2.5-VL-7B-Instruct}"
-PROBE_IMAGE="${E2E_C121_PROBE_IMAGE:-docker.io/library/busybox:1.37}"
+# Same defect as case-120: busybox ships no curl, and `|| RESPONSE=""` swallowed the exec's 127.
+PROBE_IMAGE="${E2E_C121_PROBE_IMAGE:-docker.io/curlimages/curl:8.10.1}"
 IMAGE_URL="${E2E_C121_IMAGE_URL:-data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==}"
 CARDS="${E2E_C121_CARDS:-3}"
 TP="${E2E_C121_TP:-1}"
@@ -186,7 +187,12 @@ if [ -z "$CLAIM" ]; then
   exit 2
 fi
 
-kubectl -n "$NS" get localqueue --no-headers 2>/dev/null | grep -q . || {
+# Capture first, then test. `kubectl ... | grep -q .` is a RACE under `set -o pipefail`:
+# grep -q exits on its first match, kubectl takes SIGPIPE and exits 141, and pipefail
+# then reports the whole pipeline as failed even though the match succeeded. Measured on
+# this cluster: 3 passes out of 10 runs with 5 LocalQueues present (PIPESTATUS 141 0).
+local_queues="$(kubectl -n "$NS" get localqueue --no-headers 2>/dev/null)"
+[ -n "$local_queues" ] || {
   echo "[case-121] namespace '${NS}' carries no LocalQueue; run where the pool's entrance" >&2
   echo "          LocalQueue exists, or the group is created and never admitted." >&2
   exit 2
@@ -502,7 +508,7 @@ router_pods() {
   local sel
   # shellcheck disable=SC2016  # the dollar names are kubectl jsonpath map variables, and must not expand
   sel="$(kubectl -n "$NS" get deploy "${MD}-router" \
-    -o jsonpath='{range $k,$v := .spec.selector.matchLabels}{$k}={$v},{end}' 2>/dev/null | sed 's/,$//')"
+    -o go-template='{{range $k,$v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}' 2>/dev/null | sed 's/,$//')"
   [ -n "$sel" ] || return 0
   kubectl -n "$NS" get pods -l "$sel" -o json 2>/dev/null
 }

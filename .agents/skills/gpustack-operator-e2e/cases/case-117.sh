@@ -55,7 +55,9 @@
 #              - the RoleKindsReady condition accounts the roles (KindsNotReady while the pause
 #                placeholders fail the engine probes, AllKindsReady if something serves) rather
 #                than reporting NoRoleStatuses;
-#              - status.endpoint, when published, does not name the encoder.
+#              - status.endpoint, when published, does not name the encoder;
+#              - the v1 ModelDeployment kubectl table carries the Endpoint column alongside Engine,
+#                Roles and Phase.
 #
 # Cleanup:     The trap deletes the deployment, releases any Workload still holding its replicas
 #              (Kueue keeps a finalizer on every Pod of a serving group), deletes the NodeFeature
@@ -105,6 +107,13 @@ for n in json.load(sys.stdin).get("items",[]):
     if not any(c.get("type")=="Ready" and c.get("status")=="True" for c in cs):
         continue
     if n.get("spec",{}).get("unschedulable"):
+        continue
+    # A CPU-vendor probe only reads back on a node that feeds the CPU-only catalog. An
+    # acceleratable node feeds the GPU InstanceType instead, whose manufacturer is the
+    # accelerator vendor, so an injected cpu-model.vendor_id never surfaces here and the
+    # platform-type poll below times out. Skip those nodes, exactly as case-18 reads the
+    # CPU pool (acceleratable=false) rather than the accelerator one.
+    if n.get("metadata",{}).get("labels",{}).get("feature.gpustack.ai/acceleratable") == "true":
         continue
     ts=n.get("spec",{}).get("taints",[])
     if any(str(t.get("key","")).startswith("node-role.kubernetes.io/") for t in ts):
@@ -336,7 +345,7 @@ fi
 # read from the Service rather than assumed from the render.
 selector_string() { # <svc-name>
   # shellcheck disable=SC2016  # the dollar names are kubectl jsonpath map variables, and must not expand
-  kubectl -n "$NS" get svc "$1" -o jsonpath='{range $k,$v := .spec.selector}{$k}={$v},{end}' 2>/dev/null \
+  kubectl -n "$NS" get svc "$1" -o go-template='{{range $k,$v := .spec.selector}}{{$k}}={{$v}},{{end}}' 2>/dev/null \
     | sed 's/,$//'
 }
 
@@ -471,6 +480,18 @@ else
       ;;
   esac
 fi
+
+# The v1 view's kubectl table must carry the same Endpoint column the v1alpha1 CRD declares, so
+# `kubectl get md` prints the front-door address alongside Engine, Roles and Phase.
+HDR="$(kubectl -n "$NS" get modeldeployments.v1.worker.gpustack.ai "$MD" 2>/dev/null | head -n 1)"
+case "$HDR" in
+  *ENGINE*ROLES*PHASE*ENDPOINT*)
+    record PASS "v1 table carries the Endpoint column" "header: ${HDR}"
+    ;;
+  *)
+    record FAIL "v1 table carries the Endpoint column" "header missing ENDPOINT: ${HDR:-<empty>}"
+    ;;
+esac
 
 # Results.
 print_rows

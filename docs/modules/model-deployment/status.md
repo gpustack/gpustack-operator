@@ -30,11 +30,10 @@ roles of the same kind are summed. A serving instance made of several Pods still
 `status.roles[].desired` to see the requested count.
 
 Without a router, `status.endpoint` is the address the deployment-wide Service serves on, in the form
-`<scheme>://<name>.<namespace>.svc:<port>`. The front role is the first non-`Encode` role.
-The scheme is read from that role, and is `https` only when it passes `--ssl-certfile` or `--ssl-keyfile`.
-With a router, `status.endpoint` is absent until the router is ready, using the router's `http` transport.
-
-Each role, including `Encode`, also gets a dedicated `<deployment>-<role>` Service.
+`<scheme>://<name>.<namespace>.svc:<port>`. The scheme and port come from the first role that is not
+`Encode`, and the scheme is `https` only when that role passes `--ssl-certfile` or `--ssl-keyfile`.
+With a router, it is absent until the router is ready, then uses the router Service's `http` transport.
+Each role, including `Encode`, also gets its own `<deployment>-<role>` Service.
 
 `status.router` publishes the contract used to render the router: its implementation and address,
 the cache pool's client endpoint, the metrics names and port, and one entry for every role containing
@@ -399,8 +398,8 @@ defaults to `Server`) reports `True` as soon as any replica is ready. That is no
 degradation is real and `phase` reports it as `Degraded`; this condition answers a different question
 and is silent on that shape by design.
 
-On an encoder-prefill-decode deployment, `RoleKindsReady` accounts for `Encode` alongside `Prefill`
-and `Decode`. It reports `True` only when all three declared kinds have at least one ready replica.
+On an encode, prefill and decode deployment, `RoleKindsReady` is `True` only when `Encode`,
+`Prefill` and `Decode` each have at least one ready replica.
 
 A role that took over its command line counts toward its kind like any other. Such a role gets no
 readiness probe, so its `Ready` says its containers started rather than that anything answered on the
@@ -461,7 +460,7 @@ levels back to `True` on its own once a later pass proves the live world again.
 
 **See also** — [Model Deployment Configuration](deployment.md) (the contract this status reports on) ·
 [Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) ·
-[Model Deployment Encoder Prefill Decode](epd.md) (encoder, prefill and decode disaggregation) ·
+[Model Deployment Encode, Prefill and Decode](epd.md) (encode, prefill and decode disaggregation) ·
 [KV Cache Leader](../kv-cache/leader.md) (the leader process the conditions distinguish from the operator's own).
 
 **Next** → [Model Deployment Configuration](deployment.md)

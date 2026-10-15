@@ -37,6 +37,7 @@ func epdPlatformTypes() []ctrlcli.Object {
 		epdInstanceType("ascend-8x", nodefeature.ManufacturerAscend),
 		epdInstanceType("amd-8x", nodefeature.ManufacturerAMD),
 		epdInstanceType("nvidia-8x", nodefeature.ManufacturerNVIDIA),
+		epdInstanceType("hygon-8x", nodefeature.ManufacturerHygon),
 		epdInstanceType("unknown-8x", ""),
 	}
 }
@@ -147,6 +148,24 @@ func epdNetworkRowDeployment(mutate func(*workercore.ModelDeployment)) *workerco
 	return md
 }
 
+// epdSGLangLeg moves a deployment onto an admitted SGLang row, where the encoder's output reaches
+// the prefiller by address rather than through a mounted directory or a named encoder-cache
+// connector. It is a builder rather than a flag on epdDeployment for the reason
+// epdNetworkRowDeployment is: the rows differ in what the roles mount, in what the engine version
+// must be, and in which routers name them.
+func epdSGLangLeg(router, instanceType string) func(*workercore.ModelDeployment) {
+	return func(md *workercore.ModelDeployment) {
+		md.Spec.Router.Name = router
+		md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+		md.Spec.Engine.Version = workerctrl.ModelDeploymentSGLangEncoderFirst
+		for i := range md.Spec.Roles {
+			md.Spec.Roles[i].InstanceType = instanceType
+			// The address leg mounts no claim, because no directory carries it.
+			md.Spec.Roles[i].AdditionalVolumes = nil
+		}
+	}
+}
+
 // TestModelDeploymentWebhook_EncoderAdmission covers every rule that bears on a deployment declaring
 // an Encode role.
 //
@@ -185,39 +204,114 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			},
 		},
 		{
-			name: "a platform with no admitted row is refused and names the admitted rows",
+			name: "the admitted NVIDIA row is admitted",
 			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Version = "0.30.0"
+				for i := range md.Spec.Roles {
+					md.Spec.Roles[i].InstanceType = "nvidia-8x"
+					// The NVIDIA row carries the encoder's output over the network, so no role
+					// mounts the shared claim.
+					md.Spec.Roles[i].AdditionalVolumes = nil
+				}
+			},
+		},
+		{
+			name: "the admitted vllm-router row is admitted on NVIDIA",
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 				md.Spec.Engine.Version = "0.30.0"
 				for i := range md.Spec.Roles {
 					md.Spec.Roles[i].InstanceType = "nvidia-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
 				}
 			},
-			wantRefuse: `platform "nvidia" is not admitted for encoder roles under router "llm-d-router" and engine "vLLM"`,
+			selfStored: true,
 		},
 		{
-			name: "a router that drives no encoder role is refused",
+			name: "the admitted vllm-router row is admitted on ROCm",
 			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 				md.Spec.Engine.Version = "0.30.0"
-				md.Spec.Router.Name = workercore.ModelDeploymentRouterSGLang
 				for i := range md.Spec.Roles {
 					md.Spec.Roles[i].InstanceType = "amd-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
 				}
 			},
-			wantRefuse: `router "sglang-gateway" is not admitted for an encoder role`,
+			selfStored: true,
+		},
+		{
+			// SGLANG IS ADMITTED BEHIND BOTH ROUTERS ON ALL THREE PLATFORMS, and the leg is the same
+			// one on every row: the encoder runs --encoder-only, the prefiller runs --language-only
+			// and dials it through --encoder-urls. No role mounts a claim, because an address leg
+			// carries no directory.
+			//
+			// These compare against themselves on the update half, because the engine and the router
+			// are immutable: an edit between two engines is a different deployment, not a changed one.
+			name:       "the admitted SGLang row behind llm-d-router is admitted on NVIDIA",
+			mutate:     epdSGLangLeg(workercore.ModelDeploymentRouterLLMD, "nvidia-8x"),
+			selfStored: true,
+		},
+		{
+			name:       "the admitted SGLang row behind llm-d-router is admitted on ROCm",
+			mutate:     epdSGLangLeg(workercore.ModelDeploymentRouterLLMD, "amd-8x"),
+			selfStored: true,
+		},
+		{
+			name:       "the admitted SGLang row behind llm-d-router is admitted on Ascend",
+			mutate:     epdSGLangLeg(workercore.ModelDeploymentRouterLLMD, "ascend-8x"),
+			selfStored: true,
+		},
+		{
+			name:       "the admitted SGLang row behind sglang-gateway is admitted on NVIDIA",
+			mutate:     epdSGLangLeg(workercore.ModelDeploymentRouterSGLang, "nvidia-8x"),
+			selfStored: true,
+		},
+		{
+			name:       "the admitted SGLang row behind sglang-gateway is admitted on ROCm",
+			mutate:     epdSGLangLeg(workercore.ModelDeploymentRouterSGLang, "amd-8x"),
+			selfStored: true,
+		},
+		{
+			name:       "the admitted SGLang row behind sglang-gateway is admitted on Ascend",
+			mutate:     epdSGLangLeg(workercore.ModelDeploymentRouterSGLang, "ascend-8x"),
+			selfStored: true,
+		},
+		{
+			name: "a platform with no admitted row is refused and names the admitted rows",
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Version = "0.30.0"
+				for i := range md.Spec.Roles {
+					md.Spec.Roles[i].InstanceType = "hygon-8x"
+					md.Spec.Roles[i].AdditionalVolumes = nil
+				}
+			},
+			wantRefuse: `platform "hygon" is not admitted for encoder roles under router "llm-d-router" and engine "vLLM"`,
+		},
+		{
+			name: "a platform the router does not admit for an encoder role is refused",
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
+			},
+			wantRefuse: `platform "ascend" is not admitted for encoder roles under router "vllm-router" and engine "vLLM"`,
+			selfStored: true,
+		},
+		{
+			name:       "vllm-router paired with SGLang is refused",
+			mutate:     epdSGLangLeg(workercore.ModelDeploymentRouterVLLM, "nvidia-8x"),
+			wantRefuse: `router "vllm-router" is not admitted with engine "SGLang"`,
+			selfStored: true,
 		},
 		{
 			name: "a router and engine the matrix does not pair is refused",
 			mutate: func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Router.Name = workercore.ModelDeploymentRouterSGLang
 				md.Spec.Engine.Version = "0.30.0"
 				for i := range md.Spec.Roles {
 					md.Spec.Roles[i].InstanceType = "amd-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
 				}
 			},
-			wantRefuse: `router "llm-d-router" is not admitted with engine "SGLang"`,
+			wantRefuse: `router "sglang-gateway" is not admitted with engine "vLLM"`,
 		},
 		{
 			name:   "an Encode role without a Prefill role is refused",
@@ -338,6 +432,18 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 				}
 			},
 			wantRefuse: "ECCPUConnector carries amd from vLLM 0.30.0",
+		},
+		{
+			// The SGLang floor is stated in SGLang's own releases even on Ascend, where a vLLM
+			// deployment is held to vllm-ascend tags instead. Reading the platform before the engine
+			// would send this user after a vllm-ascend release carrying no encoder-urls argument.
+			name: "an SGLang version below its row floor is refused and names SGLang",
+			mutate: func(md *workercore.ModelDeployment) {
+				epdSGLangLeg(workercore.ModelDeploymentRouterLLMD, "ascend-8x")(md)
+				md.Spec.Engine.Version = "0.5.9"
+			},
+			wantRefuse: "encoder-urls carries ascend from SGLang 0.5.10",
+			selfStored: true,
 		},
 		{
 			name: "a claim entry naming no claim is refused",
@@ -589,6 +695,52 @@ func TestModelDeploymentWebhook_EncoderReservesNoKVTransferPort(t *testing.T) {
 		"the encoder keeps no KV cache, so no listener is rendered onto it to collide with")
 	assert.NotContains(t, reserved["encode"], inject.VLLMKVEventsReplayPort)
 	assert.Empty(t, reserved["decode"])
+}
+
+// TestModelDeploymentWebhook_EncoderReservesBothSGLangBootstrapPorts pins the two listeners a
+// language-only SGLang prefiller binds beside an encoder.
+//
+// THE ENCODER BOOTSTRAP PORT IS RESERVED ONLY BECAUSE AN ENCODE ROLE IS DECLARED. Without one the
+// prefiller binds a single registry, and 8997 stays free for a user to claim; with one it binds both,
+// so a user naming 8997 would collide with a listener the render creates on that Pod.
+//
+// Only the prefiller is checked for a reservation, because only the prefiller dials the encoder: the
+// encoder serves the addresses it is given and publishes nothing, and the decoder is handed blocks
+// rather than calling out.
+func TestModelDeploymentWebhook_EncoderReservesBothSGLangBootstrapPorts(t *testing.T) {
+	md := epdDeployment(epdSGLangLeg(workercore.ModelDeploymentRouterSGLang, "nvidia-8x"))
+
+	reserved := map[string][]int32{}
+	for i := range md.Spec.Roles {
+		r := &md.Spec.Roles[i]
+		reserved[r.Name] = modelDeploymentRouterReservedPorts(md, r)
+	}
+
+	assert.Contains(t, reserved["prefill"], inject.SGLangBootstrapPort,
+		"the prefiller serves the bootstrap registry of the split it belongs to")
+	assert.Contains(t, reserved["prefill"], inject.SGLangEncoderBootstrapPort,
+		"a language-only prefiller beside an Encode role also serves the encoder's registry")
+	assert.NotContains(t, reserved["encode"], inject.SGLangEncoderBootstrapPort,
+		"the encoder serves the addresses it is given and binds no bootstrap registry")
+	assert.NotContains(t, reserved["encode"], inject.SGLangBootstrapPort)
+	assert.NotContains(t, reserved["decode"], inject.SGLangEncoderBootstrapPort,
+		"the decoder is handed blocks and calls neither registry")
+	assert.NotContains(t, reserved["decode"], inject.SGLangBootstrapPort)
+}
+
+// TestModelDeploymentWebhook_SGLangPairWithoutAnEncoderReservesOnlyItsOwnPort holds the reservation
+// above to the case that justifies it: the same pair with no Encode role binds one registry, so the
+// encoder's port is released rather than held against a listener nothing creates.
+func TestModelDeploymentWebhook_SGLangPairWithoutAnEncoderReservesOnlyItsOwnPort(t *testing.T) {
+	md := epdDeployment(epdSGLangLeg(workercore.ModelDeploymentRouterSGLang, "nvidia-8x"))
+	epdDropRole(md, "encode")
+
+	prefill := epdRoleByName(md, "prefill")
+	reserved := modelDeploymentRouterReservedPorts(md, prefill)
+
+	assert.Contains(t, reserved, inject.SGLangBootstrapPort)
+	assert.NotContains(t, reserved, inject.SGLangEncoderBootstrapPort,
+		"a pair with no encoder binds one registry, so the other port stays the user's to claim")
 }
 
 // TestModelDeploymentWebhook_ReservedTransferPortIsRefusedWhereRendered proves the reservation above
@@ -850,13 +1002,38 @@ func TestModelDeploymentMeetsFloor(t *testing.T) {
 // pair, because the failure this guards against is a FLOOR THAT REFUSES ITSELF: a row naming its
 // floor in a spelling the comparison cannot read would refuse every deployment carrying exactly
 // the version it requires.
+//
+// EVERY ADMITTED ROUTER AND ENGINE PAIR IS READ, on every platform, because a pair added to the
+// table and left out of this loop would ship a floor nobody compared against its own value.
 func TestModelDeploymentMeetsFloor_AdmitsEveryRowFloor(t *testing.T) {
-	for _, platform := range []string{nodefeature.ManufacturerAscend, nodefeature.ManufacturerAMD} {
-		row, admitted := workerctrl.ModelDeploymentEPDRowFor(
-			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM, platform)
-		require.True(t, admitted, "the %s row is admitted", platform)
+	for _, pair := range []struct {
+		router, engine string
+		platforms      []string
+	}{
+		{
+			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
+			[]string{nodefeature.ManufacturerAscend, nodefeature.ManufacturerAMD, nodefeature.ManufacturerNVIDIA},
+		},
+		{
+			workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentEngineVLLM,
+			[]string{nodefeature.ManufacturerAMD, nodefeature.ManufacturerNVIDIA},
+		},
+		{
+			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineSGLang,
+			[]string{nodefeature.ManufacturerAscend, nodefeature.ManufacturerAMD, nodefeature.ManufacturerNVIDIA},
+		},
+		{
+			workercore.ModelDeploymentRouterSGLang, workercore.ModelDeploymentEngineSGLang,
+			[]string{nodefeature.ManufacturerAscend, nodefeature.ManufacturerAMD, nodefeature.ManufacturerNVIDIA},
+		},
+	} {
+		for _, platform := range pair.platforms {
+			row, admitted := workerctrl.ModelDeploymentEPDRowFor(pair.router, pair.engine, platform)
+			require.True(t, admitted, "the %s+%s row on %s is admitted", pair.router, pair.engine, platform)
 
-		assert.True(t, modelDeploymentMeetsFloor(row.EngineFloor, row.EngineFloor),
-			"the %s row refuses the very floor it names", platform)
+			assert.True(t, modelDeploymentMeetsFloor(row.EngineFloor, row.EngineFloor),
+				"the %s+%s row on %s refuses the very floor it names",
+				pair.router, pair.engine, platform)
+		}
 	}
 }

@@ -103,6 +103,13 @@ for n in json.load(sys.stdin).get("items",[]):
         continue
     if n.get("spec",{}).get("unschedulable"):
         continue
+    # A CPU-vendor probe only reads back on a node that feeds the CPU-only catalog. An
+    # acceleratable node feeds the GPU InstanceType instead, whose manufacturer is the
+    # accelerator vendor, so an injected cpu-model.vendor_id never surfaces here and the
+    # platform-type poll below times out. Skip those nodes, exactly as case-18 reads the
+    # CPU pool (acceleratable=false) rather than the accelerator one.
+    if n.get("metadata",{}).get("labels",{}).get("feature.gpustack.ai/acceleratable") == "true":
+        continue
     ts=n.get("spec",{}).get("taints",[])
     if any(str(t.get("key","")).startswith("node-role.kubernetes.io/") for t in ts):
         continue

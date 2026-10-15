@@ -4,16 +4,20 @@ import (
 	"fmt"
 	"strings"
 
+	core "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
-// The encoder-cache connectors an admitted row can name. The names are the upstream ones, because
-// they are what a user reads in an engine log when the leg misbehaves.
+// The connectors an admitted row can name. The names are the upstream ones, because they are what
+// a user reads in an engine log when the leg misbehaves.
 //
 // ECExampleConnector passes the encoder's output through a directory both roles mount. It is the
-// only connector the Ascend example runs, and the only one that needs no copy path of any kind.
+// only encoder-cache connector the Ascend example runs, and the only one that needs no copy path of
+// any kind.
 const ModelDeploymentECConnectorExample = "ECExampleConnector"
 
 // ModelDeploymentECConnectorCPU is the network connector the decode sidecar drives, pulling the
@@ -24,6 +28,19 @@ const ModelDeploymentECConnectorCPU = "ECCPUConnector"
 // connectors ECCPUConnector and ECMooncakeConnector.
 // https://github.com/vllm-project/vllm/blob/v0.30.0/docs/features/ec_cpu_connector.md
 const ModelDeploymentECCPUConnectorFirstVLLM = "0.30.0"
+
+// ModelDeploymentECConnectorSGLangURLs names SGLang's address-based encoder leg, the one carrying
+// the encoder's output to the prefiller through --encoder-urls and --encoder-bootstrap-port.
+//
+// IT IS NOT AN ENCODER-CACHE CONNECTOR: SGLang configures no connector, and the prefiller dials the
+// encoder's address itself. The name is kept in the same column as the cache connectors because that
+// column is the whole answer to how a row carries the encoder's output.
+const ModelDeploymentECConnectorSGLangURLs = "encoder-urls"
+
+// ModelDeploymentSGLangEncoderFirst is the lowest SGLang release carrying --encoder-only,
+// --language-only, --encoder-urls and --encoder-bootstrap-port.
+// https://github.com/sgl-project/sglang/blob/v0.5.18/docs/docs/advanced_features/epd_disaggregation.mdx
+const ModelDeploymentSGLangEncoderFirst = "0.5.10"
 
 // ModelDeploymentECExampleConnectorFirstAscend is the lowest vllm-ascend release this row runs on,
 // and it is the lowest release holding BOTH fixes the shared leg needs rather than either one:
@@ -74,12 +91,16 @@ type ModelDeploymentEPDRow struct {
 	SharedVolume bool
 }
 
-// modelDeploymentEPDMatrix holds every admitted combination.
+// modelDeploymentEPDMatrix holds every admitted (router, engine, platform) combination.
 //
-// IT STARTS WITH NO NVIDIA ROW, and that is the state of the work rather than an oversight: an
-// NVIDIA combination is admitted only after its proof of concept passes, and none has. The rows
-// below are the two the design admits at once, implemented from the upstream code and marked
-// unverified until their verification passes.
+// The Ascend and ROCm vLLM rows are the design baseline: implemented from the upstream code and
+// still unverified on hardware. The NVIDIA vLLM rows (behind llm-d-router and vllm-router) and the
+// NVIDIA SGLang rows (behind llm-d-router and sglang-gateway) are verified on hardware. The
+// remaining AMD and Ascend rows are admitted on the strength of the operator-side rendering and
+// upstream connector parity; their hardware verification is tracked in issue #763. vllm-router is
+// not admitted on Ascend because vLLM-Ascend's Mooncake KV connector requires the nixlv2 handshake
+// that only llm-d-router's decode proxy relays, and a combination missing from this table is
+// refused rather than admitted.
 var modelDeploymentEPDMatrix = []ModelDeploymentEPDRow{
 	{
 		// vLLM on Ascend, fronted by llm-d-router, with the encoder's output carried through a
@@ -121,6 +142,98 @@ var modelDeploymentEPDMatrix = []ModelDeploymentEPDRow{
 		Platform:    nodefeature.ManufacturerAMD,
 		Connector:   ModelDeploymentECConnectorCPU,
 		EngineFloor: ModelDeploymentECCPUConnectorFirstVLLM,
+	},
+	{
+		// vLLM on NVIDIA CUDA, fronted by llm-d-router, pulls the encoder's output over NIXL the
+		// way the ROCm row does. Verified on 4 x NVIDIA L40S (driver 580.173.02, CUDA 13.0,
+		// Qwen/Qwen2.5-VL-7B-Instruct, vLLM 0.30.0): the multimodal request was answered through
+		// the router with the leg live on both halves.
+		Router:      workercore.ModelDeploymentRouterLLMD,
+		Engine:      workercore.ModelDeploymentEngineVLLM,
+		Platform:    nodefeature.ManufacturerNVIDIA,
+		Connector:   ModelDeploymentECConnectorCPU,
+		EngineFloor: ModelDeploymentECCPUConnectorFirstVLLM,
+	},
+	// THE TWO VLLM-ROUTER ROWS PAIR THE SAME ECCPUConnector LEG WITH vllm-router'S OWN
+	// THREE-STAGE ORCHESTRATION (--epd-config={"encoder_urls":[...]}). The router drives the
+	// encode -> prefill -> decode sequence directly without a decode sidecar, stripping
+	// ec_transfer_params before the decode call while the engine roles exchange embeddings over
+	// NIXL (ECCPUConnector) and KV cache over MooncakeConnector. Ascend is absent because
+	// vLLM-Ascend's P/D KV leg requires the nixlv2 handshake that only llm-d-router's decode
+	// sidecar speaks.
+	{
+		Router:      workercore.ModelDeploymentRouterVLLM,
+		Engine:      workercore.ModelDeploymentEngineVLLM,
+		Platform:    nodefeature.ManufacturerAMD,
+		Connector:   ModelDeploymentECConnectorCPU,
+		EngineFloor: ModelDeploymentECCPUConnectorFirstVLLM,
+	},
+	{
+		Router:      workercore.ModelDeploymentRouterVLLM,
+		Engine:      workercore.ModelDeploymentEngineVLLM,
+		Platform:    nodefeature.ManufacturerNVIDIA,
+		Connector:   ModelDeploymentECConnectorCPU,
+		EngineFloor: ModelDeploymentECCPUConnectorFirstVLLM,
+	},
+	// THE SIX SGLANG ROWS THAT FOLLOW SHARE ONE LEG AND ONE EVIDENCE LEVEL. SGLang carries the
+	// encoder's output by address rather than through an encoder-cache connector: the encoder runs
+	// --encoder-only, the prefiller runs --language-only and dials the encoder through
+	// --encoder-urls. That is what the connector column records, and it is why no row configures a
+	// connector, mounts no claim and brings the claim rule to bear on the pair.
+	//
+	// THE NVIDIA ROWS HAVE RUN END TO END; THE OTHER PLATFORMS HAVE NOT. SGLang on NVIDIA passed
+	// behind both routers on L40S: a text prompt and an image prompt each returned 200 with generated
+	// text, the encoder was reached from the prefiller, and the prefiller kept its widened probes
+	// (readiness 6, liveness 12, timeout 5s) at zero restarts. Send those requests to the deployment's
+	// published endpoint, which is the router Service on port 8081: the plain <md> Service selects the
+	// prefiller role directly and carries no bootstrap, so a request sent there is refused by SGLang
+	// with HTTP 400 before any decoder runs. That is a property of the front door, not a failure of
+	// the row. The AMD ROCm and Ascend NPU rows are still unverified on hardware, tracked in issue
+	// #763.
+	{
+		// SGLang on Ascend, fronted by llm-d-router.
+		Router:      workercore.ModelDeploymentRouterLLMD,
+		Engine:      workercore.ModelDeploymentEngineSGLang,
+		Platform:    nodefeature.ManufacturerAscend,
+		Connector:   ModelDeploymentECConnectorSGLangURLs,
+		EngineFloor: ModelDeploymentSGLangEncoderFirst,
+	},
+	{
+		Router:      workercore.ModelDeploymentRouterLLMD,
+		Engine:      workercore.ModelDeploymentEngineSGLang,
+		Platform:    nodefeature.ManufacturerAMD,
+		Connector:   ModelDeploymentECConnectorSGLangURLs,
+		EngineFloor: ModelDeploymentSGLangEncoderFirst,
+	},
+	{
+		Router:      workercore.ModelDeploymentRouterLLMD,
+		Engine:      workercore.ModelDeploymentEngineSGLang,
+		Platform:    nodefeature.ManufacturerNVIDIA,
+		Connector:   ModelDeploymentECConnectorSGLangURLs,
+		EngineFloor: ModelDeploymentSGLangEncoderFirst,
+	},
+	{
+		// The same leg behind sglang-gateway, which routes the pair natively rather than through
+		// llm-d-router's decider.
+		Router:      workercore.ModelDeploymentRouterSGLang,
+		Engine:      workercore.ModelDeploymentEngineSGLang,
+		Platform:    nodefeature.ManufacturerAscend,
+		Connector:   ModelDeploymentECConnectorSGLangURLs,
+		EngineFloor: ModelDeploymentSGLangEncoderFirst,
+	},
+	{
+		Router:      workercore.ModelDeploymentRouterSGLang,
+		Engine:      workercore.ModelDeploymentEngineSGLang,
+		Platform:    nodefeature.ManufacturerAMD,
+		Connector:   ModelDeploymentECConnectorSGLangURLs,
+		EngineFloor: ModelDeploymentSGLangEncoderFirst,
+	},
+	{
+		Router:      workercore.ModelDeploymentRouterSGLang,
+		Engine:      workercore.ModelDeploymentEngineSGLang,
+		Platform:    nodefeature.ManufacturerNVIDIA,
+		Connector:   ModelDeploymentECConnectorSGLangURLs,
+		EngineFloor: ModelDeploymentSGLangEncoderFirst,
 	},
 }
 
@@ -199,18 +312,23 @@ func modelDeploymentEPDEncoderLeg(
 		return inject.EncoderCache{}
 	}
 
-	if row.Connector == ModelDeploymentECConnectorCPU {
+	switch row.Connector {
+	case ModelDeploymentECConnectorCPU:
 		return inject.EncoderCache{Connector: row.Connector, CPUBytes: modelDeploymentEPDCPUBytes}
-	}
-
-	// The shared-directory leg carries its embeddings through a directory both roles mount, and
-	// the connector is told ONE path while two roles have to arrive at the same one. Admission
-	// refuses a deployment whose two mounts disagree, so the encoder's own mount is read here and
-	// the prefiller is given that same path rather than its own: were they ever to disagree, one
-	// number keeps the two ends of the leg paired and the mismatch becomes visible at admission.
-	return inject.EncoderCache{
-		Connector:         row.Connector,
-		SharedStoragePath: modelDeploymentEPDSharedPath(md),
+	case ModelDeploymentECConnectorExample:
+		// The shared-directory leg carries its embeddings through a directory both roles mount, and
+		// the connector is told ONE path while two roles have to arrive at the same one. Admission
+		// refuses a deployment whose two mounts disagree, so the encoder's own mount is read here and
+		// the prefiller is given that same path rather than its own: were they ever to disagree, one
+		// number keeps the two ends of the leg paired and the mismatch becomes visible at admission.
+		return inject.EncoderCache{
+			Connector:         row.Connector,
+			SharedStoragePath: modelDeploymentEPDSharedPath(md),
+		}
+	default:
+		// An address leg renders no encoder cache: SGLang takes the encoder's addresses through
+		// EncoderURLs and configures no connector, so there is nothing for a cache request to carry.
+		return inject.EncoderCache{}
 	}
 }
 
@@ -229,6 +347,90 @@ func modelDeploymentDeclaresEncoder(md *workercore.ModelDeployment) bool {
 	}
 
 	return false
+}
+
+// modelDeploymentCreateRoleOrder returns the roles in the order a pass issues their Pods: the
+// declared order, except that an encoder goes last in a deployment declaring one.
+//
+// THE ORDER IS WHAT MAKES THE PREFERENCES BELOW MEAN WHAT THEY SAY. The prefiller and the decoder
+// carry the heavier mutual weight because they exchange KV on every request, but a preference is
+// scored against Pods that already exist. With the encoder listed first it is placed first, the
+// prefiller then scores the encoder's node alone, fills it, and the decoder lands on another node.
+// Issuing the encoder last lets the heavier pair settle together first. Roles other than the
+// encoder keep their declared relative order, and a deployment without an encoder is unchanged.
+func modelDeploymentCreateRoleOrder(md *workercore.ModelDeployment) []*workercore.ModelDeploymentRole {
+	ordered := make([]*workercore.ModelDeploymentRole, 0, len(md.Spec.Roles))
+	var encoders []*workercore.ModelDeploymentRole
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindEncode {
+			encoders = append(encoders, role)
+
+			continue
+		}
+		ordered = append(ordered, role)
+	}
+
+	return append(ordered, encoders...)
+}
+
+// modelDeploymentEPDPodAffinity renders the soft co-location preference one replica of a deployment
+// declaring an encoder carries, or nil for a deployment declaring none, which must render exactly
+// as it did before the preference existed.
+//
+// THE WEIGHTS FOLLOW THE TRANSFER LEG. Prefill and decode exchange KV cache on every token, so
+// their pair is the one co-location buys the most and carries the larger weight; the encoder's
+// output reaches the prefiller once per request, so that pair carries the smaller one. Every term
+// is a preference and none is a requirement: a cluster too tight to co-locate a pair still
+// schedules it, merely spread out.
+//
+// The terms select the way the Services do -- one deployment instance, one role kind -- and are
+// scored on the node hostname, the level the transfer leg actually measures.
+func modelDeploymentEPDPodAffinity(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) *core.PodAffinity {
+	if !modelDeploymentDeclaresEncoder(md) {
+		return nil
+	}
+
+	peerTerm := func(target workercore.ModelDeploymentRoleKind, weight int32) core.WeightedPodAffinityTerm {
+		kind, _ := ModelDeploymentRoleUpstreamKind(target)
+		return core.WeightedPodAffinityTerm{
+			Weight: weight,
+			PodAffinityTerm: core.PodAffinityTerm{
+				LabelSelector: &meta.LabelSelector{MatchLabels: map[string]string{
+					modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+					modelDeploymentLabelKeyInstance: md.Name,
+					modelDeploymentLabelKeyRoleKind: kind,
+				}},
+				TopologyKey: core.LabelHostname,
+			},
+		}
+	}
+
+	switch ModelDeploymentEffectiveRoleKind(role) {
+	case workercore.ModelDeploymentRoleKindPrefill:
+		return &core.PodAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []core.WeightedPodAffinityTerm{
+				peerTerm(workercore.ModelDeploymentRoleKindDecode, 100),
+				peerTerm(workercore.ModelDeploymentRoleKindEncode, 50),
+			},
+		}
+	case workercore.ModelDeploymentRoleKindDecode:
+		return &core.PodAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []core.WeightedPodAffinityTerm{
+				peerTerm(workercore.ModelDeploymentRoleKindPrefill, 100),
+			},
+		}
+	case workercore.ModelDeploymentRoleKindEncode:
+		return &core.PodAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []core.WeightedPodAffinityTerm{
+				peerTerm(workercore.ModelDeploymentRoleKindPrefill, 50),
+			},
+		}
+	default:
+		return nil
+	}
 }
 
 // modelDeploymentEPDConnector is the row's connector for this deployment as a whole, or empty when

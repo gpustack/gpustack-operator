@@ -1,7 +1,8 @@
-# Model Deployment Encoder Prefill Decode
+# Model Deployment Encode, Prefill and Decode
 
-A deployment with `Encode`, `Prefill` and `Decode` roles runs visual encoding and language generation in separate
-Pods. [Model Deployment Configuration](deployment.md) describes the base role fields and admission rules.
+A deployment with `Encode`, `Prefill` and `Decode` roles runs visual encoding and language generation
+in separate Pods. [Model Deployment Configuration](deployment.md) describes the base role fields and
+admission rules.
 
 ## Contents
 
@@ -10,187 +11,197 @@ Pods. [Model Deployment Configuration](deployment.md) describes the base role fi
 - [The admitted matrix](#the-admitted-matrix)
 - [Unadmitted engine and router candidates](#unadmitted-engine-and-router-candidates)
 - [Encoder-cache connectors](#encoder-cache-connectors)
+- [Scheduling co-location](#scheduling-co-location)
 - [Request routing across roles](#request-routing-across-roles)
 - [Replica drain and retirement](#replica-drain-and-retirement)
 - [Upgrade and rollout behavior](#upgrade-and-rollout-behavior)
+- [Measured behavior](#measured-behavior)
 
 ## The three roles and request flow
 
-Encoder-prefill-decode (EPD) serving separates visual encoding from language generation.
-Each role runs in its own Pod set.
+Encode-prefill-decode (EPD) serving separates visual encoding from language generation. Each role
+runs in its own Pod set.
 
-The `Encode` role processes visual inputs such as images.
-It allocates no KV cache and drops language-model weight shards during model loading.
+| Role | Does | Notes |
+|---|---|---|
+| `Encode` | Runs the visual encoder on images and other media | Allocates no KV cache and loads no language-model weights |
+| `Prefill` | Consumes the encoder's embeddings and fills the KV cache | Receives the prompt tokens |
+| `Decode` | Generates completion tokens from the KV cache | Streams the response |
 
-The `Prefill` role receives prompt tokens and consumes the encoder's output embeddings.
-It populates the KV cache with the combined sequence.
-
-The `Decode` role generates completion tokens step by step from the populated KV cache.
-
-A multimodal request routes through the encoder, then the prefiller, and then the decoder.
-A text-only request skips the encoder entirely and goes directly to prefill and decode.
+A multimodal request goes through the encoder, then the prefiller, then the decoder. A text-only
+request skips the encoder and goes straight to prefill and decode.
 
 ## Shape rules and admission constraints
 
-An `Encode` role requires both a `Prefill` role and a `Decode` role in the same deployment.
-The operator admits at most one role of each kind.
+Admission refuses an EPD deployment that breaks any of these rules:
 
-`Encode` beside a `Server` role is refused.
-The encoder produces embeddings only a prefiller can consume, and prefill output needs a decoder.
-
-A router (`spec.router`) is required.
-Without a router, nothing pairs the three roles, and the operator renders no unpaired shape.
-
-`spec.kvCache` is refused on an EPD deployment.
-The field attaches every role to a shared pool, but the encoder keeps no KV cache.
-
-A role `command` is refused on all three roles.
-A custom command replaces managed arguments and the sidecar proxy, breaking role communication.
-
-All three roles must run on the same accelerator platform.
-Admission reads each role's platform from its `instanceType.status.detail.manufacturer`.
-Mixed or unknown platforms are refused.
-
-`engine.version` is required on an EPD deployment and must satisfy the row floor.
-`Encode` replicas have size 1.
-The role refuses Elastic EP and external data parallelism.
+- An `Encode` role requires a `Prefill` role and a `Decode` role in the same deployment, at most one
+  role of each kind, and no `Server` role.
+- `spec.router` is required. Without a router, nothing pairs the three roles.
+- `spec.kvCache` is refused, because the encoder keeps no KV cache.
+- A role `command` is refused on all three roles, because a custom command replaces the managed
+  arguments and the sidecar proxy.
+- All three roles must run on the same accelerator platform. Admission reads it from each role's
+  InstanceType, so mixed or unknown platforms are refused.
+- `engine.version` is required and must meet the floor of the matching row in
+  [the admitted matrix](#the-admitted-matrix).
+- An `Encode` replica has size 1. The role refuses Elastic EP and external data parallelism.
 
 ## The admitted matrix
 
-Admission allows only combinations present in the internal EPD matrix.
-Unsupported combinations are rejected at admission time.
+Admission accepts only the combinations below. Anything else is refused when the object is applied.
 
-| Router | Engine | Platform | Connector | Engine floor | Shared volume | Verification status | Limits |
-|---|---|---|---|---|---|---|---|
-| `llm-d-router` | `vLLM` | `ascend` | `ECExampleConnector` | `0.30.0rc1` | yes | Admitted by code, unverified | Needs a ReadWriteMany PVC; mounts must match; writable mount; no file locks or TTL; storage latency can delay transfers; the second model runner must stay off |
-| `llm-d-router` | `vLLM` | `amd` (ROCm) | `ECCPUConnector` | `0.30.0` | no | Admitted by code, unverified | Requires NIXL and the V2 model runner; the encoder's side channel binds 5601, which the role may not serve HTTP on; `ec_cpu_bytes` is fixed at 1 GiB; no NIXL copy path on Ascend |
+| Router | Engine | Platform | Encoder transfer | Minimum version | Hardware status |
+|---|---|---|---|---|---|
+| `llm-d-router` | `vLLM` | `nvidia` | `ECCPUConnector` over NIXL | `0.30.0` | Verified on 4 × NVIDIA L40S |
+| `llm-d-router` | `vLLM` | `amd` (ROCm) | `ECCPUConnector` over NIXL | `0.30.0` | Not verified |
+| `llm-d-router` | `vLLM` | `ascend` | `ECExampleConnector` over a shared volume | `0.30.0rc1` | Not verified |
+| `vllm-router` | `vLLM` | `nvidia` | `ECCPUConnector` over NIXL | `0.30.0` | Verified on 4 × NVIDIA L40S |
+| `vllm-router` | `vLLM` | `amd` (ROCm) | `ECCPUConnector` over NIXL | `0.30.0` | Not verified |
+| `llm-d-router` | `SGLang` | `nvidia` | `encoder-urls` | `0.5.10` | Verified on 2 × NVIDIA L40S |
+| `llm-d-router` | `SGLang` | `amd` (ROCm) | `encoder-urls` | `0.5.10` | Not verified |
+| `llm-d-router` | `SGLang` | `ascend` | `encoder-urls` | `0.5.10` | Not verified |
+| `sglang-gateway` | `SGLang` | `nvidia` | `encoder-urls` | `0.5.10` | Verified on 2 × NVIDIA L40S |
+| `sglang-gateway` | `SGLang` | `amd` (ROCm) | `encoder-urls` | `0.5.10` | Not verified |
+| `sglang-gateway` | `SGLang` | `ascend` | `encoder-urls` | `0.5.10` | Not verified |
 
-The verification status and known limits sit beside each admitted row.
-Both rows are admitted by code analysis and await live accelerator verification.
+A verified row served a multimodal request through the router on the hardware named. A row marked
+Not verified is admitted from the design and has not run on that hardware. Issue
+[#763](https://github.com/gpustack/gpustack-operator/issues/763) tracks the SGLang AMD and Ascend rows.
 
-The `ascend` row requires `ECExampleConnector` over a shared directory.
-Ascend network transfers do not support NIXL copy paths.
+### vLLM on NVIDIA and AMD
 
-Its floor is the first vllm-ascend release carrying both fixes the row needs.
-Upstream pull request 16682 stops `--mm-encoder-only` from aborting the engine at startup.
-Upstream pull request 18291 pins the encoder cache load to the rank's own NPU under tensor parallelism.
-Release `0.30.0rc2` carries the same code as `0.30.0rc1`.
+These rows run `ECCPUConnector` over NIXL behind either `llm-d-router` or `vllm-router`, moving
+embeddings across the network with no shared volume. The NVIDIA rows were verified with the
+connector live on both halves.
+See [Encoder-cache connectors](#encoder-cache-connectors) for the buffer and port rules.
 
-The runner image the floor asks for may not be published.
-An Ascend EPD deployment names its own `roles[].image` until it is.
+### vLLM on Ascend
 
-`ECCPUConnector` stays refused on Ascend.
-It has no copy path between NPU memory and host memory.
-The Ascend runner images install no NIXL.
-Upstream request 13057 asks for that support and is still open.
+The Ascend row uses `ECExampleConnector` over a shared directory, because Ascend network transfers
+have no NIXL copy path. Its floor, `0.30.0rc1`, is the first vllm-ascend release that starts
+`--mm-encoder-only` cleanly and pins the encoder-cache load to each rank's own NPU under tensor
+parallelism.
 
-Ascend's own encoder-cache connectors are not admitted.
-`ECMemcacheConnector` shipped in `0.30.0rc1`, and the operator does not configure it.
-`ECMooncakeConnector` is still an open pull request upstream.
+The runner image that release needs may not be published yet. Until it is, name your own image in
+`roles[].image`.
 
-The `amd` row runs `ECCPUConnector` over NIXL.
-The connector transfers embeddings across the network and needs no shared volume.
+### SGLang
+
+SGLang splits the encoder by address and uses no encoder-cache connector. An `Encode` role runs
+`--encoder-only`, and a `Prefill` role runs `--language-only` and dials the encoder through
+`--encoder-urls`, which carries the encoder's per-role Service address.
+
+The prefiller serves the encoder's registration port 8997. Admission reserves that port on a
+`Prefill` role whenever the deployment declares an `Encode` role, so a role naming it for its own
+HTTP server is refused. The operator also widens the prefiller's probes, so it is not restarted
+while it waits for an encoder to register.
 
 ## Unadmitted engine and router candidates
 
-The matrix currently contains no NVIDIA row.
-Upstream labels EPD under `llm-d-router` a proof of concept.
-NVIDIA combinations are admitted only after a live cluster run passes.
+These candidates are refused or not configured:
 
-`ECMooncakeConnector` is refused.
-The decode routing sidecar supports `ec-example` and `ec-nixl` only.
-Upstream `ECMooncakeConnector` requires static prefiller addresses that do not fit Kubernetes discovery.
-
-`vllm-router` is not admitted for EPD.
-Upstream merged EPD support in pull request 266, but has not tagged a release containing it.
-Dynamic prefill and decode discovery is unsupported upstream with EPD.
-
-`SGLang` is not admitted for EPD.
-Its encoder stage is carried over addresses rather than a connector, and no matrix row names one, so admission refuses the combination.
-
-The renderer still carries that stage, so an object stored before the refusal reconciles into the divided shape rather than failing.
-It gives an `Encode` role `--encoder-only` and the `Prefill` role `--language-only`.
-
-The language-only half serves the encoder bootstrap registry that encoders register against, and it reads the current encoder URL list from there.
-It renders that port as `--encoder-bootstrap-port 8997` and opens the same number as the container port `enc-bootstrap`.
-`--encoder-urls` then carries the encoder's per-role Service address, `http://<deployment>-<role>:<port>`.
+| Candidate | Status |
+|---|---|
+| `ECMooncakeConnector` | Refused. It needs static prefiller addresses, which do not fit Kubernetes discovery, and the decode sidecar supports only `ec-example` and `ec-nixl` |
+| `ECMemcacheConnector` | Not configured by the operator |
+| `ECCPUConnector` on Ascend | Refused. NPU memory has no copy path to host memory, and the Ascend runner images install no NIXL |
+| `vllm-router` on Ascend | Refused. vLLM-Ascend's P/D KV transfer requires the `nixlv2` handshake that only `llm-d-router`'s decode sidecar implements |
 
 ## Encoder-cache connectors
 
-The operator renders configuration for two encoder-cache connectors.
-Each connector dictates how embeddings travel from the encoder to the prefiller.
+The encoder-cache connector decides how embeddings travel from the encoder to the prefiller. The
+operator renders two of them.
 
-`ECExampleConnector` passes safetensors embeddings through a shared directory.
-Users provide the directory by attaching a ReadWriteMany PVC to `roles[].additionalVolumes`.
+### ECExampleConnector
 
-`Encode` and `Prefill` must declare the same `claimName`, `mountPath` and `subPath`.
+`ECExampleConnector` passes embeddings through a shared directory. Attach a ReadWriteMany PVC to
+`roles[].additionalVolumes` on both roles, with the same `claimName`, `mountPath` and `subPath`.
 The `Encode` mount must not be read-only.
-The connector has no locking or expiry, and filesystem visibility delays can affect transfers.
 
-`ECCPUConnector` moves embeddings across Pods over the network using NIXL.
-The operator sets `VLLM_USE_V2_MODEL_RUNNER=1` on both roles.
-The shared-directory row never sets it, because vllm-ascend's second model runner has no multimodal encoder path.
-An encoder running on it serves nothing, and no log names the cause.
+The connector has no file locking and no expiry, and storage latency can delay a transfer.
+The operator does not set `VLLM_USE_V2_MODEL_RUNNER` on this row, because the vllm-ascend second
+model runner has no multimodal encoder path.
 
-The `Encode` Pod binds its side-channel socket on port 5601 and publishes it as `VLLM_EC_SIDE_CHANNEL_HOST` from `status.podIP`.
-An `Encode` role is refused if it names 5601, either in `ports` or as `--port`.
-The engine would otherwise serve HTTP on the socket its consumers dial for embeddings.
-The shared-directory row binds no second socket, so its encoder may serve on 5601.
+### ECCPUConnector
 
-The connector also needs a host buffer, `ec_cpu_bytes` in the rendered `--ec-transfer-config`.
-The operator states 1 GiB on both roles, and no field lets a deployment state its own.
-A shape needing a different buffer has nowhere to say so.
-That number is the one upstream's own example ships, not one measured here.
+`ECCPUConnector` moves embeddings between Pods over NIXL. The operator sets
+`VLLM_USE_V2_MODEL_RUNNER=1` on both roles and renders a 1 GiB host buffer (`ec_cpu_bytes`) in
+`--ec-transfer-config`. No field changes the buffer size. The value is upstream's example default
+and has not been tuned here.
 
-Every key the encoder stage writes is operator-owned, so a role naming one is refused in every spelling the engine reads.
-See [Operator-owned keys](deployment.md#operator-owned-keys) for the rule behind that refusal.
-On this row the owned keys are `--ec-transfer-config`, `VLLM_USE_V2_MODEL_RUNNER` and the encoder's two side-channel variables.
+The `Encode` Pod binds a side-channel socket on port 5601 and publishes it through
+`VLLM_EC_SIDE_CHANNEL_HOST` from `status.podIP`. An `Encode` role that names 5601, in `ports` or as
+`--port`, is refused. The shared-directory row binds no socket, so its encoder may serve on 5601.
 
-Four flags the operator renders on the encoder are defaults rather than owned, so a workload's own value wins.
-They are `--enforce-eager`, `--no-enable-prefix-caching`, `--max-num-batched-tokens` and `--mm-encoder-only`.
+### Keys the operator owns
+
+Every key the encoder stage writes is operator-owned, and a role that names one is refused in every
+spelling the engine reads. On the `ECCPUConnector` rows these are `--ec-transfer-config`,
+`VLLM_USE_V2_MODEL_RUNNER` and the two side-channel variables. See
+[Operator-owned keys](deployment.md#operator-owned-keys).
+
+Four flags the operator renders on the encoder are defaults, so a role's own value wins:
+`--enforce-eager`, `--no-enable-prefix-caching`, `--max-num-batched-tokens` and `--mm-encoder-only`.
+
+## Scheduling co-location
+
+A deployment with an `Encode` role renders a soft co-location preference on every replica Pod. Each
+term scores placement by node hostname and none is a requirement, so a cluster too tight to
+co-locate a pair still schedules it across hosts.
+
+| Replica | Prefers on the same node | Weight |
+|---|---|---|
+| `Prefill` | `Decode` | 100 |
+| `Decode` | `Prefill` | 100 |
+| `Encode` | `Prefill` | 50 |
+| `Prefill` | `Encode` | 50 |
+
+Prefill and decode exchange KV cache on every generated token, so that pair gains the most from one
+host. The encoder's output reaches the prefiller once per request. Each term matches the peer role's
+`modeldeployment.gpustack.ai/role-kind` label within the same deployment. A deployment with no
+`Encode` role renders no affinity.
 
 ## Request routing across roles
 
-Under `llm-d-router`, requests land on the decode Pod's routing sidecar proxy first.
-The sidecar routes through an endpoint picker running `always-disagg-multimodal-decider`.
+How the encoder is reached depends on the engine and router. Under `llm-d-router` with `vLLM`, the
+router selects an encoder for any request carrying media, and the decode sidecar coordinates the
+transfer. Under `vllm-router` with `vLLM`, the router drives the encode, prefill and decode stages
+directly through `--epd-config`. Under `SGLang`, the `Prefill` role calls the `Encode` role
+directly, and the router adds no encode stage.
 
-The decider detects multimodal content in the request.
-When media is present, the decider selects an encoder from the `encode-pods` label filter pool.
-
-The encode scheduling profile uses the role filter alone and applies no scorers.
-Scorers are omitted because an encoder holds no KV cache and tracks no token queues.
-
-The decode sidecar runs with `--ec-connector` set from the admitted row.
-The `ascend` row gives `--ec-connector=ec-example` and the `amd` row `--ec-connector=ec-nixl`.
-It calls the encoder and coordinates the transfer before forwarding to prefill and decode.
-
-`Encode` Pods are excluded from deployment-wide answering endpoints and KV event publisher lists.
-The deployment-wide Service and `status.endpoint` never target an encoder.
+`Encode` Pods never receive deployment-wide traffic. The deployment Service and `status.endpoint`
+exclude them, and so do the KV event publisher lists. Send requests to `status.endpoint`. See
+[Encode stage routing](routing.md#encode-stage-routing) for each router's behavior.
 
 ## Replica drain and retirement
 
-The preStop drain hook is unchanged for `Encode` replicas.
-The hook reads language-model request accounting gauges that an encoder does not export.
+An encoder exports no in-flight request gauges, so the normal drain hook cannot tell when it is
+idle. Retirement therefore protects an `Encode` replica with a fixed window.
 
-The hook treats absent gauges as idle and exits after two consecutive idle polls.
-It does not protect in-flight transfers on an encoder replica.
-
-Retirement protects an `Encode` replica through a bounded time window.
-The controller withdraws the replica from discovery and marks it `Draining`.
-
-The controller waits for the drain budget (240 seconds) to expire before deleting the Pod.
-A transfer still in flight when the budget expires fails visibly at the client.
+The controller withdraws the replica from discovery and marks it `Draining`. It then waits a
+240-second drain window, plus a 30-second withdrawal and a 30-second settle, before deleting the Pod.
+A transfer still in flight when the window ends fails at the client.
 
 ## Upgrade and rollout behavior
 
-A deployment without an `Encode` role renders byte-identical Pod specifications.
-Upgrading the operator causes no rollout on existing server or prefill/decode deployments.
+A deployment without an `Encode` role renders the same Pod specifications as before, so upgrading
+the operator rolls nothing on existing server or prefill/decode deployments.
 
-Moving an existing deployment to EPD requires creating a new `ModelDeployment`.
-Role kinds are immutable after creation and cannot be changed in place.
+Role kinds cannot change after creation. To move an existing deployment to EPD, create a new
+`ModelDeployment`.
+
+## Measured behavior
+
+A live run on 4 × NVIDIA L40S compared EPD with prefill/decode and with a single aggregated
+instance. The aggregated instance leads on short prompts and at low concurrency. EPD leads at `4k`
+and `8k` prompt tokens under concurrency, and when the same image is queried repeatedly.
+
+[Model Deployment Encode, Prefill and Decode Benchmark](epd-benchmark.md) records the numbers, the
+hardware and when EPD helps.
 
 ---
 
-**See also** — [Model Deployment Configuration](deployment.md) (base fields and admission rules) · [Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) · [Engine Versions](engine-versions.md) (supported version floors) · [Model Deployment Routing](routing.md) (router selection and deciders) · [Model Deployment Status](status.md) (status conditions and role summaries).
+**See also** — [Model Deployment Configuration](deployment.md) (base fields and admission rules) · [Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) · [Model Deployment Encode, Prefill and Decode Benchmark](epd-benchmark.md) (measured three-arm latency and throughput) · [Engine Versions](engine-versions.md) (supported version floors) · [Model Deployment Routing](routing.md) (router selection and deciders) · [Model Deployment Status](status.md) (status conditions and role summaries) · [EPD Walkthrough](../../walkthroughs/model-deployment/epd.md) (a recorded live run).
 
 **Next** → [Model Deployment Routing](routing.md) — choose a routing policy and inspect candidate endpoints.

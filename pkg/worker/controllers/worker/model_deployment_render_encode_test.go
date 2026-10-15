@@ -63,10 +63,7 @@ func epdRenderDecodePod(
 // (`pkg/sidecar/proxy/options.go:671-673`), so a decoder rendered with a third spelling never
 // becomes ready and never answers.
 //
-// THERE IS NO NVIDIA ROW HERE, and its absence is the state of the work rather than an omission: an
-// NVIDIA combination is admitted only after its proof of concept passes, so this table lists exactly
-// the platforms the matrix admits. A case added for one would have to expect no flag at all, which
-// is what the test below already covers for a deployment declaring no encoder.
+// The table lists exactly the platforms the matrix admits, one case per admitted row.
 func TestRenderModelDeploymentRoutingSidecar_CarriesTheEncoderConnector(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -75,6 +72,10 @@ func TestRenderModelDeploymentRoutingSidecar_CarriesTheEncoderConnector(t *testi
 	}{
 		{
 			name: "rocm pulls over nixl", manufacturer: nodefeature.ManufacturerAMD,
+			want: "--ec-connector=ec-nixl",
+		},
+		{
+			name: "nvidia pulls over nixl", manufacturer: nodefeature.ManufacturerNVIDIA,
 			want: "--ec-connector=ec-nixl",
 		},
 		{

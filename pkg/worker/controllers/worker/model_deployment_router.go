@@ -77,8 +77,13 @@ func renderModelDeploymentRouterObjects(
 
 	roles := make([]router.Role, 0, len(md.Spec.Roles))
 	ports := make([]int32, 0, len(md.Spec.Roles))
+	// The router that takes a static encoder list is told the per-role Service URL, not a replica
+	// address: the Service fronts every replica, so a scale changes nothing the router was told
+	// and does not restart it.
+	var encoderURLs []string
 	for i := range md.Spec.Roles {
-		kind, ok := ModelDeploymentRoleUpstreamKind(ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i]))
+		roleKind := ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i])
+		kind, ok := ModelDeploymentRoleUpstreamKind(roleKind)
 		if !ok {
 			return ModelDeploymentRouterObjects{}, fmt.Errorf("unsupported role kind %q", md.Spec.Roles[i].Kind)
 		}
@@ -87,6 +92,9 @@ func renderModelDeploymentRouterObjects(
 			RoleLabelKey: modelDeploymentLabelKeyRoleKind,
 		})
 		ports = append(ports, ModelDeploymentRoleServingPort(md, &md.Spec.Roles[i]))
+		if roleKind == workercore.ModelDeploymentRoleKindEncode {
+			encoderURLs = append(encoderURLs, modelDeploymentRoleEndpoint(md, &md.Spec.Roles[i]))
+		}
 	}
 	slices.Sort(ports)
 	ports = slices.Compact(ports)
@@ -203,12 +211,25 @@ func renderModelDeploymentRouterObjects(
 			modelDeploymentLabelKeyEndpointEligible+"="+endpointLabels[modelDeploymentLabelKeyEndpointEligible])
 	}
 	endpointSelectorTerms = append(endpointSelectorTerms, "!"+modelDeploymentRouterLabelKey)
+	// An engine that reaches its encoder by address has its prefiller dial the encoder itself, so
+	// the router never sends it a request. The encoder is kept out of the candidate set rather than
+	// left in it as an endpoint no stage selects. The term is appended last, and only here, so a
+	// selector of any other deployment renders as it did.
+	if md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
+		modelDeploymentEPDSplitsEncoderByAddress(md.Spec.Engine.Name) &&
+		modelDeploymentDeclaresEncoder(md) {
+		if encodeKind, ok := ModelDeploymentRoleUpstreamKind(workercore.ModelDeploymentRoleKindEncode); ok {
+			endpointSelectorTerms = append(endpointSelectorTerms,
+				modelDeploymentLabelKeyRoleKind+"!="+encodeKind)
+		}
+	}
 	endpointSelector := strings.Join(endpointSelectorTerms, ",")
 	routerInput := router.Input{
 		Roles: roles, Metrics: metrics, ModelName: md.Spec.Model.Name,
 		TokenizerEndpoint: modelDeploymentRoleEndpoint(md, modelDeploymentTokenizerRole(md)),
 		Namespace:         md.Namespace, EndpointSelector: endpointSelector,
 		EndpointLabels:          endpointLabels,
+		EncoderURLs:             encoderURLs,
 		ListenPort:              modelDeploymentRouterHTTPPort,
 		MetricsPort:             modelDeploymentRouterMetricsPort,
 		DiscoveryPort:           ports[0],

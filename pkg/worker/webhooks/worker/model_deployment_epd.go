@@ -188,7 +188,7 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentEPD(
 	router := modelDeploymentRouterName(md)
 	if gap := workerctrl.ModelDeploymentEPDMatrixGap(router, md.Spec.Engine.Name, platform); gap != "" {
 		return append(errs, field.Invalid(field.NewPath("spec", "engine", "name"), md.Spec.Engine.Name, fmt.Sprintf(
-			"%s; an encoder role is admitted only for a combination this operator has run, and the "+
+			"%s; an encoder role is admitted only for a combination in the admitted matrix, and the "+
 				"admitted rows are %s", gap, workerctrl.ModelDeploymentEPDMatrixSummary()))), nil
 	}
 
@@ -508,10 +508,18 @@ func validateModelDeploymentEPDSideChannelPort(
 }
 
 // modelDeploymentEngineProject names the project a row's floor is a release of, which both refusals
-// below state beside the number. On Ascend the engine is the vllm-ascend plugin and the version is
-// one of its tags; on every other admitted platform it is an upstream vLLM release. Naming the
-// wrong project would send a user after tags that do not carry the connector.
+// below state beside the number. On SGLang the engine is SGLang itself; on Ascend with vLLM the
+// engine is the vllm-ascend plugin and the version is one of its tags; on every other admitted
+// platform it is an upstream vLLM release. Naming the wrong project would send a user after tags that
+// do not carry the connector.
+//
+// THE ENGINE IS ANSWERED FIRST, because an Ascend SGLang row exists and its floor is an SGLang
+// release: reading the platform first would send that user after vllm-ascend tags.
 func modelDeploymentEngineProject(row workerctrl.ModelDeploymentEPDRow) string {
+	if row.Engine == workercore.ModelDeploymentEngineSGLang {
+		return workercore.ModelDeploymentEngineSGLang
+	}
+
 	if row.Platform == nodefeature.ManufacturerAscend {
 		return string(inject.EngineVLLMAscend)
 	}

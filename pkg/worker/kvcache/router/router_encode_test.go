@@ -1,6 +1,7 @@
 package router
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -248,6 +249,52 @@ func TestRenderLLMD_KeepsTheEncoderOutOfTheKVEventPublishers(t *testing.T) {
 	assert.Contains(t, selector, "modeldeployment.gpustack.ai/role-kind!=encode")
 }
 
+// TestRenderLLMD_UsesTheBuiltInTokenProducerWhenAnEncoderRoleIsPresent pins the estimator an
+// encoder deployment gets. Naming the vLLM URL on token-producer selects llm-d-router's
+// vllmHTTPRenderer, which POSTs to <url>/v1/chat/completions/render -- an endpoint vLLM 0.30.0
+// serves only under --enable-scale-out, so on a default server every render answers 404 and no
+// request is routed. A producer with no parameters selects the built-in estimator instead, which
+// reads image dimensions from the data: URL with no HTTP call and still populates the multimodal
+// features the encoder stage is decided on.
+func TestRenderLLMD_UsesTheBuiltInTokenProducerWhenAnEncoderRoleIsPresent(t *testing.T) {
+	output, err := Render(LLMD, epdInput())
+	require.NoError(t, err)
+	document := parseLLMDDocument(t, output.Document)
+
+	producers := 0
+	for _, plugin := range document.Plugins {
+		if plugin.Type != "token-producer" {
+			continue
+		}
+		producers++
+		assert.Empty(t, plugin.Parameters,
+			"an encoder deployment names no renderer, because the only renderer it would name calls an endpoint the engine does not serve")
+	}
+	assert.Equal(t, 1, producers, "the token producer is rendered exactly once")
+}
+
+// TestRenderLLMD_WiresThePrecisePrefixProducerIntoThePrefillDeciderOnEPD holds the prefiller's
+// decider to the producer that feeds it. With the precise producer active, the decider reads token
+// counts from the producer named in prefixMatchInfoProducerName; left out, it falls back to the
+// approximate producer, which this document does not define, so the router creates an unconfigured
+// one and then reports "failed to read prefix plugin state: not found" per request.
+func TestRenderLLMD_WiresThePrecisePrefixProducerIntoThePrefillDeciderOnEPD(t *testing.T) {
+	output, err := Render(LLMD, epdInput())
+	require.NoError(t, err)
+	document := parseLLMDDocument(t, output.Document)
+
+	deciders := 0
+	for _, plugin := range document.Plugins {
+		if plugin.Type != "prefix-based-pd-decider" {
+			continue
+		}
+		deciders++
+		assert.Equal(t, "precise-prefix-cache-producer", plugin.Parameters["prefixMatchInfoProducerName"],
+			"the decider reads the producer this document defines, not the default it does not")
+	}
+	assert.Equal(t, 1, deciders, "the prefill decider is rendered exactly once")
+}
+
 // TestRenderLLMD_IsDeterministicAcrossEncoderRoleOrder holds the encoder role's position in the
 // list to be the author's accident rather than the picker's: the document is hashed into the router
 // Pod, so a shape that followed the declared order would roll the router when a user reordered
@@ -383,4 +430,97 @@ schedulingProfiles:
 	require.NoError(t, err)
 
 	assert.Equal(t, want, output.Document)
+}
+
+// TestRenderLLMD_SGLangSplitsEveryRequestAndLeavesTheEncoderToThePrefiller pins the SGLang picker
+// document. An SGLang decoder cannot prefill, so its prefill stage never skips; and its prefiller
+// dials the encoder by address, so the picker sees the encoder and the prefiller as one stage and
+// renders no encoder stage of its own.
+func TestRenderLLMD_SGLangSplitsEveryRequestAndLeavesTheEncoderToThePrefiller(t *testing.T) {
+	zero, eight := int32(0), int32(8)
+	testCases := []struct {
+		name        string
+		engine      string
+		threshold   *int32
+		wantDecider string
+		wantEncoder bool
+	}{
+		{name: "sglang with no threshold", engine: "sglang", wantDecider: "always-disagg-pd-decider"},
+		{
+			name: "sglang with a positive threshold", engine: "sglang", threshold: &eight,
+			wantDecider: "always-disagg-pd-decider",
+		},
+		{
+			name: "sglang with an explicit zero threshold", engine: "sglang", threshold: &zero,
+			wantDecider: "prefix-based-pd-decider",
+		},
+		{
+			name: "vllm keeps its stage and its decider", engine: "vllm",
+			wantDecider: "prefix-based-pd-decider", wantEncoder: true,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := epdInput()
+			input.Metrics.Engine = tc.engine
+			input.DisaggregationThreshold = tc.threshold
+			if tc.engine == "sglang" {
+				input.KVEvents = KVEvents{}
+			}
+			output, err := Render(LLMD, input)
+			require.NoError(t, err)
+			document := parseLLMDDocument(t, output.Document)
+
+			types := map[string]int{}
+			filters := []string{}
+			profiles := map[string]string{}
+			wired := map[string]string{}
+			for _, plugin := range document.Plugins {
+				types[plugin.Type]++
+				if plugin.Type == "label-selector-filter" {
+					filters = append(filters, plugin.Name)
+				}
+				if plugin.Type == "disagg-profile-handler" {
+					profiles = llmdStringParameters(t, plugin.Parameters, "profiles")
+					wired = llmdStringParameters(t, plugin.Parameters, "deciders")
+				}
+			}
+
+			assert.Equal(t, 1, types[tc.wantDecider], "the prefill decider is rendered once")
+			assert.Equal(t, tc.wantDecider, wired["prefill"])
+			other := "always-disagg-pd-decider"
+			if tc.wantDecider == other {
+				other = "prefix-based-pd-decider"
+			}
+			assert.Zero(t, types[other], "the other prefill decider is not rendered")
+
+			_, encodeProfile := document.lookupProfile("encode")
+			assert.Equal(t, tc.wantEncoder, encodeProfile)
+			assert.Equal(t, tc.wantEncoder, slices.Contains(filters, "encode-pods"))
+			assert.Equal(t, tc.wantEncoder, types["always-disagg-multimodal-decider"] == 1)
+			_, wiresEncoder := profiles["encode"]
+			assert.Equal(t, tc.wantEncoder, wiresEncoder)
+			_, deciderForEncoder := wired["encode"]
+			assert.Equal(t, tc.wantEncoder, deciderForEncoder)
+		})
+	}
+}
+
+// TestRenderLLMD_SGLangAlwaysSplitDeciderTakesNoParameters holds the always-split decider to the
+// shape upstream registers: it reads nothing, so a parameters block would be refused at load.
+func TestRenderLLMD_SGLangAlwaysSplitDeciderTakesNoParameters(t *testing.T) {
+	input := epdInput()
+	input.Metrics.Engine = "sglang"
+	input.KVEvents = KVEvents{}
+	output, err := Render(LLMD, input)
+	require.NoError(t, err)
+
+	found := false
+	for _, plugin := range parseLLMDDocument(t, output.Document).Plugins {
+		if plugin.Type == "always-disagg-pd-decider" {
+			found = true
+			assert.Empty(t, plugin.Parameters)
+		}
+	}
+	assert.True(t, found)
 }

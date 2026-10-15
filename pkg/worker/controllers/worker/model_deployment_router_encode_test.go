@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,11 +67,12 @@ func epdDocumentNames(t *testing.T, document map[string]any) (plugins, profiles 
 }
 
 // TestRenderModelDeploymentRouterObjects_DiscoversTheEncoderStage is the controller-side half of the
-// picker document: the roles reach the renderer with the encoder among them, and the document that
-// comes back has a filter and a profile for it.
+// picker document when the encoder is a router stage (vLLM): the roles reach the renderer with the
+// encoder among them, and the document that comes back has a filter and a profile for it.
 //
-// IT IS ABOUT THE POOL, NOT THE ANSWER. The router's --endpoint-selector is deliberately unchanged
-// by an encoder role, because that selector is the POOL the picker draws candidates from
+// IT IS ABOUT THE POOL, NOT THE ANSWER. For a deployment where the router dispatches the encoder
+// stage itself, its --endpoint-selector is deliberately unchanged by the encoder role, because that
+// selector is the POOL the picker draws candidates from
 // (llm-d/llm-d-router@v0.11.0 `cmd/epp/runner/runner.go:540`, applied at
 // `pkg/epp/datastore/datastore.go:220-227`) and the encoder filter runs against the pool. Excluding
 // an encoder from it would leave the encoder profile with no candidate at all, and upstream refuses
@@ -236,4 +238,105 @@ func TestRenderModelDeploymentRouterObjects_ReservesNoPortForTheEncoder(t *testi
 	}
 	assert.True(t, kinds[workercore.ModelDeploymentRoleKindEncode],
 		"the encoder is published as a role the router may address")
+}
+
+// sglangEPDRouterObjects renders the managed router of an SGLang encoder/prefill/decode
+// deployment, whose prefiller dials the encoder by address.
+func sglangEPDRouterObjects(
+	t *testing.T, order []workercore.ModelDeploymentRoleKind,
+) ModelDeploymentRouterObjects {
+	t.Helper()
+
+	md := epdDeployment(t, order)
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineSGLang, Version: "0.5.18"}
+	for i := range md.Spec.Roles {
+		md.Spec.Roles[i].Ports = []workercore.ModelDeploymentPort{{Protocol: core.ProtocolTCP, Port: 8000}}
+		md.Spec.Roles[i].ExtraArgs = nil
+	}
+
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, objects.ConfigMap)
+
+	return objects
+}
+
+// TestRenderModelDeploymentRouterObjects_SGLangRoutesEncoderPrefillAsOneStage is the controller-side
+// half of the SGLang picker document. The prefiller dials the encoder by address, so the picker
+// renders no encoder stage and its endpoint selector keeps the encoder out of the candidate pool,
+// while the published contract still lists the encoder as a role.
+func TestRenderModelDeploymentRouterObjects_SGLangRoutesEncoderPrefillAsOneStage(t *testing.T) {
+	for _, position := range epdRoleOrders {
+		t.Run(position.name, func(t *testing.T) {
+			objects := sglangEPDRouterObjects(t, position.order)
+
+			plugins, profiles := epdDocumentNames(t, epdPickerDocument(t, objects))
+			assert.NotContains(t, plugins, "encode-pods")
+			assert.NotContains(t, profiles, "encode")
+
+			document := objects.ConfigMap.Data[modelDeploymentRouterConfigKey]
+			assert.NotContains(t, document, "always-disagg-multimodal-decider")
+			assert.Contains(t, document, "always-disagg-pd-decider")
+			assert.NotContains(t, document, "prefix-based-pd-decider")
+
+			selector := objects.ConfigMap.Data[modelDeploymentRouterSelectorKey]
+			assert.Contains(t, selector, modelDeploymentLabelKeyRoleKind+"!=encode")
+			assert.True(t, strings.HasSuffix(selector, ","+modelDeploymentLabelKeyRoleKind+"!=encode") ||
+				strings.Contains(selector, modelDeploymentLabelKeyRoleKind+"!=encode,"),
+				"the exclusion is one term of the selector: %s", selector)
+
+			kinds := map[workercore.ModelDeploymentRoleKind]bool{}
+			for _, role := range objects.Contract.Roles {
+				kinds[role.Kind] = true
+			}
+			assert.True(t, kinds[workercore.ModelDeploymentRoleKindEncode],
+				"the encoder is still published as a role")
+		})
+	}
+}
+
+// TestRenderModelDeploymentRouterObjects_EndpointSelectorExcludesTheEncoderOnSGLangAlone holds the
+// selector exclusion to the one shape that needs it: vLLM keeps the encoder in the pool because its
+// encoder stage is a router stage, and a deployment without an encoder renders no such term.
+func TestRenderModelDeploymentRouterObjects_EndpointSelectorExcludesTheEncoderOnSGLangAlone(t *testing.T) {
+	withEncoder := []workercore.ModelDeploymentRoleKind{
+		workercore.ModelDeploymentRoleKindEncode,
+		workercore.ModelDeploymentRoleKindPrefill,
+		workercore.ModelDeploymentRoleKindDecode,
+	}
+	withoutEncoder := []workercore.ModelDeploymentRoleKind{
+		workercore.ModelDeploymentRoleKindPrefill,
+		workercore.ModelDeploymentRoleKindDecode,
+	}
+	testCases := []struct {
+		name    string
+		objects ModelDeploymentRouterObjects
+		want    bool
+	}{
+		{name: "sglang with an encoder", objects: sglangEPDRouterObjects(t, withEncoder), want: true},
+		{name: "sglang without an encoder", objects: sglangEPDRouterObjects(t, withoutEncoder)},
+		{name: "vllm with an encoder", objects: epdRouterObjects(t, withEncoder)},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			selector := tc.objects.ConfigMap.Data[modelDeploymentRouterSelectorKey]
+			assert.Equal(t, tc.want, strings.Contains(selector, modelDeploymentLabelKeyRoleKind+"!=encode"))
+		})
+	}
+}
+
+// TestRenderModelDeploymentRouterObjects_VLLMEncoderStageKeepsItsDeciders pins the vLLM side of the
+// split: its encoder stays a router stage, with the multimodal decider beside the prefix-based one.
+func TestRenderModelDeploymentRouterObjects_VLLMEncoderStageKeepsItsDeciders(t *testing.T) {
+	objects := epdRouterObjects(t, []workercore.ModelDeploymentRoleKind{
+		workercore.ModelDeploymentRoleKindEncode,
+		workercore.ModelDeploymentRoleKindPrefill,
+		workercore.ModelDeploymentRoleKindDecode,
+	})
+
+	document := objects.ConfigMap.Data[modelDeploymentRouterConfigKey]
+	assert.Contains(t, document, "always-disagg-multimodal-decider")
+	assert.Contains(t, document, "prefix-based-pd-decider")
+	assert.NotContains(t, document, "always-disagg-pd-decider")
 }

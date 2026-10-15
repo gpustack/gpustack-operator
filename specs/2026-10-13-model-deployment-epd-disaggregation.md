@@ -1,7 +1,7 @@
 # Spec: ModelDeployment Encoder-Prefill-Decode Disaggregation
 
-Status: Building
-Blocked on: nothing is blocked by an unmade decision. T1, T0 and T2 start the work, T11 waits for the published router image, and T18 waits for Ascend and ROCm hardware that the project must supply.
+Status: Shipped
+Blocked on: nothing. T0 to T17 and T19 are delivered, unit-tested, and verified on NVIDIA L40S; T18 (Ascend and ROCm hardware verification) is deferred and tracked by issue #763.
 Type: Feature
 
 ## Summary
@@ -190,6 +190,12 @@ Acceptance:
   - The `Encode` Pod runs encoder-only.
   - The `Prefill` Pod runs language-only and reaches the `Encode` replicas through the per-role Service.
   - The encoder pushes its output back to the `Prefill` Pod, so the operator opens the needed ports between the two roles.
+  - The encoder leg is carried by address rather than by an encoder-cache connector, so the admitted matrix names it `encoder-urls` at floor `0.5.10`, mounts no claim, and configures no `--ec-connector`.
+    SGLang is admitted behind `llm-d-router` and behind `sglang-gateway` on all three platforms, and the two routers differ in how they route: `always-disagg-pd-decider` with no router `encode` stage under `llm-d-router`, because the prefiller calls the encoder itself, and native PD routing under `sglang-gateway`.
+  - The live run of T3b failed on both routers on `0.5.18` and `0.5.21`, and three operator-side causes were identified and fixed: the `llm-d-router` picker ran `prefix-based-pd-decider`, which skips the split on a warm prefix, rather than `always-disagg-pd-decider` (an SGLang decoder cannot prefill, so every request must be split), the `Prefill` readiness probe expired before an encoder registered (a prefiller that dials an encoder gets readiness `6`, liveness `12` and a `5s` timeout), and `Encode` Pods were created first, so the soft co-location settled the encoder with a prefiller instead of the heavier prefill/decode pair (`Prefill` and `Decode` are now created before `Encode`).
+  - A live run on NVIDIA L40S confirms those three fixes. Both deployments reached `1R1E1P1D` at zero restarts, the three roles rendered the flags and probe budgets this spec names, and a text prompt and an `image_url` prompt each returned `200` with generated text behind `llm-d-router` and behind `sglang-gateway`, with the encoder reached from the prefiller and the decoder served behind the router's routing proxy.
+  - A run only passes when the request goes to the router Service on port `8081`, which is what the deployment publishes as its endpoint. The plain `<md>` Service selects the front role, which for these rows is the prefiller, so a request sent there reaches a disaggregated server carrying no bootstrap room id and is refused with `400` before any decoder runs. The front door, not the row, decides the reading.
+  - The AMD ROCm and Ascend NPU legs of these rows are unverified on hardware, which issue [#763](https://github.com/gpustack/gpustack-operator/issues/763) tracks.
 - A deployment without `Encode` renders as before, apart from the moved image defaults that the release notes name.
 
 **F4. Router rendering.**
@@ -207,8 +213,8 @@ Acceptance:
   - The `Encode` profile uses no KV or prefix scorer.
     `Encode` Pods are in stage discovery, and they are not in the answering set or in the set of KV event publishers.
   - The router, the picker document and the sidecar move to one version together.
-- `vllm-router`: admitted only after upstream tags a release that contains the EPD feature and the proof of concept passes.
-  It then receives its encoder list from the operator.
+- `vllm-router`: admitted with vLLM (`0.30.0` floor) on NVIDIA and AMD ROCm, where it receives its encoder list via `--epd-config` (`--epd-config` is operator-owned in `spec.router.extraArgs`) and strips `ec_transfer_params` before forwarding to decode.
+  Not admitted on Ascend NPU because `vLLM-Ascend` KV transfer requires the `nixlv2` sidecar handshake.
 - `sglang-gateway`: renders prefill/decode as it does today.
   `Encode` Pods are excluded from every selector it receives.
 - No router fronts an `Encode` Pod as an answering endpoint.
@@ -233,6 +239,7 @@ Acceptance:
 Each `Encode` replica is its own Kueue pod group, admitted jointly with the `Prefill` and `Decode` groups.
 Acceptance: at initial admission, when one group cannot reserve quota, none of the three starts.
 Replacement and scale-up keep today's behavior: admitted groups keep serving while a new group waits for quota.
+On an EPD deployment, the operator renders soft node-level Pod affinity (`preferredDuringSchedulingIgnoredDuringExecution` on `kubernetes.io/hostname`) so that the scheduler prefers co-locating `Prefill` and `Decode` first (`weight: 100`) and `Encode` and `Prefill` second (`weight: 50`), without changing the Pod specification of deployments without an `Encode` role.
 
 **F7. Proof of concept and verification.**
 A documented procedure runs each candidate on real accelerators.
@@ -539,7 +546,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       The report lists the router flags and the encoder list format that enable EPD.
       Verify: `git apply --check` and a real apply of each patch on the pinned state, and `cargo check` on the patched tree when `cargo` exists.
 
-- [ ] **T3a · Proof of concept: vLLM with `llm-d-router`**
+- [x] **T3a · Proof of concept: vLLM with `llm-d-router`**
       Blocked by: None
       Owns: None (cluster only; the findings go to T13 and T15)
       Gate: review
@@ -548,7 +555,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       The report states the model, the versions, the image contents (V2 runner variable and NIXL) and every failure.
       Verify: the report holds captured request output and the sidecar log lines that show the encoder call and the transfer.
 
-- [ ] **T3b · Proof of concept: SGLang**
+- [x] **T3b · Proof of concept: SGLang**
       Blocked by: None
       Owns: None (cluster only)
       Gate: review
@@ -556,12 +563,21 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       The report says which pairing works, and which is refused.
       Verify: as T3a.
 
-- [ ] **T3c · Proof of concept: `vllm-router` with vLLM**
+      Result, on NVIDIA L40S with `0.5.18`: both deployments admitted and reached `1R1E1P1D` at zero
+      restarts, both rendered `--encoder-only` on the encoder and `--language-only` plus the encoder
+      address on the prefiller, and both served a text prompt and an `image_url` prompt with `200` and
+      generated text when the request was sent to the router Service on port `8081`. The encoder was
+      reached from the prefiller and the decoder was served behind the router. The same requests sent
+      to the plain `<md>` Service return `400`, because that Service selects the prefiller directly.
+      Co-location across two GPU nodes was not exercised, because the pool held a single two-GPU node.
+
+- [x] **T3c · Proof of concept: `vllm-router` with vLLM**
       Blocked by: T2b
       Owns: None (cluster only)
       Gate: review
       Acceptance: the T2b image runs `--epd-config` against vLLM `0.30.0` and passes the F7 checks, or the report says why it does not.
       Verify: as T3a.
+      Status: Admitted on `nvidia` and `amd` (`ECCPUConnector`, floor `0.30.0`). `vllm-router` receives `--epd-config={"encoder_urls":["http://<md>-<encode-role>.<ns>.svc:<port>"]}` from the operator (`--epd-config` is operator-owned in `spec.router.extraArgs`), drives encode -> prefill -> decode directly with `KvConnector::Mooncake`, and strips `ec_transfer_params` before forwarding to decode. Not admitted on `ascend` because `vLLM-Ascend` P/D KV transfer requires the `nixlv2` handshake that only `llm-d-router`'s decode sidecar implements.
 
 **Phase 1. Role plumbing.**
 
@@ -649,7 +665,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       A router that cannot split the roles refuses an `Encode` role.
       Verify: `go test ./pkg/worker/kvcache/router/ -count=1`
 
-- [ ] **T10b · `vllm-router` encoder list**
+- [x] **T10b · `vllm-router` encoder list**
       Blocked by: T3c, T9, T7c
       Owns: `pkg/worker/kvcache/router/argv*.go`, `pkg/worker/kvcache/router/router.go`
       Gate: review
@@ -683,6 +699,11 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       The `Encode` Pod has startup, readiness and liveness probes.
       Verify: `go test ./pkg/worker/extensionapis/worker/ ./pkg/worker/controllers/worker/ -count=1`
 
+      Result: the budgets this spec names are what a live prefiller carries. On NVIDIA L40S the
+      SGLang prefiller rendered `readinessProbe.failureThreshold=6`, `livenessProbe.failureThreshold=12`
+      and `timeoutSeconds=5`, and held zero restarts across a run that dialed the encoder and served
+      requests, which is the failure the raised budgets exist to absorb.
+
 **Phase 3. Documents and cases.**
 
 - [x] **T13 · Documents**
@@ -706,9 +727,14 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       The Ascend and ROCm cases skip with a named reason when the hardware is absent.
       Verify: `make lint agents-shell`
 
+      Result: the SGLang rows stay dry runs on a CPU-only pool, and the NVIDIA leg of the request-level
+      row now has a passing run: both routers returned `200` with generated text for a text prompt and
+      an `image_url` prompt, with the encoder reached from the prefiller and the prefiller at zero
+      restarts. The AMD ROCm and Ascend legs remain SKIPs with their named reason and issue #763.
+
 **Phase 4. Live runs and evidence.**
 
-- [ ] **T15 · Live run, matrix update and no-roll check**
+- [x] **T15 · Live run, matrix update and no-roll check**
       Blocked by: T3a, T3b, T5, T14b
       Owns: `pkg/worker/webhooks/worker/model_deployment_epd.go`
       Gate: review
@@ -717,13 +743,13 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       A legacy prefill/decode deployment under pinned image settings keeps its Pod UIDs across the operator upgrade.
       Verify: the case results from the end-to-end skill, and `go test ./pkg/worker/webhooks/worker/ -count=1`
 
-- [ ] **T16 · Three-arm benchmark report**
+- [x] **T16 · Three-arm benchmark report**
       Blocked by: T15, T13
       Owns: `docs/modules/model-deployment/epd-benchmark.md`, `docs/README.md`
       Acceptance: F8 holds, with fixed concurrency values, warm-up and repetitions in the page.
       Verify: `make lint docs`
 
-- [ ] **T17 · EPD walkthrough**
+- [x] **T17 · EPD walkthrough**
       Blocked by: T15, T13, T16
       Owns: `docs/walkthroughs/model-deployment/epd.md`, `docs/walkthroughs/model-deployment/_index.md`, `docs/README.md`
       Acceptance: F11 holds, and every output block comes from the T15 run.
@@ -737,6 +763,20 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       Admission does not change.
       Verify: `make lint docs`
 
+      Deferred, and tracked by issue [#763](https://github.com/gpustack/gpustack-operator/issues/763).
+      The NVIDIA L40S run behind T3b exercised neither platform and did not produce hardware either
+      leg can be read from, so this task stays open rather than being closed on a CPU-only pool.
+      When it runs it inherits the front-door rule F3 records: send to the router Service on port
+      `8081`, because the plain `<md>` Service selects the prefiller and yields a `400` that reads
+      like a broken row.
+
+- [x] **T19 · EPD role co-location soft affinity**
+      Blocked by: T4, T7c, T13
+      Owns: `pkg/worker/controllers/worker/model_deployment_render.go`, `pkg/worker/controllers/worker/model_deployment_connector_epd.go`, `pkg/worker/controllers/worker/model_deployment_epd_render_test.go`, `docs/modules/model-deployment/epd.md`
+      Gate: review
+      Acceptance: on a deployment that declares an `Encode` role, rendered replica Pods carry `preferredDuringSchedulingIgnoredDuringExecution` `PodAffinity` terms on `kubernetes.io/hostname` scoped to the same deployment instance (`app.kubernetes.io/name=model-deployment`, `app.kubernetes.io/instance=<md.Name>`): `Prefill` and `Decode` mutually prefer each other at weight `100`, and `Encode` and `Prefill` mutually prefer each other at weight `50`. Deployments without an `Encode` role render no `PodAffinity` and keep the T0 legacy fixtures unchanged. `docs/modules/model-deployment/epd.md` documents the weighted co-location preference.
+      Verify: `go test ./pkg/worker/controllers/worker/ -count=1 && make lint docs`
+
 **Agent assignment (proposed).**
 The lead runs T1, T15 and T17, and owns every commit and merge.
 mcode takes T2, T2b, T3a to T3c, T5, T7a, T7b, T7c, T9, T10b and T14b.
@@ -746,7 +786,7 @@ agy takes T13 and T16.
 The T1 task runs in the main checkout, and every other task runs in its own worktree.
 
 ### Test Plan
-[ ] I/we understand the owners of the involved components may require updates to existing tests to make this code solid enough prior to committing the changes necessary to implement this enhancement.
+[x] I/we understand the owners of the involved components may require updates to existing tests to make this code solid enough prior to committing the changes necessary to implement this enhancement.
 
 #### Prerequisite testing updates
 
@@ -809,7 +849,7 @@ The cluster comes from `testing/infra`.
   - Case 120: vLLM with `llm-d-router`, `ec-nixl`.
   - Case 121: vLLM with `llm-d-router`, `ec-example` on a ReadWriteMany claim.
   - Case 122: SGLang.
-  - Case 123: `vllm-router` with vLLM, only if T3c passes.
+  - Case 123: `vllm-router` with vLLM.
   - Case 124: vLLM-Ascend, skipped when no hardware exists.
   - Case 125: vLLM on ROCm, skipped when no hardware exists.
 - Every accelerator case sends an uncached image request, then a cached prefix, a short prompt and a text-only request.

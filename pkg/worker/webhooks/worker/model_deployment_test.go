@@ -4432,6 +4432,10 @@ func TestValidateModelDeploymentRouter_OwnedArgumentsArePerRouter(t *testing.T) 
 			router: workercore.ModelDeploymentRouterSGLang, arg: "--kv-connector=mooncake",
 			refused: false, engine: workercore.ModelDeploymentEngineSGLang,
 		},
+		{
+			name: "the epd config the vllm router derives", router: workercore.ModelDeploymentRouterVLLM,
+			arg: `--epd-config={"encoder_urls":[]}`, refused: true, engine: workercore.ModelDeploymentEngineVLLM,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

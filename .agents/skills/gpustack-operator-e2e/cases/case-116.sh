@@ -55,8 +55,9 @@
 #                wide kvCache, a role command, an encoder of more than one instance, an empty
 #                claim name, a second volume source on one entry, a read-only encoder mount,
 #                disagreeing mount paths, an encoder or a prefiller without its claim, a router
-#                that does not take an encoder role, an engine that router does not pair with, an
-#                engine version below the floor, and a platform the matrix does not admit;
+#                that does not admit the injected platform for an encoder role, an engine a router
+#                does not pair with, an engine version below the floor, and a platform the matrix
+#                does not admit;
 #              - two roles on two different platforms are refused as a mixed deployment.
 #
 # Cleanup:     The trap deletes the NodeFeature object, restores the settings key to its exact
@@ -102,6 +103,13 @@ for n in json.load(sys.stdin).get("items",[]):
     if not any(c.get("type")=="Ready" and c.get("status")=="True" for c in cs):
         continue
     if n.get("spec",{}).get("unschedulable"):
+        continue
+    # A CPU-vendor probe only reads back on a node that feeds the CPU-only catalog. An
+    # acceleratable node feeds the GPU InstanceType instead, whose manufacturer is the
+    # accelerator vendor, so an injected cpu-model.vendor_id never surfaces here and the
+    # platform-type poll below times out. Skip those nodes, exactly as case-18 reads the
+    # CPU pool (acceleratable=false) rather than the accelerator one.
+    if n.get("metadata",{}).get("labels",{}).get("feature.gpustack.ai/acceleratable") == "true":
         continue
     ts=n.get("spec",{}).get("taints",[])
     if any(str(t.get("key","")).startswith("node-role.kubernetes.io/") for t in ts):
@@ -465,15 +473,21 @@ esac
 # ---------------------------------------------------------------- the matrix rules: platform-bound
 
 if [ -n "$PLATFORM_TYPE" ]; then
-  # The wrong router is refused before its engine is even consulted, and the message names both.
-  ROUTER_NAME=vllm-router refuses "a router that takes no encoder role is refused" \
-    'router "vllm-router" is not admitted for an encoder role' \
+  # vllm-router admits NVIDIA and AMD for vLLM encoder roles, not Ascend (vLLM-Ascend's P/D KV leg
+  # requires llm-d-router's decode sidecar handshake), so the refusal names the platform beside the
+  # router and engine.
+  ROUTER_NAME=vllm-router refuses "a router that does not admit this platform for an encoder role is refused" \
+    'platform "ascend" is not admitted for encoder roles under router "vllm-router" and engine "vLLM"' \
     "$(baseline_roles)"
   ROUTER_NAME=""
 
-  ENGINE=SGLang refuses "an engine this router does not pair with the encoder is refused" \
-    'is not admitted with engine "SGLang"' \
+  # sglang-gateway drives the encoder leg on SGLang alone, so pairing it with vLLM is the pair the
+  # matrix still refuses. Both SGLang rows are admitted behind that router now, so the engine below is
+  # vLLM and the refusal has to name the pairing rather than either half on its own.
+  ROUTER_NAME=sglang-gateway ENGINE=vLLM refuses "an engine this router does not pair with the encoder is refused" \
+    'router "sglang-gateway" is not admitted with engine "vLLM"' \
     "$(baseline_roles)"
+  ROUTER_NAME=""
   ENGINE=""
 
   # 0.10.0 is below both floors, so exactly the floor rule answers.
@@ -509,7 +523,7 @@ $(prefill_role)
 $(decode_role)"
 else
   for row in \
-    "a router that takes no encoder role is refused" \
+    "a router that does not admit this platform for an encoder role is refused" \
     "an engine this router does not pair with the encoder is refused" \
     "an engine version below the floor is refused" \
     "a read-only encoder mount is refused" \
@@ -522,11 +536,16 @@ fi
 
 # ---------------------------------------------------------------- the platform rules
 
-# A platform no admitted row covers. With awareness on, the cluster's own CPU types report their
-# real vendor, so any type whose manufacturer is neither of the two admitted platforms serves;
-# an all-AMD or all-unknown cluster may have none, and the row says so rather than inventing one.
+# The two platform rows need different second platforms, and since NVIDIA joined the matrix they
+# are no longer the same list. The mixing row needs ANY second manufacturer beside the injected
+# one, so an NVIDIA cluster (whose own types report nvidia) still runs it against its real types.
+# The unadmitted row needs a manufacturer NO admitted row covers -- neither the injected one, nor
+# amd, nor nvidia -- so that same cluster skips it cleanly instead of reading one of its own
+# admitted platforms as a refusal case-124 already covers directly. With awareness on, the
+# cluster's own CPU types report their real vendor, so any such type serves; an all-AMD,
+# all-NVIDIA or all-unknown cluster may have none, and the row says so rather than inventing one.
 if [ -n "$PLATFORM_TYPE" ]; then
-  OTHER_IT="$(kubectl get instancetypes.worker.gpustack.ai \
+  UNADMITTED_IT="$(kubectl get instancetypes.worker.gpustack.ai \
     -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
     2>/dev/null \
     | while IFS='|' read -r name deleting inactive manufacturer; do
@@ -534,20 +553,32 @@ if [ -n "$PLATFORM_TYPE" ]; then
         [ -z "$deleting" ] || continue
         [ "$inactive" = true ] && continue
         if [ -n "$manufacturer" ] && [ "$manufacturer" != "$PLATFORM" ] \
-          && [ "$manufacturer" != amd ]; then
+          && [ "$manufacturer" != amd ] && [ "$manufacturer" != nvidia ]; then
+          echo "$name"
+          break
+        fi
+      done)"
+  SECOND_IT="$(kubectl get instancetypes.worker.gpustack.ai \
+    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
+    2>/dev/null \
+    | while IFS='|' read -r name deleting inactive manufacturer; do
+        [ -n "$name" ] || continue
+        [ -z "$deleting" ] || continue
+        [ "$inactive" = true ] && continue
+        if [ -n "$manufacturer" ] && [ "$manufacturer" != "$PLATFORM" ]; then
           echo "$name"
           break
         fi
       done)"
 
-  if [ -n "$OTHER_IT" ]; then
-    # The whole deployment on the unadmitted type: the matrix names the platform, the router and
-    # the engine together.
+  # The whole deployment on the unadmitted type: the matrix names the platform, the router and
+  # the engine together.
+  if [ -n "$UNADMITTED_IT" ]; then
     refuses "a platform the matrix does not admit is refused, all three named" \
       "is not admitted for encoder roles under router" \
       "  - name: encode
     kind: Encode
-    instanceType: ${OTHER_IT}
+    instanceType: ${UNADMITTED_IT}
     image: ${IMAGE}
     additionalVolumes:
       - mountPath: /ec-cache
@@ -555,7 +586,7 @@ if [ -n "$PLATFORM_TYPE" ]; then
           claimName: case116-shared
   - name: prefill
     kind: Prefill
-    instanceType: ${OTHER_IT}
+    instanceType: ${UNADMITTED_IT}
     image: ${IMAGE}
     additionalVolumes:
       - mountPath: /ec-cache
@@ -563,16 +594,21 @@ if [ -n "$PLATFORM_TYPE" ]; then
           claimName: case116-shared
   - name: decode
     kind: Decode
-    instanceType: ${OTHER_IT}
+    instanceType: ${UNADMITTED_IT}
     image: ${IMAGE}"
+  else
+    record SKIP "a platform the matrix does not admit is refused, all three named" \
+      "every usable InstanceType reports an admitted platform (ascend, amd, nvidia) or none, so there is no unadmitted platform to name; case-124 covers every unadmitted platform"
+  fi
 
-    # Two platforms in one deployment, both claim mounts well formed so only the mixing answers.
+  # Two platforms in one deployment, both claim mounts well formed so only the mixing answers.
+  if [ -n "$SECOND_IT" ]; then
     refuses "two platforms in one encoder deployment are refused" \
       "more than one accelerator platform" \
       "$(encode_role case116-shared /ec-cache)
   - name: prefill
     kind: Prefill
-    instanceType: ${OTHER_IT}
+    instanceType: ${SECOND_IT}
     image: ${IMAGE}
     additionalVolumes:
       - mountPath: /ec-cache
@@ -580,8 +616,6 @@ if [ -n "$PLATFORM_TYPE" ]; then
           claimName: case116-shared
 $(decode_role)"
   else
-    record SKIP "a platform the matrix does not admit is refused, all three named" \
-      "every usable InstanceType reports an admitted platform or none, so there is no unadmitted platform to name"
     record SKIP "two platforms in one encoder deployment are refused" \
       "no second manufacturer exists to mix with the injected one"
   fi

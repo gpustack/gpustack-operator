@@ -1272,8 +1272,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// to be. The error is returned after the status is written, so the pass is still not treated as
 	// successful and the missing replicas are retried.
 	var createErr error
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
+	for _, role := range modelDeploymentCreateRoleOrder(md) {
 		for _, ordinal := range createOrdinals[role.Name] {
 			if slot, held := slots.slotFor(role.Name); held && slot.Ordinal == ordinal &&
 				slot.Phase == modelDeploymentReplacementCleanup {

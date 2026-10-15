@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 #
-# CASE 120 — The admitted ROCm row runs: vLLM on AMD behind llm-d-router with the NIXL encoder-cache
-#           leg, and a multimodal request goes through the router (MUTATING, self-recovering)
-#           AUTO-SKIPS without a real AMD pool with three free cards and the serving images
+# CASE 120 — The admitted network rows run: vLLM on NVIDIA CUDA or AMD ROCm behind llm-d-router
+#           with the NIXL encoder-cache leg, and a multimodal request goes through the router
+#           (MUTATING, self-recovering)
+#           AUTO-SKIPS without a pool of 2+ NVIDIA CUDA or AMD ROCm accelerators with the free cards
+#           this case asks for and the serving images
 #
 #   case-120.sh <NS>
 #
-# Goal:        This is the functional reading of the admitted matrix row
-#              llm-d-router + vLLM + AMD + ECCPUConnector. Case 116 pins the ADMISSION of the
-#              shape, case 119 pins the shared-directory render of the OTHER row; nothing yet
-#              proves this one runs. The encoder's output reaches the prefiller over NIXL here —
+# Goal:        This is the functional reading of the admitted matrix rows
+#              llm-d-router + vLLM + NVIDIA CUDA (or AMD ROCm) + ECCPUConnector. Case 116 pins the
+#              ADMISSION of the shape, case 119 pins the shared-directory render of the OTHER row;
+#              nothing yet proves these run. The encoder's output reaches the prefiller over NIXL
+#              here —
 #              the sidecar on the decode Pod pulls it — so the rendered mount rows of case 119
 #              say nothing about this leg, and the only reading that says anything is a real
-#              engine moving real encodings: three roles Ready on real AMD cards, the rendered
-#              leg naming the network connector on both halves that carry it, and one multimodal
-#              chat request answered through the router with HTTP 200.
+#              engine moving real encodings: three roles Ready on real NVIDIA or AMD cards, the
+#              rendered leg naming the network connector on both halves that carry it, and one
+#              multimodal chat request answered through the router with HTTP 200.
 #
 #              THE THREE ROWS ARE INDEPENDENT, and each can fail while the others pass. Readiness
 #              is a scheduling and scheduling chain fact. The documents are a render fact: the
@@ -26,18 +29,19 @@
 #              all three stages and the answer came back, which no amount of Ready conditions or
 #              correct argv proves on its own.
 #
-# Environment: A real AMD/ROCm accelerator pool whose InstanceType reports at least THREE free
-#              exclusive cards (one per role — this row runs each role at TP 1 by default), the
-#              vllm-ascend-free ROCm vLLM engine image pullable, and the llm-d-router image
-#              pullable. Model weights staged at a hostPath on the accelerator nodes. A multimodal
+# Environment: A real NVIDIA CUDA or AMD ROCm accelerator pool whose InstanceType reports at least
+#              THREE free exclusive cards (one per role — this row runs each role at TP 1 by
+#              default), the matching vLLM engine image pullable (the CUDA runner on nvidia, the
+#              ROCm runner on amd), and the llm-d-router image pullable. Model weights staged at a
+#              hostPath on the accelerator nodes. A multimodal
 #              (vision-language) model is REQUIRED here, not a text-only one: a text request never
 #              engages the encoder stage, so a text-only model would leave the leg untested while
 #              every row passed. The namespace must carry the pool's entrance LocalQueue.
 #              Exits 2 (input required) when E2E_C120_INSTANCE_TYPE is unset — the case refuses
 #              to guess a pool. AUTO-SKIPS (exit 0) when no InstanceType reports manufacturer
-#              amd, when the named one holds fewer than E2E_C120_CARDS (default 3) free exclusive
-#              cards, or when any of the three images would not pull (naming the image); each skip
-#              prints what it found.
+#              nvidia or amd, when the named one holds fewer than E2E_C120_CARDS (default 3) free
+#              exclusive cards, or when any of the three images would not pull (naming the image);
+#              each skip prints what it found.
 #
 #              THE ENDPOINT IS POLLED, NOT READ ONCE, and a bound spent is only a verdict when the
 #              WHOLE chain came up: the controller writes .status.endpoint after it observes the
@@ -51,10 +55,11 @@
 #              missing endpoint only follows the Pods.
 #
 # Inputs:      All real, nothing mocked. One ModelDeployment with an encode, a prefill and a
-#              decode role on the AMD type; the load is one multimodal chat request carrying an
+#              decode role on the named type; the load is one multimodal chat request carrying an
 #              image, driven from a throwaway probe Pod through the router's Service.
-#              E2E_C120_INSTANCE_TYPE (required),
-#              E2E_C120_IMAGE (engine, default quay.io/gpustack/runner:rocm6.3-vllm0.30.0),
+#              E2E_C120_INSTANCE_TYPE (required, reporting manufacturer nvidia or amd),
+#              E2E_C120_IMAGE (engine; default docker.io/gpustack/runner:cuda13.0-vllm0.30.0 on
+#              nvidia and quay.io/gpustack/runner:rocm6.3-vllm0.30.0 on amd),
 #              E2E_C120_VERSION (engine version, default 0.30.0 — the floor ECCPUConnector first
 #              appears in, so a default run clears it),
 #              E2E_C120_ROUTER_IMAGE (default docker.io/gpustack/llm-router:v0.3.1),
@@ -65,6 +70,9 @@
 #              E2E_C120_IMAGE_URL (default a 1x1 PNG data URI, so the request needs no network),
 #              E2E_C120_CARDS (default 3), E2E_C120_TP (default 1),
 #              E2E_C120_READY_BOUND (default 1800), E2E_C120_MAX_TOKENS (default 64),
+#              E2E_C120_STAGE_BOUND (default 60 — how long the three stage markers are polled for,
+#              each engine writes its line when it takes the request, which is before the decoder
+#              produces a token, so a single read could otherwise race it),
 #              E2E_C120_SETTLE_BOUND (default 180 — how long cleanup waits for the restored image
 #              to be read back through the settings cache).
 #
@@ -89,7 +97,12 @@
 #                the side channel pair;
 #              - the decode Pod runs the routing sidecar with --ec-connector=ec-nixl;
 #              - one multimodal chat request through the router Service returns HTTP 200 with
-#                generated content.
+#                generated content;
+#              - the request traversed all three stages, read from the engines rather than from the
+#                router: the encoder and the prefiller each log POST /v1/chat/completions, and the
+#                decode Pod's routing-proxy logs processing multimodal items. HTTP 200 alone does
+#                not carry this -- a router that quietly answered from one replica would return 200
+#                just the same, and a stage that never ran is the whole subject of this row.
 #
 # Cleanup:     The trap restores the two image settings to their exact original values, waits for
 #              the restore to be read back through the settings cache (bounded), and only then
@@ -112,18 +125,26 @@ fi
 
 MD=case120-epd
 IT="${E2E_C120_INSTANCE_TYPE:-}"
-IMAGE="${E2E_C120_IMAGE:-quay.io/gpustack/runner:rocm6.3-vllm0.30.0}"
+# The engine image default depends on the platform the named InstanceType reports, so the value is
+# resolved after that check below rather than here.
+IMAGE="${E2E_C120_IMAGE:-}"
 VERSION="${E2E_C120_VERSION:-0.30.0}"
 ROUTER_IMAGE="${E2E_C120_ROUTER_IMAGE:-docker.io/gpustack/llm-router:v0.3.1}"
 SIDECAR_IMAGE="${E2E_C120_SIDECAR_IMAGE:-docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0}"
 WEIGHTS="${E2E_C120_WEIGHTS:-/data/models/model_scope/Qwen/Qwen2.5-VL-7B-Instruct}"
 MODEL="${E2E_C120_MODEL:-/models/Qwen2.5-VL-7B-Instruct}"
-PROBE_IMAGE="${E2E_C120_PROBE_IMAGE:-docker.io/library/busybox:1.37}"
+# The probe drives the request with `kubectl exec ... curl`, and busybox ships NO curl (measured
+# on this cluster: `command -v curl` inside docker.io/library/busybox:1.37 returns nothing). The
+# exec exits 127 and the `|| RESPONSE=""` on the call swallowed it, so the row read "returned no
+# content" no matter what the engines answered. Use an image that actually carries curl;
+# curlimages/curl:8.10.1 is already staged on both accelerator nodes.
+PROBE_IMAGE="${E2E_C120_PROBE_IMAGE:-docker.io/curlimages/curl:8.10.1}"
 IMAGE_URL="${E2E_C120_IMAGE_URL:-data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==}"
 CARDS="${E2E_C120_CARDS:-3}"
 TP="${E2E_C120_TP:-1}"
 READY_BOUND="${E2E_C120_READY_BOUND:-1800}"
 MAX_TOKENS="${E2E_C120_MAX_TOKENS:-64}"
+STAGE_BOUND="${E2E_C120_STAGE_BOUND:-60}"
 SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
 SETTLE_BOUND="${E2E_C120_SETTLE_BOUND:-180}"
 # The operator prefixes `container-registry` onto every image it chooses, and the two settings below
@@ -160,28 +181,42 @@ command -v jq >/dev/null 2>&1 || { echo "[case-120] jq is required." >&2; exit 2
 
 if [ -z "$IT" ]; then
   echo "[case-120] E2E_C120_INSTANCE_TYPE is required (an accelerated InstanceType reporting" >&2
-  echo "          manufacturer amd); refusing to guess a pool." >&2
+  echo "          manufacturer nvidia or amd); refusing to guess a pool." >&2
   exit 2
 fi
 
-kubectl -n "$NS" get localqueue --no-headers 2>/dev/null | grep -q . || {
+# Capture first, then test. `kubectl ... | grep -q .` is a RACE under `set -o pipefail`:
+# grep -q exits on its first match, kubectl takes SIGPIPE and exits 141, and pipefail
+# then reports the whole pipeline as failed even though the match succeeded. Measured on
+# this cluster: 3 passes out of 10 runs with 5 LocalQueues present (PIPESTATUS 141 0).
+local_queues="$(kubectl -n "$NS" get localqueue --no-headers 2>/dev/null)"
+[ -n "$local_queues" ] || {
   echo "[case-120] namespace '${NS}' carries no LocalQueue; run where the pool's entrance" >&2
   echo "          LocalQueue exists, or the group is created and never admitted." >&2
   exit 2
 }
 
 # The manufacturer check is the platform the MATRIX admits, read from the object rather than
-# assumed from the variable name: an InstanceType whose manufacturer is not amd is refused at
-# admission by the very row this case exercises, and every row below would then read a refusal
-# as a failure of the operator.
+# assumed from the variable name: an InstanceType whose manufacturer is neither nvidia nor amd is
+# refused at admission by the very rows this case exercises, and every row below would then read a
+# refusal as a failure of the operator.
 IT_JSON="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o json 2>/dev/null)"
 if [ -z "$IT_JSON" ]; then
   echo "[case-120] InstanceType '${IT}' not found." >&2
   exit 2
 fi
 MANUFACTURER="$(printf '%s' "$IT_JSON" | jq -r '.status.detail.manufacturer // ""')"
-[ "$MANUFACTURER" = amd ] ||
-  skip "InstanceType '${IT}' reports manufacturer '${MANUFACTURER:-<none>}', and the admitted row this case runs is AMD."
+[ "$MANUFACTURER" = nvidia ] || [ "$MANUFACTURER" = amd ] ||
+  skip "InstanceType '${IT}' reports manufacturer '${MANUFACTURER:-<none>}', and the admitted rows this case runs are NVIDIA CUDA or AMD ROCm."
+
+# The engine image defaults per platform: each admitted network row assembles its own runner tag.
+if [ -z "$IMAGE" ]; then
+  if [ "$MANUFACTURER" = nvidia ]; then
+    IMAGE="docker.io/gpustack/runner:cuda13.0-vllm0.30.0"
+  else
+    IMAGE="quay.io/gpustack/runner:rocm6.3-vllm0.30.0"
+  fi
+fi
 
 IT_PHASE="$(printf '%s' "$IT_JSON" | jq -r '.status.phase // ""')"
 FREE_EX="$(printf '%s' "$IT_JSON" | jq -r '.status.accelerator.remaining // "0"')"
@@ -372,7 +407,7 @@ YAML
 )"
 
 if kubectl -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" >/dev/null 2>&1; then
-  record PASS "apply" "the three-role encoder deployment was admitted on ${IT} (llm-d-router, vLLM ${VERSION}, amd)"
+  record PASS "apply" "the three-role encoder deployment was admitted on ${IT} (llm-d-router, vLLM ${VERSION}, ${MANUFACTURER})"
 else
   record FAIL "apply" "refused: ${APPLY_OUT}"
   print_rows
@@ -464,7 +499,7 @@ router_pods() {
   local sel
   # shellcheck disable=SC2016  # the dollar names are kubectl jsonpath map variables, and must not expand
   sel="$(kubectl -n "$NS" get deploy "${MD}-router" \
-    -o jsonpath='{range $k,$v := .spec.selector.matchLabels}{$k}={$v},{end}' 2>/dev/null | sed 's/,$//')"
+    -o go-template='{{range $k,$v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}' 2>/dev/null | sed 's/,$//')"
   [ -n "$sel" ] || return 0
   kubectl -n "$NS" get pods -l "$sel" -o json 2>/dev/null
 }
@@ -639,7 +674,7 @@ fi
 # this row is where a cross-wiring between them would show.
 if [ -n "$DC_POD" ]; then
   EC_FLAG="$(kubectl -n "$NS" get pod "$DC_POD" -o json 2>/dev/null | jq -r \
-    '[(.spec.containers[] | select(.name=="routing-proxy") | .args // [])[]] | map(select(startswith("--ec-connector="))) | first // ""' 2>/dev/null)"
+    '[(.spec.containers[]?, .spec.initContainers[]?) | select(.name=="routing-proxy") | (.args // [])[]] | map(select(startswith("--ec-connector="))) | first // ""' 2>/dev/null)"
   if [ "$EC_FLAG" = "--ec-connector=ec-nixl" ]; then
     record PASS "decode sidecar connector" "routing-proxy on ${DC_POD} carries --ec-connector=ec-nixl"
   else
@@ -673,11 +708,20 @@ if ! kubectl -n "$NS" wait "pod/$PROBE_NAME" --for=condition=Ready --timeout=300
   exit 0
 fi
 
+# THE PROMPT HAS TO CLEAR ONE KV BLOCK, and a bare "name one colour" does not. The precise prefix
+# producer derives its block keys from token counts at a 16-token block size, and returns zero full
+# blocks for anything shorter: the 1x1 default image is about one estimated token and a short
+# question is about seven, so the producer writes no PrefixCacheMatchInfo, the prefill decider finds
+# no state to read, and it degrades to "decode only" -- skipping the prefiller while encode and
+# decode both run. Measured on this cluster: that run reported
+# "unable to read prefix cache state for PrefixCacheMatchInfoDataKey/precise-prefix-cache-producer"
+# and then "decode only". The question is therefore written long enough to estimate past 20 tokens,
+# which is one block, and says so rather than leaving the next reader to rediscover the threshold.
 PAYLOAD="$(jq -nc --arg model "$MODEL" --arg url "$IMAGE_URL" --argjson mt "$MAX_TOKENS" '{
   model: $model,
   messages: [{role: "user", content: [
     {type: "image_url", image_url: {url: $url}},
-    {type: "text", text: "Name one colour you can see in this image."}
+    {type: "text", text: "Describe this image in detail. Name every colour you can see, say where each one appears in the picture, and explain how the shapes are arranged."}
   ]}],
   max_tokens: $mt
 }')"
@@ -698,6 +742,88 @@ else
   record FAIL "a multimodal request through the router returns 200" \
     "the turn carried an image and returned no content: $(printf '%s' "$RESPONSE" | tr '\n' ' ' | cut -c1-220)"
 fi
+
+# --- the stages the request actually traversed --------------------------------
+
+# A 200 says the chain answered. It does not say the request went through all three stages: a
+# router that answered from one replica would return 200 just the same, and a stage that never ran
+# is the whole subject of this row. So each stage is read from the engine that ran it, not from the
+# router that claims to have run it.
+#
+# The Pods are resolved by the role-kind label, which is the label the rendered picker document
+# selects encoders on, so these are the Pods the router itself chose rather than a second selection
+# that could disagree with the first. The component label would not serve: it carries the role's
+# free-form name, which need not be "encode", "prefill" or "decode" at all.
+stage_pod() { # <kind>
+  kubectl -n "$NS" get pods \
+    -l "app.kubernetes.io/instance=${MD},modeldeployment.gpustack.ai/role-kind=$1" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
+}
+
+# A marker that never appears is only a verdict once the bound is spent, because the line is
+# written when the engine takes the request and a read can still lose that race on a busy node.
+stage_logged() { # <pod> <container> <marker>
+  local pod="$1" container="$2" marker="$3" deadline=$((SECONDS + STAGE_BOUND)) logs
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    logs="$(kubectl -n "$NS" logs "$pod" -c "$container" --tail=4000 2>/dev/null)"
+    case "$logs" in
+      *"$marker"*) return 0 ;;
+    esac
+    sleep 3
+  done
+  return 1
+}
+
+check_stage_log() { # <row> <pod> <container> <marker> <why it matters>
+  local row="$1" pod="$2" container="$3" marker="$4" why="$5"
+  if [ -z "$pod" ]; then
+    record FAIL "$row" \
+      "no Pod of this deployment carries that role-kind, so nothing can say the request reached the stage"
+    return 1
+  fi
+  if stage_logged "$pod" "$container" "$marker"; then
+    record PASS "$row" "${pod}/${container} logged '${marker}'"
+    return 0
+  fi
+  record FAIL "$row" \
+    "${pod}/${container} never logged '${marker}' within ${STAGE_BOUND}s; ${why}"
+  return 1
+}
+
+# The router and every stage Pod, because a stage row can only say what did not appear. The
+# router's own trace is what explains WHY it did not, and it is the one log a stage row cannot
+# substitute for.
+dump_stage_logs() {
+  local pod container
+  echo "[case-120] the request did not traverse every stage; router and Pod logs follow" >&2
+  if [ -n "$ROUTER_POD" ]; then
+    echo "[case-120] ---- router ${ROUTER_POD}/epp" >&2
+    kubectl -n "$NS" logs "$ROUTER_POD" -c epp --tail=200 2>&1 >&2 || true
+  fi
+  for pod in "$STAGE_EP" "$STAGE_PF" "$STAGE_DC"; do
+    [ -n "$pod" ] || continue
+    for container in main routing-proxy; do
+      echo "[case-120] ---- ${pod}/${container}" >&2
+      kubectl -n "$NS" logs "$pod" -c "$container" --tail=200 2>&1 >&2 || true
+    done
+  done
+}
+
+STAGE_EP="$(stage_pod encode)"
+STAGE_PF="$(stage_pod prefill)"
+STAGE_DC="$(stage_pod decode)"
+
+STAGES_RAN=yes
+check_stage_log "the encoder served the request" "$STAGE_EP" main 'POST /v1/chat/completions' \
+  "a media request answered without it produced its vision tokens on another GPU, which is the entire reason the encoder has a role" || STAGES_RAN=no
+check_stage_log "the prefiller served the request" "$STAGE_PF" main 'POST /v1/chat/completions' \
+  "a request answered without it never had its prompt processed by a prefill stage" || STAGES_RAN=no
+# The decoder's own engine container does not say what came off the wire; the routing sidecar does,
+# and the line it writes names the encodings it pulled and the encoder it pulled them from.
+check_stage_log "the decoder pulled the encodings" "$STAGE_DC" routing-proxy 'processing multimodal items' \
+  "the routing proxy called no encoder, so the image never reached the decoder at all" || STAGES_RAN=no
+
+[ "$STAGES_RAN" = yes ] || dump_stage_logs
 
 # Results.
 print_rows

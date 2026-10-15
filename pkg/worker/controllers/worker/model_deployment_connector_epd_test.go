@@ -9,12 +9,70 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
 // The table is shared policy: admission refuses a combination it lacks and the render reads the
 // same row to learn which connector to configure. These cases pin the table's own shape, so a row
 // cannot be added or edited without something here saying so -- and the refusal message a user
 // reads is built from the same rows.
+// TestModelDeploymentEPDEncoderLeg_AnAddressLegConfiguresNoCache reads the leg the render hands each
+// role, which is where the SGLang rows and the vLLM rows part company.
+//
+// THE SGLANG ROWS ARE ADMITTED, so the leg is resolved on them rather than skipped, and the answer has
+// to be the zero value: SGLang takes the encoder's addresses through EncoderURLs and resolves no
+// encoder-cache connector, so a cache request here would name a connector the engine cannot resolve.
+//
+// THE VLLM ROW BESIDE THEM IS THE CONTRAST. An assertion of emptiness alone cannot tell a correct zero
+// from a leg that never ran on any row, so the same shape on an admitted vLLM row is asserted to
+// resolve to a cache. Without it this case would still pass on a build that returned nothing at all.
+func TestModelDeploymentEPDEncoderLeg_AnAddressLegConfiguresNoCache(t *testing.T) {
+	legKinds := []workercore.ModelDeploymentRoleKind{
+		workercore.ModelDeploymentRoleKindEncode,
+		workercore.ModelDeploymentRoleKindPrefill,
+	}
+
+	for _, router := range []string{
+		workercore.ModelDeploymentRouterLLMD,
+		workercore.ModelDeploymentRouterSGLang,
+	} {
+		for _, platform := range []string{
+			nodefeature.ManufacturerNVIDIA,
+			nodefeature.ManufacturerAMD,
+			nodefeature.ManufacturerAscend,
+		} {
+			md := epdDeployment(t, legKinds)
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: router}
+			md.Spec.Engine = workercore.ModelDeploymentEngine{
+				Name:    workercore.ModelDeploymentEngineSGLang,
+				Version: ModelDeploymentSGLangEncoderFirst,
+			}
+
+			for i := range md.Spec.Roles {
+				assert.Equal(t, inject.EncoderCache{},
+					modelDeploymentEPDEncoderLeg(md, &md.Spec.Roles[i], platform),
+					"%s+SGLang on %s configures no encoder cache on role %q",
+					router, platform, md.Spec.Roles[i].Name)
+			}
+		}
+	}
+
+	vllm := epdDeployment(t, legKinds)
+	vllm.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	vllm.Spec.Engine = workercore.ModelDeploymentEngine{
+		Name:    workercore.ModelDeploymentEngineVLLM,
+		Version: ModelDeploymentECCPUConnectorFirstVLLM,
+	}
+
+	for i := range vllm.Spec.Roles {
+		leg := modelDeploymentEPDEncoderLeg(vllm, &vllm.Spec.Roles[i], nodefeature.ManufacturerNVIDIA)
+		assert.Equal(t, ModelDeploymentECConnectorCPU, leg.Connector,
+			"the admitted vLLM row resolves to an encoder cache on role %q, so the zeros above are "+
+				"the SGLang rows' answer rather than a leg that never ran",
+			vllm.Spec.Roles[i].Name)
+	}
+}
+
 // TestModelDeploymentEPDMatrix pins the table's own shape, so a row cannot be added or edited without
 // something here saying so. The rows are the whole admission answer, and the message a refusal
 // carries is built from them.
@@ -48,12 +106,32 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 		}
 	})
 
-	t.Run("no NVIDIA row is admitted", func(t *testing.T) {
+	// THE REMAINING CANDIDATE PAIRS ARE REFUSED. vllm-router fronts vLLM alone, so pairing it with
+	// SGLang has no row on any platform, and on Ascend vLLM-Ascend's P/D KV leg requires
+	// llm-d-router's decode sidecar handshake; sglang-gateway drives the encoder leg on SGLang
+	// alone, so pairing it with vLLM is refused everywhere rather than on one platform.
+	t.Run("unadmitted router or engine combinations are refused", func(t *testing.T) {
+		for _, combination := range []struct {
+			router, engine string
+		}{
+			{workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentEngineSGLang},
+			{workercore.ModelDeploymentRouterSGLang, workercore.ModelDeploymentEngineVLLM},
+		} {
+			for _, platform := range []string{
+				nodefeature.ManufacturerNVIDIA,
+				nodefeature.ManufacturerAMD,
+				nodefeature.ManufacturerAscend,
+			} {
+				_, admitted := ModelDeploymentEPDRowFor(combination.router, combination.engine, platform)
+				assert.False(t, admitted, "%s+%s is admitted on %s",
+					combination.router, combination.engine, platform)
+			}
+		}
+
 		_, admitted := ModelDeploymentEPDRowFor(
-			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
-			nodefeature.ManufacturerNVIDIA)
-		assert.False(t, admitted,
-			"an NVIDIA combination is admitted only after its proof of concept passes")
+			workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentEngineVLLM,
+			nodefeature.ManufacturerAscend)
+		assert.False(t, admitted, "vllm-router+vLLM is not admitted on ascend")
 	})
 
 	// THE FLOORS ARE SPELLED THE WAY EACH PROJECT PUBLISHES A TAG, which is what admission compares
@@ -66,9 +144,12 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 				"is spelled the way that project tags a candidate")
 		assert.Equal(t, "0.30.0", ModelDeploymentECCPUConnectorFirstVLLM,
 			"the network floor is the vLLM release the NIXL connectors ship in")
+		assert.Equal(t, "0.5.10", ModelDeploymentSGLangEncoderFirst,
+			"the SGLang floor is the first release carrying --encoder-only, --language-only, "+
+				"--encoder-urls and --encoder-bootstrap-port")
 	})
 
-	t.Run("the two admitted rows are the ones the design names", func(t *testing.T) {
+	t.Run("the admitted rows are the ones the design names", func(t *testing.T) {
 		ascend, admitted := ModelDeploymentEPDRowFor(
 			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
 			nodefeature.ManufacturerAscend)
@@ -78,13 +159,54 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 		assert.Equal(t, ModelDeploymentECExampleConnectorFirstAscend, ascend.EngineFloor,
 			"the Ascend row carries the floor its own platform's releases are compared against")
 
-		rocm, admitted := ModelDeploymentEPDRowFor(
-			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
-			nodefeature.ManufacturerAMD)
-		require.True(t, admitted, "the ROCm row is admitted")
-		assert.Equal(t, ModelDeploymentECConnectorCPU, rocm.Connector)
-		assert.False(t, rocm.SharedVolume, "the ROCm row carries the encoder leg over the network")
-		assert.Equal(t, ModelDeploymentECCPUConnectorFirstVLLM, rocm.EngineFloor)
+		for _, router := range []string{
+			workercore.ModelDeploymentRouterLLMD,
+			workercore.ModelDeploymentRouterVLLM,
+		} {
+			for _, platform := range []string{
+				nodefeature.ManufacturerAMD,
+				nodefeature.ManufacturerNVIDIA,
+			} {
+				row, admitted := ModelDeploymentEPDRowFor(
+					router, workercore.ModelDeploymentEngineVLLM, platform)
+				require.True(t, admitted, "the %s+%s row on %s is admitted",
+					router, workercore.ModelDeploymentEngineVLLM, platform)
+				assert.Equal(t, ModelDeploymentECConnectorCPU, row.Connector)
+				assert.False(t, row.SharedVolume,
+					"the %s+%s row on %s carries the encoder leg over the network",
+					router, workercore.ModelDeploymentEngineVLLM, platform)
+				assert.Equal(t, ModelDeploymentECCPUConnectorFirstVLLM, row.EngineFloor)
+			}
+		}
+
+		// SGLANG IS ADMITTED BEHIND BOTH ROUTERS ON ALL THREE PLATFORMS, and every one of those
+		// rows reads the same: the address leg, no claim, and the SGLang floor. The loop is the
+		// assertion, because a row admitted on two platforms and forgotten on the third would
+		// otherwise pass with the two platforms checked.
+		for _, router := range []string{
+			workercore.ModelDeploymentRouterLLMD,
+			workercore.ModelDeploymentRouterSGLang,
+		} {
+			for _, platform := range []string{
+				nodefeature.ManufacturerNVIDIA,
+				nodefeature.ManufacturerAMD,
+				nodefeature.ManufacturerAscend,
+			} {
+				row, admitted := ModelDeploymentEPDRowFor(
+					router, workercore.ModelDeploymentEngineSGLang, platform)
+				require.True(t, admitted, "the %s+%s row on %s is admitted",
+					router, workercore.ModelDeploymentEngineSGLang, platform)
+				assert.Equal(t, ModelDeploymentECConnectorSGLangURLs, row.Connector,
+					"the SGLang leg is named by address and configures no encoder-cache connector")
+				assert.False(t, row.SharedVolume,
+					"the SGLang leg mounts no claim, so the claim rule does not apply to it")
+				assert.Equal(t, ModelDeploymentSGLangEncoderFirst, row.EngineFloor)
+			}
+		}
+
+		assert.Empty(t, ModelDeploymentECSidecarConnector(ModelDeploymentECConnectorSGLangURLs),
+			"the decode sidecar dispatches on encoder-cache connectors only, so an address leg "+
+				"leaves it with nothing to name and renders no --ec-connector")
 	})
 
 	// THE RETURNED ROW IS A COPY, so a caller holding one cannot reach the table behind it. The

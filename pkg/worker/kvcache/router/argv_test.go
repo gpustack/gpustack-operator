@@ -374,6 +374,9 @@ func TestRenderArgv_WithoutAnEncoderTheArgvIsTheGoldenOne(t *testing.T) {
 // conjunction, and because a deployment-wide selector would take whichever role came first -- so an
 // implementation that picked the first role rather than the role of each kind would pass every
 // single-role case in this file.
+//
+// THE INPUT CARRIES THE ENCODER'S ENDPOINT LIST in every row, because the vLLM router refuses a
+// declared encoder without one. The gateway takes the same list and renders nothing from it.
 func TestRenderArgv_AnEncoderReachesNoSelector(t *testing.T) {
 	orders := []struct {
 		name  string
@@ -386,7 +389,9 @@ func TestRenderArgv_AnEncoderReachesNoSelector(t *testing.T) {
 	for _, router := range []string{VLLM, SGLang} {
 		for _, order := range orders {
 			t.Run(router+"/"+order.name, func(t *testing.T) {
-				output, err := Render(router, vllmInput(order.roles...))
+				in := vllmInput(order.roles...)
+				in.EncoderURLs = []string{"http://qwen-encode.team-a.svc:8000"}
+				output, err := Render(router, in)
 				require.NoError(t, err)
 
 				entries := selectorEntries(output.Arguments)
@@ -413,6 +418,7 @@ func TestRenderArgv_AnEncoderReachesNoSelector(t *testing.T) {
 // caught here rather than at run time, where it would offer the router an encoder as a backend.
 func TestRenderArgv_TwoEncoderReplicasReachNoArgument(t *testing.T) {
 	in := vllmInput(prefillRole(), decodeRole(), encodeRole())
+	in.EncoderURLs = []string{"http://qwen-encode.team-a.svc:8000"}
 	in.EndpointLabels = map[string]string{
 		"app.kubernetes.io/instance": "qwen", "member-index": "1",
 	}
@@ -499,6 +505,166 @@ func TestRenderArgv_APairedEncoderStillRendersTheUndividedShape(t *testing.T) {
 
 	assert.NotContains(t, output.Arguments, "--selector")
 	assert.Contains(t, output.Arguments, "--prefill-selector")
+}
+
+// TestRenderVLLM_TheEncoderStageIsCarriedAsOneStaticList pins the one flag an encoder adds.
+//
+// THE DOCUMENT IS WRITTEN OUT IN FULL rather than built from the package's constants, for the same
+// reason the golden command line above is: what is being pinned is the agreement with a program
+// this repository does not build, whose parser refuses unknown keys outright. Placement is part of
+// the pin -- the document rides ahead of the two selector lists, which read every token up to the
+// next one starting with a dash -- and so are the two absences: the document names no prefiller it
+// cannot know, and the command line turns on no gateway mode upstream refuses beside the encoder
+// stage.
+func TestRenderVLLM_TheEncoderStageIsCarriedAsOneStaticList(t *testing.T) {
+	cases := []struct {
+		name  string
+		roles []Role
+		urls  []string
+		want  string
+	}{
+		{
+			name:  "one encoder service",
+			roles: []Role{encodeRole(), prefillRole(), decodeRole()},
+			urls:  []string{"http://qwen-encode.team-a.svc:8000"},
+			want:  `--epd-config={"encoder_urls":["http://qwen-encode.team-a.svc:8000"]}`,
+		},
+		{
+			name:  "several encoder services",
+			roles: []Role{encodeRole(), prefillRole(), decodeRole()},
+			urls: []string{
+				"http://qwen-encode.team-a.svc:8000", "https://qwen-encode.team-a.svc:9100",
+			},
+			want: `--epd-config={"encoder_urls":["http://qwen-encode.team-a.svc:8000",` +
+				`"https://qwen-encode.team-a.svc:9100"]}`,
+		},
+		{
+			name:  "a declared encoder with an empty selector still carries its list",
+			roles: []Role{{Kind: "encode", RoleLabelKey: "role-kind"}, prefillRole(), decodeRole()},
+			urls:  []string{"http://qwen-encode.team-a.svc:8000"},
+			want:  `--epd-config={"encoder_urls":["http://qwen-encode.team-a.svc:8000"]}`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := vllmInput(c.roles...)
+			in.EncoderURLs = c.urls
+			output, err := Render(VLLM, in)
+			require.NoError(t, err)
+
+			epdAt := indexOf(t, output.Arguments, c.want)
+			assert.Greater(t, epdAt, indexOf(t, output.Arguments, "--vllm-pd-disaggregation"),
+				"the document rides behind the disaggregation switch")
+			assert.Less(t, epdAt, indexOf(t, output.Arguments, "--prefill-selector"),
+				"the document is pinned ahead of the list flags that follow it")
+			for _, arg := range output.Arguments {
+				assert.NotContains(t, arg, "consumer_zmq_addrs",
+					"selector discovery cannot name prefillers, so the document must claim none")
+				assert.NotContains(t, arg, "--enable-igw",
+					"upstream refuses the encoder stage beside inference-gateway mode")
+			}
+		})
+	}
+}
+
+// TestRenderVLLM_TheEncoderStageIsAllOrNothing refuses the halves apart.
+//
+// A DECLARED ENCODER WITHOUT ENDPOINTS would start a router that refuses itself at startup --
+// upstream validates an empty encoder_urls and exits -- so the renderer refuses first, where the
+// message names the deployment. ENDPOINTS WITHOUT A DECLARED ROLE would be dropped in silence if
+// ignored, and silence is the one answer this package never gives. An endpoint without its scheme
+// would survive this render and fail the router's own URL check instead.
+func TestRenderVLLM_TheEncoderStageIsAllOrNothing(t *testing.T) {
+	cases := []struct {
+		name    string
+		roles   []Role
+		urls    []string
+		wantErr string
+	}{
+		{
+			name:    "a declared encoder without endpoints",
+			roles:   []Role{encodeRole(), prefillRole(), decodeRole()},
+			wantErr: "render vllm-router: the encode role and its encoder endpoints must be declared together",
+		},
+		{
+			name:    "endpoints without a declared encoder",
+			roles:   []Role{prefillRole(), decodeRole()},
+			urls:    []string{"http://qwen-encode.team-a.svc:8000"},
+			wantErr: "render vllm-router: the encode role and its encoder endpoints must be declared together",
+		},
+		{
+			name:    "an endpoint without a scheme",
+			roles:   []Role{encodeRole(), prefillRole(), decodeRole()},
+			urls:    []string{"qwen-encode.team-a.svc:8000"},
+			wantErr: `render vllm-router: encoder endpoint "qwen-encode.team-a.svc:8000" is not an http(s) URL`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := vllmInput(c.roles...)
+			in.EncoderURLs = c.urls
+			_, err := Render(VLLM, in)
+			require.EqualError(t, err, c.wantErr)
+		})
+	}
+}
+
+// TestRenderArgv_TheGatewayTakesNoEncoderStage states the asymmetry between the two routers.
+//
+// The gateway's prefiller dials the encoder itself, by --encoder-urls on the engine's own command
+// line, so the gateway process never learns the endpoints. The strongest statement of that is
+// equality: its command line with an encoder declared and its endpoints handed over is the command
+// line it renders without either.
+func TestRenderArgv_TheGatewayTakesNoEncoderStage(t *testing.T) {
+	withEncoder := vllmInput(encodeRole(), prefillRole(), decodeRole())
+	withEncoder.EncoderURLs = []string{"http://qwen-encode.team-a.svc:8000"}
+
+	gatewayWith, err := Render(SGLang, withEncoder)
+	require.NoError(t, err)
+	gatewayWithout, err := Render(SGLang, vllmInput(prefillRole(), decodeRole()))
+	require.NoError(t, err)
+
+	assert.Equal(t, gatewayWithout.Arguments, gatewayWith.Arguments,
+		"the gateway's command line is decided by the halves it routes, never by the encoder stage")
+	for _, arg := range gatewayWith.Arguments {
+		assert.NotContains(t, arg, "epd-config")
+	}
+}
+
+// TestRenderArgv_NoEncoderRoleNoEncoderStage is the omission on the shape every existing
+// deployment has.
+//
+// The golden freeze pins both routers' complete command lines without an encoder, which is the
+// byte-identical guarantee; this states the same thing as a membership the new flag must keep
+// failing on its own, so a future edit that renders the stage unconditionally cannot hide behind
+// a frozen list nobody re-reads.
+func TestRenderArgv_NoEncoderRoleNoEncoderStage(t *testing.T) {
+	for _, name := range []string{VLLM, SGLang} {
+		t.Run(name, func(t *testing.T) {
+			output, err := Render(name, vllmInput(prefillRole(), decodeRole()))
+			require.NoError(t, err)
+
+			for _, arg := range output.Arguments {
+				assert.NotContains(t, arg, "epd-config",
+					"no encoder is declared, so there is nothing to configure")
+			}
+		})
+	}
+}
+
+// TestRenderArgv_AnEncoderWithAnEmptySelectorIsStillDeclared closes the edge declaresRole
+// documents: a role declared with an empty selector is present all the same.
+//
+// The undivided shape refuses an encoder whose selector names Pods; this is the same refusal for
+// one whose selector names nothing, which is what separates declared-but-unselected -- still an
+// encoder in the answering set -- from not declared at all.
+func TestRenderArgv_AnEncoderWithAnEmptySelectorIsStillDeclared(t *testing.T) {
+	declared := Role{Kind: "encode", RoleLabelKey: "role-kind"}
+
+	_, err := Render(VLLM, vllmInput(declared, serverRole()))
+	require.EqualError(t, err,
+		"render vllm-router: a deployment-wide selector would offer the encode role as a backend, "+
+			"so a deployment holding one needs a prefill and a decode role beside it")
 }
 
 // selectorEntries returns the label entries every selector flag on a rendered command line carries,

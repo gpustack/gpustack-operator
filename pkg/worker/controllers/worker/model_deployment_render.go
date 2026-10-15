@@ -589,6 +589,15 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			Containers:       []core.Container{mainC},
 		},
 	}
+	// The co-location preference is part of the template, so every replica of the role carries the
+	// same terms and the spec hash covers them. It composes with the node-level terms injected at
+	// creation: those land under the same Affinity as NodeAffinity and never overlap PodAffinity.
+	if podAffinity := modelDeploymentEPDPodAffinity(md, role); podAffinity != nil {
+		if pod.Spec.Affinity == nil {
+			pod.Spec.Affinity = &core.Affinity{}
+		}
+		pod.Spec.Affinity.PodAffinity = podAffinity
+	}
 	// The grace the drain hook is budgeted against goes with the hook. A take-over replica gets only
 	// the grace its role writes, so one that writes none keeps the Pod it rendered before either
 	// existed.

@@ -1,66 +1,51 @@
 #!/usr/bin/env bash
 #
-# CASE 122 — SGLang has no admitted encoder row, and the refusal says which column is missing
+# CASE 122 — SGLang's admitted encoder rows, and the pairings the matrix still refuses
 #           (NON-MUTATING: server-side dry runs only)
 #           AUTO-SKIPS the platform rows without an InstanceType reporting an admitted platform
 #
 #   case-122.sh <NS>
 #
-# Goal:        The admitted matrix has no SGLang row, and this case is the reading that says so on
-#              a live API server rather than in a table a user cannot see. An encoder role under
-#              llm-d-router on SGLang is refused naming the router AND the engine AND the admitted
-#              rows, which is the one refusal message a user can act on. A second row covers the
-#              other SGLang-family router: sglang-gateway names the ROUTER as the missing column
-#              instead, because no row carries it at all. Both messages come from one rule reading
-#              different facts, and a reader holding only one of them is left guessing which half to
-#              change.
+# Goal:        SGLang carries six admitted encoder rows: llm-d-router and sglang-gateway across
+#              nvidia, amd and ascend, every one of them at floor 0.5.10, naming the address leg
+#              (encoder-urls) and mounting no claim. This case reads that on a live API server rather
+#              than in a table a user cannot see: on the platform it injects, both routers with
+#              SGLang at a released version are ACCEPTED with no claim mounted, the pairing the
+#              matrix still refuses is refused naming BOTH halves and the admitted rows, and a
+#              version below the floor is refused naming the floor in SGLang's own numbering.
 #
-#              WHY THERE IS NO FUNCTIONAL HALF HERE. A passing SGLang encoder run would require a
-#              proof of concept that has not happened: the pairing of SGLang --encoder-only and
-#              --language-only behind both llm-d-router and sglang-gateway is spec task T3b, and it
-#              is BLOCKED ON A CLUSTER. Inventing a functional path for a row the matrix does not
-#              admit would assert a behavior the operator does not implement, and every row it
-#              printed would be false the moment the row were admitted. So the functional half is
-#              absent by construction, the header says so, and one row states it at the end so a
-#              reader scanning only the table sees it too.
+#              WHY THE FLOOR IS STATED AS SGLang 0.5.10 EVEN ON THE INJECTED ASCEND PLATFORM. The
+#              engine is what a floor belongs to; the platform only decides which project publishes
+#              the number for a vLLM row. A refusal naming vllm-ascend on an SGLang row would send a
+#              user after a plugin release carrying no encoder-urls argument at all.
 #
-#              SGLANG'S OWN RENDER PATH HAS NO OBJECT-LEVEL READING, and the case says that rather
-#              than substituting a weaker instrument. SGLang splits its encoder by ADDRESS
-#              (--encoder-urls) rather than by a named connector, which is a render fact; the render
-#              reaches that path only for a combination an admitted row covers, and none carries
-#              SGLang. There is no object to submit and no Pod to read, so nothing about that path
-#              is asserted here — only the refusal that keeps it unreachable.
+# Environment: Any cluster with a materialized scheduling chain (run case-1 first). If an active
+#              InstanceType already reports the target manufacturer (E2E_C122_VENDOR, default Ascend;
+#              also supports nvidia or amd), it is used directly without mutating node labels or
+#              settings. Otherwise, on a CPU-only cluster, the case injects the vendor label on one
+#              Ready schedulable worker node and flips CPU-manufacturer awareness on in
+#              gpustack-settings (E2E_SYSTEM_NS, default gpustack-system).
 #
-# Environment: Any cluster with a materialized scheduling chain (run case-1 first) and at least one
-#              Ready, schedulable worker node that is not a control-plane node. NO accelerator: the
-#              encoder shape reaches admission through the platform an injected CPU vendor label
-#              builds ("Ascend" — an admitted row whose floor the pinned version clears). The
-#              gpustack-settings Secret must exist in the system namespace (E2E_SYSTEM_NS, default
-#              gpustack-system). The case creates nothing and changes nothing outside its own
-#              NodeFeature and settings key.
+#              AUTO-SKIP: every admitted-row check below needs a usable InstanceType for the target
+#              platform. If neither an existing pool nor the injected CPU vendor label yields one,
+#              the rows record SKIP and the case exits 0.
 #
-#              AUTO-SKIP: the platform-bound rows need the platform InstanceType, and the vendor
-#              label may not take (NFD owns cpu-model.vendor_id and may decline an injected
-#              override). Those rows then record a SKIP naming that and the case still exits 0; the
-#              router-side row is refused before the platform is read and always runs.
+# Inputs:      MOCKED (only when no matching InstanceType already exists): one node label (the CPU
+#              vendor) injected through a NodeFeature object and one settings key (CPU-manufacturer
+#              awareness) flipped on — both restored by the trap.
+#              REAL: every assertion is a server-side dry run, so no ModelDeployment is stored.
 #
-# Inputs:      MOCKED: one node label (the CPU vendor) injected through a NodeFeature object and one
-#              settings key (CPU-manufacturer awareness) flipped on — both restored by the trap.
-#              REAL: nothing. Every assertion is a server-side dry run, so no object is ever stored.
+# Expected:    - the vLLM baseline shape for the target platform is ACCEPTED;
+#              - llm-d-router + SGLang at or above the floor, mounting no claim, is ACCEPTED on the
+#                target platform, and sglang-gateway + SGLang is ACCEPTED the same way;
+#              - sglang-gateway with vLLM is REFUSED naming both the router and the engine it is not
+#                paired with, and listing the admitted rows a user can compare against;
+#              - llm-d-router + SGLang one release below the floor is REFUSED naming encoder-urls
+#                and the SGLang release that carries it.
 #
-# Expected:    - llm-d-router + SGLang + an admitted platform is REFUSED naming that the router is
-#                not admitted with that engine, and listing the admitted rows;
-#              - sglang-gateway with the same platform and engine is REFUSED naming the ROUTER as
-#                the missing column instead, which is a different message from a different fact;
-#              - an admitted combination (llm-d-router + vLLM) is ACCEPTED by the same instrument,
-#                so the refusals above are each their own rule and not one blanket rejection;
-#              - the address-transport path records a SKIP naming why it has no object to read, and
-#                the functional half records a SKIP naming the proof of concept that would admit it.
-#
-# Cleanup:     The trap deletes the NodeFeature object and restores the settings key to its exact
-#              original value, then waits for the chain to settle back: the derived type goes only
-#              once the setting cache flips and the pool re-derives. Idempotent, runs on pass AND
-#              fail, safe to re-run.
+# Cleanup:     If the fixture injected a NodeFeature object and flipped the settings key, the trap
+#              deletes the NodeFeature, restores the settings key to its exact original value, and
+#              waits for the derived type to settle back. Idempotent, runs on pass AND fail.
 set -uo pipefail
 
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
@@ -79,7 +64,14 @@ PLATFORM="$(printf '%s' "$VENDOR" | tr '[:upper:]' '[:lower:]')"
 NF=case122-cpu-vendor
 MD=case122-epd
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
-VERSION="${E2E_C122_VERSION:-0.30.0}"
+BASE_VERSION="${E2E_C122_VERSION:-0.30.0}"
+# An assignment prefixed to a function call persists after it returns in bash, so the rows below
+# restore this rather than leaving every later row reading whichever version the last one turned.
+VERSION="$BASE_VERSION"
+# SGLang numbers its own releases and carries its own floor, so the SGLang rows below take a separate
+# default rather than reusing the vLLM one. 0.5.18 is a released SGLang tag at or above the 0.5.10
+# floor, and is the release the render was written against.
+SGLANG_VERSION="${E2E_C122_SGLANG_VERSION:-0.5.18}"
 SETTLE_ROUNDS="${E2E_C122_SETTLE:-60}"
 ROUTER_NAME=llm-d-router
 ENGINE=vLLM
@@ -100,6 +92,8 @@ for n in json.load(sys.stdin).get("items",[]):
     if not any(c.get("type")=="Ready" and c.get("status")=="True" for c in cs):
         continue
     if n.get("spec",{}).get("unschedulable"):
+        continue
+    if n.get("metadata",{}).get("labels",{}).get("feature.gpustack.ai/acceleratable") == "true":
         continue
     ts=n.get("spec",{}).get("taints",[])
     if any(str(t.get("key","")).startswith("node-role.kubernetes.io/") for t in ts):
@@ -150,26 +144,35 @@ settle_back() {
   return 0
 }
 
+INJECTED=false
 cleanup() {
   echo
   echo "[case-122] cleanup"
-  kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
-  restore_setting
-  settle_back
+  if [ "$INJECTED" = true ]; then
+    kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
+    restore_setting
+    settle_back
+  fi
 }
 trap cleanup EXIT
 
 # ---------------------------------------------------------------- the fixture
 
-NODE="$(pick_worker_node)"
-if [ -z "$NODE" ]; then
-  echo "[case-122] no Ready schedulable worker node; this case cannot place its vendor label" >&2
-  exit 2
-fi
+IT="$(epd_platform_type)"
+if [ -n "$IT" ]; then
+  record PASS "an active pool reports the target platform" \
+    "instancetype ${IT} reports manufacturer '${PLATFORM}'"
+else
+  NODE="$(pick_worker_node)"
+  if [ -z "$NODE" ]; then
+    echo "[case-122] no active '${PLATFORM}' InstanceType and no Ready schedulable CPU worker node" >&2
+    exit 2
+  fi
 
-echo "[case-122] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
+  echo "[case-122] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
+  INJECTED=true
 
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+  kubectl apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: nfd.k8s-sigs.io/v1alpha1
 kind: NodeFeature
 metadata:
@@ -182,24 +185,24 @@ spec:
     feature.node.kubernetes.io/cpu-model.vendor_id: "${VENDOR}"
   features: {}
 YAML
-set_awareness true
+  set_awareness true
 
-# The poll IS the wait for the settings cache, the node flavor re-derivation and the type authoring.
-# A timeout is a skip, not a failure: NFD owns cpu-model.vendor_id and may decline an injected
-# override, which is an environment answer this case reports rather than argues with.
-IT=""
-for _ in $(seq 1 "$SETTLE_ROUNDS"); do
-  IT="$(epd_platform_type)"
-  [ -n "$IT" ] && break
-  sleep 5
-done
+  # The poll IS the wait for the settings cache, the node flavor re-derivation and the type authoring.
+  # A timeout is a skip, not a failure: NFD owns cpu-model.vendor_id and may decline an injected
+  # override, which is an environment answer this case reports rather than argues with.
+  for _ in $(seq 1 "$SETTLE_ROUNDS"); do
+    IT="$(epd_platform_type)"
+    [ -n "$IT" ] && break
+    sleep 5
+  done
 
-if [ -z "$IT" ]; then
-  record SKIP "the platform rows could be read" \
-    "no InstanceType reported manufacturer '${PLATFORM}' within $((SETTLE_ROUNDS * 5))s: NFD did not keep the injected cpu-model.vendor_id, or the pool never derived. The address-transport row below needs no platform and still ran"
-else
-  record PASS "a CPU-only pool reports an admitted platform" \
-    "instancetype ${IT} reports manufacturer '${PLATFORM}' from the injected vendor label"
+  if [ -z "$IT" ]; then
+    record SKIP "the platform rows could be read" \
+      "no InstanceType reported manufacturer '${PLATFORM}' within $((SETTLE_ROUNDS * 5))s: NFD did not keep the injected cpu-model.vendor_id, or the pool never derived"
+  else
+    record PASS "an active pool reports the target platform" \
+      "instancetype ${IT} reports manufacturer '${PLATFORM}' from the injected vendor label"
+  fi
 fi
 
 # ---------------------------------------------------------------- the manifests
@@ -227,27 +230,49 @@ ${1}
 YAML
 }
 
-# The baseline is the ADMITTED Ascend row's shape: encode and prefill mount one claim at one path,
-# the decode role mounts nothing. It carries no claim name that has to exist — the matrix is read
-# from the object and the claim rules only compare the two mounts to each other.
+# The baseline is the admitted vLLM row's shape for the target platform: on ascend, encode and
+# prefill mount one claim at one path and decode mounts nothing; on nvidia and amd the leg is
+# carried over the network and no role mounts a shared claim.
 baseline_roles() {
+  local claim=""
+  if [ "$PLATFORM" = ascend ]; then
+    claim="    additionalVolumes:
+      - mountPath: /ec-cache
+        persistentVolumeClaim:
+          claimName: case122-shared"
+  fi
   cat <<ROLES
   - name: encode
     kind: Encode
     instanceType: ${IT:-unset}
     image: ${IMAGE}
-    additionalVolumes:
-      - mountPath: /ec-cache
-        persistentVolumeClaim:
-          claimName: case122-shared
+${claim}
   - name: prefill
     kind: Prefill
     instanceType: ${IT:-unset}
     image: ${IMAGE}
-    additionalVolumes:
-      - mountPath: /ec-cache
-        persistentVolumeClaim:
-          claimName: case122-shared
+${claim}
+  - name: decode
+    kind: Decode
+    instanceType: ${IT:-unset}
+    image: ${IMAGE}
+ROLES
+}
+
+# The address leg's roles are the baseline minus the claim. SGLang carries the encoder's output by
+# address rather than through a mounted directory, so no role declares additionalVolumes at all —
+# which is a field the address leg makes unneeded, not an omission this case forgot. Everything else
+# about the shape is the baseline, so an acceptance below is about the leg and not about the roles.
+address_leg_roles() {
+  cat <<ROLES
+  - name: encode
+    kind: Encode
+    instanceType: ${IT:-unset}
+    image: ${IMAGE}
+  - name: prefill
+    kind: Prefill
+    instanceType: ${IT:-unset}
+    image: ${IMAGE}
   - name: decode
     kind: Decode
     instanceType: ${IT:-unset}
@@ -302,52 +327,43 @@ fi
 # ---------------------------------------------------------------- the SGLang rows
 
 if [ -n "$IT" ]; then
-  # The headline of this case: the engine this design does not admit is refused naming BOTH the
-  # router and the engine it is not admitted with, plus the admitted rows a user can compare
-  # against. This is the exact message a user who wrote an SGLang encoder deployment will read.
-  ENGINE=SGLang refuses "llm-d-router with SGLang is refused naming the engine" \
-    'is not admitted with engine "SGLang"' \
-    "$(baseline_roles)" \
-    'the admitted rows are'
+  # The admitted SGLang rows, read through the same instrument as the vLLM baseline above. Both
+  # routers are accepted at a released version with no claim mounted, because an address leg is what
+  # carries the encoder's output and a connector there is not a thing a user attaches.
+  ENGINE=SGLang VERSION="$SGLANG_VERSION" accepts "llm-d-router with SGLang is ACCEPTED" \
+    "$(address_leg_roles)"
+  ENGINE=SGLang VERSION="$SGLANG_VERSION" ROUTER_NAME=sglang-gateway \
+    accepts "sglang-gateway with SGLang is ACCEPTED" \
+    "$(address_leg_roles)"
+  ROUTER_NAME=llm-d-router
+
+  # The floor belongs to the engine rather than to the platform, so the refusal has to name SGLang's
+  # own release here. Both fragments are asserted: the first says which connector the rule is talking
+  # about and the second says which project publishes the number to go after.
+  ENGINE=SGLang VERSION=0.5.9 refuses "an SGLang version below the row floor is refused" \
+    'encoder-urls carries' \
+    "$(address_leg_roles)" \
+    'from SGLang 0.5.10'
   ENGINE=""
 
-  # The other SGLang-family router names a different column as missing: the router itself, because
-  # no row carries it at all. Both messages are the same rule reading different facts, and a reader
-  # who has only one of them is left guessing which half to change.
-  ROUTER_NAME=sglang-gateway refuses "sglang-gateway with any admitted engine is refused naming the router" \
-    'router "sglang-gateway" is not admitted for an encoder role' \
-    "$(baseline_roles)"
+  # The pairing the matrix still refuses. sglang-gateway drives the encoder leg on SGLang alone, so
+  # vLLM under it names both halves in one message along with the admitted rows.
+  ROUTER_NAME=sglang-gateway ENGINE=vLLM refuses "sglang-gateway with vLLM is refused naming the pairing" \
+    'router "sglang-gateway" is not admitted with engine "vLLM"' \
+    "$(baseline_roles)" \
+    'the admitted rows are'
   ROUTER_NAME=llm-d-router
+  ENGINE=vLLM
+  VERSION="$BASE_VERSION"
 else
   for label in \
-    "llm-d-router with SGLang is refused naming the engine" \
-    "sglang-gateway with any admitted engine is refused naming the router"; do
+    "llm-d-router with SGLang is ACCEPTED" \
+    "sglang-gateway with SGLang is ACCEPTED" \
+    "an SGLang version below the row floor is refused" \
+    "sglang-gateway with vLLM is refused naming the pairing"; do
     record SKIP "$label" "needs the platform InstanceType this run did not build; see the baseline row"
   done
 fi
-
-# ---------------------------------------------------------------- the address-transport rule
-
-# SGLANG REACHES ITS ENCODER BY ADDRESS rather than by a named connector: the renderer hands the
-# language-only half --encoder-urls instead of a --ec-transfer-config document. That is a RENDER
-# fact, and it has no object-level reading today: the render only reaches that path for a
-# combination an admitted row covers, and no admitted row carries SGLang. There is therefore no
-# submitted object whose render this case could read, and no Pod of this combination to exist.
-#
-# The row says so rather than grepping the renderer instead. Every other row in this suite reads an
-# object on a live API server; a source grep would report the rule the code carries, which is a
-# different claim from the one the rest of the case makes, and a case that quietly changed
-# instrument would be the one row whose passing meant something else.
-record SKIP "SGLang reaches its encoder by address rather than by a connector" \
-  "the address transport is a render fact with no admitted row to render it, so no object and no Pod of this combination exists to read. What IS verified here is the refusal above, which is what keeps the path unreachable until a row is admitted"
-
-# ---------------------------------------------------------------- why there is no functional half
-
-# Stated as a row rather than left to the header, because a case that reads as a refusal-only case
-# with no functional rows is otherwise indistinguishable from one that forgot to write them. The
-# admission that would admit this combination is spec task T3b and it is blocked on a cluster.
-record SKIP "SGLang serves a multimodal request through the router" \
-  "there is no admitted SGLang encoder row, so there is no object to run. The functional reading is spec task T3b (SGLang --encoder-only and --language-only behind llm-d-router and behind sglang-gateway), which waits for a cluster; until its run passes and the matrix gains a row, this case asserts the refusal and nothing else"
 
 # Results.
 print_rows

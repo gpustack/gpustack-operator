@@ -1,62 +1,42 @@
 #!/usr/bin/env bash
 #
-# CASE 123 — vllm-router has no admitted encoder row, and the refusal says so before the engine is
-#           even consulted (NON-MUTATING: server-side dry runs only)
-#           AUTO-SKIPS the platform rows without an InstanceType reporting an admitted platform
+# CASE 123 — vllm-router admits vLLM encoder deployments on NVIDIA and AMD, refuses unadmitted
+#           engines, versions below the floor, and user-supplied --epd-config
+#           (NON-MUTATING on GPU clusters; fixture-mutating on CPU-only clusters, restored by trap)
+#           AUTO-SKIPS the platform rows without an InstanceType reporting nvidia or amd
 #
 #   case-123.sh <NS>
 #
-# Goal:        vllm-router is a real, supported router for a plain prefill/decode deployment, and it
-#              takes NO encoder role at all. This case is the reading that says which column of the
-#              combination is missing, and it says it EARLY: the matrix is read router-first, so a
-#              vllm-router encoder deployment is refused naming the router without ever consulting
-#              the engine, the platform or the version. That ordering is the useful part — a user
-#              who swaps the router gets one unambiguous message instead of a list of downstream
-#              consequences they have to work out themselves.
+# Goal:        vllm-router drives three-stage EPD disaggregation for vLLM on NVIDIA and AMD via
+#              --epd-config={"encoder_urls":[...]} while the engine roles exchange vision embeddings
+#              over NIXL (ECCPUConnector, floor 0.30.0) and KV cache over MooncakeConnector.
+#              This case pins the admission contract for vllm-router encoder deployments:
+#                - vllm-router + vLLM (>= 0.30.0) on nvidia or amd is ACCEPTED;
+#                - vllm-router + vLLM below the 0.30.0 floor is REFUSED naming ECCPUConnector;
+#                - vllm-router + SGLang is REFUSED naming that the router and engine do not pair;
+#                - user-supplied --epd-config in spec.router.extraArgs is REFUSED as operator-owned;
+#                - vllm-router with NO Encode role (plain prefill/decode) is ACCEPTED.
 #
-#              The rows also pin that the refusal is about ENCODER ROLES ONLY: a vllm-router
-#              deployment with no Encode role is admitted, which is what makes the encoder refusal
-#              a rule about this feature rather than a deprecation of the router.
+# Environment: Any cluster with a materialized scheduling chain (run case-1 first). When the cluster
+#              already carries an active nvidia or amd InstanceType, the case reads that type
+#              directly and mutates nothing. On a CPU-only cluster it injects a CPU vendor label
+#              ("NVIDIA") on one non-acceleratable worker node and flips CPU-manufacturer awareness
+#              on, restoring both on exit.
 #
-#              WHY THERE IS NO FUNCTIONAL HALF HERE. A passing vllm-router encoder run would
-#              require a proof of concept that has not happened: the vllm-router image running
-#              --epd-config against vLLM 0.30.0 is spec task T3c, and it is BLOCKED ON A CLUSTER.
-#              Inventing a functional path for a row the matrix does not admit would assert a
-#              behavior the operator does not implement, and every row it printed would be false the
-#              moment the row were admitted. So the functional half is absent by construction, the
-#              header says so, and one row states it at the end so a reader scanning only the table
-#              sees it too.
+#              AUTO-SKIP: if no nvidia/amd InstanceType exists and NFD declines the injected CPU
+#              vendor label, the platform-bound rows record SKIP and the case exits 0.
 #
-# Environment: Any cluster with a materialized scheduling chain (run case-1 first) and at least one
-#              Ready, schedulable worker node that is not a control-plane node. NO accelerator: the
-#              encoder shape reaches admission through the platform an injected CPU vendor label
-#              builds ("Ascend" — an admitted row whose floor the pinned version clears). The
-#              gpustack-settings Secret must exist in the system namespace (E2E_SYSTEM_NS, default
-#              gpustack-system). The case creates nothing and changes nothing outside its own
-#              NodeFeature and settings key.
+# Inputs:      Every ModelDeployment assertion is a server-side dry run (`kubectl apply --dry-run=server`),
+#              so no ModelDeployment is persisted.
 #
-#              AUTO-SKIP: the platform-bound rows need the platform InstanceType, and the vendor
-#              label may not take (NFD owns cpu-model.vendor_id and may decline an injected
-#              override). Those rows then record a SKIP naming that and the case still exits 0.
+# Expected:    - vllm-router + vLLM 0.30.0 on nvidia/amd with Encode/Prefill/Decode is ACCEPTED;
+#              - vllm-router + vLLM 0.29.0 on nvidia/amd is REFUSED naming the 0.30.0 floor;
+#              - vllm-router + SGLang with an Encode role is REFUSED naming the router/engine pair;
+#              - vllm-router passing --epd-config in spec.router.extraArgs is REFUSED as owned;
+#              - vllm-router with NO Encode role (plain prefill/decode) is ACCEPTED.
 #
-# Inputs:      MOCKED: one node label (the CPU vendor) injected through a NodeFeature object and one
-#              settings key (CPU-manufacturer awareness) flipped on — both restored by the trap.
-#              REAL: nothing. Every assertion is a server-side dry run, so no object is ever stored.
-#
-# Expected:    - llm-d-router + vLLM + an admitted platform is ACCEPTED, so the rows below are each
-#                their own rule rather than one blanket rejection;
-#              - vllm-router + vLLM + an admitted platform is REFUSED naming that the router is not
-#                admitted for an encoder role, and listing the admitted rows;
-#              - the same refusal holds whatever the engine, because the matrix is read router-first
-#                and the engine is never consulted for this router;
-#              - vllm-router with NO Encode role is ACCEPTED, which is what pins the refusal to
-#                encoder roles rather than to the router;
-#              - the functional half records a SKIP naming the proof of concept that would admit it.
-#
-# Cleanup:     The trap deletes the NodeFeature object and restores the settings key to its exact
-#              original value, then waits for the chain to settle back: the derived type goes only
-#              once the setting cache flips and the pool re-derives. Idempotent, runs on pass AND
-#              fail, safe to re-run.
+# Cleanup:     If the CPU-vendor fixture was used, the trap deletes the NodeFeature object, restores
+#              the settings key, and waits for the derived InstanceType to settle back.
 set -uo pipefail
 
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
@@ -70,15 +50,16 @@ fi
 
 SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
 SETTING=instance-type-aware-cpu-manufacturer
-VENDOR="${E2E_C123_VENDOR:-Ascend}"
+VENDOR="${E2E_C123_VENDOR:-NVIDIA}"
 PLATFORM="$(printf '%s' "$VENDOR" | tr '[:upper:]' '[:lower:]')"
 NF=case123-cpu-vendor
 MD=case123-epd
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 VERSION="${E2E_C123_VERSION:-0.30.0}"
 SETTLE_ROUNDS="${E2E_C123_SETTLE:-60}"
-ROUTER_NAME=llm-d-router
+ROUTER_NAME=vllm-router
 ENGINE=vLLM
+ROUTER_EXTRA_ARGS=""
 
 FAILS=0
 ROWS=()
@@ -87,6 +68,21 @@ record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "[case-123] jq is required." >&2; exit 2; }
+
+usable_type_for() { # <manufacturer>
+  kubectl get instancetypes.worker.gpustack.ai \
+    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
+    2>/dev/null \
+    | while IFS='|' read -r name deleting inactive manufacturer; do
+      [ -n "$name" ] || continue
+      [ -z "$deleting" ] || continue
+      [ "$inactive" = true ] && continue
+      if [ "$manufacturer" = "$1" ]; then
+        echo "$name"
+        break
+      fi
+    done
+}
 
 pick_worker_node() {
   kubectl get nodes -o json 2>/dev/null | python3 -c '
@@ -97,6 +93,8 @@ for n in json.load(sys.stdin).get("items",[]):
         continue
     if n.get("spec",{}).get("unschedulable"):
         continue
+    if n.get("metadata",{}).get("labels",{}).get("feature.gpustack.ai/acceleratable") == "true":
+        continue
     ts=n.get("spec",{}).get("taints",[])
     if any(str(t.get("key","")).startswith("node-role.kubernetes.io/") for t in ts):
         continue
@@ -106,21 +104,12 @@ for n in json.load(sys.stdin).get("items",[]):
 }
 
 epd_platform_type() {
-  kubectl get instancetypes.worker.gpustack.ai \
-    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
-    2>/dev/null \
-    | while IFS='|' read -r name deleting inactive manufacturer; do
-      [ -n "$name" ] || continue
-      [ -z "$deleting" ] || continue
-      [ "$inactive" = true ] && continue
-      if [ "$manufacturer" = "$PLATFORM" ]; then
-        echo "$name"
-        break
-      fi
-    done
+  usable_type_for "$PLATFORM"
 }
 
 ORIG_SETTING="$(kubectl -n "$SYSTEM_NS" get secret gpustack-settings -o jsonpath="{.data.${SETTING}}" 2>/dev/null)"
+INJECTED_FIXTURE=false
+
 set_awareness() { # true|false
   kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
     -p "{\"data\":{\"${SETTING}\":\"$(printf '%s' "$1" | base64)\"}}" >/dev/null 2>&1
@@ -132,11 +121,6 @@ restore_setting() {
     -p "{\"data\":{\"${SETTING}\":${v}}}" >/dev/null 2>&1
 }
 
-# Restoring the value is not the end of the restore: the worker reads it through a thirty-second
-# cache, and the type derived from it outlives the patch by that cache plus one reconcile. Wait for
-# the derived type to go, so the next case in a serial run does not list an aware type this run left
-# behind. A cluster that started with the setting already on keeps its derived type, so there is
-# nothing to wait for.
 settle_back() {
   [ "$(printf '%s' "$ORIG_SETTING" | base64 -d 2>/dev/null)" = "true" ] && return 0
   for _ in $(seq 1 "$SETTLE_ROUNDS"); do
@@ -147,6 +131,7 @@ settle_back() {
 }
 
 cleanup() {
+  [ "$INJECTED_FIXTURE" = true ] || return 0
   echo
   echo "[case-123] cleanup"
   kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
@@ -155,17 +140,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ---------------------------------------------------------------- the fixture
+# ---------------------------------------------------------------- the platform InstanceType
 
-NODE="$(pick_worker_node)"
-if [ -z "$NODE" ]; then
-  echo "[case-123] no Ready schedulable worker node; this case cannot place its vendor label" >&2
-  exit 2
-fi
+IT=""
+for m in nvidia amd; do
+  IT="$(usable_type_for "$m")"
+  if [ -n "$IT" ]; then
+    PLATFORM="$m"
+    break
+  fi
+done
 
-echo "[case-123] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
-
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+if [ -n "$IT" ]; then
+  record PASS "an admitted platform InstanceType is available" \
+    "instancetype ${IT} reports manufacturer '${PLATFORM}'"
+else
+  NODE="$(pick_worker_node)"
+  if [ -n "$NODE" ]; then
+    INJECTED_FIXTURE=true
+    echo "[case-123] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
+    kubectl apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: nfd.k8s-sigs.io/v1alpha1
 kind: NodeFeature
 metadata:
@@ -178,31 +172,25 @@ spec:
     feature.node.kubernetes.io/cpu-model.vendor_id: "${VENDOR}"
   features: {}
 YAML
-set_awareness true
+    set_awareness true
+    for _ in $(seq 1 "$SETTLE_ROUNDS"); do
+      IT="$(epd_platform_type)"
+      [ -n "$IT" ] && break
+      sleep 5
+    done
+  fi
 
-# The poll IS the wait for the settings cache, the node flavor re-derivation and the type authoring.
-# A timeout is a skip, not a failure: NFD owns cpu-model.vendor_id and may decline an injected
-# override, which is an environment answer this case reports rather than argues with.
-IT=""
-for _ in $(seq 1 "$SETTLE_ROUNDS"); do
-  IT="$(epd_platform_type)"
-  [ -n "$IT" ] && break
-  sleep 5
-done
-
-if [ -z "$IT" ]; then
-  record SKIP "the platform rows could be read" \
-    "no InstanceType reported manufacturer '${PLATFORM}' within $((SETTLE_ROUNDS * 5))s: NFD did not keep the injected cpu-model.vendor_id, or the pool never derived. Every row below names that type in its manifest, so none of them ran"
-else
-  record PASS "a CPU-only pool reports an admitted platform" \
-    "instancetype ${IT} reports manufacturer '${PLATFORM}' from the injected vendor label"
+  if [ -z "$IT" ]; then
+    record SKIP "the platform rows could be read" \
+      "no InstanceType reported manufacturer 'nvidia' or 'amd' and no CPU-vendor fixture could be derived; every row below names that type in its manifest, so none of them ran"
+  else
+    record PASS "a CPU-only pool reports an admitted platform" \
+      "instancetype ${IT} reports manufacturer '${PLATFORM}' from the injected vendor label"
+  fi
 fi
 
 # ---------------------------------------------------------------- the manifests
 
-# The three roles and the engine and the router are the only dials this case turns; each is named on
-# the row that turns it and reset right after, so a row reads on its own what it submitted instead of
-# depending on the dial the previous row left behind.
 manifest() { # roles-block
   cat <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -217,33 +205,24 @@ spec:
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:
-    name: ${ROUTER_NAME:-llm-d-router}
+    name: ${ROUTER_NAME:-vllm-router}
+${ROUTER_EXTRA_ARGS:-}
   roles:
 ${1}
 YAML
 }
 
-# The baseline is the ADMITTED Ascend row's shape: encode and prefill mount one claim at one path,
-# the decode role mounts nothing. It carries no claim name that has to exist — the matrix is read
-# from the object and the claim rules only compare the two mounts to each other.
+# The network-leg baseline on nvidia/amd: encode, prefill and decode carry no shared-claim mount.
 baseline_roles() {
   cat <<ROLES
   - name: encode
     kind: Encode
     instanceType: ${IT:-unset}
     image: ${IMAGE}
-    additionalVolumes:
-      - mountPath: /ec-cache
-        persistentVolumeClaim:
-          claimName: case123-shared
   - name: prefill
     kind: Prefill
     instanceType: ${IT:-unset}
     image: ${IMAGE}
-    additionalVolumes:
-      - mountPath: /ec-cache
-        persistentVolumeClaim:
-          claimName: case123-shared
   - name: decode
     kind: Decode
     instanceType: ${IT:-unset}
@@ -251,9 +230,7 @@ baseline_roles() {
 ROLES
 }
 
-# The same deployment with the encoder REMOVED: an ordinary prefill/decode pair, which is the shape
-# vllm-router has always served. It carries no claim and no version floor concern, so what it proves
-# is narrow and exact — that the encoder refusal above is about the Encode role.
+# The same deployment with the encoder REMOVED: an ordinary prefill/decode pair.
 pair_roles() {
   cat <<ROLES
   - name: prefill
@@ -267,10 +244,6 @@ pair_roles() {
 ROLES
 }
 
-# Assert that a roles block is refused AND that the refusal quotes every fragment after the first
-# one named. An empty apply output is a FAIL on its own: deleting anything from "" leaves "". A
-# refusal carrying other messages too passes — several rules aggregate into one response — but a
-# MISSING fragment means the manifest tripped a rule this row is not about.
 refuses() {
   local check="$1" want="$2" roles="$3" out w
   shift 3
@@ -300,61 +273,51 @@ accepts() {
   return 0
 }
 
-# ---------------------------------------------------------------- row 0: the accepted baseline
-
-# Three roles being accepted at all is the shape this whole rule set exists to guard, so the
-# baseline proves the refusals below are each their own rule rather than one blanket rejection.
-if [ -n "$IT" ]; then
-  accepts "the admitted combination is ACCEPTED by the same instrument" "$(baseline_roles)"
-else
-  record SKIP "the admitted combination is ACCEPTED by the same instrument" \
-    "no platform InstanceType exists, so there is no shape to accept and every refusal below would pass for the wrong reason"
-fi
-
 # ---------------------------------------------------------------- the vllm-router rows
 
 if [ -n "$IT" ]; then
-  # The headline of this case. The matrix is read ROUTER-FIRST, so this refusal names the router
-  # alone and never reaches the engine, the platform or the version: swapping the router is the one
-  # change that fixes it, and the message says so instead of listing consequences of the swap.
-  ROUTER_NAME=vllm-router refuses "vllm-router with an encoder role is refused naming the router" \
-    'router "vllm-router" is not admitted for an encoder role' \
+  # Row 0: the admitted vllm-router + vLLM EPD shape on nvidia/amd is accepted.
+  ROUTER_NAME=vllm-router accepts \
+    "vllm-router + vLLM with an encoder role is ACCEPTED on ${PLATFORM}" \
+    "$(baseline_roles)"
+
+  # Row 1: an engine version below the 0.30.0 network connector floor is refused.
+  VERSION=0.29.0 ROUTER_NAME=vllm-router refuses \
+    "vllm-router + vLLM below the 0.30.0 floor is refused" \
+    "ECCPUConnector carries ${PLATFORM} from vLLM 0.30.0" \
+    "$(baseline_roles)"
+  VERSION="${E2E_C123_VERSION:-0.30.0}"
+
+  # Row 2: vllm-router paired with SGLang is refused naming the router and engine.
+  ROUTER_NAME=vllm-router ENGINE=SGLang refuses \
+    "vllm-router paired with SGLang is refused" \
+    'router "vllm-router" is not admitted with engine "SGLang"' \
     "$(baseline_roles)" \
     'the admitted rows are'
-  ROUTER_NAME=llm-d-router
+  ENGINE=vLLM
 
-  # The same refusal under a different engine, which is what proves the engine was never consulted.
-  # If the rule read the engine first, this manifest would be refused with the ENGINE column named
-  # instead, and the row would fail for the right reason on the wrong message.
-  ROUTER_NAME=vllm-router ENGINE=SGLang refuses "vllm-router is refused the same way whatever the engine" \
-    'router "vllm-router" is not admitted for an encoder role' \
+  # Row 3: --epd-config is owned by the operator for vllm-router and refused in extraArgs.
+  ROUTER_EXTRA_ARGS="$(printf '    extraArgs:\n      - --epd-config={"encoder_urls":[]}\n')" \
+    ROUTER_NAME=vllm-router refuses \
+    "user-supplied --epd-config on vllm-router is refused as operator-owned" \
+    '"--epd-config" is set by the operator for router "vllm-router"' \
     "$(baseline_roles)"
-  ROUTER_NAME=llm-d-router
+  ROUTER_EXTRA_ARGS=""
 
-  # THE REFUSAL IS ABOUT ENCODER ROLES, NOT ABOUT THE ROUTER. vllm-router is a supported router for
-  # a plain prefill/decode deployment, so the same router with no Encode role is admitted. Without
-  # this row the case could not tell a rule about encoder roles from a deprecation of the router.
-  # The router is named again here because the row is only about vllm-router: llm-d-router is
-  # admitted in every shape, so submitting it would pass even if vllm-router had started refusing a
-  # plain prefill/decode pair.
-  ROUTER_NAME=vllm-router accepts "vllm-router with NO encoder role is still admitted" "$(pair_roles)"
-  ROUTER_NAME=llm-d-router
+  # Row 4: vllm-router with no Encode role (plain prefill/decode) remains accepted.
+  ROUTER_NAME=vllm-router accepts \
+    "vllm-router with NO encoder role is admitted" \
+    "$(pair_roles)"
 else
   for label in \
-    "vllm-router with an encoder role is refused naming the router" \
-    "vllm-router is refused the same way whatever the engine" \
-    "vllm-router with NO encoder role is still admitted"; do
-    record SKIP "$label" "needs the platform InstanceType this run did not build; see the baseline row"
+    "vllm-router + vLLM with an encoder role is ACCEPTED" \
+    "vllm-router + vLLM below the 0.30.0 floor is refused" \
+    "vllm-router paired with SGLang is refused" \
+    "user-supplied --epd-config on vllm-router is refused as operator-owned" \
+    "vllm-router with NO encoder role is admitted"; do
+    record SKIP "$label" "needs an nvidia or amd InstanceType this run did not have; see the first row"
   done
 fi
-
-# ---------------------------------------------------------------- why there is no functional half
-
-# Stated as a row rather than left to the header, because a case that reads as a refusal-only case
-# with no functional rows is otherwise indistinguishable from one that forgot to write them. The
-# admission that would admit this combination is spec task T3c and it is blocked on a cluster.
-record SKIP "vllm-router serves a multimodal request through the router" \
-  "there is no admitted vllm-router encoder row, so there is no object to run. The functional reading is spec task T3c (the vllm-router image running --epd-config against vLLM 0.30.0), which waits for a cluster; until its run passes and the matrix gains a row, this case asserts the refusal and nothing else"
 
 # Results.
 print_rows

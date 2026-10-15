@@ -73,6 +73,12 @@ type Input struct {
 	// carrying both is deliberate -- see Role.Selector for why a map rather than a string.
 	EndpointLabels map[string]string
 
+	// EncoderURLs are the HTTP(S) endpoints of the deployment's encoders, as the router that takes
+	// a static list of them requires. Each entry is the encoder role's per-role Service URL rather
+	// than a replica address: the Service fronts every replica, so a scale changes nothing here
+	// and does not restart the router. Nil on a deployment with no Encode role.
+	EncoderURLs []string
+
 	// ListenPort is the port the router serves its own API on, which is what the Service in front
 	// of it targets.
 	ListenPort int32
@@ -114,6 +120,21 @@ const roleKindEncode = "encode"
 // (llm-d/llm-d-router@v0.11.0 `pkg/epp/framework/plugins/scheduling/profilehandler/disagg/
 // always_disagg_mm_decider.go:29`, and the E/P/D configuration in `docs/disaggregation.md`).
 const llmdMultimodalDecider = "always-disagg-multimodal-decider"
+
+// llmdAlwaysDisaggPDDecider splits every request between the prefiller and the decoder. It takes no
+// parameters
+// (llm-d/llm-d-router@v0.11.0 `pkg/epp/framework/plugins/scheduling/profilehandler/disagg/
+// always_disagg_pd_decider.go:28`, registered at `cmd/epp/runner/runner.go:612`).
+//
+// SGLang NEEDS IT BECAUSE ITS DECODER CANNOT PREFILL: a decode-mode server rejects any request that
+// carries no bootstrap room id with HTTP 400, so a decider that skips the prefiller on a short or
+// cached prompt, or on a request it could not tokenize, sends the request to a server that cannot
+// answer it. vLLM keeps the prefix-based decider because its decoder loads the full model and can
+// prefill locally.
+const llmdAlwaysDisaggPDDecider = "always-disagg-pd-decider"
+
+// llmdEngineSGLang is the engine name this package receives for SGLang.
+const llmdEngineSGLang = "sglang"
 
 // Output is a rendered router configuration. A router is configured EITHER by a document it reads at
 // startup OR entirely by its own arguments, so exactly one half is filled and Render refuses every
@@ -189,11 +210,24 @@ func renderLLMD(input Input) (Output, error) {
 		kinds[role.Kind] = role.RoleLabelKey
 	}
 
+	// SGLang's prefiller dials the encoder itself through its encoder URLs, so the router sees the
+	// encoder and the prefiller as one stage: encode plus prefill, then decode. The encoder is
+	// dropped here rather than rendered as a stage the decoder's sidecar has no connector for.
+	sglang := input.Metrics.Engine == llmdEngineSGLang
+	if sglang {
+		delete(kinds, roleKindEncode)
+	}
+
 	orderedKinds := make([]string, 0, len(kinds))
 	for kind := range kinds {
 		orderedKinds = append(orderedKinds, kind)
 	}
 	slices.Sort(orderedKinds)
+
+	// Whether this deployment has an encoder stage at all. Hoisted because two decisions below are
+	// keyed on it, and a shadowing redeclaration inside either of them would leave the two reading
+	// the same name while only one of them could see the value they share.
+	_, encode := kinds[roleKindEncode]
 
 	plugins := make([]any, 0, len(orderedKinds)+7)
 	profiles := make([]any, 0, len(orderedKinds))
@@ -279,14 +313,26 @@ func renderLLMD(input Input) (Output, error) {
 				publisherSelector += "," + exclusion
 			}
 		}
+		// AN ENCODER STAGE GETS THE BUILT-IN ESTIMATOR, AND EVERY OTHER DEPLOYMENT GETS THE HTTP
+		// RENDERER. Naming the vLLM URL here selects llm-d-router's vllmHTTPRenderer, which POSTs to
+		// <url>/v1/chat/completions/render -- an endpoint vLLM 0.30.0 serves only under
+		// --enable-scale-out, so on a default server the call answers 404 and no request is routed
+		// at all. A bare token-producer instead selects the built-in estimator, which reads PNG and
+		// JPEG dimensions out of a data: URL with no HTTP call.
+		//
+		// The two are also not interchangeable on an encoder: the request is forwarded to the
+		// encoder with its media still attached, and the multimodal decider reads the estimator's
+		// MultiModalFeatures to decide the stage exists at all. The HTTP renderer would have to ask
+		// the prefiller to render, which is the wrong server for the question.
+		tokenProducer := map[string]any{"type": "token-producer"}
+		if !encode {
+			tokenProducer["parameters"] = map[string]any{
+				"modelName": input.ModelName,
+				"vllm":      map[string]any{"url": input.TokenizerEndpoint},
+			}
+		}
 		plugins = append(plugins,
-			map[string]any{
-				"type": "token-producer",
-				"parameters": map[string]any{
-					"modelName": input.ModelName,
-					"vllm":      map[string]any{"url": input.TokenizerEndpoint},
-				},
-			},
+			tokenProducer,
 			map[string]any{"type": "endpoint-notification-source"},
 			map[string]any{
 				"type": prefixProducer,
@@ -365,7 +411,14 @@ func renderLLMD(input Input) (Output, error) {
 			// encoder and no prefiller is refused upstream and never arrives here.
 			stageProfiles := map[string]string{"prefill": "prefill", "decode": "decode"}
 			stageDeciders := map[string]string{"prefill": "prefix-based-pd-decider"}
-			if _, encode := kinds[roleKindEncode]; encode {
+			// An explicit zero threshold still disables splitting, which only the prefix-based decider
+			// honors, so the always-split decider is for a split that is not disabled.
+			alwaysSplit := sglang &&
+				(input.DisaggregationThreshold == nil || *input.DisaggregationThreshold > 0)
+			if alwaysSplit {
+				stageDeciders["prefill"] = llmdAlwaysDisaggPDDecider
+			}
+			if encode {
 				// Declared before the prefiller's decider, which is the order upstream's E/P/D
 				// configuration lists them in (llm-d/llm-d-router@v0.11.0
 				// `docs/disaggregation.md`, E/P/D Configuration).
@@ -373,17 +426,34 @@ func renderLLMD(input Input) (Output, error) {
 				stageProfiles["encode"] = "encode"
 				stageDeciders["encode"] = llmdMultimodalDecider
 			}
+			pdDeciderParams := map[string]any{
+				"promptTokens": 0,
+				// Zero is a value here rather than an absence: the decider returns "do not
+				// disaggregate" on a zero threshold before reading anything else, so the
+				// pointer is what tells an explicit zero from an unset field.
+				"nonCachedTokens": llmdNonCachedTokens(input.DisaggregationThreshold),
+			}
+			// THE PREFILL DECIDER MUST BE TOLD WHICH PRODUCER FEEDS IT, and only on an encoder
+			// deployment. With the precise producer active, the decider reads its token counts from
+			// the producer named in prefixMatchInfoProducerName; omitted, it falls back to the
+			// approximate producer, which this document does not define, so the router creates an
+			// unconfigured one at load and then logs
+			// "failed to read prefix plugin state: not found" for every request.
+			//
+			// The name is written rather than relied upon, because the fallback is a silent second
+			// answer to a question this document has already answered.
+			if encode && prefixProducer == "precise-prefix-cache-producer" {
+				pdDeciderParams["prefixMatchInfoProducerName"] = prefixProducer
+			}
+			pdDecider := map[string]any{
+				"type":       "prefix-based-pd-decider",
+				"parameters": pdDeciderParams,
+			}
+			if alwaysSplit {
+				pdDecider = map[string]any{"type": llmdAlwaysDisaggPDDecider}
+			}
 			plugins = append(plugins,
-				map[string]any{
-					"type": "prefix-based-pd-decider",
-					"parameters": map[string]any{
-						"promptTokens": 0,
-						// Zero is a value here rather than an absence: the decider returns "do not
-						// disaggregate" on a zero threshold before reading anything else, so the
-						// pointer is what tells an explicit zero from an unset field.
-						"nonCachedTokens": llmdNonCachedTokens(input.DisaggregationThreshold),
-					},
-				},
+				pdDecider,
 				map[string]any{
 					"type": "disagg-profile-handler",
 					"parameters": map[string]any{
