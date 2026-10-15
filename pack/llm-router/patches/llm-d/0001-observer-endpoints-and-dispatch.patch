@@ -768,7 +768,7 @@ new file mode 100644
 index 00000000..b6db1667
 --- /dev/null
 +++ b/pkg/epp/observer/endpoints.go
-@@ -0,0 +1,261 @@
+@@ -0,0 +1,262 @@
 +// Copyright 2026 The Kubernetes Authors.
 +// SPDX-License-Identifier: Apache-2.0
 +
@@ -838,6 +838,7 @@ index 00000000..b6db1667
 +			"core-metrics-extractor", "approx-prefix-cache-producer",
 +			"precise-prefix-cache-producer", "token-producer", "endpoint-notification-source",
 +			"prefix-based-pd-decider", "disagg-profile-handler", "single-profile-handler",
++			"always-disagg-pd-decider", "always-disagg-multimodal-decider",
 +			"openai-parser", "anthropic-parser", "vllmhttp-parser", "passthrough-parser",
 +			"fcfs-ordering-policy", "global-strict-fairness-policy",
 +			"static-usage-limit-policy-type", "utilization-detector":
@@ -1187,7 +1188,7 @@ index 00000000..45d030eb
 +		want  bool
 +	}{
 +		{name: "missing", want: false}, {name: "operator default", types: []string{"single-profile-handler", "label-selector-filter", "queue-scorer", "kv-cache-utilization-scorer", "max-score-picker", "prefix-cache-scorer", "metrics-data-source", "core-metrics-extractor", "approx-prefix-cache-producer"}, want: true},
-+		{name: "operator disaggregation", types: []string{"disagg-profile-handler", "prefix-based-pd-decider", "precise-prefix-cache-producer", "token-producer", "endpoint-notification-source"}, want: true},
++		{name: "operator disaggregation", types: []string{"disagg-profile-handler", "prefix-based-pd-decider", "always-disagg-pd-decider", "always-disagg-multimodal-decider", "precise-prefix-cache-producer", "token-producer", "endpoint-notification-source"}, want: true},
 +		{name: "unknown plugin", types: []string{"single-profile-handler", "retains-private-candidates"}, want: false},
 +	} {
 +		t.Run(tt.name, func(t *testing.T) {
