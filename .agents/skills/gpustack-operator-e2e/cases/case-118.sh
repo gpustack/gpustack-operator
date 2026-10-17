@@ -47,8 +47,7 @@
 #              (CPU-manufacturer awareness) flipped on; both restored by the trap. REAL: three
 #              ModelDeployments — a probe and a filler of plain single-role placeholders sized from
 #              what Kueue reserves, and the three-role encoder subject. Each role carries an
-#              explicit image because a CPU-only InstanceType has observed no accelerator and the
-#              operator can synthesize no engine image (case 49's plumbing note).
+#              explicit image because the replicas are placeholders (case 49's plumbing note).
 #
 # Expected:    With the quota free the subject is admitted as three assignments at once (the
 #              baseline). With the pool shorted to one replica of room: exactly two of the three
@@ -306,7 +305,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "0.30.0"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   roles:
@@ -329,7 +328,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "0.30.0"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:

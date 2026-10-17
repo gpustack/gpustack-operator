@@ -76,7 +76,6 @@ func newElasticConvergenceFixture(t *testing.T) *elasticConvergenceFixture {
 	md := newRenderDeployment()
 	md.Generation = 1
 	md.Spec.KVCache = nil
-	md.Spec.Engine.Version = "0.29.0"
 	md.Spec.Roles[0].Replicas = 1
 	md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(1, resource.DecimalSI)}
 	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}

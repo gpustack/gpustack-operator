@@ -41,7 +41,7 @@ type ModelDeploymentKVTransferApplyConfiguration struct {
 	// argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
 	// across InstanceTypes the groups rebuild independently, and a mixed-protocol window
 	// between a prefiller and a decoder exists until both converge -- the same window an
-	// engine version edit already opens.
+	// engine image edit already opens.
 	Protocol *string `json:"protocol,omitempty"`
 }
 

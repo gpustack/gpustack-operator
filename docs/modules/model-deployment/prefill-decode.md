@@ -99,7 +99,7 @@ spec:
     name: Qwen/Qwen2.5-72B-Instruct
   engine:                                # vLLM | SGLang; this example walks the vLLM pair
     name: vLLM
-    version: "0.29.0"
+    image: <a runner image your cluster can pull>   # required; you name the tag
   router:
     name: llm-d-router                 # required to pair the roles; takes either engine
   roles:
@@ -280,7 +280,8 @@ deployment with no `kvCache` block still has this leg to configure.
 
 Editing it [turns over every role](deployment.md#rollout-behavior): the value renders
 into both ends' arguments, so every role's replicas turn over one at a time. A prefiller and a decoder
-can disagree on the protocol until both converge, the same window an `engine.version` edit opens.
+can disagree on the protocol until both converge, the same window an edit to the image a role runs
+(`engine.image` or `roles[].image`) opens.
 
 The same shared-document rule reaches the parallel degrees on the Ascend leg. The pair turns over
 together; see [Rollout behavior](deployment.md#rollout-behavior) for the mechanism. Until both roles

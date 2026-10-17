@@ -4604,10 +4604,17 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											Type:        "object",
 											Required: []string{
 												"name",
+												"image",
 											},
 											Properties: map[string]v1.JSONSchemaProps{
+												"image": {
+													Description: "Image is the container image every role of this deployment runs in by default.\n- It is the WHOLE-DEPLOYMENT default: a role that names its own image runs that one\ninstead, so this field is what an unstated role falls back to.\n- The operator does not build an image, so the tag must exist in a registry the cluster\ncan pull.\n- The minimum of 1 holds the requirement shut. Without it a required string here is\nsatisfied by the key merely being present, and this object is re-marshalled by the\nmutating webhook: Engine is a value type and this field has no omitempty, so a patch\ntaken from a request that named no image still carries an empty one.",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](512),
+													MinLength:   ptr.To[int64](1),
+												},
 												"name": {
-													Description: "Name selects the engine.\nIt is the half of this object that is the deployment's identity and is frozen after creation,\nwhile Version answers which build runs and stays editable — stated here because one object\nreading otherwise would freeze the pair together.",
+													Description: "Name selects the engine.\nIt is the deployment's identity and is frozen after creation, while Image answers which\nbuild runs and stays editable — stated here because one object reading otherwise would\nfreeze the pair together.",
 													Type:        "string",
 													Enum: []v1.JSON{
 														{
@@ -4617,12 +4624,6 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Raw: []byte(`"SGLang"`),
 														},
 													},
-												},
-												"version": {
-													Description: "Version is the engine's own version, e.g. \"0.29.0\" for vllm or \"0.5.18\" for sglang.\n- It is OPTIONAL, and the obligation sits with the roles instead: a role that names no image\nof its own has one synthesized from this version, so admission refuses an empty version\nbeside such a role rather than letting the render assemble a malformed tag naming\nsomething never typed. A role that names an image never reads this field.\n- It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the\ndriver each role's hardware installed are aligned. A gate would need the runner's release\nmatrix compiled into the operator, and the failure it would prevent is already legible as\nan ImagePullBackOff on a tag that does not exist.\n- It is per deployment rather than per role, which is what lets one version assemble a\nDIFFERENT image for each role: the backend half of the tag comes from the role's own\nInstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.\nPublished version sets do NOT overlap across every backend, so one version has to name a\ntag that exists for each backend the roles land on.",
-													Type:        "string",
-													MaxLength:   ptr.To[int64](64),
-													MinLength:   ptr.To[int64](1),
 												},
 											},
 										},
@@ -4666,7 +4667,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"protocol": {
-													Description: "Protocol is the transport both ends of the direct leg are told to use. It uses the\nKVCacheBackend transport values and their Mooncake mapping, except MUSA and MACA:\nthose are intra-node IPC transports, while prefill and decode may run on different nodes.\n- IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\nend, so a per-role field could only express a contradiction -- two ends naming different\nvalues for one connection, which fails at transfer time rather than at admission.\n- THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;\nthe engine image must still carry the matching Mooncake build. CANN renders as\n\"ascend\" and ROCM as \"hip\", using the same mapping as KVCacheBackend members.\n- Auto selects TCP and renders \"tcp\"; it does not inspect the worker's fabric.\n- UNSET RENDERS \"tcp\", the transport every Mooncake build carries. The default lives in\nthe renderer rather than in this schema, so the stored object holds exactly what was\nasked.\n- TCP IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport\nfrom the host's hardware and does not read the requested one. On vLLM the leg also gets\nMC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's\ntransfer backend: TCP renders \"mooncake_tcp\", any other value renders \"mooncake\", and\nthe value itself is not passed through. Neither pin renders while the deployment's store\nruns a transport other than tcp, because it is process-wide and would leave the store\nclient without its fabric; the leg then keeps the engine's own selection.\n- IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted\nrouter-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind\n\"vllm-router\" -- the value is accepted and renders nothing. An Ascend pair behind\n\"llm-d-router\" renders the leg but not this value: that engine's transfer leg hardcodes\nits transport, so the declared protocol has no key to land in. Each silence is stated\nhere because an accepted field that quietly does nothing is a promise broken quietly.\n- IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\nargv, so a change rebuilds every Kueue pod group of the deployment. With roles split\nacross InstanceTypes the groups rebuild independently, and a mixed-protocol window\nbetween a prefiller and a decoder exists until both converge -- the same window an\nengine version edit already opens.",
+													Description: "Protocol is the transport both ends of the direct leg are told to use. It uses the\nKVCacheBackend transport values and their Mooncake mapping, except MUSA and MACA:\nthose are intra-node IPC transports, while prefill and decode may run on different nodes.\n- IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\nend, so a per-role field could only express a contradiction -- two ends naming different\nvalues for one connection, which fails at transfer time rather than at admission.\n- THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;\nthe engine image must still carry the matching Mooncake build. CANN renders as\n\"ascend\" and ROCM as \"hip\", using the same mapping as KVCacheBackend members.\n- Auto selects TCP and renders \"tcp\"; it does not inspect the worker's fabric.\n- UNSET RENDERS \"tcp\", the transport every Mooncake build carries. The default lives in\nthe renderer rather than in this schema, so the stored object holds exactly what was\nasked.\n- TCP IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport\nfrom the host's hardware and does not read the requested one. On vLLM the leg also gets\nMC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's\ntransfer backend: TCP renders \"mooncake_tcp\", any other value renders \"mooncake\", and\nthe value itself is not passed through. Neither pin renders while the deployment's store\nruns a transport other than tcp, because it is process-wide and would leave the store\nclient without its fabric; the leg then keeps the engine's own selection.\n- IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted\nrouter-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind\n\"vllm-router\" -- the value is accepted and renders nothing. An Ascend pair behind\n\"llm-d-router\" renders the leg but not this value: that engine's transfer leg hardcodes\nits transport, so the declared protocol has no key to land in. Each silence is stated\nhere because an accepted field that quietly does nothing is a promise broken quietly.\n- IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\nargv, so a change rebuilds every Kueue pod group of the deployment. With roles split\nacross InstanceTypes the groups rebuild independently, and a mixed-protocol window\nbetween a prefiller and a decoder exists until both converge -- the same window an\nengine image edit already opens.",
 													Type:        "string",
 													Enum: []v1.JSON{
 														{
@@ -4898,7 +4899,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															XListType: ptr.To[string]("atomic"),
 														},
 														"image": {
-															Description: "Image is the container image to run. Leaving it empty is the ordinary case: the operator then\nsynthesizes one from the pool's accelerator backend, the observed runtime version and the\nrequested engine.",
+															Description: "Image is the container image to run. Leaving it empty is the ordinary case: the role then\nruns the deployment's engine image. Set it to run a private build, to pin this one role to\nan image different from the engine's, or to name a repository the engine image does not.",
 															Type:        "string",
 															MaxLength:   ptr.To[int64](512),
 														},

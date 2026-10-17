@@ -18,9 +18,9 @@
 #              Hub, and in <NS> the pool's entrance LocalQueue. One accelerator is enough: the
 #              second replica is the replacement of the first, on the same node.
 #              E2E_PD_PROBE_IMAGE (default curlimages/curl:8.11.1) sends the requests.
-# Inputs:      All real. Public E2E_C104_MODEL (default Qwen/Qwen2.5-7B-Instruct) at main; vLLM
-#              0.29.0, its runner image synthesized from the InstanceType. E2E_C104_READY_BOUND
-#              (default 3600 s) bounds the first start, download included.
+# Inputs:      All real. Public E2E_C104_MODEL (default Qwen/Qwen2.5-7B-Instruct) at main; the
+#              engine image E2E_C104_IMAGE (default a released vLLM 0.29.0 runner).
+#              E2E_C104_READY_BOUND (default 3600 s) bounds the first start, download included.
 # Expected:    - the deployment reports status.model.delivery Node and its Pod carries the plugin's
 #                volume with the artifact's digest, and no engine download cache;
 #              - WeightsReady goes through Materializing to Mounted, and the node lists the digest
@@ -49,6 +49,9 @@ IT="${E2E_C104_IT:?set E2E_C104_IT to an accelerator InstanceType}"
 MODEL="${E2E_C104_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
 PROBE_IMAGE="${E2E_PD_PROBE_IMAGE:-curlimages/curl:8.11.1}"
 READY_BOUND="${E2E_C104_READY_BOUND:-3600}"
+# The engine image the role falls back to. This case measures the node's download and publication,
+# not the engine, but the role names no image of its own.
+IMAGE="${E2E_C104_IMAGE:-quay.io/gpustack/runner:cuda12.9-vllm0.29.0}"
 P=c104
 SERVED=e2e/c104
 LABEL="e2e.gpustack.ai/case=104"
@@ -135,7 +138,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-md, namespace: ${NS}, labels: {e2e.gpustack.ai/case: "104"}}
 spec:
-  engine: {name: vLLM, version: "0.29.0"}
+  engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: ${SERVED}, artifactRef: {name: ${P}-model}}
   roles:
     - {name: server, instanceType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--max-model-len", "4096", "--gpu-memory-utilization", "0.85"]}

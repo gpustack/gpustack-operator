@@ -330,18 +330,14 @@ func modelDeploymentRoleHasMultiMemberReplica(
 
 // modelDeploymentGroupForwardActivatable reports whether this role's group-forward capability
 // can ever reach Verified or NotApplicable — the two states that activate eligibility. A shape
-// the operator has not verified (an unlisted engine version, or a prefill/decode role) answers
-// Unsupported by construction and can never activate, so an eligibility selector on its Services
-// would select zero endpoints forever: those Services render WITHOUT the term, preserving the
-// routing a deployment had before first enable.
+// the operator has no observation for (an engine absent from the matrix, or a prefill/decode
+// role) answers Unsupported by construction and can never activate, so an eligibility selector
+// on its Services would select zero endpoints forever: those Services render WITHOUT the term,
+// preserving the routing a deployment had before first enable.
 func modelDeploymentGroupForwardActivatable(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) bool {
-	engine, known := modelDeploymentGroupForwardEngines[md.Spec.Engine.Name]
-	if !known {
-		return false
-	}
-	if !slices.Contains(engine.VerifiedVersions, md.Spec.Engine.Version) {
+	if _, known := modelDeploymentGroupForwardEngines[md.Spec.Engine.Name]; !known {
 		return false
 	}
 	if len(role.Command) > 0 {
@@ -373,9 +369,10 @@ func modelDeploymentEligibilityDecided(md *workercore.ModelDeployment) bool {
 // modelDeploymentEligibilitySelectorActive is the ONE decision for whether a surface names
 // endpoint-eligible endpoints. Three halves, all required:
 //
-// STATIC: the shape must be able to activate at all -- a verified engine version whose roles are
-// ordinary server roles with the operator's own command. An unverified version, a prefill/decode
-// role, or a role with a replaced command can never be qualified, so its surfaces never narrow.
+// STATIC: the shape must be able to activate at all -- an engine the matrix carries, whose roles
+// are ordinary server roles with the operator's own command. An engine outside the matrix, a
+// prefill/decode role, or a role with a replaced command can never be qualified, so its surfaces
+// never narrow.
 //
 // ACTIVATION: a pass must have recorded a decided predicate -- True (qualified) or False
 // (revoked). Narrowing on first enable before any pass has answered would select zero endpoints

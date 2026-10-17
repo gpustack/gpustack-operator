@@ -7,17 +7,11 @@
 #   case-122.sh <NS>
 #
 # Goal:        SGLang carries six admitted encoder rows: llm-d-router and sglang-gateway across
-#              nvidia, amd and ascend, every one of them at floor 0.5.10, naming the address leg
+#              nvidia, amd and ascend, naming the address leg
 #              (encoder-urls) and mounting no claim. This case reads that on a live API server rather
 #              than in a table a user cannot see: on the platform it injects, both routers with
-#              SGLang at a released version are ACCEPTED with no claim mounted, the pairing the
-#              matrix still refuses is refused naming BOTH halves and the admitted rows, and a
-#              version below the floor is refused naming the floor in SGLang's own numbering.
-#
-#              WHY THE FLOOR IS STATED AS SGLang 0.5.10 EVEN ON THE INJECTED ASCEND PLATFORM. The
-#              engine is what a floor belongs to; the platform only decides which project publishes
-#              the number for a vLLM row. A refusal naming vllm-ascend on an SGLang row would send a
-#              user after a plugin release carrying no encoder-urls argument at all.
+#              SGLang are ACCEPTED with no claim mounted, and the pairing the matrix still refuses
+#              is refused naming BOTH halves and the admitted rows.
 #
 # Environment: Any cluster with a materialized scheduling chain (run case-1 first). If an active
 #              InstanceType already reports the target manufacturer (E2E_C122_VENDOR, default Ascend;
@@ -36,12 +30,10 @@
 #              REAL: every assertion is a server-side dry run, so no ModelDeployment is stored.
 #
 # Expected:    - the vLLM baseline shape for the target platform is ACCEPTED;
-#              - llm-d-router + SGLang at or above the floor, mounting no claim, is ACCEPTED on the
-#                target platform, and sglang-gateway + SGLang is ACCEPTED the same way;
+#              - llm-d-router + SGLang, mounting no claim, is ACCEPTED on the target platform, and
+#                sglang-gateway + SGLang is ACCEPTED the same way;
 #              - sglang-gateway with vLLM is REFUSED naming both the router and the engine it is not
-#                paired with, and listing the admitted rows a user can compare against;
-#              - llm-d-router + SGLang one release below the floor is REFUSED naming encoder-urls
-#                and the SGLang release that carries it.
+#                paired with, and listing the admitted rows a user can compare against.
 #
 # Cleanup:     If the fixture injected a NodeFeature object and flipped the settings key, the trap
 #              deletes the NodeFeature, restores the settings key to its exact original value, and
@@ -64,14 +56,6 @@ PLATFORM="$(printf '%s' "$VENDOR" | tr '[:upper:]' '[:lower:]')"
 NF=case122-cpu-vendor
 MD=case122-epd
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
-BASE_VERSION="${E2E_C122_VERSION:-0.30.0}"
-# An assignment prefixed to a function call persists after it returns in bash, so the rows below
-# restore this rather than leaving every later row reading whichever version the last one turned.
-VERSION="$BASE_VERSION"
-# SGLang numbers its own releases and carries its own floor, so the SGLang rows below take a separate
-# default rather than reusing the vLLM one. 0.5.18 is a released SGLang tag at or above the 0.5.10
-# floor, and is the release the render was written against.
-SGLANG_VERSION="${E2E_C122_SGLANG_VERSION:-0.5.18}"
 SETTLE_ROUNDS="${E2E_C122_SETTLE:-60}"
 ROUTER_NAME=llm-d-router
 ENGINE=vLLM
@@ -220,7 +204,7 @@ metadata:
 spec:
   engine:
     name: ${ENGINE:-vLLM}
-    version: "${VERSION}"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:
@@ -328,23 +312,14 @@ fi
 
 if [ -n "$IT" ]; then
   # The admitted SGLang rows, read through the same instrument as the vLLM baseline above. Both
-  # routers are accepted at a released version with no claim mounted, because an address leg is what
-  # carries the encoder's output and a connector there is not a thing a user attaches.
-  ENGINE=SGLang VERSION="$SGLANG_VERSION" accepts "llm-d-router with SGLang is ACCEPTED" \
+  # routers are accepted on SGLang with no claim mounted, because an address leg is what carries the
+  # encoder's output and a connector there is not a thing a user attaches.
+  ENGINE=SGLang accepts "llm-d-router with SGLang is ACCEPTED" \
     "$(address_leg_roles)"
-  ENGINE=SGLang VERSION="$SGLANG_VERSION" ROUTER_NAME=sglang-gateway \
+  ENGINE=SGLang ROUTER_NAME=sglang-gateway \
     accepts "sglang-gateway with SGLang is ACCEPTED" \
     "$(address_leg_roles)"
   ROUTER_NAME=llm-d-router
-
-  # The floor belongs to the engine rather than to the platform, so the refusal has to name SGLang's
-  # own release here. Both fragments are asserted: the first says which connector the rule is talking
-  # about and the second says which project publishes the number to go after.
-  ENGINE=SGLang VERSION=0.5.9 refuses "an SGLang version below the row floor is refused" \
-    'encoder-urls carries' \
-    "$(address_leg_roles)" \
-    'from SGLang 0.5.10'
-  ENGINE=""
 
   # The pairing the matrix still refuses. sglang-gateway drives the encoder leg on SGLang alone, so
   # vLLM under it names both halves in one message along with the admitted rows.
@@ -354,12 +329,10 @@ if [ -n "$IT" ]; then
     'the admitted rows are'
   ROUTER_NAME=llm-d-router
   ENGINE=vLLM
-  VERSION="$BASE_VERSION"
 else
   for label in \
     "llm-d-router with SGLang is ACCEPTED" \
     "sglang-gateway with SGLang is ACCEPTED" \
-    "an SGLang version below the row floor is refused" \
     "sglang-gateway with vLLM is refused naming the pairing"; do
     record SKIP "$label" "needs the platform InstanceType this run did not build; see the baseline row"
   done

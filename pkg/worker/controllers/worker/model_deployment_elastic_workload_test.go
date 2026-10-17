@@ -59,7 +59,6 @@ func TestElasticRayLoggingEnvironment(t *testing.T) {
 			md.Spec.KVCache = nil
 			md.Spec.Roles[0].Env = append(slices.Clone(tc.env), workercore.ModelDeploymentEnvVar{Name: "VLLM_LOGGING_LEVEL", Value: "DEBUG"})
 			if !tc.ordinary {
-				md.Spec.Engine.Version = "0.29.0"
 				md.Spec.Roles[0].Replicas = 1
 				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
 			}
@@ -109,7 +108,6 @@ func TestElasticConvergenceCreatesChildren(t *testing.T) {
 		t.Run(fmt.Sprintf("tp-%d", tp), func(t *testing.T) {
 			md := newRenderDeployment()
 			md.Spec.KVCache = nil
-			md.Spec.Engine.Version = "0.29.0"
 			md.Spec.Roles[0].Replicas = 1
 			md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(int64(tp), resource.DecimalSI)}
 			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}

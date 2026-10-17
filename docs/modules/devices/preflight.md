@@ -63,7 +63,7 @@ to use instead.
 docker run --rm --privileged --network=host \
     -v /:/host -v /dev:/dev -v /sys:/sys \
     -v /opt/rocm:/opt/rocm:ro -v /opt/rocm/lib:/opt/rocm/lib:ro \
-    gpustack/gpustack-operator:latest \
+    gpustack/gpustack-operator:<tag> \
     gpustack-operator device-manager preflight --manufacturer=amd
 ```
 
@@ -87,7 +87,7 @@ the container. Naming the library directory as its own source has the host resol
 docker run --rm --privileged --network=host \
     -v /:/host -v /dev:/dev -v /sys:/sys \
     -v /usr/local/Ascend:/usr/local/Ascend:ro -v /usr/local/dcmi:/usr/local/dcmi:ro \
-    gpustack/gpustack-operator:latest \
+    gpustack/gpustack-operator:<tag> \
     gpustack-operator device-manager preflight --manufacturer=ascend
 ```
 
@@ -102,7 +102,7 @@ and get it themselves; under `nerdctl` they cannot, and are emitted for you to r
 docker run --rm --privileged --network=host \
     -v /:/host -v /dev:/dev -v /sys:/sys \
     -v /usr/local/neuware:/usr/local/neuware:ro \
-    gpustack/gpustack-operator:latest \
+    gpustack/gpustack-operator:<tag> \
     gpustack-operator device-manager preflight --manufacturer=cambricon
 ```
 
@@ -113,7 +113,7 @@ docker run --rm --privileged --network=host \
     -v /:/host -v /dev:/dev -v /sys:/sys \
     -v /opt/hyhal:/opt/hyhal:ro -v /opt/dtk:/opt/dtk:ro \
     -v /etc/dmi_mig_config:/etc/dmi_mig_config \
-    gpustack/gpustack-operator:latest \
+    gpustack/gpustack-operator:<tag> \
     gpustack-operator device-manager preflight --manufacturer=hygon
 ```
 
@@ -129,7 +129,7 @@ tier](#the-container-probe-tier).
 docker run --rm --privileged --network=host \
     -v /:/host -v /dev:/dev -v /sys:/sys \
     -v /usr/local/corex:/usr/local/corex:ro \
-    gpustack/gpustack-operator:latest \
+    gpustack/gpustack-operator:<tag> \
     gpustack-operator device-manager preflight --manufacturer=iluvatar
 ```
 
@@ -142,7 +142,7 @@ nodes, which `--privileged` and `/dev` already cover, and the driver is the moun
 docker run --rm --privileged --network=host \
     -v /:/host -v /dev:/dev -v /sys:/sys \
     -v /opt/mxdriver:/opt/mxdriver:ro -v /opt/maca:/opt/maca:ro \
-    gpustack/gpustack-operator:latest \
+    gpustack/gpustack-operator:<tag> \
     gpustack-operator device-manager preflight --manufacturer=metax
 ```
 
@@ -151,7 +151,7 @@ docker run --rm --privileged --network=host \
 ```bash
 docker run --rm --privileged --network=host --runtime mthreads \
     -v /:/host -v /dev:/dev -v /sys:/sys \
-    gpustack/gpustack-operator:latest \
+    gpustack/gpustack-operator:<tag> \
     gpustack-operator device-manager preflight --manufacturer=mthreads
 ```
 
@@ -165,7 +165,7 @@ Under `nerdctl`, whose `--runtime` names an OCI shim, that flag does not reach t
 ```bash
 docker run --rm --privileged --network=host --runtime nvidia \
     -v /:/host -v /dev:/dev -v /sys:/sys \
-    gpustack/gpustack-operator:latest \
+    gpustack/gpustack-operator:<tag> \
     gpustack-operator device-manager preflight --manufacturer=nvidia
 ```
 
@@ -182,7 +182,7 @@ place of `--runtime nvidia`, whose `--runtime` names an OCI shim and rejects the
 docker run --rm --privileged --network=host \
     -v /:/host -v /dev:/dev -v /sys:/sys \
     -v /usr/local/PPU_SDK:/usr/local/PPU_SDK:ro \
-    gpustack/gpustack-operator:latest \
+    gpustack/gpustack-operator:<tag> \
     gpustack-operator device-manager preflight --manufacturer=thead
 ```
 
@@ -193,7 +193,7 @@ the workload container brings its own SDK and there is no generation to match an
 
 ```bash
 docker run --rm --network=host -v /:/host \
-    gpustack/gpustack-operator:latest \
+    gpustack/gpustack-operator:<tag> \
     gpustack-operator device-manager preflight
 ```
 

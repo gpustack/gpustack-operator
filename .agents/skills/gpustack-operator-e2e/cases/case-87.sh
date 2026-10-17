@@ -77,7 +77,7 @@
 #              Topology/ResourceFlavor/ClusterQueue/LocalQueue set is created case-prefixed and
 #              deleted by name; the ClusterQueue references no AdmissionCheck, so no operator
 #              barrier gates the hand-built queue. The ModelDeployments name an explicit image
-#              because a CPU-only InstanceType synthesizes none; override with E2E_MD_IMAGE, the
+#              because the roles are placeholders; override with E2E_MD_IMAGE, the
 #              InstanceType with E2E_MD_INSTANCE_TYPE. The ballast is one pause Pod per queue Node in
 #              the system namespace, which Kueue does not manage, labelled with the case prefix.
 #

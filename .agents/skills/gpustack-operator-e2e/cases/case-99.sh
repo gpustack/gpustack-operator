@@ -19,8 +19,8 @@
 #              different tokenizer. E2E_PD_PROBE_IMAGE (default curlimages/curl:8.11.1) sends the
 #              requests.
 # Inputs:      All real. Qwen/Qwen2.5-0.5B-Instruct is copied into a fresh claim by a Job
-#              (python:3.12-slim with huggingface_hub). vLLM 0.29.0 and SGLang 0.5.18 runner images
-#              are synthesized from the InstanceType.
+#              (python:3.12-slim with huggingface_hub). The vLLM and SGLang runner images are named
+#              by E2E_C99_VLLM_IMAGE and E2E_C99_SGLANG_IMAGE, whose defaults are released tags.
 # Expected:    - the claim deployment goes Ready; /v1/models lists exactly spec.model.name; every
 #                model_name label is spec.model.name; a chat request through llm-d-router answers
 #                200 naming spec.model.name; the router logs no tokenization or per-request failure;
@@ -42,6 +42,10 @@ GATED="${E2E_C99_GATED:-XyX824/mam-c-gated-tiny}"
 GATED_COMMIT="${E2E_C99_GATED_COMMIT:-849d87054adea51b3cc2e81b95ed17b1289e9a40}"
 PROBE_IMAGE="${E2E_PD_PROBE_IMAGE:-curlimages/curl:8.11.1}"
 READY_BOUND="${E2E_C99_READY_BOUND:-1200}"
+# The two engine images. These roles name no image of their own, so each deployment runs the
+# engine-wide one; the tags are the released runner builds this case is measured against.
+VLLM_IMAGE="${E2E_C99_VLLM_IMAGE:-quay.io/gpustack/runner:cuda12.9-vllm0.29.0}"
+SGLANG_IMAGE="${E2E_C99_SGLANG_IMAGE:-quay.io/gpustack/runner:cuda12.9-sglang0.5.18}"
 P=c99
 LABEL="e2e.gpustack.ai/case=99"
 HUB=https://huggingface.co
@@ -128,7 +132,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-vllm, namespace: ${NS}, labels: {e2e.gpustack.ai/case: "99"}}
 spec:
-  engine: {name: vLLM, version: "0.29.0"}
+  engine: {name: vLLM, image: "${VLLM_IMAGE}"}
   model: {name: e2e/c99-claim, artifactRef: {name: ${P}-claim}}
   router: {name: llm-d-router}
   roles:
@@ -169,7 +173,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-sglang, namespace: ${NS}, labels: {e2e.gpustack.ai/case: "99"}}
 spec:
-  engine: {name: SGLang, version: "0.5.18"}
+  engine: {name: SGLang, image: "${SGLANG_IMAGE}"}
   model: {name: e2e/c99-gated, artifactRef: {name: ${P}-gated}}
   roles:
     - {name: server, instanceType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--mem-fraction-static", "0.4"]}

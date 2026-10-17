@@ -38,11 +38,10 @@
 #              connector, and its replicas are never expected to serve. EXITS 2 (input required)
 #              when the cluster has no InstanceType.
 #
-# Inputs:      All real, nothing mocked. One single-role ModelDeployment. Its role carries an
-#              explicit image because a CPU-only InstanceType has observed no accelerator
-#              and the operator can synthesize no engine image; nothing here reads what it runs.
-#              Override the image with E2E_MD_IMAGE, the InstanceType with E2E_MD_INSTANCE_TYPE, the
-#              recreate bound with E2E_SVC_RECREATE_BOUND.
+# Inputs:      All real, nothing mocked. One single-role ModelDeployment. Its role names an
+#              explicit image because nothing here reads what it runs. Override the image with
+#              E2E_MD_IMAGE, the InstanceType with E2E_MD_INSTANCE_TYPE, the recreate bound with
+#              E2E_SVC_RECREATE_BOUND.
 #
 # Expected:    - the deployment's own Service is created;
 #              - after `kubectl delete svc`, a Service of the same name exists again within the
@@ -261,7 +260,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "0.11.0"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:

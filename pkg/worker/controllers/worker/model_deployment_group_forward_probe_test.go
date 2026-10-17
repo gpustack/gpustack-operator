@@ -44,15 +44,16 @@ func probeMember(ordinal, member int, uid string) *core.Pod {
 	}
 }
 
-// probeDeployment builds the deployment and role under test. The engine and version are the two
-// facts the per-engine guard reads, so they are the only things a case varies.
-func probeDeployment(engine, version string, kind workercore.ModelDeploymentRoleKind) (
+// probeDeployment builds the deployment and role under test. The engine is the fact the per-engine
+// guard reads, so it is what a case varies; the image is present because admission requires it and
+// nothing here reads it.
+func probeDeployment(engine string, kind workercore.ModelDeploymentRoleKind) (
 	*workercore.ModelDeployment, *workercore.ModelDeploymentRole,
 ) {
 	md := &workercore.ModelDeployment{
 		ObjectMeta: meta.ObjectMeta{Name: "qwen", Namespace: "team-a"},
 		Spec: workercore.ModelDeploymentSpec{
-			Engine: workercore.ModelDeploymentEngine{Name: engine, Version: version},
+			Engine: workercore.ModelDeploymentEngine{Name: engine, Image: "engine:latest"},
 		},
 	}
 	role := &workercore.ModelDeploymentRole{
@@ -127,24 +128,21 @@ func probeHost(ordinal, member int) string {
 }
 
 // TestGroupForwardProbeAdmitsOnlyBoundAnswers is the per-engine verifiable matrix. One case per
-// engine version this operator reads, and the assertion is the whole contract: every member of the
-// replica answered, each answer was bound to the request this operator sent it, and the leg is
-// Verified rather than merely not-Unsupported.
+// engine this operator reads, and the assertion is the whole contract: every member of the replica
+// answered, each answer was bound to the request this operator sent it, and the leg is Verified
+// rather than merely not-Unsupported.
 func TestGroupForwardProbeAdmitsOnlyBoundAnswers(t *testing.T) {
 	testCases := []struct {
-		name    string
-		engine  string
-		version string
+		name   string
+		engine string
 	}{
-		{name: "vLLM 0.25.1", engine: workercore.ModelDeploymentEngineVLLM, version: "0.25.1"},
-		{name: "vLLM 0.29.0", engine: workercore.ModelDeploymentEngineVLLM, version: "0.29.0"},
-		{name: "SGLang 0.5.18", engine: workercore.ModelDeploymentEngineSGLang, version: "0.5.18"},
-		{name: "SGLang 0.5.21", engine: workercore.ModelDeploymentEngineSGLang, version: "0.5.21"},
+		{name: "vLLM", engine: workercore.ModelDeploymentEngineVLLM},
+		{name: "SGLang", engine: workercore.ModelDeploymentEngineSGLang},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			md, role := probeDeployment(tc.engine, tc.version, "")
+			md, role := probeDeployment(tc.engine, "")
 			fetch := &probeFetch{}
 			view := modelDeploymentReplicaView{
 				Role: "server", Ordinal: 0, Seated: true,
@@ -175,12 +173,11 @@ func TestGroupForwardProbeRequestIsIdentifiable(t *testing.T) {
 	testCases := []struct {
 		name       string
 		engine     string
-		version    string
 		wantPath   string
 		wantFields map[string]any
 	}{
 		{
-			name: "vLLM", engine: workercore.ModelDeploymentEngineVLLM, version: "0.29.0",
+			name: "vLLM", engine: workercore.ModelDeploymentEngineVLLM,
 			wantPath: "/v1/completions",
 			wantFields: map[string]any{
 				// The document is read back as generic JSON, so every number arrives a float.
@@ -188,7 +185,7 @@ func TestGroupForwardProbeRequestIsIdentifiable(t *testing.T) {
 			},
 		},
 		{
-			name: "SGLang", engine: workercore.ModelDeploymentEngineSGLang, version: "0.5.18",
+			name: "SGLang", engine: workercore.ModelDeploymentEngineSGLang,
 			wantPath: "/generate",
 			wantFields: map[string]any{
 				"log_metrics": false,
@@ -198,7 +195,7 @@ func TestGroupForwardProbeRequestIsIdentifiable(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			md, role := probeDeployment(tc.engine, tc.version, "")
+			md, role := probeDeployment(tc.engine, "")
 			var seen string
 			var sent []byte
 			fetch := func(_ context.Context, url string, body []byte) ([]byte, error) {
@@ -314,11 +311,7 @@ func TestGroupForwardProbeHoldsOnAnythingItCannotBind(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			version := "0.29.0"
-			if tc.engine == workercore.ModelDeploymentEngineSGLang {
-				version = "0.5.18"
-			}
-			md, role := probeDeployment(tc.engine, version, "")
+			md, role := probeDeployment(tc.engine, "")
 			fetch := &probeFetch{}
 			if tc.answer != "" {
 				fetch.answers = map[string]string{probeHost(0, 1): tc.answer}
@@ -348,7 +341,7 @@ func TestGroupForwardProbeHoldsOnAnythingItCannotBind(t *testing.T) {
 // group whose second member cannot answer is held even when the first answered perfectly, because
 // the leg is about the group and one member's success is not a statement about its peers.
 func TestGroupForwardProbeHoldsWhenOneMemberOfTheGroupIsSilent(t *testing.T) {
-	md, role := probeDeployment(workercore.ModelDeploymentEngineVLLM, "0.29.0", "")
+	md, role := probeDeployment(workercore.ModelDeploymentEngineVLLM, "")
 	fetch := &probeFetch{failures: map[string]error{probeHost(0, 1): errors.New("no route to host")}}
 	view := modelDeploymentReplicaView{
 		Role: "server", Ordinal: 0, Seated: true,
@@ -373,43 +366,29 @@ func TestGroupForwardProbeIsUnsupportedWhereNoObservationExists(t *testing.T) {
 	testCases := []struct {
 		name        string
 		engine      string
-		version     string
 		kind        workercore.ModelDeploymentRoleKind
 		wantInWords string
 	}{
 		{
-			// The WORDING is what separates "this engine has no verified observation" from "this
-			// version's binding was not read". Both name the engine; only one of them is fixed by
-			// adding the engine to the matrix, and asserting the name alone would pass under either.
-			name:   "an engine with no verified observation is named",
-			engine: "TensorRT", version: "1.0",
+			name:        "an engine with no verified observation is named",
+			engine:      "TensorRT",
 			wantInWords: "no group-forward observation this operator has verified",
 		},
 		{
-			name:   "a vLLM version whose binding was not read is named",
-			engine: workercore.ModelDeploymentEngineVLLM, version: "0.26.0",
-			wantInWords: "0.26.0",
-		},
-		{
-			name:   "an SGLang version whose binding was not read is named",
-			engine: workercore.ModelDeploymentEngineSGLang, version: "0.4.0",
-			wantInWords: "0.4.0",
-		},
-		{
-			name:   "a vLLM prefill role carries the client-coordinated reason",
-			engine: workercore.ModelDeploymentEngineVLLM, version: "0.29.0",
+			name:        "a vLLM prefill role carries the client-coordinated reason",
+			engine:      workercore.ModelDeploymentEngineVLLM,
 			kind:        workercore.ModelDeploymentRoleKindPrefill,
 			wantInWords: "pair of requests",
 		},
 		{
-			name:   "a vLLM decode role carries the same reason",
-			engine: workercore.ModelDeploymentEngineVLLM, version: "0.29.0",
+			name:        "a vLLM decode role carries the same reason",
+			engine:      workercore.ModelDeploymentEngineVLLM,
 			kind:        workercore.ModelDeploymentRoleKindDecode,
 			wantInWords: "pair of requests",
 		},
 		{
-			name:   "an SGLang disaggregated role carries the all-reduce reason",
-			engine: workercore.ModelDeploymentEngineSGLang, version: "0.5.18",
+			name:        "an SGLang disaggregated role carries the all-reduce reason",
+			engine:      workercore.ModelDeploymentEngineSGLang,
 			kind:        workercore.ModelDeploymentRoleKindPrefill,
 			wantInWords: "all-reduce",
 		},
@@ -417,7 +396,7 @@ func TestGroupForwardProbeIsUnsupportedWhereNoObservationExists(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			md, role := probeDeployment(tc.engine, tc.version, tc.kind)
+			md, role := probeDeployment(tc.engine, tc.kind)
 			fetch := &probeFetch{}
 			view := modelDeploymentReplicaView{
 				Role: "server", Ordinal: 0, Seated: true,
@@ -430,7 +409,7 @@ func TestGroupForwardProbeIsUnsupportedWhereNoObservationExists(t *testing.T) {
 			got := observeModelDeploymentGroupForward(context.Background(), md, role, view, fetch.fetch)
 
 			assert.Equal(t, modelDeploymentGroupForwardUnsupported, got.State,
-				"a shape or version with no verified observation stays held, not admitted")
+				"a shape with no verified observation stays held, not admitted")
 			assert.Contains(t, got.Reason, tc.wantInWords,
 				"the reason names its own obstacle: %s", got.Reason)
 			assert.Empty(t, fetch.asked,
@@ -445,36 +424,35 @@ func TestGroupForwardProbeIsUnsupportedWhereNoObservationExists(t *testing.T) {
 // path: there is nothing to send that a bound answer could prove. Probing one would cost a request
 // against an engine that cannot answer it, and the answer could only ever be Unknown, which reads as
 // a hold on a healthy group. NotApplicable is therefore the whole answer, and it is asked BEFORE the
-// engine, the version and the transport, so no network call can reach an encoder at any engine.
+// engine and the transport, so no network call can reach an encoder at any engine.
 //
 // THE CASES SHARE ONE LOOP because the role is the only fact varied, and each engine is a separate
 // assertion that the refusal does not depend on which engine happens to be deployed.
 func TestGroupForwardProbeDoesNotProbeAnEncoder(t *testing.T) {
 	testCases := []struct {
-		name    string
-		engine  string
-		version string
+		name   string
+		engine string
 	}{
 		{
 			name:   "a vLLM encoder is not applicable",
-			engine: workercore.ModelDeploymentEngineVLLM, version: "0.29.0",
+			engine: workercore.ModelDeploymentEngineVLLM,
 		},
 		{
 			name:   "an SGLang encoder is not applicable",
-			engine: workercore.ModelDeploymentEngineSGLang, version: "0.5.18",
+			engine: workercore.ModelDeploymentEngineSGLang,
 		},
 		{
-			// An engine with no verified observation at all, and a version outside every verified
-			// set: an encoder is refused before either of those questions is asked, so the answer
-			// cannot become Unsupported by the engine the deployment happens to name.
+			// An engine with no verified observation at all: an encoder is refused before that
+			// question is asked, so the answer cannot become Unsupported by the engine the
+			// deployment happens to name.
 			name:   "an encoder on an engine with no verified observation is not applicable",
-			engine: "TensorRT", version: "1.0",
+			engine: "TensorRT",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			md, role := probeDeployment(tc.engine, tc.version, workercore.ModelDeploymentRoleKindEncode)
+			md, role := probeDeployment(tc.engine, workercore.ModelDeploymentRoleKindEncode)
 			fetch := &probeFetch{}
 			view := modelDeploymentReplicaView{
 				Role: "server", Ordinal: 0, Seated: true,
@@ -495,15 +473,15 @@ func TestGroupForwardProbeDoesNotProbeAnEncoder(t *testing.T) {
 }
 
 // TestGroupForwardProbeLeavesTheSingleMemberPathUntouched is the byte-identical guarantee the
-// coordinator asked for. A single-member replica is answered before the engine, the version and
-// the transport are even looked at, so nothing this operator added can reach it: the fetch is
-// never called, and the answer is the one T7 shipped.
+// coordinator asked for. A single-member replica is answered before the engine and the transport
+// are even looked at, so nothing this operator added can reach it: the fetch is never called, and
+// the answer is the one T7 shipped.
 func TestGroupForwardProbeLeavesTheSingleMemberPathUntouched(t *testing.T) {
 	for _, engine := range []string{
 		workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentEngineSGLang, "TensorRT",
 	} {
 		t.Run(engine, func(t *testing.T) {
-			md, role := probeDeployment(engine, "0.29.0", workercore.ModelDeploymentRoleKindPrefill)
+			md, role := probeDeployment(engine, workercore.ModelDeploymentRoleKindPrefill)
 			fetch := &probeFetch{}
 			view := modelDeploymentReplicaView{
 				Role: "server", Ordinal: 0, Seated: true,
@@ -515,7 +493,7 @@ func TestGroupForwardProbeLeavesTheSingleMemberPathUntouched(t *testing.T) {
 			assert.Equal(t, modelDeploymentGroupForwardNotApplicable, got.State,
 				"a replica of one member has no cross-member forward path, whatever the engine is")
 			assert.Empty(t, fetch.asked,
-				"the single-member path makes no request on any engine, at any version")
+				"the single-member path makes no request on any engine")
 		})
 	}
 }
@@ -523,7 +501,7 @@ func TestGroupForwardProbeLeavesTheSingleMemberPathUntouched(t *testing.T) {
 // TestGroupForwardProbeHoldsWithNoTransport pins the seam's fail-closed direction. A nil fetch is
 // not a license to assume the group works.
 func TestGroupForwardProbeHoldsWithNoTransport(t *testing.T) {
-	md, role := probeDeployment(workercore.ModelDeploymentEngineVLLM, "0.29.0", "")
+	md, role := probeDeployment(workercore.ModelDeploymentEngineVLLM, "")
 	view := modelDeploymentReplicaView{
 		Role: "server", Ordinal: 0, Seated: true,
 		Members: []*core.Pod{
@@ -542,7 +520,7 @@ func TestGroupForwardProbeHoldsWithNoTransport(t *testing.T) {
 // has no address: the pod was created this pass and has no IP. That is the unobserved case, not a
 // fault, and it must not be reported as a group that could not forward.
 func TestGroupForwardProbeHoldsWhenAMemberHasNoAddressYet(t *testing.T) {
-	md, role := probeDeployment(workercore.ModelDeploymentEngineVLLM, "0.29.0", "")
+	md, role := probeDeployment(workercore.ModelDeploymentEngineVLLM, "")
 	unaddressed := probeMember(0, 1, "uid-b")
 	unaddressed.Status.PodIP = ""
 	fetch := &probeFetch{}

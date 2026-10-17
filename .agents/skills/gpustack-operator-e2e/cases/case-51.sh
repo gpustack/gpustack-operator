@@ -126,7 +126,7 @@ metadata:
 spec:
   engine:
     name: ${ENGINE:-vLLM}
-    version: "0.11.0"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:
@@ -139,9 +139,8 @@ YAML
 
 # Two plain roles, prefill and decode, on one instanceType. The shape every row below varies from.
 #
-# The explicit image is plumbing, not part of any rule: a CPU-only InstanceType has observed no
-# accelerator, so the operator can synthesize no engine image and the CONTROLLER would refuse the
-# rebuild row for a reason none of the admission rows are about. Nothing asserted here runs.
+# The explicit image is plumbing, not part of any rule: the placeholder roles name one so the
+# manifest is complete, and nothing asserted here runs a container.
 two_roles() {
   cat <<YAML
   - name: prefill

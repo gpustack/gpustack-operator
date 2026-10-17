@@ -85,6 +85,15 @@ type ModelDeploymentEPDRow struct {
 	// Connector is the encoder-cache connector this row renders.
 	Connector string
 	// EngineFloor is the lowest engine version whose connector this row names.
+	//
+	// NO LONGER READ BY ADMISSION. It was the floor the encoder version gate compared against, and
+	// that gate is gone with spec.engine.version: the operator no longer knows which version an
+	// image carries, because the user names the image rather than the version. The requirement it
+	// states did not become false, it moved -- the connector needs that version of the engine
+	// library inside the image, and the image is now the user's to choose and to check. It is kept
+	// because it is a fact about the connector that the field's own constants still cite upstream
+	// provenance for, and because a future field could read it; the requirement itself is recorded
+	// in docs/modules/model-deployment/engine-versions.md, which is where a user can act on it.
 	EngineFloor string
 	// SharedVolume records that the encoder leg reaches the prefiller through a mounted directory
 	// rather than over the network, which is what brings the claim rule to bear on this row.
@@ -578,11 +587,15 @@ func ModelDeploymentECSidecarConnector(connector string) string {
 // ModelDeploymentEPDMatrixSummary renders every admitted row, for a refusal to name beside the
 // combination it refused. A user told a combination is not admitted can otherwise only read the
 // table, which is not something they can see.
+//
+// IT NAMES NO ENGINE VERSION. A row's EngineFloor is what the connector needs of the image, and
+// that requirement is now carried by the documentation rather than by admission, so printing it
+// here would tell a refused user that a version they can satisfy would admit the row. Nothing they
+// write would.
 func ModelDeploymentEPDMatrixSummary() string {
 	rows := make([]string, 0, len(modelDeploymentEPDMatrix))
 	for _, row := range modelDeploymentEPDMatrix {
-		rows = append(rows, fmt.Sprintf(
-			"%s+%s+%s+%s>=%s", row.Router, row.Engine, row.Platform, row.Connector, row.EngineFloor))
+		rows = append(rows, fmt.Sprintf("%s+%s+%s+%s", row.Router, row.Engine, row.Platform, row.Connector))
 	}
 
 	return strings.Join(rows, ", ")

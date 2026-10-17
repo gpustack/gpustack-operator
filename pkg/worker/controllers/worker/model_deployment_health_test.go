@@ -102,7 +102,7 @@ func healthDeployment(replicaSize int32, extraRoles ...string) *workercore.Model
 		ObjectMeta: meta.ObjectMeta{Name: "qwen", Namespace: "team-a", UID: "md-uid"},
 		Spec: workercore.ModelDeploymentSpec{
 			Engine: workercore.ModelDeploymentEngine{
-				Name: workercore.ModelDeploymentEngineVLLM, Version: "0.25.1",
+				Name: workercore.ModelDeploymentEngineVLLM, Image: "vllm/vllm-openai:v0.25.1",
 			},
 			Roles: []workercore.ModelDeploymentRole{{
 				Name: "server", Replicas: 1, ReplicaSize: replicaSize, InstanceType: "h20-8x",

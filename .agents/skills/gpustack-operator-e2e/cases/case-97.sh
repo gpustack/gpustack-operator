@@ -309,7 +309,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${MD}, namespace: ${NS}}
 spec:
-  engine: {name: vLLM, version: "0.29.0"}
+  engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c97, artifactRef: {name: ${P}-private}}
   roles:
     - {name: server, instanceType: "${IT}", replicas: 1, image: "${IMAGE}", command: ["/pause"]}

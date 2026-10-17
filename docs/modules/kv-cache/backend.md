@@ -484,7 +484,7 @@ members:
   - nodeSelector:
       kvcache-vram: "true"
     medium: VRAM
-    image: gpustack/mirrored-mooncake:0.3.13.post1-cann9.1
+    image: gpustack/mirrored-mooncake:0.3.13.post1-cann9.1-910b
     capacityPerMember: 32Gi
     hostPaths:
       - path: /usr/local/Ascend/driver

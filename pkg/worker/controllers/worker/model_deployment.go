@@ -1469,36 +1469,6 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentDepartures(
 	}
 }
 
-// recordModelDeploymentRuntimeVersionSkew records that a role's pool disagrees on a runtime
-// version, and does so only for a role whose image the operator SYNTHESIZES.
-//
-// A role that states its own image is unaffected by the pool's version spread: the operator did not
-// choose that tag and the spread tells its owner nothing actionable. Emitting it anyway would train
-// readers to ignore the reason they need when the image IS synthesized.
-//
-// It fires on every pass while the disagreement lasts, which is deliberate. A driver rollout is a
-// standing condition rather than an edge, and the API server folds repeats of one
-// (object, reason, message) into a single event with a count -- so a standing warning stays visible
-// for as long as it is true instead of scrolling away, which is precisely what an operator
-// diagnosing an ImagePullBackOff hours later needs.
-func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, instType *worker.InstanceType,
-) {
-	if r.Recorder == nil {
-		return
-	}
-	if role.Image != "" {
-		return
-	}
-
-	message, ok := modelDeploymentRuntimeVersionSkew(role.Name, instType.Status.Detail)
-	if !ok {
-		return
-	}
-
-	r.Recorder.Event(md, core.EventTypeWarning, modelDeploymentEventRuntimeVersionSkew, message)
-}
-
 // convergeModelDeploymentEndpointEligibility is the single write path of the eligibility label:
 // every pass re-derives, from the Pods as they exist now, which members serve and patches the key
 // onto exactly those, removing it from any member that stopped qualifying.
@@ -2031,11 +2001,6 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 		if err != nil {
 			return nil, err
 		}
-
-		// Recorded here rather than in a pass of its own, because this is the one place that
-		// already holds both the role and its InstanceType: a second loop would read the same
-		// object again for a message.
-		r.recordModelDeploymentRuntimeVersionSkew(md, role, instType)
 
 		in := ModelDeploymentRenderInput{
 			Deployment:                 md,

@@ -108,7 +108,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: $1, namespace: ${NS}, labels: {e2e.gpustack.ai/case: "98"}}
 spec:
-  engine: {name: vLLM, version: "0.29.0"}
+  engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c98, artifactRef: {name: $2}}
   roles:
     - name: server
@@ -358,7 +358,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-refuse, namespace: ${NS}}
 spec:
-  engine: {name: vLLM, version: "0.29.0"}
+  engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c98, artifactRef: {name: ${P}-later}}
   roles: [{name: server, instanceType: "${IT}", image: "${IMAGE}", extraArgs: ["--served-model-name", "other"]}]
 YAML
@@ -367,7 +367,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-refuse, namespace: ${NS}}
 spec:
-  engine: {name: vLLM, version: "0.29.0"}
+  engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c98, artifactRef: {name: ${P}-later}}
   roles: [{name: server, instanceType: "${IT}", image: "${IMAGE}", extraArgs: ["--revision", "v2"]}]
 YAML
@@ -376,7 +376,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-refuse, namespace: ${NS}}
 spec:
-  engine: {name: vLLM, version: "0.29.0"}
+  engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c98, artifactRef: {name: ${P}-later}}
   roles:
     - name: server

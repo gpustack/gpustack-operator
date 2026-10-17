@@ -6,9 +6,8 @@
 // request identifier this controller chose. What makes the answer evidence rather than liveness is
 // the binding: the response has to come back stamped with THAT identifier, so a server that is
 // merely alive, or one whose answer belongs to some other request, cannot be mistaken for a
-// forward that happened. Both engines expose exactly that binding at the versions this program
-// documents, and neither exposes it on a health route — which is why the leg could not be verified
-// before.
+// forward that happened. Both engines expose exactly that binding on their serving routes, and
+// neither exposes it on a health route — which is why the leg could not be verified before.
 //
 // THE PROBE COSTS THE ENGINE ONE TOKEN, and it is charged only where it buys something: this runs
 // on the qualification evaluation of a HELD replica, which is the admission or the restore of a
@@ -30,7 +29,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -72,8 +70,8 @@ const modelDeploymentGroupForwardMaxResponseBytes = 1 << 20
 type modelDeploymentGroupForwardFetch func(ctx context.Context, url string, body []byte) ([]byte, error)
 
 // modelDeploymentGroupForwardEngine is everything this operator knows how to do with ONE engine:
-// the route the probe posts to, the versions whose binding was read at that version, how to render
-// the request, and how to read the binding back out of the response.
+// the route the probe posts to, how to render the request, and how to read the binding back out
+// of the response.
 //
 // A MISSING ENTRY MEANS NO VERIFIED OBSERVATION EXISTS FOR THAT ENGINE, and the leg says so by
 // name rather than guessing at one.
@@ -81,13 +79,8 @@ type modelDeploymentGroupForwardEngine struct {
 	// Path is the engine route the probe posts to.
 	Path string
 	// Binding names, in words, the property that makes a response evidence of THIS operator's
-	// request. It appears in the reason a version is refused, because "the binding was not read at
-	// your version" is only actionable if the reader knows which binding was meant.
+	// request.
 	Binding string
-	// VerifiedVersions are the engine versions whose probe semantics were read at that version.
-	// A version outside this set is Unsupported, and the reason names the version, because a
-	// binding that was not read is not a binding.
-	VerifiedVersions []string
 	// DisaggregatedReason says what a real request cannot prove on this engine's disaggregated
 	// shape. It is engine-specific because the two engines fail the proof differently, and a
 	// reader told only "P/D is unsupported" cannot tell which obstacle is in the way.
@@ -111,9 +104,6 @@ var modelDeploymentGroupForwardEngines = map[string]modelDeploymentGroupForwardE
 		// does not serve would turn a working group into a 404 and a permanent hold.
 		Path:    "/v1/completions",
 		Binding: `the response id is "cmpl-" + our request_id`,
-		VerifiedVersions: []string{
-			"0.25.1", "0.29.0",
-		},
 		DisaggregatedReason: "vLLM's disaggregated transfer is a client-coordinated pair of " +
 			"requests, so one request proves only the forward path of the instance that served it " +
 			"and says nothing about the transfer between the prefill and decode roles",
@@ -148,12 +138,6 @@ var modelDeploymentGroupForwardEngines = map[string]modelDeploymentGroupForwardE
 		// engine recorded for it.
 		Path:    "/generate",
 		Binding: `the response meta_info.id is our rid`,
-		VerifiedVersions: []string{
-			// 0.5.18 is the version the rid echo was read at. 0.5.21 is admitted on the
-			// surrounding handler semantics, which are byte-identical there, and that asymmetry
-			// is stated in the guard's reason rather than smoothed over.
-			"0.5.18", "0.5.21",
-		},
 		DisaggregatedReason: "on a disaggregated shape SGLang's own readiness request takes the " +
 			"fake-bootstrap shortcut, which skips the all-reduce that would gate the transfer on " +
 			"every tensor-parallel rank, and a real bootstrap is allocated outside the engine by a " +
@@ -202,9 +186,9 @@ const modelDeploymentQualifyPrompt = "ok"
 // observeModelDeploymentGroupForward classifies the group-forward evidence for one replica.
 //
 // The order of the questions below is the order of how much they cost to be wrong. A single-member
-// replica is answered before anything else because it is the shape that must not move. A shape or
-// version this operator has not verified is answered before any network call because an observation
-// that was never read is not an observation. Only what survives both is worth a request.
+// replica is answered before anything else because it is the shape that must not move. A shape this
+// operator has no observation for is answered before any network call, because an observation that
+// was never read is not an observation. Only what survives both is worth a request.
 func observeModelDeploymentGroupForward(
 	ctx context.Context, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 	view modelDeploymentReplicaView, fetch modelDeploymentGroupForwardFetch,
@@ -237,14 +221,6 @@ func observeModelDeploymentGroupForward(
 	if !known {
 		return modelDeploymentGroupForwardUnsupportedFor(
 			"engine " + engineName + " has no group-forward observation this operator has verified",
-		)
-	}
-
-	if !slices.Contains(engine.VerifiedVersions, md.Spec.Engine.Version) {
-		return modelDeploymentGroupForwardUnsupportedFor(
-			"the " + engineName + " " + md.Spec.Engine.Version + " probe binding has not been " +
-				"read at that version, and " + engine.Binding + " was read at " +
-				strings.Join(engine.VerifiedVersions, " and "),
 		)
 	}
 

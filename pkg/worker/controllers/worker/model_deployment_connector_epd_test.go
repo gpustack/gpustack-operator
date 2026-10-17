@@ -44,8 +44,8 @@ func TestModelDeploymentEPDEncoderLeg_AnAddressLegConfiguresNoCache(t *testing.T
 			md := epdDeployment(t, legKinds)
 			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: router}
 			md.Spec.Engine = workercore.ModelDeploymentEngine{
-				Name:    workercore.ModelDeploymentEngineSGLang,
-				Version: ModelDeploymentSGLangEncoderFirst,
+				Name:  workercore.ModelDeploymentEngineSGLang,
+				Image: "lmsysorg/sglang:v0.5.18",
 			}
 
 			for i := range md.Spec.Roles {
@@ -60,8 +60,8 @@ func TestModelDeploymentEPDEncoderLeg_AnAddressLegConfiguresNoCache(t *testing.T
 	vllm := epdDeployment(t, legKinds)
 	vllm.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	vllm.Spec.Engine = workercore.ModelDeploymentEngine{
-		Name:    workercore.ModelDeploymentEngineVLLM,
-		Version: ModelDeploymentECCPUConnectorFirstVLLM,
+		Name:  workercore.ModelDeploymentEngineVLLM,
+		Image: "vllm/vllm-openai:v0.30.0",
 	}
 
 	for i := range vllm.Spec.Roles {

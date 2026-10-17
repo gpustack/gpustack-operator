@@ -249,7 +249,7 @@ func sglangEPDRouterObjects(
 
 	md := epdDeployment(t, order)
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
-	md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineSGLang, Version: "0.5.18"}
+	md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineSGLang, Image: "lmsysorg/sglang:v0.5.18"}
 	for i := range md.Spec.Roles {
 		md.Spec.Roles[i].Ports = []workercore.ModelDeploymentPort{{Protocol: core.ProtocolTCP, Port: 8000}}
 		md.Spec.Roles[i].ExtraArgs = nil

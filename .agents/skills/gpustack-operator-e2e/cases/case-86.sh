@@ -199,7 +199,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "0.23.0"
+    image: ${IMAGE}
   model:
     name: ${MODEL}
   roles:

@@ -531,7 +531,7 @@ func modelDeploymentWriteFixture(t *testing.T) map[string]any {
 		"metadata": {"name": "demo", "namespace": "default"},
 		"spec": {
 			"model": {"name": "qwen-demo", "artifactRef": {"name": "weights"}},
-			"engine": {"name": "vLLM"},
+			"engine": {"name": "vLLM", "image": "vllm/vllm-openai:v0.25.1"},
 			"roles": [{"name": "s0", "instanceType": "gpu-small", "kind": "Server", "size": 1}]
 		},
 		"status": {

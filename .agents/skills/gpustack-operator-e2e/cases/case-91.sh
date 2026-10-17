@@ -63,10 +63,10 @@ ROUTER="$(jq -r '.spec.router.name' <<<"$md_json")"
   { echo "router $ROUTER renders no transfer leg for $ENGINE on $VENDOR (one of: $SP_ROUTERS)" >&2; exit 2; }
 STORE="$(jq -r '.spec.kvCache.poolRef.name // empty' <<<"$md_json")"
 if [ "$ENGINE" = vLLM ] && [ "$SP_PIN" != none ]; then
-  # The version is read off what each role runs: the engine version for a synthesized image, the
-  # image reference for a role that names its own.
-  if ! jq -e --arg v "$VERSION" '.spec.engine.version as $ev | all(.spec.roles[];
-    if .image then (.image | contains("-vllm" + $v)) else $ev == $v end)' <<<"$md_json" >/dev/null; then
+  # The version is read off the image each role runs: its own when it names one, else the engine-wide
+  # image it falls back to.
+  if ! jq -e --arg v "$VERSION" '.spec.engine.image as $ei | all(.spec.roles[];
+    ((.image // $ei) | contains("-vllm" + $v)))' <<<"$md_json" >/dev/null; then
     echo "case 91 needs every role on vLLM $VERSION; older CUDA images embed a Mooncake client without MC_FORCE_TCP" >&2
     exit 2
   fi

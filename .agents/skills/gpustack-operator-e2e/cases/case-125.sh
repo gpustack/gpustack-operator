@@ -37,10 +37,9 @@
 # Environment: Any cluster with a materialized scheduling chain (run case-1 first) and at least one
 #              Ready, schedulable worker node that is not a control-plane node. NO accelerator: the
 #              encoder shape reaches admission through the platform an injected CPU vendor label
-#              builds ("Ascend" — an admitted row whose connector is the mounted directory and
-#              whose floor, 0.30.0rc1, the pinned version 0.30.0 clears; override it with
-#              E2E_C125_VERSION when that floor moves). The gpustack-settings Secret
-#              must exist in the system namespace (E2E_SYSTEM_NS, default gpustack-system).
+#              builds ("Ascend" — an admitted row whose connector is the mounted directory). The
+#              gpustack-settings Secret must exist in the system namespace (E2E_SYSTEM_NS, default
+#              gpustack-system).
 #
 #              AUTO-SKIP: the subject needs the platform InstanceType, and the vendor label may not
 #              take (NFD owns cpu-model.vendor_id and may decline an injected override). It also
@@ -95,10 +94,6 @@ PD=case125-pd
 CLAIM=case125-claim
 PV=case125-pv
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
-# The engine version is a variable like every other case's, so a floor that moves is one override
-# away instead of a refusal the case reads as an operator defect. 0.30.0 clears the 0.30.0rc1 floor
-# the injected Ascend row records.
-VERSION="${E2E_C125_VERSION:-0.30.0}"
 MOUNT=/ec-cache
 SETTLE_ROUNDS="${E2E_C125_SETTLE:-60}"
 POD_ROUNDS="${E2E_C125_PODS:-40}"
@@ -344,7 +339,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "${VERSION}"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:
@@ -378,7 +373,7 @@ YAML
 
 if kubectl -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" -o name >/dev/null 2>&1; then
   record PASS "the encoder deployment is admitted and created" \
-    "one encode, one prefill and one decode role on ${IT}, llm-d-router, vLLM ${VERSION}"
+    "one encode, one prefill and one decode role on ${IT}, llm-d-router"
 else
   record FAIL "the encoder deployment is admitted and created" \
     "no modeldeployment/${MD} after the apply: $(printf '%s' "${APPLY_OUT:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
@@ -402,7 +397,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "${VERSION}"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:

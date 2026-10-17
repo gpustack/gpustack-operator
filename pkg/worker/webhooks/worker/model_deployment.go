@@ -948,7 +948,6 @@ func validateModelDeployment(
 	md *workercore.ModelDeployment, existingRoles sets.Set[string],
 ) field.ErrorList {
 	errs := validateModelDeploymentRoles(md)
-	errs = append(errs, validateModelDeploymentEngineVersion(md)...)
 	errs = append(errs, validateModelDeploymentKVCache(md)...)
 	errs = append(errs, validateModelDeploymentRolesCount(md)...)
 	errs = append(errs, validateModelDeploymentRoleNames(md)...)
@@ -1308,42 +1307,6 @@ func modelDeploymentRouterReservedPorts(
 	}
 
 	return reserved
-}
-
-// validateModelDeploymentEngineVersion refuses an engine without a version when any role would
-// have its image synthesized.
-//
-// The version is optional ONLY because a role that names its own image never reads it. A role
-// naming none has its image assembled from the engine, the version and the role's own
-// InstanceType, and an empty version assembles a malformed tag naming something never typed.
-// Refusing that here, where the writer can act, beats what the render would do with it: a
-// reconcile error loop on a Pod that is never created, reported as an Event far from the field
-// that caused it.
-//
-// The rule is answerable from the object alone and runs on create and on update alike: dropping
-// the version while a role still needs it is the same mistake as omitting it on create.
-func validateModelDeploymentEngineVersion(md *workercore.ModelDeployment) field.ErrorList {
-	if md.Spec.Engine.Version != "" {
-		return nil
-	}
-
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
-		if role.Image != "" {
-			continue
-		}
-
-		return field.ErrorList{field.Required(
-			field.NewPath("spec", "engine", "version"),
-			fmt.Sprintf(
-				"role %q names no image of its own, so its image is synthesized from the engine "+
-					"and its version, and an empty version assembles a tag naming something never "+
-					"typed. Give the engine a version, or name an image on the role",
-				role.Name),
-		)}
-	}
-
-	return nil
 }
 
 // validateModelDeploymentKVCache refuses a Binding reference with an empty name.

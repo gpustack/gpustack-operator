@@ -4,108 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
-	"golang.org/x/mod/semver"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
-	"gpustack.ai/gpustack/pkg/nodefeature"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
-
-// modelDeploymentCandidate matches the release-candidate tail vllm-ascend publishes, the `rcN` of
-// v0.30.0rc1. The dot ahead of the tail in v0.29.0.rc1 belongs to the release and is trimmed off
-// before this runs, so a tail this matches never carries one.
-var modelDeploymentCandidate = regexp.MustCompile(`^rc(0|[1-9][0-9]*)$`)
-
-// modelDeploymentPost matches the `postN` tail of v0.23.0.post1, on the same terms.
-//
-// A NUMBER WITH A LEADING ZERO IS NOT MATCHED, which is what makes a recognized tail a tail semver
-// can read: it rejects a numeric identifier that carries one. A version written that way is left
-// alone and stays unreadable, which refuses it.
-var modelDeploymentPost = regexp.MustCompile(`^post(0|[1-9][0-9]*)$`)
-
-// modelDeploymentSemver rewrites a version into the spelling semver comparison reads, and leaves a
-// version it cannot read alone so that one still sorts below every valid version.
-//
-// VLLM-ASCEND DOES NOT SPELL A CANDIDATE THE WAY SEMVER REQUIRES. Its tags are v0.30.0rc1 on the
-// current line and v0.29.0.rc1 on the one before it, and semver calls both invalid. An invalid
-// version sorts below every valid one, so a floor written in either spelling would refuse the very
-// tag it names. A tag the project publishes is a version a user may legitimately write here, so the
-// tails are read rather than refused. The leading v is added on the way out for the same reason:
-// it is what these version strings do not carry and what the comparison requires.
-//
-// THE NUMBER AFTER rc IS SEPARATED BY A DOT because semver orders an alphanumeric pre-release
-// identifier lexically, which would place rc10 below rc9.
-//
-// A POST-RELEASE IS NEWER THAN THE RELEASE IT FOLLOWS, and semver has no slot above a release: the
-// next patch release is the only one. Mapping the tail there keeps both orders the project
-// publishes, a post above the release it follows and below the patch that follows that. The post
-// number rides along as a second identifier, so two post-releases of one release keep their own
-// order too.
-//
-// A TAIL THIS DOES NOT RECOGNIZE IS LEFT ALONE, so it stays unreadable and every floor refuses it.
-// That covers a number with a leading zero, which semver rejects, and a release whose patch is too
-// large to count, which no next patch can be built from.
-func modelDeploymentSemver(version string) string {
-	core := strings.TrimPrefix(version, "v")
-
-	// The release part is the numeric core, and everything after it is a tail this function either
-	// reads or leaves for the comparison to refuse. The dot separating the two belongs to neither,
-	// so the release ends on its last segment rather than on a separator.
-	tail := strings.IndexFunc(core, func(r rune) bool { return (r < '0' || r > '9') && r != '.' })
-	if tail < 0 {
-		return "v" + core
-	}
-	release, suffix := strings.TrimSuffix(core[:tail], "."), core[tail:]
-
-	if candidate := modelDeploymentCandidate.FindStringSubmatch(suffix); candidate != nil {
-		return "v" + release + "-rc." + candidate[1]
-	}
-
-	// The pre-release `-0.N` below the next patch is what puts a post above the release it follows
-	// and below the patch that follows that, and orders two posts of one release against each other.
-	if post := modelDeploymentPost.FindStringSubmatch(suffix); post != nil {
-		if next, ok := modelDeploymentNextPatch(release); ok {
-			return "v" + next + "-0." + post[1]
-		}
-	}
-
-	return "v" + core
-}
-
-// modelDeploymentNextPatch returns release with its last segment raised by one, and whether that
-// segment was a number this could read.
-func modelDeploymentNextPatch(release string) (string, bool) {
-	dot := strings.LastIndexByte(release, '.')
-	if dot < 0 {
-		return "", false
-	}
-
-	patch, err := strconv.Atoi(release[dot+1:])
-	if err != nil {
-		return "", false
-	}
-
-	return release[:dot+1] + strconv.Itoa(patch+1), true
-}
-
-// modelDeploymentMeetsFloor reports whether version is at or above floor.
-//
-// The two are compared as semver after modelDeploymentSemver has read the spellings a project
-// publishes, so a candidate sorts below the release it leads to and a post-release above the one it
-// follows. An unreadable version still sorts below every valid one. Both directions refuse rather
-// than admit: a connector that exists only in a release is absent from a candidate of it, and it is
-// absent from a string nothing could read.
-func modelDeploymentMeetsFloor(version, floor string) bool {
-	return semver.Compare(modelDeploymentSemver(version), modelDeploymentSemver(floor)) >= 0
-}
 
 // modelDeploymentDeclaresEncode reports whether the deployment declares an Encode role, which is
 // what makes it an encoder/prefill/decode deployment and brings the rules below to bear. A
@@ -163,8 +71,8 @@ func modelDeploymentRouterName(md *workercore.ModelDeployment) string {
 // while the rule did not exist, and refusing its later edits would strand it. No such object exists
 // here: an Encode role was refused at admission until this rule admitted one, so the first object
 // to reach these rules is the first that can satisfy them. Re-checking on every update is also what
-// stops an edit moving an admitted deployment off the matrix, since the platform, the engine version
-// and the router are all re-read from the object as submitted.
+// stops an edit moving an admitted deployment off the matrix, since the platform, the engine and
+// the router are all re-read from the object as submitted.
 func (r *ModelDeploymentWebhook) validateModelDeploymentEPD(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) (field.ErrorList, error) {
@@ -202,7 +110,6 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentEPD(
 				"for; this is the operator's own tables disagreeing, not a field to correct")), nil
 	}
 
-	errs = append(errs, validateModelDeploymentEPDEngineVersion(md, row)...)
 	if row.SharedVolume {
 		errs = append(errs, validateModelDeploymentEPDSharedVolume(md, row)...)
 	}
@@ -505,49 +412,6 @@ func validateModelDeploymentEPDSideChannelPort(
 	}
 
 	return errs
-}
-
-// modelDeploymentEngineProject names the project a row's floor is a release of, which both refusals
-// below state beside the number. On SGLang the engine is SGLang itself; on Ascend with vLLM the
-// engine is the vllm-ascend plugin and the version is one of its tags; on every other admitted
-// platform it is an upstream vLLM release. Naming the wrong project would send a user after tags that
-// do not carry the connector.
-//
-// THE ENGINE IS ANSWERED FIRST, because an Ascend SGLang row exists and its floor is an SGLang
-// release: reading the platform first would send that user after vllm-ascend tags.
-func modelDeploymentEngineProject(row workerctrl.ModelDeploymentEPDRow) string {
-	if row.Engine == workercore.ModelDeploymentEngineSGLang {
-		return workercore.ModelDeploymentEngineSGLang
-	}
-
-	if row.Platform == nodefeature.ManufacturerAscend {
-		return string(inject.EngineVLLMAscend)
-	}
-
-	return "vLLM"
-}
-
-// validateModelDeploymentEPDEngineVersion refuses an engine version this row cannot run.
-func validateModelDeploymentEPDEngineVersion(
-	md *workercore.ModelDeployment, row workerctrl.ModelDeploymentEPDRow,
-) field.ErrorList {
-	versionPath := field.NewPath("spec", "engine", "version")
-	project := modelDeploymentEngineProject(row)
-
-	if md.Spec.Engine.Version == "" {
-		return field.ErrorList{field.Required(versionPath, fmt.Sprintf(
-			"an encoder role needs the engine version to be set: %s first appears in %s %s, and a "+
-				"version this object does not name cannot be compared against that floor",
-			row.Connector, project, row.EngineFloor))}
-	}
-
-	if modelDeploymentMeetsFloor(md.Spec.Engine.Version, row.EngineFloor) {
-		return nil
-	}
-
-	return field.ErrorList{field.Invalid(versionPath, md.Spec.Engine.Version, fmt.Sprintf(
-		"%s carries %s from %s %s, so this deployment needs that version or later; %s is below it",
-		row.Connector, row.Platform, project, row.EngineFloor, md.Spec.Engine.Version))}
 }
 
 // validateModelDeploymentEPDSharedVolume refuses an encoder leg that the two roles cannot both read.

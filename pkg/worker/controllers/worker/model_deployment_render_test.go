@@ -35,7 +35,8 @@ func newRenderDeployment(mutate ...func(*workercore.ModelDeployment)) *workercor
 		Spec: workercore.ModelDeploymentSpec{
 			Model: workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
 			Engine: workercore.ModelDeploymentEngine{
-				Name: workercore.ModelDeploymentEngineVLLM, Version: "0.25.1",
+				Name:  workercore.ModelDeploymentEngineVLLM,
+				Image: "vllm/vllm-openai:v0.25.1",
 			},
 			KVCache: &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 			Roles: []workercore.ModelDeploymentRole{{
@@ -69,8 +70,8 @@ func newRenderInstanceType(mutate ...func(*worker.InstanceType)) *worker.Instanc
 			// the two apart -- the assertion in _Identity would pass either way. This value is one
 			// no derivation produces.
 			Entrance: "queue-for-h20-8x",
-			// The observed detail carries what image synthesis needs, so a role naming no image
-			// still renders. A case that wants the unsynthesizable path clears one of these.
+			// The observed detail carries the hardware the sizing reads. A role naming no image
+			// renders the engine's image, whatever this detail reports.
 			Detail: workercore.InstanceTypeDetail{
 				Manufacturer: nodefeature.ManufacturerNVIDIA,
 				InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
@@ -1432,94 +1433,58 @@ func TestRenderModelDeploymentPod_MetricsScrape(t *testing.T) {
 	}
 }
 
-// TestRenderModelDeploymentPod_SynthesizesTheImage covers the role that names none.
+// TestRenderModelDeploymentPod_ResolvesTheImageAtTwoLevels pins the rule that replaced synthesis: a
+// role's own image wins, a role naming none takes the engine's, and a pair naming none at all is
+// refused.
 //
-// The operator used to refuse this outright, on the grounds that it builds the argv but never the
-// image. It now assembles one from the engine and the observed hardware -- but only when the
-// hardware HAS been observed, which is why the second case matters as much as the first: an
-// InstanceType whose detail has not converged must not produce a tag with a hole in it.
-func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
-	t.Run("no image at all still renders", func(t *testing.T) {
-		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Image = ""
-		})
+// THE LAST CASE IS UNREACHABLE THROUGH ADMISSION, because the schema requires spec.engine.image. It
+// stays because the renderer must not depend on that: if the obligation ever moves, the failure has
+// to be a loud error rather than a Pod with an empty image that the kubelet rejects minutes later.
+func TestRenderModelDeploymentPod_ResolvesTheImageAtTwoLevels(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		engine  string
+		role    string
+		want    string
+		wantErr string
+	}{
+		{
+			name:   "the role's own image wins over the engine's",
+			engine: "vllm/vllm-openai:v0.25.1", role: "registry.example/private:v0.25.1",
+			want: "registry.example/private:v0.25.1",
+		},
+		{
+			name:   "a role naming none runs the engine's image",
+			engine: "vllm/vllm-openai:v0.25.1",
+			want:   "vllm/vllm-openai:v0.25.1",
+		},
+		{
+			name:    "neither naming one is refused rather than rendered empty",
+			wantErr: `role "server" names no image`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Image = tc.engine
+				md.Spec.Roles[0].Image = tc.role
+			})
 
-		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: newRenderInstanceType(),
-		})
-		require.NoError(t, err, "an empty image is not an error once one can be synthesized")
-		assert.Equal(t, "gpustack/runner:cuda12.9-vllm0.25.1", pod.Spec.Containers[0].Image)
-	})
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+				Deployment:   md,
+				Role:         &md.Spec.Roles[0],
+				InstanceType: newRenderInstanceType(),
+			})
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				assert.Nil(t, pod, "no Pod may be rendered with an empty image")
+				return
+			}
 
-	t.Run("a stated image wins over synthesis", func(t *testing.T) {
-		md := newRenderDeployment()
-		pod := renderOne(t, md, newRenderInstanceType())
-		assert.NotEqual(t, "gpustack/runner:cuda12.9-vllm0.25.1", pod.Spec.Containers[0].Image,
-			"synthesis must not overwrite a value the user stated")
-	})
-
-	t.Run("an unobserved runtime version refuses rather than rendering a hole", func(t *testing.T) {
-		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Image = ""
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, pod.Spec.Containers[0].Image)
 		})
-		it := newRenderInstanceType(func(it *worker.InstanceType) {
-			it.Status.Detail.RuntimeVersion = ""
-			it.Status.Detail.RuntimeVersions = nil
-		})
-
-		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: it,
-		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "names no image and none could be synthesized")
-		assert.Contains(t, err.Error(), "has not observed a runtime version yet",
-			"the reason has to distinguish a wait from a refusal, because only one of them resolves")
-	})
-
-	t.Run("a manufacturer with no runner backend refuses", func(t *testing.T) {
-		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Image = ""
-		})
-		it := newRenderInstanceType(func(it *worker.InstanceType) {
-			it.Status.Detail.Manufacturer = nodefeature.ManufacturerCambricon
-		})
-
-		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: it,
-		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "has no runner backend",
-			"this one never resolves, so the message must name the manufacturer")
-	})
-
-	// THE FALLBACK IS WHAT MAKES THIS AN ERROR PATH RATHER THAN A DEFAULT. A Pod carrying no
-	// queue-name label is not queued by Kueue at all -- the kubelet runs it directly, charging no
-	// quota and passing none of the gates the chain applies. So an InstanceType that has not
-	// published its entrance yet has to stop the render, exactly as an uncomputed accelerator detail
-	// does, rather than yield a Pod that would run.
-	t.Run("an instance type with no published entrance refuses", func(t *testing.T) {
-		md := newRenderDeployment()
-		it := newRenderInstanceType(func(it *worker.InstanceType) {
-			it.Status.Entrance = ""
-		})
-
-		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: it,
-		})
-		require.Error(t, err)
-		assert.Nil(t, pod, "no Pod may be returned, or a caller could create one with no queue")
-		assert.Contains(t, err.Error(), "publishes no queue entrance yet")
-		assert.Contains(t, err.Error(), "h20-8x",
-			"the message must name the instance type, since the field is two objects away")
-	})
+	}
 }
 
 // TestRenderModelDeploymentPod_ClientConfigMount pins where the rendered client configuration is
@@ -2398,7 +2363,7 @@ func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t 
 		"a take-over role carrying a connector it must be given no part of":                  "93e925e2bfaa5ab9e152a685a336d1b8031d8904bfb54b240a483f0a517e9a54",
 		"a direct decoder with a native routing sidecar":                                     "4f1e9ef33849913b2c71688d7e8b77ffd5338b67d3d5ceca6bd098ba343e546d",
 		"a direct decoder with a classic routing sidecar":                                    "cc9d8f1d61e8df9629459f45c5f0508ad12e6515209ae3c5311f10f59c2844ba",
-		"a role naming no image, synthesized from the observed hardware":                     "30d7c6cd55c58ac4a9a502396be0b291a5f9a8872967be0b4dfd430448abcac1",
+		"a role naming no image, which runs the engine's image":                              "f32a43254d561da431bd5f1107f97ffc5e3c9382b88db0478edc811a22178392",
 		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "3b9148d73e337285192aea35aa995813747fc2ebfefda19d107548b788c11791",
 		"the prefill role of a two-role deployment":                                          "7eef707d65e3c6307219d33612e56de8173d9a7b4ece67ff4239f21cc788ba82",
 		"the decode role of a two-role deployment":                                           "cc1217e6e9b9de5e61b0c01aca76666126f24176804151f772b640e13d5c5a77",
@@ -2497,7 +2462,7 @@ func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t 
 			},
 		},
 		{
-			name: "a role naming no image, synthesized from the observed hardware",
+			name: "a role naming no image, which runs the engine's image",
 			input: func(t *testing.T) ModelDeploymentRenderInput {
 				return newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
 					md.Spec.Roles[0].Image = ""
@@ -2947,7 +2912,7 @@ func TestRenderModelDeploymentPod_DecodeWithoutTheProxyFlagRunsAlone(t *testing.
 func newTCPTWReusePair(mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Engine = workercore.ModelDeploymentEngine{
-			Name: workercore.ModelDeploymentEngineSGLang, Version: "0.5.18",
+			Name: workercore.ModelDeploymentEngineSGLang, Image: "lmsysorg/sglang:v0.5.18",
 		}
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 		md.Spec.Roles = []workercore.ModelDeploymentRole{
@@ -3004,7 +2969,7 @@ func TestRenderModelDeploymentPod_TCPTWReuse(t *testing.T) {
 			name: "a vLLM prefill half, whose transfer connections persist",
 			md: newTCPTWReusePair(func(md *workercore.ModelDeployment) {
 				md.Spec.Engine = workercore.ModelDeploymentEngine{
-					Name: workercore.ModelDeploymentEngineVLLM, Version: "0.29.0",
+					Name: workercore.ModelDeploymentEngineVLLM, Image: "vllm/vllm-openai:v0.29.0",
 				}
 			}),
 			role: "prefill", kvStore: true, kvDirect: true,

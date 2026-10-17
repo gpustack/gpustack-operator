@@ -52,9 +52,12 @@ func elasticMD(roles ...workercore.ModelDeploymentRole) *workercore.ModelDeploym
 	return &workercore.ModelDeployment{
 		ObjectMeta: meta.ObjectMeta{Name: "elastic-md", Namespace: "app"},
 		Spec: workercore.ModelDeploymentSpec{
-			Model:  workercore.ModelDeploymentModel{Name: "Qwen/Qwen3-30B-A3B"},
-			Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Version: "0.29.0"},
-			Roles:  roles,
+			Model: workercore.ModelDeploymentModel{Name: "Qwen/Qwen3-30B-A3B"},
+			Engine: workercore.ModelDeploymentEngine{
+				Name:  workercore.ModelDeploymentEngineVLLM,
+				Image: "vllm/vllm-openai:v0.29.0",
+			},
+			Roles: roles,
 		},
 	}
 }

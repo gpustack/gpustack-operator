@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/mod/semver"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,10 +78,8 @@ func epdDeployment(mutate func(*workercore.ModelDeployment)) *workercore.ModelDe
 		Spec: workercore.ModelDeploymentSpec{
 			Model: workercore.ModelDeploymentModel{Name: "Qwen/Qwen3-VL-8B-Instruct"},
 			Engine: workercore.ModelDeploymentEngine{
-				Name: workercore.ModelDeploymentEngineVLLM,
-				// The floor itself, so the fixture stays valid as the row's floor moves and every
-				// case below is refused by the one rule it names rather than by the version.
-				Version: workerctrl.ModelDeploymentECExampleConnectorFirstAscend,
+				Name:  workercore.ModelDeploymentEngineVLLM,
+				Image: "vllm/vllm-openai:v0.30.0",
 			},
 			Router: &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD},
 			Roles: []workercore.ModelDeploymentRole{
@@ -130,12 +127,10 @@ func epdDropRole(md *workercore.ModelDeployment, name string) {
 // epdNetworkRowDeployment builds the same three-role shape on the admitted network row: vLLM on
 // ROCm, where the encoder leg is pulled over the network rather than carried through a mounted
 // directory. It is a separate builder rather than a flag on epdDeployment because the two rows
-// differ in what the roles mount, in what their engine version must be, and in what a case is
-// allowed to set -- a helper that took either would have to clear three fields to answer a
-// question about one.
+// differ in what the roles mount and in what a case is allowed to set -- a helper that took either
+// would have to clear two fields to answer a question about one.
 func epdNetworkRowDeployment(mutate func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
 	md := epdDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Engine.Version = "0.30.0"
 		for i := range md.Spec.Roles {
 			md.Spec.Roles[i].InstanceType = "amd-8x"
 			md.Spec.Roles[i].AdditionalVolumes = nil
@@ -151,13 +146,13 @@ func epdNetworkRowDeployment(mutate func(*workercore.ModelDeployment)) *workerco
 // epdSGLangLeg moves a deployment onto an admitted SGLang row, where the encoder's output reaches
 // the prefiller by address rather than through a mounted directory or a named encoder-cache
 // connector. It is a builder rather than a flag on epdDeployment for the reason
-// epdNetworkRowDeployment is: the rows differ in what the roles mount, in what the engine version
-// must be, and in which routers name them.
+// epdNetworkRowDeployment is: the rows differ in what the roles mount and in which routers name
+// them.
 func epdSGLangLeg(router, instanceType string) func(*workercore.ModelDeployment) {
 	return func(md *workercore.ModelDeployment) {
 		md.Spec.Router.Name = router
 		md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
-		md.Spec.Engine.Version = workerctrl.ModelDeploymentSGLangEncoderFirst
+		md.Spec.Engine.Image = "lmsysorg/sglang:v0.5.18"
 		for i := range md.Spec.Roles {
 			md.Spec.Roles[i].InstanceType = instanceType
 			// The address leg mounts no claim, because no directory carries it.
@@ -171,7 +166,7 @@ func epdSGLangLeg(router, instanceType string) func(*workercore.ModelDeployment)
 //
 // EACH CASE RUNS TWICE: once as a create and once as an update whose previous state is a valid
 // admitted deployment. The second run is what the rules are for on an update -- the platform, the
-// engine version and the router are all read from the object as submitted, so an edit cannot carry
+// engine and the router are all read from the object as submitted, so an edit cannot carry
 // a deployment off the matrix without being refused here first.
 func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 	testCases := []struct {
@@ -194,7 +189,6 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 		{
 			name: "the admitted ROCm row is admitted",
 			mutate: func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Version = "0.30.0"
 				for i := range md.Spec.Roles {
 					md.Spec.Roles[i].InstanceType = "amd-8x"
 					// The ROCm row carries the encoder's output over the network, so no role mounts
@@ -206,7 +200,6 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 		{
 			name: "the admitted NVIDIA row is admitted",
 			mutate: func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Version = "0.30.0"
 				for i := range md.Spec.Roles {
 					md.Spec.Roles[i].InstanceType = "nvidia-8x"
 					// The NVIDIA row carries the encoder's output over the network, so no role
@@ -219,7 +212,6 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			name: "the admitted vllm-router row is admitted on NVIDIA",
 			mutate: func(md *workercore.ModelDeployment) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
-				md.Spec.Engine.Version = "0.30.0"
 				for i := range md.Spec.Roles {
 					md.Spec.Roles[i].InstanceType = "nvidia-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
@@ -231,7 +223,6 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			name: "the admitted vllm-router row is admitted on ROCm",
 			mutate: func(md *workercore.ModelDeployment) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
-				md.Spec.Engine.Version = "0.30.0"
 				for i := range md.Spec.Roles {
 					md.Spec.Roles[i].InstanceType = "amd-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
@@ -279,7 +270,6 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 		{
 			name: "a platform with no admitted row is refused and names the admitted rows",
 			mutate: func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Version = "0.30.0"
 				for i := range md.Spec.Roles {
 					md.Spec.Roles[i].InstanceType = "hygon-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
@@ -305,7 +295,6 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			name: "a router and engine the matrix does not pair is refused",
 			mutate: func(md *workercore.ModelDeployment) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterSGLang
-				md.Spec.Engine.Version = "0.30.0"
 				for i := range md.Spec.Roles {
 					md.Spec.Roles[i].InstanceType = "amd-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
@@ -391,59 +380,6 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 				}
 			},
 			wantRefuse: `instance type "unknown-8x" reports no accelerator platform yet`,
-		},
-		{
-			name:       "an engine without a version is refused",
-			mutate:     func(md *workercore.ModelDeployment) { md.Spec.Engine.Version = "" },
-			wantRefuse: "an encoder role needs the engine version to be set",
-		},
-		{
-			name:       "an engine version below the row floor is refused",
-			mutate:     func(md *workercore.ModelDeployment) { md.Spec.Engine.Version = "0.23.0" },
-			wantRefuse: "ECExampleConnector carries ascend from vllm-ascend 0.30.0rc1",
-		},
-		{
-			name: "an engine version below the network connector floor is refused",
-			mutate: func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Version = "0.29.0"
-				for i := range md.Spec.Roles {
-					md.Spec.Roles[i].InstanceType = "amd-8x"
-					md.Spec.Roles[i].AdditionalVolumes = nil
-				}
-			},
-			wantRefuse: "ECCPUConnector carries amd from vLLM 0.30.0",
-		},
-		{
-			name: "a version spelling a pre-release the way the project publishes it is read",
-			mutate: func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Version = "0.28.0.rc1"
-			},
-			wantRefuse: "0.28.0.rc1 is below it",
-		},
-		{
-			// The same tag refused for the network row, which is the direction that has to survive
-			// the rewrite: the connector exists only in the release, not in its candidates.
-			name: "a pre-release of the network connector's floor is refused",
-			mutate: func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Version = "0.30.0rc1"
-				for i := range md.Spec.Roles {
-					md.Spec.Roles[i].InstanceType = "amd-8x"
-					md.Spec.Roles[i].AdditionalVolumes = nil
-				}
-			},
-			wantRefuse: "ECCPUConnector carries amd from vLLM 0.30.0",
-		},
-		{
-			// The SGLang floor is stated in SGLang's own releases even on Ascend, where a vLLM
-			// deployment is held to vllm-ascend tags instead. Reading the platform before the engine
-			// would send this user after a vllm-ascend release carrying no encoder-urls argument.
-			name: "an SGLang version below its row floor is refused and names SGLang",
-			mutate: func(md *workercore.ModelDeployment) {
-				epdSGLangLeg(workercore.ModelDeploymentRouterLLMD, "ascend-8x")(md)
-				md.Spec.Engine.Version = "0.5.9"
-			},
-			wantRefuse: "encoder-urls carries ascend from SGLang 0.5.10",
-			selfStored: true,
 		},
 		{
 			name: "a claim entry naming no claim is refused",
@@ -539,7 +475,6 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			name: "a deployment without an Encode role keeps its command",
 			mutate: func(md *workercore.ModelDeployment) {
 				epdDropRole(md, "encode")
-				md.Spec.Engine.Version = "0.25.1"
 				md.Spec.KVCache = &workercore.ModelDeploymentKVCache{
 					PoolRef: core.LocalObjectReference{Name: "shared-kv"},
 				}
@@ -551,7 +486,6 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			name: "a deployment without an Encode role may sit on NVIDIA",
 			mutate: func(md *workercore.ModelDeployment) {
 				epdDropRole(md, "encode")
-				md.Spec.Engine.Version = "0.25.1"
 				md.Spec.KVCache = &workercore.ModelDeploymentKVCache{
 					PoolRef: core.LocalObjectReference{Name: "shared-kv"},
 				}
@@ -566,7 +500,6 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			name: "a deployment without an Encode role may carry a claim of its own",
 			mutate: func(md *workercore.ModelDeployment) {
 				epdDropRole(md, "encode")
-				md.Spec.Engine.Version = "0.25.1"
 				md.Spec.KVCache = &workercore.ModelDeploymentKVCache{
 					PoolRef: core.LocalObjectReference{Name: "shared-kv"},
 				}
@@ -865,7 +798,6 @@ func TestModelDeploymentWebhook_EncoderKeysAreOwnedOnEveryRoleThatRendersThem(t 
 		t.Run(tc.name, func(t *testing.T) {
 			w := newModelDeploymentWebhookWith(epdPlatformTypes())
 			md := epdDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Version = "0.30.0"
 				// THE CLAIM STAYS. This fixture is built for the shared-volume row, and dropping
 				// the claim would fail the shared-volume rule as well -- so the object would be
 				// invalid for a second reason and `require.Error` would be satisfied by the wrong
@@ -888,152 +820,5 @@ func TestModelDeploymentWebhook_EncoderKeysAreOwnedOnEveryRoleThatRendersThem(t 
 			assert.NotContains(t, err.Error(), "shared claim",
 				"the fixture must be valid for every rule except the one under test")
 		})
-	}
-}
-
-// TestModelDeploymentSemver covers the rewrite the floor comparison reads, including the two
-// spellings a project publishes and the versions it leaves unreadable.
-//
-// A rewritten spelling must end up VALID, because an invalid one sorts below every valid version
-// and would be refused by every floor. A version nothing could be read out of must stay invalid,
-// which is what keeps it on the refusing side of every comparison.
-func TestModelDeploymentSemver(t *testing.T) {
-	testCases := []struct {
-		name      string
-		version   string
-		want      string
-		wantValid bool
-	}{
-		{name: "a release is only given its leading v", version: "0.30.0", want: "v0.30.0", wantValid: true},
-		{name: "a release carrying one is left alone", version: "v0.30.0", want: "v0.30.0", wantValid: true},
-		// THE TWO SPELLINGS VLLM-ASCEND PUBLISHES, neither of which semver reads as written.
-		{name: "a candidate spelled rcN", version: "0.30.0rc1", want: "v0.30.0-rc.1", wantValid: true},
-		{name: "a candidate spelled rcN and carrying a v", version: "v0.30.0rc1", want: "v0.30.0-rc.1", wantValid: true},
-		{name: "a candidate spelled .rcN", version: "0.28.0.rc1", want: "v0.28.0-rc.1", wantValid: true},
-		// The number is separated so that a two-digit candidate orders above a one-digit one:
-		// semver compares an alphanumeric pre-release identifier lexically, and rc10 sorts below rc9.
-		{name: "a two-digit candidate keeps its order", version: "0.30.0rc10", want: "v0.30.0-rc.10", wantValid: true},
-		// A post-release is newer than the release it follows, and the only slot above a release
-		// that semver has is the next patch release. Its number rides along as a second identifier
-		// so two posts of one release keep the order the project publishes them in.
-		{name: "a post-release sorts above its release", version: "0.23.0.post1", want: "v0.23.1-0.1", wantValid: true},
-		{name: "a post-release carrying a v", version: "v0.23.0.post1", want: "v0.23.1-0.1", wantValid: true},
-		{name: "a later post-release keeps its order", version: "0.30.0.post2", want: "v0.30.1-0.2", wantValid: true},
-		// The unreadable cases are what keep a version on the refusing side of every comparison
-		// rather than making it comparable.
-		{name: "an unreadable version is left alone", version: "latest", want: "vlatest"},
-		{name: "a candidate naming no release stays unreadable", version: "rc1", want: "v-rc.1"},
-		// A leading zero is a number semver will not read as a numeric identifier, so a tail
-		// carrying one is not recognized and the whole version stays unreadable.
-		{name: "a candidate number with a leading zero stays unreadable", version: "0.30.0rc01", want: "v0.30.0rc01"},
-		{name: "a post number with a leading zero stays unreadable", version: "0.30.0.post01", want: "v0.30.0.post01"},
-		// A patch too large to count leaves no next patch to build the post on, so the version is
-		// left alone and reads as the tail it still carries.
-		{
-			name:    "a release too large to count stays unreadable",
-			version: "0.30.123456789012345678901234567890.post1",
-			want:    "v0.30.123456789012345678901234567890.post1",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := modelDeploymentSemver(tc.version)
-			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.wantValid, semver.IsValid(got),
-				"a rewritten spelling must be readable to the comparison")
-		})
-	}
-}
-
-// TestModelDeploymentMeetsFloor covers the version comparison the matrix floors rest on, including
-// the two directions that refuse rather than admit.
-//
-// THE TWO FLOORS ARE THE TWO PROJECTS THAT PUBLISH A DIFFERENT SPELLING, so each row below reads
-// the versions its own project writes: the Ascend row the candidate and post tails vllm-ascend
-// tags carry, the network row the plain releases vLLM tags carry.
-func TestModelDeploymentMeetsFloor(t *testing.T) {
-	testCases := []struct {
-		name           string
-		version, floor string
-		want           bool
-	}{
-		{name: "the floor itself meets it", version: "0.30.0", floor: "0.30.0", want: true},
-		{name: "a later minor meets it", version: "0.31.2", floor: "0.30.0", want: true},
-		{name: "an earlier minor does not", version: "0.29.9", floor: "0.30.0"},
-		{name: "a later major meets it", version: "1.0.0", floor: "0.30.0", want: true},
-		{name: "a v-prefixed version is read the same", version: "v0.30.0", floor: "v0.30.0", want: true},
-		{name: "a pre-release sorts below its release", version: "0.30.0rc1", floor: "0.30.0"},
-		{name: "an unreadable version sorts below a valid one", version: "latest", floor: "0.30.0"},
-		{name: "an empty version sorts below a valid one", version: "", floor: "0.30.0"},
-
-		// THE ASCEND FLOOR IS ITSELF A CANDIDATE, so these cases read it as a version rather than
-		// as a literal: a floor this comparison could not read would refuse its own tag.
-		{name: "a release below the candidate floor does not meet it", version: "0.23.0", floor: "0.30.0rc1"},
-		{name: "a candidate below the floor does not meet it", version: "0.28.0.rc1", floor: "0.30.0rc1"},
-		{name: "the candidate floor meets itself", version: "0.30.0rc1", floor: "0.30.0rc1", want: true},
-		{name: "a later candidate meets the floor", version: "0.30.0rc2", floor: "0.30.0rc1", want: true},
-		{name: "the release the floor leads to meets it", version: "0.30.0", floor: "0.30.0rc1", want: true},
-		{name: "a post-release of that release meets it", version: "0.30.0.post1", floor: "0.30.0rc1", want: true},
-		{name: "a post-release sorts above the release it follows", version: "0.30.0.post1", floor: "0.30.0", want: true},
-		{name: "a post-release does not meet a floor above it", version: "0.23.0.post1", floor: "0.30.0rc1"},
-		{name: "an unreadable version does not meet a candidate floor", version: "latest", floor: "0.30.0rc1"},
-
-		// TWO POST-RELEASES OF ONE RELEASE KEEP THEIR OWN ORDER, on either side of the two releases
-		// they sit between.
-		{name: "a later post-release meets an earlier one's floor", version: "0.30.0.post2", floor: "0.30.0.post1", want: true},
-		{name: "an earlier post-release does not meet a later one's floor", version: "0.30.0.post2", floor: "0.30.0.post3"},
-		{name: "a post-release does not meet a patch release above it", version: "0.30.0.post1", floor: "0.30.1"},
-		{name: "a version whose number carries a leading zero does not meet the floor", version: "0.30.0rc01", floor: "0.30.0rc1"},
-		{name: "a version too large to count does not meet a floor", version: "0.30.123456789012345678901234567890.post1", floor: "0.30.0.post1"},
-
-		// The network row keeps refusing a candidate: the connector is in the release alone.
-		{name: "a candidate does not meet the release floor", version: "0.30.0rc2", floor: "0.30.0"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, modelDeploymentMeetsFloor(tc.version, tc.floor))
-		})
-	}
-}
-
-// TestModelDeploymentMeetsFloor_AdmitsEveryRowFloor reads the admitted rows rather than a hand-written
-// pair, because the failure this guards against is a FLOOR THAT REFUSES ITSELF: a row naming its
-// floor in a spelling the comparison cannot read would refuse every deployment carrying exactly
-// the version it requires.
-//
-// EVERY ADMITTED ROUTER AND ENGINE PAIR IS READ, on every platform, because a pair added to the
-// table and left out of this loop would ship a floor nobody compared against its own value.
-func TestModelDeploymentMeetsFloor_AdmitsEveryRowFloor(t *testing.T) {
-	for _, pair := range []struct {
-		router, engine string
-		platforms      []string
-	}{
-		{
-			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
-			[]string{nodefeature.ManufacturerAscend, nodefeature.ManufacturerAMD, nodefeature.ManufacturerNVIDIA},
-		},
-		{
-			workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentEngineVLLM,
-			[]string{nodefeature.ManufacturerAMD, nodefeature.ManufacturerNVIDIA},
-		},
-		{
-			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineSGLang,
-			[]string{nodefeature.ManufacturerAscend, nodefeature.ManufacturerAMD, nodefeature.ManufacturerNVIDIA},
-		},
-		{
-			workercore.ModelDeploymentRouterSGLang, workercore.ModelDeploymentEngineSGLang,
-			[]string{nodefeature.ManufacturerAscend, nodefeature.ManufacturerAMD, nodefeature.ManufacturerNVIDIA},
-		},
-	} {
-		for _, platform := range pair.platforms {
-			row, admitted := workerctrl.ModelDeploymentEPDRowFor(pair.router, pair.engine, platform)
-			require.True(t, admitted, "the %s+%s row on %s is admitted", pair.router, pair.engine, platform)
-
-			assert.True(t, modelDeploymentMeetsFloor(row.EngineFloor, row.EngineFloor),
-				"the %s+%s row on %s refuses the very floor it names",
-				pair.router, pair.engine, platform)
-		}
 	}
 }

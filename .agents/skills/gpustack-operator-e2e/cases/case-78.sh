@@ -39,10 +39,9 @@
 #              so rather than blaming the scale.
 #
 # Inputs:      All real, nothing mocked. The KVCachePoolBinding is not resolved by anything asserted
-#              here, so it may be absent. The role carries an explicit image because a CPU-only
-#              InstanceType has observed no accelerator and the operator can synthesize none; the
-#              replicas are placeholders and no assertion reads what they run. Override with
-#              E2E_MD_IMAGE, the InstanceType with E2E_MD_INSTANCE_TYPE.
+#              here, so it may be absent. The role names an explicit image because the replicas are
+#              placeholders and no assertion reads what they run. Override with E2E_MD_IMAGE, the
+#              InstanceType with E2E_MD_INSTANCE_TYPE.
 #
 # Expected:    Two replicas admit; scaling to three keeps both original UIDs, adds one Workload and
 #              raises the queue's admitted count and its usage by one replica's worth; scaling back
@@ -305,7 +304,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "0.11.0"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:

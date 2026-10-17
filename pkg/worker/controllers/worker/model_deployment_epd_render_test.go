@@ -33,14 +33,21 @@ var epdSharedClaim = workercore.ModelDeploymentAdditionalVolume{
 // The serving port is uniform because the router requires it to be: a deployment whose roles
 // disagree on the port is refused before any of this is rendered.
 func epdCommandOf(
-	t *testing.T, engine, version, manufacturer string, order []workercore.ModelDeploymentRoleKind,
+	t *testing.T, engine, manufacturer string, order []workercore.ModelDeploymentRoleKind,
 	mutate ...func(*workercore.ModelDeployment),
 ) map[string]*core.Pod {
 	t.Helper()
 
+	// The engine's image is the fallback every role in this fixture overrides, so it only has to be
+	// an image the engine actually runs: a deployment naming the wrong one would be a fixture that
+	// cannot be applied.
+	image := "vllm/vllm-openai:v0.30.0"
+	if engine == workercore.ModelDeploymentEngineSGLang {
+		image = "lmsysorg/sglang:v0.5.18"
+	}
 	md := epdDeployment(t, order)
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
-	md.Spec.Engine = workercore.ModelDeploymentEngine{Name: engine, Version: version}
+	md.Spec.Engine = workercore.ModelDeploymentEngine{Name: engine, Image: image}
 	for i := range md.Spec.Roles {
 		md.Spec.Roles[i].Replicas = 1
 		md.Spec.Roles[i].Ports = []workercore.ModelDeploymentPort{{Port: 8000, Protocol: core.ProtocolTCP}}
@@ -228,7 +235,7 @@ func TestModelDeploymentEncoderStage_RendersTheAdmittedRow(t *testing.T) {
 					mutate = append(mutate, mountSharedClaimOnEncoderAndPrefill)
 				}
 
-				pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM, "0.30.0",
+				pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM,
 					tc.manufacturer, position.order, mutate...)
 				require.Len(t, pods, 3, "every role renders a Pod, whatever its position")
 
@@ -309,7 +316,7 @@ func hasEnv(env []core.EnvVar, name string) bool {
 // shared leg work at all: two Pods carrying two different numbers would each look at its own
 // directory and the embeddings would never arrive.
 func TestModelDeploymentEncoderStage_GivesBothHalvesTheSameDirectory(t *testing.T) {
-	pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM, "0.30.0",
+	pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM,
 		nodefeature.ManufacturerAscend,
 		[]workercore.ModelDeploymentRoleKind{
 			workercore.ModelDeploymentRoleKindEncode,
@@ -390,7 +397,7 @@ var epdRoleOrders = []struct {
 func TestModelDeploymentEncoderStage_SGLangTakesAddressesRatherThanAConnector(t *testing.T) {
 	for _, position := range epdRoleOrders {
 		t.Run(position.name, func(t *testing.T) {
-			pods := epdCommandOf(t, workercore.ModelDeploymentEngineSGLang, "0.5.18",
+			pods := epdCommandOf(t, workercore.ModelDeploymentEngineSGLang,
 				nodefeature.ManufacturerNVIDIA, position.order)
 			require.Len(t, pods, 3)
 
@@ -425,7 +432,7 @@ func TestModelDeploymentEncoderStage_SGLangTakesAddressesRatherThanAConnector(t 
 // Every field the encoder stage adds is zero for a deployment declaring no Encode role, which is
 // what keeps a prefill/decode pair rendering exactly as it did before any of this existed.
 func TestModelDeploymentEncoderStage_LeavesADeploymentWithoutAnEncoderAlone(t *testing.T) {
-	pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM, "0.30.0",
+	pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM,
 		nodefeature.ManufacturerAscend,
 		[]workercore.ModelDeploymentRoleKind{
 			workercore.ModelDeploymentRoleKindPrefill,
@@ -455,7 +462,7 @@ func TestModelDeploymentEncoderStage_RefusesALegWithNoDirectoryAtAll(t *testing.
 		workercore.ModelDeploymentRoleKindDecode,
 	})
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
-	md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Version: "0.30.0"}
+	md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: "vllm/vllm-openai:v0.30.0"}
 	for i := range md.Spec.Roles {
 		md.Spec.Roles[i].Replicas = 1
 		md.Spec.Roles[i].Ports = []workercore.ModelDeploymentPort{{Port: 8000, Protocol: core.ProtocolTCP}}
@@ -521,13 +528,11 @@ func TestModelDeploymentEncoderStage_SGLangPrefillerGetsWiderProbes(t *testing.T
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			version := "0.30.0"
 			manufacturer := nodefeature.ManufacturerAMD
 			if tc.engine == workercore.ModelDeploymentEngineSGLang {
-				version = "0.5.18"
 				manufacturer = nodefeature.ManufacturerNVIDIA
 			}
-			pods := epdCommandOf(t, tc.engine, version, manufacturer, tc.order)
+			pods := epdCommandOf(t, tc.engine, manufacturer, tc.order)
 			require.Len(t, pods, len(tc.want))
 
 			for role, want := range tc.want {
@@ -557,7 +562,7 @@ func TestModelDeploymentEncoderStage_TakenOverPrefillerKeepsTheDefaultProbes(t *
 		workercore.ModelDeploymentRoleKindPrefill,
 		workercore.ModelDeploymentRoleKindDecode,
 	})
-	md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineSGLang, Version: "0.5.18"}
+	md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineSGLang, Image: "lmsysorg/sglang:v0.5.18"}
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		assert.Equal(t, role.Kind == workercore.ModelDeploymentRoleKindPrefill,
@@ -571,7 +576,7 @@ func TestModelDeploymentEncoderStage_TakenOverPrefillerKeepsTheDefaultProbes(t *
 // halves of its address, so a consumer is configured by the operator rather than by the user and a
 // Pod answering on that number would collide with it.
 func TestModelDeploymentEncoderStage_PublishesTheSideChannelOnItsFixedPort(t *testing.T) {
-	pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM, "0.30.0",
+	pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM,
 		nodefeature.ManufacturerAMD,
 		[]workercore.ModelDeploymentRoleKind{
 			workercore.ModelDeploymentRoleKindEncode,
@@ -607,7 +612,7 @@ func TestModelDeploymentEncoderStage_PublishesTheSideChannelOnItsFixedPort(t *te
 // the topology key and every selector entry are pinned here so a renderer that computed any of them
 // differently fails by name.
 func TestModelDeploymentEncoderStage_CoLocatesTheRolesOnOneHost(t *testing.T) {
-	pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM, "0.30.0",
+	pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM,
 		nodefeature.ManufacturerAMD,
 		[]workercore.ModelDeploymentRoleKind{
 			workercore.ModelDeploymentRoleKindEncode,
@@ -716,7 +721,7 @@ func TestModelDeploymentCreateRoleOrder_LeavesADeploymentWithoutAnEncoderInDecla
 // affinity at all and its Pods stay byte-identical to what they rendered before the preference
 // existed -- which is what keeps the legacy golden fixtures true.
 func TestModelDeploymentEncoderStage_RendersNoPodAffinityWithoutAnEncoder(t *testing.T) {
-	pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM, "0.30.0",
+	pods := epdCommandOf(t, workercore.ModelDeploymentEngineVLLM,
 		nodefeature.ManufacturerAscend,
 		[]workercore.ModelDeploymentRoleKind{
 			workercore.ModelDeploymentRoleKindPrefill,
@@ -779,7 +784,7 @@ func TestModelDeploymentRouterObjects_TheEncoderListReachesTheVLLMRouterAlone(t 
 			}
 			md := epdDeployment(t, order)
 			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: tc.router}
-			md.Spec.Engine = workercore.ModelDeploymentEngine{Name: tc.engine, Version: "0.30.0"}
+			md.Spec.Engine = workercore.ModelDeploymentEngine{Name: tc.engine, Image: "vllm/vllm-openai:v0.30.0"}
 			for i := range md.Spec.Roles {
 				md.Spec.Roles[i].Replicas = 1
 				md.Spec.Roles[i].Ports = []workercore.ModelDeploymentPort{

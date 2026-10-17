@@ -33,8 +33,8 @@
 # Environment: Any cluster with a materialized scheduling chain (run case-1 first) and at least one
 #              Ready, schedulable worker node that is not a control-plane node. NO accelerator: the
 #              encoder shape reaches admission through the platform an injected CPU vendor label
-#              builds ("Ascend" — the admitted row whose connector is the mounted directory and
-#              whose floor, 0.30.0rc1, the pinned version 0.30.0 clears). The gpustack-settings Secret
+#              builds ("Ascend" — the admitted row whose connector is a mounted directory rather
+#              than a network leg). The gpustack-settings Secret
 #              must exist in the system namespace (E2E_SYSTEM_NS, default gpustack-system). The case
 #              creates its own PV and PVC (a hostPath volume under /tmp on the labeled node,
 #              manually bound), so no StorageClass is needed.
@@ -314,7 +314,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "0.30.0"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:

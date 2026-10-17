@@ -5732,9 +5732,9 @@ func (m *ModelDeploymentEngine) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	i -= len(m.Version)
-	copy(dAtA[i:], m.Version)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Version)))
+	i -= len(m.Image)
+	copy(dAtA[i:], m.Image)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Image)))
 	i--
 	dAtA[i] = 0x12
 	i -= len(m.Name)
@@ -11155,7 +11155,7 @@ func (m *ModelDeploymentEngine) Size() (n int) {
 	_ = l
 	l = len(m.Name)
 	n += 1 + l + sovGenerated(uint64(l))
-	l = len(m.Version)
+	l = len(m.Image)
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
@@ -13939,7 +13939,7 @@ func (this *ModelDeploymentEngine) String() string {
 	}
 	s := strings.Join([]string{`&ModelDeploymentEngine{`,
 		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
-		`Version:` + fmt.Sprintf("%v", this.Version) + `,`,
+		`Image:` + fmt.Sprintf("%v", this.Image) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -32117,7 +32117,7 @@ func (m *ModelDeploymentEngine) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Image", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -32145,7 +32145,7 @@ func (m *ModelDeploymentEngine) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Version = string(dAtA[iNdEx:postIndex])
+			m.Image = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

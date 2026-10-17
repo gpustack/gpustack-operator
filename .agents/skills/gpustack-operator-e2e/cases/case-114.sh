@@ -173,7 +173,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${MD}, namespace: ${NS}}
 spec:
-  engine: {name: vLLM, version: "0.11.0"}
+  engine: {name: vLLM, image: "${MH_PYTHON}"}
   model: {name: qwen, artifactRef: {name: ${ART}}}
   roles:
     - name: server

@@ -369,19 +369,18 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRenderInput) (*core.Pod, error) {
 	md, role := in.Deployment, in.Role
 
-	// A STATED IMAGE ALWAYS WINS, and synthesis is the fallback rather than the rule: it is how a
-	// role runs a private build, a vendor with no published runner backend, or an Ascend family the
-	// matrix does not carry. The formula reads no release matrix, so it cannot know the tag it
-	// assembles was ever published - that is the accepted trade, and its failure is an
-	// ImagePullBackOff rather than a silent misconfiguration.
+	// A STATED IMAGE ALWAYS WINS: a role's own image exists to pin that one role differently from
+	// the engine's default — a private build, or a repository the engine image does not name — and
+	// the engine image is what every role that names none runs.
 	image := role.Image
 	if image == "" {
-		synthesized, err := SynthesizeModelDeploymentImage(
-			md.Spec.Engine.Name, md.Spec.Engine.Version, in.InstanceType.Status.Detail)
-		if err != nil {
-			return nil, fmt.Errorf("role %q names no image and none could be synthesized: %w", role.Name, err)
-		}
-		image = synthesized
+		image = md.Spec.Engine.Image
+	}
+	if image == "" {
+		// Unreachable through admission: the schema requires spec.engine.image. The error names the
+		// role so that, if the schema ever stops carrying that obligation, the render fails loudly
+		// instead of producing a Pod with an empty image.
+		return nil, fmt.Errorf("role %q names no image and the deployment engine names none either", role.Name)
 	}
 
 	ress, err := deriveModelDeploymentResources(role, in.InstanceType)

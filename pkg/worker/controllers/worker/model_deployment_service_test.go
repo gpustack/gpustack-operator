@@ -167,7 +167,6 @@ func epdDeployment(
 
 	return newRenderDeployment(append([]func(*workercore.ModelDeployment){
 		func(md *workercore.ModelDeployment) {
-			md.Spec.Engine.Version = "0.30.0"
 			md.Spec.Roles = roles
 		},
 	}, mutate...)...)
@@ -1142,16 +1141,12 @@ func TestModelDeploymentReconciler_RefusesAServiceItDoesNotOwn(t *testing.T) {
 }
 
 // TestEndpointEligibleSelectorActivation pins the first-enable repair at the three rendered
-// surfaces. A shape that can never qualify -- an unverified engine version, a prefill role, a
-// replaced command -- renders no eligibility term whatever any pass says. A shape that can
-// qualify does not narrow until a real pass records the predicate satisfied; the condition here
-// is computed by the real qualifier and the real status observation, never set by hand. Once a
-// selector carries the term, a quiet pass retains it, and a definite fault still withdraws.
+// surfaces. A shape that can never qualify -- a prefill role, a replaced command -- renders no
+// eligibility term whatever any pass says. A shape that can qualify does not narrow until a real
+// pass records the predicate satisfied; the condition here is computed by the real qualifier and
+// the real status observation, never set by hand. Once a selector carries the term, a quiet pass
+// retains it, and a definite fault still withdraws.
 func TestEndpointEligibleSelectorActivation(t *testing.T) {
-	unverified := healthDeployment(2)
-	unverified.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
-	unverified.Spec.Engine.Version = "0.0.0-not-verified"
-
 	prefill := healthDeployment(2)
 	prefill.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	for i := range prefill.Spec.Roles {
@@ -1173,9 +1168,8 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 	})
 
 	for name, md := range map[string]*workercore.ModelDeployment{
-		"unverified engine version": unverified,
-		"prefill role":              prefill,
-		"replaced command":          takeOver,
+		"prefill role":     prefill,
+		"replaced command": takeOver,
 	} {
 		t.Run(name+" renders no narrowing", func(t *testing.T) {
 			front := renderModelDeploymentService(md, nil)

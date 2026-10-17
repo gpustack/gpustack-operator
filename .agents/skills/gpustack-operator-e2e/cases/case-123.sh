@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # CASE 123 — vllm-router admits vLLM encoder deployments on NVIDIA and AMD, refuses unadmitted
-#           engines, versions below the floor, and user-supplied --epd-config
+#           engines and user-supplied --epd-config
 #           (NON-MUTATING on GPU clusters; fixture-mutating on CPU-only clusters, restored by trap)
 #           AUTO-SKIPS the platform rows without an InstanceType reporting nvidia or amd
 #
@@ -9,10 +9,9 @@
 #
 # Goal:        vllm-router drives three-stage EPD disaggregation for vLLM on NVIDIA and AMD via
 #              --epd-config={"encoder_urls":[...]} while the engine roles exchange vision embeddings
-#              over NIXL (ECCPUConnector, floor 0.30.0) and KV cache over MooncakeConnector.
+#              over NIXL (ECCPUConnector) and KV cache over MooncakeConnector.
 #              This case pins the admission contract for vllm-router encoder deployments:
-#                - vllm-router + vLLM (>= 0.30.0) on nvidia or amd is ACCEPTED;
-#                - vllm-router + vLLM below the 0.30.0 floor is REFUSED naming ECCPUConnector;
+#                - vllm-router + vLLM on nvidia or amd is ACCEPTED;
 #                - vllm-router + SGLang is REFUSED naming that the router and engine do not pair;
 #                - user-supplied --epd-config in spec.router.extraArgs is REFUSED as operator-owned;
 #                - vllm-router with NO Encode role (plain prefill/decode) is ACCEPTED.
@@ -30,7 +29,6 @@
 #              so no ModelDeployment is persisted.
 #
 # Expected:    - vllm-router + vLLM 0.30.0 on nvidia/amd with Encode/Prefill/Decode is ACCEPTED;
-#              - vllm-router + vLLM 0.29.0 on nvidia/amd is REFUSED naming the 0.30.0 floor;
 #              - vllm-router + SGLang with an Encode role is REFUSED naming the router/engine pair;
 #              - vllm-router passing --epd-config in spec.router.extraArgs is REFUSED as owned;
 #              - vllm-router with NO Encode role (plain prefill/decode) is ACCEPTED.
@@ -55,7 +53,6 @@ PLATFORM="$(printf '%s' "$VENDOR" | tr '[:upper:]' '[:lower:]')"
 NF=case123-cpu-vendor
 MD=case123-epd
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
-VERSION="${E2E_C123_VERSION:-0.30.0}"
 SETTLE_ROUNDS="${E2E_C123_SETTLE:-60}"
 ROUTER_NAME=vllm-router
 ENGINE=vLLM
@@ -201,7 +198,7 @@ metadata:
 spec:
   engine:
     name: ${ENGINE:-vLLM}
-    version: "${VERSION}"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:
@@ -281,13 +278,6 @@ if [ -n "$IT" ]; then
     "vllm-router + vLLM with an encoder role is ACCEPTED on ${PLATFORM}" \
     "$(baseline_roles)"
 
-  # Row 1: an engine version below the 0.30.0 network connector floor is refused.
-  VERSION=0.29.0 ROUTER_NAME=vllm-router refuses \
-    "vllm-router + vLLM below the 0.30.0 floor is refused" \
-    "ECCPUConnector carries ${PLATFORM} from vLLM 0.30.0" \
-    "$(baseline_roles)"
-  VERSION="${E2E_C123_VERSION:-0.30.0}"
-
   # Row 2: vllm-router paired with SGLang is refused naming the router and engine.
   ROUTER_NAME=vllm-router ENGINE=SGLang refuses \
     "vllm-router paired with SGLang is refused" \
@@ -311,7 +301,6 @@ if [ -n "$IT" ]; then
 else
   for label in \
     "vllm-router + vLLM with an encoder role is ACCEPTED" \
-    "vllm-router + vLLM below the 0.30.0 floor is refused" \
     "vllm-router paired with SGLang is refused" \
     "user-supplied --epd-config on vllm-router is refused as operator-owned" \
     "vllm-router with NO encoder role is admitted"; do

@@ -620,9 +620,9 @@ and any supplied value discarded (`:2559-2564`). What remains is one case: befor
 ASSUMES the decoder's parallelism equals its own. Parallelism is not something this operator renders
 — it reaches the engine through a role's `extraArgs` — so a pair whose two roles declare different
 values is expressible, and on those versions it would be mis-assumed rather than refused. This
-belongs on the reference page rather than in the admission table, because `spec.engine.version` is
-free text that this operator deliberately does not validate, so a gate would have no trustworthy
-version to read.
+belongs on the reference page rather than in the admission table, because the operator has no
+version to read — the field is gone and admission does not inspect the image a role names — so a
+gate would have no trustworthy version to act on.
 
 **The proxy template has no schema.** It is a Go string constant, and its failures are parse errors
 at startup that stop the proxy while the picker beside it stays healthy. Every change to it is

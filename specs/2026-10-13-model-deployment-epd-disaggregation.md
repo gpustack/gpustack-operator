@@ -1,7 +1,7 @@
 # Spec: ModelDeployment Encoder-Prefill-Decode Disaggregation
 
-Status: Shipped
-Blocked on: nothing. T0 to T17 and T19 are delivered, unit-tested, and verified on NVIDIA L40S; T18 (Ascend and ROCm hardware verification) is deferred and tracked by issue #763.
+Status: Building
+Blocked on: T18 (Ascend NPU verification; ROCm stays tracked by issue #763) and T20 (special enhancement: Ascend KVCache, P/D, and combined kvCache + kvTransfer verification on the 2-node Ascend 910B2 RKE2 cluster).
 Type: Feature
 
 ## Summary
@@ -151,10 +151,11 @@ Acceptance:
   Admission reads the platform of each role from its instance type.
   Any other combination, including a mixed-platform one or one with an unknown platform, is refused.
   The message names the router, the engine, the platform and the missing support.
-- An EPD deployment must set `engine.version`.
-  The same checks run again when a role instance type, image, engine version or router changes, so an update cannot move an admitted deployment outside the matrix.
+- An EPD deployment runs an image whose engine build meets the floor of its admitted row.
+  No admission check reads a version: the field is gone and the operator does not inspect images, so the floor is a requirement the user meets by naming an image, and what the reader sees when it is unmet is the failure the floor exists to prevent (an `ImagePullBackOff` on a tag that does not exist, or an engine that exits on an unknown flag) — discovery at container start, not satisfaction.
+  The same checks run again when a role instance type, image or router changes, so an update cannot move an admitted deployment outside the matrix.
   The floors apply to EPD deployments only, and the legacy floors stay as they are.
-- The engine version must meet the floor for the encoder transfer leg.
+- The engine build inside the image must meet the floor for the encoder transfer leg.
   vLLM needs `0.30.0` for the network transfer connectors.
   SGLang needs `0.5.10` or later, and the operator's own SGLang floor is higher.
   vLLM on ROCm needs `0.30.0` for the same connectors.
@@ -431,12 +432,11 @@ Acceptance:
 ### Commands
 
 Build and unit tests run on the local macOS host.
-The local `go` is 1.27, and it refuses the `GODEBUG=gotypesalias=0` value that `hack/generate.sh` and `hack/test.sh` set.
-Put the cached Go 1.26.4 toolchain first in `PATH`, and set `GOTOOLCHAIN=local`:
+The local `go` is 1.26.9, which matches the `go` directive in `go.mod`.
+Set `GOTOOLCHAIN=local` so the build never silently switches to a cached toolchain:
 
 ```bash
-TC="$(go env GOMODCACHE)/golang.org/toolchain@v0.0.1-go1.26.4.darwin-arm64"
-export PATH="$TC/bin:$PATH" GOTOOLCHAIN=local
+export GOTOOLCHAIN=local
 
 make generate                       # run in the main checkout, after API edits
 make lint                           # Go and shell sources
@@ -777,6 +777,30 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       Acceptance: on a deployment that declares an `Encode` role, rendered replica Pods carry `preferredDuringSchedulingIgnoredDuringExecution` `PodAffinity` terms on `kubernetes.io/hostname` scoped to the same deployment instance (`app.kubernetes.io/name=model-deployment`, `app.kubernetes.io/instance=<md.Name>`): `Prefill` and `Decode` mutually prefer each other at weight `100`, and `Encode` and `Prefill` mutually prefer each other at weight `50`. Deployments without an `Encode` role render no `PodAffinity` and keep the T0 legacy fixtures unchanged. `docs/modules/model-deployment/epd.md` documents the weighted co-location preference.
       Verify: `go test ./pkg/worker/controllers/worker/ -count=1 && make lint docs`
 
+- [ ] **T20 · Special enhancement: Ascend KVCache, P/D, and combined KV verification & E2E alignment**
+      Blocked by: T15
+      Owns: `.agents/skills/gpustack-operator-e2e/**`, `pkg/worker/**`, `docs/modules/**`
+      Gate: review
+      Acceptance: on the two-node Ascend 910B2 (`linux/arm64`) RKE2 cluster provisioned via `testing/infra/clusters/rke2` (`mirror=cn`), build and load the `linux/arm64` operator image locally on the `darwin/arm64` host (without amd64 emulation) and execute:
+      1. **KVCache on Ascend (Issue [#455](https://github.com/gpustack/gpustack-operator/issues/455) R1 & KVCache E2E suite)**: verify `KVCacheBackend`, `KVCachePool`, `KVCachePoolBinding`, Pod-level `KVCache` injection, and `vllm-ascend` serving with operator-injected `MooncakeStore` configuration (`case-43.sh`, `case-44.sh`, `case-47.sh`, `case-48.sh`, `case-53.sh` to `case-57.sh`, `case-59.sh`, `case-60.sh`, `case-62.sh` to `case-65.sh`, `case-67.sh`, `case-73.sh` to `case-77.sh`, `case-100.sh`), and update the two stale pointers named in #455 (`case-60.sh` header `#172` -> `#455` and `pkg/worker/kvcache/inject/engine.go` manufacturer note).
+      2. **`ModelDeployment` P/D and EPD on Ascend**: verify P/D tensor parallelism and serving (`case-86.sh`, `case-90.sh`, `case-91.sh`, `case-94.sh`) and EPD (`case-116.sh` to `case-126.sh`, including `case-121.sh` `llm-d-router + vLLM-Ascend` with `ECExampleConnector` over a shared `ReadWriteMany` NFS PVC and `MooncakeConnectorV1` for P/D KV transfer, plus SGLang EPD if image available).
+      3. **Three `ModelDeployment` KV modes on Ascend**:
+         - Mode A (`kvCache` only): `Server` role with `spec.kvCache.poolBindingName` (`MooncakeStore`).
+         - Mode B (`kvTransfer` only): `Prefill` + `Decode` roles with `llm-d-router` (`MooncakeConnectorV1` direct P2P leg, no `spec.kvCache`).
+         - Mode C (both `kvCache` and `kvTransfer`): `Prefill` + `Decode` roles with `llm-d-router` and `spec.kvCache.poolBindingName` active simultaneously.
+      4. Any E2E case adjustments or operator fixes required on `linux/arm64` Ascend 910B2 are committed and verified.
+      Verify: `make lint && make lint docs && make lint agents-shell`
+
+- [x] **T21 · `engine.image` replaces `engine.version` (record)**
+      Blocked by: none
+      Owns: `api/worker/v1alpha1/model_deployment.go`, `pkg/worker/controllers/worker/**`, `pkg/worker/webhooks/worker/**`, `docs/modules/model-deployment/**`, `specs/2026-09-19-model-deployment-router-implementations.md`
+      Gate: review
+      Acceptance: `spec.engine.version` is deleted and `spec.engine.image` is required — the API and code landed in `b828b1c7`, the end-to-end cases followed in `2c0ba46b`, and this task records what the change rests on and what it gives up.
+      The change rests on a two-axis measurement: a runner tag's `<backend><runtimeVersion>` half is the toolkit the image was BUILT with, while `InstanceType.status.detail.runtimeVersion` reads the toolkit INSTALLED on the node — the two only share a spelling. On the Ascend pool, `runtimeVersion=8.5` assembled `cann8.5-910b-vllm0.30.0`, which does not exist, while `cann9.1-910b-vllm0.30.0` does; NVIDIA has the same hole, where the CUDA driver version is not the `cuda<X>` a tag names. A formula cannot bridge the axes, so the operator no longer builds a tag: the image resolves in two levels (`roles[].image`, else the required `spec.engine.image`) and the user names a tag that exists in a registry the cluster can pull.
+      The two admission gates the deletion removed became documentation requirements, stated in `docs/modules/model-deployment/engine-versions.md`: the EPD encoder floor (vllm-ascend `0.30.0rc1` or later for Ascend `ECExampleConnector`, vLLM `0.30.0` or later for NVIDIA/AMD `ECCPUConnector`), which applying a stock lower-version runner and discovering it at container start does NOT fill — the `ImagePullBackOff` or unknown-flag exit is the failure the requirement exists to prevent; and the group-forward verified set (`0.25.1`/`0.29.0` for vLLM — the response id is `cmpl-` + the request's `request_id` — and `0.5.18`/`0.5.21` for SGLang — the response `meta_info.id` is the request's rid), which a probe passing on a version outside the set does NOT fill, because a binding that was not read is not a binding.
+      What the deletion gives up: an Ascend EPD deployment on a too-old image is no longer refused at admission, and a group-forward probe against an unverified version is no longer barred up front. The replacement is the probe outcome, and it is weaker than it looks: `modelDeploymentGroupForwardFailed` is read and never produced — every failure branch of the probe returns `Unknown`, and the unit tests pin that — so an unverified version's inconclusive probe grants nothing new and withdraws nothing already granted. The withdrawal a reader may expect belongs to a failed HEALTH leg, a different leg. What a probe passing `Verified` on an outside version proves is that the reply envelope matched this operator's own request id, not that the build's forwarding semantics were reviewed.
+      Verify: `make lint docs`
+
 **Agent assignment (proposed).**
 The lead runs T1, T15 and T17, and owns every commit and merge.
 mcode takes T2, T2b, T3a to T3c, T5, T7a, T7b, T7c, T9, T10b and T14b.
@@ -794,7 +818,7 @@ The T1 task runs in the main checkout, and every other task runs in its own work
   The later render tasks must keep those fixtures green.
 - The `Needs` column of the end-to-end case table repeats the case headers and nothing checks it.
   T14a and T14b update the column in the same commit as each case.
-- The local Go toolchain needs the 1.26.4 `PATH` setting under Commands.
+- The local Go toolchain needs `GOTOOLCHAIN=local` under Commands.
 
 #### Unit tests
 

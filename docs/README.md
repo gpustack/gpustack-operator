@@ -223,7 +223,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | [Model Deployment Encode, Prefill and Decode](modules/model-deployment/epd.md) | Disaggregate visual encoding, prefill and decode roles. |
 | [Model Deployment Encode, Prefill and Decode Benchmark](modules/model-deployment/epd-benchmark.md) | Compare EPD, prefill/decode and aggregated on measured latency and throughput. |
 | [Elastic EP](modules/model-deployment/elastic-ep.md) | Resize one serving instance's collective in place. |
-| [Engine Versions](modules/model-deployment/engine-versions.md) | Check supported engine versions. |
+| [Engine Versions](modules/model-deployment/engine-versions.md) | Check the engine version floors your images must meet. |
 | [Model Deployment Routing](modules/model-deployment/routing.md) | Choose a routing policy, confirm a Router serves. |
 | [Model Deployment Metrics](modules/model-deployment/metrics.md) | Read serving metrics. |
 | [Model Deployment Status](modules/model-deployment/status.md) | Diagnose deployment conditions, follow a retirement. |

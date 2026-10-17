@@ -24,8 +24,8 @@
 #              awareness is on. So the case turns that setting on and injects a fake CPU vendor
 #              label ("Ascend", lowercased to the platform the shared-directory row admits) on one
 #              node, and the pool that forms behind it makes the whole matrix reachable without a
-#              single accelerator: the wrong router, the wrong engine, the engine version below
-#              the floor, the shared-claim rules and the mixed-platform rule all become assertable.
+#              single accelerator: the wrong router, the wrong engine, the shared-claim rules and the
+#              mixed-platform rule all become assertable.
 #
 # Environment: Any cluster with a materialized scheduling chain (run case-1 first) and at least one
 #              Ready, schedulable worker node that is not a control-plane node. NO accelerator and
@@ -56,8 +56,7 @@
 #                claim name, a second volume source on one entry, a read-only encoder mount,
 #                disagreeing mount paths, an encoder or a prefiller without its claim, a router
 #                that does not admit the injected platform for an encoder role, an engine a router
-#                does not pair with, an engine version below the floor, and a platform the matrix
-#                does not admit;
+#                does not pair with, and a platform the matrix does not admit;
 #              - two roles on two different platforms are refused as a mixed deployment.
 #
 # Cleanup:     The trap deletes the NodeFeature object, restores the settings key to its exact
@@ -81,8 +80,6 @@ PLATFORM="$(printf '%s' "$VENDOR" | tr '[:upper:]' '[:lower:]')"
 NF="case116-cpu-vendor"
 MD=case116-probe
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
-# 0.30.0 clears both admitted floors, so nothing below is about the version unless the row says so.
-VERSION="${E2E_C116_VERSION:-0.30.0}"
 SETTLE_ROUNDS="${E2E_C116_SETTLE:-60}"   # 60 x 5s = 5 min for the settings cache and re-derivation
 
 FAILS=0
@@ -252,7 +249,7 @@ fi
 
 # ---------------------------------------------------------------- the manifests and the rows
 
-# ENGINE, VERSION and ROUTER_NAME are the one-field dials the matrix rows turn; each is reset
+# ENGINE and ROUTER_NAME are the one-field dials the matrix rows turn; each is reset
 # right after the row that turns it, because an assignment prefixed to a function call persists in
 # bash after the call returns and would silently move every later row off the baseline.
 manifest() { # roles-block
@@ -265,7 +262,7 @@ metadata:
 spec:
   engine:
     name: ${ENGINE:-vLLM}
-    version: "${VERSION}"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:
@@ -307,7 +304,7 @@ decode_role() { # [command]
 }
 
 # The accepted baseline: encode and prefill mount one claim at one path, the platform is the
-# injected one, the version clears the floor. Every refusal below varies exactly one thing from it.
+# injected one. Every refusal below varies exactly one thing from it.
 baseline_roles() {
   encode_role case116-shared /ec-cache
   prefill_role case116-shared /ec-cache
@@ -392,7 +389,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "${VERSION}"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   roles:
@@ -490,12 +487,6 @@ if [ -n "$PLATFORM_TYPE" ]; then
   ROUTER_NAME=""
   ENGINE=""
 
-  # 0.10.0 is below both floors, so exactly the floor rule answers.
-  VERSION=0.10.0 refuses "an engine version below the floor is refused" \
-    "needs that version or later" \
-    "$(baseline_roles)"
-  VERSION="${E2E_C116_VERSION:-0.30.0}"
-
   # The shared-claim rules run only on the row whose connector is a mounted directory, which is the
   # platform this case injects. Each row varies exactly one mount from the baseline.
   refuses "a read-only encoder mount is refused" \
@@ -525,7 +516,6 @@ else
   for row in \
     "a router that does not admit this platform for an encoder role is refused" \
     "an engine this router does not pair with the encoder is refused" \
-    "an engine version below the floor is refused" \
     "a read-only encoder mount is refused" \
     "disagreeing mount paths are refused" \
     "an encoder that mounts no claim is refused" \

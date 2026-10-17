@@ -27,7 +27,6 @@ func TestExternalDPRoutingSelectsQualifiedMembers(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/decided=%t", routerName, decided), func(t *testing.T) {
 				md := newRenderDeployment()
 				md.Spec.KVCache = nil
-				md.Spec.Engine.Version = "0.29.0"
 				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: routerName}
 				md.Spec.Roles[0].ReplicaSize = 2
 				md.Spec.Roles[0].ExtraArgs = []string{"--data-parallel-size", "2", "--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)"}
@@ -164,7 +163,6 @@ func TestPDRoutingKeepsReplicaLeaders(t *testing.T) {
 
 func TestExternalDPServiceEligibilityRetention(t *testing.T) {
 	md := newRenderDeployment()
-	md.Spec.Engine.Version = "0.29.0"
 	md.Spec.KVCache = nil
 	role := &md.Spec.Roles[0]
 	role.ReplicaSize = 2

@@ -42,8 +42,8 @@
 # Inputs:      MOCKED: one node label (the CPU vendor, "AMD" — the platform whose admitted row
 #              needs no shared claim) injected through a NodeFeature object, and one settings key
 #              (CPU-manufacturer awareness) flipped on; both restored by the trap. REAL: one
-#              ModelDeployment with the encode role listed first, engine vLLM at a version above
-#              the row's floor, router llm-d-router, one replica per role on the platform type.
+#              ModelDeployment with the encode role listed first, engine vLLM, router
+#              llm-d-router, one replica per role on the platform type.
 #
 # Expected:    - the deployment is created and its three role Pods exist (gated counts, they never
 #                need to run);
@@ -286,7 +286,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "0.30.0"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:
@@ -316,7 +316,7 @@ YAML
 # here as one message instead of nine timeouts (case-61's lesson).
 if kubectl -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" -o name >/dev/null 2>&1; then
   record PASS "the encoder deployment is admitted and created" \
-    "one encode, one prefill and one decode role on ${IT}, llm-d-router, vLLM 0.30.0"
+    "one encode, one prefill and one decode role on ${IT}, llm-d-router, image ${IMAGE}"
 else
   record FAIL "the encoder deployment is admitted and created" \
     "no modeldeployment/${MD} after the apply: $(printf '%s' "${APPLY_OUT:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"

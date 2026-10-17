@@ -62,8 +62,6 @@
 #              ReadWriteMany claim in <NS>), E2E_C121_MOUNT (default /ec-cache),
 #              E2E_C121_IMAGE (engine, default
 #              quay.io/gpustack/runner:cann9.1-910b-vllm0.30.0rc1-router; the tag may not be published yet, so pass an image you built),
-#              E2E_C121_VERSION (engine version, default 0.30.0rc1 — the floor the admitted Ascend row
-#              records, so a default run clears it exactly),
 #              E2E_C121_ROUTER_IMAGE (default docker.io/gpustack/llm-router:v0.3.1),
 #              E2E_C121_SIDECAR_IMAGE (default docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0),
 #              E2E_C121_WEIGHTS (default /data/models/model_scope/Qwen/Qwen2.5-VL-7B-Instruct),
@@ -122,7 +120,6 @@ IT="${E2E_C121_INSTANCE_TYPE:-}"
 CLAIM="${E2E_C121_CLAIM:-}"
 MOUNT="${E2E_C121_MOUNT:-/ec-cache}"
 IMAGE="${E2E_C121_IMAGE:-quay.io/gpustack/runner:cann9.1-910b-vllm0.30.0rc1-router}"
-VERSION="${E2E_C121_VERSION:-0.30.0rc1}"
 ROUTER_IMAGE="${E2E_C121_ROUTER_IMAGE:-docker.io/gpustack/llm-router:v0.3.1}"
 SIDECAR_IMAGE="${E2E_C121_SIDECAR_IMAGE:-docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0}"
 WEIGHTS="${E2E_C121_WEIGHTS:-/data/models/model_scope/Qwen/Qwen2.5-VL-7B-Instruct}"
@@ -356,7 +353,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "${VERSION}"
+    image: ${IMAGE}
   model:
     name: ${MODEL}
   router:
@@ -418,7 +415,7 @@ YAML
 
 if kubectl -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" >/dev/null 2>&1; then
   record PASS "apply" \
-    "the three-role encoder deployment was admitted on ${IT} at vLLM ${VERSION}, encode and prefill mounting ${CLAIM} at ${MOUNT}"
+    "the three-role encoder deployment was admitted on ${IT}, encode and prefill mounting ${CLAIM} at ${MOUNT}"
 else
   record FAIL "apply" "refused: ${APPLY_OUT}"
   print_rows

@@ -60,8 +60,6 @@
 #              E2E_C120_INSTANCE_TYPE (required, reporting manufacturer nvidia or amd),
 #              E2E_C120_IMAGE (engine; default docker.io/gpustack/runner:cuda13.0-vllm0.30.0 on
 #              nvidia and quay.io/gpustack/runner:rocm6.3-vllm0.30.0 on amd),
-#              E2E_C120_VERSION (engine version, default 0.30.0 — the floor ECCPUConnector first
-#              appears in, so a default run clears it),
 #              E2E_C120_ROUTER_IMAGE (default docker.io/gpustack/llm-router:v0.3.1),
 #              E2E_C120_SIDECAR_IMAGE (default docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0),
 #              E2E_C120_WEIGHTS (default /data/models/model_scope/Qwen/Qwen2.5-VL-7B-Instruct),
@@ -128,7 +126,6 @@ IT="${E2E_C120_INSTANCE_TYPE:-}"
 # The engine image default depends on the platform the named InstanceType reports, so the value is
 # resolved after that check below rather than here.
 IMAGE="${E2E_C120_IMAGE:-}"
-VERSION="${E2E_C120_VERSION:-0.30.0}"
 ROUTER_IMAGE="${E2E_C120_ROUTER_IMAGE:-docker.io/gpustack/llm-router:v0.3.1}"
 SIDECAR_IMAGE="${E2E_C120_SIDECAR_IMAGE:-docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0}"
 WEIGHTS="${E2E_C120_WEIGHTS:-/data/models/model_scope/Qwen/Qwen2.5-VL-7B-Instruct}"
@@ -352,7 +349,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "${VERSION}"
+    image: ${IMAGE}
   model:
     name: ${MODEL}
   router:
@@ -407,7 +404,7 @@ YAML
 )"
 
 if kubectl -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" >/dev/null 2>&1; then
-  record PASS "apply" "the three-role encoder deployment was admitted on ${IT} (llm-d-router, vLLM ${VERSION}, ${MANUFACTURER})"
+  record PASS "apply" "the three-role encoder deployment was admitted on ${IT} (llm-d-router, ${MANUFACTURER})"
 else
   record FAIL "apply" "refused: ${APPLY_OUT}"
   print_rows

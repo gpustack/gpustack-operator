@@ -33,7 +33,8 @@ request skips the encoder and goes straight to prefill and decode.
 
 ## Shape rules and admission constraints
 
-Admission refuses an EPD deployment that breaks any of these rules:
+Admission refuses an EPD deployment that breaks the rules below. One of them is not an admission
+rule: the encoder image floor is a requirement on the image you name, and its bullet says so.
 
 - An `Encode` role requires a `Prefill` role and a `Decode` role in the same deployment, at most one
   role of each kind, and no `Server` role.
@@ -43,8 +44,9 @@ Admission refuses an EPD deployment that breaks any of these rules:
   arguments and the sidecar proxy.
 - All three roles must run on the same accelerator platform. Admission reads it from each role's
   InstanceType, so mixed or unknown platforms are refused.
-- `engine.version` is required and must meet the floor of the matching row in
-  [the admitted matrix](#the-admitted-matrix).
+- The image an `Encode` deployment runs must carry an engine build that meets the floor of the
+  matching row in [the admitted matrix](#the-admitted-matrix). This is a requirement on the image
+  you name, not an admission rule: no check reads a version at apply time.
 - An `Encode` replica has size 1. The role refuses Elastic EP and external data parallelism.
 
 ## The admitted matrix
@@ -68,6 +70,8 @@ Admission accepts only the combinations below. Anything else is refused when the
 A verified row served a multimodal request through the router on the hardware named. A row marked
 Not verified is admitted from the design and has not run on that hardware. Issue
 [#763](https://github.com/gpustack/gpustack-operator/issues/763) tracks the SGLang AMD and Ascend rows.
+The `Minimum version` column is a requirement on the image you name, not an admission check:
+nothing reads a version, so an image below it is applied as written.
 
 ### vLLM on NVIDIA and AMD
 
@@ -83,8 +87,8 @@ have no NIXL copy path. Its floor, `0.30.0rc1`, is the first vllm-ascend release
 `--mm-encoder-only` cleanly and pins the encoder-cache load to each rank's own NPU under tensor
 parallelism.
 
-The runner image that release needs may not be published yet. Until it is, name your own image in
-`roles[].image`.
+Runner tags carrying that release exist for 910B — `cann9.1-910b-vllm0.30.0` is published and
+reachable. A variant with no published tag for it names its own image in `roles[].image`.
 
 ### SGLang
 

@@ -84,7 +84,6 @@ fi
 
 MD=case124-epd
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
-VERSION="${E2E_C124_VERSION:-0.30.0}"
 ROUTER_NAME=llm-d-router
 ENGINE=vLLM
 
@@ -177,7 +176,7 @@ metadata:
 spec:
   engine:
     name: ${ENGINE:-vLLM}
-    version: "${VERSION}"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:

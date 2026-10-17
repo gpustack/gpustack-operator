@@ -108,7 +108,6 @@ func TestRenderModelDeploymentRoutingSidecar_CarriesTheEncoderConnector(t *testi
 func TestRenderModelDeploymentRoutingSidecar_LeavesTheFlagOffWithoutAnEncoder(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
-		md.Spec.Engine.Version = "0.30.0"
 		md.Spec.Roles = []workercore.ModelDeploymentRole{
 			{
 				Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
