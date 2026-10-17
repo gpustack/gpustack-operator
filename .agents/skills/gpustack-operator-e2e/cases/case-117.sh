@@ -12,7 +12,9 @@
 #              own: it turns media into embeddings for a prefiller, so a front door pointed at one
 #              sends traffic to a process that serves none of it — with endpoints that resolve and
 #              answer health checks, which is what makes that failure quiet. So the case asserts
-#              the three per-role Services by NAME, each selecting only its own role's Pods, and
+#              the three per-role Services by NAME, each selecting only its own role's Pods (the
+#              encoder's may select none once the operator withdraws a placeholder that never
+#              becomes Ready), and
 #              the deployment-wide Service selecting the prefiller while the encoder sits FIRST in
 #              the roles list — the position where a "front the first role" implementation would
 #              pick it.
@@ -358,30 +360,113 @@ selected_components() { # <selector-string>
     | sort -u | tr '\n' ' '
 }
 
-# One row per per-role Service: the Service exists AND its own selector resolves to that role's
-# Pods alone. An existence-only row would pass a selector that fronted every role.
+# Whether a selector string carries one label equality. The terms are matched whole, because a
+# substring of the whole string would also match a key that merely ends in the one asked about.
+selector_has() { # <selector-string> <key> <value>
+  case ",$1," in
+    *",$2=$3,"*) return 0 ;;
+  esac
+  return 1
+}
+
+# Whether one selector can reach anything but the given role, answered from the Service's own
+# selector and the live Pods. It answers 0 when only that role is reachable and leaves the reason a
+# caller reports in SELECT_REASON.
+#
+# AN EMPTY SELECTED SET IS AN ANSWER, NOT A FAILURE, WHEN THE SELECTOR DEMANDS ELIGIBILITY. That is
+# designed withdrawal: the operator adds the eligibility equality to the Service of a role whose
+# members the reconciler has not qualified, and a placeholder that never becomes Ready matches
+# nothing once that is decided. Reading the term rather than the role is what keeps a row true on
+# both sides of the decision instead of racing it. A selector demanding no eligibility must still
+# select its own role's Pods, so an empty set is a failure there.
+selector_fronts_only() { # <selector-string> <component>
+  local sel="$1" comp="$2" comps
+  SELECT_REASON=""
+  if [ -z "$sel" ]; then
+    SELECT_REASON="carries no selector at all, so it fronts every Pod in the namespace"
+    return 1
+  fi
+  # The identity terms, read off the Service rather than assumed from the render: a selector that
+  # did not pin the role and this deployment would still resolve, and would still resolve wrongly.
+  if ! selector_has "$sel" app.kubernetes.io/component "$comp"; then
+    SELECT_REASON="requires no component=${comp}, so nothing keeps it off another role"
+    return 1
+  fi
+  if ! selector_has "$sel" app.kubernetes.io/instance "$MD" ||
+    ! selector_has "$sel" app.kubernetes.io/name model-deployment; then
+    SELECT_REASON="does not pin itself to this deployment with the instance and name terms"
+    return 1
+  fi
+  comps="$(selected_components "$sel")"
+  case "$comps" in
+    "$comp ")
+      SELECT_REASON="resolves to the ${comp} Pod(s) alone"
+      return 0
+      ;;
+    "")
+      if selector_has "$sel" modeldeployment.gpustack.ai/endpoint-eligible true; then
+        SELECT_REASON="resolves to no Pod, which is the designed withdrawal of a placeholder that never becomes Ready"
+        return 0
+      fi
+      SELECT_REASON="resolves to no Pod and demands no eligibility that would explain it"
+      return 1
+      ;;
+    *)
+      SELECT_REASON="resolves to [${comps}], which includes a Pod that is not the ${comp} role"
+      return 1
+      ;;
+  esac
+}
+
+# One row per per-role Service: the Service exists AND its own selector can reach that role's Pods
+# and nothing else. An existence-only row would pass a selector that fronted every role.
 role_service_fronts_only() { # <svc-name> <component> <row-title>
-  local sel comps
   if [ -z "$(kubectl -n "$NS" get svc "$1" -o name 2>/dev/null)" ]; then
     record FAIL "$3" "no svc/$1 exists"
     return 0
   fi
-  sel="$(selector_string "$1")"
-  comps="$(selected_components "$sel")"
-  case "$comps" in
-    "$2 ")
-      record PASS "$3" "svc/$1 selects exactly the ${2} Pod(s)"
-      ;;
-    *)
-      record FAIL "$3" "svc/$1 exists but its selector resolves to [${comps:-no Pod}] rather than only '${2}'"
-      ;;
-  esac
+  if selector_fronts_only "$(selector_string "$1")" "$2"; then
+    record PASS "$3" "svc/$1 ${SELECT_REASON}"
+  else
+    record FAIL "$3" "svc/$1 exists but its selector ${SELECT_REASON}"
+  fi
   return 0
 }
 
 role_service_fronts_only "${MD}-encode" encode "the encoder's own Service exists and fronts only the encoder"
 role_service_fronts_only "${MD}-prefill" prefill "the prefiller's own Service exists and fronts only the prefiller"
 role_service_fronts_only "${MD}-decode" decode "the decoder's own Service exists and fronts only the decoder"
+
+# A check that cannot fail proves nothing, so the same one is fed selectors that reach another role.
+# Each row below passes only when the check refuses the selector it is given, so the rows above
+# passing means the check told the roles apart rather than accepting whatever it was handed.
+#
+# The first is a real one: the prefiller's own selector, offered as the encoder's. It is refused for
+# naming no encoder term at all.
+if selector_fronts_only "$(selector_string "${MD}-prefill")" encode; then
+  record FAIL "the per-role Service check refuses a selector that reaches another role" \
+    "the prefiller's own selector was accepted as the encoder's, so the rows above cannot tell the roles apart"
+else
+  record PASS "the per-role Service check refuses a selector that reaches another role" \
+    "the prefiller's selector was refused as the encoder's: it ${SELECT_REASON}"
+fi
+
+# The second guards the one rule this check relaxed. An empty selected set is accepted only when the
+# selector demands eligibility. This selector names the encoder, this deployment and the engine, and
+# adds a term no Pod carries, so it resolves to nothing and demands no eligibility that would explain
+# it. A check that accepted it would accept any broken selector as withdrawal.
+#
+# A selector that names the encoder cannot also reach another role: label terms are a conjunction,
+# so component=encode already excludes every other component. That is why the control is built on
+# the empty set and not on a foreign Pod.
+DANGLING="app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=${MD},app.kubernetes.io/component=encode,case117.gpustack.ai/no-such-label=true"
+if selector_fronts_only "$DANGLING" encode; then
+  record FAIL "the per-role Service check refuses an empty set that nothing explains" \
+    "a selector resolving to no Pod and demanding no eligibility was accepted as designed withdrawal"
+else
+  record PASS "the per-role Service check refuses an empty set that nothing explains" \
+    "a selector resolving to no Pod without an eligibility term was refused: it ${SELECT_REASON}"
+fi
 
 # ---------------------------------------------------------------- the front door
 

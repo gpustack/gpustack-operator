@@ -73,6 +73,16 @@ type Input struct {
 	// carrying both is deliberate -- see Role.Selector for why a map rather than a string.
 	EndpointLabels map[string]string
 
+	// EligibleLabelKey names the label a stage filter must match when that role's eligibility
+	// requirement is carried per role rather than by the deployment-wide selector. A non-empty key
+	// adds the term to the stage filter of every role whose Selector already carries it, which is
+	// the set of roles the gate can decide; empty leaves every stage filter as it renders today.
+	//
+	// IT IS NAMED BY THE CALLER rather than declared here because the label belongs to the
+	// operator's own vocabulary, and a second spelling of it in this package is the thing that
+	// would drift.
+	EligibleLabelKey string
+
 	// EncoderURLs are the HTTP(S) endpoints of the deployment's encoders, as the router that takes
 	// a static list of them requires. Each entry is the encoder role's per-role Service URL rather
 	// than a replica address: the Service fronts every replica, so a scale changes nothing here
@@ -135,6 +145,44 @@ const llmdAlwaysDisaggPDDecider = "always-disagg-pd-decider"
 
 // llmdEngineSGLang is the engine name this package receives for SGLang.
 const llmdEngineSGLang = "sglang"
+
+// llmdStageFilterType is the picker plugin that filters endpoints by label. Named here so the
+// renderer and the reader of its own output agree on the spelling.
+const llmdStageFilterType = "label-selector-filter"
+
+// DocumentStageFilterDemands reports whether the rendered picker document holds a label-selector
+// filter whose matchLabels require one label to equal one value.
+//
+// IT IS ASKED OF THE DOCUMENT RATHER THAN OF ITS TEXT because the same string is also where a
+// user-supplied model name is rendered. A document that merely CONTAINS the label's key is not a
+// requirement, and reading it as one would activate a gate nobody decided. A stage filter's own
+// matchLabels is the only place the document states a requirement about a Pod, so it is the only
+// place this looks.
+//
+// A document that does not parse, and one that declares no filter, demand nothing.
+func DocumentStageFilterDemands(document, labelKey, value string) bool {
+	var parsed struct {
+		Plugins []struct {
+			Type       string `json:"type"`
+			Parameters struct {
+				MatchLabels map[string]string `json:"matchLabels"`
+			} `json:"parameters"`
+		} `json:"plugins"`
+	}
+	if err := yaml.Unmarshal([]byte(document), &parsed); err != nil {
+		return false
+	}
+	for _, plugin := range parsed.Plugins {
+		if plugin.Type != llmdStageFilterType {
+			continue
+		}
+		if plugin.Parameters.MatchLabels[labelKey] == value {
+			return true
+		}
+	}
+
+	return false
+}
 
 // Output is a rendered router configuration. A router is configured EITHER by a document it reads at
 // startup OR entirely by its own arguments, so exactly one half is filled and Render refuses every
@@ -206,8 +254,10 @@ var renderers = map[string]func(Input) (Output, error){
 
 func renderLLMD(input Input) (Output, error) {
 	kinds := make(map[string]string, len(input.Roles))
+	selectors := make(map[string]map[string]string, len(input.Roles))
 	for _, role := range input.Roles {
 		kinds[role.Kind] = role.RoleLabelKey
+		selectors[role.Kind] = role.Selector
 	}
 
 	// SGLang's prefiller dials the encoder itself through its encoder URLs, so the router sees the
@@ -233,10 +283,19 @@ func renderLLMD(input Input) (Output, error) {
 	profiles := make([]any, 0, len(orderedKinds))
 	for _, kind := range orderedKinds {
 		filter := kind + "-pods"
+		matchLabels := map[string]string{kinds[kind]: kind}
+		// A role the gate can decide carries its eligibility requirement HERE rather than in the
+		// deployment-wide selector, which is one AND of every term and so cannot say "required of
+		// the encoder and not of the prefiller". A role that can never activate never carries the
+		// label at all, so a term demanded of it would select nothing; its Selector has none, its
+		// stage filter is left alone, and its Pods stay selectable.
+		if value, ok := selectors[kind][input.EligibleLabelKey]; ok {
+			matchLabels[input.EligibleLabelKey] = value
+		}
 		plugins = append(plugins, map[string]any{
 			"name":       filter,
-			"type":       "label-selector-filter",
-			"parameters": map[string]any{"matchLabels": map[string]string{kinds[kind]: kind}},
+			"type":       llmdStageFilterType,
+			"parameters": map[string]any{"matchLabels": matchLabels},
 		})
 		profilePlugins := []any{map[string]any{"pluginRef": filter}}
 		if kind == roleKindEncode {

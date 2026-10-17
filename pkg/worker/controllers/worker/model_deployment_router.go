@@ -167,22 +167,49 @@ func renderModelDeploymentRouterObjects(
 		modelDeploymentLabelKeyInstance: md.Name,
 		modelDeploymentMemberIndexLabel: strconvx.Itoa(modelDeploymentLeaderMemberIndex),
 	}
+	// Whether the deployment's shapes can ever activate the gate, and whether they all can. These
+	// are two questions rather than one because a single AND answers only the first: what a role
+	// that cannot activate must be spared is a requirement per role, which is what the published
+	// selectors already are.
+	endpointActivatable, everyActivatable := false, true
+	for i := range md.Spec.Roles {
+		if modelDeploymentGroupForwardActivatable(md, &md.Spec.Roles[i]) {
+			endpointActivatable = true
+
+			continue
+		}
+		everyActivatable = false
+	}
+	// THE PICKER NAMES EACH ROLE IN ITS OWN STAGE FILTER, so a deployment whose roles disagree
+	// about activatability carries the requirement there and not here. One selector is one AND of
+	// every term: it cannot say "required of the encoder and not of the prefiller", and a role
+	// that can never activate carries no label for such a term to demand.
+	//
+	// SO IN THE ENCODER SHAPE IT NEVER CARRIES THE TERM AT ALL -- not decided, not retained. The
+	// stage filter withdraws the encoder on its own, and a term here would only subtract the roles
+	// the gate may not judge: an encoder outage would take text-only serving down with it. It is
+	// also what makes the selector constant for the life of the deployment, so a fault costs a
+	// stage a candidate rather than a restart of every router in the set.
+	//
+	// THE ENCODER IS WHAT NARROWS IT, and admission is why that is enough. A deployment declaring
+	// one holds at most one role of each non-Server kind and may not pair an Encode role with a
+	// Server role, so an encoder beside a role that cannot activate is exactly the prefill/decode
+	// pair of one. A deployment of several Server roles can be mixed without ever declaring one,
+	// and there the stage filters are shared by kind: they cannot hold two roles' requirements
+	// apart, and the roles' membership rules still need this selector. Those deployments render as
+	// they always did.
+	stageFiltered := endpointActivatable && !everyActivatable &&
+		md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
+		modelDeploymentDeclaresEncoder(md)
 	// The eligibility equality rides beside the leader term for the same reason it rides on the
 	// published selector: a member whose eligibility the reconciler has not written is not an
 	// endpoint a request may reach, however much its peers need its record. A deployment in which
 	// NO role's group-forward capability can ever activate renders WITHOUT it — a selector no
 	// pass would ever satisfy would hand the router zero endpoints and call it discovery — while
-	// a deployment with any activatable role keeps it, because once activation is possible the
+	// a deployment whose roles all can keeps it, because once activation is possible the
 	// observation states govern the per-pod label, not this selector.
-	endpointActivatable := false
-	for i := range md.Spec.Roles {
-		if modelDeploymentGroupForwardActivatable(md, &md.Spec.Roles[i]) {
-			endpointActivatable = true
-
-			break
-		}
-	}
-	if endpointActivatable && (modelDeploymentEligibilityDecided(md) || retainedEligibility) {
+	if endpointActivatable && !stageFiltered &&
+		(modelDeploymentEligibilityDecided(md) || retainedEligibility) {
 		endpointLabels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
 		for i := range md.Spec.Roles {
 			if modelDeploymentRoleExternalDP(md, &md.Spec.Roles[i]) {
@@ -235,6 +262,9 @@ func renderModelDeploymentRouterObjects(
 		DiscoveryPort:           ports[0],
 		RequestTimeoutSeconds:   md.Spec.Router.RequestTimeoutSeconds,
 		DisaggregationThreshold: md.Spec.Router.DisaggregationThresholdTokens,
+	}
+	if stageFiltered {
+		routerInput.EligibleLabelKey = modelDeploymentLabelKeyEndpointEligible
 	}
 	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
 		engine, _ := ModelDeploymentEngineUpstreamName(md.Spec.Engine.Name)
@@ -574,13 +604,24 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 		// not proof a surface was never narrowed -- the live router Deployment's args and env are
 		// read too. The static activatability half still governs: a deployment whose shapes
 		// stopped being activatable loses the term on this pass.
+		//
+		// IT IS READ FROM THE DOCUMENT AS WELL AS THE SELECTOR KEY, because the two are two places
+		// one requirement lives. Where a deployment's roles disagree about activatability the
+		// requirement sits in a stage filter rather than the selector, and a pass that read only
+		// the selector would find nothing, decide the gate had never been active, and put back the
+		// endpoints the fault withdrew. The document is PARSED rather than searched: a model name
+		// the user chose can be the very string of this label, and reading that as a demand would
+		// activate a gate on a deployment that never decided one.
 		needle := modelDeploymentLabelKeyEndpointEligible + "=" + modelDeploymentEndpointEligibleValue
 		retained := false
 		liveConfig := new(core.ConfigMap)
 		err := r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}, liveConfig)
 		switch {
 		case err == nil:
-			retained = strings.Contains(liveConfig.Data[modelDeploymentRouterSelectorKey], needle)
+			retained = strings.Contains(liveConfig.Data[modelDeploymentRouterSelectorKey], needle) ||
+				router.DocumentStageFilterDemands(
+					liveConfig.Data[modelDeploymentRouterConfigKey],
+					modelDeploymentLabelKeyEndpointEligible, modelDeploymentEndpointEligibleValue)
 		case apierrors.IsNotFound(err):
 		default:
 			return err
