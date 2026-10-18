@@ -209,6 +209,11 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 				"the encoder role is not among the KV event publishers: it writes no KV cache "+
 					"for one to describe")
 		}
+		if in.Connection.MasterAddress != "" {
+			return nil, newRefusal(ReasonRoleUnsupported,
+				"role %q holds no KV cache, so a shared store asked of it would leave the "+
+					"encoder carrying a cache configuration that moves nothing", in.Role)
+		}
 	}
 
 	var kvRole string
@@ -225,8 +230,8 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 	// refuses a connection carrying one without the other - so a Connection arriving here has both
 	// fields or neither. TestRender_RefusesAHalfConnection pins that, because the equivalence is a
 	// property of the caller rather than of this line, and nothing here would notice it changing.
-	// An encoder stage reads neither, so a connection a caller left on it renders nothing: the
-	// connection belongs to a KV cache this Pod does not have.
+	// An encoder stage never reaches this line with a connection: it is refused above, as the
+	// SGLang renderer refuses the same shape.
 	hasStore := !encoderOnly && in.Connection.MasterAddress != ""
 
 	// The connector configuration is a JSON document on the command line, marshaled from a type so an

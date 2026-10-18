@@ -9,6 +9,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
@@ -539,9 +540,11 @@ func modelDeploymentEPDSharedPath(md *workercore.ModelDeployment) string {
 // them is what lets one value cross the renderer without a per-role filter that could disagree with
 // which roles actually consume it.
 //
-// The address is the per-role Service, named deployment-role, on the port the encoder's container
-// serves: the Service is what a consumer inside the cluster can resolve, and the encoder serves no
-// other address. It is empty for a deployment declaring no encoder, which renders nothing.
+// The host is the short Service name, which every role of a deployment resolves by its own search
+// path because all of them share the deployment's namespace. Only the scheme is derived, the way
+// modelDeploymentRoleEndpoint derives it, so an encoder serving TLS is dialed over https by the
+// prefiller as it is by the router, and an encoder that does not is addressed exactly as before.
+// It is empty for a deployment declaring no encoder, which renders nothing.
 func modelDeploymentEPDEncoderURLs(md *workercore.ModelDeployment) []string {
 	if !modelDeploymentDeclaresEncoder(md) {
 		return nil
@@ -554,8 +557,11 @@ func modelDeploymentEPDEncoderURLs(md *workercore.ModelDeployment) []string {
 		}
 
 		role := &md.Spec.Roles[i]
-		return []string{fmt.Sprintf("http://%s-%s:%d", md.Name, role.Name,
-			modelDeploymentServicePort(role).ContainerPort)}
+		scheme, _ := modelDeploymentEngineTransport(md.Spec.Engine.Name, ModelDeploymentRoleArgs(role))
+		port := modelDeploymentServicePort(role)
+
+		return []string{strings.ToLower(string(scheme)) + "://" + md.Name + "-" + role.Name + ":" +
+			strconvx.Itoa(int(port.ContainerPort))}
 	}
 
 	return nil

@@ -227,3 +227,51 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 			"writing to a returned row must not reach the admitted table")
 	})
 }
+
+// TestModelDeploymentEPDEncoderURLs_TakeTheSchemeFromTheEncoderArguments pins the one property the
+// address has: the host is the short Service name, and only the scheme follows the encoder's own
+// arguments. A listener serving TLS is dialed over https and any other over http, so a prefiller
+// never dials an address the encoder refuses, and a non-TLS encoder renders what it always did.
+func TestModelDeploymentEPDEncoderURLs_TakeTheSchemeFromTheEncoderArguments(t *testing.T) {
+	testCases := []struct {
+		name        string
+		encoderArgs []string
+		want        string
+	}{
+		{
+			name: "no TLS flag is http",
+			want: "http://qwen-encode:9100",
+		},
+		{
+			name:        "a certificate is https",
+			encoderArgs: []string{"--ssl-certfile", "/etc/tls/tls.crt"},
+			want:        "https://qwen-encode:9100",
+		},
+		{
+			name:        "a key alone is https",
+			encoderArgs: []string{"--ssl-keyfile", "/etc/tls/tls.key"},
+			want:        "https://qwen-encode:9100",
+		},
+		{
+			name:        "a CA bundle alone leaves http",
+			encoderArgs: []string{"--ssl-ca-certs", "/etc/tls/ca.crt"},
+			want:        "http://qwen-encode:9100",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := epdDeployment(t, []workercore.ModelDeploymentRoleKind{
+				workercore.ModelDeploymentRoleKindEncode,
+				workercore.ModelDeploymentRoleKindPrefill,
+			})
+			for i := range md.Spec.Roles {
+				if md.Spec.Roles[i].Kind == workercore.ModelDeploymentRoleKindEncode {
+					md.Spec.Roles[i].ExtraArgs = append([]string{"--port", "9100"}, tc.encoderArgs...)
+				}
+			}
+
+			assert.Equal(t, []string{tc.want}, modelDeploymentEPDEncoderURLs(md))
+		})
+	}
+}

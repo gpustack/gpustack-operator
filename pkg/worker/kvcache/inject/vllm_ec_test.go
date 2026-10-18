@@ -98,19 +98,6 @@ func TestRenderVLLM_EncodeCarriesTheEncoderCacheArmAndNoKVKey(t *testing.T) {
 			document: `{"ec_connector":"ECExampleConnector","ec_role":"ec_producer",
 				"ec_connector_extra_config":{"shared_storage_path":"/mnt/ec"}}`,
 		},
-		{
-			// The store row is deliberately a legal, complete connection with a dtype and a cache
-			// prefix: all three render KV keys on any other role, so this row fails the moment the
-			// renderer stops consulting the role before it renders the store.
-			name: "a connection the caller left on the encoder renders no store",
-			in: Input{
-				Engine: EngineVLLM, Role: RoleEncode,
-				Connection: testConnection(), Dtype: "fp8", CachePrefix: "team-a",
-			},
-			ec: nixlLeg(),
-			document: `{"ec_connector":"ECCPUConnector","ec_role":"ec_producer",
-				"ec_connector_extra_config":{"ec_enable_nixl":true,"ec_cpu_bytes":1073741824}}`,
-		},
 	}
 
 	for _, tc := range testCases {
@@ -513,6 +500,15 @@ func TestRenderVLLM_RefusesAnEncoderCacheLegItCannotRender(t *testing.T) {
 			wantErr:    "not among the KV event publishers",
 		},
 		{
+			// The refusal the SGLang renderer already gives the same shape: a store connection
+			// handed to an encoder is a caller error, not something to drop silently.
+			name:       "an encoder stage handed a store connection beside its leg",
+			in:         Input{Engine: EngineVLLM, Role: RoleEncode, Connection: testConnection()},
+			ec:         nixlLeg(),
+			wantReason: ReasonRoleUnsupported,
+			wantErr:    "holds no KV cache",
+		},
+		{
 			// The one row that arrives with no leg at all. Before the encoder-cache arm existed the
 			// role mapping had no encoder case and this refused; a renderer that answered it with an
 			// empty Result instead would hand back a vLLM container with no transfer configuration
@@ -573,7 +569,7 @@ func TestRenderVLLM_AnEncoderStageAlwaysDeclaresItsLeg(t *testing.T) {
 	for _, leg := range []EncoderCache{nixlLeg(), sharedLeg()} {
 		t.Run(leg.Connector, func(t *testing.T) {
 			result, err := renderVLLMWithEncoderCache(
-				Input{Engine: EngineVLLM, Role: RoleEncode, Connection: testConnection()}, leg)
+				Input{Engine: EngineVLLM, Role: RoleEncode}, leg)
 			require.NoError(t, err, "a declared leg is what makes the role renderable")
 			assert.NotEmpty(t, result.Args)
 		})

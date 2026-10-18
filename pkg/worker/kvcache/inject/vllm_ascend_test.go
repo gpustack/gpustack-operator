@@ -38,7 +38,7 @@ import (
 func TestRenderVLLMAscend_EncodeRendersTheSharedDirectoryProducerAndNoKVLeg(t *testing.T) {
 	result, err := renderVLLMWithEncoderCache(Input{
 		Engine: EngineVLLMAscend, Role: RoleEncode,
-		Connection: testConnection(), Dtype: "fp8", CachePrefix: "team-a",
+		Dtype: "fp8", CachePrefix: "team-a",
 	}, sharedLeg())
 	require.NoError(t, err)
 
@@ -140,8 +140,12 @@ func TestRenderVLLMAscend_TheNIXLPathIsRefusedOnEveryRoleThatCouldNameIt(t *test
 		t.Run(string(role), func(t *testing.T) {
 			// Every value is present and legal, so what is refused is the pairing.
 			leg := EncoderCache{Connector: vllmECCPUConnector, CPUBytes: 1_073_741_824}
-			result, err := renderVLLMWithEncoderCache(
-				Input{Engine: EngineVLLMAscend, Role: role, Connection: testConnection()}, leg)
+			in := Input{Engine: EngineVLLMAscend, Role: role}
+			if role != RoleEncode {
+				// An encoder is refused a store connection before the pairing is looked at.
+				in.Connection = testConnection()
+			}
+			result, err := renderVLLMWithEncoderCache(in, leg)
 			require.Error(t, err, "a leg with no NPU copy path must be refused, not rendered")
 			assert.Equal(t, ReasonTransportUnsupported, reasonOf(t, err))
 			assert.Contains(t, err.Error(), "no NPU copy path")

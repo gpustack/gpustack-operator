@@ -399,16 +399,23 @@ func TestModelDeploymentEncoderStage_SGLangTakesAddressesRatherThanAConnector(t 
 		name         string
 		router       string
 		manufacturer string
+		encoderArgs  []string
+		wantURL      string
 	}{
 		{
 			name:         "llmd_on_nvidia",
 			router:       workercore.ModelDeploymentRouterLLMD,
 			manufacturer: nodefeature.ManufacturerNVIDIA,
+			wantURL:      "http://qwen-encode:8000",
 		},
 		{
+			// The encoder serves TLS, so the prefiller has to dial https: the scheme is what this
+			// row proves, and the host stays the short Service name.
 			name:         "sglang_gateway_on_ascend",
 			router:       workercore.ModelDeploymentRouterSGLang,
 			manufacturer: nodefeature.ManufacturerAscend,
+			encoderArgs:  []string{"--ssl-certfile", "/etc/tls/tls.crt"},
+			wantURL:      "https://qwen-encode:8000",
 		},
 	} {
 		for _, position := range epdRoleOrders {
@@ -416,6 +423,11 @@ func TestModelDeploymentEncoderStage_SGLangTakesAddressesRatherThanAConnector(t 
 				pods := epdCommandOf(t, workercore.ModelDeploymentEngineSGLang,
 					row.manufacturer, position.order, func(md *workercore.ModelDeployment) {
 						md.Spec.Router.Name = row.router
+						for i := range md.Spec.Roles {
+							if md.Spec.Roles[i].Kind == workercore.ModelDeploymentRoleKindEncode {
+								md.Spec.Roles[i].ExtraArgs = row.encoderArgs
+							}
+						}
 					})
 				require.Len(t, pods, 3)
 
@@ -432,7 +444,7 @@ func TestModelDeploymentEncoderStage_SGLangTakesAddressesRatherThanAConnector(t 
 				// the prefiller a Service that resolves to a prefiller or a decoder.
 				prefill := pods["prefill"].Spec.Containers[0].Command
 				assert.Contains(t, prefill, "--language-only")
-				require.Equal(t, "http://qwen-encode:8000", commandValue(prefill, "--encoder-urls"),
+				require.Equal(t, row.wantURL, commandValue(prefill, "--encoder-urls"),
 					"the prefiller dials the encoder's Service, whichever position the encoder holds")
 				assert.Equal(t, "prefill", commandValue(prefill, "--disaggregation-mode"),
 					"the prefiller still renders its half of the P/D split on every admitted row")
@@ -450,6 +462,72 @@ func TestModelDeploymentEncoderStage_SGLangTakesAddressesRatherThanAConnector(t 
 				}
 			})
 		}
+	}
+}
+
+// TestModelDeploymentEncoderStage_NVIDIAEncoderURLFingerprint pins the encoder address the NVIDIA
+// shapes render, byte for byte. Those shapes were verified on NVIDIA hardware, so a change made for
+// another vendor must not move what they render: a vendor-agnostic address function that changed its
+// output would pass every Ascend test and still invalidate that evidence.
+//
+// The vLLM shapes take the encoder through a connector and render no address list at all, which is
+// pinned the same way so that one growing a flag is noticed.
+func TestModelDeploymentEncoderStage_NVIDIAEncoderURLFingerprint(t *testing.T) {
+	testCases := []struct {
+		name    string
+		engine  string
+		router  string
+		wantURL string
+	}{
+		{
+			name:    "sglang_behind_llm_d_router",
+			engine:  workercore.ModelDeploymentEngineSGLang,
+			router:  workercore.ModelDeploymentRouterLLMD,
+			wantURL: "http://qwen-encode:8000",
+		},
+		{
+			name:    "sglang_behind_vllm_router",
+			engine:  workercore.ModelDeploymentEngineSGLang,
+			router:  workercore.ModelDeploymentRouterVLLM,
+			wantURL: "http://qwen-encode:8000",
+		},
+		{
+			name:   "vllm_behind_llm_d_router",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			router: workercore.ModelDeploymentRouterLLMD,
+		},
+		{
+			name:   "vllm_behind_vllm_router",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			router: workercore.ModelDeploymentRouterVLLM,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pods := epdCommandOf(t, tc.engine, nodefeature.ManufacturerNVIDIA,
+				[]workercore.ModelDeploymentRoleKind{
+					workercore.ModelDeploymentRoleKindEncode,
+					workercore.ModelDeploymentRoleKindPrefill,
+					workercore.ModelDeploymentRoleKindDecode,
+				}, func(md *workercore.ModelDeployment) {
+					md.Spec.Router.Name = tc.router
+				})
+			require.Len(t, pods, 3)
+
+			prefill := pods["prefill"].Spec.Containers[0].Command
+			assert.Equal(t, tc.wantURL, commandValue(prefill, "--encoder-urls"))
+			if tc.wantURL == "" {
+				// commandValue answers "" for a flag that is absent and for one that carries an
+				// empty value, so the absence is asserted on the argv itself rather than on what
+				// it returns.
+				assert.NotContains(t, prefill, "--encoder-urls")
+				return
+			}
+			at := slices.Index(prefill, "--encoder-urls")
+			require.GreaterOrEqual(t, at, 0)
+			assert.Equal(t, []string{"--encoder-urls", tc.wantURL}, prefill[at:at+2])
+		})
 	}
 }
 

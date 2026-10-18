@@ -307,7 +307,8 @@ first write, or silently with no error at all.
 
 - In the engine image: `pip show mooncake-transfer-engine`. On Ascend the distribution is named
   `mooncake-transfer-engine-npu`, and the plain name is absent, so check both spellings.
-- In the `KVCacheBackend`: its `status` reports the version its members run.
+- For the `KVCacheBackend`: the store version is the one in the member image its `spec` names, so
+  read it from that image tag.
 - The compatibility rule is [the store version](backend.md#the-store-version-must-match-the-engines-client).
 
 **For a non-`default` domain the engine's library must also be `0.3.13` or later.** That is the line
