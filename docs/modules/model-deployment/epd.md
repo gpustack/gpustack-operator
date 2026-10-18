@@ -87,11 +87,6 @@ have no NIXL copy path. Its floor, `0.30.0rc1`, is the first vllm-ascend release
 `--mm-encoder-only` cleanly and pins the encoder-cache load to each rank's own NPU under tensor
 parallelism.
 
-The row ran on a two-node Ascend 910B2 cluster with vllm-ascend `0.30.0rc1` behind `llm-d-router`
-and `Qwen2.5-VL-7B-Instruct`. `case-121.sh` passed 15 of 15 twice, and its multimodal probe
-returned `200` with generated text through the router Service. The plain deployment Service selects
-the prefiller and returns `400`, so a probe must use the router Service.
-
 Runner tags carrying that release exist for 910B — `cann9.1-910b-vllm0.30.0` is published and
 reachable. A variant with no published tag for it names its own image in `roles[].image`.
 
