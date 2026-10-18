@@ -537,4 +537,23 @@ func TestReplacementRenderVersion_PartialGroupAndSlotCurrency(t *testing.T) {
 			"replacement whose member falls below the render-version floor transitions to Cleanup")
 		assert.True(t, progress.requeue)
 	})
+
+	t.Run("resolveReplacementSlot cleans up a short group carrying an out-of-range member index without panicking", func(t *testing.T) {
+		outOfRange := want[0].DeepCopy()
+		outOfRange.Labels[modelDeploymentMemberIndexLabel] = "9"
+		slot := modelDeploymentReplacementSlot{
+			Role:              "server",
+			Ordinal:           0,
+			Phase:             modelDeploymentReplacementWaitingForAdmission,
+			MemberHashes:      replacementRenderHashes(want),
+			CurrentMemberUIDs: []types.UID{outOfRange.UID},
+		}
+		cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType(), outOfRange)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+
+		progress, err := r.resolveReplacementSlot(ctx, getModelDeployment(t, cli), slot, &md.Spec.Roles[0], want)
+		require.NoError(t, err)
+		assert.Equal(t, modelDeploymentReplacementCleanup, progress.slot.Phase)
+		assert.True(t, progress.requeue)
+	})
 }
