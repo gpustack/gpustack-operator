@@ -33,8 +33,8 @@ request skips the encoder and goes straight to prefill and decode.
 
 ## Shape rules and admission constraints
 
-Admission refuses an EPD deployment that breaks the rules below. One of them is not an admission
-rule: the encoder image floor is a requirement on the image you name, and its bullet says so.
+An EPD deployment must satisfy the rules below. Admission enforces every one except the encoder
+image floor, which is a requirement on the image you name.
 
 - An `Encode` role requires a `Prefill` role and a `Decode` role in the same deployment, at most one
   role of each kind, and no `Server` role.
@@ -141,9 +141,11 @@ The `Encode` Pod binds a side-channel socket on port 5601 and publishes it throu
 ### Keys the operator owns
 
 Every key the encoder stage writes is operator-owned, and a role that names one is refused in every
-spelling the engine reads. On the `ECCPUConnector` rows these are `--ec-transfer-config`,
-`VLLM_USE_V2_MODEL_RUNNER` and the two side-channel variables. See
-[Operator-owned keys](deployment.md#operator-owned-keys).
+spelling the engine reads. On vLLM that is `--ec-transfer-config`; `ECCPUConnector` also owns
+`VLLM_USE_V2_MODEL_RUNNER` and the two side-channel variables.
+
+SGLang owns `--encoder-only`, `--language-only`, `--encoder-urls` and
+`--encoder-bootstrap-port`. See [Operator-owned keys](deployment.md#operator-owned-keys).
 
 Four flags the operator renders on the encoder are defaults, so a role's own value wins:
 `--enforce-eager`, `--no-enable-prefix-caching`, `--max-num-batched-tokens` and `--mm-encoder-only`.

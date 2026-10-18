@@ -330,8 +330,7 @@ kubectl -n gpustack-elastic exec "$POD" -c main -- \
 | GPU Pods remain Pending | Kueue Workloads, queue quota, Pod events, InstanceType capacity, and the per-card `Devices` ledger. |
 | Placement groups exist but inference times out | Master logs, EngineCore actor state, GPU worker logs, and Ray session logs. `CREATED` placement groups alone do not establish inference readiness. |
 | Ray sees the wrong GPU count | Actual allocation annotations, container-visible GPUs, and live Ray node capacity. Each GPU member must expose exactly TP GPUs. |
-| Unexpected engine arguments or missing Ray | Running image digest and installed vLLM/Ray versions. The operator does not inspect the image —
-no field names a version any more — so read what runs. |
+| Unexpected engine arguments or missing Ray | Running image digest and installed vLLM/Ray versions. The operator does not inspect the image, so check what the container runs. |
 | Shared-memory pressure | Actual `/dev/shm` capacity, Pod memory limits, node allocatable memory, and the object store's location. |
 
 `RAY_LOGGER_LEVEL` controls Python Ray logging; `RAY_BACKEND_LOG_LEVEL` controls backend logging.

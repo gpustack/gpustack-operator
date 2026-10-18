@@ -1714,7 +1714,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 		errs = append(errs, validateModelDeploymentRoleLoadBalance(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleEnv(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleResources(role, rolePath)...)
-		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(md.Namespace, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleArtifactKeys(md, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleReservedMountPaths(md, role, rolePath)...)
 		// Unconditional rather than inside the router's own rules, because the listeners this
@@ -1750,7 +1750,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 // admitted here and still diverges silently at render. Closing that needs the check where the
 // mounts are known, which is the renderer, not this validator.
 func validateModelDeploymentRoleAdditionalVolumes(
-	role *workercore.ModelDeploymentRole, rolePath *field.Path,
+	namespace string, role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
 
@@ -1759,11 +1759,13 @@ func validateModelDeploymentRoleAdditionalVolumes(
 	for i := range role.AdditionalVolumes {
 		av, avPath := &role.AdditionalVolumes[i], avsPath.Index(i)
 
-		// The claim source joins the three that were here, so an entry naming only a claim is
-		// refused here for the same reason the others are: it would be skipped at render and the
-		// container would start without the volume. Exactly one of the four is enough to pass this
-		// check; the refusal for naming more than one belongs to the claim source itself, which is
-		// new and can therefore be scoped to the entries that carry one.
+		// The claim source joins the three that were here, so an entry naming no source is refused
+		// here for the same reason the others are: it would be skipped at render and the container
+		// would start without the volume. The refusal for an empty claimName or for naming a second
+		// source beside persistentVolumeClaim runs on every entry that carries one: the claim source
+		// is new, so no stored object predating it can hold one, and gating that check on an Encode
+		// role would let a deployment without one mount an empty claimName or two volume sources on
+		// the same entry.
 		if av.ConfigMap == nil && av.Secret == nil && av.HostPath == nil && av.PersistentVolumeClaim == nil {
 			errs = append(errs, field.Required(avPath, fmt.Sprintf(
 				"one of configMap, secret, hostPath or persistentVolumeClaim, so that %q names "+
@@ -1771,6 +1773,30 @@ func validateModelDeploymentRoleAdditionalVolumes(
 					"starts without it",
 				av.MountPath,
 			)))
+		}
+		if av.PersistentVolumeClaim != nil {
+			if av.PersistentVolumeClaim.ClaimName == "" {
+				errs = append(errs, field.Required(avPath.Child("persistentVolumeClaim", "claimName"),
+					fmt.Sprintf(
+						"the claim name must not be empty: it names a claim in namespace %q, and an "+
+							"empty reference names none", namespace)))
+			}
+			for _, other := range []struct {
+				field string
+				set   bool
+			}{
+				{"configMap", av.ConfigMap != nil},
+				{"secret", av.Secret != nil},
+				{"hostPath", av.HostPath != nil},
+			} {
+				if other.set {
+					errs = append(errs, field.Forbidden(avPath.Child(other.field),
+						fmt.Sprintf(
+							"%q is set beside persistentVolumeClaim on the same entry: one entry "+
+								"mounts one volume, and two sources leave the renderer to pick",
+							other.field)))
+				}
+			}
 		}
 
 		if first, duplicate := seen[av.MountPath]; duplicate {

@@ -81,7 +81,6 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentEPD(
 	}
 
 	errs := validateModelDeploymentEPDShape(md)
-	errs = append(errs, validateModelDeploymentEPDClaimSources(md)...)
 
 	platform, platformErrs, err := r.modelDeploymentEPDPlatform(ctx, md)
 	if err != nil {
@@ -227,58 +226,6 @@ func validateModelDeploymentEPDEncodeShape(md *workercore.ModelDeployment, encod
 	return errs
 }
 
-// validateModelDeploymentEPDClaimSources refuses an entry that mounts a claim it cannot name, or
-// that names a source beside it.
-//
-// The rule reads every entry that carries a persistentVolumeClaim and ignores every entry that does
-// not. That is deliberate: the claim source arrived with the encoder work, so no object stored before
-// it can hold one, and refusing a second source on an entry that predates it would change the
-// behavior of a deployment with no encoder role at all.
-func validateModelDeploymentEPDClaimSources(md *workercore.ModelDeployment) field.ErrorList {
-	var errs field.ErrorList
-
-	rolesPath := field.NewPath("spec", "roles")
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
-		avsPath := rolesPath.Index(i).Child("additionalVolumes")
-
-		for j := range role.AdditionalVolumes {
-			av, avPath := &role.AdditionalVolumes[j], avsPath.Index(j)
-			if av.PersistentVolumeClaim == nil {
-				continue
-			}
-
-			if av.PersistentVolumeClaim.ClaimName == "" {
-				errs = append(errs, field.Required(avPath.Child("persistentVolumeClaim", "claimName"),
-					fmt.Sprintf(
-						"the claim name must not be empty: it names a claim in namespace %q, and an "+
-							"empty reference names none", md.Namespace)))
-			}
-
-			// One entry mounts one volume. Naming a second source leaves the renderer a choice this
-			// API does not make, and the container sees whichever it picked.
-			for _, other := range []struct {
-				field string
-				set   bool
-			}{
-				{"configMap", av.ConfigMap != nil},
-				{"secret", av.Secret != nil},
-				{"hostPath", av.HostPath != nil},
-			} {
-				if other.set {
-					errs = append(errs, field.Forbidden(avPath.Child(other.field),
-						fmt.Sprintf(
-							"%q is set beside persistentVolumeClaim on the same entry: one entry "+
-								"mounts one volume, and two sources leave the renderer to pick",
-							other.field)))
-				}
-			}
-		}
-	}
-
-	return errs
-}
-
 // modelDeploymentEPDPlatform returns the one accelerator platform every role runs on, and the
 // refusals that stopped it from settling on one.
 //
@@ -345,6 +292,11 @@ func (r *ModelDeploymentWebhook) modelDeploymentEPDPlatform(
 				"and another reports %q. The encoder leg follows the accelerator, so one deployment "+
 				"cannot carry it across two",
 			platform, strings.Join(mixed, ", ")))), nil
+	}
+
+	if platform == "" && len(errs) == 0 {
+		return "", append(errs, field.Required(rolesPath,
+			"no role names an instance type, so the accelerator platform the encoder admission needs cannot be read")), nil
 	}
 
 	return platform, errs, nil

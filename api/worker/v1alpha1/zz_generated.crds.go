@@ -4608,7 +4608,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											},
 											Properties: map[string]v1.JSONSchemaProps{
 												"image": {
-													Description: "Image is the container image every role of this deployment runs in by default.\n- It is the WHOLE-DEPLOYMENT default: a role that names its own image runs that one\ninstead, so this field is what an unstated role falls back to.\n- The operator does not build an image, so the tag must exist in a registry the cluster\ncan pull.\n- The minimum of 1 holds the requirement shut. Without it a required string here is\nsatisfied by the key merely being present, and this object is re-marshalled by the\nmutating webhook: Engine is a value type and this field has no omitempty, so a patch\ntaken from a request that named no image still carries an empty one.",
+													Description: "Image is the container image every role of this deployment runs in by default.\n- It is the WHOLE-DEPLOYMENT default: a role that names its own image runs that one\ninstead, so this field is what an unstated role falls back to.\n- The operator does not build an image, so the tag must exist in a registry the cluster\ncan pull.\n- The minimum of 1 holds the requirement shut. Without it a required string here is\nsatisfied by the key merely being present, and this object is re-marshaled by the\nmutating webhook: Engine is a value type and this field has no omitempty, so a patch\ntaken from a request that named no image still carries an empty one.",
 													Type:        "string",
 													MaxLength:   ptr.To[int64](512),
 													MinLength:   ptr.To[int64](1),

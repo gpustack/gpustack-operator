@@ -58,7 +58,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    image: <a runner image your cluster can pull>
+    image: docker.io/gpustack/runner:cuda13.0-vllm0.30.0
   model:
     name: /models/Qwen2.5-VL-7B-Instruct
   router:
@@ -68,7 +68,6 @@ spec:
       kind: Encode
       replicas: 1
       instanceType: gpustack--nvidia-l40s-linux-amd64
-      image: docker.io/gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
         accelerator: "1"
@@ -82,7 +81,6 @@ spec:
       kind: Prefill
       replicas: 1
       instanceType: gpustack--nvidia-l40s-linux-amd64
-      image: docker.io/gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
         accelerator: "1"
@@ -96,7 +94,6 @@ spec:
       kind: Decode
       replicas: 1
       instanceType: gpustack--nvidia-l40s-linux-amd64
-      image: docker.io/gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
         accelerator: "1"
@@ -326,8 +323,8 @@ engine, because the pool held a single two-GPU node.
 | Symptom | Condition / Reason | Check & Mitigation |
 |---|---|---|
 | The apply is refused for the role set | Admission refusal message | An `Encode` role requires `Prefill` and `Decode`, admits one role per kind, is refused beside `Server`, and cannot take `spec.kvCache` or a role `command`. See [Shape rules and admission constraints](../../modules/model-deployment/epd.md#shape-rules-and-admission-constraints) |
-| The apply is refused for engine, router or platform | Admission refusal message | All three roles must resolve to one accelerator platform, and the router must be one the matrix pairs with that engine. `vllm-router` has no admitted row. See [The admitted matrix](../../modules/model-deployment/epd.md#the-admitted-matrix) |
-| The encoder image is older than its row's floor | Not refused — no admission check reads a version | The floor lives in the image you name: vLLM `0.30.0`+ for `ECCPUConnector`, vllm-ascend `0.30.0rc1`+ for `ECExampleConnector`, SGLang `0.5.10`+ for `encoder-urls`. An image below it surfaces as an `ImagePullBackOff` on a tag that does not exist, or an engine that exits on an unknown flag — discovering that at container start is the failure the floor exists to prevent, not a pass. See [Reading the table](../../modules/model-deployment/engine-versions.md#reading-the-table) |
+| The apply is refused for engine, router or platform | Admission refusal message | All three roles must resolve to one accelerator platform, and the router, engine and platform must match [the admitted matrix](../../modules/model-deployment/epd.md#the-admitted-matrix) (`vllm-router` is refused on Ascend). See [The admitted matrix](../../modules/model-deployment/epd.md#the-admitted-matrix) |
+| The encoder image is older than its row's floor | No admission check reads a version | The floor lives in the image you name: vLLM `0.30.0`+ for `ECCPUConnector`, vllm-ascend `0.30.0rc1`+ for `ECExampleConnector`, SGLang `0.5.10`+ for `encoder-urls`. An image below the floor fails at container start with an `ImagePullBackOff` or an unknown-argument exit. See [Reading the table](../../modules/model-deployment/engine-versions.md#reading-the-table) |
 | The Ascend encoder starts with no directory to write | `ECExampleConnector` needs a shared directory | Attach a ReadWriteMany claim through `spec.roles[].additionalVolumes[].persistentVolumeClaim` on `Encode` and `Prefill`. Both roles must match `claimName`, `mountPath` and `subPath`, and the encoder's mount must not be read-only |
 | The apply names port 5601 or 8997 | Admission refusal on an owned key | The `ECCPUConnector` encoder owns 5601, and an SGLang `Prefill` role owns 8997 once the deployment has an `Encode` role. Move the engine's HTTP port off these |
 | An encoder replica sits in `Draining` for minutes | The encoder exports no in-flight queue the drain can read | Retirement waits a fixed window of about 300 seconds. A transfer still in flight when it ends fails at the client |

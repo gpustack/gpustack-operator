@@ -51,7 +51,7 @@ spec:
       name: deepseek-v2-lite-chat
   engine:
     name: vLLM
-    version: "0.29.0"
+    image: gpustack/runner:cuda13.0-vllm0.29.0
   router:
     name: llm-d-router
   roles:

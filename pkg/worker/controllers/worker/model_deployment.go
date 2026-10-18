@@ -2036,7 +2036,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 		encoderURLs := modelDeploymentEPDEncoderURLs(md)
 		if roleKind != workercore.ModelDeploymentRoleKindEncode &&
 			ModelDeploymentMaySynthesizeConnector(md) &&
-			(connection != nil || kvTransfer || publishKVEvents || routingSidecar || len(encoderURLs) > 0) {
+			(connection != nil || kvTransfer || publishKVEvents || routingSidecar) {
 			roleConnection := ModelDeploymentConnectorInput{}
 			if connection != nil {
 				roleConnection = *connection

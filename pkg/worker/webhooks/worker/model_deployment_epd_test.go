@@ -497,6 +497,16 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			selfStored: true,
 		},
 		{
+			name: "roles omitting every instance type are refused on spec.roles",
+			mutate: func(md *workercore.ModelDeployment) {
+				for i := range md.Spec.Roles {
+					md.Spec.Roles[i].InstanceType = ""
+				}
+			},
+			wantRefuse: "no role names an instance type, so the accelerator platform the encoder admission needs cannot be read",
+			wantField:  "spec.roles",
+		},
+		{
 			name: "a deployment without an Encode role may carry a claim of its own",
 			mutate: func(md *workercore.ModelDeployment) {
 				epdDropRole(md, "encode")
@@ -505,6 +515,32 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 				}
 				epdRoleByName(md, "prefill").AdditionalVolumes = nil
 			},
+			selfStored: true,
+		},
+		{
+			name: "a deployment without an Encode role naming an empty claimName is refused",
+			mutate: func(md *workercore.ModelDeployment) {
+				epdDropRole(md, "encode")
+				md.Spec.KVCache = &workercore.ModelDeploymentKVCache{
+					PoolRef: core.LocalObjectReference{Name: "shared-kv"},
+				}
+				epdRoleByName(md, "prefill").AdditionalVolumes[0].PersistentVolumeClaim.ClaimName = ""
+			},
+			wantRefuse: "the claim name must not be empty",
+			wantField:  "spec.roles[0].additionalVolumes[0].persistentVolumeClaim.claimName",
+			selfStored: true,
+		},
+		{
+			name: "a deployment without an Encode role naming a second source beside a claim is refused",
+			mutate: func(md *workercore.ModelDeployment) {
+				epdDropRole(md, "encode")
+				md.Spec.KVCache = &workercore.ModelDeploymentKVCache{
+					PoolRef: core.LocalObjectReference{Name: "shared-kv"},
+				}
+				epdRoleByName(md, "prefill").AdditionalVolumes[0].ConfigMap = &core.LocalObjectReference{Name: "ec-config"}
+			},
+			wantRefuse: `"configMap" is set beside persistentVolumeClaim on the same entry`,
+			wantField:  "spec.roles[0].additionalVolumes[0].configMap",
 			selfStored: true,
 		},
 	}

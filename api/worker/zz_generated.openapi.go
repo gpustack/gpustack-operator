@@ -9272,7 +9272,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentEngine(ref common.Refere
 					},
 					"image": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Image is the container image every role of this deployment runs in by default.\n\n  - It is the WHOLE-DEPLOYMENT default: a role that names its own image runs that one\n    instead, so this field is what an unstated role falls back to.\n  - The operator does not build an image, so the tag must exist in a registry the cluster\n    can pull.\n  - The minimum of 1 holds the requirement shut. Without it a required string here is\n    satisfied by the key merely being present, and this object is re-marshalled by the\n    mutating webhook: Engine is a value type and this field has no omitempty, so a patch\n    taken from a request that named no image still carries an empty one.",
+							Description: "Image is the container image every role of this deployment runs in by default.\n\n  - It is the WHOLE-DEPLOYMENT default: a role that names its own image runs that one\n    instead, so this field is what an unstated role falls back to.\n  - The operator does not build an image, so the tag must exist in a registry the cluster\n    can pull.\n  - The minimum of 1 holds the requirement shut. Without it a required string here is\n    satisfied by the key merely being present, and this object is re-marshaled by the\n    mutating webhook: Engine is a value type and this field has no omitempty, so a patch\n    taken from a request that named no image still carries an empty one.",
 							Default:     "",
 							MinLength:   ptr.To[int64](1),
 							MaxLength:   ptr.To[int64](512),

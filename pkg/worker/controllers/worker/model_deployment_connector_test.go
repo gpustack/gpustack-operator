@@ -563,6 +563,16 @@ func TestModelDeploymentUsesKVTransfer(t *testing.T) {
 			manufacturer: nodefeature.ManufacturerAscend,
 		},
 		{
+			// SGLang runs its own bootstrap registry rather than vLLM-Ascend's MooncakeConnectorV1,
+			// so sglang-gateway pairs its prefiller and decoder on Ascend the same way it does on
+			// NVIDIA and ROCm.
+			name:         "SGLang on Ascend under the gateway",
+			router:       workercore.ModelDeploymentRouterSGLang,
+			engine:       workercore.ModelDeploymentEngineSGLang,
+			kind:         workercore.ModelDeploymentRoleKindPrefill,
+			manufacturer: nodefeature.ManufacturerAscend, want: true,
+		},
+		{
 			// The pair rule's own rows: one half of an undeclared pair runs no leg, because the
 			// router in front of it is routing it as the undivided shape already.
 			name: "a lone prefill under the vllm router", lone: true,

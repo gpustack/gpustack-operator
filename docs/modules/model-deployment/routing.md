@@ -66,6 +66,13 @@ prefix scorers, because an encoder keeps no KV cache and tracks no tokens. A mul
 decider sends a request with media through an encoder first. A text-only request goes straight to
 prefill and decode.
 
+On the Ascend EPD shape (`llm-d-router` + `vLLM-Ascend` + `ECExampleConnector`), the `encode`
+role answers requests that carry media and stays idle for text-only traffic. The connector hands
+the result to `Prefill` through the shared volume both roles mount; the router is not in that path.
+
+The operator keeps a vLLM encoder in the router's candidate set on every platform. Its
+address-based encoder path applies only to SGLang.
+
 The decode sidecar's `--ec-connector` follows the admitted row: `ec-example` on Ascend and `ec-nixl`
 on NVIDIA and AMD. See [The admitted matrix](epd.md#the-admitted-matrix).
 

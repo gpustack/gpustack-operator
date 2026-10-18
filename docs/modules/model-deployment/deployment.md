@@ -429,17 +429,10 @@ default does not name, or one role pinned differently from the rest.
 The operator does not build an image and does not infer one from the node. The tag you name must
 exist in a registry the cluster can pull.
 
-**Why the operator does not infer the version from the node.** An earlier design assembled
-`gpustack/runner:<backend><runtimeVersion>…-<engine><version>` from the runtime version a node
-reported, but the two axes only share a spelling: the node's `runtimeVersion` is the toolkit
-**installed on the node**, while the `cann<X>` half of a real tag is the CANN SDK the image was
-**built** with.
-
-The mismatch was measured on the Ascend pool: a node reporting `runtimeVersion=8.5`
-assembled `cann8.5-910b-vllm0.30.0`, which does not exist, while `cann9.1-910b-vllm0.30.0` — the
-line the pool actually runs — does. NVIDIA has the same hole: the CUDA **driver** version is not
-the `cuda<X>` a tag names. A formula cannot see which tags a registry carries, so the operator
-names nothing and you name the tag.
+**Why the operator does not infer the image from the node.** A node reports the driver or toolkit
+it has installed. A runner tag names the SDK the image was built with. The two share a spelling but
+not a value, and no formula can see which tags a registry carries. You name the tag; the operator
+uses it as written.
 
 ## Rollout behavior
 

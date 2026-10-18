@@ -333,6 +333,26 @@ rather than settling for the `TCP` default.
 The member then needs a CANN-carrying image, per the variant table above. The project's own CPU
 build compiles no `ascend` transport.
 
+**Match the member image to the transport.** A CPU image serves `TCP` and `RDMA`. A CANN image
+serves `CANN`.
+
+**A CANN-carrying member over `TCP` or `RDMA` does not start**, and the failure names neither the
+transport nor the image. The store installs `AscendDirectTransport` unconditionally, and without an
+ACL context it ends in `cannot allocate local segment, ret: -1`. The member REST server never
+serves. So a pool that may ever serve an Ascend engine declares `CANN`.
+
+**Members take no accelerator while idle.** Measured with a CANN store serving and no engine
+deployed, every NPU on the nodes read `AICore 0%` and device memory at the driver baseline. The
+member registers device memory regions; it does not compute.
+
+**Two readings can mislead an instrument.** `binding.usage` and `pool.usage` lag the leader's
+counters by a reconcile tick, so a read taken immediately after a successful write can show `0`.
+The synchronous numbers are the leader's `:9003` `/metrics` and `/api/v1/tenant_quotas`.
+
+**The first write to a fresh store can answer `500`, and that is a race.** The signature is a put
+start with no matching put end in the master's counters, because the tenant ledger is not yet
+visible. Wait until the tenant is listed and retry; the store is not failing.
+
 > **Why** — one group is one Pod template, which cannot express a per-node transport; and promoting to
 > a host fabric would mean granting `hostNetwork` plus `IPC_LOCK` and `SYS_RESOURCE`. A privilege is
 > requested, never inferred. Naming `RDMA` or `EFA` is also what accepts the security context that

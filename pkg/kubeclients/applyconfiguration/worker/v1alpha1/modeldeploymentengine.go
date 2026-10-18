@@ -24,7 +24,7 @@ type ModelDeploymentEngineApplyConfiguration struct {
 	// - The operator does not build an image, so the tag must exist in a registry the cluster
 	// can pull.
 	// - The minimum of 1 holds the requirement shut. Without it a required string here is
-	// satisfied by the key merely being present, and this object is re-marshalled by the
+	// satisfied by the key merely being present, and this object is re-marshaled by the
 	// mutating webhook: Engine is a value type and this field has no omitempty, so a patch
 	// taken from a request that named no image still carries an empty one.
 	Image *string `json:"image,omitempty"`

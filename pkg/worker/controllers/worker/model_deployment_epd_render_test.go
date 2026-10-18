@@ -395,36 +395,61 @@ var epdRoleOrders = []struct {
 // role's URL was chosen. This case is the one that reads the value back, and it is built in all
 // three orders for that reason.
 func TestModelDeploymentEncoderStage_SGLangTakesAddressesRatherThanAConnector(t *testing.T) {
-	for _, position := range epdRoleOrders {
-		t.Run(position.name, func(t *testing.T) {
-			pods := epdCommandOf(t, workercore.ModelDeploymentEngineSGLang,
-				nodefeature.ManufacturerNVIDIA, position.order)
-			require.Len(t, pods, 3)
+	for _, row := range []struct {
+		name         string
+		router       string
+		manufacturer string
+	}{
+		{
+			name:         "llmd_on_nvidia",
+			router:       workercore.ModelDeploymentRouterLLMD,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+		},
+		{
+			name:         "sglang_gateway_on_ascend",
+			router:       workercore.ModelDeploymentRouterSGLang,
+			manufacturer: nodefeature.ManufacturerAscend,
+		},
+	} {
+		for _, position := range epdRoleOrders {
+			t.Run(row.name+"/"+position.name, func(t *testing.T) {
+				pods := epdCommandOf(t, workercore.ModelDeploymentEngineSGLang,
+					row.manufacturer, position.order, func(md *workercore.ModelDeployment) {
+						md.Spec.Router.Name = row.router
+					})
+				require.Len(t, pods, 3)
 
-			// The encoder builds no language model of its own; without this flag it starts as a
-			// server that serves nothing the prefiller asks for.
-			assert.Contains(t, pods["encode"].Spec.Containers[0].Command, "--encoder-only")
+				// The encoder builds no language model of its own; without this flag it starts as a
+				// server that serves nothing the prefiller asks for.
+				assert.Contains(t, pods["encode"].Spec.Containers[0].Command, "--encoder-only")
 
-			// ONE URL PER SERVICE, not per replica: the address is what a consumer inside the
-			// cluster can resolve, and a replica address would be one Pod's worth of an encoder
-			// stage the caller has no way to choose between.
-			//
-			// THE URL NAMES THE ENCODER, NOT THE FIRST ROLE. Every role here serves on 8000, so
-			// only the name distinguishes them, and a resolver answering with role 0 would hand
-			// the prefiller a Service that resolves to a prefiller or a decoder.
-			prefill := pods["prefill"].Spec.Containers[0].Command
-			assert.Contains(t, prefill, "--language-only")
-			require.Equal(t, "http://qwen-encode:8000", commandValue(prefill, "--encoder-urls"),
-				"the prefiller dials the encoder's Service, whichever position the encoder holds")
+				// ONE URL PER SERVICE, not per replica: the address is what a consumer inside the
+				// cluster can resolve, and a replica address would be one Pod's worth of an encoder
+				// stage the caller has no way to choose between.
+				//
+				// THE URL NAMES THE ENCODER, NOT THE FIRST ROLE. Every role here serves on 8000, so
+				// only the name distinguishes them, and a resolver answering with role 0 would hand
+				// the prefiller a Service that resolves to a prefiller or a decoder.
+				prefill := pods["prefill"].Spec.Containers[0].Command
+				assert.Contains(t, prefill, "--language-only")
+				require.Equal(t, "http://qwen-encode:8000", commandValue(prefill, "--encoder-urls"),
+					"the prefiller dials the encoder's Service, whichever position the encoder holds")
+				assert.Equal(t, "prefill", commandValue(prefill, "--disaggregation-mode"),
+					"the prefiller still renders its half of the P/D split on every admitted row")
 
-			// The decoder reads the embeddings out of the KV cache the prefiller already built,
-			// so it is handed neither half.
-			assert.NotContains(t, prefill, "--encoder-only")
-			for _, arg := range sidecarArgs(pods["decode"], "routing-proxy") {
-				assert.NotContains(t, arg, "--ec-connector",
-					"this engine splits its encoder by address, and the sidecar carries no such flag")
-			}
-		})
+				decode := pods["decode"].Spec.Containers[0].Command
+				assert.Equal(t, "decode", commandValue(decode, "--disaggregation-mode"),
+					"the decoder renders its half of the P/D split beside the language-only prefiller")
+
+				// The decoder reads the embeddings out of the KV cache the prefiller already built,
+				// so it is handed neither half.
+				assert.NotContains(t, prefill, "--encoder-only")
+				for _, arg := range sidecarArgs(pods["decode"], "routing-proxy") {
+					assert.NotContains(t, arg, "--ec-connector",
+						"this engine splits its encoder by address, and the sidecar carries no such flag")
+				}
+			})
+		}
 	}
 }
 

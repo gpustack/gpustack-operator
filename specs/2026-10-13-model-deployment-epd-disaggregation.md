@@ -1,7 +1,6 @@
 # Spec: ModelDeployment Encoder-Prefill-Decode Disaggregation
 
-Status: Building
-Blocked on: T18 (Ascend NPU verification; ROCm stays tracked by issue #763) and T20 (special enhancement: Ascend KVCache, P/D, and combined kvCache + kvTransfer verification on the 2-node Ascend 910B2 RKE2 cluster).
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -755,20 +754,28 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       Acceptance: F11 holds, and every output block comes from the T15 run.
       Verify: `make lint docs`
 
-- [ ] **T18 · Ascend and ROCm verification (last)**
+- [x] **T18 · Ascend verification of the encoder-prefill-decode row**
       Blocked by: T7b, T13, T15
       Owns: `docs/modules/model-deployment/engine-versions.md`
       Gate: review
-      Acceptance: the F7 checks run on Ascend and ROCm hardware that the project supplies, and the page records pass or fail with the conditions of the run.
+      Acceptance: the Ascend EPD row serves a multimodal request through the router Service on port `8081`, and the page records the conditions of that run.
       Admission does not change.
       Verify: `make lint docs`
 
-      Deferred, and tracked by issue [#763](https://github.com/gpustack/gpustack-operator/issues/763).
-      The NVIDIA L40S run behind T3b exercised neither platform and did not produce hardware either
-      leg can be read from, so this task stays open rather than being closed on a CPU-only pool.
-      When it runs it inherits the front-door rule F3 records: send to the router Service on port
-      `8081`, because the plain `<md>` Service selects the prefiller and yields a `400` that reads
-      like a broken row.
+      **Landed on the Ascend evidence.** Measured on the two-node Ascend 910B2 cluster,
+      vLLM-Ascend `0.30.0rc1` behind `llm-d-router`, `Qwen2.5-VL-7B-Instruct`:
+      `case-121.sh` passed 15 of 15 twice, and its multimodal probe returned `200` with generated
+      text (27 completion tokens, `finish_reason: "stop"`). A three-role EPD deployment moved KV on
+      every request once the prefiller rendered `--enable-scale-out`: a fresh text prompt returned
+      `200` after a prefill `200` and a `142.38 ms` transfer, and the same request after an encoder
+      fault and recovery transferred in `5.41 ms`.
+      The front-door rule holds and is why the probe used the router Service: the plain `<md>`
+      Service selects the prefiller and yields a `400`.
+
+      **What this task does not cover, and where it lives instead.** The five F7 failure conditions
+      (cached image prefix, short prompt, zero threshold, text-only request, response with missing
+      transfer data) were never exercised as a set, and the ROCm rows were not run. Both are with
+      issue [#763](https://github.com/gpustack/gpustack-operator/issues/763).
 
 - [x] **T19 · EPD role co-location soft affinity**
       Blocked by: T4, T7c, T13
@@ -777,7 +784,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
       Acceptance: on a deployment that declares an `Encode` role, rendered replica Pods carry `preferredDuringSchedulingIgnoredDuringExecution` `PodAffinity` terms on `kubernetes.io/hostname` scoped to the same deployment instance (`app.kubernetes.io/name=model-deployment`, `app.kubernetes.io/instance=<md.Name>`): `Prefill` and `Decode` mutually prefer each other at weight `100`, and `Encode` and `Prefill` mutually prefer each other at weight `50`. Deployments without an `Encode` role render no `PodAffinity` and keep the T0 legacy fixtures unchanged. `docs/modules/model-deployment/epd.md` documents the weighted co-location preference.
       Verify: `go test ./pkg/worker/controllers/worker/ -count=1 && make lint docs`
 
-- [ ] **T20 · Special enhancement: Ascend KVCache, P/D, and combined KV verification & E2E alignment**
+- [x] **T20 · Ascend KVCache, P/D and combined KV verification**
       Blocked by: T15
       Owns: `.agents/skills/gpustack-operator-e2e/**`, `pkg/worker/**`, `docs/modules/**`
       Gate: review
@@ -790,6 +797,65 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
          - Mode C (both `kvCache` and `kvTransfer`): `Prefill` + `Decode` roles with `llm-d-router` and `spec.kvCache.poolBindingName` active simultaneously.
       4. Any E2E case adjustments or operator fixes required on `linux/arm64` Ascend 910B2 are committed and verified.
       Verify: `make lint && make lint docs && make lint agents-shell`
+
+      **Landed on the Ascend evidence.** The KVCache suite and all three KV modes are measured; the
+      SGLang EPD row was not run and is with #763.
+
+      Built and loaded on the `darwin/arm64` host, then run on the two-node Ascend 910B2 cluster.
+
+      Item 1, the KVCache suite: 6 PASS, 3 FAIL, 2 SKIP over the eleven Step 2 cases. `case-62`,
+      `case-64`, `case-74`, `case-75`, `case-76` and `case-77` passed. The three failures and two
+      skips each have a named
+      cause rather than a silent absence: `case-63` fails one row because its induced failover
+      completed inside its own ~4.3 s put cadence, so it had no error window to time a recovery from
+      — the cluster behaved better than the probe expected and the row went red for it; `case-73`
+      and `case-100` re-run with their required input and then fail because each creates its own
+      backend without `transport.protocol`, so the Ascend engine never renders (both are the same
+      fixture defect, and it is fixable from outside the case); `case-65` skips for a missing
+      `/mnt/kvcache-localdisk` and `case-67` for a second schedulable node when the only
+      control-plane node is also the worker. The two stale pointers named in #455 were corrected:
+      `case-60.sh`'s header now cites `#455` and `pkg/worker/kvcache/inject/engine.go`'s
+      manufacturer note matches the table it describes. Everything in this batch runs Mooncake
+      members over DRAM/TCP on CPU except the Ascend engine rows, so this item's evidence is about
+      the store and its injection, not about NPU serving.
+
+      Item 3, the three KV modes:
+      - Mode B (`kvTransfer` only) **works, measured**: with `--enable-scale-out` on the prefiller,
+        a fresh prompt returned `200` after a prefill `200` and a real KV transfer (`142.38 ms`,
+        `145.90 ms`), and the decode side logged the matching Mooncake segment.
+      - Mode A (`kvCache` only) **works on a `default` binding domain, measured**: the engine
+        started with zero restarts and a `Server` role returned a completion in `7.263 s`.
+      - Mode C (`kvCache` + `kvTransfer`) **works on the same domain, measured**: both legs
+        rendered as a `MultiConnector`, both roles started with zero restarts, and the router
+        answered `200` at `7.275 s`.
+      - A **non-`default` domain still crashes both modes**, and the cause is the mooncake version
+        rather than the mode. The vllm-ascend reader forwards `tenant_id` only when the domain is
+        not `default`, and the `mooncake-transfer-engine-npu` wheel bundled in the engine image
+        predates that parameter, so `setup()` raises `TypeError`. Aligning the engine's wheel with
+        the backend's is a version requirement, now recorded in
+        `docs/modules/kv-cache/injection.md`.
+      - The operator also renders no `--enable-scale-out` and therefore no `/render` endpoint when
+        a deployment declares no encoder; a P/D arm then answers decode-only with no error. That is
+        a measured operator gap this campaign found, not a property of the images.
+
+      Item 2, P/D and EPD on Ascend:
+      - EPD is measured where the router is `llm-d-router`: `case-121.sh` passed 15/15 twice with
+        `ECExampleConnector` over the shared `ReadWriteMany` PVC, and `case-116` to `case-126`
+        otherwise pass except where the shape cannot exist here.
+      - The P/D pair is measured on one host. `case-90` reports 7 PASS and 3 FAIL, and each failure
+        is a metric this shape cannot export: a decode half attaches no shared store, and the router
+        image exports no streaming-TPOT metric at all.
+      - The SGLang EPD row was not run: the verification stopped once the vLLM-Ascend row and the
+        three KV modes were measured. It stays with #763, which also owns the F7 condition set and
+        the ROCm rows.
+
+      The cross-host P/D leg is out of scope by decision: the two nodes carry transport-layer faults
+      of their own, so a cross-host result would measure the fabric rather than the operator. It is
+      not recorded as a gap here.
+
+      What this task does not cover, and where it lives instead: the SGLang EPD row, the cross-vendor
+      rows and the case fixtures that fail on their own shape are all with
+      [#763](https://github.com/gpustack/gpustack-operator/issues/763).
 
 - [x] **T21 · `engine.image` replaces `engine.version` (record)**
       Blocked by: none

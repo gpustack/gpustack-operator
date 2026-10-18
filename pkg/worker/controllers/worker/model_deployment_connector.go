@@ -274,6 +274,7 @@ func modelDeploymentUsesKVTransfer(
 		return false
 	}
 	if manufacturer == nodefeature.ManufacturerAscend &&
+		md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
 		md.Spec.Router.Name != workercore.ModelDeploymentRouterLLMD {
 		return false
 	}

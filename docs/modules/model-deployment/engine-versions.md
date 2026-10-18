@@ -14,11 +14,11 @@ those releases, and this documentation does not track them; upgrading is the fix
 
 | Engine | Shape | Minimum | Mooncake client | Store members |
 |---|---|---|---|---|
-| vLLM | alone | `0.29.0` | `0.3.13.post1`, on the `cuda12.9` and the `cuda13.0` tag | — |
-| vLLM | prefill/decode, direct transfer over `tcp` | `0.29.0` | `0.3.13.post1` | — |
-| vLLM | with a Mooncake store, alone or as a pair | `0.29.0` | `0.3.13.post1` | the 0.3.13 line; the [default image](../../reference/settings.md) is one |
-| vLLM-Ascend | alone | `0.23.0` | `0.3.11.post1`, the NPU build | — |
-| vLLM-Ascend | prefill/decode, direct transfer | `0.23.0`, behind `llm-d-router` | `0.3.11.post1`, the NPU build | — |
+| vLLM | alone | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1`, on the `cuda12.9` and the `cuda13.0` tag | — |
+| vLLM | prefill/decode, direct transfer over `tcp` | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1` | — |
+| vLLM | with a Mooncake store, alone or as a pair | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1` | the 0.3.13 line; the [default image](../../reference/settings.md) is one |
+| vLLM-Ascend | alone | `0.23.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0rc1`+ | `0.3.11.post1`, the NPU build | — |
+| vLLM-Ascend | prefill/decode, direct transfer | `0.23.0`, behind `llm-d-router`; `--enable-scale-out` is also required on `0.30.0rc1`+ | `0.3.11.post1`, the NPU build | — |
 | vLLM-Ascend | with a Mooncake store | not verified | `0.3.11.post1`, the NPU build | not verified |
 | SGLang | alone | `0.5.18`, run as the halves of a pair | `0.3.12.post1` | — |
 | SGLang | prefill/decode, direct transfer over `tcp` | `0.5.18` | `0.3.12.post1` | — |
@@ -43,6 +43,15 @@ the image a role runs resolves to `roles[].image` when the role names one, and t
 `spec.engine.image` otherwise ([The image a role runs](deployment.md#the-image-a-role-runs)).
 Nothing assembles a tag and no admission check reads a version, so meeting a minimum here means
 naming an image whose engine build carries it.
+
+**A deployment without an `Encode` role needs `--enable-scale-out` behind `llm-d-router`.**
+The router counts prompt tokens through the engine's render endpoint, which vLLM serves only
+under that flag, from `0.30.0` on; the gate measured on vllm-ascend is `0.30.0rc1`. Name an
+image at those versions and set the flag on each role
+([Counting tokens through the engine](prefill-decode.md#counting-tokens-through-the-engine)).
+
+The `0.29.0` and `0.23.0` minimums above predate the flag: they were measured as transfer-leg
+runs, before the operator rendered this dependency.
 
 The floor belongs to the engine, so an SGLang EPD
 row states `SGLang 0.5.10` on every platform, while the vLLM Ascend row states a vllm-ascend
@@ -72,30 +81,18 @@ Ascend `ECExampleConnector`, and vLLM `0.30.0` or later for NVIDIA/AMD `ECCPUCon
 ([the admitted matrix](epd.md#the-admitted-matrix)). Admission does not check it — the version
 field and its gate are gone.
 
-What you see when the floor is unmet is the failure it exists to
-prevent: an `ImagePullBackOff` on a tag that does not exist, or an engine that exits on an unknown
-flag. **Applying a stock lower-version runner and discovering that at container start does not
-fill the requirement**; it is the outcome the requirement exists to prevent, and admission will no
-longer stop you from getting there.
+An image below the floor fails at container start with an `ImagePullBackOff` on a tag that does not
+exist, or an engine that exits on an unknown argument.
 
 **The group-forward probe has a verified version set, and nothing bars an unverified one.** The
 requirement: the version whose probe binding was read is `0.25.1`/`0.29.0` for vLLM (the response
 id is `cmpl-` + the request's `request_id`) and `0.5.18`/`0.5.21` for SGLang (the response
 `meta_info.id` is the request's rid).
 
-**Seeing a probe pass on a version outside that set does not put the version in the set**: a
-binding that was not read is not a binding, and the probe can pass against an engine whose echo
-semantics merely happen to coincide.
-
-What happens to an unverified version: the probe still runs and its outcome still decides. A
-`Verified` probe is what admits a member. A probe that cannot be answered is `Unknown`, and an
-unanswered probe is an absence of evidence, not a fault: `Unknown` grants nothing new and does not
-withdraw what was already granted.
-
-The withdrawal a reader may be thinking of, a failed leg pulling the member from
-`endpoints.eligible`, belongs to a health leg of the same [qualification](status.md), members
-reporting not ready for example, and that leg does apply. Neither probe outcome is an admission
-refusal.
+On any other version the probe still runs and its outcome still decides: `Verified` admits a
+member, `Unknown` grants nothing new and withdraws nothing already granted. Only a failed health
+leg of the same [qualification](status.md) withdraws an eligible member. Neither probe outcome is an
+admission refusal.
 
 ## Which transport each engine can use
 

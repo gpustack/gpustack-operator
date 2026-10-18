@@ -48,7 +48,7 @@ adds the encoder leg on top of the same KV transfer. See
 [Encoder-cache connectors](epd.md#encoder-cache-connectors) for what each connector moves.
 
 The scheduler placed the roles on two nodes, `node-a` and `node-b`. In the EPD arm, encode and
-prefill shared `node-a` and decode ran on `node-b`, which follows the preference described in
+prefill shared `node-a` and decode ran on `node-b` — the weight-50 pair in
 [Scheduling co-location](epd.md#scheduling-co-location). The other two arms landed as follows:
 
 | Arm | Role | Node |
