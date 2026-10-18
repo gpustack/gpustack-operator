@@ -775,7 +775,7 @@ refused. See <a href="/gpustack-operator/main/docs/modules/model-deployment/epd/
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get modeldeployment case120-epd -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.endpoint}&#39;</span></span></span></code></pre></div>
 </div><div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">http://case120-epd-router.default.svc:8081</span></span></code></pre></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">http://case120-epd-router.default.svc:8000</span></span></code></pre></div>
 </div><p>Send a multimodal chat completion to that endpoint from inside the cluster. The recorded request
 carried a base64 PNG as an <code>image_url</code> part beside a text instruction, which makes the router use the
 encoder:</p>
@@ -784,7 +784,7 @@ encoder:</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl run curl-probe --rm -i --restart<span class="o">=</span>Never --image<span class="o">=</span>curlimages/curl -- <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  curl -sS -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --data-binary @request.json <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  http://case120-epd-router.default.svc:8081/v1/chat/completions</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  http://case120-epd-router.default.svc:8000/v1/chat/completions</span></span></code></pre></div>
 </div><p>The response was HTTP 200 with 285 characters of generated text describing the image. To see which
 engine did what, read the access line each stage logged:</p>
 <table>
@@ -898,7 +898,7 @@ discovery and then removed after a fixed window. See the last rows of <a href="#
       </tr>
       <tr>
           <td>Endpoint</td>
-          <td><code>http://case120-epd-router.default.svc:8081</code></td>
+          <td><code>http://case120-epd-router.default.svc:8000</code></td>
       </tr>
       <tr>
           <td>Encoder wiring</td>
@@ -936,7 +936,7 @@ discovery and then removed after a fixed window. See the last rows of <a href="#
   <tbody>
       <tr>
           <td>Published endpoint</td>
-          <td><code>http://sglang-epd-llmd-router.default.svc:8081</code></td>
+          <td><code>http://sglang-epd-llmd-router.default.svc:8000</code></td>
       </tr>
       <tr>
           <td>Encoder flags</td>
@@ -1041,7 +1041,7 @@ engine, because the pool held a single two-GPU node.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/e17b855b75e3b90f22d485d843b1ced1043e25b1/docs/walkthroughs/model-deployment/epd.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/7d419d419653869138cef42c7475c472a2461dfa/docs/walkthroughs/model-deployment/epd.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/epd.md">Edit this page</a>
             

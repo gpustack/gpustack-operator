@@ -851,15 +851,15 @@ These short checks establish functional inference, not throughput or sustained-l
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">ROUTER_POD</span><span class="o">=</span><span class="k">$(</span>kubectl -n gpustack-elastic get pods <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>external-fixed -o json <span class="p">|</span>
 </span></span><span class="line"><span class="cl">  jq -r <span class="s1">&#39;.items[] | select(any(.spec.containers[]; .name == &#34;router&#34;)) | .metadata.name&#39;</span><span class="k">)</span>
-</span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic port-forward <span class="s2">&#34;pod/</span><span class="nv">$ROUTER_POD</span><span class="s2">&#34;</span> 18081:8081 19090:9090</span></span></code></pre></div>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic port-forward <span class="s2">&#34;pod/</span><span class="nv">$ROUTER_POD</span><span class="s2">&#34;</span> 18080:8000 19090:9090</span></span></code></pre></div>
 </div><p>In another terminal, read the registered workers and per-worker request counters:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">curl --fail-with-body http://127.0.0.1:18081/observer/endpoints <span class="p">|</span>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">curl --fail-with-body http://127.0.0.1:18080/observer/endpoints <span class="p">|</span>
 </span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;.workers[] | {url, selection}&#39;</span>
 </span></span><span class="line"><span class="cl">curl --fail-with-body http://127.0.0.1:19090/metrics <span class="p">|</span>
 </span></span><span class="line"><span class="cl">  grep <span class="s1">&#39;^vllm_router_processed_requests_total&#39;</span></span></span></code></pre></div>
-</div><p>Repeat the completion requests through port 18081. Compare the counters before and after.
+</div><p>Repeat the completion requests through port 18080. Compare the counters before and after.
 For complete External LB coverage, the registry must contain both rank endpoints.
 Requests must increase each rank&rsquo;s counter. A successful response through the Router is insufficient.</p>
 <p>The corrected run registered both healthy endpoints and included both in selection.
@@ -1016,7 +1016,7 @@ Both engine Pods remained running through the Operator upgrade. The Router Pod r
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/e17b855b75e3b90f22d485d843b1ced1043e25b1/docs/walkthroughs/model-deployment/external-dp.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/7d419d419653869138cef42c7475c472a2461dfa/docs/walkthroughs/model-deployment/external-dp.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/external-dp.md">Edit this page</a>
             
