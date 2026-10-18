@@ -1,6 +1,6 @@
 # Spec: ModelDeployment Explicit Spec Hash and Implicit Render Versioning
 
-Status: Building
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -205,7 +205,7 @@ Pre-compute the role-template's explicit hash inside [`renderModelDeploymentPodT
     - Coexistence test proves a deployment with `render-version: "1"` and `"2"` replicas serves both through Service and Router selectors, preserves the `"1"` replica across scale-up and scale-down, rolls both on an explicit role field edit, and rolls the `"1"` replica when `modeldeployment.gpustack.ai/min-render-version: "2"` is set.
   - Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -tags 'goccy netgo' -race -count=1 ./pkg/worker/controllers/worker/...`
 
-- [ ] **T5: Update `ModelDeployment` documentation and verify repo-wide lint and docs gates**
+- [x] **T5: Update `ModelDeployment` documentation and verify repo-wide lint and docs gates**
   - Blocked by: [T3]
   - Owns: `docs/modules/model-deployment/deployment.md`, `docs/modules/model-deployment/status.md`, `docs/README.md`
   - Acceptance:
