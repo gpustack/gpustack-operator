@@ -425,6 +425,7 @@ Acceptance:
 - vLLM-Ascend and ROCm are admitted before verification, so a silent transfer failure can ship → State the unverified status next to the admission rule, and run the transfer-evidence checks as soon as hardware exists.
 - The router image must exist before the settings change → Open the image pull request first, and gate the EPD rendering that needs it on the settings change.
 - Moving `vllm-router` or `llm-d-router` can break the patches the operator applies → The image build fails on a patch mismatch, so a bump shows up before release.
+- No artifact records the full argv of the verified L40S runs, so the rendered bytes of the shipped branch cannot be proven identical to what ran on hardware → This is a known evidence gap, not an oversight. A render comparison shows the NVIDIA `PodSpec` of the four admitted rows is identical from `af6cd02f` to the branch head, and the `Command` and `Env` of the prefill and decode roles match `main`. The next hardware run should save the rendered `PodSpec` beside its results.
 
 ## Design Details
 
