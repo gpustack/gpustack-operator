@@ -1534,3 +1534,126 @@ func TestModelDeploymentMetricsHandler_RoutedServersWithOneIdleAreComplete(t *te
 	}
 	assert.Equal(t, map[string]string{"ttft": "chat-server-busy", "tpot": "chat-server-busy", "itl": "chat-server-busy"}, latency)
 }
+
+// metricsEncoderFixture is what an Encode Pod's listener serves: the engine's request gauges and
+// nothing else. An encoder produces encoder-cache output rather than language-model tokens, so it
+// exports no time-to-first-token histogram, no per-output-token latency and no prefix-cache
+// counter, and this body says exactly that rather than serving a language model with a name changed.
+const metricsEncoderFixture = `# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running 2
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting 0
+`
+
+// metricsEncoderBareFixture is an engine that answers the scrape with something that is not the
+// language-model request accounting at all. Which of the two encoder shapes a real encoder takes is
+// not established by this tree, so both are exercised: a gauge set it does not publish must not
+// turn the snapshot partial, and it must still say which sources it looked for and did not find.
+const metricsEncoderBareFixture = `# HELP vllm:gpu_cache_usage_perc GPU KV cache usage.
+# TYPE vllm:gpu_cache_usage_perc gauge
+vllm:gpu_cache_usage_perc 0
+`
+
+// TestModelDeploymentMetricsHandler_EncodePublishesNoTokenSeries asserts that an Encode Pod is
+// measured against the series its role actually publishes, and that failing to read one is still a
+// failure of the whole snapshot rather than an absence the role excuses.
+//
+// THE TWO CASES SHARE ONE EXECUTION LOOP because they are one contract seen from both sides: the
+// role may excuse a series the encoder never exports, and it may excuse nothing about a read that
+// failed. The unreadable Pod is beside a readable one rather than alone because a snapshot whose
+// every Pod is unreadable is refused outright, which would test the refusal and not the partial mark.
+func TestModelDeploymentMetricsHandler_EncodePublishesNoTokenSeries(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		unreadable  bool
+		replicas    int32
+		wantPartial bool
+		wantMissing []worker.ModelDeploymentMetricMissing
+	}{
+		{
+			name:     "one healthy encoder is not partial for the series it never publishes",
+			body:     metricsEncoderFixture,
+			replicas: 1,
+		},
+		{
+			// An encoder that publishes none of the language-model request queues either. The
+			// gauges are still asked for, so their absence is reported in missing[] with the
+			// role's own reason rather than dropped, and the reader can see why the snapshot
+			// carries no processing value for this Pod without the whole snapshot turning
+			// partial over a source the role was never providing.
+			name:     "an encoder exporting no request queue at all is still not partial",
+			body:     metricsEncoderBareFixture,
+			replicas: 1,
+			wantMissing: []worker.ModelDeploymentMetricMissing{
+				{Pod: "chat-encode-1", Source: "vllm:num_requests_running", Reason: modelDeploymentEncodeNoRequestGauge},
+				{Pod: "chat-encode-1", Source: "vllm:num_requests_waiting", Reason: modelDeploymentEncodeNoRequestGauge},
+			},
+		},
+		{
+			name:        "one healthy encoder beside an unreadable one is partial",
+			body:        metricsEncoderFixture,
+			unreadable:  true,
+			replicas:    2,
+			wantPartial: true,
+			wantMissing: []worker.ModelDeploymentMetricMissing{{
+				Pod: "chat-encode-2", Source: "scrape", Reason: "metrics endpoint returned HTTP 500",
+			}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			readable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, tc.body)
+			}))
+			defer readable.Close()
+			refused := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer refused.Close()
+
+			md := metricsModelDeployment()
+			md.Spec.Roles = []workercore.ModelDeploymentRole{{
+				Name: "encode", Kind: workercore.ModelDeploymentRoleKindEncode, Replicas: tc.replicas,
+			}}
+			host, port := metricsHostPort(t, readable)
+			first := metricsEnginePod(md, "chat-encode-1", host, port)
+			first.Labels["app.kubernetes.io/component"] = "encode"
+			objects := []ctrlcli.Object{md, first}
+			if tc.unreadable {
+				refusedHost, refusedPort := metricsHostPort(t, refused)
+				second := metricsEnginePod(md, "chat-encode-2", refusedHost, refusedPort)
+				second.Labels["app.kubernetes.io/component"] = "encode"
+				objects = append(objects, second)
+			}
+			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(objects...).Build()
+			h := &ModelDeploymentMetricsHandler{APIReader: cli, HTTPClient: readable.Client()}
+
+			obj, err := h.OnGet(context.Background(),
+				types.NamespacedName{Namespace: md.Namespace, Name: md.Name}, ctrlcli.GetOptions{})
+			require.NoError(t, err)
+
+			result := obj.(*worker.ModelDeploymentMetrics)
+			assert.Equal(t, tc.wantPartial, result.Partial)
+			// The order of missing[] is the order the sources were asked in, which is a map walk,
+			// so the cases assert membership rather than a sequence they cannot pin.
+			assert.ElementsMatch(t, tc.wantMissing, result.Missing)
+			assert.Empty(t, result.Latency,
+				"an encoder serves no tokens, so it has no latency window to report")
+			assert.Empty(t, result.CacheHits,
+				"an encoder holds no KV cache, so it has no cache-hit ratio to report")
+		})
+	}
+}
+
+// metricsHostPort is the address one fixture server is scraped at, for the tests that drive the
+// handler through a real listener rather than through a prepared read.
+func metricsHostPort(t *testing.T, server *httptest.Server) (host, port string) {
+	t.Helper()
+	parsed, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	host, port, err = net.SplitHostPort(parsed.Host)
+	require.NoError(t, err)
+
+	return host, port
+}

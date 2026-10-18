@@ -8,6 +8,7 @@ See [Prefill and Decode](prefill-decode.md) for the External DP boundary within 
 ## Contents
 
 - [Which Pods receive traffic](#which-pods-receive-traffic)
+- [Encode stage routing](#encode-stage-routing)
 - [Each router's default](#each-routers-default)
 - [Prefix affinity](#prefix-affinity)
 - [Switching to round robin](#switching-to-round-robin)
@@ -25,7 +26,14 @@ The engine's LB mode determines the candidate endpoints. The Router policy choos
 | Internal Server group | Member 0 of each replica. |
 | Qualified External Server group | Every qualified member; each member serves one DP rank. |
 | Prefill or Decode group | Member 0 of each replica, including groups with `size > 1`. |
+| Encode group | Excluded from answering candidates and the deployment-wide Service. |
 | Unknown mode or unverified group | Keep the existing leader restriction; do not expand discovery. |
+
+`Encode` Pods are never part of the deployment's answering set. Under `llm-d-router` they are
+discovered for stage routing, and under `vllm-router` their Service endpoint is passed through
+`--epd-config`, while the deployment Service never targets them. All three routers (`llm-d-router`,
+`vllm-router` and `sglang-gateway`) are admitted with an `Encode` role for their supported engine
+and platform combinations. See [Encode stage routing](#encode-stage-routing).
 
 For an eligible External Server role, Router discovery and ordinary Services omit `member-index=0`.
 They retain the endpoint eligibility label, so an unhealthy group cannot receive new traffic.
@@ -39,6 +47,42 @@ All routed roles must use the same serving port. A shared custom port remains su
 Admission rejects vLLM's MultiPort mode because it starts endpoints on additional, incremented ports.
 A decoder proxy's internal backend port remains separate from its published HTTP port.
 See the [External DP walkthrough](../../walkthroughs/model-deployment/external-dp.md) for a minimal per-rank configuration.
+
+## Encode stage routing
+
+How the encoder is reached depends on the engine and router. Send requests to
+`status.endpoint` in every case.
+
+| Router | Engine | How the encoder is reached |
+|---|---|---|
+| `llm-d-router` | `vLLM` | The router picks an encoder for requests with media, then the decode sidecar coordinates the transfer |
+| `vllm-router` | `vLLM` | The router receives the encoder Service URL via `--epd-config` and drives encode, prefill and decode directly without a decode sidecar |
+| `llm-d-router` | `SGLang` | The `Prefill` role calls the `Encode` role directly through `--encoder-urls`; the router has no encode stage |
+| `sglang-gateway` | `SGLang` | The gateway routes the pair natively; the `Prefill` role calls the `Encode` role directly |
+
+With `llm-d-router` and `vLLM`, the router defines an `encode` scheduling profile over the Pods
+labelled `modeldeployment.gpustack.ai/role-kind: encode`. The profile applies no queue, KV cache or
+prefix scorers, because an encoder keeps no KV cache and tracks no tokens. A multimodal-aware
+decider sends a request with media through an encoder first. A text-only request goes straight to
+prefill and decode.
+
+On the Ascend EPD shape (`llm-d-router` + `vLLM-Ascend` + `ECExampleConnector`), the `encode`
+role answers requests that carry media and stays idle for text-only traffic. The connector hands
+the result to `Prefill` through the shared volume both roles mount; the router is not in that path.
+
+The operator keeps a vLLM encoder in the router's candidate set on every platform. Its
+address-based encoder path applies only to SGLang.
+
+The decode sidecar's `--ec-connector` follows the admitted row: `ec-example` on Ascend and `ec-nixl`
+on NVIDIA and AMD. See [The admitted matrix](epd.md#the-admitted-matrix).
+
+With `vllm-router` and `vLLM` (on NVIDIA and AMD), the operator passes `--epd-config={"encoder_urls":["http://<md>-<encode-role>.<ns>.svc:<port>"]}` to the router. The router calls the encoder Service first, forwards `ec_transfer_params` to the prefill worker so it pulls the embeddings over NIXL (`ECCPUConnector`), and strips `ec_transfer_params` before forwarding to decode. `--epd-config` is operator-owned and refused in `spec.router.extraArgs`.
+
+With `llm-d-router` and `SGLang`, the router splits every request between prefill and decode,
+because an SGLang decode role cannot prefill. The sidecar runs without `--ec-connector`, since this
+engine uses no encoder-cache connector.
+
+Encoders are also excluded from KV cache event discovery, because they produce no cache blocks.
 
 ## Each router's default
 
@@ -168,8 +212,6 @@ the engine Pods' own counts instead, such as each Pod's TTFT histogram `_count`.
 
 ---
 
-**See also** — [Model Deployment Prefill and Decode](prefill-decode.md)
-for `spec.router` and the flags each router refuses · [Model Deployment Metrics](metrics.md) for the router
-counters a deployment's snapshot reads.
+**See also** — [Model Deployment Prefill and Decode](prefill-decode.md) for `spec.router` and the flags each router refuses · [Model Deployment Encode, Prefill and Decode](epd.md) for EPD disaggregation and connector options · [Model Deployment Metrics](metrics.md) for the router counters a deployment's snapshot reads.
 
 **Next** → [Model Deployment Status](status.md)

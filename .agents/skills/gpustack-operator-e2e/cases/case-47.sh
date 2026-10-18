@@ -165,7 +165,7 @@ metadata:
 spec:
   engine:
     name: SGLang
-    version: "0.5.18"
+    image: ${CLIENT_IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:

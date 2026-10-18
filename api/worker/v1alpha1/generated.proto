@@ -3203,46 +3203,44 @@ message ModelDeploymentAdditionalVolume {
   // mount reaches the node's own filesystem rather than a namespaced object, so what it exposes
   // is decided by what the node carries rather than by anything this API can see.
   optional .k8s.io.api.core.v1.HostPathVolumeSource hostPath = 6;
+
+  // PersistentVolumeClaim is the reference to a PersistentVolumeClaim to mount, in the deployment
+  // namespace. claimName is required and names a claim in this namespace; exactly one source is
+  // set on the entry. The existing mount path, sub-path and read-only fields apply.
+  optional .k8s.io.api.core.v1.PersistentVolumeClaimVolumeSource persistentVolumeClaim = 7;
 }
 
-// ModelDeploymentEngine is the engine a deployment runs and the version of it.
+// ModelDeploymentEngine is the engine a deployment runs and the image it runs in.
 //
-// The two are one object because they were never meaningful apart: a role that names no image of
-// its own has one assembled from the engine and the version together with the role's own
-// InstanceType. The version carries no obligation of its own — it is owed exactly when some role
-// needs that assembly, which admission rather than the schema decides, because which roles need it
-// is a fact about the roles and not about this field.
+// The image is a deployment-wide default rather than a per-role field, because the roles of one
+// deployment are one engine build and usually share one image. A role that needs a different one
+// names it in its own spec, which overrides this field.
 message ModelDeploymentEngine {
   // Name selects the engine.
   //
-  // It is the half of this object that is the deployment's identity and is frozen after creation,
-  // while Version answers which build runs and stays editable — stated here because one object
-  // reading otherwise would freeze the pair together.
+  // It is the deployment's identity and is frozen after creation, while Image answers which
+  // build runs and stays editable — stated here because one object reading otherwise would
+  // freeze the pair together.
   //
   // +required
   // +k8s:validation:enum=["vLLM","SGLang"]
   optional string name = 1;
 
-  // Version is the engine's own version, e.g. "0.29.0" for vllm or "0.5.18" for sglang.
+  // Image is the container image every role of this deployment runs in by default.
   //
-  //   - It is OPTIONAL, and the obligation sits with the roles instead: a role that names no image
-  //     of its own has one synthesized from this version, so admission refuses an empty version
-  //     beside such a role rather than letting the render assemble a malformed tag naming
-  //     something never typed. A role that names an image never reads this field.
-  //   - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the
-  //     driver each role's hardware installed are aligned. A gate would need the runner's release
-  //     matrix compiled into the operator, and the failure it would prevent is already legible as
-  //     an ImagePullBackOff on a tag that does not exist.
-  //   - It is per deployment rather than per role, which is what lets one version assemble a
-  //     DIFFERENT image for each role: the backend half of the tag comes from the role's own
-  //     InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.
-  //     Published version sets do NOT overlap across every backend, so one version has to name a
-  //     tag that exists for each backend the roles land on.
+  //   - It is the WHOLE-DEPLOYMENT default: a role that names its own image runs that one
+  //     instead, so this field is what an unstated role falls back to.
+  //   - The operator does not build an image, so the tag must exist in a registry the cluster
+  //     can pull.
+  //   - The minimum of 1 holds the requirement shut. Without it a required string here is
+  //     satisfied by the key merely being present, and this object is re-marshaled by the
+  //     mutating webhook: Engine is a value type and this field has no omitempty, so a patch
+  //     taken from a request that named no image still carries an empty one.
   //
-  // +optional
+  // +required
   // +k8s:validation:minLength=1
-  // +k8s:validation:maxLength=64
-  optional string version = 2;
+  // +k8s:validation:maxLength=512
+  optional string image = 2;
 }
 
 // ModelDeploymentEnvVar defines one environment variable appended to a role's replica.
@@ -3381,7 +3379,7 @@ message ModelDeploymentKVTransfer {
   //     argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
   //     across InstanceTypes the groups rebuild independently, and a mixed-protocol window
   //     between a prefiller and a decoder exists until both converge -- the same window an
-  //     engine version edit already opens.
+  //     engine image edit already opens.
   //
   // +optional
   // +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM"]
@@ -3686,7 +3684,7 @@ message ModelDeploymentRole {
   // so such a deployment renders exactly as it did.
   //
   // +k8s:validation:default="Server"
-  // +k8s:validation:enum=["Server","Prefill","Decode"]
+  // +k8s:validation:enum=["Server","Prefill","Decode","Encode"]
   optional string kind = 8;
 
   // Replicas is how many independent serving instances this role runs. The instances are
@@ -3772,9 +3770,9 @@ message ModelDeploymentRole {
   // elastic-EP profile freezes this field at the whole-card group it bound to TP at creation.
   optional ModelDeploymentRoleResources resources = 4;
 
-  // Image is the container image to run. Leaving it empty is the ordinary case: the operator then
-  // synthesizes one from the pool's accelerator backend, the observed runtime version and the
-  // requested engine.
+  // Image is the container image to run. Leaving it empty is the ordinary case: the role then
+  // runs the deployment's engine image. Set it to run a private build, to pin this one role to
+  // an image different from the engine's, or to name a repository the engine image does not.
   //
   // +optional
   // +k8s:validation:maxLength=512
@@ -4091,7 +4089,7 @@ message ModelDeploymentRoleStatus {
   // figure down with the kind. The marker sits on the field because the type's own enum marker is a
   // Go-level one and does not become schema validation.
   //
-  // +k8s:validation:enum=["Server","Prefill","Decode"]
+  // +k8s:validation:enum=["Server","Prefill","Decode","Encode"]
   optional string kind = 5;
 
   // AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for

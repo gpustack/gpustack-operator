@@ -41,10 +41,9 @@
 #
 # Inputs:      All real, nothing mocked. Three ModelDeployments: a probe sized past every flavor's
 #              quota, a filler sized from what Kueue reserved for the probe, and the two-role subject
-#              under test. Each role carries an explicit `template.image` because a CPU-only
-#              InstanceType has observed no accelerator and the operator can synthesize no engine
-#              image; nothing asserted here reads what they run. Override with E2E_MD_IMAGE, the
-#              InstanceType with E2E_MD_INSTANCE_TYPE.
+#              under test. Each role carries an explicit `image` because the replicas are
+#              placeholders here and nothing asserted reads what they run. Override with
+#              E2E_MD_IMAGE, the InstanceType with E2E_MD_INSTANCE_TYPE.
 #
 # Expected:    With the quota free the two-role subject is admitted (the baseline). With the pool
 #              shorted to one replica, exactly one of the subject's roles reserves quota, every one of
@@ -186,7 +185,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "0.11.0"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:

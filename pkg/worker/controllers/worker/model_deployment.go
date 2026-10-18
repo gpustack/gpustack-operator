@@ -1272,8 +1272,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// to be. The error is returned after the status is written, so the pass is still not treated as
 	// successful and the missing replicas are retried.
 	var createErr error
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
+	for _, role := range modelDeploymentCreateRoleOrder(md) {
 		for _, ordinal := range createOrdinals[role.Name] {
 			if slot, held := slots.slotFor(role.Name); held && slot.Ordinal == ordinal &&
 				slot.Phase == modelDeploymentReplacementCleanup {
@@ -1468,36 +1467,6 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentDepartures(
 	for _, d := range modelDeploymentReplicaDepartures(pods) {
 		r.Recorder.Event(md, core.EventTypeWarning, d.reason, d.message)
 	}
-}
-
-// recordModelDeploymentRuntimeVersionSkew records that a role's pool disagrees on a runtime
-// version, and does so only for a role whose image the operator SYNTHESIZES.
-//
-// A role that states its own image is unaffected by the pool's version spread: the operator did not
-// choose that tag and the spread tells its owner nothing actionable. Emitting it anyway would train
-// readers to ignore the reason they need when the image IS synthesized.
-//
-// It fires on every pass while the disagreement lasts, which is deliberate. A driver rollout is a
-// standing condition rather than an edge, and the API server folds repeats of one
-// (object, reason, message) into a single event with a count -- so a standing warning stays visible
-// for as long as it is true instead of scrolling away, which is precisely what an operator
-// diagnosing an ImagePullBackOff hours later needs.
-func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, instType *worker.InstanceType,
-) {
-	if r.Recorder == nil {
-		return
-	}
-	if role.Image != "" {
-		return
-	}
-
-	message, ok := modelDeploymentRuntimeVersionSkew(role.Name, instType.Status.Detail)
-	if !ok {
-		return
-	}
-
-	r.Recorder.Event(md, core.EventTypeWarning, modelDeploymentEventRuntimeVersionSkew, message)
 }
 
 // convergeModelDeploymentEndpointEligibility is the single write path of the eligibility label:
@@ -1888,7 +1857,7 @@ func modelDeploymentServiceRoleOf(
 	md *workercore.ModelDeployment, serviceName string,
 ) *workercore.ModelDeploymentRole {
 	if serviceName == md.Name {
-		return &md.Spec.Roles[0]
+		return modelDeploymentFrontRole(md)
 	}
 	for i := range md.Spec.Roles {
 		if serviceName == md.Name+"-"+md.Spec.Roles[i].Name {
@@ -2033,11 +2002,6 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			return nil, err
 		}
 
-		// Recorded here rather than in a pass of its own, because this is the one place that
-		// already holds both the role and its InstanceType: a second loop would read the same
-		// object again for a message.
-		r.recordModelDeploymentRuntimeVersionSkew(md, role, instType)
-
 		in := ModelDeploymentRenderInput{
 			Deployment:                 md,
 			Role:                       role,
@@ -2055,10 +2019,23 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 		// because the accelerator is the role's: it selects the store connector the engine
 		// registers, and only the role's InstanceType knows it.
 		//
+		// ENCODE REACHES THE RENDERER, BUT NOT THE KV CONNECTOR. The synthesizer renders the
+		// encoder-cache leg on it, which is the whole point of it being here; what an encoder does
+		// not do is reach the shared KV store. The early skip that used to keep Encode out of this
+		// block has therefore become a term below that excludes the KV terms alone, so a leg the
+		// operator owns is configured while the store the operator does not own is left alone.
 		kvTransfer := modelDeploymentUsesKVTransfer(md, role, instType.Status.Detail.Manufacturer)
 		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, instType.Status.Detail.Manufacturer)
 		routingSidecar := modelDeploymentFrontsDecodeWithSidecar(md, role)
-		if ModelDeploymentMaySynthesizeConnector(md) &&
+		roleKind := ModelDeploymentEffectiveRoleKind(role)
+		// The encoder stage is the row's answer for this combination, taken once per role because
+		// the render is per role: the leg differs by half and the sidecar flag is the same on both
+		// ends of the data plane. Both are empty for a deployment with no encoder stage, so the
+		// fields below are set unconditionally rather than behind a test.
+		encoderLeg := modelDeploymentEPDEncoderLeg(md, role, instType.Status.Detail.Manufacturer)
+		encoderURLs := modelDeploymentEPDEncoderURLs(md)
+		if roleKind != workercore.ModelDeploymentRoleKindEncode &&
+			ModelDeploymentMaySynthesizeConnector(md) &&
 			(connection != nil || kvTransfer || publishKVEvents || routingSidecar) {
 			roleConnection := ModelDeploymentConnectorInput{}
 			if connection != nil {
@@ -2080,6 +2057,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			roleConnection.Parallelism = pair
 			roleConnection.KVTransfer = kvTransfer
 			roleConnection.RoutingSidecar = routingSidecar
+			roleConnection.EncoderCache = encoderLeg
+			roleConnection.EncoderURLs = encoderURLs
 			if md.Spec.KVTransfer != nil {
 				roleConnection.KVTransferProtocol = md.Spec.KVTransfer.Protocol
 			}
@@ -2096,7 +2075,41 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 				return nil, fmt.Errorf("role %q cannot be given a cache client: %w", role.Name, err)
 			}
 			in.Connector = connector
+		} else if roleKind == workercore.ModelDeploymentRoleKindEncode &&
+			modelDeploymentEPDReachesEncoderStage(md, instType.Status.Detail.Manufacturer) {
+			// AN ENCODER TAKES THE LEG WITHOUT ANYTHING ELSE, so this is its own path rather than a
+			// term in the condition above: an encoder has no store connection, no transfer leg and
+			// no sidecar, and folding it into that branch would carry four false terms to reach the
+			// one that is true.
+			//
+			// THE CONDITION IS REACHABILITY, NOT THE ROLE ALONE. An engine can be told about an encoder stage
+			// either because an admitted row names the connector it runs or because that engine splits
+			// its encoder by address; a combination with neither renders this role undivided, which is
+			// what it rendered before any of this existed and what a reconcile of an object admission
+			// refuses should keep doing rather than fail over a field nothing consumes.
+			connector, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
+				Engine:       md.Spec.Engine.Name,
+				Manufacturer: instType.Status.Detail.Manufacturer,
+				Kind:         role.Kind,
+				EncoderCache: encoderLeg,
+				EncoderURLs:  encoderURLs,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("role %q cannot be given an encoder leg: %w", role.Name, err)
+			}
+			in.Connector = connector
 		}
+		// The sidecar half of the same row the engine half was configured from above, in the
+		// sidecar's own spelling. It is read from the deployment rather than from the leg above
+		// because the sidecar runs on the decode Pod, which carries no leg of its own: the reader
+		// of this flag is never one of the two roles the leg is configured onto.
+		//
+		// It is set here rather than beside the sidecar call because this is the one place holding
+		// both the deployment and its InstanceType, and therefore the one place that can ask which
+		// row this deployment runs under. Empty renders no flag, which is what a deployment
+		// declaring no encoder role gets.
+		in.ECConnector = ModelDeploymentECSidecarConnector(
+			modelDeploymentEPDConnector(md, instType.Status.Detail.Manufacturer))
 		if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
 			count, whole := role.Resources.Interface.AsInt64()
 			if !whole {

@@ -112,6 +112,25 @@ type ModelDeploymentConnectorInput struct {
 	// -- the Ascend transfer leg's -- and the zero value renders the engine's own default of
 	// one on both sides there.
 	Parallelism inject.ParallelismPair
+
+	// EncoderCache is the encoder-cache leg this role runs on an engine that names the connector
+	// rather than the addresses, which is the vLLM family. It is an input rather than a derivation
+	// because the connector is not this package's to choose: admission decides it from the matrix row
+	// for this router, engine and accelerator, and a synthesizer that picked one itself could render
+	// a leg the object was never admitted for.
+	//
+	// Its zero value asks for no leg, which is the shape every deployment without an Encode role
+	// renders, and the render is unchanged for it.
+	EncoderCache inject.EncoderCache
+
+	// EncoderURLs are the addresses of the encoder stage, which is the other engine's half of the
+	// same leg: SGLang takes the URLs on the language side and passes them down to the encoder
+	// rather than naming a connector. It is deployment-wide rather than per role because a
+	// deployment declaring an Encode role has one set of them, and the roles that do not read them
+	// render nothing from the list.
+	//
+	// Empty asks for no encoder stage, which renders nothing.
+	EncoderURLs []string
 }
 
 // TWO FIELDS THIS STRUCT USED TO CARRY ARE GONE, and neither is a capability that was lost.
@@ -255,6 +274,7 @@ func modelDeploymentUsesKVTransfer(
 		return false
 	}
 	if manufacturer == nodefeature.ManufacturerAscend &&
+		md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
 		md.Spec.Router.Name != workercore.ModelDeploymentRouterLLMD {
 		return false
 	}
@@ -297,6 +317,19 @@ func modelDeploymentFrontsDecodeWithSidecar(
 //
 // It is DATA READ BY BOTH the renderer and the validating webhook, so the refusal and the render can
 // never disagree about what is owned. Adding an engine adds an entry; nothing else has to change.
+//
+// THE ENCODER KEYS ARE A UNION, and that is what this table's shape forces. Everything above is
+// spelled out because the operator writes it on every deployment of the engine. The encoder-cache
+// leg writes a different set per (role, connector), and this table has no column for either -- it is
+// keyed on the engine alone, because that is what the refusal can be asked before it knows which
+// role it is judging. So the entry below names every key the leg writes for ANY request, which is
+// the same trade the repository already makes for --kv-transfer-config: a deployment with no
+// encoder stage cannot set that flag itself either.
+//
+// The cost is stated rather than hidden. A user who sets one of these on a deployment declaring no
+// Encode role is refused for a key the render would not have written anyway -- except that the leg
+// renders whenever an Encode role IS declared, and that is the deployment that would have had the
+// user's entry silently overridden by last-wins on the command line had the key been left unowned.
 var modelDeploymentOwnedKeys = map[string]struct {
 	Args []string
 	Env  []string
@@ -306,8 +339,10 @@ var modelDeploymentOwnedKeys = map[string]struct {
 	// its value was IDENTICAL to this one, because the owned keys follow the engine while only the
 	// connector name follows the backend.
 	workercore.ModelDeploymentEngineVLLM: {
-		Args: []string{"--kv-transfer-config", "--kv-events-config"},
-		Env:  []string{"MOONCAKE_CONFIG_PATH", "VLLM_MOONCAKE_BOOTSTRAP_PORT"},
+		Args: append([]string{"--kv-transfer-config", "--kv-events-config"},
+			modelDeploymentEncoderCacheOwnedArgs()...),
+		Env: append([]string{"MOONCAKE_CONFIG_PATH", "VLLM_MOONCAKE_BOOTSTRAP_PORT"},
+			modelDeploymentEncoderCacheOwnedEnv()...),
 	},
 	// SGLang is configured through the environment, so its owned set covers both the variables it
 	// actually reads AND the two keys that would divert it onto a different loader. Ownership here
@@ -342,11 +377,11 @@ var modelDeploymentOwnedKeys = map[string]struct {
 	// an unowned key here lets a role declared as one half start as the other, with both ends of
 	// the pair still advertising the first.
 	workercore.ModelDeploymentEngineSGLang: {
-		Args: []string{
+		Args: append([]string{
 			"--hicache-storage-backend", "--hicache-storage-backend-extra-config",
 			"--disaggregation-mode", "--disaggregation-transfer-backend",
 			"--disaggregation-bootstrap-port",
-		},
+		}, inject.SGLangEncoderOwnedArgs()...),
 		Env: []string{
 			"SGLANG_HICACHE_MOONCAKE_CONFIG_PATH",
 			"MOONCAKE_MASTER",
@@ -358,6 +393,48 @@ var modelDeploymentOwnedKeys = map[string]struct {
 			"MOONCAKE_TENANT_ID",
 		},
 	},
+}
+
+// modelDeploymentEncoderCacheOwnedArgs and its Env counterpart are the union of everything the
+// vLLM encoder-cache leg writes, taken over every (role, connector) it can be asked for.
+//
+// THEY ASK `inject` RATHER THAN NAMING THE KEYS, because that package is where the leg renders
+// them: a literal list here would be a second statement of what it writes, and the two would be
+// free to disagree -- which is the failure this table exists to prevent on the other side of the
+// refusal.
+//
+// The two admitted connectors and the two roles the leg renders are the whole domain, so the union
+// is taken over exactly those and not over every possible request: a caller naming a third
+// connector gets no keys from `inject` itself, and would be refused at admission before it rendered.
+func modelDeploymentEncoderCacheOwnedArgs() []string {
+	return modelDeploymentEncoderCacheOwnedKeys(func(args, _ []string) ([]string, []string) { return args, nil })
+}
+
+func modelDeploymentEncoderCacheOwnedEnv() []string {
+	return modelDeploymentEncoderCacheOwnedKeys(func(_, env []string) ([]string, []string) { return nil, env })
+}
+
+func modelDeploymentEncoderCacheOwnedKeys(pick func(args, env []string) ([]string, []string)) []string {
+	var owned []string
+	for _, connector := range []string{
+		ModelDeploymentECConnectorExample, ModelDeploymentECConnectorCPU,
+	} {
+		for _, role := range []inject.Role{inject.RoleEncode, inject.RolePrefill} {
+			args, env := pick(inject.EncoderCacheOwnedKeys(role, inject.EncoderCache{Connector: connector}))
+			for _, key := range args {
+				if !slices.Contains(owned, key) {
+					owned = append(owned, key)
+				}
+			}
+			for _, key := range env {
+				if !slices.Contains(owned, key) {
+					owned = append(owned, key)
+				}
+			}
+		}
+	}
+
+	return owned
 }
 
 // ModelDeploymentModelMountPath is where a claim artifact's directory is mounted, read-only, and
@@ -652,6 +729,11 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		Domain:        in.Domain,
 		CachePrefix:   in.CachePrefix,
 		Dtype:         in.Dtype,
+		// The encoder leg arrives whole rather than being assembled here: which connector carries it
+		// is admission's answer, read from the row it admitted this combination under. A zero value
+		// asks for no leg and renders exactly what this render produced before the leg existed.
+		EncoderCache: in.EncoderCache,
+		EncoderURLs:  in.EncoderURLs,
 		Connection: inject.Connection{
 			MasterAddress: in.MasterServerAddress,
 			Protocol:      protocol,
@@ -729,6 +811,10 @@ func ModelDeploymentEngineUpstreamName(engine string) (string, bool) {
 }
 
 // ModelDeploymentRoleUpstreamKind returns the spelling consumed by routers and Pod selectors.
+//
+// "encode" is the spelling the role-label filter and the per-role Service selector match on for
+// the encoder leg. A missing case here would leave the encoder Pod unlabeled and every selector on
+// this name blind to it.
 func ModelDeploymentRoleUpstreamKind(kind workercore.ModelDeploymentRoleKind) (string, bool) {
 	switch kind {
 	case workercore.ModelDeploymentRoleKindServer:
@@ -737,6 +823,8 @@ func ModelDeploymentRoleUpstreamKind(kind workercore.ModelDeploymentRoleKind) (s
 		return "prefill", true
 	case workercore.ModelDeploymentRoleKindDecode:
 		return "decode", true
+	case workercore.ModelDeploymentRoleKindEncode:
+		return "encode", true
 	default:
 		return "", false
 	}
@@ -766,14 +854,23 @@ func ModelDeploymentEffectiveRoleKind(
 // IT STAYS WITH ONE ROUTER AND ONE ENGINE. The publisher exists to feed that router's prefix-cache
 // data layer, which subscribes per Pod; the other two score on their own observations and subscribe
 // to nothing, so publishing under them would open two sockets on every replica that nothing reads.
+//
+// ENCODE IS NOT A KV PRODUCER: an encoder produces multimodal embeddings, not KV cache blocks, and
+// the publisher it would open has no subscriber on the data-plane side. Refusing it is what keeps a
+// deployment that pairs Encode with Prefill from rendering two sockets on the encoder when only
+// one has a consumer.
 func modelDeploymentPublishesKVEvents(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) bool {
+	kind := ModelDeploymentEffectiveRoleKind(role)
+	if kind == workercore.ModelDeploymentRoleKindDecode || kind == workercore.ModelDeploymentRoleKindEncode {
+		return false
+	}
+
 	return modelDeploymentRoutesManaged(md, manufacturer) &&
 		md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
 		md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
-		len(role.Command) == 0 &&
-		ModelDeploymentEffectiveRoleKind(role) != workercore.ModelDeploymentRoleKindDecode
+		len(role.Command) == 0
 }
 
 // modelDeploymentInjectRole maps this API's role kind onto the renderer's role.
@@ -785,6 +882,10 @@ func modelDeploymentPublishesKVEvents(
 // An unset kind maps to the same place as "server": the CRD schema defaults the field, so nothing
 // arriving from the API server carries an empty one, but a Go caller constructing the value directly
 // does. Reading the zero value as an unknown kind would refuse every such caller.
+//
+// ENCODE HAS ITS OWN VALUE (inject.RoleEncode) and is never folded into RoleNone. Returning the
+// dedicated value is what lets the connector refuse a role the renderer cannot take, and the
+// engine-support table refuse it again at admission -- both on the same answer.
 func modelDeploymentInjectRole(kind workercore.ModelDeploymentRoleKind) (inject.Role, bool) {
 	switch kind {
 	case "", workercore.ModelDeploymentRoleKindServer:
@@ -793,6 +894,8 @@ func modelDeploymentInjectRole(kind workercore.ModelDeploymentRoleKind) (inject.
 		return inject.RolePrefill, true
 	case workercore.ModelDeploymentRoleKindDecode:
 		return inject.RoleDecode, true
+	case workercore.ModelDeploymentRoleKindEncode:
+		return inject.RoleEncode, true
 	default:
 		return "", false
 	}

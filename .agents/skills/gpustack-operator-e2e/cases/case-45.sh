@@ -34,15 +34,11 @@
 #              image carrying the ModelDeployment CRD. No GPU is needed, and NO KVCachePoolBinding
 #              has to exist.
 #
-#              ONE ROW PAYS FOR THE "NO GPU" PART EXPLICITLY, and it did not always. The
-#              replica-rendering row gives its role an explicit `image`, because a role naming no
-#              image has one SYNTHESIZED from the accelerator backend its InstanceType observed —
-#              and a CPU-only InstanceType has observed none. Measured on a single-node CPU-only
-#              cluster: without the explicit image that row polls out at 0 Pods, and the operator
-#              log says "the instance type has not observed its hardware yet". That is a correct
-#              refusal (an empty image would surface later as an ImagePullBackOff naming a tag
-#              nobody typed) and it has its own coverage in the unit tier, so the row drops the
-#              dependency rather than the assertion: it still requires EXACTLY 1 Pod, so a
+#              THE ROWS THAT SCHEDULE A REPLICA NEED AN IMAGE THAT EXISTS, and that is now a schema
+#              obligation rather than a controller one. `spec.engine.image` is required, so the
+#              baseline manifest carries a placeholder that pulls on any platform; a role that names
+#              nothing falls back to it. The one row that schedules a replica names its own image,
+#              which is the ordinary per-role override, and it still requires EXACTLY 1 Pod, so a
 #              convergence wrongly gated on the domain still fails it.
 #
 #              The lesson is in the header rather than at the row: this line read "No GPU is needed:
@@ -90,6 +86,9 @@ fi
 # row at the end asserts that the controller does.
 BINDING="case45-no-such-binding"
 IT="${E2E_MD_INSTANCE_TYPE:-}"
+# The deployment-wide engine image. No row here runs a container, so what it names does not matter --
+# only that it exists, because the field is required and a role that names none falls back to it.
+IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 
 FAILS=0
 ROWS=()
@@ -153,7 +152,7 @@ metadata:
 spec:
   engine:
     name: ${ENGINE:-vLLM}
-    version: "0.11.0"
+    image: ${IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:
@@ -245,23 +244,20 @@ refuses "the template tier is refused as an unknown field" \
   "    template:
       image: docker.io/library/busybox:1.36" ""
 
-# The take-over tier, with NO image. This row asserts an ACCEPTANCE: a role that replaces the whole
-# command line is not required to name an image, because the two capabilities do not exclude each
-# other -- image synthesis is independent of who owns the argv.
+# The take-over tier: a role that replaces the whole command line. It asserts an ACCEPTANCE, because
+# owning the argv and naming an image are independent choices -- the operator runs whatever the role
+# says, and the command it would otherwise build is simply not built.
 #
-# WHAT DOES NOT PIN IT: the same manifest WITH an image. That one is accepted either way, so it
-# discriminates nothing. The absence of `image` is the entire assertion.
-takeover_out="$(manifest "    command:
+# THE IMAGE IS NOW REQUIRED, and that is why this row carries one. It used to assert the OPPOSITE:
+# that a take-over role could omit `image`, because the operator synthesized one from the
+# InstanceType. That capability is gone, so the row's old subject no longer exists. What survives is
+# the question underneath it -- does taking over the argv still admit -- and the row keeps asking it.
+accepts "a take-over role with an image is accepted" \
+  "    image: docker.io/library/busybox:1.36
+    command:
     - /bin/sh
     - -c
-    - sleep 3600" "" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
-if [ -n "$takeover_out" ] && [ -z "${takeover_out##*created*}" ]; then
-  record PASS "a take-over role without an image is accepted" \
-    "command with no image passes schema and webhook — taking over the argv does not cost the synthesized image"
-else
-  record FAIL "a take-over role without an image is accepted" \
-    "wanted acceptance, got: $(echo "$takeover_out" | cut -c1-160)"
-fi
+    - sleep 3600" ""
 
 # --- schema rows: these never reach the webhook, and that is the design ---
 
@@ -334,11 +330,10 @@ if [ "${left:-0}" -ne 0 ]; then
     "$left leftover Pod(s) from an earlier pass survived a 60s drain; every row below would have counted them"
 fi
 
-# The role names an image EXPLICITLY here, unlike every row above, and the header says why. A role
-# without one gets an image synthesized from the accelerator backend its InstanceType observed, and
-# a CPU-only InstanceType has observed none. That refusal is correct and is asserted in the unit
-# tier -- model_deployment_image_test.go and model_deployment_render_test.go both pin its message --
-# so this row drops the dependency rather than the assertion. It still demands EXACTLY 1 Pod.
+# The role names its own image here, which overrides the engine-wide one the baseline manifest
+# carries. That is the ordinary way to pin one role to another build, and it is worth exercising on
+# the one row that actually schedules a replica: it proves the override reaches the Pod spec, not
+# only the schema. The row still demands EXACTLY 1 Pod.
 #
 # THE APPLY IS READ, NOT DISCARDED. `>/dev/null 2>&1` here made a rejected manifest look like a
 # controller that never reconciled: both rows below would go red naming a missing condition and a

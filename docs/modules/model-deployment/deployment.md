@@ -16,7 +16,7 @@ admission still applies to every replica.
 - [Inherited reuse domain](#inherited-reuse-domain)
 - [The three override tiers](#the-three-override-tiers)
 - [Operator-owned keys](#operator-owned-keys)
-- [Runner image formula](#runner-image-formula)
+- [The image a role runs](#the-image-a-role-runs)
 - [Rollout behavior](#rollout-behavior)
 - [Admission refusals](#admission-refusals)
 - [Operating notes](#operating-notes)
@@ -34,7 +34,7 @@ spec:
     name: Qwen/Qwen2.5-72B-Instruct      # served, never provisioned
   engine:                                # vLLM | SGLang
     name: vLLM
-    version: "0.29.0"                    # free-form; you guarantee alignment
+    image: <a runner image your cluster can pull>   # required; you name the tag
   kvCache:                               # OPTIONAL; omit it and no shared pool is attached
     poolRef:
       name: team-a-dram                  # a KVCachePoolBinding IN THIS NAMESPACE
@@ -416,53 +416,23 @@ unlikely to collide, but an overlay that mounts over that path replaces the conf
 and the owned `MOONCAKE_CONFIG_PATH` cannot protect against it. SGLang gets no file at all; its
 configuration travels entirely in the environment.
 
-## Runner image formula
+## The image a role runs
 
-A role with no `roles[].image` gets one assembled from the engine the deployment declares and the
-hardware its InstanceType observed. A stated image always wins.
+The image a replica runs resolves in two levels: `roles[].image` when the role names one, else
+`spec.engine.image`. `engine.image` is required, so an unstated role always has somewhere to fall
+back to — it is the whole-deployment default, one object covering every role because the roles of
+one deployment are one engine build.
 
-```text
-gpustack/runner:<backend><runtimeVersion>[-<variant>]-<engine><version>
-```
+A role names its own image to run something the default is not: a private build, a repository the
+default does not name, or one role pinned differently from the rest.
 
-`gpustack/runner:cuda12.9-vllm0.29.0` on an NVIDIA pool; `gpustack/runner:cann9.0-910b-sglang0.5.18`
-on an Ascend 910B one. The platform is not part of the tag: no published tag carries an
-architecture, which indicates one multi-arch manifest per tag.
+The operator does not build an image and does not infer one from the node. The tag you name must
+exist in a registry the cluster can pull.
 
-| This project's manufacturer | Runner backend |
-|---|---|
-| `nvidia` | `cuda` |
-| `ascend` | `cann` |
-| `amd` | `rocm` |
-| `metax` | `maca` |
-| `mthreads` | `musa` |
-| `iluvatar` | `corex` |
-| `hygon` | `dtk` |
-| `thead` | `hggc` |
-| `cambricon` | none — the role must name an image |
-
-The variant applies to **Ascend only**: `310P` to `310p`, `910B` to `910b`, `910C` to `a3`, `950` to
-`950`. Across the whole matrix the variant is populated for `cann` alone. Ascend `910` and `310B`
-publish none, so a role on one of those must name an image.
-
-`engine.version` is optional in the schema, and the obligation sits with the roles: a role that
-names no image of its own has one synthesized from this version, so admission refuses an empty
-version beside such a role. It is otherwise **free-form**: the operator checks neither that the
-combination was ever published nor that the version supports the installed driver. You guarantee
-version alignment; a bad combination surfaces as an `ImagePullBackOff` on a tag that does not exist.
-
-It is per deployment rather than per role, which is what lets one engine and one version assemble a
-**different** image per role: the backend half of the tag comes from the role's own InstanceType.
-
-Two synthesis failures read alike and are not the same: a manufacturer with no backend, or a family
-with no variant, will **never** resolve and the role has to name an image, while an unobserved
-runtime version resolves on a later reconcile. Each message says which one it is.
-
-**A pool mid driver rollout does not agree on a runtime version.** The image takes the **lowest**
-version the pool reports, because a workload's image is fixed before admission chooses its node and
-only the lowest runs everywhere. The deployment then carries a `RuntimeVersionSkew` warning event
-naming the value taken and the ones skipped, so the node holding the pool back is legible instead of
-appearing as an unattributable `ImagePullBackOff`.
+**Why the operator does not infer the image from the node.** A node reports the driver or toolkit
+it has installed. A runner tag names the SDK the image was built with. The two share a spelling but
+not a value, and no formula can see which tags a registry carries. You name the tag; the operator
+uses it as written.
 
 ## Rollout behavior
 
@@ -633,7 +603,7 @@ table below lists both groups.
 
 | Frozen | Editable |
 |---|---|
-| `model`, `engine.name`, `kvCache` | `engine.version`, `kvTransfer` |
+| `model`, `engine.name`, `kvCache` | `engine.image`, `kvTransfer` |
 | `router.name` in place — the router block itself may be added or removed | `router.replicas`, `router.extraArgs` |
 | the set of roles, and each role's `name` and `kind` | `roles[].replicas`, `roles[].size` |
 | on a role carrying `elasticEp`: its `size`, `instanceType`, `resources` and `command` | `roles[].instanceType`, `roles[].resources`, `roles[].command` |
@@ -763,12 +733,12 @@ role onto a mode its type does not offer, and nothing renders the result. Why th
 rather than merely tidy is in
 [Update validation while an object is deleted](../devices/admission.md#update-validation-while-an-object-is-deleted).
 
-A manufacturer with no runner backend is still refused **at render time and not at admission**, and the
-reason is not the missing client. The rule needs the InstanceType's OBSERVED detail, and
-`InstanceType.status` has not converged on a freshly created object, so the rule would refuse a
-perfectly legal deployment for losing a race against the InstanceType reconciler.
+The render, not admission, is where a not-yet-converged InstanceType shows up. Sizing a replica
+needs the InstanceType's OBSERVED detail, and `InstanceType.status` has not converged on a freshly
+created object, so the render fails rather than admission refusing a perfectly legal deployment for
+losing a race against the InstanceType reconciler.
 
-The render-time refusal reaches a reader as a `RenderFailed` warning event carrying the renderer's
+A render-time failure reaches a reader as a `RenderFailed` warning event carrying the renderer's
 own message, because a pass that cannot build a replica aborts before writing any status.
 
 ## Operating notes

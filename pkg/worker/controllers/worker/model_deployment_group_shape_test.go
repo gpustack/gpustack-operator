@@ -473,7 +473,6 @@ func TestRenderedPodsCarryTheirGroupTotal(t *testing.T) {
 func TestActualElasticRenderCarriesExecutionFacts(t *testing.T) {
 	md := newRenderDeployment()
 	md.Spec.KVCache = nil
-	md.Spec.Engine.Version = "0.29.0"
 	md.Spec.Roles[0].Replicas = 1
 	md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
 		Accelerator: resource.NewQuantity(1, resource.DecimalSI),

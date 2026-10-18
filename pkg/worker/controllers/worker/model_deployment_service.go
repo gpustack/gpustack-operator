@@ -184,25 +184,47 @@ func modelDeploymentStandingMembers(
 func renderModelDeploymentService(
 	md *workercore.ModelDeployment, pods []core.Pod,
 ) *core.Service {
-	svc := renderModelDeploymentServiceFor(md, &md.Spec.Roles[0], md.Name)
-	modelDeploymentFrontLeadersOnly(svc, &md.Spec.Roles[0],
-		modelDeploymentRoleHasMultiMemberReplica(pods, md, &md.Spec.Roles[0]))
-	modelDeploymentSelectAnsweringMembers(svc, modelDeploymentNeedsDeployedRouting(pods, md, &md.Spec.Roles[0]))
-	// ONLY THE FRONT ROLE'S OWN STANDING MEMBERS: the Service routes Roles[0] alone, so a sibling
+	front := modelDeploymentFrontRole(md)
+	svc := renderModelDeploymentServiceFor(md, front, md.Name)
+	modelDeploymentFrontLeadersOnly(svc, front,
+		modelDeploymentRoleHasMultiMemberReplica(pods, md, front))
+	modelDeploymentSelectAnsweringMembers(svc, modelDeploymentNeedsDeployedRouting(pods, md, front))
+	// ONLY THE FRONT ROLE'S OWN STANDING MEMBERS: the Service routes that role alone, so a sibling
 	// role's managed Pod, or a Pod already leaving, must not lift the take-over refusal for it.
 	var frontStanding []*core.Pod
 	for _, view := range modelDeploymentGroupPods(pods, true) {
-		if modelDeploymentPodRole(view.Members[0]) == md.Spec.Roles[0].Name {
+		if modelDeploymentPodRole(view.Members[0]) == front.Name {
 			frontStanding = append(frontStanding, view.Members...)
 		}
 	}
 	if modelDeploymentEligibilitySelectorActive(md,
-		modelDeploymentEffectiveRoleForEligibility(&md.Spec.Roles[0], frontStanding), nil,
+		modelDeploymentEffectiveRoleForEligibility(front, frontStanding), nil,
 		modelDeploymentEligibilityDecided(md)) {
-		modelDeploymentSelectEligibleEndpoints(svc, md, &md.Spec.Roles[0])
+		modelDeploymentSelectEligibleEndpoints(svc, md, front)
 	}
 
 	return svc
+}
+
+// modelDeploymentFrontRole is the role the deployment's own address belongs to: the one replica group
+// the deployment-wide Service routes and the published endpoint describes.
+//
+// AN ENCODE ROLE IS NEVER IT. An encoder turns media into embeddings for a prefiller and answers no
+// request of its own, so a front door pointed at one sends traffic to a process that serves none of
+// it -- with endpoints that resolve and answer health checks, which is what makes the failure quiet.
+// The encoder's position in the list is therefore irrelevant: first, middle or last, it is skipped.
+//
+// A DEPLOYMENT WITH NO OTHER ROLE ANSWERS NOBODY either, and admission refuses one rather than
+// creating it. The first role is returned in that case so a spec the refusal did not reach still
+// renders an address instead of nothing.
+func modelDeploymentFrontRole(md *workercore.ModelDeployment) *workercore.ModelDeploymentRole {
+	for i := range md.Spec.Roles {
+		if ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i]) != workercore.ModelDeploymentRoleKindEncode {
+			return &md.Spec.Roles[i]
+		}
+	}
+
+	return &md.Spec.Roles[0]
 }
 
 // modelDeploymentFrontLeadersOnly narrows a Service that serves the OpenAI API to the one member of
@@ -308,18 +330,14 @@ func modelDeploymentRoleHasMultiMemberReplica(
 
 // modelDeploymentGroupForwardActivatable reports whether this role's group-forward capability
 // can ever reach Verified or NotApplicable — the two states that activate eligibility. A shape
-// the operator has not verified (an unlisted engine version, or a prefill/decode role) answers
-// Unsupported by construction and can never activate, so an eligibility selector on its Services
-// would select zero endpoints forever: those Services render WITHOUT the term, preserving the
-// routing a deployment had before first enable.
+// the operator has no observation for (an engine absent from the matrix, or a prefill/decode
+// role) answers Unsupported by construction and can never activate, so an eligibility selector
+// on its Services would select zero endpoints forever: those Services render WITHOUT the term,
+// preserving the routing a deployment had before first enable.
 func modelDeploymentGroupForwardActivatable(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) bool {
-	engine, known := modelDeploymentGroupForwardEngines[md.Spec.Engine.Name]
-	if !known {
-		return false
-	}
-	if !slices.Contains(engine.VerifiedVersions, md.Spec.Engine.Version) {
+	if _, known := modelDeploymentGroupForwardEngines[md.Spec.Engine.Name]; !known {
 		return false
 	}
 	if len(role.Command) > 0 {
@@ -351,9 +369,10 @@ func modelDeploymentEligibilityDecided(md *workercore.ModelDeployment) bool {
 // modelDeploymentEligibilitySelectorActive is the ONE decision for whether a surface names
 // endpoint-eligible endpoints. Three halves, all required:
 //
-// STATIC: the shape must be able to activate at all -- a verified engine version whose roles are
-// ordinary server roles with the operator's own command. An unverified version, a prefill/decode
-// role, or a role with a replaced command can never be qualified, so its surfaces never narrow.
+// STATIC: the shape must be able to activate at all -- an engine the matrix carries, whose roles
+// are ordinary server roles with the operator's own command. An engine outside the matrix, a
+// prefill/decode role, or a role with a replaced command can never be qualified, so its surfaces
+// never narrow.
 //
 // ACTIVATION: a pass must have recorded a decided predicate -- True (qualified) or False
 // (revoked). Narrowing on first enable before any pass has answered would select zero endpoints
@@ -592,14 +611,14 @@ func ModelDeploymentRoleServingScheme(engine string, role *workercore.ModelDeplo
 // THE SCHEME IS READ FROM THE SAME ROLE THE PORT IS, and it has to be: a role serving over TLS that
 // is published as http:// is an address no client can use, while the replica behind it is graded
 // Ready by a probe that did speak TLS. The two would then be separate facts, which is exactly what
-// the gates exist to prevent. The first role decides both, because it is the role this Service
+// the gates exist to prevent. The front role decides both, because it is the role this Service
 // fronts.
 //
 // It is read from the role's OWN arguments rather than from a rendered command line, which this
 // function has no way to build. That is sound only because the operator's own contributions carry no
 // listen or TLS flag, which is asserted by a test rather than assumed here.
 func modelDeploymentEndpoint(md *workercore.ModelDeployment) string {
-	role := &md.Spec.Roles[0]
+	role := modelDeploymentFrontRole(md)
 	port := modelDeploymentServicePort(role)
 
 	// ONLY THE SCHEME IS WANTED HERE, and discarding the other answer is deliberate rather than an

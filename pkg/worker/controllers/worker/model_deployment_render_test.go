@@ -35,7 +35,8 @@ func newRenderDeployment(mutate ...func(*workercore.ModelDeployment)) *workercor
 		Spec: workercore.ModelDeploymentSpec{
 			Model: workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
 			Engine: workercore.ModelDeploymentEngine{
-				Name: workercore.ModelDeploymentEngineVLLM, Version: "0.25.1",
+				Name:  workercore.ModelDeploymentEngineVLLM,
+				Image: "vllm/vllm-openai:v0.25.1",
 			},
 			KVCache: &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 			Roles: []workercore.ModelDeploymentRole{{
@@ -69,8 +70,8 @@ func newRenderInstanceType(mutate ...func(*worker.InstanceType)) *worker.Instanc
 			// the two apart -- the assertion in _Identity would pass either way. This value is one
 			// no derivation produces.
 			Entrance: "queue-for-h20-8x",
-			// The observed detail carries what image synthesis needs, so a role naming no image
-			// still renders. A case that wants the unsynthesizable path clears one of these.
+			// The observed detail carries the hardware the sizing reads. A role naming no image
+			// renders the engine's image, whatever this detail reports.
 			Detail: workercore.InstanceTypeDetail{
 				Manufacturer: nodefeature.ManufacturerNVIDIA,
 				InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
@@ -174,7 +175,7 @@ func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
 			require.Len(t, pod.Spec.InitContainers, 1)
 			sidecar := pod.Spec.InitContainers[0]
 			assert.Equal(t, "routing-proxy", sidecar.Name)
-			assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.10.0", sidecar.Image)
+			assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0", sidecar.Image)
 			require.NotNil(t, sidecar.RestartPolicy)
 			assert.Equal(t, core.ContainerRestartPolicyAlways, *sidecar.RestartPolicy)
 			assert.Contains(t, sidecar.Args, fmt.Sprintf("--port=%d", tc.externalPort))
@@ -377,7 +378,7 @@ func TestRenderModelDeploymentPod_DecodeUsesClassicSidecarBelowTheFloor(t *testi
 
 	sidecar := pod.Spec.Containers[0]
 	assert.Equal(t, "routing-proxy", sidecar.Name, "the proxy is the FIRST regular container, the closest list order gets to starting first")
-	assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.10.0", sidecar.Image)
+	assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0", sidecar.Image)
 	assert.Nil(t, sidecar.RestartPolicy,
 		"a regular container leaves the field nil and lets the Pod's restartPolicy restart it")
 	assert.Contains(t, sidecar.Args, "--port=8000")
@@ -425,7 +426,7 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("vllm speaks the mooncake handshake", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerNVIDIA)
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerNVIDIA, "")
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=mooncake")
 		assert.Contains(t, sidecar.Args,
@@ -441,7 +442,7 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("vllm on ascend relays through nixlv2", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerAscend)
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerAscend, "")
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=nixlv2",
 			"the Ascend connector speaks the four-null-key handshake the nixlv2 mode relays")
@@ -454,7 +455,7 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("sglang speaks the sglang handshake", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA)
+			workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "")
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=sglang")
 		assert.NotContains(t, sidecar.Args, "mooncake",
@@ -503,7 +504,7 @@ func TestRenderModelDeploymentRoutingSidecar_SGLangBootstrapPortPairsWithThePref
 
 	sidecar := renderModelDeploymentRoutingSidecar(
 		context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-		workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA)
+		workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "")
 	sidecarEnv := argEnvValue(t, sidecar.Env, "SGLANG_BOOTSTRAP_PORT")
 
 	assert.Equal(t, engineArg, sidecarEnv,
@@ -1432,94 +1433,58 @@ func TestRenderModelDeploymentPod_MetricsScrape(t *testing.T) {
 	}
 }
 
-// TestRenderModelDeploymentPod_SynthesizesTheImage covers the role that names none.
+// TestRenderModelDeploymentPod_ResolvesTheImageAtTwoLevels pins the rule that replaced synthesis: a
+// role's own image wins, a role naming none takes the engine's, and a pair naming none at all is
+// refused.
 //
-// The operator used to refuse this outright, on the grounds that it builds the argv but never the
-// image. It now assembles one from the engine and the observed hardware -- but only when the
-// hardware HAS been observed, which is why the second case matters as much as the first: an
-// InstanceType whose detail has not converged must not produce a tag with a hole in it.
-func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
-	t.Run("no image at all still renders", func(t *testing.T) {
-		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Image = ""
-		})
+// THE LAST CASE IS UNREACHABLE THROUGH ADMISSION, because the schema requires spec.engine.image. It
+// stays because the renderer must not depend on that: if the obligation ever moves, the failure has
+// to be a loud error rather than a Pod with an empty image that the kubelet rejects minutes later.
+func TestRenderModelDeploymentPod_ResolvesTheImageAtTwoLevels(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		engine  string
+		role    string
+		want    string
+		wantErr string
+	}{
+		{
+			name:   "the role's own image wins over the engine's",
+			engine: "vllm/vllm-openai:v0.25.1", role: "registry.example/private:v0.25.1",
+			want: "registry.example/private:v0.25.1",
+		},
+		{
+			name:   "a role naming none runs the engine's image",
+			engine: "vllm/vllm-openai:v0.25.1",
+			want:   "vllm/vllm-openai:v0.25.1",
+		},
+		{
+			name:    "neither naming one is refused rather than rendered empty",
+			wantErr: `role "server" names no image`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Image = tc.engine
+				md.Spec.Roles[0].Image = tc.role
+			})
 
-		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: newRenderInstanceType(),
-		})
-		require.NoError(t, err, "an empty image is not an error once one can be synthesized")
-		assert.Equal(t, "gpustack/runner:cuda12.9-vllm0.25.1", pod.Spec.Containers[0].Image)
-	})
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+				Deployment:   md,
+				Role:         &md.Spec.Roles[0],
+				InstanceType: newRenderInstanceType(),
+			})
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				assert.Nil(t, pod, "no Pod may be rendered with an empty image")
+				return
+			}
 
-	t.Run("a stated image wins over synthesis", func(t *testing.T) {
-		md := newRenderDeployment()
-		pod := renderOne(t, md, newRenderInstanceType())
-		assert.NotEqual(t, "gpustack/runner:cuda12.9-vllm0.25.1", pod.Spec.Containers[0].Image,
-			"synthesis must not overwrite a value the user stated")
-	})
-
-	t.Run("an unobserved runtime version refuses rather than rendering a hole", func(t *testing.T) {
-		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Image = ""
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, pod.Spec.Containers[0].Image)
 		})
-		it := newRenderInstanceType(func(it *worker.InstanceType) {
-			it.Status.Detail.RuntimeVersion = ""
-			it.Status.Detail.RuntimeVersions = nil
-		})
-
-		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: it,
-		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "names no image and none could be synthesized")
-		assert.Contains(t, err.Error(), "has not observed a runtime version yet",
-			"the reason has to distinguish a wait from a refusal, because only one of them resolves")
-	})
-
-	t.Run("a manufacturer with no runner backend refuses", func(t *testing.T) {
-		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Image = ""
-		})
-		it := newRenderInstanceType(func(it *worker.InstanceType) {
-			it.Status.Detail.Manufacturer = nodefeature.ManufacturerCambricon
-		})
-
-		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: it,
-		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "has no runner backend",
-			"this one never resolves, so the message must name the manufacturer")
-	})
-
-	// THE FALLBACK IS WHAT MAKES THIS AN ERROR PATH RATHER THAN A DEFAULT. A Pod carrying no
-	// queue-name label is not queued by Kueue at all -- the kubelet runs it directly, charging no
-	// quota and passing none of the gates the chain applies. So an InstanceType that has not
-	// published its entrance yet has to stop the render, exactly as an uncomputed accelerator detail
-	// does, rather than yield a Pod that would run.
-	t.Run("an instance type with no published entrance refuses", func(t *testing.T) {
-		md := newRenderDeployment()
-		it := newRenderInstanceType(func(it *worker.InstanceType) {
-			it.Status.Entrance = ""
-		})
-
-		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: it,
-		})
-		require.Error(t, err)
-		assert.Nil(t, pod, "no Pod may be returned, or a caller could create one with no queue")
-		assert.Contains(t, err.Error(), "publishes no queue entrance yet")
-		assert.Contains(t, err.Error(), "h20-8x",
-			"the message must name the instance type, since the field is two objects away")
-	})
+	}
 }
 
 // TestRenderModelDeploymentPod_ClientConfigMount pins where the rendered client configuration is
@@ -1576,6 +1541,184 @@ func TestRenderModelDeploymentPod_NoClientConfigWithoutOne(t *testing.T) {
 	for _, mount := range pod.Spec.Containers[0].VolumeMounts {
 		assert.NotEqual(t, inject.ConfigMountPath, mount.MountPath)
 	}
+}
+
+// TestConvertModelDeploymentAdditionalVolumes asserts how a role's spec.additionalVolumes reach the
+// rendered Pod: one Pod volume and one mount per entry, named from the entry's index, with the
+// mount path, sub-path and read-only carried from the entry. A claim's reference is the entry's own
+// claim name and its own read-only, copied as they arrive: a Pod volume reaches a claim in the
+// Pod's namespace only, so nothing may add a namespace to the reference, and the mount's read-only
+// stays the entry's rather than the source's.
+func TestConvertModelDeploymentAdditionalVolumes(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		entry      workercore.ModelDeploymentAdditionalVolume
+		wantVolume core.Volume
+		wantMount  core.VolumeMount
+	}{
+		{
+			name: "a claim",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/cache",
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/cache"},
+		},
+		{
+			name: "a claim with a sub-path",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/cache",
+				SubPath:               "qwen",
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/cache", SubPath: "qwen"},
+		},
+		{
+			name: "a claim with a read-only entry",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/cache",
+				ReadOnly:              true,
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/cache", ReadOnly: true},
+		},
+		{
+			name: "a read-only claim source is copied and the mount read-only stays the entry's own",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/cache",
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache", ReadOnly: true},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
+						ClaimName: "shared-cache", ReadOnly: true,
+					},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/cache"},
+		},
+		{
+			name: "a config map",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath: "/etc/app",
+				ReadOnly:  true,
+				SubPath:   "conf",
+				ConfigMap: &core.LocalObjectReference{Name: "app-config"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					ConfigMap: &core.ConfigMapVolumeSource{LocalObjectReference: core.LocalObjectReference{Name: "app-config"}},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/etc/app", ReadOnly: true, SubPath: "conf"},
+		},
+		{
+			name: "a secret",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath: "/var/run/creds",
+				ReadOnly:  true,
+				Secret:    &core.LocalObjectReference{Name: "app-creds"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					Secret: &core.SecretVolumeSource{SecretName: "app-creds"},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/var/run/creds", ReadOnly: true},
+		},
+		{
+			name: "a host path",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath: "/host/models",
+				HostPath:  &core.HostPathVolumeSource{Path: "/mnt/models"},
+			},
+			wantVolume: core.Volume{
+				Name:         "additional-0",
+				VolumeSource: core.VolumeSource{HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/host/models"},
+		},
+		{
+			name: "an entry with every source renders the first",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/data",
+				ConfigMap:             &core.LocalObjectReference{Name: "app-config"},
+				Secret:                &core.LocalObjectReference{Name: "app-creds"},
+				HostPath:              &core.HostPathVolumeSource{Path: "/mnt/models"},
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+			},
+			wantVolume: core.Volume{
+				Name: "additional-0",
+				VolumeSource: core.VolumeSource{
+					ConfigMap: &core.ConfigMapVolumeSource{LocalObjectReference: core.LocalObjectReference{Name: "app-config"}},
+				},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/data"},
+		},
+		{
+			name: "a claim yields to a host path",
+			entry: workercore.ModelDeploymentAdditionalVolume{
+				MountPath:             "/data",
+				HostPath:              &core.HostPathVolumeSource{Path: "/mnt/models"},
+				PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+			},
+			wantVolume: core.Volume{
+				Name:         "additional-0",
+				VolumeSource: core.VolumeSource{HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			},
+			wantMount: core.VolumeMount{Name: "additional-0", MountPath: "/data"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vols, mounts := convertModelDeploymentAdditionalVolumes(
+				[]workercore.ModelDeploymentAdditionalVolume{tc.entry})
+
+			assert.Equal(t, []core.Volume{tc.wantVolume}, vols)
+			assert.Equal(t, []core.VolumeMount{tc.wantMount}, mounts)
+		})
+	}
+
+	// Two roles mount the same claim through their own entries: each Pod volume carries the claim
+	// name as the entry spelled it, so both reference one claim in the Pods' own namespace.
+	t.Run("the same claim name reaches both roles of a pair", func(t *testing.T) {
+		entry := workercore.ModelDeploymentAdditionalVolume{
+			MountPath:             "/cache",
+			PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+		}
+
+		prefillVols, _ := convertModelDeploymentAdditionalVolumes(
+			[]workercore.ModelDeploymentAdditionalVolume{entry})
+		decodeVols, _ := convertModelDeploymentAdditionalVolumes(
+			[]workercore.ModelDeploymentAdditionalVolume{entry})
+
+		require.Len(t, prefillVols, 1)
+		require.Len(t, decodeVols, 1)
+		require.NotNil(t, prefillVols[0].PersistentVolumeClaim)
+		require.NotNil(t, decodeVols[0].PersistentVolumeClaim)
+		assert.Equal(t, "shared-cache", prefillVols[0].PersistentVolumeClaim.ClaimName)
+		assert.Equal(t, "shared-cache", decodeVols[0].PersistentVolumeClaim.ClaimName)
+	})
 }
 
 // TestModelDeploymentPodSpecHash_IsDeterministic states the property the whole rollout rests on: two
@@ -2205,7 +2348,11 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // operator builds began carrying the drain hook and the termination grace it is budgeted against,
 // which left the take-over case's digest where it was. The shared-memory volume then changed
 // every role's Pod, including take-over roles. Every digest here moved by intent
-// rather than by drift. Each case renders ORDINAL ZERO -- the composite's zero value -- which is the
+// rather than by drift. The two direct-decoder cases then moved when the default routing sidecar
+// image advanced from v0.10.0 to v0.11.0, which is the only thing in those two Pods that carries
+// the setting; the seven cases rendering no sidecar stayed where they were, naming the move to
+// the setting's value the same way the router table does. Each case renders ORDINAL ZERO -- the
+// composite's zero value -- which is the
 // one ordinal a digest can name without the table growing a dimension. To re-baseline after an
 // intended rendering change: empty the table, run this case, and pin the digests the failures
 // print.
@@ -2214,9 +2361,9 @@ func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t 
 		"a sole server role": "f32a43254d561da431bd5f1107f97ffc5e3c9382b88db0478edc811a22178392",
 		"a sole server role with a synthesized cache connector":                              "52aff227f37f8ca8d4c311b4008b7650a2823ee0668a9f693ceb14837f8643d6",
 		"a take-over role carrying a connector it must be given no part of":                  "93e925e2bfaa5ab9e152a685a336d1b8031d8904bfb54b240a483f0a517e9a54",
-		"a direct decoder with a native routing sidecar":                                     "9708da967a83ff20e04944fa38033d8fceca8de0379d9a6d7e7847312c997813",
-		"a direct decoder with a classic routing sidecar":                                    "ed7d954b5f334dc1993caab86d7e2fa0f53458eda1db3006dcd2e861ca464a6b",
-		"a role naming no image, synthesized from the observed hardware":                     "30d7c6cd55c58ac4a9a502396be0b291a5f9a8872967be0b4dfd430448abcac1",
+		"a direct decoder with a native routing sidecar":                                     "4f1e9ef33849913b2c71688d7e8b77ffd5338b67d3d5ceca6bd098ba343e546d",
+		"a direct decoder with a classic routing sidecar":                                    "cc9d8f1d61e8df9629459f45c5f0508ad12e6515209ae3c5311f10f59c2844ba",
+		"a role naming no image, which runs the engine's image":                              "f32a43254d561da431bd5f1107f97ffc5e3c9382b88db0478edc811a22178392",
 		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "3b9148d73e337285192aea35aa995813747fc2ebfefda19d107548b788c11791",
 		"the prefill role of a two-role deployment":                                          "7eef707d65e3c6307219d33612e56de8173d9a7b4ece67ff4239f21cc788ba82",
 		"the decode role of a two-role deployment":                                           "cc1217e6e9b9de5e61b0c01aca76666126f24176804151f772b640e13d5c5a77",
@@ -2315,7 +2462,7 @@ func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t 
 			},
 		},
 		{
-			name: "a role naming no image, synthesized from the observed hardware",
+			name: "a role naming no image, which runs the engine's image",
 			input: func(t *testing.T) ModelDeploymentRenderInput {
 				return newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
 					md.Spec.Roles[0].Image = ""
@@ -2765,7 +2912,7 @@ func TestRenderModelDeploymentPod_DecodeWithoutTheProxyFlagRunsAlone(t *testing.
 func newTCPTWReusePair(mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Engine = workercore.ModelDeploymentEngine{
-			Name: workercore.ModelDeploymentEngineSGLang, Version: "0.5.18",
+			Name: workercore.ModelDeploymentEngineSGLang, Image: "lmsysorg/sglang:v0.5.18",
 		}
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 		md.Spec.Roles = []workercore.ModelDeploymentRole{
@@ -2822,7 +2969,7 @@ func TestRenderModelDeploymentPod_TCPTWReuse(t *testing.T) {
 			name: "a vLLM prefill half, whose transfer connections persist",
 			md: newTCPTWReusePair(func(md *workercore.ModelDeployment) {
 				md.Spec.Engine = workercore.ModelDeploymentEngine{
-					Name: workercore.ModelDeploymentEngineVLLM, Version: "0.29.0",
+					Name: workercore.ModelDeploymentEngineVLLM, Image: "vllm/vllm-openai:v0.29.0",
 				}
 			}),
 			role: "prefill", kvStore: true, kvDirect: true,

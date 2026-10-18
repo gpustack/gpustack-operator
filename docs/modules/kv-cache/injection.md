@@ -297,13 +297,28 @@ isolate cache reuse.** The webhook always writes a non-empty domain and never in
 image version. Verify the image you deploy: the vLLM family must consume `tenant_id` from the
 projected file, while SGLang must consume `MOONCAKE_TENANT_ID` from its environment.
 
-Keep the Mooncake library bundled by the engine unless that engine documents another compatible
-combination. A mismatched library may reject the tenant even when the engine reads it.
+**Every engine image carries its own `mooncake-transfer-engine`, and that library must match the
+`KVCacheBackend`'s.** This holds on every platform, not only on Ascend. The engine's copy is what
+reads the tenant and what talks to the store's members; the backend's copy is the other end of that
+conversation. Two versions that disagree fail, whatever hardware they run on — at startup, at the
+first write, or silently with no error at all.
 
-An older engine is allowed. It may ignore the injected value and use Mooncake's literal `default`
-tenant instead, without any admission error. Such a pool needs a `KVCachePoolBinding` whose domain is
-`default`, which is also what a Binding that leaves `spec.domain.name` out registers; its quota is
-then shared by every client that falls back to that tenant.
+**Before deploying, read the version inside the engine image and compare it with the backend's.**
+
+- In the engine image: `pip show mooncake-transfer-engine`. On Ascend the distribution is named
+  `mooncake-transfer-engine-npu`, and the plain name is absent, so check both spellings.
+- For the `KVCacheBackend`: the store version is the one in the member image its `spec` names, so
+  read it from that image tag.
+- The compatibility rule is [the store version](backend.md#the-store-version-must-match-the-engines-client).
+
+**For a non-`default` domain the engine's library must also be `0.3.13` or later.** That is the line
+that carries `tenant_id` in `setup()`. Below it the engine has no such parameter, so a non-default
+domain fails at startup with `TypeError: setup(): incompatible function arguments`.
+
+If the engine's library is older than `0.3.13`, or ignores the injected tenant, keep the Binding's
+domain at `default` — the value a Binding with no `spec.domain.name` registers. The engine then
+starts and serves. Every client on that domain shares one tenant and one quota ledger, so cache reuse
+is not separated between namespaces.
 
 `tenantInjected` records only that the webhook wrote the value. It does not prove the image read it
 or that isolation took effect.

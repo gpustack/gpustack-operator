@@ -44,7 +44,7 @@ func modelDeployment(engine string, roles ...workercore.ModelDeploymentRole) *wo
 		Spec: workercore.ModelDeploymentSpec{
 			Model: workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
 			Engine: workercore.ModelDeploymentEngine{
-				Name: engine, Version: "0.25.1",
+				Name: engine, Image: "vllm/vllm-openai:v0.25.1",
 			},
 			KVCache: &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 			Roles:   roles,
@@ -2627,7 +2627,9 @@ func TestValidateModelDeploymentIdentity(t *testing.T) {
 		}, ""},
 
 		// Editable: how the deployment is being run right now.
-		{"engine_version", func(md *workercore.ModelDeployment) { md.Spec.Engine.Version = "0.26.0" }, ""},
+		{"engine_image", func(md *workercore.ModelDeployment) {
+			md.Spec.Engine.Image = "vllm/vllm-openai:v0.26.0"
+		}, ""},
 		{"role_replicas", func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 8 }, ""},
 		{"role_extra_args", func(md *workercore.ModelDeployment) {
 			md.Spec.Roles[0].ExtraArgs = []string{"--max-model-len=16384"}
@@ -4431,6 +4433,10 @@ func TestValidateModelDeploymentRouter_OwnedArgumentsArePerRouter(t *testing.T) 
 			name:   "the connector flag the gateway does not have",
 			router: workercore.ModelDeploymentRouterSGLang, arg: "--kv-connector=mooncake",
 			refused: false, engine: workercore.ModelDeploymentEngineSGLang,
+		},
+		{
+			name: "the epd config the vllm router derives", router: workercore.ModelDeploymentRouterVLLM,
+			arg: `--epd-config={"encoder_urls":[]}`, refused: true, engine: workercore.ModelDeploymentEngineVLLM,
 		},
 	}
 	for _, c := range cases {

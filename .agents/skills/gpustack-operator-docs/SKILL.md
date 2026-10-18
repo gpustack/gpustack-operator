@@ -76,6 +76,9 @@ one, not to widen the overview.
 | A `ModelDeployment` metrics snapshot, which series each field reads per engine, role and router, cache-hit scope or Pod scrape annotation | `docs/modules/model-deployment/metrics.md` |
 | What a `ModelDeployment` status condition or published field means, and how to read them when a deployment misbehaves | `docs/modules/model-deployment/status.md` |
 | How a prefill role and a decode role are paired: the connector each engine and router renders, `spec.router` and its fields, `spec.kvTransfer`, roles on different hardware, a role's own Service | `docs/modules/model-deployment/prefill-decode.md` |
+| How an `Encode` role pairs with `Prefill` and `Decode`: the admitted EPD matrix, encoder-cache connectors (`ECCPUConnector`, `ECExampleConnector`), shared RWX PVC rules, soft co-location affinity, and bounded encoder drain | `docs/modules/model-deployment/epd.md` |
+| The measured comparison of aggregated, prefill/decode and EPD serving: latency and throughput at each concurrency, the hardware and workload behind it, and the conditions under which EPD does not help | `docs/modules/model-deployment/epd-benchmark.md` |
+| A recorded three-role EPD deployment (`Encode` + `Prefill` + `Decode` + `llm-d-router`), its captured CR/Pod output and multimodal inference check | `docs/walkthroughs/model-deployment/epd.md` |
 | Which replica a managed router picks, its default routing policy, switching it through `spec.router.extraArgs`, the router's own per-replica series | `docs/modules/model-deployment/routing.md` |
 | What a `ModelDeployment` replica does between its Pod's delete and its engine's exit: the drain hook, its timings, what it does not cover | `docs/modules/model-deployment/shutdown.md` |
 | The lowest engine release a deployment shape runs on, the Mooncake client its runner image carries, the store line it needs, which transport each engine can use on each leg | `docs/modules/model-deployment/engine-versions.md` |

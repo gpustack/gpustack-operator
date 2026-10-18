@@ -80,14 +80,25 @@ type Role string
 
 // The roles, plus the absence of one. RoleNone is a value rather than an empty string used bare, so
 // a renderer switching on the role has no unlabelled case.
+//
+// RoleEncode names the encoder stage a deployment may declare: the kind has its own value here so
+// the connector's role-mapping function can return it instead of folding it into RoleNone, and
+// an absence of an entry for it in engineRoleSupport is what makes admission refuse an engine that
+// cannot take it. The role carries no KV cache: the encoder-cache leg is the engine's own
+// encoder-disaggregation rendering, not the store client every other role is written.
 const (
 	RoleNone    Role = ""
 	RolePrefill Role = "prefill"
 	RoleDecode  Role = "decode"
+	RoleEncode  Role = "encode"
 )
 
 // ParseRole converts the role annotation's value. An unset annotation is legal and means the caller
 // has no prefill/decode split, which is the ordinary case for a shared cache.
+//
+// Pod annotations never carry "Encode": the encoder stage is a deployment shape the API server
+// writes, not a Pod-side knob, and accepting it here would let a hand-written annotation opt a
+// container out of the renderer that names the role it set.
 func ParseRole(value string) (Role, error) {
 	switch value {
 	case "":
@@ -113,16 +124,27 @@ func ParseRole(value string) (Role, error) {
 // The renderers read this table rather than restating it, so it is a live constraint rather than
 // documentation. Substituting an entry changes what renders.
 var engineRoleSupport = map[Engine][]Role{
-	// Both vLLM-family engines share renderVLLM, whose vllmKVRole maps all three onto kv_both,
-	// kv_producer and kv_consumer.
-	EngineVLLM:       {RoleNone, RolePrefill, RoleDecode},
-	EngineVLLMAscend: {RoleNone, RolePrefill, RoleDecode},
+	// Both vLLM-family engines share renderVLLMWithEncoderCache, whose vllmKVRole maps the three
+	// cache roles onto kv_both, kv_producer and kv_consumer.
+	//
+	// RoleEncode is here because this renderer has a term for it: the encoder stage is the producer
+	// half of the encoder-cache leg, rendered onto a container that runs no KV cache of any kind,
+	// while the prefill half reads the same leg back as its consumer (read at vLLM v0.30.0
+	// `vllm/config/ec_transfer.py:12-14`). An entry therefore means the renderer answers, not that
+	// the encoder serves a cache.
+	EngineVLLM:       {RoleNone, RolePrefill, RoleDecode, RoleEncode},
+	EngineVLLMAscend: {RoleNone, RolePrefill, RoleDecode, RoleEncode},
 	// SGLang's store client is role-blind, but its disaggregation arguments carry both roles, so
 	// all three render. The two kinds' ONLY rendering is the disaggregation one, and it follows
 	// the declared pair: a kind without one, which includes every Pod the injection webhook
 	// admits, renders the shared store alone, exactly as no role does. What the renderer refuses
 	// is the converse, a point-to-point leg with no kind to pair.
-	EngineSGLang: {RoleNone, RolePrefill, RoleDecode},
+	//
+	// RoleEncode is here because this engine has a term for it: SGLang splits an encoder stage off
+	// its own server with --encoder-only (v0.5.18 `server_args.py:3171-3173`), rather than through a
+	// connector this package would have to describe. An entry therefore means the renderer answers,
+	// not that the encoder serves a cache - it holds no KV cache at all.
+	EngineSGLang: {RoleNone, RolePrefill, RoleDecode, RoleEncode},
 }
 
 // SupportsRole reports whether the engine's rendering has a term for the role.
@@ -270,6 +292,28 @@ type Input struct {
 	// KVEventsHost is the dialable host paired with the publisher's fixed ports. The engine binds a
 	// wildcard address, which cannot be published to a consumer as an endpoint.
 	KVEventsHost string
+
+	// EncoderURLs are the addresses of the deployment's encoder replicas, one per replica or per
+	// replica Service, in the engine's own spelling. It is what makes a deployment a three-role one,
+	// and only a prefill half reads it.
+	//
+	// It is an input rather than something resolved here because a replica's address does not exist
+	// until its Service does, and a Service is the caller's object, built at reconcile time rather
+	// than at admission.
+	//
+	// An empty value renders no encoder leg at all, which is what every deployment without an
+	// encoder role declares, so that shape renders exactly as it did before this field existed.
+	EncoderURLs []string
+
+	// EncoderCache is the encoder-cache leg this role runs, named by the caller rather than derived
+	// here. The zero value asks for no leg, which renders nothing and leaves every other field of
+	// this struct to render exactly as it did before the leg existed.
+	//
+	// It is an input because the connector the engine must resolve is not this package's to choose:
+	// it is the row admission admitted for this router, engine and accelerator, and a renderer that
+	// picked one itself would be free to disagree with the object that was accepted. EncoderURLs
+	// above is the other half of the same leg on the engine that carries the addresses instead.
+	EncoderCache EncoderCache
 }
 
 const defaultKVTransferProtocol = "tcp"
@@ -338,7 +382,8 @@ const (
 	// ReasonConnectionIncomplete is an input missing something rendering cannot proceed without:
 	// a Connection missing a value the engine cannot start without, an input that requests none
 	// of the store, direct transfer, or event publishing, an engine that cannot run without a
-	// shared store, or an event publisher with no dialable host.
+	// shared store, or an event publisher with no dialable host. An encoder role is exempt from
+	// the first three of those, because the leg it renders is not a cache this package connects.
 	ReasonConnectionIncomplete Reason = "ConnectionIncomplete"
 
 	// ReasonTransportUnsupported is a pool transport the engine's store backend refuses. It is

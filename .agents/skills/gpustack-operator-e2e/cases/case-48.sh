@@ -246,10 +246,7 @@ fi
 
 # --- two deployments: one on the dead Binding, one on the fixture's Ready Binding ---
 #
-# Both name an image explicitly. A role without one gets an image synthesized from the accelerator
-# backend its InstanceType observed, and a CPU-only InstanceType has observed none; that refusal is
-# correct and is pinned in the unit tier, so naming an image drops the dependency rather than the
-# assertion.
+# Both name an image explicitly, which is the engine-wide default every role here falls back to.
 #
 # The image carries the Mooncake client and no engine, which is what makes case48-registered the
 # subject of the first vehicle as well as the control for the second: the operator renders a full
@@ -264,11 +261,10 @@ metadata:
 spec:
   engine:
     name: vLLM
-    # The minimum vLLM docs/modules/model-deployment/engine-versions.md supports. Inert here -- the
-    # role names its image explicitly, so nothing is synthesized from it -- but a version no
-    # runner ships, or one below that minimum, would read as the version under test, and
-    # this case tests nothing about an engine.
-    version: "0.29.0"
+    # Inert here -- the role names its own image, which overrides this one -- but the field is
+    # required, and this case tests nothing about an engine, so the same placeholder the role uses
+    # stands in for the deployment-wide default too.
+    image: ${CLIENT_IMAGE}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:

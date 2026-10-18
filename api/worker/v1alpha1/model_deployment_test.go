@@ -123,8 +123,8 @@ func TestModelDeploymentEnumSpellings(t *testing.T) {
 		old          []string
 		defaultValue string
 	}{
-		{"spec role kind", []string{"spec", "roles", "[]", "kind"}, []string{`"Server"`, `"Prefill"`, `"Decode"`}, []string{`"server"`, `"prefill"`, `"decode"`}, `"Server"`},
-		{"status role kind", []string{"status", "roles", "[]", "kind"}, []string{`"Server"`, `"Prefill"`, `"Decode"`}, []string{`"server"`, `"prefill"`, `"decode"`}, ""},
+		{"spec role kind", []string{"spec", "roles", "[]", "kind"}, []string{`"Server"`, `"Prefill"`, `"Decode"`, `"Encode"`}, []string{`"server"`, `"prefill"`, `"decode"`, `"encode"`}, `"Server"`},
+		{"status role kind", []string{"status", "roles", "[]", "kind"}, []string{`"Server"`, `"Prefill"`, `"Decode"`, `"Encode"`}, []string{`"server"`, `"prefill"`, `"decode"`, `"encode"`}, ""},
 		{"engine name", []string{"spec", "engine", "name"}, []string{`"vLLM"`, `"SGLang"`}, []string{`"vllm"`, `"sglang"`}, ""},
 		{"cache connector", []string{"spec", "kvCache", "connector"}, []string{`"Mooncake"`}, []string{`"mooncake"`}, `"Mooncake"`},
 		{"direct protocol", []string{"spec", "kvTransfer", "protocol"}, []string{`"Auto"`, `"TCP"`, `"RDMA"`, `"EFA"`, `"CANN"`, `"ROCM"`}, []string{`"auto"`, `"tcp"`, `"rdma"`, `"efa"`, `"cann"`, `"rocm"`, `"MUSA"`, `"MACA"`}, ""},
@@ -531,7 +531,7 @@ func modelDeploymentWriteFixture(t *testing.T) map[string]any {
 		"metadata": {"name": "demo", "namespace": "default"},
 		"spec": {
 			"model": {"name": "qwen-demo", "artifactRef": {"name": "weights"}},
-			"engine": {"name": "vLLM"},
+			"engine": {"name": "vLLM", "image": "vllm/vllm-openai:v0.25.1"},
 			"roles": [{"name": "s0", "instanceType": "gpu-small", "kind": "Server", "size": 1}]
 		},
 		"status": {

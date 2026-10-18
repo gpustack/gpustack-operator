@@ -375,6 +375,13 @@ func TestRenderLLMD_DecodeDoesNotScorePrefixOverlap(t *testing.T) {
 	}
 }
 
+// TestRenderLLMD_EveryProfileCanPickAnEndpoint holds every profile to naming a picker.
+//
+// AN ENCODER PROFILE IS THE ONE EXCEPTION, and it is not a counterexample to the rule: upstream
+// completes a profile that names no picker at load time by appending max-score-picker
+// (`pkg/epp/config/loader/defaults.go:197-216`), and the profile runner dereferences that picker
+// unconditionally, so every profile runs with one either way. The case renders no encoder role, so
+// the property it asserts holds for every profile it produces.
 func TestRenderLLMD_EveryProfileCanPickAnEndpoint(t *testing.T) {
 	output, err := Render(LLMD, Input{Roles: []Role{
 		{Kind: "prefill", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"},
@@ -400,5 +407,79 @@ func TestRenderLLMD_EveryProfileCanPickAnEndpoint(t *testing.T) {
 			refs = append(refs, plugin.PluginRef)
 		}
 		assert.Contains(t, refs, "max-score-picker", profile.Name)
+	}
+}
+
+// TestDocumentStageFilterDemands states what counts as a requirement in the rendered document, and
+// three things that look like one but are not.
+//
+// A model name is user text the operator renders into the same document, so a reader that searched
+// the text would call a deployment's own model name a demand and activate a gate no pass decided.
+// Only a stage filter's matchLabels is a statement about a Pod, so only that is read.
+func TestDocumentStageFilterDemands(t *testing.T) {
+	const (
+		label = "modeldeployment.gpustack.ai/endpoint-eligible"
+		value = "true"
+	)
+	stageFilter := func(matchLabels string) string {
+		return "plugins:\n" +
+			"- name: encode-pods\n" +
+			"  type: label-selector-filter\n" +
+			"  parameters:\n    matchLabels:\n" + matchLabels
+	}
+
+	for _, tc := range []struct {
+		name     string
+		document string
+		want     bool
+	}{
+		{
+			name: "a stage filter requiring the label demands it",
+			document: stageFilter("      modeldeployment.gpustack.ai/role-kind: encode\n" +
+				"      modeldeployment.gpustack.ai/endpoint-eligible: \"true\"\n"),
+			want: true,
+		},
+		{
+			name:     "a stage filter without the label demands nothing",
+			document: stageFilter("      modeldeployment.gpustack.ai/role-kind: encode\n"),
+			want:     false,
+		},
+		{
+			name:     "the label under another value is not this requirement",
+			document: stageFilter("      modeldeployment.gpustack.ai/endpoint-eligible: \"false\"\n"),
+			want:     false,
+		},
+		{
+			// The false positive this reader exists to reject.
+			name: "a model name that reads as the label is not a requirement",
+			document: "modelConfig:\n" +
+				"  modelName: modeldeployment.gpustack.ai/endpoint-eligible\n" +
+				"plugins:\n" +
+				"- name: encode-pods\n" +
+				"  type: label-selector-filter\n" +
+				"  parameters:\n    matchLabels:\n" +
+				"      modeldeployment.gpustack.ai/role-kind: encode\n",
+			want: false,
+		},
+		{
+			name: "a plugin of another type does not demand it",
+			document: "plugins:\n- name: encode\n  type: max-score-picker\n  parameters:\n" +
+				"    matchLabels:\n      modeldeployment.gpustack.ai/endpoint-eligible: \"true\"\n",
+			want: false,
+		},
+		{
+			name:     "a document that does not parse demands nothing",
+			document: "\tnot: [valid",
+			want:     false,
+		},
+		{
+			name:     "an empty document demands nothing",
+			document: "",
+			want:     false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, DocumentStageFilterDemands(tc.document, label, value))
+		})
 	}
 }

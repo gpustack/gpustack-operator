@@ -5,36 +5,29 @@ package v1alpha1
 // ModelDeploymentEngineApplyConfiguration represents a declarative configuration of the ModelDeploymentEngine type for use
 // with apply.
 //
-// ModelDeploymentEngine is the engine a deployment runs and the version of it.
+// ModelDeploymentEngine is the engine a deployment runs and the image it runs in.
 //
-// The two are one object because they were never meaningful apart: a role that names no image of
-// its own has one assembled from the engine and the version together with the role's own
-// InstanceType. The version carries no obligation of its own — it is owed exactly when some role
-// needs that assembly, which admission rather than the schema decides, because which roles need it
-// is a fact about the roles and not about this field.
+// The image is a deployment-wide default rather than a per-role field, because the roles of one
+// deployment are one engine build and usually share one image. A role that needs a different one
+// names it in its own spec, which overrides this field.
 type ModelDeploymentEngineApplyConfiguration struct {
 	// Name selects the engine.
 	//
-	// It is the half of this object that is the deployment's identity and is frozen after creation,
-	// while Version answers which build runs and stays editable — stated here because one object
-	// reading otherwise would freeze the pair together.
+	// It is the deployment's identity and is frozen after creation, while Image answers which
+	// build runs and stays editable — stated here because one object reading otherwise would
+	// freeze the pair together.
 	Name *string `json:"name,omitempty"`
-	// Version is the engine's own version, e.g. "0.29.0" for vllm or "0.5.18" for sglang.
+	// Image is the container image every role of this deployment runs in by default.
 	//
-	// - It is OPTIONAL, and the obligation sits with the roles instead: a role that names no image
-	// of its own has one synthesized from this version, so admission refuses an empty version
-	// beside such a role rather than letting the render assemble a malformed tag naming
-	// something never typed. A role that names an image never reads this field.
-	// - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the
-	// driver each role's hardware installed are aligned. A gate would need the runner's release
-	// matrix compiled into the operator, and the failure it would prevent is already legible as
-	// an ImagePullBackOff on a tag that does not exist.
-	// - It is per deployment rather than per role, which is what lets one version assemble a
-	// DIFFERENT image for each role: the backend half of the tag comes from the role's own
-	// InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.
-	// Published version sets do NOT overlap across every backend, so one version has to name a
-	// tag that exists for each backend the roles land on.
-	Version *string `json:"version,omitempty"`
+	// - It is the WHOLE-DEPLOYMENT default: a role that names its own image runs that one
+	// instead, so this field is what an unstated role falls back to.
+	// - The operator does not build an image, so the tag must exist in a registry the cluster
+	// can pull.
+	// - The minimum of 1 holds the requirement shut. Without it a required string here is
+	// satisfied by the key merely being present, and this object is re-marshaled by the
+	// mutating webhook: Engine is a value type and this field has no omitempty, so a patch
+	// taken from a request that named no image still carries an empty one.
+	Image *string `json:"image,omitempty"`
 }
 
 // ModelDeploymentEngineApplyConfiguration constructs a declarative configuration of the ModelDeploymentEngine type for use with
@@ -51,10 +44,10 @@ func (b *ModelDeploymentEngineApplyConfiguration) WithName(value string) *ModelD
 	return b
 }
 
-// WithVersion sets the Version field in the declarative configuration to the given value
+// WithImage sets the Image field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Version field is set to the value of the last call.
-func (b *ModelDeploymentEngineApplyConfiguration) WithVersion(value string) *ModelDeploymentEngineApplyConfiguration {
-	b.Version = &value
+// If called multiple times, the Image field is set to the value of the last call.
+func (b *ModelDeploymentEngineApplyConfiguration) WithImage(value string) *ModelDeploymentEngineApplyConfiguration {
+	b.Image = &value
 	return b
 }

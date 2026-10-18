@@ -12,10 +12,12 @@
 package router
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -41,6 +43,12 @@ const (
 	// both to every interface already. It is stated for both anyway, because a value that is
 	// correct by accident on one side is a value nobody notices changing.
 	argvRouterBindAddress = "0.0.0.0"
+
+	// argvRouterEPDConfigArg carries the vLLM router's encoder stage, which the other router has no
+	// flag for. Upstream takes it as ONE optional string holding a JSON document (pull request 266,
+	// cherry-picked at pack/llm-router/patches/vllm-router/0001-epd-routing.patch,
+	// `CliArgs::epd_config`), so the whole stage is one argument rather than a repeatable flag.
+	argvRouterEPDConfigArg = "--epd-config"
 )
 
 // argvRouter is what one of these routers differs by. Everything not named here is shared.
@@ -139,6 +147,30 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 		// selectors are a UNION rather than a conjunction: a Pod is taken when it matches either
 		// (`src/service_discovery.rs:88-95`).
 		args = append(args, delta.DisaggregationArg)
+		// AN ENCODER IS CARRIED AS ONE STATIC LIST, and the vLLM router is the one that takes it.
+		// Its --epd-config is the whole of the encoder stage upstream knows (pull request 266): a
+		// JSON document read once at startup, whose encoder_urls are never refreshed and whose
+		// endpoints are never health-checked, and upstream documents dynamic prefill/decode
+		// discovery as unsupported beside EPD. That is why the two halves above are selectors and
+		// the encoder alone is a plain list of Service URLs. The gateway renders nothing here --
+		// its prefiller dials the encoder itself, by --encoder-urls on the engine's own command
+		// line.
+		//
+		// IT IS RENDERED BEFORE THE TWO SELECTORS: both are lists that consume every following
+		// token until the next one starting with a dash (see selectorArgs), so the document rides
+		// ahead of them, where no flag can be mistaken for a list entry.
+		//
+		// THE ROUTER STAYS OUT OF GATEWAY MODE. Upstream refuses EPD beside inference-gateway mode
+		// outright, and this renderer renders --enable-igw for no input; the statement is kept
+		// because it is the invariant the refusal upstream is checked against, not an accident of
+		// this flag list.
+		if name == VLLM && (declaresRole(input, roleKindEncode) || len(input.EncoderURLs) > 0) {
+			config, err := epdConfigArg(name, input)
+			if err != nil {
+				return Output{}, err
+			}
+			args = append(args, config)
+		}
 		args = append(args, selectorArgs(argvRouterPrefillSelectArg, prefill)...)
 		args = append(args, selectorArgs(argvRouterDecodeSelectArg, decode)...)
 
@@ -146,6 +178,18 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 	}
 
 	// The undivided shape: one selector naming every Pod that answers.
+	//
+	// AN ENCODER IS REFUSED HERE RATHER THAN LEFT OUT OF THE SELECTOR, because this one selector is
+	// deployment-wide: it IS the answering set, and the encoder is in it. An encoder answers nothing
+	// -- it consumes media and returns embeddings only a prefiller reads -- so a router offered one as
+	// a backend routes requests to a process that cannot generate from them, and the failure would
+	// arrive as a request that never completes. The split shape above is what pairs an encoder, and it
+	// names each half by its own role, which is where an encoder is absent by construction.
+	if declaresRole(input, roleKindEncode) {
+		return Output{}, fmt.Errorf("render %s: a deployment-wide selector would offer the %s role as "+
+			"a backend, so a deployment holding one needs a %s and a %s role beside it",
+			name, roleKindEncode, rolePrefill, roleKindDecode)
+	}
 	deployment := selectorArgs(argvRouterSelectorArg, input.EndpointLabels)
 	if deployment == nil {
 		return Output{}, fmt.Errorf("render %s: no endpoint labels to discover by", name)
@@ -182,6 +226,24 @@ func selectorArgs(flag string, labels map[string]string) []string {
 // roleKindDecode is a string: the caller resolves kinds and this package compares what it is given.
 const rolePrefill = "prefill"
 
+// declaresRole reports whether the deployment declares a role of this kind, whatever that role's
+// selector holds.
+//
+// IT IS SEPARATE FROM roleSelector because the two answer different questions. A selector answers
+// "which Pods does this role name", which is what a flag is built from; this answers "is this role
+// present at all", which is what a refusal is built from. A role declared with an empty selector is
+// present either way, and reading its absence as a reason to render would be exactly the silent
+// omission this package is written against.
+func declaresRole(input Input, kind string) bool {
+	for i := range input.Roles {
+		if input.Roles[i].Kind == kind {
+			return true
+		}
+	}
+
+	return false
+}
+
 func roleSelector(input Input, kind string) map[string]string {
 	for i := range input.Roles {
 		if input.Roles[i].Kind == kind && len(input.Roles[i].Selector) > 0 {
@@ -190,4 +252,42 @@ func roleSelector(input Input, kind string) map[string]string {
 	}
 
 	return nil
+}
+
+// epdConfig is the JSON document --epd-config carries: the encoder endpoints and nothing else.
+// Upstream reads the key back with unknown fields refused, so the document is one struct rather
+// than a map -- a second spelling of the key would be a startup failure on the router, not a
+// render error here.
+type epdConfig struct {
+	EncoderURLs []string `json:"encoder_urls"`
+}
+
+// epdConfigArg renders the --epd-config argument for the vLLM router's encoder stage.
+//
+// THE CONTRACT IS ALL-OR-NOTHING. A declared Encode role with no endpoints is refused because
+// upstream refuses to start on an empty encoder_urls; endpoints without a declared role are
+// refused because dropping them would be exactly the silent omission this package is written
+// against. Every endpoint must carry its scheme, because upstream validates http:// or https://
+// and refuses anything else at startup.
+//
+// consumer_zmq_addrs is OMITTED rather than written empty. Upstream treats the key as optional,
+// and it exists to hand each prefiller's address to an encoder-cache connector that registers
+// them one by one -- an address list that does not exist when the two halves are discovered by
+// selector -- so writing it would state a claim about a transfer leg nothing configures.
+func epdConfigArg(name string, input Input) (string, error) {
+	if !declaresRole(input, roleKindEncode) || len(input.EncoderURLs) == 0 {
+		return "", fmt.Errorf("render %s: the %s role and its encoder endpoints must be declared together",
+			name, roleKindEncode)
+	}
+	for _, url := range input.EncoderURLs {
+		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+			return "", fmt.Errorf("render %s: encoder endpoint %q is not an http(s) URL", name, url)
+		}
+	}
+	encoded, err := json.Marshal(epdConfig{EncoderURLs: input.EncoderURLs})
+	if err != nil {
+		return "", fmt.Errorf("render %s: encoder stage configuration: %w", name, err)
+	}
+
+	return argvRouterEPDConfigArg + "=" + string(encoded), nil
 }

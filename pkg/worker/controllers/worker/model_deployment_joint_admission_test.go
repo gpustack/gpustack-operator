@@ -252,6 +252,159 @@ func TestModelDeploymentJointAdmission_TheWholeSetOrNone(t *testing.T) {
 	})
 }
 
+// epdJointDeployment is an encoder deployment: an encoder, a prefiller and a decoder, one replica
+// each, on the three instance types the roles sit on.
+//
+// THE ENCODER COMES FIRST, which is the order a reader writes the shape in and the one a barrier that
+// reads only the first role or the first two roles would get wrong. The roles carry their kinds, so a
+// barrier that filtered encoders out of the set would answer Ready while this deployment's encoder
+// was still waiting for quota.
+func epdJointDeployment() *workercore.ModelDeployment {
+	md := jointDeployment("qwen", "h20-8x", "a100-8x", "l20-8x")
+	md.Spec.Roles = []workercore.ModelDeploymentRole{
+		{
+			Name: "encode", Kind: workercore.ModelDeploymentRoleKindEncode,
+			Replicas: 1, InstanceType: "h20-8x",
+		},
+		{
+			Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
+			Replicas: 1, InstanceType: "a100-8x",
+		},
+		{
+			Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
+			Replicas: 1, InstanceType: "l20-8x",
+		},
+	}
+
+	return md
+}
+
+// threeGroupFixture builds the encoder deployment with one replica and one Workload per role, and
+// the reservation of the named role left controlled by the caller.
+//
+// The group names come from the renderer's own derivation, per (role, ordinal), for the same reason
+// twoGroupFixture uses it.
+func threeGroupFixture(unreserved string) []ctrlcli.Object {
+	md := epdJointDeployment()
+
+	objects := make([]ctrlcli.Object, 0, 2+2*len(md.Spec.Roles))
+	objects = append(objects, jointCheckObject(), md)
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		pod := jointGroupPod(fmt.Sprintf("qwen-%s-0", role.Name),
+			modelDeploymentReplicaGroupName(md, role.Name, 0), "qwen")
+		objects = append(objects, pod, jointWorkload("wl-"+role.Name, role.Name != unreserved, pod))
+	}
+
+	return objects
+}
+
+// workloadNamed is the named Workload as the client holds it now, for the assertions that follow a
+// pass the barrier took over it.
+func workloadNamed(t *testing.T, cli ctrlcli.Client, name string) *kueue.Workload {
+	t.Helper()
+
+	wl := new(kueue.Workload)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: name}, wl))
+
+	return wl
+}
+
+// TestModelDeploymentJointAdmission_EveryGroupOfAnEncoderDeployment covers the barrier over three
+// groups rather than two.
+//
+// THE THIRD GROUP IS THE ENCODER, and it is held like the other two. A barrier written over the pair
+// this repository already shipped -- one group of producers, one of consumers -- would leave the
+// encoder outside the set, and a deployment whose prefiller and decoder are admitted together while
+// its encoder waits is exactly the half-running deployment the barrier exists to prevent.
+func TestModelDeploymentJointAdmission_EveryGroupOfAnEncoderDeployment(t *testing.T) {
+	t.Run("every_group_reserved_is_ready", func(t *testing.T) {
+		got := reconcileJoint(t, newJointClient(threeGroupFixture("")...), "wl-encode")
+
+		assert.Equal(t, kueue.CheckStateReady, jointCheckState(got))
+	})
+
+	for _, unreserved := range []string{"encode", "prefill", "decode"} {
+		t.Run("one_group_short_holds_the_others_"+unreserved, func(t *testing.T) {
+			cli := newJointClient(threeGroupFixture(unreserved)...)
+
+			// EVERY GROUP THAT HOLDS QUOTA IS RECONCILED, because that is how the barrier reaches
+			// them: a verdict written to one group is never read by another.
+			for _, wl := range rolloutWorkloads(t, cli) {
+				if wl.Name == "wl-"+unreserved {
+					continue
+				}
+				got := reconcileJoint(t, cli, wl.Name)
+
+				assert.Equal(t, kueue.CheckStatePending, jointCheckState(got),
+					"%s waits for the deployment to assemble, not only for itself", wl.Name)
+				assert.NotEqual(t, kueue.CheckStateRetry, jointCheckState(got),
+					"a Retry evicts and drops the reservation the barrier is made of")
+				assert.Contains(t, jointCheckMessage(got), unreserved,
+					"the message names the role still waiting, which is what an operator acts on")
+				assert.True(t, workloadHasReservation(t, cli, wl.Name),
+					"every role keeps the quota it reserved while the set assembles")
+			}
+
+			// THE GROUP THAT HOLDS NOTHING IS KUEUE'S TO HOLD. This controller confirms a
+			// reservation, so a Workload without one is not its to judge, and saying anything
+			// about it would be a second opinion on a group Kueue is already not admitting.
+			got := reconcileJoint(t, cli, "wl-"+unreserved)
+			assert.Empty(t, jointCheckMessage(got),
+				"the controller writes no verdict on a group holding no quota")
+		})
+	}
+}
+
+// TestModelDeploymentJointAdmission_AScaleUpDoesNotReopenTheAdmittedGroups covers the shape that must
+// NOT change: a deployment that is already serving, gaining one replica.
+//
+// THE BARRIER IS ABOUT A SET ASSEMBLING, NOT ABOUT A SET BEING SERVED. The three groups that admitted
+// have left Kueue's path, and a barrier that re-judged the deployment on every pass would hold them
+// again each time it grows -- which is a scale-up in reverse. Their checks therefore still carry no
+// verdict after a pass over each of them, which is what an untouched check looks like.
+func TestModelDeploymentJointAdmission_AScaleUpDoesNotReopenTheAdmittedGroups(t *testing.T) {
+	md := epdJointDeployment()
+	md.Spec.Roles[1].Replicas = 2
+
+	encode := jointGroupPod("qwen-encode-0",
+		modelDeploymentReplicaGroupName(md, "encode", 0), "qwen")
+	prefillFirst := jointGroupPod("qwen-prefill-0",
+		modelDeploymentReplicaGroupName(md, "prefill", 0), "qwen")
+	decode := jointGroupPod("qwen-decode-0",
+		modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
+	joining := jointGroupPod("qwen-prefill-1",
+		modelDeploymentReplicaGroupName(md, "prefill", 1), "qwen")
+
+	cli := newJointClient(
+		jointCheckObject(), md, encode, prefillFirst, decode, joining,
+		jointWorkload("wl-encode", true, encode),
+		jointWorkload("wl-prefill-0", true, prefillFirst),
+		jointWorkload("wl-decode", true, decode),
+		jointWorkload("wl-prefill-1", false, joining),
+	)
+	serving := []string{"wl-encode", "wl-prefill-0", "wl-decode"}
+	for _, name := range serving {
+		admitWorkload(t, cli, workloadNamed(t, cli, name))
+	}
+
+	for _, name := range serving {
+		got := reconcileJoint(t, cli, name)
+
+		assert.Empty(t, jointCheckMessage(got),
+			"%s is admitted, so the barrier has nothing left to say about it", name)
+		assert.True(t, kueueworkload.IsAdmitted(workloadNamed(t, cli, name)),
+			"%s keeps serving while another group waits", name)
+	}
+
+	assert.Equal(t, kueue.CheckStatePending,
+		jointCheckState(reconcileJoint(t, cli, "wl-prefill-1")),
+		"the group that joined without quota is still not admitted")
+	assert.True(t, kueueworkload.IsAdmitted(workloadNamed(t, cli, "wl-prefill-0")),
+		"and the group it joined beside is still serving")
+}
+
 // TestJointCheckEntry pins the contract the readers of this check depend on.
 //
 // THE ENTRY RATHER THAN A BOOL IS THE POINT. Three readers ask three different questions of it --

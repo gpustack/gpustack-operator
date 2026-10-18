@@ -308,6 +308,7 @@ func modelDeploymentRoleSummary(
 	for _, role := range roles {
 		switch role.Kind {
 		case workercore.ModelDeploymentRoleKindServer,
+			workercore.ModelDeploymentRoleKindEncode,
 			workercore.ModelDeploymentRoleKindPrefill,
 			workercore.ModelDeploymentRoleKindDecode:
 			counts[role.Kind] += role.Ready
@@ -315,11 +316,20 @@ func modelDeploymentRoleSummary(
 			fmt.Fprintf(&other, "%d%s", role.Ready, strings.ToUpper(string(role.Kind)))
 		}
 	}
+	// THE ORDER IS FIXED, NOT THE ROLES' OWN. The summary is read at a glance and compared with
+	// another summary in a glance, so a deployment written encoder-first and one written
+	// encoder-last have to render the same letters in the same places.
+	//
+	// THE SERVER LETTER STAYS IN FRONT. A server and an encoder are not one deployment's shape --
+	// admission refuses the pair -- so their relative position is not observable on any deployment
+	// that can be admitted, and keeping it where every deployment without an encoder already puts
+	// it is the reading that changes nothing.
 	for _, kind := range []struct {
 		name workercore.ModelDeploymentRoleKind
 		code string
 	}{
 		{workercore.ModelDeploymentRoleKindServer, "S"},
+		{workercore.ModelDeploymentRoleKindEncode, "E"},
 		{workercore.ModelDeploymentRoleKindPrefill, "P"},
 		{workercore.ModelDeploymentRoleKindDecode, "D"},
 	} {

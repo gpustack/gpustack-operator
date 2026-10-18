@@ -9240,12 +9240,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentAdditionalVolume(ref com
 							Ref:         ref(corev1.HostPathVolumeSource{}.OpenAPIModelName()),
 						},
 					},
+					"persistentVolumeClaim": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PersistentVolumeClaim is the reference to a PersistentVolumeClaim to mount, in the deployment namespace. claimName is required and names a claim in this namespace; exactly one source is set on the entry. The existing mount path, sub-path and read-only fields apply.",
+							Ref:         ref(corev1.PersistentVolumeClaimVolumeSource{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"mountPath"},
 			},
 		},
 		Dependencies: []string{
-			corev1.HostPathVolumeSource{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+			corev1.HostPathVolumeSource{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName(), corev1.PersistentVolumeClaimVolumeSource{}.OpenAPIModelName()},
 	}
 }
 
@@ -9253,28 +9259,29 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentEngine(ref common.Refere
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentEngine is the engine a deployment runs and the version of it.\n\nThe two are one object because they were never meaningful apart: a role that names no image of its own has one assembled from the engine and the version together with the role's own InstanceType. The version carries no obligation of its own — it is owed exactly when some role needs that assembly, which admission rather than the schema decides, because which roles need it is a fact about the roles and not about this field.",
+				Description: "ModelDeploymentEngine is the engine a deployment runs and the image it runs in.\n\nThe image is a deployment-wide default rather than a per-role field, because the roles of one deployment are one engine build and usually share one image. A role that needs a different one names it in its own spec, which overrides this field.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Name selects the engine.\n\nIt is the half of this object that is the deployment's identity and is frozen after creation, while Version answers which build runs and stays editable — stated here because one object reading otherwise would freeze the pair together.",
+							Description: "Name selects the engine.\n\nIt is the deployment's identity and is frozen after creation, while Image answers which build runs and stays editable — stated here because one object reading otherwise would freeze the pair together.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
-					"version": {
+					"image": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Version is the engine's own version, e.g. \"0.29.0\" for vllm or \"0.5.18\" for sglang.\n\n  - It is OPTIONAL, and the obligation sits with the roles instead: a role that names no image\n    of its own has one synthesized from this version, so admission refuses an empty version\n    beside such a role rather than letting the render assemble a malformed tag naming\n    something never typed. A role that names an image never reads this field.\n  - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the\n    driver each role's hardware installed are aligned. A gate would need the runner's release\n    matrix compiled into the operator, and the failure it would prevent is already legible as\n    an ImagePullBackOff on a tag that does not exist.\n  - It is per deployment rather than per role, which is what lets one version assemble a\n    DIFFERENT image for each role: the backend half of the tag comes from the role's own\n    InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.\n    Published version sets do NOT overlap across every backend, so one version has to name a\n    tag that exists for each backend the roles land on.",
+							Description: "Image is the container image every role of this deployment runs in by default.\n\n  - It is the WHOLE-DEPLOYMENT default: a role that names its own image runs that one\n    instead, so this field is what an unstated role falls back to.\n  - The operator does not build an image, so the tag must exist in a registry the cluster\n    can pull.\n  - The minimum of 1 holds the requirement shut. Without it a required string here is\n    satisfied by the key merely being present, and this object is re-marshaled by the\n    mutating webhook: Engine is a value type and this field has no omitempty, so a patch\n    taken from a request that named no image still carries an empty one.",
+							Default:     "",
 							MinLength:   ptr.To[int64](1),
-							MaxLength:   ptr.To[int64](64),
+							MaxLength:   ptr.To[int64](512),
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 				},
-				Required: []string{"name"},
+				Required: []string{"name", "image"},
 			},
 		},
 	}
@@ -9426,7 +9433,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVTransfer(ref common.Re
 				Properties: map[string]spec.Schema{
 					"protocol": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Protocol is the transport both ends of the direct leg are told to use. It uses the KVCacheBackend transport values and their Mooncake mapping, except MUSA and MACA: those are intra-node IPC transports, while prefill and decode may run on different nodes.\n\n  - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\n    end, so a per-role field could only express a contradiction -- two ends naming different\n    values for one connection, which fails at transfer time rather than at admission.\n  - THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;\n    the engine image must still carry the matching Mooncake build. CANN renders as\n    \"ascend\" and ROCM as \"hip\", using the same mapping as KVCacheBackend members.\n  - Auto selects TCP and renders \"tcp\"; it does not inspect the worker's fabric.\n  - UNSET RENDERS \"tcp\", the transport every Mooncake build carries. The default lives in\n    the renderer rather than in this schema, so the stored object holds exactly what was\n    asked.\n  - TCP IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport\n    from the host's hardware and does not read the requested one. On vLLM the leg also gets\n    MC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's\n    transfer backend: TCP renders \"mooncake_tcp\", any other value renders \"mooncake\", and\n    the value itself is not passed through. Neither pin renders while the deployment's store\n    runs a transport other than tcp, because it is process-wide and would leave the store\n    client without its fabric; the leg then keeps the engine's own selection.\n  - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted\n    router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind\n    \"vllm-router\" -- the value is accepted and renders nothing. An Ascend pair behind\n    \"llm-d-router\" renders the leg but not this value: that engine's transfer leg hardcodes\n    its transport, so the declared protocol has no key to land in. Each silence is stated\n    here because an accepted field that quietly does nothing is a promise broken quietly.\n  - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\n    argv, so a change rebuilds every Kueue pod group of the deployment. With roles split\n    across InstanceTypes the groups rebuild independently, and a mixed-protocol window\n    between a prefiller and a decoder exists until both converge -- the same window an\n    engine version edit already opens.",
+							Description: "Protocol is the transport both ends of the direct leg are told to use. It uses the KVCacheBackend transport values and their Mooncake mapping, except MUSA and MACA: those are intra-node IPC transports, while prefill and decode may run on different nodes.\n\n  - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\n    end, so a per-role field could only express a contradiction -- two ends naming different\n    values for one connection, which fails at transfer time rather than at admission.\n  - THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;\n    the engine image must still carry the matching Mooncake build. CANN renders as\n    \"ascend\" and ROCM as \"hip\", using the same mapping as KVCacheBackend members.\n  - Auto selects TCP and renders \"tcp\"; it does not inspect the worker's fabric.\n  - UNSET RENDERS \"tcp\", the transport every Mooncake build carries. The default lives in\n    the renderer rather than in this schema, so the stored object holds exactly what was\n    asked.\n  - TCP IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport\n    from the host's hardware and does not read the requested one. On vLLM the leg also gets\n    MC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's\n    transfer backend: TCP renders \"mooncake_tcp\", any other value renders \"mooncake\", and\n    the value itself is not passed through. Neither pin renders while the deployment's store\n    runs a transport other than tcp, because it is process-wide and would leave the store\n    client without its fabric; the leg then keeps the engine's own selection.\n  - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted\n    router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind\n    \"vllm-router\" -- the value is accepted and renders nothing. An Ascend pair behind\n    \"llm-d-router\" renders the leg but not this value: that engine's transfer leg hardcodes\n    its transport, so the declared protocol has no key to land in. Each silence is stated\n    here because an accepted field that quietly does nothing is a promise broken quietly.\n  - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\n    argv, so a change rebuilds every Kueue pod group of the deployment. With roles split\n    across InstanceTypes the groups rebuild independently, and a mixed-protocol window\n    between a prefiller and a decoder exists until both converge -- the same window an\n    engine image edit already opens.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -9837,10 +9844,10 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"kind": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable by typing a string is one typo away from silently changing. Two roles may share a kind and differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a deployment declaring one would render a role no reader of the rendered configuration could reach. It defaults to Server, the shape a deployment written before disaggregation existed has, so such a deployment renders exactly as it did.\n\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable by typing a string is one typo away from silently changing. Two roles may share a kind and differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a deployment declaring one would render a role no reader of the rendered configuration could reach. It defaults to Server, the shape a deployment written before disaggregation existed has, so such a deployment renders exactly as it did.\n\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Encode\"` is a role that runs the multimodal encoder and hands its output to a prefiller rather than producing tokens itself.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Decode", "Prefill", "Server"},
+							Enum:        []interface{}{"Decode", "Encode", "Prefill", "Server"},
 						},
 					},
 					"replicas": {
@@ -9879,7 +9886,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"image": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Image is the container image to run. Leaving it empty is the ordinary case: the operator then synthesizes one from the pool's accelerator backend, the observed runtime version and the requested engine.",
+							Description: "Image is the container image to run. Leaving it empty is the ordinary case: the role then runs the deployment's engine image. Set it to run a private build, to pin this one role to an image different from the engine's, or to name a repository the engine image does not.",
 							MaxLength:   ptr.To[int64](512),
 							Type:        []string{"string"},
 							Format:      "",
@@ -10278,11 +10285,11 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 					},
 					"kind": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Kind echoes the role's kind, so reading the status alone answers which half of a disaggregated deployment an entry describes. It is ALWAYS present: every role has a kind, defaulted if the user named none, so an absent value would mean the status was written by something that did not know about kinds rather than that the role has none.\n\nThe enum is the same one the spec field carries and has to stay that way: this field is written from the spec field with the unset case resolved, so a value the writer can produce and this list does not name would make every later status write on the object fail, taking every other figure down with the kind. The marker sits on the field because the type's own enum marker is a Go-level one and does not become schema validation.\n\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Description: "Kind echoes the role's kind, so reading the status alone answers which half of a disaggregated deployment an entry describes. It is ALWAYS present: every role has a kind, defaulted if the user named none, so an absent value would mean the status was written by something that did not know about kinds rather than that the role has none.\n\nThe enum is the same one the spec field carries and has to stay that way: this field is written from the spec field with the unset case resolved, so a value the writer can produce and this list does not name would make every later status write on the object fail, taking every other figure down with the kind. The marker sits on the field because the type's own enum marker is a Go-level one and does not become schema validation.\n\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Encode\"` is a role that runs the multimodal encoder and hands its output to a prefiller rather than producing tokens itself.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Decode", "Prefill", "Server"},
+							Enum:        []interface{}{"Decode", "Encode", "Prefill", "Server"},
 						},
 					},
 					"assignedFlavors": {
@@ -10554,11 +10561,11 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterRoleStatus(ref com
 					},
 					"kind": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Kind is the role's effective kind, which is what tells a prefiller from a decoder. It is the resolved value rather than the field, because a role naming no kind is a server and a consumer matching on the empty string would find nothing.\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Description: "Kind is the role's effective kind, which is what tells a prefiller from a decoder. It is the resolved value rather than the field, because a role naming no kind is a server and a consumer matching on the empty string would find nothing.\n\nPossible enum values:\n - `\"Decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"Encode\"` is a role that runs the multimodal encoder and hands its output to a prefiller rather than producing tokens itself.\n - `\"Prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"Server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Decode", "Prefill", "Server"},
+							Enum:        []interface{}{"Decode", "Encode", "Prefill", "Server"},
 						},
 					},
 					"selector": {

@@ -64,6 +64,45 @@ func TestInstanceHostAccessSettings(t *testing.T) {
 	}
 }
 
+// TestModelDeploymentImageSettings pins the two images a ModelDeployment's own roles run when the
+// object names none: the router, and the sidecar a decoder runs to accept a remote prefill handoff.
+// Neither runs a model, so neither links an accelerator runtime and one default is safe for every
+// cluster; both stay editable so an air-gapped cluster can redirect them at its own registry and a
+// broken upstream release can be pinned back without rebuilding the operator. Pinning the tags
+// here is what makes a default bump a reviewed change rather than a silent one.
+func TestModelDeploymentImageSettings(t *testing.T) {
+	cases := []struct {
+		s           setting.Setting
+		wantName    string
+		wantEnv     string
+		wantDefault string
+	}{
+		{
+			ModelDeploymentRouterImage,
+			"model-deployment-router-image",
+			"GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE",
+			"gpustack/llm-router:v0.3.1",
+		},
+		{
+			ModelDeploymentRoutingSidecarImage,
+			"model-deployment-routing-sidecar-image",
+			"GPUSTACK_MODEL_DEPLOYMENT_ROUTING_SIDECAR_IMAGE",
+			"gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.wantName, func(t *testing.T) {
+			assert.Equal(t, c.wantName, c.s.Name(), "name drives the GPUSTACK_ env mapping")
+			assert.Equal(t, c.wantDefault, c.s.DefaultValue(), "boot default image")
+			assert.True(t, c.s.Editable(), "must stay editable so a cluster can redirect or pin it")
+
+			t.Setenv(c.wantEnv, "registry.example.com/override:v0")
+			assert.Equal(t, "registry.example.com/override:v0", setting.InitializeFromEnv(c.wantDefault)(c.s.Name()),
+				"env %s must override the default", c.wantEnv)
+		})
+	}
+}
+
 // TestModelDeploymentTCPTWReuseSetting pins the switch that renders net.ipv4.tcp_tw_reuse onto
 // SGLang prefill Pods: its stable name (which drives the GPUSTACK_ env mapping), its default-off
 // boot value, and that it stays an editable boolean. It must default off because the sysctl is

@@ -2,7 +2,7 @@ terraform {
   required_providers {
     nebius = {
       source  = "nebius/nebius"
-      version = "0.6.30"
+      version = "0.6.67"
     }
     # Pinned rather than inferred by init: this module declares its provider set explicitly, and an
     # unpinned external provider would contradict that. Same version as clusters/nebius, which already

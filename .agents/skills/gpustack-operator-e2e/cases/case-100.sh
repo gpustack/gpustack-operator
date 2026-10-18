@@ -39,6 +39,10 @@ NS="${1:?usage: case-100.sh <NS>}"
 IT="${E2E_C100_IT:?set E2E_C100_IT to an accelerator InstanceType}"
 MEMBER_NODE="${E2E_C100_MEMBER_NODE:?set E2E_C100_MEMBER_NODE to the hostname the store member runs on}"
 READY_BOUND="${E2E_C100_READY_BOUND:-1200}"
+# The engine image every role falls back to. This case reads which prompts the store serves, not
+# what the engine does with them, but the roles name no image of their own, so the deployment needs
+# one that pulls and runs vLLM.
+IMAGE="${E2E_C100_IMAGE:-quay.io/gpustack/runner:cuda12.9-vllm0.29.0}"
 # Where the prompts are sent inside the engine container. Pointing it at a port nothing listens on is
 # how this case is shown to fail: every send then fails and every served count stays put.
 ENGINE_URL="${E2E_C100_ENGINE_URL:-http://127.0.0.1:8000}"
@@ -143,7 +147,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: $1, namespace: ${NS}, labels: {e2e.gpustack.ai/case: "100"}}
 spec:
-  engine: {name: vLLM, version: "0.29.0"}
+  engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: ${SERVED}, artifactRef: {name: $2}}
   kvCache: {poolRef: {name: ${P}-shared}}
   roles:

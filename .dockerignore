@@ -30,12 +30,16 @@
 /.docker
 /.entc
 # /.sbin
-# /.dist
+/.dist
+/.gitnexus
 /log
 /certs
 .terraform
+**/.terraform
 !.claude
+.claude/*
+!.claude/skills
+!.claude/settings.json
 !.agents
-.claude/settings.local.json
 .agents/skills/generated
 .agents/skills/gitnexus

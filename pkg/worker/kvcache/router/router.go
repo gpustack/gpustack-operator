@@ -73,6 +73,22 @@ type Input struct {
 	// carrying both is deliberate -- see Role.Selector for why a map rather than a string.
 	EndpointLabels map[string]string
 
+	// EligibleLabelKey names the label a stage filter must match when that role's eligibility
+	// requirement is carried per role rather than by the deployment-wide selector. A non-empty key
+	// adds the term to the stage filter of every role whose Selector already carries it, which is
+	// the set of roles the gate can decide; empty leaves every stage filter as it renders today.
+	//
+	// IT IS NAMED BY THE CALLER rather than declared here because the label belongs to the
+	// operator's own vocabulary, and a second spelling of it in this package is the thing that
+	// would drift.
+	EligibleLabelKey string
+
+	// EncoderURLs are the HTTP(S) endpoints of the deployment's encoders, as the router that takes
+	// a static list of them requires. Each entry is the encoder role's per-role Service URL rather
+	// than a replica address: the Service fronts every replica, so a scale changes nothing here
+	// and does not restart the router. Nil on a deployment with no Encode role.
+	EncoderURLs []string
+
 	// ListenPort is the port the router serves its own API on, which is what the Service in front
 	// of it targets.
 	ListenPort int32
@@ -101,6 +117,72 @@ type Input struct {
 // has to agree with the API's enum by convention rather than by the compiler, so the two places that
 // compare against it do so through this one name - a second spelling would be the thing that drifts.
 const roleKindDecode = "decode"
+
+// roleKindEncode is the encoder's kind as this package receives it. It joins roleKindDecode for the
+// reason stated on that one: this package compares strings against a convention the API's enum
+// defines, so both kinds are named here rather than imported.
+const roleKindEncode = "encode"
+
+// llmdMultimodalDecider is the plugin that makes the encoder stage conditional. It activates on a
+// request carrying image, audio or video content and declines a text-only one, which is the whole of
+// the no-media path: the decode stage has already picked its Pod by then, so declining sends the
+// request straight to the prefiller and the decoder.
+// (llm-d/llm-d-router@v0.11.0 `pkg/epp/framework/plugins/scheduling/profilehandler/disagg/
+// always_disagg_mm_decider.go:29`, and the E/P/D configuration in `docs/disaggregation.md`).
+const llmdMultimodalDecider = "always-disagg-multimodal-decider"
+
+// llmdAlwaysDisaggPDDecider splits every request between the prefiller and the decoder. It takes no
+// parameters
+// (llm-d/llm-d-router@v0.11.0 `pkg/epp/framework/plugins/scheduling/profilehandler/disagg/
+// always_disagg_pd_decider.go:28`, registered at `cmd/epp/runner/runner.go:612`).
+//
+// SGLang NEEDS IT BECAUSE ITS DECODER CANNOT PREFILL: a decode-mode server rejects any request that
+// carries no bootstrap room id with HTTP 400, so a decider that skips the prefiller on a short or
+// cached prompt, or on a request it could not tokenize, sends the request to a server that cannot
+// answer it. vLLM keeps the prefix-based decider because its decoder loads the full model and can
+// prefill locally.
+const llmdAlwaysDisaggPDDecider = "always-disagg-pd-decider"
+
+// llmdEngineSGLang is the engine name this package receives for SGLang.
+const llmdEngineSGLang = "sglang"
+
+// llmdStageFilterType is the picker plugin that filters endpoints by label. Named here so the
+// renderer and the reader of its own output agree on the spelling.
+const llmdStageFilterType = "label-selector-filter"
+
+// DocumentStageFilterDemands reports whether the rendered picker document holds a label-selector
+// filter whose matchLabels require one label to equal one value.
+//
+// IT IS ASKED OF THE DOCUMENT RATHER THAN OF ITS TEXT because the same string is also where a
+// user-supplied model name is rendered. A document that merely CONTAINS the label's key is not a
+// requirement, and reading it as one would activate a gate nobody decided. A stage filter's own
+// matchLabels is the only place the document states a requirement about a Pod, so it is the only
+// place this looks.
+//
+// A document that does not parse, and one that declares no filter, demand nothing.
+func DocumentStageFilterDemands(document, labelKey, value string) bool {
+	var parsed struct {
+		Plugins []struct {
+			Type       string `json:"type"`
+			Parameters struct {
+				MatchLabels map[string]string `json:"matchLabels"`
+			} `json:"parameters"`
+		} `json:"plugins"`
+	}
+	if err := yaml.Unmarshal([]byte(document), &parsed); err != nil {
+		return false
+	}
+	for _, plugin := range parsed.Plugins {
+		if plugin.Type != llmdStageFilterType {
+			continue
+		}
+		if plugin.Parameters.MatchLabels[labelKey] == value {
+			return true
+		}
+	}
+
+	return false
+}
 
 // Output is a rendered router configuration. A router is configured EITHER by a document it reads at
 // startup OR entirely by its own arguments, so exactly one half is filled and Render refuses every
@@ -172,8 +254,18 @@ var renderers = map[string]func(Input) (Output, error){
 
 func renderLLMD(input Input) (Output, error) {
 	kinds := make(map[string]string, len(input.Roles))
+	selectors := make(map[string]map[string]string, len(input.Roles))
 	for _, role := range input.Roles {
 		kinds[role.Kind] = role.RoleLabelKey
+		selectors[role.Kind] = role.Selector
+	}
+
+	// SGLang's prefiller dials the encoder itself through its encoder URLs, so the router sees the
+	// encoder and the prefiller as one stage: encode plus prefill, then decode. The encoder is
+	// dropped here rather than rendered as a stage the decoder's sidecar has no connector for.
+	sglang := input.Metrics.Engine == llmdEngineSGLang
+	if sglang {
+		delete(kinds, roleKindEncode)
 	}
 
 	orderedKinds := make([]string, 0, len(kinds))
@@ -182,21 +274,58 @@ func renderLLMD(input Input) (Output, error) {
 	}
 	slices.Sort(orderedKinds)
 
+	// Whether this deployment has an encoder stage at all. Hoisted because two decisions below are
+	// keyed on it, and a shadowing redeclaration inside either of them would leave the two reading
+	// the same name while only one of them could see the value they share.
+	_, encode := kinds[roleKindEncode]
+
 	plugins := make([]any, 0, len(orderedKinds)+7)
 	profiles := make([]any, 0, len(orderedKinds))
 	for _, kind := range orderedKinds {
 		filter := kind + "-pods"
+		matchLabels := map[string]string{kinds[kind]: kind}
+		// A role the gate can decide carries its eligibility requirement HERE rather than in the
+		// deployment-wide selector, which is one AND of every term and so cannot say "required of
+		// the encoder and not of the prefiller". A role that can never activate never carries the
+		// label at all, so a term demanded of it would select nothing; its Selector has none, its
+		// stage filter is left alone, and its Pods stay selectable.
+		if value, ok := selectors[kind][input.EligibleLabelKey]; ok {
+			matchLabels[input.EligibleLabelKey] = value
+		}
 		plugins = append(plugins, map[string]any{
 			"name":       filter,
-			"type":       "label-selector-filter",
-			"parameters": map[string]any{"matchLabels": map[string]string{kinds[kind]: kind}},
+			"type":       llmdStageFilterType,
+			"parameters": map[string]any{"matchLabels": matchLabels},
 		})
-		profilePlugins := []any{
-			map[string]any{"pluginRef": filter},
+		profilePlugins := []any{map[string]any{"pluginRef": filter}}
+		if kind == roleKindEncode {
+			// AN ENCODER IS SCORED ON NOTHING, and the shape is upstream's own: the E/P/D
+			// configuration in llm-d/llm-d-router@v0.11.0 `docs/disaggregation.md` gives the
+			// encode profile the role filter and nothing else.
+			//
+			// It has to. An encoder keeps no KV cache, so the queue and KV-cache scorers read
+			// gauges it never exports and rank every candidate identically; the prefix scorer
+			// asks about token overlap, which does not exist before a request has tokens. A
+			// scorer that cannot separate candidates is not a weak preference, it is a cost
+			// paid on every media request.
+			//
+			// THE PICKER IS STILL THERE. Upstream completes any profile naming none at load time
+			// by appending its max-score-picker (`pkg/epp/config/loader/defaults.go:197-216`),
+			// and the profile runner dereferences that picker unconditionally
+			// (`pkg/epp/scheduling/scheduler_profile.go:351`), so a profile that named none
+			// would fail rather than run unscored. Naming it here would say nothing the loader
+			// does not already say, and would put a second answer to the same question in the
+			// document this operator hashes into its router Pod.
+			profiles = append(profiles, map[string]any{
+				"name":    kind,
+				"plugins": profilePlugins,
+			})
+			continue
+		}
+		profilePlugins = append(profilePlugins,
 			map[string]any{"pluginRef": "queue-scorer", "weight": 2},
 			map[string]any{"pluginRef": "kv-cache-utilization-scorer", "weight": 2},
-			map[string]any{"pluginRef": "max-score-picker"},
-		}
+			map[string]any{"pluginRef": "max-score-picker"})
 		if kind != roleKindDecode {
 			profilePlugins = append(profilePlugins,
 				map[string]any{"pluginRef": "prefix-cache-scorer", "weight": 3})
@@ -214,30 +343,55 @@ func renderLLMD(input Input) (Output, error) {
 	prefixProducer := "approx-prefix-cache-producer"
 	if input.KVEvents.Port > 0 {
 		prefixProducer = "precise-prefix-cache-producer"
-		// Excludes decoders from the set of Pods the producer subscribes to. The exclusion is keyed
-		// on the decode kind's own label, so it exists only when a decode role is among the inputs -
-		// keying it on whichever kind sorts first would pin it to an arbitrary role. Appended rather
-		// than assigned, and guarded, because an empty selector would otherwise render a leading
-		// comma - which Kubernetes rejects as a label selector, and which no current caller
-		// produces. The guard is here because this function is a library and its callers are not
-		// its contract.
+		// Excludes every role that keeps no KV cache from the set of Pods the producer
+		// subscribes to. The exclusion is keyed on each kind's own label, so a term exists only
+		// for a kind among the inputs -- keying it on whichever kind sorts first would pin it to
+		// an arbitrary role. Appended rather than assigned, and guarded, because an empty
+		// selector would otherwise render a leading comma - which Kubernetes rejects as a label
+		// selector, and which no current caller produces. The guard is here because this
+		// function is a library and its callers are not its contract.
+		//
+		// DECODE FIRST, THEN ENCODE, and the order is rendered. The selector is a ConfigMap value
+		// whose hash is stamped on the router Pod, so reordering the terms would roll every
+		// prefill/decode router in the cluster for a change nothing reads.
+		//
+		// AN ENCODER IS EXCLUDED FOR THE SAME REASON A DECODER IS, and it is worth stating
+		// because the two look different from outside. A decoder consumes KV and produces none;
+		// an encoder does not hold KV at all. Either way it publishes no events, and leaving one
+		// in the set is a subscriber dialing a socket the engine never opens.
 		publisherSelector := input.EndpointSelector
-		if key, ok := kinds[roleKindDecode]; ok {
-			exclusion := key + "!=" + roleKindDecode
+		for _, kind := range []string{roleKindDecode, roleKindEncode} {
+			key, ok := kinds[kind]
+			if !ok {
+				continue
+			}
+			exclusion := key + "!=" + kind
 			if publisherSelector == "" {
 				publisherSelector = exclusion
 			} else {
 				publisherSelector += "," + exclusion
 			}
 		}
+		// AN ENCODER STAGE GETS THE BUILT-IN ESTIMATOR, AND EVERY OTHER DEPLOYMENT GETS THE HTTP
+		// RENDERER. Naming the vLLM URL here selects llm-d-router's vllmHTTPRenderer, which POSTs to
+		// <url>/v1/chat/completions/render -- an endpoint vLLM 0.30.0 serves only under
+		// --enable-scale-out, so on a default server the call answers 404 and no request is routed
+		// at all. A bare token-producer instead selects the built-in estimator, which reads PNG and
+		// JPEG dimensions out of a data: URL with no HTTP call.
+		//
+		// The two are also not interchangeable on an encoder: the request is forwarded to the
+		// encoder with its media still attached, and the multimodal decider reads the estimator's
+		// MultiModalFeatures to decide the stage exists at all. The HTTP renderer would have to ask
+		// the prefiller to render, which is the wrong server for the question.
+		tokenProducer := map[string]any{"type": "token-producer"}
+		if !encode {
+			tokenProducer["parameters"] = map[string]any{
+				"modelName": input.ModelName,
+				"vllm":      map[string]any{"url": input.TokenizerEndpoint},
+			}
+		}
 		plugins = append(plugins,
-			map[string]any{
-				"type": "token-producer",
-				"parameters": map[string]any{
-					"modelName": input.ModelName,
-					"vllm":      map[string]any{"url": input.TokenizerEndpoint},
-				},
-			},
+			tokenProducer,
 			map[string]any{"type": "endpoint-notification-source"},
 			map[string]any{
 				"type": prefixProducer,
@@ -311,22 +465,59 @@ func renderLLMD(input Input) (Output, error) {
 
 	if _, prefill := kinds["prefill"]; prefill {
 		if _, decode := kinds["decode"]; decode {
+			// The encoder stage is wired beside the prefiller's because admission requires an
+			// encoder to declare both halves: a deployment reaching this renderer with an
+			// encoder and no prefiller is refused upstream and never arrives here.
+			stageProfiles := map[string]string{"prefill": "prefill", "decode": "decode"}
+			stageDeciders := map[string]string{"prefill": "prefix-based-pd-decider"}
+			// An explicit zero threshold still disables splitting, which only the prefix-based decider
+			// honors, so the always-split decider is for a split that is not disabled.
+			alwaysSplit := sglang &&
+				(input.DisaggregationThreshold == nil || *input.DisaggregationThreshold > 0)
+			if alwaysSplit {
+				stageDeciders["prefill"] = llmdAlwaysDisaggPDDecider
+			}
+			if encode {
+				// Declared before the prefiller's decider, which is the order upstream's E/P/D
+				// configuration lists them in (llm-d/llm-d-router@v0.11.0
+				// `docs/disaggregation.md`, E/P/D Configuration).
+				plugins = append(plugins, map[string]any{"type": llmdMultimodalDecider})
+				stageProfiles["encode"] = "encode"
+				stageDeciders["encode"] = llmdMultimodalDecider
+			}
+			pdDeciderParams := map[string]any{
+				"promptTokens": 0,
+				// Zero is a value here rather than an absence: the decider returns "do not
+				// disaggregate" on a zero threshold before reading anything else, so the
+				// pointer is what tells an explicit zero from an unset field.
+				"nonCachedTokens": llmdNonCachedTokens(input.DisaggregationThreshold),
+			}
+			// THE PREFILL DECIDER MUST BE TOLD WHICH PRODUCER FEEDS IT, and only on an encoder
+			// deployment. With the precise producer active, the decider reads its token counts from
+			// the producer named in prefixMatchInfoProducerName; omitted, it falls back to the
+			// approximate producer, which this document does not define, so the router creates an
+			// unconfigured one at load and then logs
+			// "failed to read prefix plugin state: not found" for every request.
+			//
+			// The name is written rather than relied upon, because the fallback is a silent second
+			// answer to a question this document has already answered.
+			if encode && prefixProducer == "precise-prefix-cache-producer" {
+				pdDeciderParams["prefixMatchInfoProducerName"] = prefixProducer
+			}
+			pdDecider := map[string]any{
+				"type":       "prefix-based-pd-decider",
+				"parameters": pdDeciderParams,
+			}
+			if alwaysSplit {
+				pdDecider = map[string]any{"type": llmdAlwaysDisaggPDDecider}
+			}
 			plugins = append(plugins,
-				map[string]any{
-					"type": "prefix-based-pd-decider",
-					"parameters": map[string]any{
-						"promptTokens": 0,
-						// Zero is a value here rather than an absence: the decider returns "do not
-						// disaggregate" on a zero threshold before reading anything else, so the
-						// pointer is what tells an explicit zero from an unset field.
-						"nonCachedTokens": llmdNonCachedTokens(input.DisaggregationThreshold),
-					},
-				},
+				pdDecider,
 				map[string]any{
 					"type": "disagg-profile-handler",
 					"parameters": map[string]any{
-						"profiles": map[string]string{"prefill": "prefill", "decode": "decode"},
-						"deciders": map[string]string{"prefill": "prefix-based-pd-decider"},
+						"profiles": stageProfiles,
+						"deciders": stageDeciders,
 					},
 				},
 			)

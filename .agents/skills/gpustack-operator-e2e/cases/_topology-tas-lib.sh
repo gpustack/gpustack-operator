@@ -433,9 +433,8 @@ tas_md_cq_of_it() {
     -o jsonpath='{.spec.clusterQueue}' 2>/dev/null
 }
 
-# One role block for a ModelDeployment. The image and command are placeholder plumbing: a CPU-only
-# InstanceType has observed no accelerator and the operator can synthesize no engine image, and no
-# reading that matters is about what the container runs.
+# One role block for a ModelDeployment. The image and command are placeholder plumbing: no reading
+# that matters is about what the container runs.
 tas_md_role_block() {
   printf '  - name: %s\n' "$1"
   [ -n "$2" ] && printf '    kind: %s\n' "$2"
@@ -463,7 +462,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    version: "0.11.0"
+    image: registry.k8s.io/pause:3.10
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:

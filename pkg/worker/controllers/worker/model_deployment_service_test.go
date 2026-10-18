@@ -119,6 +119,208 @@ func TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide(t *testing.T) 
 	assert.Equal(t, byName["qwen-prefill"].Spec.Selector, byName["qwen"].Spec.Selector)
 }
 
+// epdDeployment is the three-role shape an encoder deployment has: an encoder, a prefiller and a
+// decoder, in the order the case gives them.
+//
+// THE ENCODER DECLARES ITS OWN PORT AND ITS OWN TRANSPORT. That is what makes "the front door read
+// the encoder" observable rather than a matter of taste: with every role answering on the same port
+// over the same transport, a Service pointed at an encoder would be indistinguishable from one
+// pointed at a prefiller. As shaped here the two disagree on both figures the front door publishes --
+// the selector names the role, the port says 8000 against the encoder's 9100, and the address says
+// http against the encoder's https.
+func epdDeployment(
+	t *testing.T, order []workercore.ModelDeploymentRoleKind, mutate ...func(*workercore.ModelDeployment),
+) *workercore.ModelDeployment {
+	t.Helper()
+
+	shapes := map[workercore.ModelDeploymentRoleKind]workercore.ModelDeploymentRole{
+		workercore.ModelDeploymentRoleKindEncode: {
+			Name:         "encode",
+			Kind:         workercore.ModelDeploymentRoleKindEncode,
+			InstanceType: "h20-8x",
+			Image:        "vllm/vllm-openai:v0.30.0",
+			Ports: []workercore.ModelDeploymentPort{
+				{Port: 9100, Protocol: core.ProtocolTCP},
+			},
+			ExtraArgs: []string{"--port", "9100", "--ssl-certfile", "/etc/tls/tls.crt"},
+		},
+		workercore.ModelDeploymentRoleKindPrefill: {
+			Name:         "prefill",
+			Kind:         workercore.ModelDeploymentRoleKindPrefill,
+			InstanceType: "h20-8x",
+			Image:        "vllm/vllm-openai:v0.30.0",
+		},
+		workercore.ModelDeploymentRoleKindDecode: {
+			Name:         "decode",
+			Kind:         workercore.ModelDeploymentRoleKindDecode,
+			InstanceType: "h20-8x",
+			Image:        "vllm/vllm-openai:v0.30.0",
+		},
+	}
+
+	roles := make([]workercore.ModelDeploymentRole, 0, len(order))
+	for _, kind := range order {
+		role, known := shapes[kind]
+		require.Truef(t, known, "no encoder-deployment shape for role kind %q", kind)
+		roles = append(roles, role)
+	}
+
+	return newRenderDeployment(append([]func(*workercore.ModelDeployment){
+		func(md *workercore.ModelDeployment) {
+			md.Spec.Roles = roles
+		},
+	}, mutate...)...)
+}
+
+// TestRenderModelDeploymentServices_AnEncodeRoleGetsItsOwnService covers what the position of the
+// encoder changes and what it does not.
+//
+// AN ENCODER IS A ROLE LIKE ANY OTHER to this renderer, so it is served like one. What must not
+// follow from it is the front door: the deployment-wide Service answers the OpenAI API, and an
+// encoder answers none of it.
+func TestRenderModelDeploymentServices_AnEncodeRoleGetsItsOwnService(t *testing.T) {
+	md := epdDeployment(t, []workercore.ModelDeploymentRoleKind{
+		workercore.ModelDeploymentRoleKindEncode,
+		workercore.ModelDeploymentRoleKindPrefill,
+		workercore.ModelDeploymentRoleKindDecode,
+	})
+
+	services := renderModelDeploymentServices(md, nil, nil)
+	byName := map[string]*core.Service{}
+	for _, svc := range services {
+		byName[svc.Name] = svc
+	}
+
+	encode := byName["qwen-encode"]
+	require.NotNil(t, encode, "the encoder role is served by a Service of its own, %v",
+		serviceNamesOf(services))
+	assert.Equal(t, map[string]string{
+		modelDeploymentLabelKeyName:      modelDeploymentLabelValueName,
+		modelDeploymentLabelKeyInstance:  "qwen",
+		modelDeploymentLabelKeyComponent: "encode",
+	}, encode.Spec.Selector)
+	assert.Equal(t, md.Name, services[0].Name,
+		"the deployment-wide Service comes first, and the role Services follow it")
+}
+
+// serviceNamesOf names the rendered Services in the order they were rendered.
+func serviceNamesOf(services []*core.Service) []string {
+	names := make([]string, 0, len(services))
+	for _, svc := range services {
+		names = append(names, svc.Name)
+	}
+
+	return names
+}
+
+// TestRenderModelDeploymentService_NeverFrontsAnEncodeRole pins where an encoder deployment's front
+// door lands.
+//
+// AN ENCODER IS NOT A FRONT DOOR. It serves embeddings for a prefiller, not completions, so a Service
+// selecting it round-robins requests onto a process that answers none of them -- and the failure is
+// silent, because the Service has endpoints and the router's health check is the only thing that
+// notices. The rule is therefore POSITIONAL AND TOTAL: the front role is the first role that can
+// answer, wherever the encoder sits in the list. A deployment with no encoder keeps today's rule,
+// which is also the first role.
+func TestRenderModelDeploymentService_NeverFrontsAnEncodeRole(t *testing.T) {
+	testCases := []struct {
+		name  string
+		order []workercore.ModelDeploymentRoleKind
+	}{
+		{
+			// The order a reader would write an encoder deployment in, and the one that breaks a
+			// front door still reading the first role.
+			name: "the_encoder_first",
+			order: []workercore.ModelDeploymentRoleKind{
+				workercore.ModelDeploymentRoleKindEncode,
+				workercore.ModelDeploymentRoleKindPrefill,
+				workercore.ModelDeploymentRoleKindDecode,
+			},
+		},
+		{
+			name: "the_encoder_in_the_middle",
+			order: []workercore.ModelDeploymentRoleKind{
+				workercore.ModelDeploymentRoleKindPrefill,
+				workercore.ModelDeploymentRoleKindEncode,
+				workercore.ModelDeploymentRoleKindDecode,
+			},
+		},
+		{
+			// The two orders above are what a first-role rule and a skip rule disagree about. This
+			// one both already answer for, and exists so the table cannot pass against a rule that
+			// skips the encoder only in some positions.
+			name: "the_encoder_last",
+			order: []workercore.ModelDeploymentRoleKind{
+				workercore.ModelDeploymentRoleKindPrefill,
+				workercore.ModelDeploymentRoleKindDecode,
+				workercore.ModelDeploymentRoleKindEncode,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := epdDeployment(t, tc.order)
+
+			svc := renderModelDeploymentService(md, nil)
+
+			assert.Equal(t, md.Name, svc.Name)
+			assert.Equal(t, "prefill",
+				svc.Spec.Selector[modelDeploymentLabelKeyComponent],
+				"the front door routes the first role that answers, not the first one listed")
+			require.Len(t, svc.Spec.Ports, 1)
+			assert.Equal(t, int32(8000), svc.Spec.Ports[0].Port,
+				"and publishes the address that role listens on, which the encoder's 9100 is not")
+		})
+	}
+}
+
+// TestModelDeploymentEndpoint_NeverReadsAnEncodeRole pins the address a user is handed.
+//
+// THE PUBLISHED ADDRESS IS THE SAME FRONT DOOR IN A DIFFERENT GUISE: it is what a client is told to
+// dial. A front door reading the encoder would publish the encoder's port and the encoder's transport
+// at the same time, which is the clearest available statement that it did.
+func TestModelDeploymentEndpoint_NeverReadsAnEncodeRole(t *testing.T) {
+	testCases := []struct {
+		name  string
+		order []workercore.ModelDeploymentRoleKind
+	}{
+		{
+			name: "the_encoder_first",
+			order: []workercore.ModelDeploymentRoleKind{
+				workercore.ModelDeploymentRoleKindEncode,
+				workercore.ModelDeploymentRoleKindPrefill,
+				workercore.ModelDeploymentRoleKindDecode,
+			},
+		},
+		{
+			name: "the_encoder_in_the_middle",
+			order: []workercore.ModelDeploymentRoleKind{
+				workercore.ModelDeploymentRoleKindPrefill,
+				workercore.ModelDeploymentRoleKindEncode,
+				workercore.ModelDeploymentRoleKindDecode,
+			},
+		},
+		{
+			name: "the_encoder_last",
+			order: []workercore.ModelDeploymentRoleKind{
+				workercore.ModelDeploymentRoleKindPrefill,
+				workercore.ModelDeploymentRoleKindDecode,
+				workercore.ModelDeploymentRoleKindEncode,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := epdDeployment(t, tc.order)
+
+			assert.Equal(t, "http://qwen.team-a.svc:8000", modelDeploymentEndpoint(md),
+				"https://...:9100 is the encoder's address, and no client can take a completion from it")
+		})
+	}
+}
+
 func TestRenderModelDeploymentService_KVEventPorts(t *testing.T) {
 	md := routedModelDeployment()
 	services := renderModelDeploymentServices(md, nil, nil)
@@ -939,16 +1141,12 @@ func TestModelDeploymentReconciler_RefusesAServiceItDoesNotOwn(t *testing.T) {
 }
 
 // TestEndpointEligibleSelectorActivation pins the first-enable repair at the three rendered
-// surfaces. A shape that can never qualify -- an unverified engine version, a prefill role, a
-// replaced command -- renders no eligibility term whatever any pass says. A shape that can
-// qualify does not narrow until a real pass records the predicate satisfied; the condition here
-// is computed by the real qualifier and the real status observation, never set by hand. Once a
-// selector carries the term, a quiet pass retains it, and a definite fault still withdraws.
+// surfaces. A shape that can never qualify -- a prefill role, a replaced command -- renders no
+// eligibility term whatever any pass says. A shape that can qualify does not narrow until a real
+// pass records the predicate satisfied; the condition here is computed by the real qualifier and
+// the real status observation, never set by hand. Once a selector carries the term, a quiet pass
+// retains it, and a definite fault still withdraws.
 func TestEndpointEligibleSelectorActivation(t *testing.T) {
-	unverified := healthDeployment(2)
-	unverified.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
-	unverified.Spec.Engine.Version = "0.0.0-not-verified"
-
 	prefill := healthDeployment(2)
 	prefill.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	for i := range prefill.Spec.Roles {
@@ -970,9 +1168,8 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 	})
 
 	for name, md := range map[string]*workercore.ModelDeployment{
-		"unverified engine version": unverified,
-		"prefill role":              prefill,
-		"replaced command":          takeOver,
+		"prefill role":     prefill,
+		"replaced command": takeOver,
 	} {
 		t.Run(name+" renders no narrowing", func(t *testing.T) {
 			front := renderModelDeploymentService(md, nil)

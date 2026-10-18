@@ -132,9 +132,9 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// the accelerator half is defaulted, to one whole card of an acceleratable type. The
 	// elastic-EP profile freezes this field at the whole-card group it bound to TP at creation.
 	Resources *ModelDeploymentRoleResourcesApplyConfiguration `json:"resources,omitempty"`
-	// Image is the container image to run. Leaving it empty is the ordinary case: the operator then
-	// synthesizes one from the pool's accelerator backend, the observed runtime version and the
-	// requested engine.
+	// Image is the container image to run. Leaving it empty is the ordinary case: the role then
+	// runs the deployment's engine image. Set it to run a private build, to pin this one role to
+	// an image different from the engine's, or to name a repository the engine image does not.
 	Image *string `json:"image,omitempty"`
 	// ImagePullPolicy is the pull policy for Image.
 	ImagePullPolicy *v1.PullPolicy `json:"imagePullPolicy,omitempty"`

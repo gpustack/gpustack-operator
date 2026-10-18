@@ -50,10 +50,11 @@ locals {
         instance_type = { platform = cfg.platform, preset = cfg.preset }
         os            = coalesce(cfg.os, data.external.gpu_compat[name].result.os)
         preemptible   = cfg.preemptible
-        # Everything this module does *for* MIG — masking DCGM, turning off the NebiusGPUError
-        # auto-repair rule — hangs off this flag, so a platform that cannot be partitioned keeps
-        # its GPU telemetry and its platform-level auto-repair instead of losing both for a
-        # capability it will never have.
+        # This flag gates the DCGM masking half of local.gpu_node_prep: a platform that cannot
+        # be partitioned keeps its GPU telemetry. The NebiusGPUError auto-repair rule is not
+        # gated on it — that is disabled on every GPU node group (each.value.gpu != null),
+        # because non-MIG presets trip the same condition in their own way; see the auto_repair
+        # block on the node group resource below.
         mig = coalesce(cfg.mig, contains(local.mig_platforms, cfg.platform))
         # A GPU node is driven from outside the cluster over SSH — the hardware-partition tests
         # toggle MIG on the card that way, and they take the node's address as an input rather than
@@ -336,8 +337,11 @@ resource "nebius_mk8s_v1_node_group" "this" {
     ]))
 
     # An empty object is how the API asks for preemptible nodes; null keeps the group on-demand.
-    # Preemptible capacity is cheaper, and the platform may reclaim a node at any time.
-    preemptible = each.value.preemptible ? {} : null
+    # Preemptible capacity is cheaper, and the platform may reclaim a node at any time. Nebius now
+    # requires a spot pricing model on preemptible templates: without follows_spot_price the mk8s
+    # API rejects the generated NebiusMachineTemplate with "spec.pricing_model is invalid".
+    preemptible        = each.value.preemptible ? {} : null
+    follows_spot_price = each.value.preemptible ? {} : null
 
     gpu_settings = each.value.gpu != null ? {
       drivers_preset = each.value.gpu.drivers_preset
@@ -351,18 +355,25 @@ resource "nebius_mk8s_v1_node_group" "this" {
     } : null
   }
 
-  # Putting a card into a hardware partitioning mode fails the provider's own GPU health check —
-  # its NVLink topology probe cannot read a partitioned card — which raises the NebiusGPUError
-  # node condition. The default auto-repair rule for that condition cordons the node and then
-  # shuts it down, so a partitioning test kills the very node it runs on. Turning the rule off
-  # leaves the condition reported and visible, but no longer node-fatal. Every other auto-repair
-  # rule (kernel deadlock, disk IO, container runtime) keeps its default.
+  # Two different failures raise the NebiusGPUError node condition, and the default auto-repair
+  # rule for it cordons the node and then shuts it down — so either one kills the very node the
+  # test runs on. (a) A hardware partitioning mode (MIG) fails the provider's own GPU health
+  # check: its NVLink topology probe cannot read a partitioned card. (b) Non-MIG presets such as
+  # gpu-l40s-d / 2gpu-64vcpu-384gb trip node-problem-detector-gpu itself: it hands its
+  # health-checker a platform name the checker does not know (Invalid platform "2xL40") and exits
+  # 1, so the detector raises NebiusGPUError=True (reason: GPUHealthCheckFailedMK8S) on every
+  # node of the group ~30 seconds after boot. Either way MK8s auto-repair (nebiusgpuerror_true)
+  # cordons and stops healthy nodes in a loop, leaving the group stuck in PROVISIONING, unless
+  # the rule below disables it. Turning the rule off leaves the condition reported and visible,
+  # but no longer node-fatal. Every other auto-repair rule (kernel deadlock, disk IO, container
+  # runtime) keeps its default.
   #
-  # Only groups that can be partitioned give this up. On a card without MIG the condition can only
-  # mean the GPU is genuinely broken, and the platform is left free to repair the node.
-  auto_repair = each.value.mig ? {
+  # status = "TRUE" is what makes the disable match the nebiusgpuerror_true trigger — without it
+  # the API stores CONDITION_STATUS_UNSPECIFIED, which matches nothing, and the rule stays live.
+  auto_repair = each.value.gpu != null ? {
     conditions = [{
       type     = "NebiusGPUError"
+      status   = "TRUE"
       disabled = true
     }]
   } : null

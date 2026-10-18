@@ -84,14 +84,6 @@ func asPD(md *workercore.ModelDeployment) {
 	md.Spec.Roles[1].Kind = workercore.ModelDeploymentRoleKindDecode
 }
 
-// synthesizingImages clears the image each role's template names, so the runner image is derived
-// from the hardware instead. A case keeping the shared fixture's template would assert that
-// literal rather than anything the manufacturer decided.
-func synthesizingImages(md *workercore.ModelDeployment) {
-	md.Spec.Roles[0].Image = ""
-	md.Spec.Roles[1].Image = ""
-}
-
 // crossManufacturerClient converges the deployment against both types, on a pool offering the
 // transport the Ascend half requires.
 //
@@ -130,20 +122,6 @@ func connectorNameByRole(t *testing.T, cli ctrlcli.Client) map[string]string {
 		require.NotEmpty(t, cfg.KVConnector, "%s renders no connector name", pod.Name)
 
 		byRole[modelDeploymentPodRole(pod)] = cfg.KVConnector
-	}
-
-	return byRole
-}
-
-// imageByRole reads the image each replica runs, keyed by the role it belongs to.
-func imageByRole(t *testing.T, cli ctrlcli.Client) map[string]string {
-	t.Helper()
-
-	byRole := map[string]string{}
-	pods := replicaPods(t, cli)
-	for i := range pods {
-		pod := &pods[i]
-		byRole[modelDeploymentPodRole(pod)] = pod.Spec.Containers[0].Image
 	}
 
 	return byRole
@@ -300,27 +278,6 @@ func TestModelDeploymentCrossManufacturer_TheTwoHalvesRenderDifferentConnectors(
 			"mean one of them cannot start")
 }
 
-// TestModelDeploymentCrossManufacturer_EachRoleRendersItsOwnImageBackend covers the runner image.
-func TestModelDeploymentCrossManufacturer_EachRoleRendersItsOwnImageBackend(t *testing.T) {
-	cli := crossManufacturerClient(crossManufacturerDeployment(asPD, synthesizingImages))
-
-	_, err := reconcileModelDeployment(t, cli)
-	require.NoError(t, err)
-
-	byRole := imageByRole(t, cli)
-	require.Len(t, byRole, 2, "one image per role")
-
-	// The backend token and the runtime version travel together: both come from the role's own
-	// InstanceType, so a role reading the other one's detail would show up in either segment.
-	assert.Equal(t, "gpustack/runner:cuda12.9-vllm0.25.1", byRole["prefill"],
-		"the NVIDIA half renders the cuda backend at its own runtime version")
-	assert.Equal(t, "gpustack/runner:cann9.1-a3-vllm0.25.1", byRole["decode"],
-		"the Ascend half renders the cann backend, at its own runtime version and with the "+
-			"variant that is the one entry no lowercasing produces")
-	assert.NotEqual(t, byRole["prefill"], byRole["decode"],
-		"the two halves run two different images")
-}
-
 // TestModelDeploymentCrossManufacturer_EachGroupEntersItsOwnQueue covers the entrance label, which
 // is what routes a replica into a pool.
 //
@@ -398,10 +355,9 @@ func TestModelDeploymentCrossManufacturer_EachQueueCoversItsOwnCredits(t *testin
 // a P/D pair to anyone who did not check which of the two the label carries.
 //
 // What it pins is that the manufacturer split is not a property of the P/D split: each half still
-// gets its own connector and its own image on a shape where neither role is a prefiller or a decoder
-// at all.
+// gets its own connector on a shape where neither role is a prefiller or a decoder at all.
 func TestModelDeploymentCrossManufacturer_TwoServerRolesAreTheSameRendering(t *testing.T) {
-	md := crossManufacturerDeployment(synthesizingImages, func(md *workercore.ModelDeployment) {
+	md := crossManufacturerDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Name = "on-nvidia"
 		md.Spec.Roles[1].Name = "on-ascend"
 	})
@@ -419,9 +375,4 @@ func TestModelDeploymentCrossManufacturer_TwoServerRolesAreTheSameRendering(t *t
 	assert.Equal(t, "AscendStoreConnector", connectors["on-ascend"])
 	assert.NotEqual(t, connectors["on-nvidia"], connectors["on-ascend"],
 		"the connector follows the manufacturer, not the kind")
-
-	images := imageByRole(t, cli)
-	require.Len(t, images, 2, "one image per role")
-	assert.Equal(t, "gpustack/runner:cuda12.9-vllm0.25.1", images["on-nvidia"])
-	assert.Equal(t, "gpustack/runner:cann9.1-a3-vllm0.25.1", images["on-ascend"])
 }

@@ -126,7 +126,7 @@ func modelDeploymentDrainHook(
 //     measure -- an engine already gone, still loading, or listening elsewhere -- so it returns;
 //   - a read that times out means an engine too busy to answer, which is busy, so it keeps waiting;
 //     socket.timeout is matched beside TimeoutError because it is not one before Python 3.10, and
-//     engine.version is free-form, so an older image may carry such an interpreter;
+//     an older image may carry such an interpreter;
 //   - a sample it cannot parse counts as busy, since it cannot prove the replica idle.
 //
 // It returns on the SECOND consecutive idle read, one poll apart. A prefiller's gauges drop the

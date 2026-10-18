@@ -35,18 +35,19 @@
 #              case-65's bucket-limit rows were inverted.
 #
 # Environment: A real accelerator pool with at least TWO free exclusive cards (two server replicas;
-#              one card cannot exercise the cross-replica half), an accelerated InstanceType whose
-#              observed runtime lets the operator synthesize the engine image, and the model weights
-#              pre-staged on every accelerator node at a hostPath. Exits 2 (input required) when
-#              E2E_VB_INSTANCE_TYPE is unset rather than guessing a pool. No RDMA. Needs a registry
-#              the cluster can pull the Mooncake image from — override with E2E_MOONCAKE_IMAGE.
+#              one card cannot exercise the cross-replica half), an accelerated InstanceType, and the
+#              model weights pre-staged on every accelerator node at a hostPath. Exits 2 (input
+#              required) when E2E_VB_INSTANCE_TYPE is unset rather than guessing a pool. No RDMA.
+#              Needs a registry the cluster can pull the Mooncake image from — override with
+#              E2E_MOONCAKE_IMAGE.
 #
 # Inputs:      All real, nothing mocked. This case creates its own KVCacheBackend (one DRAM member),
 #              pool, binding and a two-role ModelDeployment bound to that binding; the load comes
 #              from throwaway Pods on the Mooncake image driving the engines' own HTTP APIs.
 #              E2E_VB_INSTANCE_TYPE (required), E2E_VB_MODEL (default Qwen/Qwen3-0.6B — a small
 #              model on purpose: prefill is cheap and every verdict here rides on counters, never on
-#              TTFT, which is undiscriminating at this size), E2E_VB_ENGINE_VERSION (default 0.29.0),
+#              TTFT, which is undiscriminating at this size), E2E_VB_ENGINE_IMAGE (default
+#              quay.io/gpustack/runner:cann9.1-910b-vllm0.30.0),
 #              E2E_VB_WEIGHTS (default /mnt/kvcache-weights), E2E_VB_GPU_MEM_UTIL (default 0.55).
 #              The fill volume is computed from the engine's own reported kv_cache_size_tokens, so
 #              the case adapts to whatever card and utilization it lands on.
@@ -85,7 +86,10 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/
 NS="${1:?usage: case-73.sh <NS>}"
 IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
 MODEL="${E2E_VB_MODEL:-Qwen/Qwen3-0.6B}"
-ENGINE_VERSION="${E2E_VB_ENGINE_VERSION:-0.29.0}"
+# The engine image is an input, because the operator no longer assembles one: a tag that does not
+# exist is an ImagePullBackOff, not a refusal. The default is the Ascend 910B vLLM line this case is
+# measured on; pass an image built for whatever platform the pool actually is.
+ENGINE_IMAGE="${E2E_VB_ENGINE_IMAGE:-quay.io/gpustack/runner:cann9.1-910b-vllm0.30.0}"
 WEIGHTS="${E2E_VB_WEIGHTS:-/mnt/kvcache-weights}"
 GPU_UTIL="${E2E_VB_GPU_MEM_UTIL:-0.55}"
 
@@ -274,8 +278,8 @@ YAML
   # The engine command is the thing being exercised, so the deployment mirrors the shape this case was
   # measured on: two equal server roles, one card each, the utilization lowered (a store member or a
   # sibling replica may hold device memory the engine's free-memory probe cannot see), weights from
-  # the node's own disk, and the kv cache bound to this case's binding. The engine version is an
-  # input because the synthesized image tag hangs off it.
+  # the node's own disk, and the kv cache bound to this case's binding. The engine image is an
+  # input because the operator no longer assembles one.
   kubectl apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -287,7 +291,7 @@ spec:
     name: ${MODEL}
   engine:
     name: vLLM
-    version: "${ENGINE_VERSION}"
+    image: "${ENGINE_IMAGE}"
   kvCache:
     poolRef:
       name: ${BINDING}
@@ -331,7 +335,7 @@ YAML
   if [ -z "$POD_A" ] || [ -z "$POD_B" ] \
     || ! kubectl -n "$NS" wait --for=condition=Ready "pod/$POD_A" "pod/$POD_B" --timeout=540s >/dev/null 2>&1; then
     record FAIL "both engine replicas become Ready" \
-      "server-a='${POD_A:-absent}' server-b='${POD_B:-absent}' — check image synthesis, weights at ${WEIGHTS}, and that the pool really has two free cards"
+      "server-a='${POD_A:-absent}' server-b='${POD_B:-absent}' — check the engine image ${ENGINE_IMAGE} pulls, weights at ${WEIGHTS}, and that the pool really has two free cards"
     fail_out
   fi
   record PASS "both engine replicas become Ready" "${POD_A} and ${POD_B}"

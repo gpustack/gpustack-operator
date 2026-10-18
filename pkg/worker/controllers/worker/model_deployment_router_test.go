@@ -18,12 +18,16 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
+	"sigs.k8s.io/yaml"
 
+	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
 )
@@ -236,6 +240,721 @@ func TestRenderModelDeploymentRouterObjects_SelectsEligibleEndpoints(t *testing.
 	config := objects.ConfigMap.Data[modelDeploymentRouterConfigKey]
 	assert.NotContains(t, config, modelDeploymentLabelKeyEndpointEligible+"="+modelDeploymentEndpointEligibleValue,
 		"the discovery equalities preserve legacy routing for a never-activating shape")
+}
+
+// mixedEligibilityDeployment is the shape whose roles disagree about activatability: an encoder of
+// one member, a prefiller of two and a decoder of one, on llm-d with vLLM.
+//
+// It is the only shape that separates the two questions the gate asks. The encoder and the decoder
+// have nothing to verify and answer NotApplicable, so they activate; the prefiller has a group and
+// an observation the operator refuses to make, so it answers Unsupported and never activates. One
+// deployment therefore carries a role the gate decides beside roles it may not.
+func mixedEligibilityDeployment() *workercore.ModelDeployment {
+	role := func(
+		name string, kind workercore.ModelDeploymentRoleKind, replicaSize int32,
+	) workercore.ModelDeploymentRole {
+		return workercore.ModelDeploymentRole{
+			Name: name, Kind: kind, Replicas: 1, ReplicaSize: replicaSize,
+			InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.30.0",
+			// One serving port for every role, because the router refuses a deployment whose roles
+			// disagree on it. No command, no Elastic EP and no parallelism arguments: the shape a
+			// managed role has, so the group shape below is the one the operator itself renders.
+			Ports: []workercore.ModelDeploymentPort{{Port: 8000, Protocol: core.ProtocolTCP}},
+		}
+	}
+
+	return newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Model = workercore.ModelDeploymentModel{Name: "Qwen/Qwen3-VL-8B-Instruct"}
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		md.Spec.KVCache = nil
+		md.Spec.Roles = []workercore.ModelDeploymentRole{
+			role("encode", workercore.ModelDeploymentRoleKindEncode, 1),
+			role("prefill", workercore.ModelDeploymentRoleKindPrefill, 2),
+			role("decode", workercore.ModelDeploymentRoleKindDecode, 1),
+		}
+	})
+}
+
+// TestRenderModelDeploymentRouterObjects_EPDKeepsUnsupportedPrefillDiscoverable states the candidate
+// set the picker's global discovery selector names for a mixed encoder, prefill and decode
+// deployment, across the one lifecycle that moves it: healthy, a definite fault, then recovery.
+//
+// THE ASYMMETRY UNDER TEST IS BETWEEN TWO SELECTORS RENDERED BY THE SAME PASS. A published per-role
+// selector gains the eligibility equality only when THAT role can ever activate, and a multi-member
+// prefiller never can: the group-forward leg is Unsupported for it, so no pass would ever satisfy
+// the term. The global discovery selector gains the same equality when ANY role can activate, and
+// the encoder beside it always can. One activation therefore narrows a selector the prefiller's own
+// selector never narrowed, and a prefiller the reconciler is not permitted to qualify keeps serving
+// through its own Service while global discovery stops naming it.
+//
+// EVERY LABEL BELOW IS DERIVED. The members are rendered and stamped the way the converger renders
+// them, qualified through the real evaluator, and labeled through the production writers, so the
+// sets compared here are the ones the reconciler would produce rather than ones a fixture decided
+// to write by hand. A hand-stamped eligibility label would make this an assertion about the fixture.
+func TestRenderModelDeploymentRouterObjects_EPDKeepsUnsupportedPrefillDiscoverable(t *testing.T) {
+	md := mixedEligibilityDeployment()
+	instanceType := newRenderInstanceType(func(it *worker.InstanceType) {
+		it.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+	})
+	manufacturers := map[string]string{
+		"encode":  nodefeature.ManufacturerNVIDIA,
+		"prefill": nodefeature.ManufacturerNVIDIA,
+		"decode":  nodefeature.ManufacturerNVIDIA,
+	}
+	roles := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		roles[md.Spec.Roles[i].Name] = &md.Spec.Roles[i]
+	}
+
+	// The four members this deployment runs, named the way the assertions below read them. Only the
+	// prefiller has more than one: a second member of any other role would change nothing, since a
+	// one-member replica is answered before the engine is even read.
+	members := []struct {
+		id     string
+		role   string
+		member int
+	}{
+		{id: "E0", role: "encode", member: 0},
+		{id: "P0", role: "prefill", member: 0},
+		{id: "P1", role: "prefill", member: 1},
+		{id: "D0", role: "decode", member: 0},
+	}
+	pods := make([]core.Pod, 0, len(members))
+	ids := make(map[types.UID]string, len(members))
+	for _, m := range members {
+		pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: roles[m.role], InstanceType: instanceType,
+		})
+		require.NoErrorf(t, err, "render the %s member of %s", m.id, m.role)
+		stampModelDeploymentPod(pod, md, roles[m.role], 0, m.member)
+		pod.UID = types.UID("uid-" + m.id)
+		pod.Status.Conditions = []core.PodCondition{{Type: core.PodReady, Status: core.ConditionTrue}}
+		pods = append(pods, *pod)
+		ids[pod.UID] = m.id
+	}
+	byID := make(map[string]*core.Pod, len(members))
+	for i := range pods {
+		byID[ids[pods[i].UID]] = &pods[i]
+	}
+	setReady := func(t *testing.T, id string, ready bool) {
+		t.Helper()
+		status := core.ConditionFalse
+		if ready {
+			status = core.ConditionTrue
+		}
+		require.NotNil(t, byID[id], "no member named %s in this fixture", id)
+		byID[id].Status.Conditions = []core.PodCondition{{Type: core.PodReady, Status: status}}
+	}
+
+	// NO MEMBER OF THIS SHAPE MAY REACH A PROBE. A one-member replica and an encoder are both
+	// answered NotApplicable before the engine is read, and a multi-member prefiller or decoder is
+	// answered Unsupported before any address is dialed. A transport that runs would mean one of
+	// those three answers had stopped being made, which is a different defect than the one under
+	// test and would silently change the labels derived below.
+	unexpectedProbe := func(_ context.Context, url string, _ []byte) ([]byte, error) {
+		t.Fatalf("no group-forward request was expected, got one to %s", url)
+
+		return nil, nil
+	}
+
+	// One pass of the reconciler's eligibility write, in the order the converger runs it: evaluate
+	// the whole-group predicate once per replica, read each member's own replica answer, and write
+	// the key through the production label writer.
+	deriveLabels := func(t *testing.T) []modelDeploymentInstanceQualification {
+		t.Helper()
+		qualifications := qualifyModelDeploymentInstances(
+			context.Background(), md, pods, modelDeploymentPendingReplacement{}, unexpectedProbe)
+		byMember := modelDeploymentQualificationsByMember(qualifications)
+		replicaOf := make(map[types.UID]modelDeploymentReplicaView, len(pods))
+		for _, view := range modelDeploymentGroupPods(pods, true) {
+			for _, member := range view.Members {
+				replicaOf[member.UID] = view
+			}
+		}
+		for i := range pods {
+			pod := &pods[i]
+			role := roles[modelDeploymentPodRole(pod)]
+			require.NotNil(t, role, "no role names the pod %s", pod.Name)
+			view, seated := replicaOf[pod.UID]
+			if !seated {
+				view = modelDeploymentReplicaView{Members: []*core.Pod{pod}, Seated: false}
+			}
+			qualification, evaluated := byMember[pod.UID]
+			modelDeploymentApplyLabel(pod, modelDeploymentLabelKeyEndpointEligible,
+				modelDeploymentPodEligible(md, role, pod, view, qualification, evaluated))
+		}
+
+		return qualifications
+	}
+	groupForwardOf := func(t *testing.T, role string,
+		qualifications []modelDeploymentInstanceQualification,
+	) modelDeploymentGroupForward {
+		t.Helper()
+		for _, qualification := range qualifications {
+			if qualification.View.Role == role {
+				return qualification.GroupForward
+			}
+		}
+		t.Fatalf("no qualification was produced for the %s replica", role)
+
+		return modelDeploymentGroupForward{}
+	}
+
+	render := func(t *testing.T, retainedEligibility bool) ModelDeploymentRouterObjects {
+		t.Helper()
+		objects, err := renderModelDeploymentRouterObjects(
+			context.Background(), md, manufacturers, retainedEligibility)
+		require.NoError(t, err)
+
+		return objects
+	}
+	// The discovery selector is parsed with the machinery a router uses rather than read as text,
+	// and the sets below are produced by matching Pod labels against the parsed form.
+	discovery := func(t *testing.T, objects ModelDeploymentRouterObjects) labels.Selector {
+		t.Helper()
+		selector, err := labels.Parse(objects.ConfigMap.Data[modelDeploymentRouterSelectorKey])
+		require.NoError(t, err, "the discovery selector must parse with the machinery a router uses")
+
+		return selector
+	}
+	publishedSelector := func(objects ModelDeploymentRouterObjects, role string) map[string]string {
+		for i := range objects.Contract.Roles {
+			if objects.Contract.Roles[i].Name == role {
+				return objects.Contract.Roles[i].Selector
+			}
+		}
+
+		return nil
+	}
+	published := func(objects ModelDeploymentRouterObjects, role string) labels.Selector {
+		return labels.SelectorFromSet(publishedSelector(objects, role))
+	}
+	reached := func(selector labels.Selector) []string {
+		var got []string
+		for i := range pods {
+			if selector.Matches(labels.Set(pods[i].Labels)) {
+				got = append(got, ids[pods[i].UID])
+			}
+		}
+		slices.Sort(got)
+
+		return got
+	}
+	// The picker document is parsed as the structure the router loads, so a term can be asked of a
+	// stage filter rather than read out of the text that renders it.
+	stageFilters := func(t *testing.T, objects ModelDeploymentRouterObjects) map[string]map[string]string {
+		t.Helper()
+		var document struct {
+			Plugins []struct {
+				Name       string `json:"name"`
+				Type       string `json:"type"`
+				Parameters struct {
+					MatchLabels map[string]string `json:"matchLabels"`
+				} `json:"parameters"`
+			} `json:"plugins"`
+		}
+		require.NoError(t, yaml.Unmarshal([]byte(objects.ConfigMap.Data[modelDeploymentRouterConfigKey]), &document),
+			"the picker document must parse with the machinery the router uses")
+		filters := make(map[string]map[string]string, len(document.Plugins))
+		for _, plugin := range document.Plugins {
+			if plugin.Type == "label-selector-filter" {
+				filters[plugin.Name] = plugin.Parameters.MatchLabels
+			}
+		}
+		// EVERY KIND THIS DEPLOYMENT DECLARES MUST HAVE RENDERED A FILTER. A missing one is a nil
+		// map here, which matches every Pod and so would read as a stage demanding nothing -- the
+		// absence would pass every assertion below while the stage did not exist at all.
+		for _, name := range []string{"encode-pods", "prefill-pods", "decode-pods"} {
+			require.NotNil(t, filters[name], "the document rendered no %s stage filter", name)
+		}
+
+		return filters
+	}
+	// The members one stage filter would actually select, matched against the labels the real
+	// derivation wrote. A stage filter names a role and not a leader, so it is expected to reach
+	// every member of that role -- which is the whole difference between the filter and discovery.
+	stageCandidates := func(matchLabels map[string]string) []string {
+		selector := labels.SelectorFromSet(matchLabels)
+		var got []string
+		for i := range pods {
+			if selector.Matches(labels.Set(pods[i].Labels)) {
+				got = append(got, ids[pods[i].UID])
+			}
+		}
+		slices.Sort(got)
+
+		return got
+	}
+	filters := func(t *testing.T, objects ModelDeploymentRouterObjects, name string) map[string]string {
+		t.Helper()
+
+		return stageFilters(t, objects)[name]
+	}
+	// The retention flag the reconciler would read back, read off the document the way production
+	// reads it: a stage filter demanding eligibility of some role is a requirement in force.
+	retainedEligibilityOf := func(t *testing.T, objects ModelDeploymentRouterObjects) bool {
+		t.Helper()
+		for _, matchLabels := range stageFilters(t, objects) {
+			if matchLabels[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue {
+				return true
+			}
+		}
+
+		return false
+	}
+	// The bytes a router Pod is rolled by: the whole ConfigMap, and the hash stamped on the Pod
+	// template that is taken over it.
+	publishedConfig := func(objects ModelDeploymentRouterObjects) map[string]string {
+		return maps.Clone(objects.ConfigMap.Data)
+	}
+	publishedHash := func(objects ModelDeploymentRouterObjects) string {
+		return objects.Deployment.Spec.Template.Annotations[modelDeploymentRouterConfigHash]
+	}
+
+	// THE DISCOVERY SELECTOR IS CONSTANT FOR THE WHOLE LIFE OF THIS DEPLOYMENT, and the router Pod
+	// IS NOT. The first activation changes the picker's document -- that is where the encoder's
+	// requirement moves to, and nothing else changes with it -- so it rolls the router once, and
+	// once is the price of withdrawing an encoder at all. Every fault and recovery after that
+	// re-renders the same document through retention, so none of them rolls it again. The phases
+	// below assert exactly that split: the first two differ, the second and third are identical.
+	var publishedDiscoverySelector string
+	var coldHash, faultHash string
+	var coldConfig, faultConfig map[string]string
+
+	t.Run("a healthy deployment is discovered through the leader of every role", func(t *testing.T) {
+		qualifications := deriveLabels(t)
+		// THE FIXTURE'S OWN PREMISE. Only a multi-member prefiller reaches Unsupported, so a
+		// deployment of one member per role cannot reproduce what the third phase states.
+		assert.Equal(t, modelDeploymentGroupForwardNotApplicable,
+			groupForwardOf(t, "encode", qualifications).State, "the encoder serves no tokens")
+		assert.Equal(t, modelDeploymentGroupForwardUnsupported,
+			groupForwardOf(t, "prefill", qualifications).State, "a multi-member prefiller is unverifiable")
+		assert.Equal(t, modelDeploymentGroupForwardNotApplicable,
+			groupForwardOf(t, "decode", qualifications).State, "a one-member replica has no group to verify")
+
+		observeModelDeploymentEndpointEligibility(md, qualifications)
+		assert.Equal(t, string(meta.ConditionUnknown),
+			ModelDeploymentConditionEndpointEligibility.GetStatus(md), "Unsupported decides nothing")
+		assert.Equal(t, modelDeploymentReasonEndpointsUnsupported,
+			ModelDeploymentConditionEndpointEligibility.GetReason(md))
+
+		objects := render(t, false)
+		selector := discovery(t, objects)
+		assert.ElementsMatch(t, []string{"D0", "E0", "P0"}, reached(selector),
+			"before anything activates, discovery is leader-only and reaches the leader of every role")
+		assert.NotContains(t, reached(selector), "P1", "a follower answers no request of its own")
+		assert.False(t, selector.Matches(labels.Set(objects.Deployment.Spec.Template.Labels)),
+			"the router's own Pod is not one of its endpoints")
+
+		publishedDiscoverySelector = objects.ConfigMap.Data[modelDeploymentRouterSelectorKey]
+		coldHash = publishedHash(objects)
+		coldConfig = publishedConfig(objects)
+		// Nothing has been decided, so no stage may demand the label -- and each stage still reaches
+		// every member of its own role, the follower included.
+		for filter, matchLabels := range stageFilters(t, objects) {
+			_, demanded := matchLabels[modelDeploymentLabelKeyEndpointEligible]
+			assert.False(t, demanded,
+				"nothing has decided the gate yet, so no stage filter may demand the label (%s)", filter)
+		}
+		assert.ElementsMatch(t, []string{"E0"}, stageCandidates(filters(t, objects, "encode-pods")),
+			"with nothing decided the encoder is a candidate of its own stage")
+		assert.ElementsMatch(t, []string{"P0", "P1"}, stageCandidates(filters(t, objects, "prefill-pods")),
+			"the prefiller stage reaches every member of the role, unlike discovery")
+		assert.ElementsMatch(t, []string{"D0"}, stageCandidates(filters(t, objects, "decode-pods")),
+			"the decoder stage reaches the decoder")
+	})
+
+	// The requirement the second phase published, carried into the third as the reconciler carries
+	// it -- out of the document, which is the only place it lives in this shape.
+	var retainedEligibility bool
+
+	t.Run("a definite fault withdraws the encoder and nothing else", func(t *testing.T) {
+		setReady(t, "E0", false)
+		qualifications := deriveLabels(t)
+		observeModelDeploymentEndpointEligibility(md, qualifications)
+		assert.Equal(t, string(meta.ConditionFalse),
+			ModelDeploymentConditionEndpointEligibility.GetStatus(md), "the unready member is a definite fault")
+		assert.Equal(t, modelDeploymentReasonEndpointsRevoked,
+			ModelDeploymentConditionEndpointEligibility.GetReason(md))
+
+		objects := render(t, false)
+		selector := discovery(t, objects)
+		assert.Equal(t, publishedDiscoverySelector,
+			objects.ConfigMap.Data[modelDeploymentRouterSelectorKey],
+			"a decided fault must not move the discovery selector: it is hashed onto the router Pod")
+		// AN ENCODER OUTAGE MUST NOT TAKE TEXT-ONLY SERVING WITH IT. The prefiller beside the
+		// encoder is healthy, is serving, and is a role the gate may not judge, so discovery names
+		// it exactly as it did before the fault.
+		assert.ElementsMatch(t, []string{"D0", "E0", "P0"}, reached(selector),
+			"the roles the gate cannot judge must stay discoverable through a fault in a role it can")
+
+		// The withdrawal now lives where a per-role requirement can live: in the stage filter of
+		// the role the fault was in, and nowhere else.
+		filters := stageFilters(t, objects)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			filters["encode-pods"][modelDeploymentLabelKeyEndpointEligible],
+			"the encoder is withdrawn by its own stage filter")
+		for _, filter := range []string{"prefill-pods", "decode-pods"} {
+			_, demanded := filters[filter][modelDeploymentLabelKeyEndpointEligible]
+			assert.False(t, demanded,
+				"a role that can never activate must not be asked for a label it never carries (%s)", filter)
+		}
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			publishedSelector(objects, "encode")[modelDeploymentLabelKeyEndpointEligible],
+			"the encoder's own published selector narrows too: it is the role whose activation decided this")
+		for _, role := range []string{"prefill", "decode"} {
+			_, narrowed := publishedSelector(objects, role)[modelDeploymentLabelKeyEndpointEligible]
+			assert.False(t, narrowed,
+				"a role that can never activate must keep a selector no pass would satisfy (%s)", role)
+		}
+		// THE COMPLETE CANDIDATE SET OF EACH STAGE, matched against labels the real derivation
+		// wrote. The encoder's is empty because its only member lost its label; the other two are
+		// untouched, follower included.
+		assert.Empty(t, stageCandidates(filters["encode-pods"]),
+			"the fault emptied the encoder stage and nothing else")
+		assert.ElementsMatch(t, []string{"P0", "P1"}, stageCandidates(filters["prefill-pods"]),
+			"the prefiller stage is untouched by a fault in the encoder")
+		assert.ElementsMatch(t, []string{"D0"}, stageCandidates(filters["decode-pods"]),
+			"the decoder stage is untouched by a fault in the encoder")
+
+		// THE FIRST ACTIVATION ROLLS THE ROUTER ONCE. The document changed here, and the document
+		// is hashed onto the Pod template. Every later fault and recovery re-renders it unchanged.
+		assert.NotEqual(t, coldHash, publishedHash(objects),
+			"the first activation moves the requirement into the document, and rolls the router once")
+		assert.NotEqual(t, coldConfig, publishedConfig(objects),
+			"the whole ConfigMap moved with it, not only the selector inside it")
+
+		retainedEligibility = retainedEligibilityOf(t, objects)
+		assert.True(t, retainedEligibility,
+			"this is the document the next pass reads its retention back from")
+		faultConfig = publishedConfig(objects)
+		faultHash = publishedHash(objects)
+	})
+
+	t.Run("recovery must not lose a prefiller its own selector still names", func(t *testing.T) {
+		setReady(t, "E0", true)
+		qualifications := deriveLabels(t)
+		observeModelDeploymentEndpointEligibility(md, qualifications)
+		assert.Equal(t, string(meta.ConditionUnknown),
+			ModelDeploymentConditionEndpointEligibility.GetStatus(md),
+			"a healthy mixed pass reports the same Unsupported the first phase reported")
+		assert.Equal(t, modelDeploymentReasonEndpointsUnsupported,
+			ModelDeploymentConditionEndpointEligibility.GetReason(md))
+
+		objects := render(t, retainedEligibility)
+		selector := discovery(t, objects)
+		assert.Equal(t, publishedDiscoverySelector,
+			objects.ConfigMap.Data[modelDeploymentRouterSelectorKey],
+			"a recovery must not move the discovery selector either: it is hashed onto the router Pod")
+		// THE PRECONDITION OF THE CLAIM. The prefiller is reachable, and its own published selector
+		// says so, so a discovery set missing it is a disagreement between two surfaces of one pass
+		// rather than a fixture that never built a reachable prefiller.
+		assert.Equal(t, []string{"P0"}, reached(published(objects, "prefill")),
+			"the published prefiller selector names the leader and nothing else")
+		assert.ElementsMatch(t, []string{"D0", "E0", "P0"}, reached(selector),
+			"global discovery must name every endpoint the deployment still serves, including a "+
+				"prefiller the reconciler is not permitted to qualify: an activation beside it must "+
+				"not narrow a selector its own published selector never narrowed")
+		assert.NotContains(t, reached(selector), "P1", "a follower answers no request of its own")
+		assert.False(t, selector.Matches(labels.Set(objects.Deployment.Spec.Template.Labels)),
+			"the router's own Pod is not one of its endpoints")
+
+		// E0 RECOVERED, SO IT IS A CANDIDATE AGAIN. Its real NotApplicable qualification restored
+		// the label, and the requirement stays in force precisely so that a label means something:
+		// the stage admits the encoder again on the strength of that label, not merely because the
+		// filter is there.
+		filters := stageFilters(t, objects)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			filters["encode-pods"][modelDeploymentLabelKeyEndpointEligible],
+			"the requirement survives the recovery, which is what retention is for")
+		assert.ElementsMatch(t, []string{"E0"}, stageCandidates(filters["encode-pods"]),
+			"a recovered encoder whose label the reconciler restored is a candidate of its stage again")
+		assert.ElementsMatch(t, []string{"P0", "P1"}, stageCandidates(filters["prefill-pods"]),
+			"and the stages the gate cannot judge never moved")
+		assert.ElementsMatch(t, []string{"D0"}, stageCandidates(filters["decode-pods"]),
+			"nor the decoder's")
+
+		// AND THE RECOVERY ROLLS NOTHING. Every byte is what the fault published, because retention
+		// holds the requirement rather than the reconciler deciding it again.
+		assert.Equal(t, faultHash, publishedHash(objects),
+			"a recovery re-renders the document the fault published, so the router does not restart")
+		assert.Equal(t, faultConfig, publishedConfig(objects),
+			"the whole ConfigMap, not only the hash of it")
+	})
+
+	t.Run("an encoder ready but not yet labelled stays out of its stage", func(t *testing.T) {
+		// READY, BUT NOT YET QUALIFIED. The label is removed by the real derivation while the
+		// member is unready, and readiness is then restored WITHOUT re-deriving -- which is the
+		// window every rollout creates, between a Pod passing its probe and the reconciler's next
+		// pass writing what it read. Nothing here stamps a label by hand.
+		setReady(t, "E0", false)
+		deriveLabels(t)
+		setReady(t, "E0", true)
+		assert.NotEmpty(t, byID["E0"].Status.Conditions, "the member must be Ready for this phase")
+		_, labelled := byID["E0"].Labels[modelDeploymentLabelKeyEndpointEligible]
+		assert.False(t, labelled, "a ready member the reconciler has not yet read carries no label")
+
+		objects := render(t, true)
+		filters := stageFilters(t, objects)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			filters["encode-pods"][modelDeploymentLabelKeyEndpointEligible],
+			"the requirement is still in force, so an unlabelled encoder is still refused")
+		assert.Empty(t, stageCandidates(filters["encode-pods"]),
+			"an encoder that is Ready but carries no label is not a candidate of its own stage")
+		assert.ElementsMatch(t, []string{"P0", "P1"}, stageCandidates(filters["prefill-pods"]),
+			"while the stages the gate cannot judge keep every member they had")
+		assert.ElementsMatch(t, []string{"D0"}, stageCandidates(filters["decode-pods"]),
+			"including the decoder's")
+	})
+}
+
+// TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged pins the profile that
+// carries no activatable role against every byte a router Pod is rolled by.
+//
+// A prefill/decode pair answers Unsupported for its group-forward capability by construction, so
+// no pass ever writes an eligibility label on it. The gate has therefore nothing to say about this
+// shape, and any term it gained would select zero endpoints. The hash below is taken over the whole
+// ConfigMap, so it pins the picker document and every selector in it as well as the selector string
+// beside it -- which is the point: a change here that reads as a comment edit is a restart of every
+// prefill/decode router in the cluster.
+func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *testing.T) {
+	const (
+		wantSelector = "app.kubernetes.io/name=model-deployment," +
+			"app.kubernetes.io/instance=qwen,modeldeployment.gpustack.ai/member-index=0," +
+			"!modeldeployment.gpustack.ai/router"
+		wantHash = "349f5ffcf73a19131deb6d8b5bae814649e34e8f9295a135273739527d18bfcf"
+	)
+	// Decided as well as dormant, because a decided condition is the only thing that could move
+	// this shape and the assertion that it does not is the whole claim.
+	for _, decided := range []bool{false, true} {
+		md := routedModelDeployment()
+		if decided {
+			ModelDeploymentConditionEndpointEligibility.False(
+				md, modelDeploymentReasonEndpointsRevoked, "a member was withdrawn")
+		}
+		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+		require.NoError(t, err)
+		require.NotNil(t, objects.ConfigMap)
+
+		assert.Equal(t, wantSelector, objects.ConfigMap.Data[modelDeploymentRouterSelectorKey],
+			"the discovery selector of a shape with nothing to qualify")
+		assert.Equal(t, wantHash,
+			objects.Deployment.Spec.Template.Annotations[modelDeploymentRouterConfigHash],
+			"every byte of the ConfigMap a router Pod is rolled by")
+		assert.NotContains(t, objects.ConfigMap.Data[modelDeploymentRouterConfigKey],
+			modelDeploymentLabelKeyEndpointEligible,
+			"no stage filter may demand a label no pass writes for this shape")
+	}
+
+	// The two argv profiles render no ConfigMap, so their whole configuration is the argument list
+	// a Pod is rolled by. Each discovers its halves by per-role selectors, which is why moving a
+	// requirement out of the deployment-wide selector cannot reach them.
+	for _, routerName := range []string{
+		workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentRouterSGLang,
+	} {
+		objects, err := renderModelDeploymentRouterObjects(context.Background(),
+			routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Router.Name = routerName
+			}), nil, false)
+		require.NoError(t, err)
+		assert.Nil(t, objects.ConfigMap, "%s publishes no ConfigMap", routerName)
+		for _, container := range objects.Deployment.Spec.Template.Spec.Containers {
+			for _, arg := range container.Args {
+				assert.NotContains(t, arg, modelDeploymentLabelKeyEndpointEligible,
+					"%s discovers by per-role selectors, which never narrow for this shape (%s)",
+					routerName, arg)
+			}
+		}
+	}
+}
+
+// TestSyncModelDeploymentRouter_RetentionReadsTheDocument covers the quiet passes of a mixed
+// deployment, where the requirement lives only in the picker's document.
+//
+// The discovery selector of this shape is constant for the life of the deployment, so the term is
+// never in it and a reconciler reading only the selector finds nothing. It would conclude the gate
+// had never fired, stop demanding eligibility of an encoder that is ready again but not yet
+// qualified, and offer it back to every media request -- on a pass that looks quiet, because
+// nothing about the members changed.
+func TestSyncModelDeploymentRouter_RetentionReadsTheDocument(t *testing.T) {
+	md := mixedEligibilityDeployment()
+	// The pass a fault leaves behind: a decided condition, and a document that now demands
+	// eligibility of the encoder.
+	ModelDeploymentConditionEndpointEligibility.False(
+		md, modelDeploymentReasonEndpointsRevoked, "the encoder was withdrawn")
+	faulted, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+	require.NoError(t, err)
+	require.NotContains(t, faulted.ConfigMap.Data[modelDeploymentRouterSelectorKey],
+		modelDeploymentLabelKeyEndpointEligible,
+		"the mixed discovery selector never carries the term, decided or not")
+	require.Contains(t, faulted.ConfigMap.Data[modelDeploymentRouterConfigKey],
+		modelDeploymentLabelKeyEndpointEligible, "the requirement is in the document")
+
+	cli := newModelDeploymentClient(faulted.ConfigMap.DeepCopy())
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+	published := new(core.ConfigMap)
+	read := func(t *testing.T) *core.ConfigMap {
+		t.Helper()
+		require.NoError(t, cli.Get(context.Background(),
+			ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}, published))
+
+		return published
+	}
+
+	// Two quiet passes over an otherwise unchanged deployment. The second is the one that needs
+	// the document read: after the first, the term survives nowhere else.
+	ModelDeploymentConditionEndpointEligibility.Unknown(
+		md, modelDeploymentReasonEndpointsUnsupported, "a prefiller cannot be verified")
+	for _, pass := range []string{"first", "second"} {
+		require.NoError(t, r.syncModelDeploymentRouter(context.Background(), md, false))
+		quiet := read(t)
+		assert.Contains(t, quiet.Data[modelDeploymentRouterConfigKey],
+			modelDeploymentLabelKeyEndpointEligible,
+			"a quiet pass must keep demanding eligibility of the encoder, or it puts back what the "+
+				"fault withdrew (the %s quiet pass)", pass)
+		assert.NotContains(t, quiet.Data[modelDeploymentRouterSelectorKey],
+			modelDeploymentLabelKeyEndpointEligible,
+			"and the discovery selector must stay broad, or the prefiller is lost (the %s quiet pass)", pass)
+	}
+}
+
+// TestRenderModelDeploymentRouterObjects_MixedServerRolesRenderAsBefore pins the one shape the
+// encoder repair must not touch: several Server roles whose commands disagree.
+//
+// A managed Server role and a role the user gave its own command are mixed by exactly the test the
+// encoder repair is about -- one role can be qualified, the other never will be. They are not the
+// encoder shape, and the repair's mechanism cannot express them: every Server role maps to one
+// upstream kind, so they share one stage filter and one selector, and a per-role rule would have to
+// overwrite the other. Admission refuses an Encode role beside a Server role and allows at most one
+// role per non-Server kind, so a deployment declaring an encoder can never be this shape -- which is
+// why the repair is narrowed to the encoder rather than left to reach here.
+//
+// The hashes below were taken from the production code at 19009093. They cover the whole ConfigMap
+// and the Pod template's hash of it, so a change to any byte a router reads, in either role order,
+// fails here.
+func TestRenderModelDeploymentRouterObjects_MixedServerRolesRenderAsBefore(t *testing.T) {
+	mixedServerDeployment := func(t *testing.T, externalFirst, decided bool) ModelDeploymentRouterObjects {
+		t.Helper()
+		managed := newRenderDeployment().Spec.Roles[0]
+		managed.Name = "managed"
+		managed.Replicas = 1
+		managed.ReplicaSize = 2
+		managed.ExtraArgs = []string{"--data-parallel-size", "2", "--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)"}
+		custom := *managed.DeepCopy()
+		custom.Name = "custom"
+		custom.ReplicaSize = 1
+		custom.Command = []string{"python3", "-m", "vllm.entrypoints.openai.api_server"}
+
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		})
+		if externalFirst {
+			md.Spec.Roles = []workercore.ModelDeploymentRole{managed, custom}
+		} else {
+			md.Spec.Roles = []workercore.ModelDeploymentRole{custom, managed}
+		}
+		if decided {
+			ModelDeploymentConditionEndpointEligibility.True(
+				md, modelDeploymentReasonEndpointsQualified, "the managed group qualified")
+		}
+		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+		require.NoError(t, err)
+		require.NotNil(t, objects.ConfigMap)
+
+		return objects
+	}
+
+	// Both orders, because a per-kind rule takes whichever role came last, and both states, because
+	// only a decided gate is what could narrow anything.
+	for _, tc := range []struct {
+		externalFirst, decided bool
+		selector               string
+		hash                   string
+	}{
+		{
+			externalFirst: true,
+			decided:       false,
+			selector: "app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=qwen," +
+				"modeldeployment.gpustack.ai/member-index=0,!modeldeployment.gpustack.ai/router",
+			hash: "e5c414482b95d44f7a9f156d21a3c0d0668b6620ed082ddd544afcb051300b6f",
+		},
+		{
+			externalFirst: true,
+			decided:       true,
+			selector: "app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=qwen," +
+				"modeldeployment.gpustack.ai/endpoint-eligible=true,!modeldeployment.gpustack.ai/router",
+			hash: "d15a3a6aba07d188ac766a47de6f02f856ea214ffbb394d86b2e087da57c0acd",
+		},
+		{
+			externalFirst: false,
+			decided:       false,
+			selector: "app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=qwen," +
+				"modeldeployment.gpustack.ai/member-index=0,!modeldeployment.gpustack.ai/router",
+			hash: "e5c414482b95d44f7a9f156d21a3c0d0668b6620ed082ddd544afcb051300b6f",
+		},
+		{
+			externalFirst: false,
+			decided:       true,
+			selector: "app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=qwen," +
+				"modeldeployment.gpustack.ai/endpoint-eligible=true,!modeldeployment.gpustack.ai/router",
+			hash: "d15a3a6aba07d188ac766a47de6f02f856ea214ffbb394d86b2e087da57c0acd",
+		},
+	} {
+		order := "custom-role first"
+		if tc.externalFirst {
+			order = "external role first"
+		}
+		objects := mixedServerDeployment(t, tc.externalFirst, tc.decided)
+		assert.Equal(t, tc.selector, objects.ConfigMap.Data[modelDeploymentRouterSelectorKey],
+			"the discovery selector of a shape the repair must not reach (%s, decided=%t)", order, tc.decided)
+		assert.Equal(t, tc.hash,
+			objects.Deployment.Spec.Template.Annotations[modelDeploymentRouterConfigHash],
+			"every byte a router Pod is rolled by (%s, decided=%t)", order, tc.decided)
+		// No stage filter carries the requirement: the requirement belongs to the global selector
+		// in this shape, exactly as it did before.
+		assert.False(t, router.DocumentStageFilterDemands(
+			objects.ConfigMap.Data[modelDeploymentRouterConfigKey],
+			modelDeploymentLabelKeyEndpointEligible, modelDeploymentEndpointEligibleValue),
+			"a mixed Server deployment must not put the requirement in a stage filter (%s, decided=%t)",
+			order, tc.decided)
+	}
+}
+
+// TestSyncModelDeploymentRouter_ModelNameDoesNotRetain pins the false positive a text search for the
+// eligibility label would let through.
+//
+// A model name is user text the operator renders into the picker document, and nothing forbids it
+// from being the label's own key. Read as text, such a document says the gate is in force when no
+// pass ever decided it, and the next render narrows the discovery selector of a deployment that
+// never asked to be narrowed -- selecting members that carry no label, of which there are none.
+func TestSyncModelDeploymentRouter_ModelNameDoesNotRetain(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.KVCache = nil
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		// A non-mixed deployment: one managed Server role, so nothing here is the encoder shape
+		// and the gate has no role it may judge differently from another.
+		md.Spec.Model = workercore.ModelDeploymentModel{
+			Name: modelDeploymentLabelKeyEndpointEligible,
+		}
+	})
+	// The document such a deployment renders on a cold pass.
+	live, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+	require.NoError(t, err)
+	require.Contains(t, live.ConfigMap.Data[modelDeploymentRouterConfigKey],
+		modelDeploymentLabelKeyEndpointEligible,
+		"the model name must be rendered into the document, or this case proves nothing")
+
+	cli := newModelDeploymentClient(live.ConfigMap.DeepCopy())
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+	require.NoError(t, r.syncModelDeploymentRouter(context.Background(), md, false))
+
+	published := new(core.ConfigMap)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}, published))
+	assert.NotContains(t, published.Data[modelDeploymentRouterSelectorKey],
+		modelDeploymentLabelKeyEndpointEligible,
+		"a model name that reads as the label must not activate a gate no pass decided")
 }
 
 func TestRenderModelDeploymentRouterObjects_ConfigHashIsDeterministic(t *testing.T) {
@@ -729,7 +1448,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 			name:      "picker defaults to the image that carries every router",
 			md:        routedModelDeployment(),
 			container: "epp",
-			want:      "gpustack/llm-router:v0.2.0",
+			want:      "gpustack/llm-router:v0.3.1",
 			why:       "the default names a release of this project's own build, not a moving upstream tag",
 		},
 		{
@@ -738,7 +1457,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 			}),
 			container: "router",
-			want:      "gpustack/llm-router:v0.2.0",
+			want:      "gpustack/llm-router:v0.3.1",
 			why:       "one setting says where the binaries come from; the command picks which one runs",
 		},
 		{
@@ -772,33 +1491,23 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 // render path could drop a field no case reads and every one of them would stay green; this is the
 // case that cannot, because it compares the bytes of everything at once.
 //
-// THE ORIGINAL DIGESTS WERE CAPTURED FROM THE RENDERER AS IT STOOD BEFORE IT WAS SPLIT into a
-// shared half and a per-router half, and that split had to reproduce every one of them exactly. The
-// table has been RE-BASELINED three times since, each time for a rendering change that was intended:
-// once when the proxy gained its access log and a route timeout filled from a field rather than
-// fixed in the template, once when the default router image became the one build that carries all
-// three routers, and once when the containers running out of that image gained the command naming
-// which of its three programs to run. That last one was found by running it: the image declares no
-// entrypoint, so arguments without a command land in the CMD position and the first flag is read as
-// the program name, which every field-picked case in this file passed over. The metrics listener
-// scheme annotation was then added to each managed router Pod. The SGLang case alone moved again
-// when its picker configuration came to name the engine a Pod without an engine-type label is read
-// as, which the vLLM cases pin as unchanged. It moved once more when that configuration came to
-// carry the engine's KV cache capacity, which is rendered beside the approximate producer alone, so
-// the vLLM cases, whose picker runs the precise producer, pin it as unchanged again. The four cases
-// running the default image moved once more when that default advanced from v0.1.0 to v0.2.0; the
-// case naming its own image did not, pinning the move to the setting's value.
+// A DIGEST MOVES ONLY WHEN THE RENDERED OUTPUT OR THE DEFAULT ROUTER IMAGE CHANGES. Every case
+// running the default image moves together when that image advances, and the one case naming its
+// own image does not, which pins such a move to the setting rather than to the renderer. A case
+// whose engine renders differently from the rest moves alone, so an SGLang-only picker change shows
+// up in its digest while the vLLM cases pin theirs as unchanged.
+//
 // To re-baseline after an intended rendering change: empty the table, run this case, and pin the
 // digests the failures print.
 func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
 		// The digests moved once when the eligibility equality joined the discovery selector
 		// (the endpoint-eligible term a reconciler writes at runtime); they are pinned again here.
-		"a prefill and decode pair": "99610d32170549ce71bf88c2829f71047299cc740c615df7bbadd4b74963550a",
-		"a sole server role":        "988eb796ec383af6711f20dbd71cdba9047d47896f674cee5a8ebbbf371796d7",
+		"a prefill and decode pair": "4104fe673bfc0b8340dc711b564d39638c8015524a69b186f625fca2754630ff",
+		"a sole server role":        "b3765d6528100cf7f889b4400fc469f4690b4394be8ec70e5e415a02ad48abb6",
 		"a router declaring its own image, policy, replicas and extra arguments": "a3eb0fce558ed09aa0f41e6b57cf7e9777bc169ed48709a0f2647064532c43cc",
-		"a role whose command the user took over, so it publishes no events":     "26194d4837676997b1ca4390167058612440528d25dc1959e123b61f28b3396b",
-		"an sglang engine, whose metrics contract differs":                       "9586aff15c8498972303e7bfd7d947c31b7f0bf43833f99c7d038b932b1afc1a",
+		"a role whose command the user took over, so it publishes no events":     "b18d788474ff480f2f1ddd7fa622716e67ca217b75500bde6b6c8a2ae8f39099",
+		"an sglang engine, whose metrics contract differs":                       "2807b587750cdbee319607af9f614f530ce8aff02cd47e40ea99d61b27810050",
 	}
 
 	soleServerRole := func() *workercore.ModelDeployment {

@@ -71,7 +71,7 @@ func TestRenderModelDeploymentPod_DrainsBeforeTheEngineStops(t *testing.T) {
 			name: "an SGLang server",
 			input: plain(0, func(md *workercore.ModelDeployment) {
 				md.Spec.Engine = workercore.ModelDeploymentEngine{
-					Name: workercore.ModelDeploymentEngineSGLang, Version: "0.5.18",
+					Name: workercore.ModelDeploymentEngineSGLang, Image: "lmsysorg/sglang:v0.5.18",
 				}
 				md.Spec.Roles[0].Image = "lmsysorg/sglang:v0.5.18"
 			}),

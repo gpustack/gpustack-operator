@@ -81,7 +81,7 @@ func storedDeploymentJSON(t *testing.T, legacy bool) []byte {
 		},
 		"spec": map[string]any{
 			"model":  map[string]any{"name": "qwen-demo"},
-			"engine": map[string]any{"name": "vLLM"},
+			"engine": map[string]any{"name": "vLLM", "image": "vllm/vllm-openai:v0.25.1"},
 			"roles":  []any{map[string]any{"name": "s0", "instanceType": "gpu-small", "kind": "Server", "size": 1}},
 		},
 		"status": map[string]any{
@@ -759,7 +759,8 @@ func TestTheReachedPersistWriteStaysValidAgainstAStoredLegacyObject(t *testing.T
       }
     },
     "engine": {
-      "name": "vLLM"
+      "name": "vLLM",
+      "image": "vllm/vllm-openai:v0.25.1"
     },
     "roles": [
       {

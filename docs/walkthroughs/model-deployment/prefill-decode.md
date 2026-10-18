@@ -51,7 +51,7 @@ spec:
       name: deepseek-v2-lite-chat
   engine:
     name: vLLM
-    version: "0.29.0"
+    image: gpustack/runner:cuda13.0-vllm0.29.0
   router:
     name: llm-d-router
   roles:
@@ -203,6 +203,7 @@ kubectl get devices -o json | jq '[.items[].status.groups[].accelerators[] |
 **See also** — [Model Deployment Prefill and Decode](../../modules/model-deployment/prefill-decode.md) (configuration and transfer) ·
 [Routing](../../modules/model-deployment/routing.md) (router engine combinations) ·
 [Elastic EP Walkthrough](elastic-ep.md) (collective expansion) ·
-[External DP Walkthrough](external-dp.md) (fixed per-rank serving)
+[External DP Walkthrough](external-dp.md) (fixed per-rank serving) ·
+[EPD Walkthrough](epd.md) (multimodal disaggregation)
 
 **Next** → [Multi-Host Serving Walkthrough](multi-host.md) — scale models across multiple GPU nodes.

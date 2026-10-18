@@ -287,7 +287,7 @@ spec:
     name: case68/model
   engine:
     name: vLLM
-    version: "0.29.0"
+    image: ${IMAGE}
   kvCache:
     poolRef:
       name: $BINDING

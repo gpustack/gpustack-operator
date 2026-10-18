@@ -170,9 +170,59 @@ type vllmKVEventsConfig struct {
 }
 
 func renderVLLM(in Input) (*Result, error) {
-	kvRole, err := vllmKVRole(in.Role)
-	if err != nil {
-		return nil, err
+	// The encoder-cache leg is a separate input rather than a field on Input, so every call that
+	// predates it renders through here and cannot reach it. That is what makes the output of a
+	// deployment with no encoder-cache leg byte-identical to what it was before this arm existed,
+	// and the equality is pinned by TestRenderVLLM_DecodeAndUnsplitRolesAreUnchanged.
+	return renderVLLMWithEncoderCache(in, EncoderCache{})
+}
+
+// renderVLLMWithEncoderCache is renderVLLM with the encoder-cache arm composed onto it. An
+// EncoderCache naming no connector leaves every other arm exactly as renderVLLM produces it.
+func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
+	// An encoder stage renders the encoder-cache arm and NOTHING from the KV arm, and that is an
+	// upstream property rather than a choice: an encoder-only instance "allocates no KV cache
+	// either -- GPUModelRunner.get_kv_cache_spec returns {} for it" (read at vLLM v0.30.0
+	// `vllm/config/ec_transfer.py:112-119`). Filling any KV key here would name a role the engine
+	// cannot act on, and the store half in particular would project a client configuration file
+	// onto a Pod with no KV cache to address.
+	encoderOnly := in.Role == RoleEncode
+	if encoderOnly {
+		// An encoder stage exists only to produce encodings, so naming no leg leaves it with
+		// nothing at all to render: not the encoder-cache document, and none of the KV keys below,
+		// because it has no KV cache either. Rendering an empty Result there would hand back a vLLM
+		// container with no transfer configuration of any kind and start it to serve embeddings
+		// nobody can read. Refusing keeps the reason the same one this role drew before the leg
+		// existed, when the role mapping had no encoder-cache case and fell through to its default.
+		if ec.Connector == "" {
+			return nil, newRefusal(ReasonRoleUnknown,
+				"role %q has no vllm encoder-cache rendering: declare the encoder-cache leg the "+
+					"stage runs, since it renders no KV configuration either", in.Role)
+		}
+		if in.KVTransfer {
+			return nil, newRefusal(ReasonRoleUnsupported,
+				"the encoder role has no KV transfer partner: it produces encodings, not "+
+					"attention blocks")
+		}
+		if in.PublishKVEvents {
+			return nil, newRefusal(ReasonRoleUnsupported,
+				"the encoder role is not among the KV event publishers: it writes no KV cache "+
+					"for one to describe")
+		}
+		if in.Connection.MasterAddress != "" {
+			return nil, newRefusal(ReasonRoleUnsupported,
+				"role %q holds no KV cache, so a shared store asked of it would leave the "+
+					"encoder carrying a cache configuration that moves nothing", in.Role)
+		}
+	}
+
+	var kvRole string
+	if !encoderOnly {
+		role, err := vllmKVRole(in.Role)
+		if err != nil {
+			return nil, err
+		}
+		kvRole = role
 	}
 
 	// Reads the address alone, while Render's gate spells the same question as "an address OR a
@@ -180,7 +230,9 @@ func renderVLLM(in Input) (*Result, error) {
 	// refuses a connection carrying one without the other - so a Connection arriving here has both
 	// fields or neither. TestRender_RefusesAHalfConnection pins that, because the equivalence is a
 	// property of the caller rather than of this line, and nothing here would notice it changing.
-	hasStore := in.Connection.MasterAddress != ""
+	// An encoder stage never reaches this line with a connection: it is refused above, as the
+	// SGLang renderer refuses the same shape.
+	hasStore := !encoderOnly && in.Connection.MasterAddress != ""
 
 	// The connector configuration is a JSON document on the command line, marshaled from a type so an
 	// unreadable key is a compile error. Key order is not part of the contract - JSON defines none -
@@ -364,6 +416,18 @@ func renderVLLM(in Input) (*Result, error) {
 		}
 		result.Args = append(result.Args, vllmTransferConfigArg, string(transferDoc))
 	}
+	// The leg renders nothing when the request names no connector, so it is composed
+	// unconditionally: one place decides what an absent leg means, and appending an empty Result
+	// costs nothing. Appended after the KV document so the two transfer legs read together on the
+	// command line, and after the store block because that block ASSIGNS Env while this one appends.
+	leg, err := renderVLLMEncoderCache(in, ec)
+	if err != nil {
+		return nil, err
+	}
+	result.Args = append(result.Args, leg.Args...)
+	result.Env = append(result.Env, leg.Env...)
+	result.Ports = append(result.Ports, leg.Ports...)
+	result.DefaultedArgs = append(result.DefaultedArgs, leg.DefaultedArgs...)
 	if hasStore && in.Dtype != "" {
 		result.Args = append(result.Args, KVCacheDtypeArg, in.Dtype)
 	}

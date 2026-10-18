@@ -694,6 +694,13 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 		return nil, err
 	}
 	errs = append(errs, typeErrs...)
+
+	epdErrs, err := r.validateModelDeploymentEPD(ctx, md)
+	if err != nil {
+		return nil, err
+	}
+	errs = append(errs, epdErrs...)
+
 	if len(errs) == 0 {
 		interfaceErrs, err := r.validateModelDeploymentInterfaceRequests(ctx, nil, md)
 		if err != nil {
@@ -749,6 +756,13 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 		return nil, err
 	}
 	errs = append(errs, typeErrs...)
+
+	epdErrs, err := r.validateModelDeploymentEPD(ctx, md)
+	if err != nil {
+		return nil, err
+	}
+	errs = append(errs, epdErrs...)
+
 	if len(errs) == 0 && old != nil {
 		interfaceErrs, err := r.validateModelDeploymentInterfaceRequests(ctx, old, md)
 		if err != nil {
@@ -934,7 +948,6 @@ func validateModelDeployment(
 	md *workercore.ModelDeployment, existingRoles sets.Set[string],
 ) field.ErrorList {
 	errs := validateModelDeploymentRoles(md)
-	errs = append(errs, validateModelDeploymentEngineVersion(md)...)
 	errs = append(errs, validateModelDeploymentKVCache(md)...)
 	errs = append(errs, validateModelDeploymentRolesCount(md)...)
 	errs = append(errs, validateModelDeploymentRoleNames(md)...)
@@ -1010,6 +1023,7 @@ var modelDeploymentRouterOwnedArgs = map[string][]string{
 		"--prefill-selector",
 		"--decode-selector",
 		"--vllm-pd-disaggregation",
+		"--epd-config",
 	},
 	// The same catalog as the row above MINUS the two flags that project does not have: its
 	// transfer backend is the engine's, and its disaggregation switch is spelled without the
@@ -1251,9 +1265,11 @@ func modelDeploymentRouterReservedPorts(
 			break
 		}
 		// The event publisher and its replay socket feed the picker's data layer, so they exist
-		// under that router alone -- and not on a decoder, which consumes rather than publishes.
+		// under that router alone -- and not on a decoder, which consumes rather than publishes, nor
+		// on an encoder, which keeps no KV cache to publish events about at all.
 		if md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
-			kind != workercore.ModelDeploymentRoleKindDecode {
+			kind != workercore.ModelDeploymentRoleKindDecode &&
+			kind != workercore.ModelDeploymentRoleKindEncode {
 			reserved = append(reserved, inject.VLLMKVEventsPort, inject.VLLMKVEventsReplayPort)
 		}
 		// The Mooncake bootstrap server runs on the prefiller alone, and UNDER EVERY ROUTER rather
@@ -1275,50 +1291,22 @@ func modelDeploymentRouterReservedPorts(
 		// reservation reads the same rule. It also renders only where the render can synthesize a
 		// connector at all, read from the predicate that gates the render: a pair with neither a
 		// router nor a cache renders none, and its prefiller keeps the port free.
+		//
+		// AN ENCODER ROLE ADDS A SECOND LISTENER on the same prefiller. The language-only engine
+		// binds its encoder bootstrap port as well as its own, so a deployment declaring one reserves
+		// both. A pair with no encoder reserves only the first, which is what keeps 8997 free for a
+		// user to claim on a deployment that never runs an encoder.
 		if kind == workercore.ModelDeploymentRoleKindPrefill &&
 			workerctrl.ModelDeploymentDeclaresBothHalves(md) &&
 			workerctrl.ModelDeploymentMaySynthesizeConnector(md) {
 			reserved = append(reserved, inject.SGLangBootstrapPort)
+			if modelDeploymentDeclaresEncode(md) {
+				reserved = append(reserved, inject.SGLangEncoderBootstrapPort)
+			}
 		}
 	}
 
 	return reserved
-}
-
-// validateModelDeploymentEngineVersion refuses an engine without a version when any role would
-// have its image synthesized.
-//
-// The version is optional ONLY because a role that names its own image never reads it. A role
-// naming none has its image assembled from the engine, the version and the role's own
-// InstanceType, and an empty version assembles a malformed tag naming something never typed.
-// Refusing that here, where the writer can act, beats what the render would do with it: a
-// reconcile error loop on a Pod that is never created, reported as an Event far from the field
-// that caused it.
-//
-// The rule is answerable from the object alone and runs on create and on update alike: dropping
-// the version while a role still needs it is the same mistake as omitting it on create.
-func validateModelDeploymentEngineVersion(md *workercore.ModelDeployment) field.ErrorList {
-	if md.Spec.Engine.Version != "" {
-		return nil
-	}
-
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
-		if role.Image != "" {
-			continue
-		}
-
-		return field.ErrorList{field.Required(
-			field.NewPath("spec", "engine", "version"),
-			fmt.Sprintf(
-				"role %q names no image of its own, so its image is synthesized from the engine "+
-					"and its version, and an empty version assembles a tag naming something never "+
-					"typed. Give the engine a version, or name an image on the role",
-				role.Name),
-		)}
-	}
-
-	return nil
 }
 
 // validateModelDeploymentKVCache refuses a Binding reference with an empty name.
@@ -1684,14 +1672,21 @@ func validateModelDeploymentRoleKinds(md *workercore.ModelDeployment) field.Erro
 		}
 
 		// NO ENGINE THIS API ACCEPTS IS REFUSED BY THIS RULE TODAY, and it is kept rather than
-		// removed. Both engines render all three kinds, so the only shapes left for it are a kind
-		// with no mapping and an engine added to the renderer without a table entry -- and the
-		// second is the one worth a standing rule. The support table is the rendering side's own
-		// truth; an engine that arrives without an entry reports "no term" for every kind, and this
-		// is the only place that turns that into a refusal the user can still act on. Without it
-		// such a deployment is admitted and then fails to render, in a reconciler the user cannot
-		// reach.
-		if !workerctrl.ModelDeploymentSupportsRoleKind(md.Spec.Engine.Name, kind) {
+		// removed, for every kind but one. Both engines render Server, Prefill and Decode, so the
+		// only shapes left for it are a kind with no mapping and an engine added to the renderer
+		// without a table entry -- and the second is the one worth a standing rule. The support table
+		// is the rendering side's own truth; an engine that arrives without an entry reports "no
+		// term" for every kind, and this is the only place that turns that into a refusal the user
+		// can still act on. Without it such a deployment is admitted and then fails to render, in a
+		// reconciler the user cannot reach.
+		//
+		// ENCODE IS THE EXCEPTION, and it is excluded above the call rather than inside it. That
+		// function answers for the KV split, which an encoder takes no part in: the renderer is
+		// asked whether it has a term for the role, and the answer this rule would read is the
+		// renderer's answer about a KV consumer. An Encode role is admitted by the encoder matrix
+		// instead, which asks a different question and names what is missing.
+		if kind != workercore.ModelDeploymentRoleKindEncode &&
+			!workerctrl.ModelDeploymentSupportsRoleKind(md.Spec.Engine.Name, kind) {
 			errs = append(errs, field.Invalid(kindPath, kind, fmt.Sprintf(
 				"engine %q has no rendering term for kind %q; accepting it would leave the container "+
 					"looking configured and behaving as though the role were never declared",
@@ -1719,7 +1714,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 		errs = append(errs, validateModelDeploymentRoleLoadBalance(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleEnv(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleResources(role, rolePath)...)
-		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(md.Namespace, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleArtifactKeys(md, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleReservedMountPaths(md, role, rolePath)...)
 		// Unconditional rather than inside the router's own rules, because the listeners this
@@ -1755,7 +1750,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 // admitted here and still diverges silently at render. Closing that needs the check where the
 // mounts are known, which is the renderer, not this validator.
 func validateModelDeploymentRoleAdditionalVolumes(
-	role *workercore.ModelDeploymentRole, rolePath *field.Path,
+	namespace string, role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
 
@@ -1764,12 +1759,44 @@ func validateModelDeploymentRoleAdditionalVolumes(
 	for i := range role.AdditionalVolumes {
 		av, avPath := &role.AdditionalVolumes[i], avsPath.Index(i)
 
-		if av.ConfigMap == nil && av.Secret == nil && av.HostPath == nil {
+		// The claim source joins the three that were here, so an entry naming no source is refused
+		// here for the same reason the others are: it would be skipped at render and the container
+		// would start without the volume. The refusal for an empty claimName or for naming a second
+		// source beside persistentVolumeClaim runs on every entry that carries one: the claim source
+		// is new, so no stored object predating it can hold one, and gating that check on an Encode
+		// role would let a deployment without one mount an empty claimName or two volume sources on
+		// the same entry.
+		if av.ConfigMap == nil && av.Secret == nil && av.HostPath == nil && av.PersistentVolumeClaim == nil {
 			errs = append(errs, field.Required(avPath, fmt.Sprintf(
-				"one of configMap, secret or hostPath, so that %q names something to mount; an "+
-					"entry naming none is skipped at render and the container starts without it",
+				"one of configMap, secret, hostPath or persistentVolumeClaim, so that %q names "+
+					"something to mount; an entry naming none is skipped at render and the container "+
+					"starts without it",
 				av.MountPath,
 			)))
+		}
+		if av.PersistentVolumeClaim != nil {
+			if av.PersistentVolumeClaim.ClaimName == "" {
+				errs = append(errs, field.Required(avPath.Child("persistentVolumeClaim", "claimName"),
+					fmt.Sprintf(
+						"the claim name must not be empty: it names a claim in namespace %q, and an "+
+							"empty reference names none", namespace)))
+			}
+			for _, other := range []struct {
+				field string
+				set   bool
+			}{
+				{"configMap", av.ConfigMap != nil},
+				{"secret", av.Secret != nil},
+				{"hostPath", av.HostPath != nil},
+			} {
+				if other.set {
+					errs = append(errs, field.Forbidden(avPath.Child(other.field),
+						fmt.Sprintf(
+							"%q is set beside persistentVolumeClaim on the same entry: one entry "+
+								"mounts one volume, and two sources leave the renderer to pick",
+							other.field)))
+				}
+			}
 		}
 
 		if first, duplicate := seen[av.MountPath]; duplicate {

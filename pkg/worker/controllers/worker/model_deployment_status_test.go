@@ -79,6 +79,57 @@ func TestModelDeploymentRoleSummary(t *testing.T) {
 			},
 			want: "0R1P0D",
 		},
+		{
+			// AN ENCODER IS A COUNTED KIND, NOT AN UNNAMED ONE. Left in the default branch it would
+			// render as its own uppercase text after the recognized counts, which reads as a stray
+			// note about a kind this build has no letter for.
+			name:        "encoder prefiller and decoder behind one router",
+			router:      &workercore.ModelDeploymentRouter{},
+			routerReady: 1,
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Kind: workercore.ModelDeploymentRoleKindDecode, Desired: 4, Ready: 4},
+				{Kind: workercore.ModelDeploymentRoleKindPrefill, Desired: 3, Ready: 3},
+				{Kind: workercore.ModelDeploymentRoleKindEncode, Desired: 2, Ready: 2},
+			},
+			want: "1R2E3P4D",
+		},
+		{
+			// The roles' own order does not move the letters: the summary is read at a glance, so
+			// its shape has to be the same for a deployment written encoder-first.
+			name:        "the_roles_own_order_does_not_move_the_letters",
+			router:      &workercore.ModelDeploymentRouter{},
+			routerReady: 1,
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Kind: workercore.ModelDeploymentRoleKindEncode, Desired: 2, Ready: 2},
+				{Kind: workercore.ModelDeploymentRoleKindDecode, Desired: 4, Ready: 4},
+				{Kind: workercore.ModelDeploymentRoleKindPrefill, Desired: 3, Ready: 3},
+			},
+			want: "1R2E3P4D",
+		},
+		{
+			// An unready encoder stays visible as a zero rather than disappearing from the summary,
+			// which is the whole point of counting ready replicas by kind.
+			name:   "an_unready_encoder_remains_visible_as_zero",
+			router: &workercore.ModelDeploymentRouter{},
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Kind: workercore.ModelDeploymentRoleKindEncode, Desired: 2},
+				{Kind: workercore.ModelDeploymentRoleKindPrefill, Desired: 3, Ready: 3},
+			},
+			want: "0R0E3P",
+		},
+		{
+			// A kind this build does not name still reaches the summary, after the letters it does
+			// name. It is not a count like theirs -- it carries the kind's own spelling -- so it is
+			// appended rather than given a position.
+			name:        "a_kind_this_build_does_not_name_lands_after_the_others",
+			router:      &workercore.ModelDeploymentRouter{},
+			routerReady: 1,
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Kind: workercore.ModelDeploymentRoleKindPrefill, Desired: 3, Ready: 3},
+				{Kind: workercore.ModelDeploymentRoleKind("Ada"), Desired: 1, Ready: 1},
+			},
+			want: "1R3P1ADA",
+		},
 	}
 
 	for _, tc := range tests {
@@ -2109,6 +2160,29 @@ func TestModelDeploymentKindsWithoutReady(t *testing.T) {
 			},
 			want: nil,
 		},
+		{
+			// AN ENCODER IS A KIND LIKE PREFILL OR DECODE HERE: a deployment whose encoder has
+			// nothing ready is degraded, and the condition that says so has to name it. A rule
+			// listing only the kinds this file knew before would pass every case above and drop
+			// the encoder, which is the kind a new deployment is most likely to be missing.
+			name: "an_encoder_without_a_ready_replica_is_a_missing_kind",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("e", workercore.ModelDeploymentRoleKindEncode, 0),
+				roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 1),
+				roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
+			},
+			want: []string{string(workercore.ModelDeploymentRoleKindEncode)},
+		},
+		{
+			name: "an_encoder_is_represented_by_its_second_role",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("e1", workercore.ModelDeploymentRoleKindEncode, 0),
+				roleKindStatus("e2", workercore.ModelDeploymentRoleKindEncode, 1),
+				roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 1),
+				roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
+			},
+			want: nil,
+		},
 	}
 
 	for _, c := range testCases {
@@ -2237,6 +2311,32 @@ func TestObserveModelDeploymentRoleKinds(t *testing.T) {
 			roles: []workercore.ModelDeploymentRoleStatus{
 				roleKindStatus("a", workercore.ModelDeploymentRoleKindServer, 0),
 				roleKindStatus("b", workercore.ModelDeploymentRoleKindServer, 1),
+			},
+			wantStatus:  "True",
+			wantReason:  modelDeploymentReasonAllKindsReady,
+			wantMessage: "every role kind of this deployment has at least one ready replica",
+		},
+		{
+			// THE CONDITION NAMES THE ENCODER. It is reported as the missing kind rather than
+			// folded into "ready", which is the difference between an operator reading "the
+			// deployment is fine" and an operator reading "the encoder has nothing up".
+			name: "an_encoder_with_nothing_ready_is_false_and_named",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("e", workercore.ModelDeploymentRoleKindEncode, 0),
+				roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 1),
+				roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
+			},
+			wantStatus:  "False",
+			wantReason:  modelDeploymentReasonKindsNotReady,
+			wantMessage: "no replica is ready for role kinds Encode",
+		},
+		{
+			name: "every_encoder_replica_ready_is_true",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("e1", workercore.ModelDeploymentRoleKindEncode, 0),
+				roleKindStatus("e2", workercore.ModelDeploymentRoleKindEncode, 1),
+				roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 1),
+				roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
 			},
 			wantStatus:  "True",
 			wantReason:  modelDeploymentReasonAllKindsReady,
