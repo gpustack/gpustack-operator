@@ -680,7 +680,7 @@ those releases, and this documentation does not track them; upgrading is the fix
       <tr>
           <td>vLLM-Ascend</td>
           <td>encoder/prefill/decode, direct transfer (<code>ECExampleConnector</code>)</td>
-          <td><code>0.30.0rc1</code>, behind <code>llm-d-router</code> (unverified on hardware)</td>
+          <td><code>0.30.0rc1</code>, behind <code>llm-d-router</code> (verified on Ascend 910B2)</td>
           <td><code>0.3.11.post1</code>, the NPU build</td>
           <td>—</td>
       </tr>
@@ -698,9 +698,10 @@ store reported blocks moving: a transfer or a store write, not a Pod reaching <c
 vLLM-Ascend rows ran on the runner&rsquo;s <code>cann9.1-910b-vllm0.23.0</code> tag, named through
 <code>roles[].image</code>.</p>
 <p>The NVIDIA vLLM EPD rows (behind <code>llm-d-router</code> and <code>vllm-router</code>) and the NVIDIA SGLang EPD rows
-(run on <code>0.5.18</code>, behind both routers) ran live. The AMD and Ascend EPD rows are admitted but not
-verified on hardware (<a href="https://github.com/gpustack/gpustack-operator/issues/763">#763</a>
- tracks the SGLang ones).</p>
+(run on <code>0.5.18</code>, behind both routers) ran live. The vLLM-Ascend EPD row behind <code>llm-d-router</code> ran live on Ascend 910B2. The AMD EPD rows and the
+SGLang Ascend rows are admitted but not verified on hardware
+(<a href="https://github.com/gpustack/gpustack-operator/issues/763">#763</a>
+ tracks them).</p>
 <h2 id="reading-the-table">Reading the table</h2>
 <p><strong>The minimum is a property of the image you name.</strong> There is no <code>engine.version</code> field to set:
 the image a role runs resolves to <code>roles[].image</code> when the role names one, and to
@@ -943,7 +944,7 @@ connections open instead of opening one per transfer, and held at most nine sock
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/modules/model-deployment/engine-versions.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/e17b855b75e3b90f22d485d843b1ced1043e25b1/docs/modules/model-deployment/engine-versions.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/engine-versions.md">Edit this page</a>
             

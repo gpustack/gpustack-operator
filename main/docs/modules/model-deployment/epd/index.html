@@ -693,7 +693,7 @@ you name, not an admission rule: no check reads a version at apply time.</li>
           <td><code>ascend</code></td>
           <td><code>ECExampleConnector</code> over a shared volume</td>
           <td><code>0.30.0rc1</code></td>
-          <td>Not verified</td>
+          <td>Verified on Ascend 910B2</td>
       </tr>
       <tr>
           <td><code>vllm-router</code></td>
@@ -764,7 +764,7 @@ you name, not an admission rule: no check reads a version at apply time.</li>
 <p>A verified row served a multimodal request through the router on the hardware named. A row marked
 Not verified is admitted from the design and has not run on that hardware. Issue
 <a href="https://github.com/gpustack/gpustack-operator/issues/763">#763</a>
- tracks the SGLang AMD and Ascend rows.
+ tracks the rows still unrun: the AMD ROCm rows and the SGLang Ascend rows.
 The <code>Minimum version</code> column is a requirement on the image you name, not an admission check:
 nothing reads a version, so an image below it is applied as written.</p>
 <h3 id="vllm-on-nvidia-and-amd">vLLM on NVIDIA and AMD</h3>
@@ -936,7 +936,7 @@ hardware and when EPD helps.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/modules/model-deployment/epd.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/e17b855b75e3b90f22d485d843b1ced1043e25b1/docs/modules/model-deployment/epd.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/epd.md">Edit this page</a>
             

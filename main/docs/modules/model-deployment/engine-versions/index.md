@@ -24,7 +24,7 @@ those releases, and this documentation does not track them; upgrading is the fix
 | SGLang | prefill/decode, direct transfer over `tcp` | `0.5.18` | `0.3.12.post1` | — |
 | SGLang | with a Mooncake store | `0.5.18`, run as a pair | `0.3.12.post1` | the 0.3.12 line, such as `kvcacheai/mooncake:0.3.12.post1` |
 | vLLM | encoder/prefill/decode, direct transfer over NIXL (`ECCPUConnector`) | `0.30.0`, behind `llm-d-router` or `vllm-router`: NVIDIA CUDA (verified on 4 × NVIDIA L40S) or AMD ROCm (unverified on hardware) | compiles its own, not run | — |
-| vLLM-Ascend | encoder/prefill/decode, direct transfer (`ECExampleConnector`) | `0.30.0rc1`, behind `llm-d-router` (unverified on hardware) | `0.3.11.post1`, the NPU build | — |
+| vLLM-Ascend | encoder/prefill/decode, direct transfer (`ECExampleConnector`) | `0.30.0rc1`, behind `llm-d-router` (verified on Ascend 910B2) | `0.3.11.post1`, the NPU build | — |
 | SGLang | encoder/prefill/decode, transfer by address (`encoder-urls`) | `0.5.10`, behind `llm-d-router` or `sglang-gateway` (NVIDIA verified on 2 × NVIDIA L40S) | `0.3.12.post1` | — |
 
 A version counts as run when the shape answered requests and, where it moves KV, the engine or the
@@ -33,8 +33,9 @@ vLLM-Ascend rows ran on the runner's `cann9.1-910b-vllm0.23.0` tag, named throug
 `roles[].image`.
 
 The NVIDIA vLLM EPD rows (behind `llm-d-router` and `vllm-router`) and the NVIDIA SGLang EPD rows
-(run on `0.5.18`, behind both routers) ran live. The AMD and Ascend EPD rows are admitted but not
-verified on hardware ([#763](https://github.com/gpustack/gpustack-operator/issues/763) tracks the SGLang ones).
+(run on `0.5.18`, behind both routers) ran live. The vLLM-Ascend EPD row behind `llm-d-router` ran live on Ascend 910B2. The AMD EPD rows and the
+SGLang Ascend rows are admitted but not verified on hardware
+([#763](https://github.com/gpustack/gpustack-operator/issues/763) tracks them).
 
 ## Reading the table
 
