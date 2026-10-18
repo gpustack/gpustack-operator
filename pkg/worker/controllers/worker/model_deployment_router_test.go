@@ -722,7 +722,7 @@ func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *tes
 		wantSelector = "app.kubernetes.io/name=model-deployment," +
 			"app.kubernetes.io/instance=qwen,modeldeployment.gpustack.ai/member-index=0," +
 			"!modeldeployment.gpustack.ai/router"
-		wantHash = "349f5ffcf73a19131deb6d8b5bae814649e34e8f9295a135273739527d18bfcf"
+		wantHash = "b3009d0233730081bcfeb308d7e3900e371ff5b151787cf076d8fe9641f76258"
 	)
 	// Decided as well as dormant, because a decided condition is the only thing that could move
 	// this shape and the assertion that it does not is the whole claim.
@@ -877,28 +877,28 @@ func TestRenderModelDeploymentRouterObjects_MixedServerRolesRenderAsBefore(t *te
 			decided:       false,
 			selector: "app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=qwen," +
 				"modeldeployment.gpustack.ai/member-index=0,!modeldeployment.gpustack.ai/router",
-			hash: "e5c414482b95d44f7a9f156d21a3c0d0668b6620ed082ddd544afcb051300b6f",
+			hash: "0ded380cc56f1d8a2543b1288730fc092cfda8dc08745e7235c052e183f6535c",
 		},
 		{
 			externalFirst: true,
 			decided:       true,
 			selector: "app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=qwen," +
 				"modeldeployment.gpustack.ai/endpoint-eligible=true,!modeldeployment.gpustack.ai/router",
-			hash: "d15a3a6aba07d188ac766a47de6f02f856ea214ffbb394d86b2e087da57c0acd",
+			hash: "cb10ff7586ace7e0f04403c79ad59963c2e2e33afa55c4e1f63ef7834e723f91",
 		},
 		{
 			externalFirst: false,
 			decided:       false,
 			selector: "app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=qwen," +
 				"modeldeployment.gpustack.ai/member-index=0,!modeldeployment.gpustack.ai/router",
-			hash: "e5c414482b95d44f7a9f156d21a3c0d0668b6620ed082ddd544afcb051300b6f",
+			hash: "0ded380cc56f1d8a2543b1288730fc092cfda8dc08745e7235c052e183f6535c",
 		},
 		{
 			externalFirst: false,
 			decided:       true,
 			selector: "app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=qwen," +
 				"modeldeployment.gpustack.ai/endpoint-eligible=true,!modeldeployment.gpustack.ai/router",
-			hash: "d15a3a6aba07d188ac766a47de6f02f856ea214ffbb394d86b2e087da57c0acd",
+			hash: "cb10ff7586ace7e0f04403c79ad59963c2e2e33afa55c4e1f63ef7834e723f91",
 		},
 	} {
 		order := "custom-role first"
@@ -1182,6 +1182,7 @@ func TestRenderModelDeploymentRouterObjects_CarriesRuntimeIdentityAndStreamingTr
 	}
 
 	envoy := objects.ConfigMap.Data[modelDeploymentRouterEnvoyConfigKey]
+	assert.Contains(t, envoy, "socket_address: {address: 0.0.0.0, port_value: 8000}")
 	assert.Contains(t, envoy, "request_trailer_mode: SEND")
 	assert.Contains(t, envoy, "response_trailer_mode: SEND")
 	assert.Contains(t, envoy, "typed_extension_protocol_options:")
@@ -1240,7 +1241,7 @@ func TestRenderModelDeploymentRouterObjects_EndpointUsesRouterTransport(t *testi
 	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
-	assert.Equal(t, "http://qwen-router.team-a.svc:8081", objects.Contract.Endpoint)
+	assert.Equal(t, "http://qwen-router.team-a.svc:8000", objects.Contract.Endpoint)
 	assert.Equal(t, "https://qwen-prefill.team-a.svc:8000", objects.Contract.Roles[0].Endpoint)
 }
 
@@ -1318,7 +1319,7 @@ func TestModelDeploymentRouter_ReadyReplicaPublishesRouterEndpoint(t *testing.T)
 	require.NoError(t, err)
 
 	md = getModelDeployment(t, cli)
-	assert.Equal(t, "http://qwen-router.team-a.svc:8081", md.Status.Endpoint)
+	assert.Equal(t, "http://qwen-router.team-a.svc:8000", md.Status.Endpoint)
 }
 
 func TestModelDeploymentRouter_RefusesToAdopt(t *testing.T) {
@@ -1501,13 +1502,12 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 // digests the failures print.
 func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		// The digests moved once when the eligibility equality joined the discovery selector
-		// (the endpoint-eligible term a reconciler writes at runtime); they are pinned again here.
-		"a prefill and decode pair": "4104fe673bfc0b8340dc711b564d39638c8015524a69b186f625fca2754630ff",
-		"a sole server role":        "b3765d6528100cf7f889b4400fc469f4690b4394be8ec70e5e415a02ad48abb6",
-		"a router declaring its own image, policy, replicas and extra arguments": "a3eb0fce558ed09aa0f41e6b57cf7e9777bc169ed48709a0f2647064532c43cc",
-		"a role whose command the user took over, so it publishes no events":     "b18d788474ff480f2f1ddd7fa622716e67ca217b75500bde6b6c8a2ae8f39099",
-		"an sglang engine, whose metrics contract differs":                       "2807b587750cdbee319607af9f614f530ce8aff02cd47e40ea99d61b27810050",
+		// The digests moved when the router HTTP port unified on 8000; they are pinned again here.
+		"a prefill and decode pair": "9f8d07ed79294b5de22eebe3b215a40449ba768e98059e993334330737f4123c",
+		"a sole server role":        "093e7e521452bbc07a00de54ad477f1a58dfd0d155fb16bdac70d94fad06edb5",
+		"a router declaring its own image, policy, replicas and extra arguments": "ded3648a6b614abe1dc5ea0e4694f7b11827140126a771248dea8a5418a57237",
+		"a role whose command the user took over, so it publishes no events":     "111bf8dc63a570fde3164a2038b4a575d72990eed93dd9628c314790a3e95b88",
+		"an sglang engine, whose metrics contract differs":                       "b32414a7673ee745143e07dc4491aa2c011489cbce3135e38a48aa56f9e146eb",
 	}
 
 	soleServerRole := func() *workercore.ModelDeployment {

@@ -135,7 +135,7 @@ if [ "$ready" != yes ]; then
   esac
 fi
 
-want="http://${MD}-router.${NS}.svc:8081"
+want="http://${MD}-router.${NS}.svc:8000"
 got=""
 for _ in $(seq 1 40); do
   got="$(k -n "$NS" get modeldeployment "$MD" -o jsonpath='{.status.endpoint}' 2>/dev/null)"

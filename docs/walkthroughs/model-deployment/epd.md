@@ -210,7 +210,7 @@ kubectl get modeldeployment case120-epd -o jsonpath='{.status.endpoint}'
 ```
 
 ```text
-http://case120-epd-router.default.svc:8081
+http://case120-epd-router.default.svc:8000
 ```
 
 Send a multimodal chat completion to that endpoint from inside the cluster. The recorded request
@@ -221,7 +221,7 @@ encoder:
 kubectl run curl-probe --rm -i --restart=Never --image=curlimages/curl -- \
   curl -sS -H 'Content-Type: application/json' \
   --data-binary @request.json \
-  http://case120-epd-router.default.svc:8081/v1/chat/completions
+  http://case120-epd-router.default.svc:8000/v1/chat/completions
 ```
 
 The response was HTTP 200 with 285 characters of generated text describing the image. To see which
@@ -290,7 +290,7 @@ The model was `Qwen/Qwen2.5-VL-7B-Instruct`, served with `vLLM` `0.30.0` on the 
 |---|---|
 | Admission | The three-role deployment was admitted on `gpustack--nvidia-l40s-linux-amd64` |
 | Readiness | Encode, Prefill and Decode Pods `Ready`; every container restart count is 0 |
-| Endpoint | `http://case120-epd-router.default.svc:8081` |
+| Endpoint | `http://case120-epd-router.default.svc:8000` |
 | Encoder wiring | `ECCPUConnector` as `ec_producer`, side channel on the Pod IP, port 5601 |
 | Prefiller wiring | `ECCPUConnector` as `ec_consumer`, no side-channel port |
 | Decoder wiring | `--ec-connector=ec-nixl` on `routing-proxy` |
@@ -306,7 +306,7 @@ SGLang `0.5.18` ran the same model on NVIDIA L40S behind `llm-d-router` and agai
 
 | Reading | Result |
 |---|---|
-| Published endpoint | `http://sglang-epd-llmd-router.default.svc:8081` |
+| Published endpoint | `http://sglang-epd-llmd-router.default.svc:8000` |
 | Encoder flags | The encoder runs `--encoder-only`; the prefiller runs `--language-only` and dials the encoder |
 | Text-only request | HTTP 200: `The capital of France is Paris.` |
 | `image_url` request | HTTP 200: `The image consists of a red and blue checkerboard pattern with alternating squares.` |

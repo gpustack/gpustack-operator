@@ -25,7 +25,7 @@ func TestModelDeploymentTableRendersTheColumns(t *testing.T) {
 		Status: workercore.ModelDeploymentStatus{
 			RoleSummary: "1R1E1P1D",
 			Phase:       "Ready",
-			Endpoint:    "http://sglang-epd-llmd-router.default.svc:8081",
+			Endpoint:    "http://sglang-epd-llmd-router.default.svc:8000",
 		},
 	}
 	got, err := table.ConvertToTable(context.Background(), md, nil)
@@ -41,7 +41,7 @@ func TestModelDeploymentTableRendersTheColumns(t *testing.T) {
 		"SGLang",
 		"1R1E1P1D",
 		"Ready",
-		"http://sglang-epd-llmd-router.default.svc:8081",
+		"http://sglang-epd-llmd-router.default.svc:8000",
 		"<unknown>",
 	}, cells)
 

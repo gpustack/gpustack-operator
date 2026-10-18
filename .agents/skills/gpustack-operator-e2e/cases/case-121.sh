@@ -761,7 +761,7 @@ PAYLOAD="$(jq -nc --arg model "$MODEL" --arg url "$IMAGE_URL" --argjson mt "$MAX
 
 RESPONSE="$(kubectl -n "$NS" exec "$PROBE_NAME" -- curl -sS --max-time 300 \
   -w $'\nHTTP_STATUS:%{http_code}\n' -H 'Content-Type: application/json' \
-  --data-binary "$PAYLOAD" "http://${MD}-router.${NS}.svc:8081/v1/chat/completions" 2>&1)" || RESPONSE=""
+  --data-binary "$PAYLOAD" "http://${MD}-router.${NS}.svc:8000/v1/chat/completions" 2>&1)" || RESPONSE=""
 
 CONTENT=""
 if [[ "$RESPONSE" == *'HTTP_STATUS:200'* ]]; then

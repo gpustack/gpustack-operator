@@ -280,7 +280,7 @@ func TestComputeModelDeploymentStatus_Roles(t *testing.T) {
 func TestProjectModelDeploymentRouterStatus_FollowsTheRender(t *testing.T) {
 	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil, false)
 	require.NoError(t, err)
-	objects.Contract.Endpoint = "http://perturbed-router.test:8081"
+	objects.Contract.Endpoint = "http://perturbed-router.test:8000"
 	objects.Contract.Metrics.QueuedRequests = "perturbed_queue_metric"
 	objects.Contract.Roles[0].Endpoint = "http://perturbed-role.test:8000"
 	objects.Contract.Roles[0].KVEvents.Topic = "perturbed-topic"

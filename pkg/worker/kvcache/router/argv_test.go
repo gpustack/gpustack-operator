@@ -14,7 +14,7 @@ func vllmInput(roles ...Role) Input {
 		Roles:          roles,
 		Namespace:      "team-a",
 		EndpointLabels: map[string]string{"app.kubernetes.io/instance": "qwen", "member-index": "0"},
-		ListenPort:     8081,
+		ListenPort:     8000,
 		MetricsPort:    9090,
 		DiscoveryPort:  8000,
 	}
@@ -77,7 +77,7 @@ func TestRenderVLLM_NamesItsOwnPortsAndTheOneItDials(t *testing.T) {
 	output, err := Render(VLLM, vllmInput(serverRole()))
 	require.NoError(t, err)
 
-	for _, arg := range []string{"--port=8081", "--prometheus-port=9090", "--service-discovery-port=8000"} {
+	for _, arg := range []string{"--port=8000", "--prometheus-port=9090", "--service-discovery-port=8000"} {
 		assert.Contains(t, output.Arguments, arg)
 	}
 }
@@ -312,7 +312,7 @@ func TestRenderArgv_WithoutAnEncoderTheArgvIsTheGoldenOne(t *testing.T) {
 			command: []string{"vllm-router"},
 			args: []string{
 				"--host=0.0.0.0",
-				"--port=8081",
+				"--port=8000",
 				"--prometheus-host=0.0.0.0",
 				"--prometheus-port=9090",
 				"--kv-connector=mooncake",
@@ -336,7 +336,7 @@ func TestRenderArgv_WithoutAnEncoderTheArgvIsTheGoldenOne(t *testing.T) {
 			command: []string{"sgl-model-gateway"},
 			args: []string{
 				"--host=0.0.0.0",
-				"--port=8081",
+				"--port=8000",
 				"--prometheus-host=0.0.0.0",
 				"--prometheus-port=9090",
 				"--service-discovery",

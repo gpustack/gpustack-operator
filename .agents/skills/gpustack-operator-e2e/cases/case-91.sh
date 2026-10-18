@@ -167,7 +167,7 @@ for i in $(seq 1 "$REQUESTS"); do
     max_tokens:48,stream:$stream}')"
   response="$(kubectl -n "$NS" exec "$PROBE" -- curl -sS --max-time 60 \
     -w '\nHTTP_STATUS:%{http_code}\n' -H 'Content-Type: application/json' \
-    --data-binary "$payload" "http://$MD-router.$NS.svc:8081/v1/chat/completions")" || continue
+    --data-binary "$payload" "http://$MD-router.$NS.svc:8000/v1/chat/completions")" || continue
   [[ "$response" == *'HTTP_STATUS:200'* ]] || continue
   # A streamed failure still ends in [DONE] with status 200: the error arrives as an SSE event, so a
   # stream counts only when it carried generated content and no error object.
