@@ -195,7 +195,7 @@ var modelDeploymentEPDMatrix = []ModelDeploymentEPDRow{
 	// behind both routers on L40S: a text prompt and an image prompt each returned 200 with generated
 	// text, the encoder was reached from the prefiller, and the prefiller kept its widened probes
 	// (readiness 6, liveness 12, timeout 5s) at zero restarts. Send those requests to the deployment's
-	// published endpoint, which is the router Service on port 8081: the plain <md> Service selects the
+	// published endpoint, which is the router Service on port 8000: the plain <md> Service selects the
 	// prefiller role directly and carries no bootstrap, so a request sent there is refused by SGLang
 	// with HTTP 400 before any decoder runs. That is a property of the front door, not a failure of
 	// the row. The AMD ROCm and Ascend NPU rows are still unverified on hardware, tracked in issue

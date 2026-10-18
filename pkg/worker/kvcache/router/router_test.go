@@ -82,7 +82,7 @@ func TestEveryRegisteredRendererFillsExactlyOneHalf(t *testing.T) {
 		}},
 		Namespace:      "team-a",
 		EndpointLabels: map[string]string{"app.kubernetes.io/instance": "qwen"},
-		ListenPort:     8081,
+		ListenPort:     8000,
 		MetricsPort:    9090,
 		DiscoveryPort:  8000,
 	}
@@ -124,7 +124,7 @@ func TestEveryRegisteredRendererNamesItsOwnBinary(t *testing.T) {
 		}},
 		Namespace:      "team-a",
 		EndpointLabels: map[string]string{"app.kubernetes.io/instance": "qwen"},
-		ListenPort:     8081,
+		ListenPort:     8000,
 		MetricsPort:    9090,
 		DiscoveryPort:  8000,
 	}

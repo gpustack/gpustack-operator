@@ -36,7 +36,7 @@ const (
 	modelDeploymentRouterExtraArgsKey         = "extra-args.json"
 	modelDeploymentRouterConfigHash           = "modeldeployment.gpustack.ai/router-config-hash"
 	modelDeploymentRouterLabelKey             = "modeldeployment.gpustack.ai/router"
-	modelDeploymentRouterHTTPPort       int32 = 8081
+	modelDeploymentRouterHTTPPort       int32 = 8000
 	modelDeploymentRouterEPPPort        int32 = 9002
 	// modelDeploymentRouterMetricsPort is where every router serves Prometheus metrics, so that one
 	// scrape configuration reaches all of them. The llm-d picker listens here by default; the
@@ -851,7 +851,7 @@ const modelDeploymentRouterEnvoyConfig = `static_resources:
   listeners:
   - name: http
     address:
-      socket_address: {address: 0.0.0.0, port_value: 8081}
+      socket_address: {address: 0.0.0.0, port_value: 8000}
     filter_chains:
     - filters:
       - name: envoy.filters.network.http_connection_manager
