@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -1739,50 +1740,48 @@ func TestModelDeploymentPodSpecHash_IsDeterministic(t *testing.T) {
 		second.Annotations[modelDeploymentPodSpecHashAnnotation])
 }
 
-// TestModelDeploymentPodSpecHash_DoesNotCoverItself is the other half of that property. A
-// fingerprint that covered the annotation holding it would differ from the one already stored on
-// every pass, which reads exactly like a spec that keeps changing.
+// TestModelDeploymentPodSpecHash_DoesNotCoverItself verifies that stamping a rendered template
+// strips the internal binding-hash carrier and stamps both the explicit spec hash and the current
+// render-version annotation deterministically.
 func TestModelDeploymentPodSpecHash_DoesNotCoverItself(t *testing.T) {
 	md := newRenderDeployment()
-	pod := renderOne(t, md, newRenderInstanceType())
+	it := newRenderInstanceType()
+	pod := renderOne(t, md, it)
 
 	stored := pod.Annotations[modelDeploymentPodSpecHashAnnotation]
-	assert.Equal(t, stored, modelDeploymentPodSpecHash(pod),
-		"rehashing a rendered Pod must reproduce the value it already carries")
+	assert.NotEmpty(t, stored)
+	assert.Equal(t, strconv.Itoa(modelDeploymentRenderVersion),
+		pod.Annotations[modelDeploymentRenderVersionAnnotation])
+	assert.NotContains(t, pod.Annotations, modelDeploymentTemplateBindingHashAnnotation)
+
+	again := renderOne(t, md, it)
+	assert.Equal(t, stored, again.Annotations[modelDeploymentPodSpecHashAnnotation],
+		"re-rendering and stamping a Pod must reproduce the value it already carries")
 }
 
-// TestModelDeploymentPodSpecHash_DoesNotCoverTheName is the migration half of the fingerprint's
-// subject: the hash covers {Labels, Annotations, Spec} and no part of the naming, so a replica
-// named by an earlier scheme is not stale merely for being old. The rollout compares fingerprints,
-// and a hash that read the name would read every surviving replica as outdated the moment the
-// naming scheme changed.
-//
-// THE POSITIVE BASELINE RUNS IN THE SAME TABLE on purpose. "The fingerprint ignores the name" alone
-// would pass against a fingerprint that ignored everything, so beside the case that must not move
-// it sits one that must.
+// TestModelDeploymentPodSpecHash_DoesNotCoverTheName verifies that the explicit spec hash covers
+// the user spec and resolved bindings rather than a Pod's assigned name, so a replica named by an
+// earlier scheme is not stale merely for being old.
 func TestModelDeploymentPodSpecHash_DoesNotCoverTheName(t *testing.T) {
 	base := renderOne(t, newRenderDeployment(), newRenderInstanceType())
 	stored := base.Annotations[modelDeploymentPodSpecHashAnnotation]
 
 	testCases := []struct {
-		name   string
-		mutate func(*core.Pod)
-		moves  bool
+		name      string
+		mutateMD  func(*workercore.ModelDeployment)
+		mutatePod func(*core.Pod)
+		moves     bool
 	}{
 		{
-			// The name an earlier scheme would have given this replica. Neither the rendered prefix
-			// nor this assigned name is part of the fingerprint's subject -- which is what lets a
-			// replica named before the generated naming exist beside ones named after it without
-			// reading as stale.
 			name: "a name assigned by an earlier scheme leaves the fingerprint where it was",
-			mutate: func(pod *core.Pod) {
+			mutatePod: func(pod *core.Pod) {
 				pod.Name = "qwen-server-3"
 			},
 		},
 		{
 			name: "a spec change moves the fingerprint",
-			mutate: func(pod *core.Pod) {
-				pod.Spec.Containers[0].Image = "vllm/vllm-openai:v0.26.0"
+			mutateMD: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 			},
 			moves: true,
 		},
@@ -1790,16 +1789,140 @@ func TestModelDeploymentPodSpecHash_DoesNotCoverTheName(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			pod := base.DeepCopy()
-			tc.mutate(pod)
+			md := newRenderDeployment()
+			if tc.mutateMD != nil {
+				tc.mutateMD(md)
+			}
+			tmpl, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+				Deployment:   md,
+				Role:         &md.Spec.Roles[0],
+				InstanceType: newRenderInstanceType(),
+			})
+			require.NoError(t, err)
+			if tc.mutatePod != nil {
+				tc.mutatePod(tmpl)
+			}
+			stampModelDeploymentPod(tmpl, md, &md.Spec.Roles[0], 0, 0)
 
 			if tc.moves {
-				assert.NotEqual(t, stored, modelDeploymentPodSpecHash(pod))
+				assert.NotEqual(t, stored, tmpl.Annotations[modelDeploymentPodSpecHashAnnotation])
 				return
 			}
-			assert.Equal(t, stored, modelDeploymentPodSpecHash(pod))
+			assert.Equal(t, stored, tmpl.Annotations[modelDeploymentPodSpecHashAnnotation])
 		})
 	}
+}
+
+// TestModelDeploymentPodSpecHash_IgnoresImplicitOperatorDefaultsAndSettings verifies that implicit
+// operator rendering knobs, replica counts, and hub settings do not move pod-spec-hash, while
+// explicit spec and artifact binding changes do.
+func TestModelDeploymentPodSpecHash_IgnoresImplicitOperatorDefaultsAndSettings(t *testing.T) {
+	newArtifact := func() *ModelDeploymentArtifactRender {
+		return &ModelDeploymentArtifactRender{
+			Delivery:   workercore.ModelDeploymentModelDeliveryEngine,
+			Repository: "Qwen/Qwen3-8B",
+			Revision:   "abc1234",
+			Hub:        modelDeploymentHubHuggingFace,
+			SizeBytes:  1 << 30,
+		}
+	}
+
+	baseMD := newRenderDeployment()
+	baseIn := ModelDeploymentRenderInput{
+		Deployment:   baseMD,
+		Role:         &baseMD.Spec.Roles[0],
+		InstanceType: newRenderInstanceType(),
+		Artifact:     newArtifact(),
+	}
+	basePod, err := renderModelDeploymentPod(context.Background(), baseIn)
+	require.NoError(t, err)
+	baseHash := basePod.Annotations[modelDeploymentPodSpecHashAnnotation]
+	assert.Equal(t, strconv.Itoa(modelDeploymentRenderVersion),
+		basePod.Annotations[modelDeploymentRenderVersionAnnotation])
+
+	testCases := []struct {
+		name   string
+		mutate func(*workercore.ModelDeployment, *ModelDeploymentRenderInput)
+		moves  bool
+	}{
+		{
+			name: "general resources overcommit knob does not move the explicit spec hash",
+			mutate: func(_ *workercore.ModelDeployment, in *ModelDeploymentRenderInput) {
+				in.GeneralResourcesOvercommit = true
+			},
+		},
+		{
+			name: "native sidecar shape knob does not move the explicit spec hash",
+			mutate: func(_ *workercore.ModelDeployment, in *ModelDeploymentRenderInput) {
+				in.NativeSidecar = true
+			},
+		},
+		{
+			name: "tcp tw_reuse knob does not move the explicit spec hash",
+			mutate: func(_ *workercore.ModelDeployment, in *ModelDeploymentRenderInput) {
+				in.TCPTWReuse = true
+			},
+		},
+		{
+			name: "hub endpoint and proxy settings do not move the explicit spec hash",
+			mutate: func(_ *workercore.ModelDeployment, in *ModelDeploymentRenderInput) {
+				in.Artifact.Endpoint = "https://hf-mirror.example.com"
+				in.Artifact.HTTPSProxy = "http://proxy.example.com:8080"
+				in.Artifact.NoProxy = "10.0.0.0/8"
+			},
+		},
+		{
+			name: "replica count scaling does not move the explicit spec hash",
+			mutate: func(md *workercore.ModelDeployment, _ *ModelDeploymentRenderInput) {
+				md.Spec.Roles[0].Replicas = 5
+			},
+		},
+		{
+			name: "artifact revision change moves the explicit spec hash",
+			mutate: func(_ *workercore.ModelDeployment, in *ModelDeploymentRenderInput) {
+				in.Artifact.Revision = "def5678"
+			},
+			moves: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			in := ModelDeploymentRenderInput{
+				Deployment:   md,
+				Role:         &md.Spec.Roles[0],
+				InstanceType: newRenderInstanceType(),
+				Artifact:     newArtifact(),
+			}
+			tc.mutate(md, &in)
+			pod, err := renderModelDeploymentPod(context.Background(), in)
+			require.NoError(t, err)
+			if tc.moves {
+				assert.NotEqual(t, baseHash, pod.Annotations[modelDeploymentPodSpecHashAnnotation])
+				return
+			}
+			assert.Equal(t, baseHash, pod.Annotations[modelDeploymentPodSpecHashAnnotation])
+		})
+	}
+}
+
+// TestModelDeploymentPodSpecHash_CoversEverySpecField uses reflection to ensure every field on
+// ModelDeploymentSpec is explicitly accounted for in modelDeploymentExplicitSpecHash.
+func TestModelDeploymentPodSpecHash_CoversEverySpecField(t *testing.T) {
+	specType := reflect.TypeFor[workercore.ModelDeploymentSpec]()
+	got := make([]string, 0, specType.NumField())
+	for i := 0; i < specType.NumField(); i++ {
+		got = append(got, specType.Field(i).Name)
+	}
+	assert.Equal(t, []string{
+		"Model",
+		"Engine",
+		"KVCache",
+		"Roles",
+		"Router",
+		"KVTransfer",
+	}, got, "new ModelDeploymentSpec fields must be wired into modelDeploymentExplicitSpecHash")
 }
 
 // TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput walks the inputs a rollout must react
@@ -2358,15 +2481,15 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "f32a43254d561da431bd5f1107f97ffc5e3c9382b88db0478edc811a22178392",
-		"a sole server role with a synthesized cache connector":                              "52aff227f37f8ca8d4c311b4008b7650a2823ee0668a9f693ceb14837f8643d6",
-		"a take-over role carrying a connector it must be given no part of":                  "93e925e2bfaa5ab9e152a685a336d1b8031d8904bfb54b240a483f0a517e9a54",
-		"a direct decoder with a native routing sidecar":                                     "4f1e9ef33849913b2c71688d7e8b77ffd5338b67d3d5ceca6bd098ba343e546d",
-		"a direct decoder with a classic routing sidecar":                                    "cc9d8f1d61e8df9629459f45c5f0508ad12e6515209ae3c5311f10f59c2844ba",
-		"a role naming no image, which runs the engine's image":                              "f32a43254d561da431bd5f1107f97ffc5e3c9382b88db0478edc811a22178392",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "3b9148d73e337285192aea35aa995813747fc2ebfefda19d107548b788c11791",
-		"the prefill role of a two-role deployment":                                          "7eef707d65e3c6307219d33612e56de8173d9a7b4ece67ff4239f21cc788ba82",
-		"the decode role of a two-role deployment":                                           "cc1217e6e9b9de5e61b0c01aca76666126f24176804151f772b640e13d5c5a77",
+		"a sole server role": "0c2b20ea8c15f627d161c551a009430eeab4dcb3f02412ba9db04f93cb0f2cec",
+		"a sole server role with a synthesized cache connector":                              "cb69cc4001e0d88329fb2ccf4bdac15bd38cb03a5f071501f66a33f61de0774f",
+		"a take-over role carrying a connector it must be given no part of":                  "951e69e8ca2b9eaf7be4e2d413296a86f6948f91f5cd2811a8ea9b39fb495177",
+		"a direct decoder with a native routing sidecar":                                     "1e67a96c8751b3c8c51244e269600b6e43bc046aa67884332777fff9a0c6ed39",
+		"a direct decoder with a classic routing sidecar":                                    "d7ee57984af847d53134823e0854aee82bb650fc5a28703d4e9798c4cc541c27",
+		"a role naming no image, which runs the engine's image":                              "0c2b20ea8c15f627d161c551a009430eeab4dcb3f02412ba9db04f93cb0f2cec",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "9ecc86333032b553de5789d414848a3a3e90b877ae6f43537f547620987cbac3",
+		"the prefill role of a two-role deployment":                                          "147ad5e517b94e5338e035bb4604cb5b810012a49b25a29a3441de4a312a21d1",
+		"the decode role of a two-role deployment":                                           "bede82c4a68c4af87e2ca3305cb9f8a561b5964851be292f1bed239b6788766f",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its
@@ -3043,7 +3166,8 @@ func TestRenderModelDeploymentPod_TCPTWReuse(t *testing.T) {
 			require.NotNil(t, on.Spec.SecurityContext)
 			assert.Equal(t, []core.Sysctl{{Name: "net.ipv4.tcp_tw_reuse", Value: "1"}},
 				on.Spec.SecurityContext.Sysctls)
-			assert.NotEqual(t, offHash, onHash, "flipping the setting must roll the target replica")
+			assert.Equal(t, offHash, onHash,
+				"the setting is an implicit operator knob and does not move the explicit spec hash")
 		})
 	}
 }

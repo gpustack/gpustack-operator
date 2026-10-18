@@ -199,6 +199,28 @@ type ModelDeploymentConnectorRender struct {
 	// handshake on its behalf. It is decided HERE rather than read off KVTransfer by the renderer,
 	// because the two stopped agreeing the moment a second router could carry the transfer leg.
 	RoutingSidecar bool
+
+	// binding records the external binding inputs this connector was synthesized from so the
+	// explicit Pod spec hash can fingerprint the binding without hashing synthesized flags or
+	// defaulted environment variables.
+	binding *modelDeploymentConnectorBinding
+}
+
+type modelDeploymentConnectorBinding struct {
+	Domain              string                 `json:"domain,omitempty"`
+	Dtype               string                 `json:"dtype,omitempty"`
+	CachePrefix         string                 `json:"cachePrefix,omitempty"`
+	MasterServerAddress string                 `json:"masterServerAddress,omitempty"`
+	Protocol            string                 `json:"protocol,omitempty"`
+	KVTransfer          bool                   `json:"kvTransfer,omitempty"`
+	KVTransferProtocol  string                 `json:"kvTransferProtocol,omitempty"`
+	PublishKVEvents     bool                   `json:"publishKVEvents,omitempty"`
+	KVEventsHost        string                 `json:"kvEventsHost,omitempty"`
+	RoutingSidecar      bool                   `json:"routingSidecar,omitempty"`
+	Disaggregated       bool                   `json:"disaggregated,omitempty"`
+	Parallelism         inject.ParallelismPair `json:"parallelism,omitempty"`
+	EncoderCache        inject.EncoderCache    `json:"encoderCache,omitempty"`
+	EncoderURLs         []string               `json:"encoderURLs,omitempty"`
 }
 
 // modelDeploymentRoutesManaged is now the KV EVENTS gate alone: a managed router is in front of
@@ -751,6 +773,11 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		return ModelDeploymentConnectorRender{}, err
 	}
 
+	var parallelism inject.ParallelismPair
+	if engine == inject.EngineVLLMAscend && res.KVTransfer {
+		parallelism = in.Parallelism
+	}
+
 	return ModelDeploymentConnectorRender{
 		Args: res.Args,
 		Env:  res.Env,
@@ -769,6 +796,22 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		// Passed through rather than derived: the renderer has no way to tell which router is in
 		// front, and deriving it from the transfer leg is exactly the inheritance this split ends.
 		RoutingSidecar: in.RoutingSidecar,
+		binding: &modelDeploymentConnectorBinding{
+			Domain:              in.Domain,
+			Dtype:               in.Dtype,
+			CachePrefix:         in.CachePrefix,
+			MasterServerAddress: in.MasterServerAddress,
+			Protocol:            protocol,
+			KVTransfer:          res.KVTransfer,
+			KVTransferProtocol:  kvTransferProtocol,
+			PublishKVEvents:     in.PublishKVEvents,
+			KVEventsHost:        in.KVEventsHost,
+			RoutingSidecar:      in.RoutingSidecar,
+			Disaggregated:       in.Disaggregated,
+			Parallelism:         parallelism,
+			EncoderCache:        in.EncoderCache,
+			EncoderURLs:         in.EncoderURLs,
+		},
 	}, nil
 }
 
