@@ -338,14 +338,14 @@ simply idle looks exactly like an unread one: no supported engine signals "the c
 initialized" before any traffic, so silence is the most common steady state. A connector that
 cannot come up keeps its replica from ever becoming Ready, which is reported there.
 
-**`ReplicasUpToDate`** — whether the running replicas match what the convergence renders for them now.
-It is not a statement about `spec` alone: the comparison includes the rendered KV cache connector,
-so a replica carrying the current `spec` can still differ from the render once that connector stops
-resolving — the state behind `RolloutHeldByCache`, which the other conditions do not describe.
+**`ReplicasUpToDate`** — whether the running replicas match the desired explicit spec hash and meet
+the deployment's minimum `modeldeployment.gpustack.ai/render-version`. The explicit spec hash
+includes the resolved KV cache binding, so a replica carrying the current `spec` still differs from
+the desired hash once that connector stops resolving — the state behind `RolloutHeldByCache`.
 
 | Value | Reason | Meaning |
 |---|---|---|
-| `True` | `UpToDate` | every replica matches what the pass rendered |
+| `True` | `UpToDate` | every replica matches the explicit spec hash and meets the minimum render version; when any replica runs on an older compatible `render-version`, the message reports how many, the current render version, and `modeldeployment.gpustack.ai/min-render-version` |
 | `False` | `RolloutInProgress` | replicas differ from the render and turn over **one per role per pass**; this pass deleted at most one replica per role, and the pass that finds it gone creates the replacement |
 | `False` | `ReplacementInProgress` | every surviving replica matches the render but the declared count is short — what removed them is not this condition's to say, and a preemption reports itself on the quota condition; the pass creates each replacement once the departed replica's ordinal reads empty |
 | `False` | `RolloutHeldByCache` | replicas that differed from the render were **left in place**: no connection resolved this pass, and recreating them on that alone would rebuild every replica whenever the store blinks |

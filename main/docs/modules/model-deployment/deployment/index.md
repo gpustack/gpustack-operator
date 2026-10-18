@@ -175,15 +175,17 @@ a role's own address.
 | Key | Value | Purpose |
 |---|---|---|
 | label `kueue.x-k8s.io/pod-group-name` | `gpustack-fnv64-<hash>` over the namespace, deployment, role and ordinal — always the hashed form, on every shape | membership: it is what makes a replica its own group. The name is unique, not parseable; the ordinal travels in its own label |
-| label `modeldeployment.gpustack.ai/pod-ordinal` | the replica's slot within its role, from 0 up | the per-replica identity: the group name derives from it, and a scale-down sheds the highest ordinals first |
-| label `modeldeployment.gpustack.ai/member-index` | which Pod of its instance this is, from 0 up — rendered at **every** size, one Pod included | what tells two Pods of one instance apart, and what a `Service` selector matches to front only the leader above `size: 1`. A container reads its own index through this label rather than from a rendered value, which is what keeps one Pod template per instance |
+| label `kueue.x-k8s.io/queue-name` | the `status.entrance` **published by** the role's InstanceType | unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type so this operator and the LocalQueue it creates cannot disagree about the queue |
 | annotation `kueue.x-k8s.io/pod-group-total-count` | the role's `size` | how many Pods Kueue waits for before composing anything. A replica-count change moves no total any member carries — a resize is a trim, not a rebuild. A `size` edit never edits a running group's total either: it replaces whole groups, and each new group carries its own |
 | annotation `kueue.x-k8s.io/role-hash` | the role's `name` | names the single PodSet the replica's group composes, which is what lets status attribute a Workload back to the role that asked for it. Every replica of a role names the same PodSet |
 | annotation `kueue.x-k8s.io/pod-group-serving` | `"true"` | an inference deployment never finishes; without it Kueue reclaims the quota of a replica that exited |
-| label `kueue.x-k8s.io/queue-name` | the `status.entrance` **published by** the role's InstanceType | unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type so this operator and the LocalQueue it creates cannot disagree about the queue |
+| annotation `kueue.x-k8s.io/podset-required-topology` | `roles[].topology.requiredLevel`, when non-empty | asks Kueue to fit this replica's whole PodSet in one domain at the named hierarchy level |
 | label `app.kubernetes.io/component` | the role's `name` | unchanged; what a `Service` selects on and what `status.roles[]` is attributed by |
 | label `modeldeployment.gpustack.ai/role-kind` | the role's effective kind mapped to the router's spelling, so `server` when the API field is unset | what something in front of the replicas selects on to tell a prefiller from a decoder. Rendered for every deployment, a lone `server` included, so "no prefiller is running" and "this deployment does not label its roles" are different answers |
-| annotation `kueue.x-k8s.io/podset-required-topology` | `roles[].topology.requiredLevel`, when non-empty | asks Kueue to fit this replica's whole PodSet in one domain at the named hierarchy level |
+| label `modeldeployment.gpustack.ai/pod-ordinal` | the replica's slot within its role, from 0 up | the per-replica identity: the group name derives from it, and a scale-down sheds the highest ordinals first |
+| label `modeldeployment.gpustack.ai/member-index` | which Pod of its instance this is, from 0 up — rendered at **every** size, one Pod included | what tells two Pods of one instance apart, and what a `Service` selector matches to front only the leader above `size: 1`. A container reads its own index through this label rather than from a rendered value, which is what keeps one Pod template per instance |
+| annotation `modeldeployment.gpustack.ai/pod-spec-hash` | SHA-256 hex digest of explicit `ModelDeployment` fields and resolved external bindings | tracks user-declared spec and binding changes independently of operator-synthesized flags or worker `Setting` values |
+| annotation `modeldeployment.gpustack.ai/render-version` | positive integer (`"1"`, `"2"`, ...) | records the operator rendering baseline that built the Pod; checked against the minimum supported baseline and `modeldeployment.gpustack.ai/min-render-version` |
 | `spec.nodeSelector` | no topology value is added | Kueue selects the concrete domain through the flavor's Topology and writes its assignment; the deployment requests a level, not a region, zone, rack, or host value |
 
 The `role-hash` annotation is load-bearing: status joins a Workload's PodSets to the roles by this
@@ -545,10 +547,43 @@ The deployment records an event naming the replica and the lease window on each 
 (`ReplicaEvicted`, `ReplicaLeaving`, `ReplicaRestarted`), so an operator correlating a burst of
 failed requests with a replica that went away has the correlation written down rather than inferred.
 
-**An upgrade can trigger the same turnover without any spec edit.** The fingerprint covers a replica's
-labels, annotations and spec, so a release that changes what every replica renders turns each one over
-once: the `role-kind` label above did, and so did the [drain](/gpustack-operator/main/docs/modules/model-deployment/shutdown/index.md). Nothing
-is required of you, but on a busy deployment the restart is worth scheduling.
+### Render version and upgrade turnover
+
+Each replica Pod carries two currency annotations so user-declared changes and operator-internal
+rendering changes are evaluated separately:
+
+| Annotation | Scope | What changes it | Default rollout behavior |
+|---|---|---|---|
+| `modeldeployment.gpustack.ai/pod-spec-hash` (on Pod) | explicit `ModelDeployment` fields (`model`, `engine`, `router`, `kvCache.poolRef`, `kvTransfer`, and the role's configuration) plus resolved external bindings (`InstanceType` entrance/manufacturer/resources, `KVCachePoolBinding` endpoint/domain/dtype, `ModelArtifact` source/digest, fabric interface key, `RuntimeClassName`, and seat `ordinal`/`member`) | editing any covered `ModelDeployment` field or changing a bound external resource | rolls affected replicas one per role per pass |
+| `modeldeployment.gpustack.ai/render-version` (on Pod) | operator-synthesized flags (`--host`, `--port`, `--served-model-name`, connector flags), probes, `preStop` drain hook, sidecars (`routing-proxy`, `wait-for-worker`), implicit labels/annotations, and worker `Setting` values | upgrading to an operator release with a newer rendering baseline | keeps running replicas in place while `render-version` meets the effective minimum floor; applies to newly created or replaced Pods |
+| `modeldeployment.gpustack.ai/min-render-version` (on `ModelDeployment`) | per-deployment render-version floor, clamped to `[minSupportedRenderVersion, currentRenderVersion]` | setting or raising the annotation on `ModelDeployment.metadata.annotations` | rolls replicas whose `render-version` is below the effective floor, one per role per pass |
+
+Set `modeldeployment.gpustack.ai/min-render-version` on the `ModelDeployment` to roll running
+replicas onto a newer rendering baseline on your own schedule; see
+[Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md#status) for how `ReplicasUpToDate` reports older compatible
+replicas:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen-chat
+  namespace: team-a
+  annotations:
+    modeldeployment.gpustack.ai/min-render-version: "2"
+spec:
+  model:
+    name: Qwen/Qwen2.5-72B-Instruct
+  engine:
+    name: vLLM
+    image: vllm/vllm-openai:v0.25.1
+  roles:
+    - name: server
+      replicas: 4
+      instanceType: gpustack-nvidia-a10g-linux-amd64
+      resources:
+        accelerator: 2
+```
 
 ### Replica departures
 

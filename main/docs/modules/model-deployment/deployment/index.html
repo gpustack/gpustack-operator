@@ -778,14 +778,9 @@ a role&rsquo;s own address.</p>
           <td>membership: it is what makes a replica its own group. The name is unique, not parseable; the ordinal travels in its own label</td>
       </tr>
       <tr>
-          <td>label <code>modeldeployment.gpustack.ai/pod-ordinal</code></td>
-          <td>the replica&rsquo;s slot within its role, from 0 up</td>
-          <td>the per-replica identity: the group name derives from it, and a scale-down sheds the highest ordinals first</td>
-      </tr>
-      <tr>
-          <td>label <code>modeldeployment.gpustack.ai/member-index</code></td>
-          <td>which Pod of its instance this is, from 0 up — rendered at <strong>every</strong> size, one Pod included</td>
-          <td>what tells two Pods of one instance apart, and what a <code>Service</code> selector matches to front only the leader above <code>size: 1</code>. A container reads its own index through this label rather than from a rendered value, which is what keeps one Pod template per instance</td>
+          <td>label <code>kueue.x-k8s.io/queue-name</code></td>
+          <td>the <code>status.entrance</code> <strong>published by</strong> the role&rsquo;s InstanceType</td>
+          <td>unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type so this operator and the LocalQueue it creates cannot disagree about the queue</td>
       </tr>
       <tr>
           <td>annotation <code>kueue.x-k8s.io/pod-group-total-count</code></td>
@@ -803,9 +798,9 @@ a role&rsquo;s own address.</p>
           <td>an inference deployment never finishes; without it Kueue reclaims the quota of a replica that exited</td>
       </tr>
       <tr>
-          <td>label <code>kueue.x-k8s.io/queue-name</code></td>
-          <td>the <code>status.entrance</code> <strong>published by</strong> the role&rsquo;s InstanceType</td>
-          <td>unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type so this operator and the LocalQueue it creates cannot disagree about the queue</td>
+          <td>annotation <code>kueue.x-k8s.io/podset-required-topology</code></td>
+          <td><code>roles[].topology.requiredLevel</code>, when non-empty</td>
+          <td>asks Kueue to fit this replica&rsquo;s whole PodSet in one domain at the named hierarchy level</td>
       </tr>
       <tr>
           <td>label <code>app.kubernetes.io/component</code></td>
@@ -818,9 +813,24 @@ a role&rsquo;s own address.</p>
           <td>what something in front of the replicas selects on to tell a prefiller from a decoder. Rendered for every deployment, a lone <code>server</code> included, so &ldquo;no prefiller is running&rdquo; and &ldquo;this deployment does not label its roles&rdquo; are different answers</td>
       </tr>
       <tr>
-          <td>annotation <code>kueue.x-k8s.io/podset-required-topology</code></td>
-          <td><code>roles[].topology.requiredLevel</code>, when non-empty</td>
-          <td>asks Kueue to fit this replica&rsquo;s whole PodSet in one domain at the named hierarchy level</td>
+          <td>label <code>modeldeployment.gpustack.ai/pod-ordinal</code></td>
+          <td>the replica&rsquo;s slot within its role, from 0 up</td>
+          <td>the per-replica identity: the group name derives from it, and a scale-down sheds the highest ordinals first</td>
+      </tr>
+      <tr>
+          <td>label <code>modeldeployment.gpustack.ai/member-index</code></td>
+          <td>which Pod of its instance this is, from 0 up — rendered at <strong>every</strong> size, one Pod included</td>
+          <td>what tells two Pods of one instance apart, and what a <code>Service</code> selector matches to front only the leader above <code>size: 1</code>. A container reads its own index through this label rather than from a rendered value, which is what keeps one Pod template per instance</td>
+      </tr>
+      <tr>
+          <td>annotation <code>modeldeployment.gpustack.ai/pod-spec-hash</code></td>
+          <td>SHA-256 hex digest of explicit <code>ModelDeployment</code> fields and resolved external bindings</td>
+          <td>tracks user-declared spec and binding changes independently of operator-synthesized flags or worker <code>Setting</code> values</td>
+      </tr>
+      <tr>
+          <td>annotation <code>modeldeployment.gpustack.ai/render-version</code></td>
+          <td>positive integer (<code>&quot;1&quot;</code>, <code>&quot;2&quot;</code>, &hellip;)</td>
+          <td>records the operator rendering baseline that built the Pod; checked against the minimum supported baseline and <code>modeldeployment.gpustack.ai/min-render-version</code></td>
       </tr>
       <tr>
           <td><code>spec.nodeSelector</code></td>
@@ -1168,12 +1178,66 @@ therefore costs its siblings the blocks it held.</p>
 <p>The deployment records an event naming the replica and the lease window on each of three paths
 (<code>ReplicaEvicted</code>, <code>ReplicaLeaving</code>, <code>ReplicaRestarted</code>), so an operator correlating a burst of
 failed requests with a replica that went away has the correlation written down rather than inferred.</p>
-<p><strong>An upgrade can trigger the same turnover without any spec edit.</strong> The fingerprint covers a replica&rsquo;s
-labels, annotations and spec, so a release that changes what every replica renders turns each one over
-once: the <code>role-kind</code> label above did, and so did the <a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/">drain</a>
-. Nothing
-is required of you, but on a busy deployment the restart is worth scheduling.</p>
-<h3 id="replica-departures">Replica departures</h3>
+<h3 id="render-version-and-upgrade-turnover">Render version and upgrade turnover</h3>
+<p>Each replica Pod carries two currency annotations so user-declared changes and operator-internal
+rendering changes are evaluated separately:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Annotation</th>
+          <th>Scope</th>
+          <th>What changes it</th>
+          <th>Default rollout behavior</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>modeldeployment.gpustack.ai/pod-spec-hash</code> (on Pod)</td>
+          <td>explicit <code>ModelDeployment</code> fields (<code>model</code>, <code>engine</code>, <code>router</code>, <code>kvCache.poolRef</code>, <code>kvTransfer</code>, and the role&rsquo;s configuration) plus resolved external bindings (<code>InstanceType</code> entrance/manufacturer/resources, <code>KVCachePoolBinding</code> endpoint/domain/dtype, <code>ModelArtifact</code> source/digest, fabric interface key, <code>RuntimeClassName</code>, and seat <code>ordinal</code>/<code>member</code>)</td>
+          <td>editing any covered <code>ModelDeployment</code> field or changing a bound external resource</td>
+          <td>rolls affected replicas one per role per pass</td>
+      </tr>
+      <tr>
+          <td><code>modeldeployment.gpustack.ai/render-version</code> (on Pod)</td>
+          <td>operator-synthesized flags (<code>--host</code>, <code>--port</code>, <code>--served-model-name</code>, connector flags), probes, <code>preStop</code> drain hook, sidecars (<code>routing-proxy</code>, <code>wait-for-worker</code>), implicit labels/annotations, and worker <code>Setting</code> values</td>
+          <td>upgrading to an operator release with a newer rendering baseline</td>
+          <td>keeps running replicas in place while <code>render-version</code> meets the effective minimum floor; applies to newly created or replaced Pods</td>
+      </tr>
+      <tr>
+          <td><code>modeldeployment.gpustack.ai/min-render-version</code> (on <code>ModelDeployment</code>)</td>
+          <td>per-deployment render-version floor, clamped to <code>[minSupportedRenderVersion, currentRenderVersion]</code></td>
+          <td>setting or raising the annotation on <code>ModelDeployment.metadata.annotations</code></td>
+          <td>rolls replicas whose <code>render-version</code> is below the effective floor, one per role per pass</td>
+      </tr>
+  </tbody>
+</table>
+<p>Set <code>modeldeployment.gpustack.ai/min-render-version</code> on the <code>ModelDeployment</code> to roll running
+replicas onto a newer rendering baseline on your own schedule; see
+<a href="/gpustack-operator/main/docs/modules/model-deployment/status/#status">Model Deployment Status</a>
+ for how <code>ReplicasUpToDate</code> reports older compatible
+replicas:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-chat</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">annotations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">modeldeployment.gpustack.ai/min-render-version</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-72B-Instruct</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">vllm/vllm-openai:v0.25.1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-a10g-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
+</div><h3 id="replica-departures">Replica departures</h3>
 <p>Most departures are not a spec change, and none of them touches a sibling:</p>
 <table>
   <thead>
@@ -1562,7 +1626,7 @@ structured snapshot and Pod scrape endpoints.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/7d419d419653869138cef42c7475c472a2461dfa/docs/modules/model-deployment/deployment.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1c149b1c087a157bff55c136f6fba4871b8938a5/docs/modules/model-deployment/deployment.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/deployment.md">Edit this page</a>
             
@@ -1592,6 +1656,7 @@ structured snapshot and Pod scrape endpoints.</li></ul>
     <li><a href="#rollout-behavior">Rollout behavior</a>
       <ul>
         <li><a href="#replacing-a-role-whose-shape-moved">Replacing a role whose shape moved</a></li>
+        <li><a href="#render-version-and-upgrade-turnover">Render version and upgrade turnover</a></li>
         <li><a href="#replica-departures">Replica departures</a></li>
         <li><a href="#deployment-identity-fields">Deployment identity fields</a></li>
         <li><a href="#one-group-per-replica">One group per replica</a></li>

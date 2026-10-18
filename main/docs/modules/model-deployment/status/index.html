@@ -1015,10 +1015,10 @@ or a log line.</p>
 simply idle looks exactly like an unread one: no supported engine signals &ldquo;the connector
 initialized&rdquo; before any traffic, so silence is the most common steady state. A connector that
 cannot come up keeps its replica from ever becoming Ready, which is reported there.</p>
-<p><strong><code>ReplicasUpToDate</code></strong> — whether the running replicas match what the convergence renders for them now.
-It is not a statement about <code>spec</code> alone: the comparison includes the rendered KV cache connector,
-so a replica carrying the current <code>spec</code> can still differ from the render once that connector stops
-resolving — the state behind <code>RolloutHeldByCache</code>, which the other conditions do not describe.</p>
+<p><strong><code>ReplicasUpToDate</code></strong> — whether the running replicas match the desired explicit spec hash and meet
+the deployment&rsquo;s minimum <code>modeldeployment.gpustack.ai/render-version</code>. The explicit spec hash
+includes the resolved KV cache binding, so a replica carrying the current <code>spec</code> still differs from
+the desired hash once that connector stops resolving — the state behind <code>RolloutHeldByCache</code>.</p>
 <table>
   <thead>
       <tr>
@@ -1031,7 +1031,7 @@ resolving — the state behind <code>RolloutHeldByCache</code>, which the other 
       <tr>
           <td><code>True</code></td>
           <td><code>UpToDate</code></td>
-          <td>every replica matches what the pass rendered</td>
+          <td>every replica matches the explicit spec hash and meets the minimum render version; when any replica runs on an older compatible <code>render-version</code>, the message reports how many, the current render version, and <code>modeldeployment.gpustack.ai/min-render-version</code></td>
       </tr>
       <tr>
           <td><code>False</code></td>
@@ -1282,7 +1282,7 @@ levels back to <code>True</code> on its own once a later pass proves the live wo
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/7d419d419653869138cef42c7475c472a2461dfa/docs/modules/model-deployment/status.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/1c149b1c087a157bff55c136f6fba4871b8938a5/docs/modules/model-deployment/status.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/status.md">Edit this page</a>
             

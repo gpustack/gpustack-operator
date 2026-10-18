@@ -37,7 +37,7 @@ no `.partitioned*` keys at all.
 ## The resource keys
 
 `<base>` is the manufacturer's device resource (`nvidia.com/gpu`, `huawei.com/npu`, … — see
-[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/7d419d419653869138cef42c7475c472a2461dfa/README.md#accelerator-support)).
+[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/1c149b1c087a157bff55c136f6fba4871b8938a5/README.md#accelerator-support)).
 
 | Key | Served by | Eligible accelerators | Request value | Node value |
 |---|---|---|---|---|
