@@ -558,11 +558,10 @@ rendering changes are evaluated separately:
 | `modeldeployment.gpustack.ai/render-version` (on Pod) | operator-synthesized flags (`--host`, `--port`, `--served-model-name`, connector flags), probes, `preStop` drain hook, sidecars (`routing-proxy`, `wait-for-worker`), implicit labels/annotations, and worker `Setting` values | upgrading to an operator release with a newer rendering baseline | keeps running replicas in place while `render-version` meets the effective minimum floor; applies to newly created or replaced Pods |
 | `modeldeployment.gpustack.ai/min-render-version` (on `ModelDeployment`) | per-deployment render-version floor, clamped to `[minSupportedRenderVersion, currentRenderVersion]` | setting or raising the annotation on `ModelDeployment.metadata.annotations` | rolls replicas whose `render-version` is below the effective floor, one per role per pass |
 
-When running replicas match `pod-spec-hash` and meet the minimum floor while carrying an older
-`render-version`, `ReplicasUpToDate` remains `True` (`UpToDate`) and its message reports how many
-replicas run on an older baseline alongside the current version. Set
-`modeldeployment.gpustack.ai/min-render-version` on the `ModelDeployment` to roll those replicas
-onto the current baseline on your own schedule:
+Set `modeldeployment.gpustack.ai/min-render-version` on the `ModelDeployment` to roll running
+replicas onto a newer rendering baseline on your own schedule; see
+[Model Deployment Status](status.md#status) for how `ReplicasUpToDate` reports older compatible
+replicas:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
