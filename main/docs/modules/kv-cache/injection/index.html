@@ -150,6 +150,11 @@
     
       
       
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
         <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
       
     
@@ -415,6 +420,16 @@
       
       
         <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
       
     
       
@@ -1045,12 +1060,27 @@ reachable or not.</p>
 isolate cache reuse.</strong> The webhook always writes a non-empty domain and never inspects or rejects the
 image version. Verify the image you deploy: the vLLM family must consume <code>tenant_id</code> from the
 projected file, while SGLang must consume <code>MOONCAKE_TENANT_ID</code> from its environment.</p>
-<p>Keep the Mooncake library bundled by the engine unless that engine documents another compatible
-combination. A mismatched library may reject the tenant even when the engine reads it.</p>
-<p>An older engine is allowed. It may ignore the injected value and use Mooncake&rsquo;s literal <code>default</code>
-tenant instead, without any admission error. Such a pool needs a <code>KVCachePoolBinding</code> whose domain is
-<code>default</code>, which is also what a Binding that leaves <code>spec.domain.name</code> out registers; its quota is
-then shared by every client that falls back to that tenant.</p>
+<p><strong>Every engine image carries its own <code>mooncake-transfer-engine</code>, and that library must match the
+<code>KVCacheBackend</code>&rsquo;s.</strong> This holds on every platform, not only on Ascend. The engine&rsquo;s copy is what
+reads the tenant and what talks to the store&rsquo;s members; the backend&rsquo;s copy is the other end of that
+conversation. Two versions that disagree fail, whatever hardware they run on — at startup, at the
+first write, or silently with no error at all.</p>
+<p><strong>Before deploying, read the version inside the engine image and compare it with the backend&rsquo;s.</strong></p>
+<ul>
+<li>In the engine image: <code>pip show mooncake-transfer-engine</code>. On Ascend the distribution is named
+<code>mooncake-transfer-engine-npu</code>, and the plain name is absent, so check both spellings.</li>
+<li>For the <code>KVCacheBackend</code>: the store version is the one in the member image its <code>spec</code> names, so
+read it from that image tag.</li>
+<li>The compatibility rule is <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#the-store-version-must-match-the-engines-client">the store version</a>
+.</li>
+</ul>
+<p><strong>For a non-<code>default</code> domain the engine&rsquo;s library must also be <code>0.3.13</code> or later.</strong> That is the line
+that carries <code>tenant_id</code> in <code>setup()</code>. Below it the engine has no such parameter, so a non-default
+domain fails at startup with <code>TypeError: setup(): incompatible function arguments</code>.</p>
+<p>If the engine&rsquo;s library is older than <code>0.3.13</code>, or ignores the injected tenant, keep the Binding&rsquo;s
+domain at <code>default</code> — the value a Binding with no <code>spec.domain.name</code> registers. The engine then
+starts and serves. Every client on that domain shares one tenant and one quota ledger, so cache reuse
+is not separated between namespaces.</p>
 <p><code>tenantInjected</code> records only that the webhook wrote the value. It does not prove the image read it
 or that isolation took effect.</p>
 <h2 id="verify-the-vllm-file-vehicle">Verify the vLLM file vehicle</h2>
@@ -1268,7 +1298,7 @@ operator for.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c1c29a794375a198a5358b6e2b7ab53801fcc79/docs/modules/kv-cache/injection.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/modules/kv-cache/injection.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/injection.md">Edit this page</a>
             

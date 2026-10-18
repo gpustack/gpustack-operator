@@ -150,6 +150,11 @@
     
       
       
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
         <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
       
     
@@ -419,6 +424,16 @@
     
       
       
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
+      
+    
+      
+      
         <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
       
     
@@ -630,7 +645,7 @@ hardware gives. Check the path exists on the host before reading the result.</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /opt/rocm:/opt/rocm:ro -v /opt/rocm/lib:/opt/rocm/lib:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>amd</span></span></code></pre></div>
 </div><p>The second mount is not a duplicate of the first. ROCm&rsquo;s packaging puts a symlink somewhere in this
 path on every install, and where it falls decides whether the mount survives it: one at or above the
@@ -653,7 +668,7 @@ and 10.0 separately.</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/Ascend:/usr/local/Ascend:ro -v /usr/local/dcmi:/usr/local/dcmi:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>ascend</span></span></code></pre></div>
 </div><p>No <code>--runtime ascend</code> here, although <a href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/">Vendor Prerequisites</a>
  requires that
@@ -666,7 +681,7 @@ and get it themselves; under <code>nerdctl</code> they cannot, and are emitted f
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/neuware:/usr/local/neuware:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>cambricon</span></span></code></pre></div>
 </div><h3 id="hygon">Hygon</h3>
 <div class="code-block">
@@ -675,7 +690,7 @@ and get it themselves; under <code>nerdctl</code> they cannot, and are emitted f
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /opt/hyhal:/opt/hyhal:ro -v /opt/dtk:/opt/dtk:ro <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /etc/dmi_mig_config:/etc/dmi_mig_config <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>hygon</span></span></code></pre></div>
 </div><p>The third mount is the only writable one on this page: the vendor library materializes a partition by
 writing that registry, and the DaemonSet mounts it writable for the same reason. Add
@@ -689,7 +704,7 @@ tier</a>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/corex:/usr/local/corex:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>iluvatar</span></span></code></pre></div>
 </div><p>No <code>--runtime iluvatar</code>, for the same reason Ascend needs none: <code>ix-container-runtime</code> injects device
 nodes, which <code>--privileged</code> and <code>/dev</code> already cover, and the driver is the mount above.</p>
@@ -699,14 +714,14 @@ nodes, which <code>--privileged</code> and <code>/dev</code> already cover, and 
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /opt/mxdriver:/opt/mxdriver:ro -v /opt/maca:/opt/maca:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>metax</span></span></code></pre></div>
 </div><h3 id="moore-threads">Moore Threads</h3>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host --runtime mthreads <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>mthreads</span></span></code></pre></div>
 </div><p>Nothing to mount, and a <code>--runtime</code> instead: the user-space driver here is injected by the vendor
 container runtime rather than installed at a path you can bind-mount. <code>mthreads</code> is the handler that
@@ -717,7 +732,7 @@ Under <code>nerdctl</code>, whose <code>--runtime</code> names an OCI shim, that
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host --runtime nvidia <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>nvidia</span></span></code></pre></div>
 </div><p>Nothing to mount, for the same reason as Moore Threads above. Under <code>nerdctl</code> use <code>--gpus all</code> in
 place of <code>--runtime nvidia</code>, whose <code>--runtime</code> names an OCI shim and rejects the handler name.</p>
@@ -730,7 +745,7 @@ place of <code>--runtime nvidia</code>, whose <code>--runtime</code> names an OC
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/PPU_SDK:/usr/local/PPU_SDK:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>thead</span></span></code></pre></div>
 </div><p>Add <code>--probe-image &lt;image&gt;</code> to measure the slice rows: no default is claimed for a PPU family, because
 the workload container brings its own SDK and there is no generation to match an image against.</p>
@@ -738,7 +753,7 @@ the workload container brings its own SDK and there is no generation to match an
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --network<span class="o">=</span>host -v /:/host <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight</span></span></code></pre></div>
 </div><p><strong>With no vendor mounts at all</strong>, the run still reports every manufacturer and names the mounts the
 rest of the questions need. Only NVIDIA, Ascend and AMD carry a host CLI to cross-check that
@@ -1518,7 +1533,7 @@ never creates.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c1c29a794375a198a5358b6e2b7ab53801fcc79/docs/modules/devices/preflight.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/modules/devices/preflight.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/preflight.md">Edit this page</a>
             

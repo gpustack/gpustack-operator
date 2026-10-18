@@ -150,6 +150,11 @@
     
       
       
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
         <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
       
     
@@ -419,6 +424,16 @@
     
       
       
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
+      
+    
+      
+      
         <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
       
     
@@ -574,6 +589,8 @@ on a server role; on a prefill/decode pair, where each half is chosen separately
 <ul>
 <li><a href="#which-pods-receive-traffic">Which Pods receive traffic</a>
 </li>
+<li><a href="#encode-stage-routing">Encode stage routing</a>
+</li>
 <li><a href="#each-routers-default">Each router&rsquo;s default</a>
 </li>
 <li><a href="#prefix-affinity">Prefix affinity</a>
@@ -611,11 +628,21 @@ on a server role; on a prefill/decode pair, where each half is chosen separately
           <td>Member 0 of each replica, including groups with <code>size &gt; 1</code>.</td>
       </tr>
       <tr>
+          <td>Encode group</td>
+          <td>Excluded from answering candidates and the deployment-wide Service.</td>
+      </tr>
+      <tr>
           <td>Unknown mode or unverified group</td>
           <td>Keep the existing leader restriction; do not expand discovery.</td>
       </tr>
   </tbody>
 </table>
+<p><code>Encode</code> Pods are never part of the deployment&rsquo;s answering set. Under <code>llm-d-router</code> they are
+discovered for stage routing, and under <code>vllm-router</code> their Service endpoint is passed through
+<code>--epd-config</code>, while the deployment Service never targets them. All three routers (<code>llm-d-router</code>,
+<code>vllm-router</code> and <code>sglang-gateway</code>) are admitted with an <code>Encode</code> role for their supported engine
+and platform combinations. See <a href="#encode-stage-routing">Encode stage routing</a>
+.</p>
 <p>For an eligible External Server role, Router discovery and ordinary Services omit <code>member-index=0</code>.
 They retain the endpoint eligibility label, so an unhealthy group cannot receive new traffic.
 The replica&rsquo;s headless Service always publishes every member for peer communication.</p>
@@ -628,6 +655,58 @@ Admission rejects vLLM&rsquo;s MultiPort mode because it starts endpoints on add
 A decoder proxy&rsquo;s internal backend port remains separate from its published HTTP port.
 See the <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP walkthrough</a>
  for a minimal per-rank configuration.</p>
+<h2 id="encode-stage-routing">Encode stage routing</h2>
+<p>How the encoder is reached depends on the engine and router. Send requests to
+<code>status.endpoint</code> in every case.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Router</th>
+          <th>Engine</th>
+          <th>How the encoder is reached</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td><code>vLLM</code></td>
+          <td>The router picks an encoder for requests with media, then the decode sidecar coordinates the transfer</td>
+      </tr>
+      <tr>
+          <td><code>vllm-router</code></td>
+          <td><code>vLLM</code></td>
+          <td>The router receives the encoder Service URL via <code>--epd-config</code> and drives encode, prefill and decode directly without a decode sidecar</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td><code>SGLang</code></td>
+          <td>The <code>Prefill</code> role calls the <code>Encode</code> role directly through <code>--encoder-urls</code>; the router has no encode stage</td>
+      </tr>
+      <tr>
+          <td><code>sglang-gateway</code></td>
+          <td><code>SGLang</code></td>
+          <td>The gateway routes the pair natively; the <code>Prefill</code> role calls the <code>Encode</code> role directly</td>
+      </tr>
+  </tbody>
+</table>
+<p>With <code>llm-d-router</code> and <code>vLLM</code>, the router defines an <code>encode</code> scheduling profile over the Pods
+labelled <code>modeldeployment.gpustack.ai/role-kind: encode</code>. The profile applies no queue, KV cache or
+prefix scorers, because an encoder keeps no KV cache and tracks no tokens. A multimodal-aware
+decider sends a request with media through an encoder first. A text-only request goes straight to
+prefill and decode.</p>
+<p>On the Ascend EPD shape (<code>llm-d-router</code> + <code>vLLM-Ascend</code> + <code>ECExampleConnector</code>), the <code>encode</code>
+role answers requests that carry media and stays idle for text-only traffic. The connector hands
+the result to <code>Prefill</code> through the shared volume both roles mount; the router is not in that path.</p>
+<p>The operator keeps a vLLM encoder in the router&rsquo;s candidate set on every platform. Its
+address-based encoder path applies only to SGLang.</p>
+<p>The decode sidecar&rsquo;s <code>--ec-connector</code> follows the admitted row: <code>ec-example</code> on Ascend and <code>ec-nixl</code>
+on NVIDIA and AMD. See <a href="/gpustack-operator/main/docs/modules/model-deployment/epd/#the-admitted-matrix">The admitted matrix</a>
+.</p>
+<p>With <code>vllm-router</code> and <code>vLLM</code> (on NVIDIA and AMD), the operator passes <code>--epd-config={&quot;encoder_urls&quot;:[&quot;http://&lt;md&gt;-&lt;encode-role&gt;.&lt;ns&gt;.svc:&lt;port&gt;&quot;]}</code> to the router. The router calls the encoder Service first, forwards <code>ec_transfer_params</code> to the prefill worker so it pulls the embeddings over NIXL (<code>ECCPUConnector</code>), and strips <code>ec_transfer_params</code> before forwarding to decode. <code>--epd-config</code> is operator-owned and refused in <code>spec.router.extraArgs</code>.</p>
+<p>With <code>llm-d-router</code> and <code>SGLang</code>, the router splits every request between prefill and decode,
+because an SGLang decode role cannot prefill. The sidecar runs without <code>--ec-connector</code>, since this
+engine uses no encoder-cache connector.</p>
+<p>Encoders are also excluded from KV cache event discovery, because they produce no cache blocks.</p>
 <h2 id="each-routers-default">Each router&rsquo;s default</h2>
 <p><strong><code>vllm-router</code> and <code>sglang-gateway</code> route by <code>cache_aware</code>, and <code>llm-d-router</code> scores every
 candidate for each request.</strong> The operator renders no policy flag for the first two, so each runs its
@@ -832,10 +911,9 @@ the engine Pods&rsquo; own counts instead, such as each Pod&rsquo;s TTFT histogr
     <section>
       <h2>See also</h2>
       <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
-
-for <code>spec.router</code> and the flags each router refuses</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
- for the router
-counters a deployment&rsquo;s snapshot reads.</li></ul>
+ for <code>spec.router</code> and the flags each router refuses</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/epd/">Model Deployment Encode, Prefill and Decode</a>
+ for EPD disaggregation and connector options</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
+ for the router counters a deployment&rsquo;s snapshot reads.</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
         <div><a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Model Deployment Status</a></div>
@@ -850,7 +928,7 @@ counters a deployment&rsquo;s snapshot reads.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c1c29a794375a198a5358b6e2b7ab53801fcc79/docs/modules/model-deployment/routing.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/modules/model-deployment/routing.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/routing.md">Edit this page</a>
             
@@ -862,6 +940,7 @@ counters a deployment&rsquo;s snapshot reads.</li></ul>
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#which-pods-receive-traffic">Which Pods receive traffic</a></li>
+    <li><a href="#encode-stage-routing">Encode stage routing</a></li>
     <li><a href="#each-routers-default">Each router&rsquo;s default</a></li>
     <li><a href="#prefix-affinity">Prefix affinity</a></li>
     <li><a href="#switching-to-round-robin">Switching to round robin</a></li>

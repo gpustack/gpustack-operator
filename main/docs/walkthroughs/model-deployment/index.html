@@ -150,6 +150,11 @@
     
       
       
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
         <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
       
     
@@ -419,6 +424,16 @@
     
       
       
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
+      
+    
+      
+      
         <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
       
     
@@ -567,7 +582,7 @@
         
   <h1 id="model-deployment-walkthroughs">Model Deployment Walkthroughs</h1>
 <p>Choose a serving shape, prepare its model, then follow the matching walkthrough.
-The Elastic EP and External DP examples use the official GPUStack runner and retain captured CR output and inference results.
+The Elastic EP, External DP and Encode, Prefill and Decode examples use the official GPUStack runner and retain captured CR output and inference results.
 The Prefill and Decode and the Multi-Host pages are configuration examples. They record no captured run.</p>
 <h2 id="contents">Contents</h2>
 <ul>
@@ -595,6 +610,12 @@ The Prefill and Decode and the Multi-Host pages are configuration examples. They
 </td>
           <td>Disaggregated roles fronted by router</td>
           <td>Not measured here. Separate Prefill and Decode roles, <code>llm-d-router</code> routing, joint admission, and KV cache transfer.</td>
+      </tr>
+      <tr>
+          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/">Encode, Prefill and Decode</a>
+</td>
+          <td>Disaggregated multimodal roles fronted by router</td>
+          <td>Encoder output transfer over NIXL, joint admission of three roles, and a multimodal request through the router.</td>
       </tr>
       <tr>
           <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/">Elastic EP</a>
@@ -662,7 +683,7 @@ Each serving member requests two GPUs; CPU and memory budgets scale with that co
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f gpu-instance-type.yaml
 </span></span><span class="line"><span class="cl">kubectl get instancetype elastic-cpu-gpu</span></span></code></pre></div>
-</div><p>All four examples refer to <code>elastic-cpu-gpu</code>. Replace that name if you use an existing InstanceType.</p>
+</div><p>The <code>Prefill and Decode</code>, <code>Elastic EP</code>, <code>External DP</code> and <code>Multi-Host</code> examples refer to <code>elastic-cpu-gpu</code>, while <code>Encode, Prefill and Decode</code> uses the cluster&rsquo;s discovered <code>gpustack--nvidia-l40s-linux-amd64</code> InstanceType. Replace that name if you use an existing InstanceType.</p>
 <h2 id="check-the-software-identity">Check the software identity</h2>
 <p>Read the running images and binary versions. Repeat for the worker, device-manager, and model-manager Pods.
 Set the namespace, Pod, and container names from your installation:</p>
@@ -697,7 +718,7 @@ No engine packages were replaced during validation.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c1c29a794375a198a5358b6e2b7ab53801fcc79/docs/walkthroughs/model-deployment/_index.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/walkthroughs/model-deployment/_index.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/_index.md">Edit this page</a>
             

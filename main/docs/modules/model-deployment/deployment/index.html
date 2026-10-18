@@ -150,6 +150,11 @@
     
       
       
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
         <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
       
     
@@ -419,6 +424,16 @@
     
       
       
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
+      
+    
+      
+      
         <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
       
     
@@ -586,7 +601,7 @@ admission still applies to every replica.</p>
 </li>
 <li><a href="#operator-owned-keys">Operator-owned keys</a>
 </li>
-<li><a href="#runner-image-formula">Runner image formula</a>
+<li><a href="#the-image-a-role-runs">The image a role runs</a>
 </li>
 <li><a href="#rollout-behavior">Rollout behavior</a>
 </li>
@@ -608,7 +623,7 @@ admission still applies to every replica.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-72B-Instruct     </span><span class="w"> </span><span class="c"># served, never provisioned</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">                                </span><span class="c"># vLLM | SGLang</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.29.0&#34;</span><span class="w">                    </span><span class="c"># free-form; you guarantee alignment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;a runner image your cluster can pull&gt;  </span><span class="w"> </span><span class="c"># required; you name the tag</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kvCache</span><span class="p">:</span><span class="w">                               </span><span class="c"># OPTIONAL; omit it and no shared pool is attached</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">poolRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">team-a-dram                 </span><span class="w"> </span><span class="c"># a KVCachePoolBinding IN THIS NAMESPACE</span><span class="w">
@@ -1051,79 +1066,19 @@ the pool&rsquo;s published endpoint changes.</p>
 unlikely to collide, but an overlay that mounts over that path replaces the configuration silently,
 and the owned <code>MOONCAKE_CONFIG_PATH</code> cannot protect against it. SGLang gets no file at all; its
 configuration travels entirely in the environment.</p>
-<h2 id="runner-image-formula">Runner image formula</h2>
-<p>A role with no <code>roles[].image</code> gets one assembled from the engine the deployment declares and the
-hardware its InstanceType observed. A stated image always wins.</p>
-<div class="code-block">
-  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">gpustack/runner:&lt;backend&gt;&lt;runtimeVersion&gt;[-&lt;variant&gt;]-&lt;engine&gt;&lt;version&gt;</span></span></code></pre></div>
-</div><p><code>gpustack/runner:cuda12.9-vllm0.29.0</code> on an NVIDIA pool; <code>gpustack/runner:cann9.0-910b-sglang0.5.18</code>
-on an Ascend 910B one. The platform is not part of the tag: no published tag carries an
-architecture, which indicates one multi-arch manifest per tag.</p>
-<table>
-  <thead>
-      <tr>
-          <th>This project&rsquo;s manufacturer</th>
-          <th>Runner backend</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>nvidia</code></td>
-          <td><code>cuda</code></td>
-      </tr>
-      <tr>
-          <td><code>ascend</code></td>
-          <td><code>cann</code></td>
-      </tr>
-      <tr>
-          <td><code>amd</code></td>
-          <td><code>rocm</code></td>
-      </tr>
-      <tr>
-          <td><code>metax</code></td>
-          <td><code>maca</code></td>
-      </tr>
-      <tr>
-          <td><code>mthreads</code></td>
-          <td><code>musa</code></td>
-      </tr>
-      <tr>
-          <td><code>iluvatar</code></td>
-          <td><code>corex</code></td>
-      </tr>
-      <tr>
-          <td><code>hygon</code></td>
-          <td><code>dtk</code></td>
-      </tr>
-      <tr>
-          <td><code>thead</code></td>
-          <td><code>hggc</code></td>
-      </tr>
-      <tr>
-          <td><code>cambricon</code></td>
-          <td>none — the role must name an image</td>
-      </tr>
-  </tbody>
-</table>
-<p>The variant applies to <strong>Ascend only</strong>: <code>310P</code> to <code>310p</code>, <code>910B</code> to <code>910b</code>, <code>910C</code> to <code>a3</code>, <code>950</code> to
-<code>950</code>. Across the whole matrix the variant is populated for <code>cann</code> alone. Ascend <code>910</code> and <code>310B</code>
-publish none, so a role on one of those must name an image.</p>
-<p><code>engine.version</code> is optional in the schema, and the obligation sits with the roles: a role that
-names no image of its own has one synthesized from this version, so admission refuses an empty
-version beside such a role. It is otherwise <strong>free-form</strong>: the operator checks neither that the
-combination was ever published nor that the version supports the installed driver. You guarantee
-version alignment; a bad combination surfaces as an <code>ImagePullBackOff</code> on a tag that does not exist.</p>
-<p>It is per deployment rather than per role, which is what lets one engine and one version assemble a
-<strong>different</strong> image per role: the backend half of the tag comes from the role&rsquo;s own InstanceType.</p>
-<p>Two synthesis failures read alike and are not the same: a manufacturer with no backend, or a family
-with no variant, will <strong>never</strong> resolve and the role has to name an image, while an unobserved
-runtime version resolves on a later reconcile. Each message says which one it is.</p>
-<p><strong>A pool mid driver rollout does not agree on a runtime version.</strong> The image takes the <strong>lowest</strong>
-version the pool reports, because a workload&rsquo;s image is fixed before admission chooses its node and
-only the lowest runs everywhere. The deployment then carries a <code>RuntimeVersionSkew</code> warning event
-naming the value taken and the ones skipped, so the node holding the pool back is legible instead of
-appearing as an unattributable <code>ImagePullBackOff</code>.</p>
+<h2 id="the-image-a-role-runs">The image a role runs</h2>
+<p>The image a replica runs resolves in two levels: <code>roles[].image</code> when the role names one, else
+<code>spec.engine.image</code>. <code>engine.image</code> is required, so an unstated role always has somewhere to fall
+back to — it is the whole-deployment default, one object covering every role because the roles of
+one deployment are one engine build.</p>
+<p>A role names its own image to run something the default is not: a private build, a repository the
+default does not name, or one role pinned differently from the rest.</p>
+<p>The operator does not build an image and does not infer one from the node. The tag you name must
+exist in a registry the cluster can pull.</p>
+<p><strong>Why the operator does not infer the image from the node.</strong> A node reports the driver or toolkit
+it has installed. A runner tag names the SDK the image was built with. The two share a spelling but
+not a value, and no formula can see which tags a registry carries. You name the tag; the operator
+uses it as written.</p>
 <h2 id="rollout-behavior">Rollout behavior</h2>
 <p>Changing <code>replicas</code> adds or removes instances and nothing more: the survivors are not restarted, do
 not reload their weights and keep their cached blocks. What still replaces <strong>every</strong> instance of the
@@ -1287,7 +1242,7 @@ table below lists both groups.</p>
   <tbody>
       <tr>
           <td><code>model</code>, <code>engine.name</code>, <code>kvCache</code></td>
-          <td><code>engine.version</code>, <code>kvTransfer</code></td>
+          <td><code>engine.image</code>, <code>kvTransfer</code></td>
       </tr>
       <tr>
           <td><code>router.name</code> in place — the router block itself may be added or removed</td>
@@ -1517,11 +1472,11 @@ role onto a mode its type does not offer, and nothing renders the result. Why th
 rather than merely tidy is in
 <a href="/gpustack-operator/main/docs/modules/devices/admission/#update-validation-while-an-object-is-deleted">Update validation while an object is deleted</a>
 .</p>
-<p>A manufacturer with no runner backend is still refused <strong>at render time and not at admission</strong>, and the
-reason is not the missing client. The rule needs the InstanceType&rsquo;s OBSERVED detail, and
-<code>InstanceType.status</code> has not converged on a freshly created object, so the rule would refuse a
-perfectly legal deployment for losing a race against the InstanceType reconciler.</p>
-<p>The render-time refusal reaches a reader as a <code>RenderFailed</code> warning event carrying the renderer&rsquo;s
+<p>The render, not admission, is where a not-yet-converged InstanceType shows up. Sizing a replica
+needs the InstanceType&rsquo;s OBSERVED detail, and <code>InstanceType.status</code> has not converged on a freshly
+created object, so the render fails rather than admission refusing a perfectly legal deployment for
+losing a race against the InstanceType reconciler.</p>
+<p>A render-time failure reaches a reader as a <code>RenderFailed</code> warning event carrying the renderer&rsquo;s
 own message, because a pass that cannot build a replica aborts before writing any status.</p>
 <h2 id="operating-notes">Operating notes</h2>
 <p><strong>Two notes apply to every workload on a pool, replicas included, and are stated once under</strong>
@@ -1607,7 +1562,7 @@ structured snapshot and Pod scrape endpoints.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c1c29a794375a198a5358b6e2b7ab53801fcc79/docs/modules/model-deployment/deployment.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/modules/model-deployment/deployment.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/deployment.md">Edit this page</a>
             
@@ -1633,7 +1588,7 @@ structured snapshot and Pod scrape endpoints.</li></ul>
       </ul>
     </li>
     <li><a href="#operator-owned-keys">Operator-owned keys</a></li>
-    <li><a href="#runner-image-formula">Runner image formula</a></li>
+    <li><a href="#the-image-a-role-runs">The image a role runs</a></li>
     <li><a href="#rollout-behavior">Rollout behavior</a>
       <ul>
         <li><a href="#replacing-a-role-whose-shape-moved">Replacing a role whose shape moved</a></li>

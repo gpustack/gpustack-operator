@@ -16,9 +16,9 @@ all role replicas are ready but a declared router has no ready replica.
 `assignedFlavors`, `parallelism` and `endpoints` per role.
 
 `kubectl get modeldeployments` shows `status.roleSummary` in its `ROLES` column. It counts current
-Ready instances by kind: `R` is managed router Pods, `S` is ordinary servers, `P` is prefillers,
-and `D` is decoders. For example, `1R2S` means one Ready router and two Ready servers; `1R3P4D`
-means one Ready router, three Ready prefillers and four Ready decoders.
+Ready instances by kind: `R` is managed router Pods, `S` is ordinary servers, `E` is encoders,
+`P` is prefillers, and `D` is decoders. For example, `1R2S` means one Ready router and two Ready
+servers; `1R1E1P1D` means one Ready router, one Ready encoder, one Ready prefiller and one Ready decoder.
 
 **During a replacement, status combines desired and observed fields.** See
 [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior). `desired` and `parallelism` describe the current
@@ -30,9 +30,10 @@ roles of the same kind are summed. A serving instance made of several Pods still
 `status.roles[].desired` to see the requested count.
 
 Without a router, `status.endpoint` is the address the deployment-wide Service serves on, in the form
-`<scheme>://<name>.<namespace>.svc:<port>`. The scheme is read from the same role the port is (the
-first one), and is `https` only where that role passes `--ssl-certfile` or `--ssl-keyfile`. With a
-router it is absent until the router is ready, then uses the router Service's own `http` transport.
+`<scheme>://<name>.<namespace>.svc:<port>`. The scheme and port come from the first role that is not
+`Encode`, and the scheme is `https` only when that role passes `--ssl-certfile` or `--ssl-keyfile`.
+With a router, it is absent until the router is ready, then uses the router Service's `http` transport.
+Each role, including `Encode`, also gets its own `<deployment>-<role>` Service.
 
 `status.router` publishes the contract used to render the router: its implementation and address,
 the cache pool's client endpoint, the metrics names and port, and one entry for every role containing
@@ -397,6 +398,9 @@ defaults to `Server`) reports `True` as soon as any replica is ready. That is no
 degradation is real and `phase` reports it as `Degraded`; this condition answers a different question
 and is silent on that shape by design.
 
+On an encode, prefill and decode deployment, `RoleKindsReady` is `True` only when `Encode`,
+`Prefill` and `Decode` each have at least one ready replica.
+
 A role that took over its command line counts toward its kind like any other. Such a role gets no
 readiness probe, so its `Ready` says its containers started rather than that anything answered on the
 serving path. `status.roles[].unmanaged` is published per role for a reader who needs the stronger
@@ -408,7 +412,7 @@ the engine and Service connectivity.
 
 **`KVEventsPublishing`** — whether every role that produces cache blocks has publisher configuration
 in its rendered Pods. It reports configuration, not live traffic: a configured publisher that later
-crashes remains `True`.
+crashes remains `True`. `Encode` holds no KV cache and produces no cache blocks, so it is excluded.
 
 | Value | Reason | Meaning |
 |---|---|---|
@@ -454,8 +458,9 @@ levels back to `True` on its own once a later pass proves the live world again.
 
 ---
 
-**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) for the contract this status
-reports on · [KV Cache Leader](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md) for the leader process the conditions
-distinguish from the operator's own.
+**See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) (the contract this status reports on) ·
+[Model Deployment Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) (pairing prefill and decode roles) ·
+[Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md) (encode, prefill and decode disaggregation) ·
+[KV Cache Leader](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md) (the leader process the conditions distinguish from the operator's own).
 
-**Next** → [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md)
+**Next** → [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md)

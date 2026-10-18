@@ -1,7 +1,7 @@
 # Model Deployment Walkthroughs
 
 Choose a serving shape, prepare its model, then follow the matching walkthrough.
-The Elastic EP and External DP examples use the official GPUStack runner and retain captured CR output and inference results.
+The Elastic EP, External DP and Encode, Prefill and Decode examples use the official GPUStack runner and retain captured CR output and inference results.
 The Prefill and Decode and the Multi-Host pages are configuration examples. They record no captured run.
 
 ## Contents
@@ -16,6 +16,7 @@ The Prefill and Decode and the Multi-Host pages are configuration examples. They
 | Walkthrough | Serving shape | What it covers |
 |---|---|---|
 | [Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) | Disaggregated roles fronted by router | Not measured here. Separate Prefill and Decode roles, `llm-d-router` routing, joint admission, and KV cache transfer. |
+| [Encode, Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/index.md) | Disaggregated multimodal roles fronted by router | Encoder output transfer over NIXL, joint admission of three roles, and a multimodal request through the router. |
 | [Elastic EP](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) | One Internal LB instance on Ray | TP2, DP width 2→4, EP world 4→8; ordinary and streaming requests before and after expansion. |
 | [External DP](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) | Two fixed DP ranks using multiprocessing | TP2, DP2, EP world4; direct requests to each rank and Router distribution across both ranks. |
 | [Multi-Host](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md) | Coordinated instance spanning multiple hosts | Not measured here. `size: 2`, sixteen GPUs across two physical nodes, leader `m0` routing, and gang admission. |
@@ -71,7 +72,7 @@ kubectl apply -f gpu-instance-type.yaml
 kubectl get instancetype elastic-cpu-gpu
 ```
 
-All four examples refer to `elastic-cpu-gpu`. Replace that name if you use an existing InstanceType.
+The `Prefill and Decode`, `Elastic EP`, `External DP` and `Multi-Host` examples refer to `elastic-cpu-gpu`, while `Encode, Prefill and Decode` uses the cluster's discovered `gpustack--nvidia-l40s-linux-amd64` InstanceType. Replace that name if you use an existing InstanceType.
 
 ## Check the software identity
 

@@ -100,6 +100,9 @@ where the deployment attaches a pool, which renders the storage backend.
 | `http-5xx-responses` | — | — | — | `smg_http_responses_total` with a 5xx `status_code` |
 | `ttft`, `tpot` | `llm_d_epp_request_ttft_seconds`, `llm_d_epp_request_streaming_tpot_seconds` | — | — | — |
 
+`gpustack/llm-router:v0.3.1` does not export `llm_d_epp_request_streaming_tpot_seconds`. The table
+keeps the series because it remains part of the router contract.
+
 Of the error series only `llm_d_epp_request_error_total` has been seen exported. The other four are
 labeled counters that export nothing before their first increment, and none has been seen
 exported, so what each counts has not been checked against a failed request. Why each router has or lacks `error-ratio` is

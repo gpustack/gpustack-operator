@@ -150,6 +150,11 @@
     
       
       
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
         <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
       
     
@@ -419,6 +424,16 @@
     
       
       
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
+      
+    
+      
+      
         <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
       
     
@@ -594,21 +609,21 @@ those releases, and this documentation does not track them; upgrading is the fix
       <tr>
           <td>vLLM</td>
           <td>alone</td>
-          <td><code>0.29.0</code></td>
+          <td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
           <td><code>0.3.13.post1</code>, on the <code>cuda12.9</code> and the <code>cuda13.0</code> tag</td>
           <td>—</td>
       </tr>
       <tr>
           <td>vLLM</td>
           <td>prefill/decode, direct transfer over <code>tcp</code></td>
-          <td><code>0.29.0</code></td>
+          <td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
           <td><code>0.3.13.post1</code></td>
           <td>—</td>
       </tr>
       <tr>
           <td>vLLM</td>
           <td>with a Mooncake store, alone or as a pair</td>
-          <td><code>0.29.0</code></td>
+          <td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
           <td><code>0.3.13.post1</code></td>
           <td>the 0.3.13 line; the <a href="/gpustack-operator/main/docs/reference/settings/">default image</a>
  is one</td>
@@ -616,14 +631,14 @@ those releases, and this documentation does not track them; upgrading is the fix
       <tr>
           <td>vLLM-Ascend</td>
           <td>alone</td>
-          <td><code>0.23.0</code></td>
+          <td><code>0.23.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0rc1</code>+</td>
           <td><code>0.3.11.post1</code>, the NPU build</td>
           <td>—</td>
       </tr>
       <tr>
           <td>vLLM-Ascend</td>
           <td>prefill/decode, direct transfer</td>
-          <td><code>0.23.0</code>, behind <code>llm-d-router</code></td>
+          <td><code>0.23.0</code>, behind <code>llm-d-router</code>; <code>--enable-scale-out</code> is also required on <code>0.30.0rc1</code>+</td>
           <td><code>0.3.11.post1</code>, the NPU build</td>
           <td>—</td>
       </tr>
@@ -655,18 +670,56 @@ those releases, and this documentation does not track them; upgrading is the fix
           <td><code>0.3.12.post1</code></td>
           <td>the 0.3.12 line, such as <code>kvcacheai/mooncake:0.3.12.post1</code></td>
       </tr>
+      <tr>
+          <td>vLLM</td>
+          <td>encoder/prefill/decode, direct transfer over NIXL (<code>ECCPUConnector</code>)</td>
+          <td><code>0.30.0</code>, behind <code>llm-d-router</code> or <code>vllm-router</code>: NVIDIA CUDA (verified on 4 × NVIDIA L40S) or AMD ROCm (unverified on hardware)</td>
+          <td>compiles its own, not run</td>
+          <td>—</td>
+      </tr>
+      <tr>
+          <td>vLLM-Ascend</td>
+          <td>encoder/prefill/decode, direct transfer (<code>ECExampleConnector</code>)</td>
+          <td><code>0.30.0rc1</code>, behind <code>llm-d-router</code> (unverified on hardware)</td>
+          <td><code>0.3.11.post1</code>, the NPU build</td>
+          <td>—</td>
+      </tr>
+      <tr>
+          <td>SGLang</td>
+          <td>encoder/prefill/decode, transfer by address (<code>encoder-urls</code>)</td>
+          <td><code>0.5.10</code>, behind <code>llm-d-router</code> or <code>sglang-gateway</code> (NVIDIA verified on 2 × NVIDIA L40S)</td>
+          <td><code>0.3.12.post1</code></td>
+          <td>—</td>
+      </tr>
   </tbody>
 </table>
 <p>A version counts as run when the shape answered requests and, where it moves KV, the engine or the
 store reported blocks moving: a transfer or a store write, not a Pod reaching <code>Ready</code>. The
-vLLM-Ascend rows ran on the runner&rsquo;s <code>cann9.1-910b-vllm0.23.0-router</code> tag, named through
+vLLM-Ascend rows ran on the runner&rsquo;s <code>cann9.1-910b-vllm0.23.0</code> tag, named through
 <code>roles[].image</code>.</p>
+<p>The NVIDIA vLLM EPD rows (behind <code>llm-d-router</code> and <code>vllm-router</code>) and the NVIDIA SGLang EPD rows
+(run on <code>0.5.18</code>, behind both routers) ran live. The AMD and Ascend EPD rows are admitted but not
+verified on hardware (<a href="https://github.com/gpustack/gpustack-operator/issues/763">#763</a>
+ tracks the SGLang ones).</p>
 <h2 id="reading-the-table">Reading the table</h2>
-<p><strong><code>engine.version</code> has no default.</strong> The operator assembles the runner image from it (see <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#runner-image-formula">The
-runner image formula</a>
-), so the minimum is a
-value you write, and nothing refuses a lower one.</p>
-<p><strong>The client comes with the image, not with the version.</strong> The column above is read off the
+<p><strong>The minimum is a property of the image you name.</strong> There is no <code>engine.version</code> field to set:
+the image a role runs resolves to <code>roles[].image</code> when the role names one, and to
+<code>spec.engine.image</code> otherwise (<a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#the-image-a-role-runs">The image a role runs</a>
+).
+Nothing assembles a tag and no admission check reads a version, so meeting a minimum here means
+naming an image whose engine build carries it.</p>
+<p><strong>A deployment without an <code>Encode</code> role needs <code>--enable-scale-out</code> behind <code>llm-d-router</code>.</strong>
+The router counts prompt tokens through the engine&rsquo;s render endpoint, which vLLM serves only
+under that flag, from <code>0.30.0</code> on; the gate measured on vllm-ascend is <code>0.30.0rc1</code>. Name an
+image at those versions and set the flag on each role
+(<a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#counting-tokens-through-the-engine">Counting tokens through the engine</a>
+).</p>
+<p>The <code>0.29.0</code> and <code>0.23.0</code> minimums above predate the flag: they were measured as transfer-leg
+runs, before the operator rendered this dependency.</p>
+<p>The floor belongs to the engine, so an SGLang EPD
+row states <code>SGLang 0.5.10</code> on every platform, while the vLLM Ascend row states a vllm-ascend
+release.</p>
+<p><strong>The client comes with the image.</strong> The column above is read off the
 published runner images, and the vLLM rows are the CUDA ones; a ROCm runner image compiles its own
 client and has not been run. A role naming its own <code>roles[].image</code> carries whatever client that
 image embeds: read it off the image, then pick the store from it.</p>
@@ -682,6 +735,23 @@ each engine can use is <a href="#which-transport-each-engine-can-use">the matrix
 .</p>
 <p><strong>&ldquo;Not verified&rdquo; means no run, not a known failure.</strong> Nothing refuses such a shape; nothing here
 says it works.</p>
+<p><strong>An EPD encoder image must meet its row&rsquo;s floor, and nothing refuses a lower one.</strong> The
+requirement: the image an <code>Encode</code> deployment runs must carry vllm-ascend <code>0.30.0rc1</code> or later for
+Ascend <code>ECExampleConnector</code>, and vLLM <code>0.30.0</code> or later for NVIDIA/AMD <code>ECCPUConnector</code>
+(<a href="/gpustack-operator/main/docs/modules/model-deployment/epd/#the-admitted-matrix">the admitted matrix</a>
+). Admission does not check it — the version
+field and its gate are gone.</p>
+<p>An image below the floor fails at container start with an <code>ImagePullBackOff</code> on a tag that does not
+exist, or an engine that exits on an unknown argument.</p>
+<p><strong>The group-forward probe has a verified version set, and nothing bars an unverified one.</strong> The
+requirement: the version whose probe binding was read is <code>0.25.1</code>/<code>0.29.0</code> for vLLM (the response
+id is <code>cmpl-</code> + the request&rsquo;s <code>request_id</code>) and <code>0.5.18</code>/<code>0.5.21</code> for SGLang (the response
+<code>meta_info.id</code> is the request&rsquo;s rid).</p>
+<p>On any other version the probe still runs and its outcome still decides: <code>Verified</code> admits a
+member, <code>Unknown</code> grants nothing new and withdraws nothing already granted. Only a failed health
+leg of the same <a href="/gpustack-operator/main/docs/modules/model-deployment/status/">qualification</a>
+ withdraws an eligible member. Neither probe outcome is an
+admission refusal.</p>
 <h2 id="which-transport-each-engine-can-use">Which transport each engine can use</h2>
 <p>A <strong>store</strong> cell is the pool&rsquo;s <code>KVCacheBackend.spec.transport.protocol</code>, which a member group can
 override and the engine is handed. A <strong>direct</strong> cell is <code>spec.kvTransfer.protocol</code> on a
@@ -778,7 +848,7 @@ prefill/decode pair. The first column gives the API and Mooncake spellings. <cod
           <td>vLLM-Ascend</td>
           <td><strong>Not verified</strong>; the members need <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#the-image">an image carrying CANN</a>
 </td>
-          <td><strong>Works</strong>, a published <code>-router</code> runner tag named by hand, behind <code>llm-d-router</code></td>
+          <td><strong>Works</strong>, <code>cann9.1-910b-vllm0.23.0</code> named by hand in <code>roles[].image</code>, behind <code>llm-d-router</code></td>
       </tr>
       <tr>
           <td><code>ROCM</code> / <code>hip</code></td>
@@ -810,8 +880,9 @@ minimum</a>
 cell could run carries the transport; the cell says which.</li>
 <li><strong>Not verified</strong>: no run. Nothing refuses it; nothing here says it works.</li>
 </ul>
-<p><strong>&ldquo;Default images&rdquo; needs no image work from you</strong>: the runner image the operator assembles for each
-role, and the <a href="/gpustack-operator/main/docs/reference/settings/"><code>kv-cache-backend-image</code></a>
+<p><strong>&ldquo;Default images&rdquo; needs no image work from you</strong>: a stock runner image the project publishes,
+named in <code>engine.image</code> or <code>roles[].image</code>, and the
+<a href="/gpustack-operator/main/docs/reference/settings/"><code>kv-cache-backend-image</code></a>
  default for the store members. &ldquo;Named by
 hand&rdquo; is a published image you write into <code>roles[].image</code> or the backend&rsquo;s <code>spec.image</code>.</p>
 <p><strong>A cell is one leg.</strong> A deployment using both legs is a shape of its own, read from <a href="#the-minimum-per-shape">the
@@ -852,10 +923,12 @@ connections open instead of opening one per transfer, and held at most nine sock
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
-      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment</a>
- (the fields these versions go into)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/backend/">KV Cache Backend</a>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
+ (the fields these versions go into)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
+ (pairing prefill and decode roles)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/epd/">Model Deployment Encode, Prefill and Decode</a>
+ (encode, prefill and decode disaggregation)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/backend/">KV Cache Backend</a>
  (the store a client needs)</li><li><a href="/gpustack-operator/main/docs/modules/rdma/operations/">RDMA Operations</a>
- (fabric devices and the engine image they need)</li></ul>
+ (fabric devices and the engine image they need).</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
         <div><a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Model Deployment Status</a></div>
@@ -870,7 +943,7 @@ connections open instead of opening one per transfer, and held at most nine sock
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c1c29a794375a198a5358b6e2b7ab53801fcc79/docs/modules/model-deployment/engine-versions.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/modules/model-deployment/engine-versions.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/engine-versions.md">Edit this page</a>
             

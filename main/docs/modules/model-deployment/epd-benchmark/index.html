@@ -1,0 +1,1737 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Model Deployment Encode, Prefill and Decode Benchmark · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">main</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">main</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/main/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" aria-current="page">EPD benchmark</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Deployment Encode, Prefill and Decode Benchmark</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-deployment-encode-prefill-and-decode-benchmark">Model Deployment Encode, Prefill and Decode Benchmark</h1>
+<p>A live run on 4 × NVIDIA L40S compared three serving shapes for <code>Qwen/Qwen2.5-VL-7B-Instruct</code>:
+aggregated, prefill/decode and encode/prefill/decode (EPD). Three workloads exercise them: a prompt
+sweep from <code>1k</code> to <code>8k</code> tokens, a mixed stream of heavy-vision and small requests, and one image
+queried repeatedly. <a href="/gpustack-operator/main/docs/modules/model-deployment/epd/">Model Deployment Encode, Prefill and Decode</a>
+ describes the EPD topology.</p>
+<p>EPD is not faster everywhere. At <code>1k</code> and <code>2k</code> tokens the aggregated arm has the lowest time to
+first token (TTFT), because two network hops cost more than a short vision pass. At <code>4k</code> and <code>8k</code>
+under concurrency the order reverses. At <code>8k</code> with four requests in flight, EPD has a TTFT p50 of
+<code>241.8 ms</code>, against <code>697.9 ms</code> for prefill/decode (<code>2.89×</code>) and <code>757.1 ms</code> for aggregated (<code>3.13×</code>).</p>
+<p>At that point EPD also reaches <code>128.24 tok/s</code>, <code>13.3%</code> above prefill/decode and <code>5.7%</code> above
+aggregated. At <code>8k</code> with eight in flight its inter-token latency (ITL) p99 is <code>52.72 ms</code>, while
+aggregated degrades to <code>199.34 ms</code>.</p>
+<p>Under mixed traffic the advantage depends on the stream. EPD protects the small requests
+(<code>226.5 ms</code> TTFT p50, against <code>315.1 ms</code> and <code>388.3 ms</code>) but is the slowest arm for the heavy-vision
+requests (<code>5017.0 ms</code>, against <code>2854.0 ms</code> for aggregated). On a repeated <code>4k</code> image EPD wins
+outright: <code>356.0 ms</code> TTFT p50 at four in flight (<code>2.22×</code> faster than prefill/decode) and <code>31.9%</code>
+higher output throughput at eight.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#the-three-arms">The three arms</a>
+</li>
+<li><a href="#hardware-model-and-workload">Hardware, model and workload</a>
+</li>
+<li><a href="#suite-1-k-context-multimodal-scaling">Suite 1: k-context multimodal scaling</a>
+</li>
+<li><a href="#suite-2-mixed-heavy-vision-and-concurrent-decode">Suite 2: mixed heavy-vision and concurrent decode</a>
+</li>
+<li><a href="#suite-3-repeated-image-encoder-cache-reuse">Suite 3: repeated-image encoder-cache reuse</a>
+</li>
+<li><a href="#stage-execution-verification">Stage execution verification</a>
+</li>
+<li><a href="#when-epd-helps-and-when-it-does-not">When EPD helps and when it does not</a>
+</li>
+<li><a href="#what-this-run-does-not-measure">What this run does not measure</a>
+</li>
+</ul>
+<h2 id="the-three-arms">The three arms</h2>
+<p>Each arm is one <code>ModelDeployment</code> with one replica per role and one accelerator per replica. The
+arms differ in topology and in how many cards they use.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Arm</th>
+          <th>Roles</th>
+          <th>Cards</th>
+          <th>KV connector</th>
+          <th>Encoder connector</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Aggregated</td>
+          <td><code>server</code></td>
+          <td>1</td>
+          <td>none</td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td>Prefill/Decode</td>
+          <td><code>prefill</code>, <code>decode</code></td>
+          <td>2</td>
+          <td><code>MooncakeConnector</code> over tcp</td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td>EPD</td>
+          <td><code>encode</code>, <code>prefill</code>, <code>decode</code></td>
+          <td>3</td>
+          <td><code>MooncakeConnector</code> over tcp</td>
+          <td><code>ECCPUConnector</code> over NIXL</td>
+      </tr>
+  </tbody>
+</table>
+<p>The aggregated arm needs no connector, because one instance holds the whole model. Prefill and
+decode hand KV blocks across two Pods, pinned to tcp because the nodes have no RDMA interface. EPD
+adds the encoder leg on top of the same KV transfer. See
+<a href="/gpustack-operator/main/docs/modules/model-deployment/epd/#encoder-cache-connectors">Encoder-cache connectors</a>
+ for what each connector moves.</p>
+<p>The scheduler placed the roles on two nodes, <code>node-a</code> and <code>node-b</code>. In the EPD arm, encode and
+prefill shared <code>node-a</code> and decode ran on <code>node-b</code> — the weight-50 pair in
+<a href="/gpustack-operator/main/docs/modules/model-deployment/epd/#scheduling-co-location">Scheduling co-location</a>
+. The other two arms landed as follows:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Arm</th>
+          <th>Role</th>
+          <th>Node</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Prefill/Decode</td>
+          <td><code>prefill</code></td>
+          <td><code>node-b</code></td>
+      </tr>
+      <tr>
+          <td>Prefill/Decode</td>
+          <td><code>decode</code></td>
+          <td><code>node-a</code></td>
+      </tr>
+      <tr>
+          <td>Aggregated</td>
+          <td><code>server</code></td>
+          <td><code>node-b</code></td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="hardware-model-and-workload">Hardware, model and workload</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Property</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Accelerators</td>
+          <td>4 × NVIDIA L40S 48 GB, 2 per node</td>
+      </tr>
+      <tr>
+          <td>Driver</td>
+          <td>580.173.02, CUDA 13.0</td>
+      </tr>
+      <tr>
+          <td>Interconnect</td>
+          <td>none; no RDMA interface on either node</td>
+      </tr>
+      <tr>
+          <td>Instance type</td>
+          <td><code>gpustack--nvidia-l40s-linux-amd64</code></td>
+      </tr>
+      <tr>
+          <td>Runner image</td>
+          <td><code>docker.io/gpustack/runner:cuda13.0-vllm0.30.0</code></td>
+      </tr>
+      <tr>
+          <td>Engine</td>
+          <td>vLLM 0.30.0</td>
+      </tr>
+      <tr>
+          <td>Router</td>
+          <td><code>gpustack/llm-router:v0.3.1</code>, disaggregation sidecar v0.11.0</td>
+      </tr>
+      <tr>
+          <td>Model</td>
+          <td><code>Qwen/Qwen2.5-VL-7B-Instruct</code></td>
+      </tr>
+      <tr>
+          <td>Engine arguments</td>
+          <td><code>--max-model-len=16384</code>, <code>--gpu-memory-utilization=0.85</code>, <code>--enforce-eager</code></td>
+      </tr>
+      <tr>
+          <td>Parallelism</td>
+          <td>TP 1 per role</td>
+      </tr>
+  </tbody>
+</table>
+<p>Every arm ran the same weights, so the comparison is per arm, not per card: the aggregated arm used
+one card and EPD used three. <code>--max-model-len</code> is <code>16384</code> so that the <code>8k</code> prompts are not truncated.
+The prefill/decode and aggregated arms also set <code>--enable-scale-out</code>, which their router needs to
+count tokens. EPD does not need it.</p>
+<p>All three suites ran on every arm, and every request succeeded.</p>
+<h3 id="suite-1-workload">Suite 1 workload</h3>
+<p>Suite 1 holds the completion budget at <code>max_tokens=128</code> and varies only the prompt. Qwen2.5-VL turns
+an <code>S</code>-square image into <code>(S / 28)²</code> visual tokens.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Context</th>
+          <th>Image</th>
+          <th>Visual tokens</th>
+          <th>Text tokens</th>
+          <th>Measured prompt tokens</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>1k</code></td>
+          <td>560 × 560</td>
+          <td>400</td>
+          <td>624</td>
+          <td>1072 to 1073</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td>840 × 840</td>
+          <td>900</td>
+          <td>1148</td>
+          <td>2101 to 2102</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td>1260 × 1260</td>
+          <td>2025</td>
+          <td>2071</td>
+          <td>4157 to 4158</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td>1792 × 1792</td>
+          <td>4096</td>
+          <td>4096</td>
+          <td>8281 to 8282</td>
+      </tr>
+  </tbody>
+</table>
+<p>Each context runs at concurrency <code>1</code>, <code>4</code> and <code>8</code>, with <code>8</code>, <code>12</code> and <code>24</code> requests.</p>
+<h3 id="suite-2-workload">Suite 2 workload</h3>
+<p>Suite 2 runs two streams against one arm at the same time. Four workers ask for <code>1k</code> requests
+(<code>560 × 560</code>, <code>1073</code> prompt tokens, <code>max_tokens=256</code>). Four other workers send <code>4k</code> heavy-vision
+bursts (a unique <code>1792 × 1792</code> PNG per request, <code>4523</code> prompt tokens, <code>max_tokens=64</code>).
+Each stream sends twelve requests, and no image repeats, so no cache can answer a burst.</p>
+<h3 id="suite-3-workload">Suite 3 workload</h3>
+<p>Suite 3 sends one shared <code>1792 × 1792</code> PNG (<code>4527</code> prompt tokens, <code>max_tokens=64</code>) with a different
+question per request, at concurrency <code>4</code> and <code>8</code>. This is the multi-turn shape: the image is fixed
+and the encoder&rsquo;s output is worth keeping.</p>
+<h3 id="method">Method</h3>
+<p>Two warm-up requests preceded every Suite 1 and Suite 3 configuration and are excluded from the
+results. Each configuration ran once, so every number below is a single measurement. The arms ran
+one after another on a shared cluster, and the later arms had the warmer nodes. See
+<a href="#what-this-run-does-not-measure">What this run does not measure</a>
+.</p>
+<h2 id="suite-1-k-context-multimodal-scaling">Suite 1: k-context multimodal scaling</h2>
+<p><code>Requests</code> is succeeded of issued. Every cell succeeded.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Workload</th>
+          <th>Prompt tokens</th>
+          <th>Concurrency</th>
+          <th>Arm</th>
+          <th>Requests</th>
+          <th>TTFT p50 (ms)</th>
+          <th>TTFT p95 (ms)</th>
+          <th>TPOT p50 (ms)</th>
+          <th>ITL p99 (ms)</th>
+          <th>Output (tok/s)</th>
+          <th>Throughput (req/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>1k</code></td>
+          <td>1072</td>
+          <td>1</td>
+          <td>Aggregated</td>
+          <td>8/8</td>
+          <td>99.1</td>
+          <td>104.4</td>
+          <td>20.46</td>
+          <td>25.26</td>
+          <td>46.1</td>
+          <td>0.715</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td>1072</td>
+          <td>1</td>
+          <td>EPD</td>
+          <td>8/8</td>
+          <td>180.4</td>
+          <td>183.9</td>
+          <td>20.29</td>
+          <td>23.16</td>
+          <td>44.09</td>
+          <td>0.651</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td>1072</td>
+          <td>1</td>
+          <td>Prefill/Decode</td>
+          <td>8/8</td>
+          <td>198.6</td>
+          <td>205.4</td>
+          <td>20.3</td>
+          <td>23.69</td>
+          <td>43.53</td>
+          <td>0.642</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td>1072</td>
+          <td>4</td>
+          <td>Aggregated</td>
+          <td>12/12</td>
+          <td>116.1</td>
+          <td>181.5</td>
+          <td>22.08</td>
+          <td>32.3</td>
+          <td>156.16</td>
+          <td>2.283</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td>1072</td>
+          <td>4</td>
+          <td>EPD</td>
+          <td>12/12</td>
+          <td>172.9</td>
+          <td>421.8</td>
+          <td>21.94</td>
+          <td>44.58</td>
+          <td>148.54</td>
+          <td>2.148</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td>1072</td>
+          <td>4</td>
+          <td>Prefill/Decode</td>
+          <td>12/12</td>
+          <td>122.1</td>
+          <td>332.8</td>
+          <td>22.1</td>
+          <td>46.89</td>
+          <td>152.3</td>
+          <td>2.089</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td>1073</td>
+          <td>8</td>
+          <td>Aggregated</td>
+          <td>24/24</td>
+          <td>176.7</td>
+          <td>250.8</td>
+          <td>23.61</td>
+          <td>60.12</td>
+          <td>290.68</td>
+          <td>4.109</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td>1073</td>
+          <td>8</td>
+          <td>EPD</td>
+          <td>24/24</td>
+          <td>227.8</td>
+          <td>501.2</td>
+          <td>22.69</td>
+          <td>53.39</td>
+          <td>272.9</td>
+          <td>3.68</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td>1073</td>
+          <td>8</td>
+          <td>Prefill/Decode</td>
+          <td>24/24</td>
+          <td>214.4</td>
+          <td>423.4</td>
+          <td>23.25</td>
+          <td>65.57</td>
+          <td>275.98</td>
+          <td>3.898</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td>2101</td>
+          <td>1</td>
+          <td>Aggregated</td>
+          <td>8/8</td>
+          <td>178.3</td>
+          <td>186.8</td>
+          <td>20.63</td>
+          <td>23.49</td>
+          <td>45.56</td>
+          <td>0.384</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td>2101</td>
+          <td>1</td>
+          <td>EPD</td>
+          <td>8/8</td>
+          <td>268.0</td>
+          <td>272.3</td>
+          <td>20.52</td>
+          <td>23.71</td>
+          <td>44.15</td>
+          <td>0.378</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td>2101</td>
+          <td>1</td>
+          <td>Prefill/Decode</td>
+          <td>8/8</td>
+          <td>321.7</td>
+          <td>326.4</td>
+          <td>20.54</td>
+          <td>23.79</td>
+          <td>43.5</td>
+          <td>0.354</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td>2101</td>
+          <td>4</td>
+          <td>Aggregated</td>
+          <td>12/12</td>
+          <td>173.4</td>
+          <td>235.7</td>
+          <td>22.49</td>
+          <td>38.35</td>
+          <td>156.62</td>
+          <td>1.304</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td>2101</td>
+          <td>4</td>
+          <td>EPD</td>
+          <td>12/12</td>
+          <td>178.7</td>
+          <td>489.5</td>
+          <td>22.22</td>
+          <td>45.91</td>
+          <td>157.15</td>
+          <td>1.281</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td>2101</td>
+          <td>4</td>
+          <td>Prefill/Decode</td>
+          <td>12/12</td>
+          <td>168.3</td>
+          <td>362.2</td>
+          <td>22.37</td>
+          <td>45.23</td>
+          <td>154.26</td>
+          <td>1.288</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td>2102</td>
+          <td>8</td>
+          <td>Aggregated</td>
+          <td>24/24</td>
+          <td>276.8</td>
+          <td>453.5</td>
+          <td>23.63</td>
+          <td>94.36</td>
+          <td>280.27</td>
+          <td>2.38</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td>2102</td>
+          <td>8</td>
+          <td>EPD</td>
+          <td>24/24</td>
+          <td>260.8</td>
+          <td>932.3</td>
+          <td>23.85</td>
+          <td>47.46</td>
+          <td>265.62</td>
+          <td>2.26</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td>2102</td>
+          <td>8</td>
+          <td>Prefill/Decode</td>
+          <td>24/24</td>
+          <td>347.5</td>
+          <td>869.6</td>
+          <td>23.27</td>
+          <td>47.18</td>
+          <td>270.52</td>
+          <td>2.233</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td>4157</td>
+          <td>1</td>
+          <td>Aggregated</td>
+          <td>8/8</td>
+          <td>353.1</td>
+          <td>365.3</td>
+          <td>20.85</td>
+          <td>24.14</td>
+          <td>42.66</td>
+          <td>0.333</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td>4157</td>
+          <td>1</td>
+          <td>EPD</td>
+          <td>8/8</td>
+          <td>467.2</td>
+          <td>478.3</td>
+          <td>20.75</td>
+          <td>23.75</td>
+          <td>41.27</td>
+          <td>0.322</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td>4157</td>
+          <td>1</td>
+          <td>Prefill/Decode</td>
+          <td>8/8</td>
+          <td>583.8</td>
+          <td>587.9</td>
+          <td>20.75</td>
+          <td>23.84</td>
+          <td>39.79</td>
+          <td>0.311</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td>4157</td>
+          <td>4</td>
+          <td>EPD</td>
+          <td>12/12</td>
+          <td>205.7</td>
+          <td>1343.1</td>
+          <td>22.52</td>
+          <td>26.85</td>
+          <td>148.12</td>
+          <td>1.157</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td>4157</td>
+          <td>4</td>
+          <td>Aggregated</td>
+          <td>12/12</td>
+          <td>339.0</td>
+          <td>832.8</td>
+          <td>22.92</td>
+          <td>28.67</td>
+          <td>151.49</td>
+          <td>1.184</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td>4157</td>
+          <td>4</td>
+          <td>Prefill/Decode</td>
+          <td>12/12</td>
+          <td>362.7</td>
+          <td>1280.6</td>
+          <td>22.56</td>
+          <td>27.99</td>
+          <td>144.84</td>
+          <td>1.132</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td>4158</td>
+          <td>8</td>
+          <td>Aggregated</td>
+          <td>24/24</td>
+          <td>644.9</td>
+          <td>1732.6</td>
+          <td>24.21</td>
+          <td>167.79</td>
+          <td>249.34</td>
+          <td>1.948</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td>4158</td>
+          <td>8</td>
+          <td>EPD</td>
+          <td>24/24</td>
+          <td>959.4</td>
+          <td>2410.1</td>
+          <td>23.67</td>
+          <td>49.23</td>
+          <td>239.73</td>
+          <td>1.873</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td>4158</td>
+          <td>8</td>
+          <td>Prefill/Decode</td>
+          <td>24/24</td>
+          <td>860.7</td>
+          <td>1754.0</td>
+          <td>24.87</td>
+          <td>47.81</td>
+          <td>235.19</td>
+          <td>1.837</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td>8281</td>
+          <td>1</td>
+          <td>Aggregated</td>
+          <td>8/8</td>
+          <td>705.4</td>
+          <td>747.4</td>
+          <td>21.29</td>
+          <td>24.16</td>
+          <td>37.24</td>
+          <td>0.299</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td>8281</td>
+          <td>1</td>
+          <td>EPD</td>
+          <td>8/8</td>
+          <td>856.7</td>
+          <td>887.1</td>
+          <td>21.17</td>
+          <td>24.7</td>
+          <td>35.43</td>
+          <td>0.298</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td>8281</td>
+          <td>1</td>
+          <td>Prefill/Decode</td>
+          <td>8/8</td>
+          <td>1129.0</td>
+          <td>1150.6</td>
+          <td>21.17</td>
+          <td>24.79</td>
+          <td>32.81</td>
+          <td>0.276</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td>8281</td>
+          <td>4</td>
+          <td>EPD</td>
+          <td>12/12</td>
+          <td>241.8</td>
+          <td>2279.9</td>
+          <td>23.3</td>
+          <td>47.88</td>
+          <td>128.24</td>
+          <td>1.036</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td>8281</td>
+          <td>4</td>
+          <td>Aggregated</td>
+          <td>12/12</td>
+          <td>757.1</td>
+          <td>1880.9</td>
+          <td>24.3</td>
+          <td>49.28</td>
+          <td>121.34</td>
+          <td>0.965</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td>8281</td>
+          <td>4</td>
+          <td>Prefill/Decode</td>
+          <td>12/12</td>
+          <td>697.9</td>
+          <td>2853.0</td>
+          <td>23.34</td>
+          <td>48.36</td>
+          <td>113.15</td>
+          <td>0.947</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td>8282</td>
+          <td>8</td>
+          <td>EPD</td>
+          <td>24/24</td>
+          <td>880.7</td>
+          <td>3394.3</td>
+          <td>26.72</td>
+          <td>52.72</td>
+          <td>187.1</td>
+          <td>1.5</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td>8282</td>
+          <td>8</td>
+          <td>Aggregated</td>
+          <td>24/24</td>
+          <td>1243.5</td>
+          <td>2590.3</td>
+          <td>32.41</td>
+          <td>199.34</td>
+          <td>179.13</td>
+          <td>1.459</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td>8282</td>
+          <td>8</td>
+          <td>Prefill/Decode</td>
+          <td>24/24</td>
+          <td>1513.9</td>
+          <td>3473.7</td>
+          <td>26.18</td>
+          <td>51.19</td>
+          <td>170.31</td>
+          <td>1.378</td>
+      </tr>
+  </tbody>
+</table>
+<p>Time per output token barely separates the arms. TPOT p50 stays between <code>20.29 ms</code> and <code>26.72 ms</code>
+in all thirty-six cells, and output throughput follows concurrency, not topology: <code>1k</code> climbs from
+about <code>45 tok/s</code> at one request in flight to <code>291 tok/s</code> at eight.</p>
+<p>Time to first token is where the topology shows.</p>
+<p><strong>One request in flight.</strong> Aggregated is fastest at every context, and EPD beats prefill/decode at
+every one. A request pays a transfer hop for each connector before its first token, and at low
+concurrency nothing is waiting behind it. At <code>1k</code> the EPD penalty is <code>81.3 ms</code>, because the transfer
+costs more than a <code>400</code>-token vision pass.</p>
+<p><strong>Eight requests in flight.</strong> The two disaggregated arms hold ITL p99 flat, while aggregated degrades
+with prompt length:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Concurrency 8</th>
+          <th><code>1k</code></th>
+          <th><code>2k</code></th>
+          <th><code>4k</code></th>
+          <th><code>8k</code></th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Aggregated</td>
+          <td>60.12</td>
+          <td>94.36</td>
+          <td>167.79</td>
+          <td>199.34</td>
+      </tr>
+      <tr>
+          <td>EPD</td>
+          <td>53.39</td>
+          <td>47.46</td>
+          <td>49.23</td>
+          <td>52.72</td>
+      </tr>
+      <tr>
+          <td>Prefill/Decode</td>
+          <td>65.57</td>
+          <td>47.18</td>
+          <td>47.81</td>
+          <td>51.19</td>
+      </tr>
+  </tbody>
+</table>
+<p>In the aggregated arm a long prefill shares a card with the requests already generating tokens. Its
+<code>4k</code> and <code>8k</code> ITL p99 is <code>3.4×</code> and <code>3.8×</code> EPD&rsquo;s. Prefill/Decode removes the same interference, so
+EPD and prefill/decode differ little on this metric.</p>
+<p>TTFT p50 at eight in flight crosses over as the prompt grows. At <code>1k</code> and <code>2k</code> EPD is still behind
+aggregated. At <code>4k</code> it is behind on TTFT p50 (<code>959.4 ms</code> against <code>644.9 ms</code>) but well ahead on ITL
+p99 (<code>49.23 ms</code> against <code>167.79 ms</code>). At <code>8k</code> EPD wins both: TTFT p50 is <code>880.7 ms</code> against
+<code>1243.5 ms</code> (aggregated) and <code>1513.9 ms</code> (prefill/decode).</p>
+<p>The <code>8k</code> cell at four in flight is the strongest result and the weakest measurement. EPD&rsquo;s TTFT p50
+of <code>241.8 ms</code> is the lowest of all thirty-six cells, but its p95 is <code>2279.9 ms</code>, worse than
+aggregated&rsquo;s <code>1880.9 ms</code>. With twelve requests, the p95 sits between the slowest two samples, so
+treat the median and the tail as separate readings.</p>
+<h2 id="suite-2-mixed-heavy-vision-and-concurrent-decode">Suite 2: mixed heavy-vision and concurrent decode</h2>
+<p>Two streams share one arm: four workers ask for <code>1k</code> completions while four workers push <code>4k</code>
+unique-image bursts through the same GPU. This test shows how isolating the encoder changes what each
+arm is good at.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Workload</th>
+          <th>Arm</th>
+          <th>Requests</th>
+          <th>TTFT p50 (ms)</th>
+          <th>TTFT p95 (ms)</th>
+          <th>TPOT p50 (ms)</th>
+          <th>TPOT p95 (ms)</th>
+          <th>ITL p95 (ms)</th>
+          <th>ITL p99 (ms)</th>
+          <th>Output (tok/s)</th>
+          <th>Throughput (req/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>concurrent_decode_1k</code></td>
+          <td>Aggregated</td>
+          <td>12/12</td>
+          <td>388.3</td>
+          <td>502.1</td>
+          <td>24.39</td>
+          <td>27.76</td>
+          <td>25.3</td>
+          <td>89.22</td>
+          <td>69.2</td>
+          <td>1.038</td>
+      </tr>
+      <tr>
+          <td><code>concurrent_decode_1k</code></td>
+          <td>EPD</td>
+          <td>12/12</td>
+          <td>226.5</td>
+          <td>266.4</td>
+          <td>24.52</td>
+          <td>26.18</td>
+          <td>47.99</td>
+          <td>66.87</td>
+          <td>66.96</td>
+          <td>0.972</td>
+      </tr>
+      <tr>
+          <td><code>concurrent_decode_1k</code></td>
+          <td>Prefill/Decode</td>
+          <td>12/12</td>
+          <td>315.1</td>
+          <td>380.2</td>
+          <td>24.37</td>
+          <td>25.58</td>
+          <td>46.02</td>
+          <td>55.66</td>
+          <td>63.12</td>
+          <td>0.879</td>
+      </tr>
+      <tr>
+          <td><code>heavy_vision_4k</code></td>
+          <td>Aggregated</td>
+          <td>12/12</td>
+          <td>2854.0</td>
+          <td>5677.9</td>
+          <td>38.14</td>
+          <td>75.86</td>
+          <td>176.22</td>
+          <td>386.39</td>
+          <td>66.43</td>
+          <td>1.038</td>
+      </tr>
+      <tr>
+          <td><code>heavy_vision_4k</code></td>
+          <td>EPD</td>
+          <td>12/12</td>
+          <td>5017.0</td>
+          <td>6964.2</td>
+          <td>27.33</td>
+          <td>39.96</td>
+          <td>50.39</td>
+          <td>53.42</td>
+          <td>62.19</td>
+          <td>0.972</td>
+      </tr>
+      <tr>
+          <td><code>heavy_vision_4k</code></td>
+          <td>Prefill/Decode</td>
+          <td>12/12</td>
+          <td>6187.9</td>
+          <td>7977.2</td>
+          <td>28.57</td>
+          <td>38.55</td>
+          <td>50.15</td>
+          <td>63.61</td>
+          <td>56.23</td>
+          <td>0.879</td>
+      </tr>
+  </tbody>
+</table>
+<p>Every arm completed both streams. The two streams share one batch window: <code>11.561 s</code> for aggregated,
+<code>12.35 s</code> for EPD and <code>13.658 s</code> for prefill/decode. The per-stream throughput columns are two views
+of that one window.</p>
+<p><strong>The <code>1k</code> stream prefers EPD.</strong> EPD&rsquo;s TTFT p50 is <code>226.5 ms</code>, against <code>315.1 ms</code> for prefill/decode
+and <code>388.3 ms</code> for aggregated, and its p95 is the lowest at <code>266.4 ms</code>. In prefill/decode the prefill
+engine runs the <code>1792 × 1792</code> vision pass inline, so small prefills queue behind it. In EPD the
+encoder absorbs those passes on its own GPU. In aggregated, the same prefill lands in the engine that
+is also decoding.</p>
+<p><strong>The <code>4k</code> stream prefers aggregated on first token and EPD on every token after it.</strong>
+Aggregated&rsquo;s TTFT p50 of <code>2854.0 ms</code> is <code>1.76×</code> faster than EPD&rsquo;s <code>5017.0 ms</code> and <code>2.17×</code> faster than
+prefill/decode&rsquo;s <code>6187.9 ms</code>, because no embedding crosses a network. After the first token the order
+inverts. Aggregated&rsquo;s ITL p99 is <code>386.39 ms</code>, against <code>53.42 ms</code> for EPD (<code>7.23×</code> worse) and
+<code>63.61 ms</code> for prefill/decode. Its TPOT p95 is <code>75.86 ms</code>, against <code>39.96 ms</code> and <code>38.55 ms</code>.</p>
+<p>Combined throughput over the window is <code>135.63 tok/s</code> for aggregated, <code>129.15 tok/s</code> for EPD and
+<code>119.35 tok/s</code> for prefill/decode. EPD gives up about <code>4.8%</code> of aggregate throughput to make the <code>1k</code>
+stream&rsquo;s TTFT <code>1.39×</code> faster than prefill/decode and the <code>4k</code> stream&rsquo;s ITL p99 <code>7.23×</code> faster.</p>
+<h2 id="suite-3-repeated-image-encoder-cache-reuse">Suite 3: repeated-image encoder-cache reuse</h2>
+<p>One shared <code>1792 × 1792</code> image, a different question per request, at two concurrencies. The image
+is <code>4096</code> visual tokens of encoder work that a cache could answer once.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Workload</th>
+          <th>Concurrency</th>
+          <th>Arm</th>
+          <th>Requests</th>
+          <th>TTFT p50 (ms)</th>
+          <th>TTFT p95 (ms)</th>
+          <th>TPOT p50 (ms)</th>
+          <th>ITL p99 (ms)</th>
+          <th>Output (tok/s)</th>
+          <th>Throughput (req/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>repeated_4k_c4</code></td>
+          <td>4</td>
+          <td>Aggregated</td>
+          <td>12/12</td>
+          <td>621.4</td>
+          <td>786.8</td>
+          <td>23.76</td>
+          <td>76.57</td>
+          <td>120.17</td>
+          <td>1.878</td>
+      </tr>
+      <tr>
+          <td><code>repeated_4k_c4</code></td>
+          <td>4</td>
+          <td>EPD</td>
+          <td>12/12</td>
+          <td>356.0</td>
+          <td>422.7</td>
+          <td>22.24</td>
+          <td>37.17</td>
+          <td>143.16</td>
+          <td>2.237</td>
+      </tr>
+      <tr>
+          <td><code>repeated_4k_c4</code></td>
+          <td>4</td>
+          <td>Prefill/Decode</td>
+          <td>12/12</td>
+          <td>790.6</td>
+          <td>848.9</td>
+          <td>22.25</td>
+          <td>28.61</td>
+          <td>116.51</td>
+          <td>1.82</td>
+      </tr>
+      <tr>
+          <td><code>repeated_4k_c8</code></td>
+          <td>8</td>
+          <td>Aggregated</td>
+          <td>24/24</td>
+          <td>1131.3</td>
+          <td>1347.3</td>
+          <td>24.45</td>
+          <td>110.02</td>
+          <td>191.4</td>
+          <td>2.991</td>
+      </tr>
+      <tr>
+          <td><code>repeated_4k_c8</code></td>
+          <td>8</td>
+          <td>EPD</td>
+          <td>24/24</td>
+          <td>570.2</td>
+          <td>693.6</td>
+          <td>22.5</td>
+          <td>46.38</td>
+          <td>251.92</td>
+          <td>3.936</td>
+      </tr>
+      <tr>
+          <td><code>repeated_4k_c8</code></td>
+          <td>8</td>
+          <td>Prefill/Decode</td>
+          <td>24/24</td>
+          <td>1242.6</td>
+          <td>1437.3</td>
+          <td>22.44</td>
+          <td>49.76</td>
+          <td>191.01</td>
+          <td>2.985</td>
+      </tr>
+  </tbody>
+</table>
+<p>This is EPD&rsquo;s clearest result, and the only suite it wins outright. At concurrency 4 its TTFT p50
+of <code>356.0 ms</code> is <code>2.22×</code> faster than prefill/decode and <code>1.75×</code> faster than aggregated, with the
+lowest p95 (<code>422.7 ms</code>). At concurrency 8 it reaches <code>251.92 tok/s</code>, <code>31.9%</code> above prefill/decode
+and <code>31.6%</code> above aggregated, and TTFT p50 is about half (<code>570.2 ms</code> against <code>1242.6 ms</code> and
+<code>1131.3 ms</code>).</p>
+<p>The cause is the encoder cache. Suite 2&rsquo;s heavy-vision stream has the same <code>4096</code>-token encoder input
+with a unique image per request, and there EPD was the slowest arm on first token. Here the image
+repeats and EPD is the fastest. <code>ECCPUConnector</code> can answer later requests from a cached embedding,
+while prefill/decode re-runs the vision pass inline and aggregated re-runs it on the card that is also
+decoding.</p>
+<p>Prefill/decode has the lowest ITL p99 at concurrency 4 (<code>28.61 ms</code>). Once the embeddings are in hand,
+the extra encoder leg costs little.</p>
+<h2 id="stage-execution-verification">Stage execution verification</h2>
+<p>A <code>200</code> does not show which engines ran, because a router that answered every request from one
+replica would return the same status and similar latency. After the run, each arm&rsquo;s engines were
+read for the access line <code>POST /v1/chat/completions</code>. For the EPD decoder, the <code>routing-proxy</code>
+sidecar was read instead for <code>processing multimodal items</code>, because only the sidecar logs what
+arrived from the encoder.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Arm</th>
+          <th>Stage</th>
+          <th>Requests</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>EPD</td>
+          <td><code>encode</code></td>
+          <td>264</td>
+      </tr>
+      <tr>
+          <td>EPD</td>
+          <td><code>prefill</code></td>
+          <td>264</td>
+      </tr>
+      <tr>
+          <td>EPD</td>
+          <td><code>decode</code></td>
+          <td>264</td>
+      </tr>
+      <tr>
+          <td>EPD</td>
+          <td><code>decode</code> sidecar</td>
+          <td>264 multimodal items</td>
+      </tr>
+      <tr>
+          <td>Prefill/Decode</td>
+          <td><code>prefill</code></td>
+          <td>430</td>
+      </tr>
+      <tr>
+          <td>Prefill/Decode</td>
+          <td><code>decode</code></td>
+          <td>264</td>
+      </tr>
+      <tr>
+          <td>Aggregated</td>
+          <td><code>server</code></td>
+          <td>530</td>
+      </tr>
+  </tbody>
+</table>
+<p>The harness issued 264 requests across the three suites. EPD shows three equal counts, so every
+multimodal request was encoded once, prefilled once and pulled by the decoder once.</p>
+<p>The <code>430</code> and <code>530</code> counts exceed 264 because the marker also matches the router&rsquo;s token-render call,
+<code>POST /v1/chat/completions/render</code>. The prefill/decode and aggregated arms have no encoder role, so
+their router counts tokens by calling the engine. The EPD arm uses the router&rsquo;s built-in estimator,
+which makes no HTTP call. This is why only those two arms need <code>--enable-scale-out</code>.</p>
+<p>The router&rsquo;s prefix-aware decision also needs a prompt of at least one 16-token KV block. A shorter
+prompt is scheduled to the decoder alone. Keep probe prompts past about twenty tokens when you
+check stage counts through this router.</p>
+<h2 id="when-epd-helps-and-when-it-does-not">When EPD helps and when it does not</h2>
+<p><strong>Use aggregated when prompts are short or concurrency is low.</strong> It has the lowest TTFT in every
+cell at concurrency <code>1</code>, and at <code>1k</code> and <code>2k</code> under load, on one card instead of three. A vision pass
+of a few hundred tokens does not repay two extra network hops. Prefill/decode shows the same cost:
+its TTFT p50 at <code>1k</code> and concurrency <code>1</code> is <code>198.6 ms</code>, against <code>99.1 ms</code> for aggregated.</p>
+<p><strong>Use prefill/decode when decode streams must stay smooth and no image repeats.</strong> It matches EPD on
+ITL p99 in Suite 1 at concurrency 8 and beats it in Suite 3 at concurrency 4, on two cards instead of
+three. Its weakness is first token on heavy vision: <code>6187.9 ms</code> on the <code>4k</code> stream, and <code>315.1 ms</code> on
+the <code>1k</code> stream that shares the arm with it. Both are worse than EPD.</p>
+<p><strong>Use EPD for long-prompt multimodal traffic under concurrency, or when the same image repeats.</strong> It
+is the only arm that wins on TTFT p50 and ITL p99 together, at <code>8k</code> with concurrency <code>4</code> and <code>8</code> and
+across Suite 3. The encoder cache pays whenever an image repeats, as in multi-turn chat, and needs
+no concurrency to show a benefit.</p>
+<p><strong>Avoid EPD when every request carries a unique large image and first-token latency matters most.</strong>
+In Suite 2 it was <code>1.76×</code> slower than aggregated on the heavy-vision stream.</p>
+<p>Splitting vision onto its own card pays when the shared card would otherwise be busy: concurrency
+above one, and contexts of <code>4k</code> and above. Below those thresholds, with no repeated image, the third
+role only moves embeddings that a single engine would have produced in place.</p>
+<h2 id="what-this-run-does-not-measure">What this run does not measure</h2>
+<ul>
+<li><strong>Repetition.</strong> One batch per configuration, 8 to 24 requests per cell. Treat tail differences
+below roughly 10% as unmeasured. Read the <code>8k</code> TTFT p50 of <code>241.8 ms</code> at concurrency 4 together
+with its <code>2279.9 ms</code> p95.</li>
+<li><strong>Arm order.</strong> The aggregated arm was resident and warm while the EPD benchmark ran, and it was
+benchmarked while prefill/decode was still starting. Later arms had the warmer cluster.</li>
+<li><strong>Interconnect.</strong> Neither node has an RDMA interface, so the KV leg ran over tcp and the encoder leg
+over NIXL on shared memory. A 100 GbE or RDMA fabric would shrink the transfer penalties that decide
+the <code>1k</code> and <code>2k</code> columns.</li>
+<li><strong>Parallelism.</strong> TP 1 per role on one 7B model. A model that needs tensor parallelism changes what
+each role holds and what separating them buys.</li>
+<li><strong>Graph capture.</strong> <code>--enforce-eager</code> was set on every role. This removes CUDA graphs and lowers
+decode throughput relative to a default deployment.</li>
+<li><strong>Model coverage.</strong> One 7B vision-language model, on one engine (<code>vLLM</code>) and one platform
+(<code>nvidia</code>). The <code>SGLang</code> <code>nvidia</code> rows are verified functionally in the
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/#sglang-ep--d-behind-both-routers">EPD Walkthrough</a>
+.
+The <code>ascend</code> and <code>amd</code> rows of the <a href="/gpustack-operator/main/docs/modules/model-deployment/epd/#the-admitted-matrix">admitted matrix</a>
+ are not verified
+on hardware.</li>
+<li><strong>Cache hit rate.</strong> Suite 3 shows what a repeated image does, not how the hit rate is computed or
+what invalidates an entry. The benefit assumes the same image arrives with the same preprocessed
+token prefix.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/epd/">Model Deployment Encode, Prefill and Decode</a>
+ (the topology this run measures)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
+ (the two-role arm)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
+ (the roles each arm declares)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/">Model Deployment Routing</a>
+ (which replica the router picks)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/">EPD Walkthrough</a>
+ (a recorded live run).</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/">Model Deployment Routing</a>
+ — choose a routing policy and inspect candidate endpoints.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/modules/model-deployment/epd-benchmark.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/epd-benchmark.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#the-three-arms">The three arms</a></li>
+    <li><a href="#hardware-model-and-workload">Hardware, model and workload</a>
+      <ul>
+        <li><a href="#suite-1-workload">Suite 1 workload</a></li>
+        <li><a href="#suite-2-workload">Suite 2 workload</a></li>
+        <li><a href="#suite-3-workload">Suite 3 workload</a></li>
+        <li><a href="#method">Method</a></li>
+      </ul>
+    </li>
+    <li><a href="#suite-1-k-context-multimodal-scaling">Suite 1: k-context multimodal scaling</a></li>
+    <li><a href="#suite-2-mixed-heavy-vision-and-concurrent-decode">Suite 2: mixed heavy-vision and concurrent decode</a></li>
+    <li><a href="#suite-3-repeated-image-encoder-cache-reuse">Suite 3: repeated-image encoder-cache reuse</a></li>
+    <li><a href="#stage-execution-verification">Stage execution verification</a></li>
+    <li><a href="#when-epd-helps-and-when-it-does-not">When EPD helps and when it does not</a></li>
+    <li><a href="#what-this-run-does-not-measure">What this run does not measure</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

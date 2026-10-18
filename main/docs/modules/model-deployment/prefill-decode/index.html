@@ -150,6 +150,11 @@
     
       
       
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
         <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
       
     
@@ -419,6 +424,16 @@
     
       
       
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
+      
+    
+      
+      
         <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" aria-current="page">Prefill and decode</a>
       
     
@@ -580,6 +595,8 @@ decode</a>
 </li>
 <li><a href="#the-two-router-fields">The two router fields</a>
 </li>
+<li><a href="#counting-tokens-through-the-engine">Counting tokens through the engine</a>
+</li>
 <li><a href="#direct-transfer-transport">Direct transfer transport</a>
 </li>
 <li><a href="#different-hardware-per-role">Different hardware per role</a>
@@ -674,7 +691,7 @@ and share a pool with every other deployment bound to it&rdquo;.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-72B-Instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">                                </span><span class="c"># vLLM | SGLang; this example walks the vLLM pair</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.29.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;a runner image your cluster can pull&gt;  </span><span class="w"> </span><span class="c"># required; you name the tag</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-d-router                </span><span class="w"> </span><span class="c"># required to pair the roles; takes either engine</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
@@ -811,6 +828,57 @@ are <strong>north-south</strong> concerns owned by the gateway that admits traff
 picker&rsquo;s gRPC server, whose only client is the proxy container <strong>in the same Pod</strong> dialing
 <code>127.0.0.1</code>; <code>--metrics-endpoint-auth</code> guards the picker&rsquo;s own <code>/metrics</code>, scraped in-cluster. So
 there is no field for either, and neither is reachable through <code>extraArgs</code>.</p>
+<h2 id="counting-tokens-through-the-engine">Counting tokens through the engine</h2>
+<p><strong>A deployment that declares no <code>Encode</code> role needs <code>--enable-scale-out</code> on its vLLM roles,
+behind <code>llm-d-router</code>.</strong> The router counts prompt tokens by calling the engine: it POSTs
+<code>/v1/chat/completions/render</code>. vLLM serves that endpoint only under <code>--enable-scale-out</code>. The
+operator does not render the flag, and admission does not check for it: set the flag in each
+role&rsquo;s <code>extraArgs</code>.</p>
+<p>What the declared shape decides:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Declared roles</th>
+          <th>How the router counts tokens</th>
+          <th><code>--enable-scale-out</code> needed</th>
+          <th>What the render gives today</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Encode</code>, <code>Prefill</code>, <code>Decode</code></td>
+          <td>the router&rsquo;s built-in estimator; no HTTP call</td>
+          <td>no</td>
+          <td>no flag, which is correct</td>
+      </tr>
+      <tr>
+          <td><code>Prefill</code>, <code>Decode</code></td>
+          <td>a call to the engine&rsquo;s render endpoint</td>
+          <td>yes</td>
+          <td>nothing</td>
+      </tr>
+      <tr>
+          <td>a single <code>Server</code> role</td>
+          <td>a call to the engine&rsquo;s render endpoint</td>
+          <td>yes</td>
+          <td>nothing</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Without the flag the failure is silent.</strong> Measured on vLLM-Ascend <code>0.30.0rc1</code>: the render call
+answers <code>404</code>, no token count comes back, and the prefix decider routes every request to the
+decoder alone. Requests return <code>200</code>, the prefill stage receives nothing, no KV moves, and no
+error is reported. The render calls do appear in the router&rsquo;s access log, so the stage counts
+name the gap (<a href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/#stage-execution-verification">what the counts showed</a>
+).</p>
+<p><strong>The floor is vLLM <code>0.30.0</code> and vllm-ascend <code>0.30.0rc1</code>.</strong> Earlier releases lack
+<code>--enable-scale-out</code>, and at vLLM-Ascend <code>0.23.0</code> the render route itself is absent.</p>
+<p>Setting the flag registers the render, derender and generate endpoints; it changes nothing else
+about the engine. The flag and the endpoint are vLLM&rsquo;s. What SGLang behind <code>llm-d-router</code>, and
+any shape behind the other two routers, use to count tokens was not measured here.</p>
+<p><a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#the-minimum-per-shape">Engine Versions</a>
+ carries the same floors as a
+requirement on the vLLM and vLLM-Ascend rows.</p>
 <h2 id="direct-transfer-transport">Direct transfer transport</h2>
 <p>The point-to-point leg renders Mooncake&rsquo;s <code>tcp</code> when the API field is unset:</p>
 <div class="code-block">
@@ -856,7 +924,8 @@ deployment with no <code>kvCache</code> block still has this leg to configure.</
 <p>Editing it <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">turns over every role</a>
 : the value renders
 into both ends&rsquo; arguments, so every role&rsquo;s replicas turn over one at a time. A prefiller and a decoder
-can disagree on the protocol until both converge, the same window an <code>engine.version</code> edit opens.</p>
+can disagree on the protocol until both converge, the same window an edit to the image a role runs
+(<code>engine.image</code> or <code>roles[].image</code>) opens.</p>
 <p>The same shared-document rule reaches the parallel degrees on the Ascend leg. The pair turns over
 together; see <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">Rollout behavior</a>
  for the mechanism. Until both roles
@@ -943,7 +1012,7 @@ each leg</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c1c29a794375a198a5358b6e2b7ab53801fcc79/docs/modules/model-deployment/prefill-decode.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/modules/model-deployment/prefill-decode.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/prefill-decode.md">Edit this page</a>
             
@@ -958,6 +1027,7 @@ each leg</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/
     <li><a href="#two-ways-to-configure-a-pair">Two ways to configure a pair</a></li>
     <li><a href="#the-router-block">The router block</a></li>
     <li><a href="#the-two-router-fields">The two router fields</a></li>
+    <li><a href="#counting-tokens-through-the-engine">Counting tokens through the engine</a></li>
     <li><a href="#direct-transfer-transport">Direct transfer transport</a></li>
     <li><a href="#different-hardware-per-role">Different hardware per role</a></li>
     <li><a href="#addressing-a-role">Addressing a role</a></li>

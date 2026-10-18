@@ -150,6 +150,11 @@
     
       
       
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
         <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
       
     
@@ -419,6 +424,16 @@
     
       
       
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
+      
+    
+      
+      
         <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
       
     
@@ -580,9 +595,9 @@ all role replicas are ready but a declared router has no ready replica.
 <code>status.roles[]</code> carries <code>name</code>, <code>kind</code>, <code>desired</code>, <code>ready</code>, <code>quotaReserved</code>, <code>unmanaged</code>,
 <code>assignedFlavors</code>, <code>parallelism</code> and <code>endpoints</code> per role.</p>
 <p><code>kubectl get modeldeployments</code> shows <code>status.roleSummary</code> in its <code>ROLES</code> column. It counts current
-Ready instances by kind: <code>R</code> is managed router Pods, <code>S</code> is ordinary servers, <code>P</code> is prefillers,
-and <code>D</code> is decoders. For example, <code>1R2S</code> means one Ready router and two Ready servers; <code>1R3P4D</code>
-means one Ready router, three Ready prefillers and four Ready decoders.</p>
+Ready instances by kind: <code>R</code> is managed router Pods, <code>S</code> is ordinary servers, <code>E</code> is encoders,
+<code>P</code> is prefillers, and <code>D</code> is decoders. For example, <code>1R2S</code> means one Ready router and two Ready
+servers; <code>1R1E1P1D</code> means one Ready router, one Ready encoder, one Ready prefiller and one Ready decoder.</p>
 <p><strong>During a replacement, status combines desired and observed fields.</strong> See
 <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">Rollout behavior</a>
 . <code>desired</code> and <code>parallelism</code> describe the current
@@ -592,9 +607,10 @@ serving their deployed configuration. <code>unmanaged</code> and cache condition
 roles of the same kind are summed. A serving instance made of several Pods still counts once; use
 <code>status.roles[].desired</code> to see the requested count.</p>
 <p>Without a router, <code>status.endpoint</code> is the address the deployment-wide Service serves on, in the form
-<code>&lt;scheme&gt;://&lt;name&gt;.&lt;namespace&gt;.svc:&lt;port&gt;</code>. The scheme is read from the same role the port is (the
-first one), and is <code>https</code> only where that role passes <code>--ssl-certfile</code> or <code>--ssl-keyfile</code>. With a
-router it is absent until the router is ready, then uses the router Service&rsquo;s own <code>http</code> transport.</p>
+<code>&lt;scheme&gt;://&lt;name&gt;.&lt;namespace&gt;.svc:&lt;port&gt;</code>. The scheme and port come from the first role that is not
+<code>Encode</code>, and the scheme is <code>https</code> only when that role passes <code>--ssl-certfile</code> or <code>--ssl-keyfile</code>.
+With a router, it is absent until the router is ready, then uses the router Service&rsquo;s <code>http</code> transport.
+Each role, including <code>Encode</code>, also gets its own <code>&lt;deployment&gt;-&lt;role&gt;</code> Service.</p>
 <p><code>status.router</code> publishes the contract used to render the router: its implementation and address,
 the cache pool&rsquo;s client endpoint, the metrics names and port, and one entry for every role containing
 the effective kind, selector, direct endpoint and any dialable KV-event endpoints. The event entries
@@ -1105,6 +1121,8 @@ for&rdquo; is what <code>phase</code> answers, by summing every role&rsquo;s cou
 defaults to <code>Server</code>) reports <code>True</code> as soon as any replica is ready. That is not a blind spot. The
 degradation is real and <code>phase</code> reports it as <code>Degraded</code>; this condition answers a different question
 and is silent on that shape by design.</p>
+<p>On an encode, prefill and decode deployment, <code>RoleKindsReady</code> is <code>True</code> only when <code>Encode</code>,
+<code>Prefill</code> and <code>Decode</code> each have at least one ready replica.</p>
 <p>A role that took over its command line counts toward its kind like any other. Such a role gets no
 readiness probe, so its <code>Ready</code> says its containers started rather than that anything answered on the
 serving path. <code>status.roles[].unmanaged</code> is published per role for a reader who needs the stronger
@@ -1114,7 +1132,7 @@ replica completeness. Neither guarantees that an inference request succeeds; tha
 the engine and Service connectivity.</p>
 <p><strong><code>KVEventsPublishing</code></strong> — whether every role that produces cache blocks has publisher configuration
 in its rendered Pods. It reports configuration, not live traffic: a configured publisher that later
-crashes remains <code>True</code>.</p>
+crashes remains <code>True</code>. <code>Encode</code> holds no KV cache and produces no cache blocks, so it is excluded.</p>
 <table>
   <thead>
       <tr>
@@ -1245,14 +1263,14 @@ levels back to <code>True</code> on its own once a later pass proves the live wo
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
-      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment</a>
- for the contract this status
-reports on</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/leader/">KV Cache Leader</a>
- for the leader process the conditions
-distinguish from the operator&rsquo;s own.</li></ul>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
+ (the contract this status reports on)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
+ (pairing prefill and decode roles)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/epd/">Model Deployment Encode, Prefill and Decode</a>
+ (encode, prefill and decode disaggregation)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/leader/">KV Cache Leader</a>
+ (the leader process the conditions distinguish from the operator&rsquo;s own).</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
-        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment</a></div>
+        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a></div>
       </section></nav>
 
       </article>
@@ -1264,7 +1282,7 @@ distinguish from the operator&rsquo;s own.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c1c29a794375a198a5358b6e2b7ab53801fcc79/docs/modules/model-deployment/status.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/modules/model-deployment/status.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/status.md">Edit this page</a>
             

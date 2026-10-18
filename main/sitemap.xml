@@ -68,6 +68,10 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/engine-versions/</loc>
   </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/epd/</loc>
+  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/metrics/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/</loc>
@@ -121,6 +125,8 @@
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/</loc>
   </url><url>

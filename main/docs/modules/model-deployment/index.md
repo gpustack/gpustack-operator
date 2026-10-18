@@ -11,11 +11,14 @@ its own replicas and resources.
 ## Deployment configuration
 
 [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) starts with a minimal manifest and explains
-the role contract. [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) covers split roles.
-[Engine Versions](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) records tested version floors.
+the role contract. [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) covers split roles, and
+[Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md) covers multimodal disaggregation.
+[Engine Versions](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) records tested version floors, and
+[EPD Benchmark](/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/index.md) measures that disaggregation against an aggregated instance.
 
 Follow [Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) for
-disaggregated serving, and [Multi-Host Serving Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md)
+disaggregated serving, [Encode, Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/index.md) for
+multimodal disaggregation, and [Multi-Host Serving Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md)
 for distributed multi-node serving.
 
 ## Service operations

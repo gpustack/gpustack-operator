@@ -150,6 +150,11 @@
     
       
       
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
         <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
       
     
@@ -415,6 +420,16 @@
       
       
         <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
       
     
       
@@ -915,6 +930,21 @@ and it may change), so a pool serving Ascend engines declares <code>CANN</code> 
 rather than settling for the <code>TCP</code> default.</p>
 <p>The member then needs a CANN-carrying image, per the variant table above. The project&rsquo;s own CPU
 build compiles no <code>ascend</code> transport.</p>
+<p><strong>Match the member image to the transport.</strong> A CPU image serves <code>TCP</code> and <code>RDMA</code>. A CANN image
+serves <code>CANN</code>.</p>
+<p><strong>A CANN-carrying member over <code>TCP</code> or <code>RDMA</code> does not start</strong>, and the failure names neither the
+transport nor the image. The store installs <code>AscendDirectTransport</code> unconditionally, and without an
+ACL context it ends in <code>cannot allocate local segment, ret: -1</code>. The member REST server never
+serves. So a pool that may ever serve an Ascend engine declares <code>CANN</code>.</p>
+<p><strong>Members take no accelerator while idle.</strong> Measured with a CANN store serving and no engine
+deployed, every NPU on the nodes read <code>AICore 0%</code> and device memory at the driver baseline. The
+member registers device memory regions; it does not compute.</p>
+<p><strong>Two readings can mislead an instrument.</strong> <code>binding.usage</code> and <code>pool.usage</code> lag the leader&rsquo;s
+counters by a reconcile tick, so a read taken immediately after a successful write can show <code>0</code>.
+The synchronous numbers are the leader&rsquo;s <code>:9003</code> <code>/metrics</code> and <code>/api/v1/tenant_quotas</code>.</p>
+<p><strong>The first write to a fresh store can answer <code>500</code>, and that is a race.</strong> The signature is a put
+start with no matching put end in the master&rsquo;s counters, because the tenant ledger is not yet
+visible. Wait until the tenant is listed and retry; the store is not failing.</p>
 <blockquote>
 <p><strong>Why</strong> — one group is one Pod template, which cannot express a per-node transport; and promoting to
 a host fabric would mean granting <code>hostNetwork</code> plus <code>IPC_LOCK</code> and <code>SYS_RESOURCE</code>. A privilege is
@@ -1064,7 +1094,7 @@ mounted from the node:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kvcache-vram</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">VRAM</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/mirrored-mooncake:0.3.13.post1-cann9.1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/mirrored-mooncake:0.3.13.post1-cann9.1-910b</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">32Gi</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">hostPaths</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/Ascend/driver</span><span class="w">
@@ -1486,7 +1516,7 @@ a quota on this store, and what a quota ceiling buys)</li><li><a href="/gpustack
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c1c29a794375a198a5358b6e2b7ab53801fcc79/docs/modules/kv-cache/backend.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ca747962501e9f465528ad7a7a6da62123eb827/docs/modules/kv-cache/backend.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/backend.md">Edit this page</a>
             

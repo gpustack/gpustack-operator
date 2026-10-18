@@ -10,6 +10,7 @@ decode](deployment.md#prefill-and-decode) describes the role fields and admissio
 - [Two ways to configure a pair](#two-ways-to-configure-a-pair)
 - [The router block](#the-router-block)
 - [The two router fields](#the-two-router-fields)
+- [Counting tokens through the engine](#counting-tokens-through-the-engine)
 - [Direct transfer transport](#direct-transfer-transport)
 - [Different hardware per role](#different-hardware-per-role)
 - [Addressing a role](#addressing-a-role)
@@ -99,7 +100,7 @@ spec:
     name: Qwen/Qwen2.5-72B-Instruct
   engine:                                # vLLM | SGLang; this example walks the vLLM pair
     name: vLLM
-    version: "0.29.0"
+    image: <a runner image your cluster can pull>   # required; you name the tag
   router:
     name: llm-d-router                 # required to pair the roles; takes either engine
   roles:
@@ -231,6 +232,38 @@ picker's gRPC server, whose only client is the proxy container **in the same Pod
 `127.0.0.1`; `--metrics-endpoint-auth` guards the picker's own `/metrics`, scraped in-cluster. So
 there is no field for either, and neither is reachable through `extraArgs`.
 
+## Counting tokens through the engine
+
+**A deployment that declares no `Encode` role needs `--enable-scale-out` on its vLLM roles,
+behind `llm-d-router`.** The router counts prompt tokens by calling the engine: it POSTs
+`/v1/chat/completions/render`. vLLM serves that endpoint only under `--enable-scale-out`. The
+operator does not render the flag, and admission does not check for it: set the flag in each
+role's `extraArgs`.
+
+What the declared shape decides:
+
+| Declared roles | How the router counts tokens | `--enable-scale-out` needed | What the render gives today |
+| --- | --- | --- | --- |
+| `Encode`, `Prefill`, `Decode` | the router's built-in estimator; no HTTP call | no | no flag, which is correct |
+| `Prefill`, `Decode` | a call to the engine's render endpoint | yes | nothing |
+| a single `Server` role | a call to the engine's render endpoint | yes | nothing |
+
+**Without the flag the failure is silent.** Measured on vLLM-Ascend `0.30.0rc1`: the render call
+answers `404`, no token count comes back, and the prefix decider routes every request to the
+decoder alone. Requests return `200`, the prefill stage receives nothing, no KV moves, and no
+error is reported. The render calls do appear in the router's access log, so the stage counts
+name the gap ([what the counts showed](/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/index.md#stage-execution-verification)).
+
+**The floor is vLLM `0.30.0` and vllm-ascend `0.30.0rc1`.** Earlier releases lack
+`--enable-scale-out`, and at vLLM-Ascend `0.23.0` the render route itself is absent.
+
+Setting the flag registers the render, derender and generate endpoints; it changes nothing else
+about the engine. The flag and the endpoint are vLLM's. What SGLang behind `llm-d-router`, and
+any shape behind the other two routers, use to count tokens was not measured here.
+
+[Engine Versions](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md#the-minimum-per-shape) carries the same floors as a
+requirement on the vLLM and vLLM-Ascend rows.
+
 ## Direct transfer transport
 
 The point-to-point leg renders Mooncake's `tcp` when the API field is unset:
@@ -280,7 +313,8 @@ deployment with no `kvCache` block still has this leg to configure.
 
 Editing it [turns over every role](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior): the value renders
 into both ends' arguments, so every role's replicas turn over one at a time. A prefiller and a decoder
-can disagree on the protocol until both converge, the same window an `engine.version` edit opens.
+can disagree on the protocol until both converge, the same window an edit to the image a role runs
+(`engine.image` or `roles[].image`) opens.
 
 The same shared-document rule reaches the parallel degrees on the Ascend leg. The pair turns over
 together; see [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior) for the mechanism. Until both roles
