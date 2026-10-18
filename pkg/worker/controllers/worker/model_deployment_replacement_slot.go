@@ -1061,8 +1061,8 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 			seat := modelDeploymentPodMemberIndex(member)
 			if seat >= len(want) || !modelDeploymentPodMatchesCurrency(member, want[seat], minRenderVersion) {
 				broken = true
-			}
-			if len(standing) < len(want) && modelDeploymentPodRenderVersion(member) != modelDeploymentPodRenderVersion(want[seat]) {
+			} else if len(standing) < len(want) &&
+				modelDeploymentPodRenderVersion(member) != modelDeploymentPodRenderVersion(want[seat]) {
 				broken = true
 			}
 		}
