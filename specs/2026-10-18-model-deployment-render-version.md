@@ -179,7 +179,7 @@ Pre-compute the role-template's explicit hash inside [`renderModelDeploymentPodT
     - Reflection completeness test verifies every field on `ModelDeploymentSpec` and `ModelDeploymentRole` is accounted for in the canonical spec-hash input or explicitly excluded (`Replicas`).
   - Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -tags 'goccy netgo' -race -count=1 -run 'TestModelDeploymentPodSpecHash|TestRenderModelDeploymentPod' ./pkg/worker/controllers/worker`
 
-- [ ] **T2: Re-baseline golden render fixtures and add the `version.json` render-version tripwire test**
+- [x] **T2: Re-baseline golden render fixtures and add the `version.json` render-version tripwire test**
   - Blocked by: [T1]
   - Owns: `pkg/worker/controllers/worker/model_deployment_legacy_render_test.go`, `pkg/worker/controllers/worker/testdata/legacy-render/*`
   - Acceptance:
