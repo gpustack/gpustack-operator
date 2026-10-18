@@ -197,7 +197,7 @@ Pre-compute the role-template's explicit hash inside [`renderModelDeploymentPodT
     - `observeModelDeploymentRollout` reports the count of replicas running on older compatible render versions, the current `modelDeploymentRenderVersion`, and `modeldeployment.gpustack.ai/min-render-version` in the `ReplicasUpToDate` (`True` / `UpToDate`) condition message.
   - Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -tags 'goccy netgo' -race -count=1 -run 'TestModelDeploymentRollout|TestObserveModelDeploymentRollout|TestModelDeploymentReplacement' ./pkg/worker/controllers/worker`
 
-- [ ] **T4: Add controller convergence, replacement-slot, status, and multi-version coexistence tests**
+- [x] **T4: Add controller convergence, replacement-slot, status, and multi-version coexistence tests**
   - Blocked by: [T2, T3]
   - Owns: `pkg/worker/controllers/worker/model_deployment_test.go`, `pkg/worker/controllers/worker/model_deployment_rollout_test.go`, `pkg/worker/controllers/worker/model_deployment_replacement_slot_test.go`
   - Acceptance:

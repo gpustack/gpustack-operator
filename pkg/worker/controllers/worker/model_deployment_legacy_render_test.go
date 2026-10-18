@@ -429,4 +429,3 @@ func legacyRenderCluster(instTypes ...*worker.InstanceType) []ctrlcli.Object {
 		&node.RuntimeClass{ObjectMeta: meta.ObjectMeta{Name: "ascend"}},
 	)
 }
-

@@ -1880,4 +1880,3 @@ func modelDeploymentReplicaRenderVersionUniform(members []*core.Pod) bool {
 
 	return true
 }
-

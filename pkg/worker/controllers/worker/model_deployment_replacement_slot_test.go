@@ -461,3 +461,80 @@ func TestCleanReplacementSlot_ASlotWrittenBeforeTheWorkloadWasSeenStillReleasesI
 	assert.ElementsMatch(t, []string{"someone-elses", "orphan"}, names,
 		"only the Workload owned by a captured member is released")
 }
+
+// TestReplacementRenderVersion_PartialGroupAndSlotCurrency verifies that replacement slots never
+// top up a partial group across render versions, accept complete groups at any render version
+// meeting the deployment's floor, and supersede in-flight replacements whose render version falls
+// below the floor or whose members disagree on render version.
+func TestReplacementRenderVersion_PartialGroupAndSlotCurrency(t *testing.T) {
+	ctx := context.Background()
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	want := replicaMembersAt(t, md, "server", 0)
+	require.Len(t, want, 2)
+
+	t.Run("partial group is fillable only when standing member carries the current render version", func(t *testing.T) {
+		standingCurrent := want[0].DeepCopy()
+		cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType(), standingCurrent)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+		slot := modelDeploymentReplacementSlot{Role: "server", Ordinal: 0}
+
+		missing, fillable, err := r.modelDeploymentPartialGroupMembers(ctx, md, slot, want)
+		require.NoError(t, err)
+		assert.True(t, fillable)
+		require.Len(t, missing, 1)
+		assert.Equal(t, want[1].Name, missing[0].Name)
+
+		standingOlder := want[0].DeepCopy()
+		standingOlder.Annotations[modelDeploymentRenderVersionAnnotation] = "99"
+		cliOlder := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType(), standingOlder)
+		rOlder := &ModelDeploymentReconciler{Client: cliOlder, APIReader: cliOlder}
+
+		missing, fillable, err = rOlder.modelDeploymentPartialGroupMembers(ctx, md, slot, want)
+		require.NoError(t, err)
+		assert.False(t, fillable, "a standing member on another render version must not be topped up into a mixed group")
+		assert.Empty(t, missing)
+	})
+
+	t.Run("replacementMembersMatch enforces render-version floor and uniformity", func(t *testing.T) {
+		standing := []*core.Pod{want[0].DeepCopy(), want[1].DeepCopy()}
+		assert.Empty(t, replacementMembersMatch(want, standing, 1))
+		assert.Contains(t, replacementMembersMatch(want, standing, 2), "does not carry the render")
+
+		mixed := []*core.Pod{want[0].DeepCopy(), want[1].DeepCopy()}
+		mixed[0].Annotations[modelDeploymentRenderVersionAnnotation] = "1"
+		mixed[1].Annotations[modelDeploymentRenderVersionAnnotation] = "2"
+		assert.Contains(t, replacementMembersMatch(want, mixed, 1), "carry different render versions")
+	})
+
+	t.Run("resolveReplacementSlot keeps compatible complete replacement and cleans up below-floor replacement", func(t *testing.T) {
+		m0 := want[0].DeepCopy()
+		m1 := want[1].DeepCopy()
+		slot := modelDeploymentReplacementSlot{
+			Role:              "server",
+			Ordinal:           0,
+			Phase:             modelDeploymentReplacementWaitingForAdmission,
+			MemberHashes:      replacementRenderHashes(want),
+			CurrentMemberUIDs: []types.UID{m0.UID, m1.UID},
+		}
+		cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType(), m0, m1)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+
+		progress, err := r.resolveReplacementSlot(ctx, getModelDeployment(t, cli), slot, &md.Spec.Roles[0], want)
+		require.NoError(t, err)
+		assert.Equal(t, modelDeploymentReplacementWaitingForAdmission, progress.slot.Phase,
+			"complete replacement meeting the floor stays waiting for admission")
+
+		// Dropping m0's render version below the floor (0 < 1) supersedes the in-flight replacement.
+		m0Stale := m0.DeepCopy()
+		delete(m0Stale.Annotations, modelDeploymentRenderVersionAnnotation)
+		require.NoError(t, cli.Update(ctx, m0Stale))
+
+		progress, err = r.resolveReplacementSlot(ctx, getModelDeployment(t, cli), progress.slot, &md.Spec.Roles[0], want)
+		require.NoError(t, err)
+		assert.Equal(t, modelDeploymentReplacementCleanup, progress.slot.Phase,
+			"replacement whose member falls below the render-version floor transitions to Cleanup")
+		assert.True(t, progress.requeue)
+	})
+}

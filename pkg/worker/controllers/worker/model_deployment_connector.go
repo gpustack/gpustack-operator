@@ -807,7 +807,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 			PublishKVEvents:     in.PublishKVEvents,
 			KVEventsHost:        in.KVEventsHost,
 			RoutingSidecar:      in.RoutingSidecar,
-			Disaggregated:       in.Disaggregated,
+			Disaggregated:       in.Disaggregated && (role == inject.RolePrefill || role == inject.RoleDecode),
 			Parallelism:         parallelism,
 			EncoderCache:        in.EncoderCache,
 			EncoderURLs:         in.EncoderURLs,
