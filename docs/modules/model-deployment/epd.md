@@ -57,7 +57,7 @@ Admission accepts only the combinations below. Anything else is refused when the
 |---|---|---|---|---|---|
 | `llm-d-router` | `vLLM` | `nvidia` | `ECCPUConnector` over NIXL | `0.30.0` | Verified on 4 × NVIDIA L40S |
 | `llm-d-router` | `vLLM` | `amd` (ROCm) | `ECCPUConnector` over NIXL | `0.30.0` | Not verified |
-| `llm-d-router` | `vLLM` | `ascend` | `ECExampleConnector` over a shared volume | `0.30.0rc1` | Not verified |
+| `llm-d-router` | `vLLM` | `ascend` | `ECExampleConnector` over a shared volume | `0.30.0rc1` | Verified on Ascend 910B2 |
 | `vllm-router` | `vLLM` | `nvidia` | `ECCPUConnector` over NIXL | `0.30.0` | Verified on 4 × NVIDIA L40S |
 | `vllm-router` | `vLLM` | `amd` (ROCm) | `ECCPUConnector` over NIXL | `0.30.0` | Not verified |
 | `llm-d-router` | `SGLang` | `nvidia` | `encoder-urls` | `0.5.10` | Verified on 2 × NVIDIA L40S |
@@ -69,7 +69,7 @@ Admission accepts only the combinations below. Anything else is refused when the
 
 A verified row served a multimodal request through the router on the hardware named. A row marked
 Not verified is admitted from the design and has not run on that hardware. Issue
-[#763](https://github.com/gpustack/gpustack-operator/issues/763) tracks the SGLang AMD and Ascend rows.
+[#763](https://github.com/gpustack/gpustack-operator/issues/763) tracks the rows still unrun: the AMD ROCm rows and the SGLang Ascend rows.
 The `Minimum version` column is a requirement on the image you name, not an admission check:
 nothing reads a version, so an image below it is applied as written.
 
@@ -86,6 +86,11 @@ The Ascend row uses `ECExampleConnector` over a shared directory, because Ascend
 have no NIXL copy path. Its floor, `0.30.0rc1`, is the first vllm-ascend release that starts
 `--mm-encoder-only` cleanly and pins the encoder-cache load to each rank's own NPU under tensor
 parallelism.
+
+The row ran on a two-node Ascend 910B2 cluster with vllm-ascend `0.30.0rc1` behind `llm-d-router`
+and `Qwen2.5-VL-7B-Instruct`. `case-121.sh` passed 15 of 15 twice, and its multimodal probe
+returned `200` with generated text through the router Service. The plain deployment Service selects
+the prefiller and returns `400`, so a probe must use the router Service.
 
 Runner tags carrying that release exist for 910B — `cann9.1-910b-vllm0.30.0` is published and
 reachable. A variant with no published tag for it names its own image in `roles[].image`.
