@@ -449,9 +449,9 @@ func (r *ModelDeploymentReconciler) modelDeploymentPartialGroupMembers(
 	}
 
 	// Every member standing must be seated on a seat this render has, and must carry this render's
-	// own fingerprint for it. The group being short is expected here; the group being made of
-	// something else is not.
-	seated := make(map[int]string, len(standing))
+	// own fingerprint and render version for it. The group being short is expected here; the group
+	// being made of something else is not.
+	seated := make(map[int]*core.Pod, len(standing))
 	for _, member := range standing {
 		seat := modelDeploymentPodMemberIndex(member)
 		if seat >= len(want) {
@@ -460,11 +460,13 @@ func (r *ModelDeploymentReconciler) modelDeploymentPartialGroupMembers(
 		if _, duplicated := seated[seat]; duplicated {
 			return nil, false, nil
 		}
-		seated[seat] = member.Annotations[modelDeploymentPodSpecHashAnnotation]
+		seated[seat] = member
 	}
 	for index, rendered := range want {
-		if carried, present := seated[index]; present &&
-			carried != rendered.Annotations[modelDeploymentPodSpecHashAnnotation] {
+		if member, present := seated[index]; present &&
+			(member.Annotations[modelDeploymentPodSpecHashAnnotation] !=
+				rendered.Annotations[modelDeploymentPodSpecHashAnnotation] ||
+				modelDeploymentPodRenderVersion(member) != modelDeploymentPodRenderVersion(rendered)) {
 			return nil, false, nil
 		}
 	}
@@ -603,7 +605,7 @@ func (r *ModelDeploymentReconciler) replacementAdmitted(
 		standing = append(standing, &members[i])
 	}
 
-	if reason := replacementMembersMatch(want, standing); reason != "" {
+	if reason := replacementMembersMatch(want, standing, modelDeploymentEffectiveMinRenderVersion(md)); reason != "" {
 		return false, reason, nil
 	}
 
@@ -898,10 +900,9 @@ func resourceQuantityListEqual(got, want core.ResourceList) bool {
 	return true
 }
 
-// replacementMembersMatch reports whether a standing group is the render this pass produced, and
-// names the first difference. The rendered fingerprint covers the template and the request
-// together, so a replica rebuilt from any other configuration does not match.
-func replacementMembersMatch(want, standing []*core.Pod) string {
+// replacementMembersMatch reports whether a standing group matches the desired spec and render
+// version requirements, and names the first difference.
+func replacementMembersMatch(want, standing []*core.Pod, minRenderVersion int) string {
 	if len(standing) != len(want) {
 		return fmt.Sprintf("the replica holds %d of the %d members it is rendered at",
 			len(standing), len(want))
@@ -921,10 +922,13 @@ func replacementMembersMatch(want, standing []*core.Pod) string {
 		if !seated {
 			return fmt.Sprintf("no member sits at index %d", index)
 		}
-		if member.Annotations[modelDeploymentPodSpecHashAnnotation] !=
-			rendered.Annotations[modelDeploymentPodSpecHashAnnotation] {
+		if !modelDeploymentPodMatchesCurrency(member, rendered, minRenderVersion) {
 			return fmt.Sprintf("member %s does not carry the render this pass produced", member.Name)
 		}
+	}
+
+	if !modelDeploymentReplicaRenderVersionUniform(standing) {
+		return "the replica's members carry different render versions"
 	}
 
 	return ""
@@ -994,6 +998,7 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 ) (modelDeploymentReplacementProgress, error) {
 	logger := ctrllog.FromContext(ctx)
 	progress := modelDeploymentReplacementProgress{slot: slot}
+	minRenderVersion := modelDeploymentEffectiveMinRenderVersion(md)
 
 	// A REPLICA COUNT THAT NO LONGER DECLARES THIS ORDINAL CANCELS THE SLOT, and the cancellation
 	// runs through the same cleanup: the members and the Workload the slot captured still have to
@@ -1053,6 +1058,16 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 		for _, member := range standing {
 			present.Insert(member.UID)
 			broken = broken || member.DeletionTimestamp != nil
+			seat := modelDeploymentPodMemberIndex(member)
+			if seat >= len(want) || !modelDeploymentPodMatchesCurrency(member, want[seat], minRenderVersion) {
+				broken = true
+			} else if len(standing) < len(want) &&
+				modelDeploymentPodRenderVersion(member) != modelDeploymentPodRenderVersion(want[seat]) {
+				broken = true
+			}
+		}
+		if !modelDeploymentReplicaRenderVersionUniform(standing) {
+			broken = true
 		}
 		for _, uid := range slot.CurrentMemberUIDs {
 			broken = broken || !present.Has(uid)

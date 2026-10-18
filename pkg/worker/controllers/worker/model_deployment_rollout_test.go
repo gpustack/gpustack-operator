@@ -53,6 +53,13 @@ func TestModelDeploymentRollout_ReportsWhatThePassDecided(t *testing.T) {
 			wantMessage: "every replica matches what this pass rendered",
 		},
 		{
+			name:        "every replica matches the declared spec with one running on an older compatible render version",
+			rollout:     modelDeploymentRollout{accounted: 2, olderRenderVersion: 1},
+			wantStatus:  "True",
+			wantReason:  modelDeploymentReasonUpToDate,
+			wantMessage: "every replica matches the declared spec (1 running on an older compatible render version; current render version is 1, set annotation modeldeployment.gpustack.ai/min-render-version=1 to roll them)",
+		},
+		{
 			name:        "an ordinary rollout is under way",
 			rollout:     modelDeploymentRollout{accounted: 2, outdated: 2},
 			wantStatus:  "False",

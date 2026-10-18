@@ -1,0 +1,52 @@
+{
+  "renderVersion": 1,
+  "minSupportedRenderVersion": 1,
+  "fixtures": {
+    "pair-ascend-llm-d": {
+      "podSpecHashes": [
+        "a7e5080f63a1644be91875c7ace4b998f3c976184382cdb961a510959aaa8864",
+        "18d686bcd0890ddf4fef4cd4e78d2a551f314de261410be8fa77742807978165"
+      ],
+      "digest": "6b8779c20c53912ac18563cc9674d1fe5f6c9bd944dbab75604d161332c6d737"
+    },
+    "pair-llm-d": {
+      "podSpecHashes": [
+        "1804d883b289dd436abc0128b5e05e2898aac260c0ca7206b88e31898d57a3b9",
+        "47461bd22436ab8714a107105df8162c6a5ed92bf15555c1f642585c74572e21"
+      ],
+      "digest": "e3da50fa17b1eedc9de0e9c708fe01b3420bea2522657862731c06d397ecfc7b"
+    },
+    "pair-lone": {
+      "podSpecHashes": [
+        "90e7371e146f2cde16f638876d6285b6a53d61b5dafa44b10948f16650bfa3a8",
+        "aa0d008ae187a42bf0830c587b495c0011936b58393b142763744a6436bc16e4"
+      ],
+      "digest": "02c0799664323f11ba26f2f86288e1cfbaefb7072494614cfb34dc075771d3c9"
+    },
+    "pair-shared-pool": {
+      "podSpecHashes": [
+        "63bb86eaf21b252303c04f77136406d3ce63ec87a2571671e3d66b9170f37c12",
+        "0efbf42490ddeea1b7c0e99252126b604bb32d734e32b1421a2536d3ff029487"
+      ],
+      "digest": "fe14b1b34ff2bde190dbef12328e2bc1dcf7285d86ba5e1df5de227293964685"
+    },
+    "server-command": {
+      "podSpecHashes": [
+        "97a24f04ba9eeccb2244d14f00f56dcc391975421740c0a81a8c5097c2f0ab45"
+      ],
+      "digest": "63cfefee80766865d07ab74941b8fc3a0d3243d11ae04327c5b3eef59341cc75"
+    },
+    "server-defaulted": {
+      "podSpecHashes": [
+        "c10cf7e545174bd90f46bf7d605fa9b87a278fdece1fe9bd0a6160b1574312f2"
+      ],
+      "digest": "465b707fd7968907769c862e6acafb259bc08a793d3bf1caea628354f759364e"
+    },
+    "server-explicit": {
+      "podSpecHashes": [
+        "c10cf7e545174bd90f46bf7d605fa9b87a278fdece1fe9bd0a6160b1574312f2"
+      ],
+      "digest": "465b707fd7968907769c862e6acafb259bc08a793d3bf1caea628354f759364e"
+    }
+  }
+}

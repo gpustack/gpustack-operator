@@ -3,12 +3,15 @@ package worker
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	node "k8s.io/api/node/v1"
@@ -166,30 +169,70 @@ func legacyRenderPodsJSON(t *testing.T, pods []*core.Pod) string {
 	return rendered.String()
 }
 
+type legacyRenderFixtureEntry struct {
+	PodSpecHashes []string `json:"podSpecHashes"`
+	Digest        string   `json:"digest"`
+}
+
+type legacyRenderVersionManifest struct {
+	RenderVersion             int                                 `json:"renderVersion"`
+	MinSupportedRenderVersion int                                 `json:"minSupportedRenderVersion"`
+	Fixtures                  map[string]legacyRenderFixtureEntry `json:"fixtures"`
+}
+
+func legacyRenderEntryForPods(pods []*core.Pod, rendered string) legacyRenderFixtureEntry {
+	hashes := make([]string, 0, len(pods))
+	for i := range pods {
+		hashes = append(hashes, pods[i].Annotations[modelDeploymentPodSpecHashAnnotation])
+	}
+	sum := sha256.Sum256([]byte(rendered))
+	return legacyRenderFixtureEntry{
+		PodSpecHashes: hashes,
+		Digest:        hex.EncodeToString(sum[:]),
+	}
+}
+
 // checkLegacyRenderFixture compares a shape's rendered Pods against its recorded fixture, byte for
 // byte, and names the file and a line diff when they disagree. With -update it records instead.
-func checkLegacyRenderFixture(t *testing.T, name string, pods []*core.Pod) {
+func checkLegacyRenderFixture(
+	t *testing.T, name string, pods []*core.Pod, manifest *legacyRenderVersionManifest,
+) {
 	t.Helper()
 
 	rendered := legacyRenderPodsJSON(t, pods)
+	entry := legacyRenderEntryForPods(pods, rendered)
 
 	path := filepath.Join(legacyRenderDir, name+".json")
 	if *legacyRenderUpdate {
 		require.NoError(t, os.MkdirAll(legacyRenderDir, 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(rendered), 0o644))
+		manifest.Fixtures[name] = entry
 		return
 	}
 
 	recorded, err := os.ReadFile(path)
 	require.NoError(t, err, "the recording is the contract; regenerate it with -update")
+	if string(recorded) != rendered && manifest.RenderVersion == modelDeploymentRenderVersion {
+		require.Equal(t, string(recorded), rendered,
+			"rendered Pod bytes for %s changed while modelDeploymentRenderVersion (%d) matches %s; "+
+				"bump modelDeploymentRenderVersion in model_deployment_render.go before running -update",
+			path, modelDeploymentRenderVersion, filepath.Join(legacyRenderDir, "version.json"))
+	}
 	require.Equal(t, string(recorded), rendered,
 		"the render of %s moved; re-baseline deliberately with -update", path)
+	assert.Equal(t, manifest.Fixtures[name], entry,
+		"the version.json entry for %s is out of sync; regenerate with -update", name)
 }
 
 // TestModelDeploymentLegacyRender_GoldenPods records and then freezes the rendered Pods of the
 // seven legacy shapes: the deployment with no Encode role, in every configuration that reaches a
 // distinct branch of the renderer.
 func TestModelDeploymentLegacyRender_GoldenPods(t *testing.T) {
+	require.GreaterOrEqual(t, modelDeploymentMinSupportedRenderVersion, 1,
+		"modelDeploymentMinSupportedRenderVersion must be at least 1")
+	require.LessOrEqual(t, modelDeploymentMinSupportedRenderVersion, modelDeploymentRenderVersion,
+		"modelDeploymentMinSupportedRenderVersion must not exceed modelDeploymentRenderVersion")
+
 	settingtest.MergeDelegatedSettings(t, map[string]string{
 		"model-deployment-routing-sidecar-image": legacyRenderPinnedSidecarImage,
 		"container-registry":                     "",
@@ -272,6 +315,22 @@ func TestModelDeploymentLegacyRender_GoldenPods(t *testing.T) {
 		},
 	}
 
+	manifestPath := filepath.Join(legacyRenderDir, "version.json")
+	manifest := legacyRenderVersionManifest{
+		RenderVersion:             modelDeploymentRenderVersion,
+		MinSupportedRenderVersion: modelDeploymentMinSupportedRenderVersion,
+		Fixtures:                  make(map[string]legacyRenderFixtureEntry, len(cases)),
+	}
+	if !*legacyRenderUpdate {
+		rawManifest, err := os.ReadFile(manifestPath)
+		require.NoError(t, err, "the version manifest is the contract; regenerate it with -update")
+		require.NoError(t, json.Unmarshal(rawManifest, &manifest))
+		assert.Equal(t, modelDeploymentRenderVersion, manifest.RenderVersion,
+			"modelDeploymentRenderVersion changed without updating %s; run with -update", manifestPath)
+		assert.Equal(t, modelDeploymentMinSupportedRenderVersion, manifest.MinSupportedRenderVersion,
+			"modelDeploymentMinSupportedRenderVersion changed without updating %s; run with -update", manifestPath)
+	}
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newLegacyRenderDeployment()
@@ -281,8 +340,48 @@ func TestModelDeploymentLegacyRender_GoldenPods(t *testing.T) {
 			pods := renderLegacyDeploymentPods(t, md, objs, tc.connection)
 			require.NotEmpty(t, pods)
 
-			checkLegacyRenderFixture(t, tc.name, pods)
+			checkLegacyRenderFixture(t, tc.name, pods, &manifest)
 		})
+	}
+
+	if *legacyRenderUpdate {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetIndent("", "  ")
+		require.NoError(t, enc.Encode(manifest))
+		require.NoError(t, os.WriteFile(manifestPath, buf.Bytes(), 0o644))
+	}
+}
+
+// TestModelDeploymentLegacyRender_DynamicRenderChangeKeepsPodSpecHash proves the separation between
+// pod-spec-hash and render-version: changing an implicit operator rendering detail (such as the
+// default routing sidecar image setting) changes the rendered Pod bytes while keeping pod-spec-hash
+// identical.
+func TestModelDeploymentLegacyRender_DynamicRenderChangeKeepsPodSpecHash(t *testing.T) {
+	render := func(sidecarImage string) ([]*core.Pod, string) {
+		settingtest.MergeDelegatedSettings(t, map[string]string{
+			"model-deployment-routing-sidecar-image": sidecarImage,
+			"container-registry":                     "",
+			"container-namespace":                    "",
+		})
+		md := newLegacyRenderDeployment()
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		md.Spec.Roles = legacyRenderPairRoles("h20-8x", legacyRenderPinnedEngineImage)
+		pods := renderLegacyDeploymentPods(t, md, legacyRenderCluster(newRenderInstanceType()), nil)
+		return pods, legacyRenderPodsJSON(t, pods)
+	}
+
+	beforePods, beforeJSON := render(legacyRenderPinnedSidecarImage)
+	afterPods, afterJSON := render("gpustack.example/disagg-sidecar:v0.99.0-next")
+
+	assert.NotEqual(t, beforeJSON, afterJSON,
+		"changing the routing sidecar image setting must change the rendered decode Pod bytes")
+	require.Len(t, beforePods, len(afterPods))
+	for i := range beforePods {
+		assert.Equal(t,
+			beforePods[i].Annotations[modelDeploymentPodSpecHashAnnotation],
+			afterPods[i].Annotations[modelDeploymentPodSpecHashAnnotation],
+			"role %d pod-spec-hash must stay unchanged when only an implicit operator setting moves", i)
 	}
 }
 

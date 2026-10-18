@@ -68,10 +68,25 @@ const (
 	// already describes, and a replica that leaves loses its cached blocks to its siblings.
 	modelDeploymentLabelKeyRoleKind = "modeldeployment." + systemname.LabelPrefix + "role-kind"
 
-	// modelDeploymentPodSpecHashAnnotation carries the fingerprint of the Pod a role's spec renders
-	// to. The rollout is recreate rather than surge, so this is the whole of how a replica built
-	// before a spec change is told from one built after it.
+	// modelDeploymentPodSpecHashAnnotation carries the fingerprint of the explicit spec inputs and
+	// external resource bindings a replica member was built from.
 	modelDeploymentPodSpecHashAnnotation = "modeldeployment." + systemname.LabelPrefix + "pod-spec-hash"
+	// modelDeploymentRenderVersionAnnotation records the operator render version a replica's Pod
+	// was synthesized under.
+	modelDeploymentRenderVersionAnnotation = "modeldeployment." + systemname.LabelPrefix + "render-version"
+	// modelDeploymentMinRenderVersionAnnotation is the per-deployment annotation that raises the
+	// minimum acceptable render version for running replicas.
+	modelDeploymentMinRenderVersionAnnotation = "modeldeployment." + systemname.LabelPrefix + "min-render-version"
+	// modelDeploymentTemplateBindingHashAnnotation carries the template-level external binding digest
+	// from renderModelDeploymentPodTemplate into stampModelDeploymentPod and is stripped when stamped.
+	modelDeploymentTemplateBindingHashAnnotation = "modeldeployment." + systemname.LabelPrefix + "template-binding-hash"
+
+	// modelDeploymentRenderVersion is the current operator Pod rendering baseline. Bump this
+	// constant whenever a change modifies the rendered Pod output of any ModelDeployment shape.
+	modelDeploymentRenderVersion = 1
+	// modelDeploymentMinSupportedRenderVersion is the lowest render version that remains compatible
+	// with the current controller without replacing running Pods.
+	modelDeploymentMinSupportedRenderVersion = 1
 
 	// modelDeploymentDefaultPort is the port a replica serves on when the role names
 	// none, and it is RENDERED INTO THE ENGINE'S OWN LISTEN ARGUMENT rather than left to the engine
@@ -662,7 +677,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	// command line gets no part of the connector, and half of it would be worse than none.
 	if !takeOver && len(in.Connector.PodAnnotations) > 0 {
 		if pod.Annotations == nil {
-			pod.Annotations = make(map[string]string, len(in.Connector.PodAnnotations)+1)
+			pod.Annotations = make(map[string]string, len(in.Connector.PodAnnotations)+2)
 		}
 		for k, v := range in.Connector.PodAnnotations {
 			pod.Annotations[k] = v
@@ -670,12 +685,16 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	}
 	if !takeOver {
 		if pod.Annotations == nil {
-			pod.Annotations = make(map[string]string, 3)
+			pod.Annotations = make(map[string]string, 5)
 		}
 		for key, value := range modelDeploymentMetricsAnnotations(enginePort, scheme) {
 			pod.Annotations[key] = value
 		}
 	}
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string, 1)
+	}
+	pod.Annotations[modelDeploymentTemplateBindingHashAnnotation] = modelDeploymentBindingHash(in, *ress)
 
 	return pod, nil
 }
@@ -744,10 +763,7 @@ func modelDeploymentMetricsAnnotations(port int32, scheme core.URIScheme) map[st
 }
 
 // stampModelDeploymentPod puts the Kueue group metadata on a rendered replica and then writes the
-// spec-hash fingerprint, in that order. The fingerprint covers the labels and annotations it finds
-// on the Pod, so writing it before the group metadata would leave it blind to a change that moves
-// only the group -- a replica whose role was renamed would keep its old fingerprint and never be
-// seen as outdated.
+// explicit spec-hash fingerprint and the operator render-version annotation.
 func stampModelDeploymentPod(
 	pod *core.Pod, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 	ordinal, member int,
@@ -779,10 +795,6 @@ func stampModelDeploymentPod(
 
 	// The Kueue group metadata, which is what makes a replica's admission unit that replica alone:
 	// the group name is derived per (role, ordinal), so each Pod joins its own one-member group.
-	// It goes on before the fingerprint below, for the same reason the connector's annotations do:
-	// the group name and the ordinal are two of the values a spec change or a scale moves, and a
-	// fingerprint blind to them would leave every replica declaring a membership the deployment no
-	// longer asks for.
 	//
 	// The labels and the annotations are applied together because the group's own type returns them
 	// together -- a Pod carrying the membership label without the total count joins a group whose
@@ -792,18 +804,17 @@ func stampModelDeploymentPod(
 		pod.Labels[k] = v
 	}
 	if pod.Annotations == nil {
-		pod.Annotations = make(map[string]string, len(group.Annotations)+1)
+		pod.Annotations = make(map[string]string, len(group.Annotations)+2)
 	}
 	for k, v := range group.Annotations {
 		pod.Annotations[k] = v
 	}
 
-	// The fingerprint is written last so that it covers everything above it, and it is read back on
-	// every pass to decide whether a running replica was built from the current spec.
-	if pod.Annotations == nil {
-		pod.Annotations = make(map[string]string, 1)
-	}
-	pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentPodSpecHash(pod)
+	bindingHash := pod.Annotations[modelDeploymentTemplateBindingHashAnnotation]
+	delete(pod.Annotations, modelDeploymentTemplateBindingHashAnnotation)
+	pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentExplicitSpecHash(
+		md, role, ordinal, member, bindingHash)
+	pod.Annotations[modelDeploymentRenderVersionAnnotation] = strconv.Itoa(modelDeploymentRenderVersion)
 }
 
 // stampModelDeploymentRankEnv publishes the three facts a member needs to join its collective: who
@@ -1650,35 +1661,158 @@ func modelDeploymentUnitResources(
 	return cpu, ram, nil
 }
 
-// modelDeploymentPodSpecHash fingerprints a rendered replica.
-//
-// It covers the labels, the annotations and the spec, because a change to any of them is a change
-// the running replica does not have: the entrance label decides which pool admits it, and the
-// resource note decides which watch sees it. The hash annotation itself is stripped, so the
-// fingerprint never covers itself — a value that did would change on every render and roll the
-// deployment forever.
-func modelDeploymentPodSpecHash(pod *core.Pod) string {
-	annotations := make(map[string]string, len(pod.Annotations))
-	for k, v := range pod.Annotations {
-		if k == modelDeploymentPodSpecHashAnnotation {
-			continue
+type modelDeploymentInstanceTypeHashInput struct {
+	Name          string                               `json:"name,omitempty"`
+	Entrance      string                               `json:"entrance,omitempty"`
+	Manufacturer  string                               `json:"manufacturer,omitempty"`
+	Acceleratable bool                                 `json:"acceleratable,omitempty"`
+	UnitResources workercore.InstanceTypeUnitResources `json:"unitResources"`
+	Resources     workercore.InstanceResources         `json:"resources"`
+}
+
+type modelDeploymentRoleSiblingHashInput struct {
+	Name string                             `json:"name"`
+	Kind workercore.ModelDeploymentRoleKind `json:"kind,omitempty"`
+}
+
+// modelDeploymentBindingHash fingerprints the resolved external binding inputs that feed a role's
+// template render, excluding implicit operator defaults and cluster-wide settings.
+func modelDeploymentBindingHash(
+	in ModelDeploymentRenderInput, ress workercore.InstanceResources,
+) string {
+	takeOver := len(in.Role.Command) > 0
+
+	var instType modelDeploymentInstanceTypeHashInput
+	if in.InstanceType != nil {
+		instType = modelDeploymentInstanceTypeHashInput{
+			Name:          in.InstanceType.Name,
+			Entrance:      in.InstanceType.Status.Entrance,
+			Manufacturer:  in.InstanceType.Status.Detail.Manufacturer,
+			Acceleratable: in.InstanceType.Spec.Acceleratable,
+			UnitResources: in.InstanceType.Spec.UnitResources,
+			Resources:     ress,
 		}
-		annotations[k] = v
+	}
+
+	var artifact *ModelDeploymentArtifactRender
+	if in.Artifact != nil && (!takeOver || in.Artifact.Delivery != workercore.ModelDeploymentModelDeliveryEngine) {
+		a := *in.Artifact
+		a.Endpoint = ""
+		a.HTTPSProxy = ""
+		a.NoProxy = ""
+		artifact = &a
+	}
+
+	var connector *modelDeploymentConnectorBinding
+	var rawConnector *ModelDeploymentConnectorRender
+	var ecConnector string
+	if !takeOver {
+		if in.Connector.binding != nil {
+			connector = in.Connector.binding
+		} else if len(in.Connector.Args) > 0 || len(in.Connector.Env) > 0 ||
+			len(in.Connector.PodAnnotations) > 0 || len(in.Connector.Ports) > 0 ||
+			len(in.Connector.Volumes) > 0 || len(in.Connector.VolumeMounts) > 0 ||
+			in.Connector.KVTransfer || in.Connector.RoutingSidecar {
+			c := in.Connector
+			c.DefaultedEnv = nil
+			c.DefaultedArgs = nil
+			rawConnector = &c
+		}
+		if in.Connector.RoutingSidecar {
+			ecConnector = in.ECConnector
+		}
 	}
 
 	subject := struct {
-		Labels      map[string]string `json:"labels"`
-		Annotations map[string]string `json:"annotations"`
-		Spec        core.PodSpec      `json:"spec"`
+		InstanceType      modelDeploymentInstanceTypeHashInput `json:"instanceType"`
+		RuntimeClassName  string                               `json:"runtimeClassName,omitempty"`
+		InterfaceResource core.ResourceName                    `json:"interfaceResource,omitempty"`
+		Artifact          *ModelDeploymentArtifactRender       `json:"artifact,omitempty"`
+		Connector         *modelDeploymentConnectorBinding     `json:"connector,omitempty"`
+		RawConnector      *ModelDeploymentConnectorRender      `json:"rawConnector,omitempty"`
+		ECConnector       string                               `json:"ecConnector,omitempty"`
 	}{
-		Labels:      pod.Labels,
-		Annotations: annotations,
-		Spec:        pod.Spec,
+		InstanceType:      instType,
+		RuntimeClassName:  in.RuntimeClassName,
+		InterfaceResource: in.InterfaceResource,
+		Artifact:          artifact,
+		Connector:         connector,
+		RawConnector:      rawConnector,
+		ECConnector:       ecConnector,
 	}
 
-	// JSON rather than fmt: it orders map keys, so two renders of one spec hash identically. A
-	// marshal failure is not reachable for a PodSpec, and treating it as an empty digest would
-	// silently disable every rollout, so it is surfaced as a value nothing can match.
+	encoded, err := json.Marshal(subject)
+	if err != nil {
+		return "unhashable-binding-" + err.Error()
+	}
+
+	sum := sha256.Sum256(encoded)
+
+	return hex.EncodeToString(sum[:])
+}
+
+// modelDeploymentExplicitSpecHash fingerprints the explicit user-configured ModelDeployment and
+// role spec together with the resolved external binding digest and replica seat coordinates.
+func modelDeploymentExplicitSpecHash(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	ordinal, member int, bindingHash string,
+) string {
+	canonicalRole := *role.DeepCopy()
+	canonicalRole.Kind = ModelDeploymentEffectiveRoleKind(&canonicalRole)
+	if canonicalRole.Image == "" {
+		canonicalRole.Image = md.Spec.Engine.Image
+	}
+	if len(canonicalRole.Command) == 0 {
+		canonicalRole.TerminationGracePeriodSeconds = ptr.To(
+			modelDeploymentTerminationGracePeriodSeconds(&canonicalRole))
+	} else {
+		canonicalRole.ExtraArgs = nil
+	}
+	canonicalRole.Replicas = 0
+
+	siblings := make([]modelDeploymentRoleSiblingHashInput, 0, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		siblings = append(siblings, modelDeploymentRoleSiblingHashInput{
+			Name: md.Spec.Roles[i].Name,
+			Kind: ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i]),
+		})
+	}
+
+	var kvCache *workercore.ModelDeploymentKVCache
+	if md.Spec.KVCache != nil {
+		copied := *md.Spec.KVCache
+		copied.Connector = ""
+		kvCache = &copied
+	}
+
+	subject := struct {
+		Name        string                                `json:"name"`
+		Namespace   string                                `json:"namespace"`
+		Engine      string                                `json:"engine,omitempty"`
+		Model       workercore.ModelDeploymentModel       `json:"model"`
+		Router      *workercore.ModelDeploymentRouter     `json:"router,omitempty"`
+		KVCache     *workercore.ModelDeploymentKVCache    `json:"kvCache,omitempty"`
+		KVTransfer  *workercore.ModelDeploymentKVTransfer `json:"kvTransfer,omitempty"`
+		Role        workercore.ModelDeploymentRole        `json:"role"`
+		Siblings    []modelDeploymentRoleSiblingHashInput `json:"siblings,omitempty"`
+		Ordinal     int                                   `json:"ordinal"`
+		Member      int                                   `json:"member"`
+		BindingHash string                                `json:"bindingHash,omitempty"`
+	}{
+		Name:        md.Name,
+		Namespace:   md.Namespace,
+		Engine:      md.Spec.Engine.Name,
+		Model:       md.Spec.Model,
+		Router:      md.Spec.Router,
+		KVCache:     kvCache,
+		KVTransfer:  md.Spec.KVTransfer,
+		Role:        canonicalRole,
+		Siblings:    siblings,
+		Ordinal:     ordinal,
+		Member:      member,
+		BindingHash: bindingHash,
+	}
+
 	encoded, err := json.Marshal(subject)
 	if err != nil {
 		return "unhashable-" + err.Error()
@@ -1687,4 +1821,62 @@ func modelDeploymentPodSpecHash(pod *core.Pod) string {
 	sum := sha256.Sum256(encoded)
 
 	return hex.EncodeToString(sum[:])
+}
+
+// modelDeploymentEffectiveMinRenderVersion computes the minimum acceptable render version for a
+// deployment's running replicas, clamped to [modelDeploymentMinSupportedRenderVersion, modelDeploymentRenderVersion].
+func modelDeploymentEffectiveMinRenderVersion(md *workercore.ModelDeployment) int {
+	floor := modelDeploymentMinSupportedRenderVersion
+	if md == nil {
+		return floor
+	}
+	if raw := md.Annotations[modelDeploymentMinRenderVersionAnnotation]; raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > floor {
+			floor = min(v, modelDeploymentRenderVersion)
+		}
+	}
+
+	return floor
+}
+
+// modelDeploymentPodRenderVersion returns the integer render version stamped on a Pod, or 0 when
+// the annotation is absent or invalid.
+func modelDeploymentPodRenderVersion(pod *core.Pod) int {
+	if pod == nil {
+		return 0
+	}
+	v, err := strconv.Atoi(pod.Annotations[modelDeploymentRenderVersionAnnotation])
+	if err != nil || v <= 0 {
+		return 0
+	}
+
+	return v
+}
+
+// modelDeploymentPodMatchesCurrency reports whether a live Pod matches the desired explicit spec
+// hash and meets the deployment's minimum render version floor.
+func modelDeploymentPodMatchesCurrency(actual, desired *core.Pod, minRenderVersion int) bool {
+	if actual == nil || desired == nil {
+		return false
+	}
+
+	return actual.Annotations[modelDeploymentPodSpecHashAnnotation] ==
+		desired.Annotations[modelDeploymentPodSpecHashAnnotation] &&
+		modelDeploymentPodRenderVersion(actual) >= minRenderVersion
+}
+
+// modelDeploymentReplicaRenderVersionUniform reports whether all members of a replica carry the
+// same render version.
+func modelDeploymentReplicaRenderVersionUniform(members []*core.Pod) bool {
+	if len(members) <= 1 {
+		return true
+	}
+	first := modelDeploymentPodRenderVersion(members[0])
+	for _, member := range members[1:] {
+		if modelDeploymentPodRenderVersion(member) != first {
+			return false
+		}
+	}
+
+	return true
 }

@@ -96,6 +96,9 @@ type modelDeploymentRollout struct {
 	// replacements need are blocked. A role's replicas are counted in held or here, never in both, so
 	// the two together are never greater than outdated.
 	heldByWeights int
+	// olderRenderVersion counts current replicas whose render version is compatible with the
+	// deployment's floor but strictly older than modelDeploymentRenderVersion.
+	olderRenderVersion int
 }
 
 // observeModelDeploymentRollout folds one pass's rollout decision into the status.
@@ -225,6 +228,15 @@ func observeModelDeploymentRollout(
 				"and each replacement is created once its ordinal holds no member",
 			missing, strings.Join(missingWhere, "; ")))
 	default:
+		if rollout.olderRenderVersion > 0 {
+			ModelDeploymentConditionReplicasUpToDate.True(holder, modelDeploymentReasonUpToDate, fmt.Sprintf(
+				"every replica matches the declared spec (%d running on an older compatible render version; "+
+					"current render version is %d, set annotation %s=%d to roll them)",
+				rollout.olderRenderVersion, modelDeploymentRenderVersion,
+				modelDeploymentMinRenderVersionAnnotation, modelDeploymentRenderVersion))
+
+			return
+		}
 		ModelDeploymentConditionReplicasUpToDate.True(holder, modelDeploymentReasonUpToDate,
 			"every replica matches what this pass rendered")
 	}

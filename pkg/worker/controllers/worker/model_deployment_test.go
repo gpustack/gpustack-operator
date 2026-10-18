@@ -24,6 +24,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
@@ -33,6 +34,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
@@ -2611,4 +2613,255 @@ func endpointEligibilityCountingClient(
 	}
 
 	return newCountingModelDeploymentClient(w, objs...)
+}
+
+// TestModelDeploymentReconciler_RenderVersionFloorAndPredicate verifies that Pods with a missing
+// or below-floor render-version roll one per role per pass, while modelDeploymentEffectiveMinRenderVersion
+// clamps valid and invalid min-render-version annotations and modelDeploymentMinRenderVersionChangedPredicate
+// wakes the controller when the annotation changes.
+func TestModelDeploymentReconciler_RenderVersionFloorAndPredicate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("missing render-version annotation rolls replicas one per pass", func(t *testing.T) {
+		cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		standInForKueue(t, cli, true)
+
+		pods := replicaPods(t, cli)
+		require.Len(t, pods, 2)
+		for i := range pods {
+			stale := pods[i].DeepCopy()
+			delete(stale.Annotations, modelDeploymentRenderVersionAnnotation)
+			require.NoError(t, cli.Update(ctx, stale))
+		}
+
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		require.Len(t, replicaPods(t, cli), 1, "one replica without render-version is removed on the first pass")
+
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		require.Len(t, replicaPods(t, cli), 2)
+		standInForKueue(t, cli, true)
+
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		require.Len(t, replicaPods(t, cli), 1, "the second replica without render-version is removed on its turn")
+
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		rebuilt := replicaPods(t, cli)
+		require.Len(t, rebuilt, 2)
+		for i := range rebuilt {
+			assert.Equal(t, strconv.Itoa(modelDeploymentRenderVersion),
+				rebuilt[i].Annotations[modelDeploymentRenderVersionAnnotation])
+		}
+	})
+
+	t.Run("effective min render version clamps invalid and out-of-range annotation values", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			raw  string
+			want int
+		}{
+			{name: "absent", raw: "", want: modelDeploymentMinSupportedRenderVersion},
+			{name: "non-numeric", raw: "abc", want: modelDeploymentMinSupportedRenderVersion},
+			{name: "zero", raw: "0", want: modelDeploymentMinSupportedRenderVersion},
+			{name: "negative", raw: "-3", want: modelDeploymentMinSupportedRenderVersion},
+			{name: "above current clamped to current", raw: "999", want: modelDeploymentRenderVersion},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					if tc.raw != "" {
+						md.Annotations = map[string]string{modelDeploymentMinRenderVersionAnnotation: tc.raw}
+					}
+				})
+				assert.Equal(t, tc.want, modelDeploymentEffectiveMinRenderVersion(md))
+			})
+		}
+	})
+
+	t.Run("watch predicate wakes on min-render-version annotation change", func(t *testing.T) {
+		pred := modelDeploymentMinRenderVersionChangedPredicate()
+		oldMD := newRenderDeployment()
+		newMD := oldMD.DeepCopy()
+		assert.False(t, pred.Update(ctrlevent.UpdateEvent{ObjectOld: oldMD, ObjectNew: newMD}))
+
+		newMD.Annotations = map[string]string{modelDeploymentMinRenderVersionAnnotation: "1"}
+		assert.True(t, pred.Update(ctrlevent.UpdateEvent{ObjectOld: oldMD, ObjectNew: newMD}))
+	})
+}
+
+// TestModelDeploymentReconciler_MultiMemberRenderVersionUniformity verifies that a multi-member
+// replica with mixed render versions across its members is condemned as a whole, and that surplus
+// shedding on a duplicated seat keeps the member whose render version matches its ordinal peers.
+func TestModelDeploymentReconciler_MultiMemberRenderVersionUniformity(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("mixed render versions inside one ordinal condemn the whole replica", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Replicas = 1
+			md.Spec.Roles[0].ReplicaSize = 2
+		})
+		cli := newModelDeploymentClient(md, newRenderInstanceType())
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		standInForKueue(t, cli, true)
+
+		pods := replicaPods(t, cli)
+		require.Len(t, pods, 2)
+		mixed := pods[1].DeepCopy()
+		mixed.Annotations[modelDeploymentRenderVersionAnnotation] = "2"
+		require.NoError(t, cli.Update(ctx, mixed))
+
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		assert.Empty(t, replicaPods(t, cli), "a multi-member ordinal with mixed render versions turns over whole")
+	})
+
+	t.Run("surplus shedding preserves intra-ordinal render-version uniformity", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Replicas = 1
+			md.Spec.Roles[0].ReplicaSize = 2
+		})
+		m0 := renderStampedMember(t, md, 0, 0)
+		m0.Name = "qwen-server-r0-m0"
+		m0.Annotations[modelDeploymentRenderVersionAnnotation] = "1"
+
+		m1PeerMatch := renderStampedMember(t, md, 0, 1)
+		m1PeerMatch.Name = "qwen-server-r0-m1-a"
+		m1PeerMatch.Annotations[modelDeploymentRenderVersionAnnotation] = "1"
+
+		m1Higher := renderStampedMember(t, md, 0, 1)
+		m1Higher.Name = "qwen-server-r0-m1-z"
+		m1Higher.Annotations[modelDeploymentRenderVersionAnnotation] = "2"
+
+		want := map[int][]*core.Pod{0: {
+			renderStampedMember(t, md, 0, 0),
+			renderStampedMember(t, md, 0, 1),
+		}}
+		shed := modelDeploymentSurplusReplicas([]*core.Pod{m0, m1PeerMatch, m1Higher}, want, 1, 1)
+		require.Len(t, shed, 1)
+		assert.Equal(t, "qwen-server-r0-m1-z", shed[0].Name,
+			"surplus shedding keeps the occupant matching the peer member's render version")
+	})
+}
+
+// TestModelDeploymentReconciler_MultiRenderVersionCoexistence verifies that a deployment whose
+// running replicas carry compatible render versions alongside dynamically mutated container specs
+// keeps those replicas across settings toggles, scale-up, and scale-down, serves all of them
+// through the role Service, and rolls them when an explicit spec field changes.
+func TestModelDeploymentReconciler_MultiRenderVersionCoexistence(t *testing.T) {
+	ctx := context.Background()
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 2
+	})
+	md, router := retirementRouterFixture(md)
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
+
+	_, err := reconcileModelDeploymentRetiring(t, cli)
+	require.NoError(t, err)
+	standInForKueue(t, cli, true)
+
+	initial := replicaPods(t, cli)
+	require.Len(t, initial, 2)
+	const cohortMarker = "test.gpustack.ai/cohort"
+	for i := range initial {
+		live := initial[i].DeepCopy()
+		if modelDeploymentOrdinalOrFloor(live) == 0 {
+			// Simulate a replica rendered under an earlier operator baseline whose synthesized
+			// container env differed while its explicit spec hash matches.
+			live.Annotations[cohortMarker] = "v1-cohort"
+			live.Spec.Containers[0].Env = append(live.Spec.Containers[0].Env, core.EnvVar{
+				Name: "SYNTHESIZED_OPERATOR_FLAG", Value: "legacy",
+			})
+		} else {
+			live.Annotations[cohortMarker] = "v2-cohort"
+			live.Annotations[modelDeploymentRenderVersionAnnotation] = "2"
+		}
+		require.NoError(t, cli.Update(ctx, live))
+	}
+
+	// Flipping an operator Setting does not roll either cohort.
+	settingtest.MergeDelegatedSettings(t, map[string]string{
+		"instance-general-resources-overcommit": "true",
+	})
+	_, err = reconcileModelDeploymentRetiring(t, cli)
+	require.NoError(t, err)
+
+	afterSetting := replicaPods(t, cli)
+	require.Len(t, afterSetting, 2)
+	cohorts := map[int]string{}
+	for i := range afterSetting {
+		cohorts[modelDeploymentOrdinalOrFloor(&afterSetting[i])] = afterSetting[i].Annotations[cohortMarker]
+	}
+	assert.Equal(t, map[int]string{0: "v1-cohort", 1: "v2-cohort"}, cohorts,
+		"flipping a Setting leaves both render-version cohorts untouched")
+
+	// Both cohorts match the role Service selector.
+	svc := new(core.Service)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-server"}, svc))
+	selector := labels.SelectorFromSet(svc.Spec.Selector)
+	for i := range afterSetting {
+		assert.True(t, selector.Matches(labels.Set(afterSetting[i].Labels)),
+			"Service selector matches replica %s across render-version cohorts", afterSetting[i].Name)
+	}
+
+	// Scale up to 3: ordinals 0 and 1 stay in place while ordinal 2 is created at current render-version.
+	scaledUp := getModelDeployment(t, cli)
+	scaledUp.Spec.Roles[0].Replicas = 3
+	require.NoError(t, cli.Update(ctx, scaledUp))
+	_, err = reconcileModelDeploymentRetiring(t, cli)
+	require.NoError(t, err)
+	standInForKueue(t, cli, true)
+
+	three := replicaPods(t, cli)
+	require.Len(t, three, 3)
+	for i := range three {
+		switch modelDeploymentOrdinalOrFloor(&three[i]) {
+		case 0:
+			assert.Equal(t, "v1-cohort", three[i].Annotations[cohortMarker])
+		case 1:
+			assert.Equal(t, "v2-cohort", three[i].Annotations[cohortMarker])
+		case 2:
+			assert.Equal(t, strconv.Itoa(modelDeploymentRenderVersion),
+				three[i].Annotations[modelDeploymentRenderVersionAnnotation])
+		}
+	}
+
+	// Scale down back to 2: ordinal 2 is trimmed while ordinals 0 and 1 remain in place.
+	scaledDown := getModelDeployment(t, cli)
+	scaledDown.Spec.Roles[0].Replicas = 2
+	require.NoError(t, cli.Update(ctx, scaledDown))
+	_, err = reconcileModelDeploymentRetiring(t, cli)
+	require.NoError(t, err)
+	standInForKueue(t, cli, true)
+
+	afterTrim := replicaPods(t, cli)
+	require.Len(t, afterTrim, 2)
+	trimmedCohorts := map[int]string{}
+	for i := range afterTrim {
+		trimmedCohorts[modelDeploymentOrdinalOrFloor(&afterTrim[i])] = afterTrim[i].Annotations[cohortMarker]
+	}
+	assert.Equal(t, map[int]string{0: "v1-cohort", 1: "v2-cohort"}, trimmedCohorts,
+		"scale-down trims the highest ordinal and keeps the remaining cohorts untouched")
+
+	// An explicit spec edit (image change) moves pod-spec-hash and rolls all replicas regardless of render-version.
+	edited := getModelDeployment(t, cli)
+	edited.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
+	require.NoError(t, cli.Update(ctx, edited))
+
+	for pass := 0; pass < 6; pass++ {
+		_, err = reconcileModelDeploymentRetiring(t, cli)
+		require.NoError(t, err)
+		standInForKueue(t, cli, true)
+	}
+	rolled := replicaPods(t, cli)
+	require.Len(t, rolled, 2)
+	for i := range rolled {
+		assert.Equal(t, "vllm/vllm-openai:v0.26.0", rolled[i].Spec.Containers[0].Image)
+		assert.Empty(t, rolled[i].Annotations[cohortMarker],
+			"explicit spec change replaces replicas from every render-version cohort")
+	}
 }

@@ -131,7 +131,6 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 			c.LivenessProbe = nil
 			c.Lifecycle = nil
 		}
-		pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentPodSpecHash(pod)
 	}
 	headPod := renderModelDeploymentElasticHeadPod(md, gpu, desired[role.Name][0][0].Spec.Containers[0])
 	desired[modelDeploymentElasticHeadName(md)] = map[int][]*core.Pod{0: {headPod}}
@@ -184,7 +183,10 @@ func renderModelDeploymentElasticHeadPod(
 	}
 	systemmeta.NoteResource(pod, ModelDeploymentResourceType, map[string]string{ModelDeploymentResourceNoteRole: name})
 	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
-	pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentPodSpecHash(pod)
+	headRole := *role.DeepCopy()
+	headRole.Name = name
+	pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentExplicitSpecHash(md, &headRole, 0, 0, "")
+	pod.Annotations[modelDeploymentRenderVersionAnnotation] = strconv.Itoa(modelDeploymentRenderVersion)
 	return pod
 }
 
