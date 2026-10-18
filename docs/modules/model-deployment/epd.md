@@ -57,7 +57,7 @@ Admission accepts only the combinations below. Anything else is refused when the
 |---|---|---|---|---|---|
 | `llm-d-router` | `vLLM` | `nvidia` | `ECCPUConnector` over NIXL | `0.30.0` | Verified on 4 × NVIDIA L40S |
 | `llm-d-router` | `vLLM` | `amd` (ROCm) | `ECCPUConnector` over NIXL | `0.30.0` | Not verified |
-| `llm-d-router` | `vLLM` | `ascend` | `ECExampleConnector` over a shared volume | `0.30.0rc1` | Not verified |
+| `llm-d-router` | `vLLM` | `ascend` | `ECExampleConnector` over a shared volume | `0.30.0rc1` | Verified on Ascend 910B2 |
 | `vllm-router` | `vLLM` | `nvidia` | `ECCPUConnector` over NIXL | `0.30.0` | Verified on 4 × NVIDIA L40S |
 | `vllm-router` | `vLLM` | `amd` (ROCm) | `ECCPUConnector` over NIXL | `0.30.0` | Not verified |
 | `llm-d-router` | `SGLang` | `nvidia` | `encoder-urls` | `0.5.10` | Verified on 2 × NVIDIA L40S |
@@ -69,7 +69,7 @@ Admission accepts only the combinations below. Anything else is refused when the
 
 A verified row served a multimodal request through the router on the hardware named. A row marked
 Not verified is admitted from the design and has not run on that hardware. Issue
-[#763](https://github.com/gpustack/gpustack-operator/issues/763) tracks the SGLang AMD and Ascend rows.
+[#763](https://github.com/gpustack/gpustack-operator/issues/763) tracks the rows still unrun: the AMD ROCm rows and the SGLang Ascend rows.
 The `Minimum version` column is a requirement on the image you name, not an admission check:
 nothing reads a version, so an image below it is applied as written.
 
