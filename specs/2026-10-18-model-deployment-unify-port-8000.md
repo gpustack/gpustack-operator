@@ -1,11 +1,7 @@
 # Spec: Unify ModelDeployment Serving and Router Endpoints on Port 8000
 
-Status: Building
-Blocked on: Tasks T1 and T2 in progress
+Status: Shipped
 Type: Feature
-Created: 2026-10-18
-Updated: 2026-10-18
-Issue: [764](https://github.com/gpustack/gpustack-operator/issues/764)
 
 ## Table of Contents
 
@@ -74,15 +70,15 @@ As a user adding or removing `spec.router` on a `ModelDeployment`, I want `statu
 Update [`pkg/worker/controllers/worker/model_deployment_router.go`](../pkg/worker/controllers/worker/model_deployment_router.go):
 
 - Set `modelDeploymentRouterHTTPPort int32 = 8000` (was `8081`).
-- In `modelDeploymentRouterEnvoyConfig`, set the `listener_0` socket address `port_value` to `8000` (was `8081`).
+- In `modelDeploymentRouterEnvoyConfig`, set the `http` listener socket address `port_value` to `8000` (was `8081`).
 - Keep `modelDeploymentDefaultPort` at `8000` in [`pkg/worker/controllers/worker/model_deployment_render.go`](../pkg/worker/controllers/worker/model_deployment_render.go#L40).
 
 Because all router rendering and status helpers derive from `modelDeploymentRouterHTTPPort`, this single constant + Envoy config change automatically updates:
 
-1. **`Service/<md>-router`**: `spec.ports[0].port = 8000` and `targetPort = "http"`.
+1. **`Service/<md>-router`**: `spec.ports[0].port = 8000` and `targetPort = 8000`.
 2. **`llm-d-router` Deployment**: Envoy container port `http = 8000`, TCP readiness probe on `8000`, and Envoy listener on `0.0.0.0:8000`.
-3. **`vllm-router` and `sglang-gateway` Deployments**: `router.RenderArgv` receives `ListenPort: 8000`, rendering `--port=8000`, container port `http = 8000`, and HTTP `/readiness` probe on `8000`.
-4. **Router endpoint observation**: [`modelDeploymentRouterObserverPort`](../pkg/worker/controllers/worker/model_deployment_status.go#L350-L355) returns `modelDeploymentRouterHTTPPort` (`8000`) for `vllm-router` and `sglang-gateway`, and `modelDeploymentRouterMetricsPort` (`9090`) for `llm-d-router`.
+3. **`vllm-router` and `sglang-gateway` Deployments**: `router.Render` receives `ListenPort: 8000`, rendering `--port=8000`, container port `http = 8000`, and `TCPSocket` readiness probe on `8000`.
+4. **Router endpoint observation**: [`modelDeploymentRouterObserverPort`](../pkg/worker/controllers/worker/model_deployment_router_observation.go#L288-L294) returns `modelDeploymentRouterHTTPPort` (`8000`) for `vllm-router` and `sglang-gateway`, and `modelDeploymentRouterMetricsPort` (`9090`) for `llm-d-router`.
 5. **Published status**: `status.router.endpoint` and `status.endpoint` publish `http://<md>-router.<ns>.svc:8000` when the router is ready.
 
 #### F2 — Test suite, e2e cases, and documentation alignment
@@ -176,7 +172,7 @@ const (
       Acceptance: `modelDeploymentRouterHTTPPort` is `8000`, `modelDeploymentRouterEnvoyConfig` binds `port_value: 8000`, and all unit tests in `pkg/worker/kvcache/router`, `pkg/worker/controllers/worker`, and `pkg/worker/extensionapis/worker` assert `8000` for router HTTP listener and `status.endpoint` (`http://<md>-router.<ns>.svc:8000`).
       Verify: `GOTOOLCHAIN=local GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/kvcache/router/... ./pkg/worker/controllers/worker/... ./pkg/worker/extensionapis/worker/...`
 
-- [ ] **T2 · Update end-to-end test cases and walkthrough documentation to port `8000`**
+- [x] **T2 · Update end-to-end test cases and walkthrough documentation to port `8000`**
       Blocked by: T1
       Owns: `.agents/skills/gpustack-operator-e2e/cases/case-71.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-91.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-94.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-120.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-121.sh`, `docs/walkthroughs/model-deployment/epd.md`, `docs/walkthroughs/model-deployment/external-dp.md`, `docs/README.md`
       Acceptance: Every end-to-end script and walkthrough targeting `Service/<md>-router` or router `Pod` HTTP port uses `8000` instead of `8081`, `docs/README.md` indexes this spec under `Model Deployment`, and both `make lint agents-shell` and `make lint docs` pass.

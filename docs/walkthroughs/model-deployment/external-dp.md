@@ -246,19 +246,19 @@ Discover the Router Pod and forward its API and metrics ports:
 ROUTER_POD=$(kubectl -n gpustack-elastic get pods \
   -l app.kubernetes.io/instance=external-fixed -o json |
   jq -r '.items[] | select(any(.spec.containers[]; .name == "router")) | .metadata.name')
-kubectl -n gpustack-elastic port-forward "pod/$ROUTER_POD" 18081:8081 19090:9090
+kubectl -n gpustack-elastic port-forward "pod/$ROUTER_POD" 18080:8000 19090:9090
 ```
 
 In another terminal, read the registered workers and per-worker request counters:
 
 ```bash
-curl --fail-with-body http://127.0.0.1:18081/observer/endpoints |
+curl --fail-with-body http://127.0.0.1:18080/observer/endpoints |
   jq '.workers[] | {url, selection}'
 curl --fail-with-body http://127.0.0.1:19090/metrics |
   grep '^vllm_router_processed_requests_total'
 ```
 
-Repeat the completion requests through port 18081. Compare the counters before and after.
+Repeat the completion requests through port 18080. Compare the counters before and after.
 For complete External LB coverage, the registry must contain both rank endpoints.
 Requests must increase each rank's counter. A successful response through the Router is insufficient.
 

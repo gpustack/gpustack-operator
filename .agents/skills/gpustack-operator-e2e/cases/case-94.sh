@@ -116,7 +116,7 @@ kubectl -n "$NS" exec "$PROBE" -- sh -c "echo base >$TRAFFIC.phase; nohup sh -c 
   while [ ! -e $TRAFFIC.stop ]; do
     i=\$((i + 1)); s=false; [ \$((i % 2)) -eq 0 ] && s=true
     b=\"{\\\"model\\\":\\\"$MODEL\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"Explain how a controller reconciles state. Case 94 question \$i \$(date +%s%N).\\\"}],\\\"max_tokens\\\":32,\\\"stream\\\":\$s}\"
-    c=\$(curl -sS --max-time 60 -o /tmp/case94-r -w %{http_code} -H Content-Type:application/json --data-binary \"\$b\" http://$MD-router.$NS.svc:8081/v1/chat/completions 2>/dev/null)
+    c=\$(curl -sS --max-time 60 -o /tmp/case94-r -w %{http_code} -H Content-Type:application/json --data-binary \"\$b\" http://$MD-router.$NS.svc:8000/v1/chat/completions 2>/dev/null)
     v=\"BAD \$c \$(head -c 200 /tmp/case94-r | tr -d \"\\n\")\"
     if [ \"\$c\" = 200 ] && grep -q \"\\\"content\\\": *\\\"[^\\\"]\" /tmp/case94-r && ! grep -q \"\\\"error\\\"\" /tmp/case94-r; then v=ok; fi
     echo \"\$(date +%s) \$(cat $TRAFFIC.phase) \$v\" >>$TRAFFIC.log
