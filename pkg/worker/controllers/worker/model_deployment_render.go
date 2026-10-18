@@ -1778,6 +1778,13 @@ func modelDeploymentExplicitSpecHash(
 		})
 	}
 
+	var kvCache *workercore.ModelDeploymentKVCache
+	if md.Spec.KVCache != nil {
+		copied := *md.Spec.KVCache
+		copied.Connector = ""
+		kvCache = &copied
+	}
+
 	subject := struct {
 		Name        string                                `json:"name"`
 		Namespace   string                                `json:"namespace"`
@@ -1797,7 +1804,7 @@ func modelDeploymentExplicitSpecHash(
 		Engine:      md.Spec.Engine.Name,
 		Model:       md.Spec.Model,
 		Router:      md.Spec.Router,
-		KVCache:     md.Spec.KVCache,
+		KVCache:     kvCache,
 		KVTransfer:  md.Spec.KVTransfer,
 		Role:        canonicalRole,
 		Siblings:    siblings,
@@ -1815,3 +1822,62 @@ func modelDeploymentExplicitSpecHash(
 
 	return hex.EncodeToString(sum[:])
 }
+
+// modelDeploymentEffectiveMinRenderVersion computes the minimum acceptable render version for a
+// deployment's running replicas, clamped to [modelDeploymentMinSupportedRenderVersion, modelDeploymentRenderVersion].
+func modelDeploymentEffectiveMinRenderVersion(md *workercore.ModelDeployment) int {
+	floor := modelDeploymentMinSupportedRenderVersion
+	if md == nil {
+		return floor
+	}
+	if raw := md.Annotations[modelDeploymentMinRenderVersionAnnotation]; raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > floor {
+			floor = min(v, modelDeploymentRenderVersion)
+		}
+	}
+
+	return floor
+}
+
+// modelDeploymentPodRenderVersion returns the integer render version stamped on a Pod, or 0 when
+// the annotation is absent or invalid.
+func modelDeploymentPodRenderVersion(pod *core.Pod) int {
+	if pod == nil {
+		return 0
+	}
+	v, err := strconv.Atoi(pod.Annotations[modelDeploymentRenderVersionAnnotation])
+	if err != nil || v <= 0 {
+		return 0
+	}
+
+	return v
+}
+
+// modelDeploymentPodMatchesCurrency reports whether a live Pod matches the desired explicit spec
+// hash and meets the deployment's minimum render version floor.
+func modelDeploymentPodMatchesCurrency(actual, desired *core.Pod, minRenderVersion int) bool {
+	if actual == nil || desired == nil {
+		return false
+	}
+
+	return actual.Annotations[modelDeploymentPodSpecHashAnnotation] ==
+		desired.Annotations[modelDeploymentPodSpecHashAnnotation] &&
+		modelDeploymentPodRenderVersion(actual) >= minRenderVersion
+}
+
+// modelDeploymentReplicaRenderVersionUniform reports whether all members of a replica carry the
+// same render version.
+func modelDeploymentReplicaRenderVersionUniform(members []*core.Pod) bool {
+	if len(members) <= 1 {
+		return true
+	}
+	first := modelDeploymentPodRenderVersion(members[0])
+	for _, member := range members[1:] {
+		if modelDeploymentPodRenderVersion(member) != first {
+			return false
+		}
+	}
+
+	return true
+}
+

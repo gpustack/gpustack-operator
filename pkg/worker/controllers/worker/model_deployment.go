@@ -576,6 +576,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// every decision below except selecting a further healthy replica.
 	holdingRoles := make(map[string]modelDeploymentReplacementSlot, len(md.Spec.Roles))
 	slots := modelDeploymentReplacementSlotsOf(md)
+	minRenderVersion := modelDeploymentEffectiveMinRenderVersion(md)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		live := liveByRole[role.Name]
@@ -686,7 +687,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// its Workload with it: leaving the excess standing would have Kueue evict a member of its
 		// own choosing on every pass.
 		if surplus := modelDeploymentSurplusCount(kept); surplus > 0 {
-			shedSurplus := modelDeploymentSurplusReplicas(kept, want, surplus)
+			shedSurplus := modelDeploymentSurplusReplicas(kept, want, surplus, minRenderVersion)
 			// THE SHED IS ONE DECISION AND IT IS NOT PARTLY TAKEN. The protocol is handed the
 			// whole set rather than the first member of it, because a replica is removed as a
 			// replica: shedding one member of a set the protocol is about to take as a whole would
@@ -775,8 +776,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			member := modelDeploymentPodMemberIndex(pod)
 			members := want[ordinal]
 			if member < len(members) &&
-				pod.Annotations[modelDeploymentPodSpecHashAnnotation] ==
-					members[member].Annotations[modelDeploymentPodSpecHashAnnotation] {
+				modelDeploymentPodMatchesCurrency(pod, members[member], minRenderVersion) {
 				continue
 			}
 
@@ -822,6 +822,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			if modelDeploymentDeployedReplicaShape(view).State == modelDeploymentReplicaShapeIncomplete {
 				outdatedByOrdinal[view.Ordinal] = true
 				incompleteByOrdinal[view.Ordinal] = true
+				continue
+			}
+			if !modelDeploymentReplicaRenderVersionUniform(view.Members) {
+				outdatedByOrdinal[view.Ordinal] = true
 			}
 		}
 
@@ -860,6 +864,12 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			if outdatedByOrdinal[ordinal] {
 				rollout.outdated++
 				outdated = append(outdated, modelDeploymentReplicaMembers(kept, ordinal)...)
+				continue
+			}
+			if members := modelDeploymentReplicaMembers(kept, ordinal); len(members) > 0 &&
+				!retirement.names(role.Name, ordinal) &&
+				modelDeploymentPodRenderVersion(members[0]) < modelDeploymentRenderVersion {
+				rollout.olderRenderVersion++
 			}
 		}
 
@@ -2387,7 +2397,7 @@ func modelDeploymentSurplusCount(kept []*core.Pod) int {
 // with no ordinal leaves before any seated one because every seated Pod is accounted for by the
 // declared count.
 func modelDeploymentSurplusReplicas(
-	kept []*core.Pod, want map[int][]*core.Pod, surplus int,
+	kept []*core.Pod, want map[int][]*core.Pod, surplus, minRenderVersion int,
 ) []*core.Pod {
 	type seat struct{ ordinal, member int }
 
@@ -2414,20 +2424,54 @@ func modelDeploymentSurplusReplicas(
 		// fingerprint at all -- one built by a hand -- would otherwise compare EQUAL to it and be
 		// kept as the seat's current occupant. Nothing matches an absent render, so those occupants
 		// sort by name alone and the seat still sheds down to one.
-		wantHash, described := "", false
+		var wantMember *core.Pod
 		if members := want[at.ordinal]; at.member < len(members) {
-			wantHash = members[at.member].Annotations[modelDeploymentPodSpecHashAnnotation]
-			described = true
+			wantMember = members[at.member]
+		}
+		peerVersion := 0
+		for peerSeat, peerOccupants := range bySeat {
+			if peerSeat.ordinal != at.ordinal || peerSeat.member == at.member || len(peerOccupants) != 1 {
+				continue
+			}
+			v := modelDeploymentPodRenderVersion(peerOccupants[0])
+			if v <= 0 {
+				peerVersion = -1
+				break
+			}
+			if peerVersion == 0 {
+				peerVersion = v
+			} else if peerVersion != v {
+				peerVersion = -1
+				break
+			}
 		}
 		slices.SortFunc(occupants, func(a, b *core.Pod) int {
-			am := described && a.Annotations[modelDeploymentPodSpecHashAnnotation] == wantHash
-			bm := described && b.Annotations[modelDeploymentPodSpecHashAnnotation] == wantHash
+			am := modelDeploymentPodMatchesCurrency(a, wantMember, minRenderVersion)
+			bm := modelDeploymentPodMatchesCurrency(b, wantMember, minRenderVersion)
 			if am != bm {
 				if am {
 					return -1
 				}
 
 				return 1
+			}
+			if am && bm {
+				av := modelDeploymentPodRenderVersion(a)
+				bv := modelDeploymentPodRenderVersion(b)
+				if peerVersion > 0 {
+					aPeer := av == peerVersion
+					bPeer := bv == peerVersion
+					if aPeer != bPeer {
+						if aPeer {
+							return -1
+						}
+
+						return 1
+					}
+				}
+				if av != bv {
+					return bv - av
+				}
 			}
 
 			return strings.Compare(b.Name, a.Name)
@@ -2686,7 +2730,10 @@ func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts co
 		For(
 			&workercore.ModelDeployment{},
 			ctrlbuilder.WithPredicates(
-				ctrlpredicate.GenerationChangedPredicate{},
+				ctrlpredicate.Or(
+					ctrlpredicate.GenerationChangedPredicate{},
+					modelDeploymentMinRenderVersionChangedPredicate(),
+				),
 			),
 		).
 		Owns(
@@ -3053,3 +3100,27 @@ func modelDeploymentWorkloadVerdict(wl *kueue.Workload) ([]meta.Condition, []kue
 
 	return conditions, checks
 }
+
+// modelDeploymentMinRenderVersionChangedPredicate passes an update when the deployment's
+// modeldeployment.gpustack.ai/min-render-version annotation changes.
+func modelDeploymentMinRenderVersionChangedPredicate() ctrlpredicate.Predicate {
+	return ctrlpredicate.Funcs{
+		CreateFunc: func(ctrlevent.CreateEvent) bool {
+			return false
+		},
+		DeleteFunc: func(ctrlevent.DeleteEvent) bool {
+			return false
+		},
+		GenericFunc: func(ctrlevent.GenericEvent) bool {
+			return false
+		},
+		UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+			if e.ObjectOld == nil || e.ObjectNew == nil {
+				return false
+			}
+			return e.ObjectOld.GetAnnotations()[modelDeploymentMinRenderVersionAnnotation] !=
+				e.ObjectNew.GetAnnotations()[modelDeploymentMinRenderVersionAnnotation]
+		},
+	}
+}
+

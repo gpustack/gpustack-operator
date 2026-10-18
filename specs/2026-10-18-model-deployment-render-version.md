@@ -187,7 +187,7 @@ Pre-compute the role-template's explicit hash inside [`renderModelDeploymentPodT
     - `TestModelDeploymentLegacyRender_GoldenPods` asserts `1 <= modelDeploymentMinSupportedRenderVersion <= modelDeploymentRenderVersion` and fails with an instruction to bump `modelDeploymentRenderVersion` if any rendered Pod bytes change without a version bump.
   - Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -tags 'goccy netgo' -race -count=1 -run 'TestModelDeploymentLegacyRender' ./pkg/worker/controllers/worker`
 
-- [ ] **T3: Implement render-version floor evaluation, convergence skip rule, replacement slot matching, watch predicate, and `ReplicasUpToDate` reporting**
+- [x] **T3: Implement render-version floor evaluation, convergence skip rule, replacement slot matching, watch predicate, and `ReplicasUpToDate` reporting**
   - Blocked by: [T1]
   - Owns: `pkg/worker/controllers/worker/model_deployment.go`, `pkg/worker/controllers/worker/model_deployment_replacement_slot.go`, `pkg/worker/controllers/worker/model_deployment_rollout.go`
   - Gate: review
