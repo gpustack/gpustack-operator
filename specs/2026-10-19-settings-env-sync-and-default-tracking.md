@@ -137,6 +137,11 @@ model-deployment-router-proxy-image,model-deployment-routing-sidecar-image,
 model-prefetch-warmup-image
 ```
 
+The name is a protocol constant, exported from `pkg/setting`, because the align pass reads it and the task that
+registers the Setting writes it. Two copies of the literal that drift apart make the tracking list match nothing,
+which is the silent failure this specification exists to eliminate, and no test covers the join between the reader
+and the writer. One exported name is the whole defense.
+
 Its own name may not appear in the list. An entry naming itself is ignored and logged, because a Setting that
 tracked itself would reconcile its own membership.
 
@@ -318,7 +323,7 @@ alignFn := func(aSec *core.Secret) (_ *core.Secret, skip bool, err error) {
 
 	// The tracking list is read from the live Secret, falling back to the built-in default, so a
 	// Secret that predates this Setting gets the default on the same start that backfills it.
-	tracking := parseTrackedSettings(trackingValue(aSec))
+	tracking := parseTrackedSettings(h, h.trackingValue(aSec))
 
 	for name, s := range h {
 		stored := string(aSec.Data[name])
@@ -342,7 +347,7 @@ when its seed is non-blank and the environment declares it or the tracking list 
 ```go
 // desiredValue returns the value the operator owns for this Setting and the rule that claimed it.
 // An empty rule means the operator owns nothing here, and the stored value is the administrator's.
-func (s Setting) desiredValue(tracked sets.Set[string]) (value string, rule string) {
+func (s Setting) desiredValue(tracked sets.Set[string]) (value, rule string) {
 	if isBlank(s.defVal) {
 		return "", ""
 	}
@@ -359,6 +364,21 @@ func (s Setting) desiredValue(tracked sets.Set[string]) (value string, rule stri
 Conventions to keep: use `klog.InfoS` with key-value pairs, as in `pkg/kubeapp/lock.go`; reuse `isBlank` rather
 than testing for an empty string; keep one Setting name per log line so a grep finds every override; do not
 introduce a second meaning of "blank" anywhere in this path.
+
+Two placement notes, because the sketch above is illustrative and the task boundaries are not negotiable.
+
+`desiredValue` is sketched as a method on `Setting`, which reads as though it belongs in `types.go` beside `Value`
+and `Configure`. The task that applies the sync predicate owns `pkg/setting/kuberes.go` and not `types.go`, so the
+method lands in `kuberes.go` and `Setting`'s methods end up split across two files. Ownership forced it, and moving
+it later is a separate decision rather than a quiet cleanup.
+
+`parseTrackedSettings` is sketched with one argument. Its own steps four and five cannot be evaluated without the
+registry — step four drops the tracking Setting's own name and step five drops a name no registered Setting
+carries — so it takes the registry. The acceptance is the contract and the sketch is a shape, not a signature.
+
+`desiredValue` returns `(value, rule string)`, not the `(value string, rule string)` an earlier draft of this sketch
+wrote. `gofumpt` collapses a repeated result type, so the earlier spelling does not survive `make lint`. The
+signature and its meaning are unchanged, and no test or contract depends on the spelling.
 
 ### Implementation Plan
 
@@ -382,15 +402,17 @@ T4 ───────────────┘
       behavior; the whole tree compiles.
       Verify: `GOTOOLCHAIN=local GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/setting/... && make lint`
 
-- [ ] **T2 · Apply the sync predicate in the align pass, with the regression guard**
+- [x] **T2 · Apply the sync predicate in the align pass, with the regression guard**
       Blocked by: T1
       Owns: `pkg/setting/kuberes.go`, `pkg/setting/kuberes_test.go`
       Gate: review
       Acceptance: absent keys are backfilled first, so a blank-default Setting is still added; the tracking list
       is read from the live Secret and falls back to the built-in default when the key is absent, and is parsed
-      by the five-step contract in Core Features; `desiredValue` returns a value only for a non-blank seed that
-      is either declared or tracked; every change to a stored value logs one `klog.InfoS` line carrying the
-      Setting, both values and the rule; `TestSettingsInitialize` covers the table below and passes.
+      by the five-step contract in Core Features, which takes the registry because steps four and five cannot be
+      evaluated without it; the name is an exported constant so the task registering the Setting cannot drift from
+      the one reading it; `desiredValue` returns a value only for a non-blank seed that is either declared or
+      tracked; every change to a stored value logs one `klog.InfoS` line carrying the Setting, both values, the
+      rule and the variable; `TestSettingsInitialize` covers the table below and passes.
       Verify: `GOTOOLCHAIN=local GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -v ./pkg/setting -run TestSettingsInitialize && make lint`
 
 - [ ] **T3 · Register `settings-default-tracking`**
