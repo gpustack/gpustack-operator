@@ -581,6 +581,16 @@ type ModelDeploymentRole struct {
 	//
 	// +optional
 	ElasticEP *ModelDeploymentRoleElasticEP `json:"elasticEp,omitempty" protobuf:"bytes,18,opt,name=elasticEp"`
+
+	// StartupTimeoutSeconds is the maximum time in seconds that a role replica's main container
+	// is given to pass its startup probe before kubelet restarts it. Unset defaults to 1800
+	// (30 minutes), which renders a startupProbe with periodSeconds 10 and failureThreshold 180.
+	//
+	// +optional
+	// +k8s:validation:default=1800
+	// +k8s:validation:minimum=10
+	// +k8s:validation:maximum=86400
+	StartupTimeoutSeconds *int32 `json:"startupTimeoutSeconds,omitempty" protobuf:"varint,20,opt,name=startupTimeoutSeconds"` // nolint: lll
 }
 
 // ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.

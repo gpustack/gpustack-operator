@@ -2719,6 +2719,11 @@ func (in *ModelDeploymentRole) DeepCopyInto(out *ModelDeploymentRole) {
 		*out = new(ModelDeploymentRoleElasticEP)
 		**out = **in
 	}
+	if in.StartupTimeoutSeconds != nil {
+		in, out := &in.StartupTimeoutSeconds, &out.StartupTimeoutSeconds
+		*out = new(int32)
+		**out = **in
+	}
 	return
 }
 

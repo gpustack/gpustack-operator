@@ -223,6 +223,10 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// All GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP.
 	// The auxiliary head requests no container resources and never counts toward Width.
 	ElasticEP *ModelDeploymentRoleElasticEPApplyConfiguration `json:"elasticEp,omitempty"`
+	// StartupTimeoutSeconds is the maximum time in seconds that a role replica's main container
+	// is given to pass its startup probe before kubelet restarts it. Unset defaults to 1800
+	// (30 minutes), which renders a startupProbe with periodSeconds 10 and failureThreshold 180.
+	StartupTimeoutSeconds *int32 `json:"startupTimeoutSeconds,omitempty"`
 }
 
 // ModelDeploymentRoleApplyConfiguration constructs a declarative configuration of the ModelDeploymentRole type for use with
@@ -404,5 +408,13 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithTerminationGracePeriodSecond
 // If called multiple times, the ElasticEP field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithElasticEP(value *ModelDeploymentRoleElasticEPApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
 	b.ElasticEP = value
+	return b
+}
+
+// WithStartupTimeoutSeconds sets the StartupTimeoutSeconds field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the StartupTimeoutSeconds field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithStartupTimeoutSeconds(value int32) *ModelDeploymentRoleApplyConfiguration {
+	b.StartupTimeoutSeconds = &value
 	return b
 }
