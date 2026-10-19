@@ -477,6 +477,20 @@ func TestModelDeploymentRolesSharedMemory(t *testing.T) {
 				require.Len(t, shmNames, 1, "%s must mount /dev/shm exactly once", pod.Name)
 				var backing *core.Volume
 				for j := range pod.Spec.Volumes {
+					// ONE host-backed volume is expected, and it is the operator's own: the managed
+					// role's compilation cache, which is what keeps a warm cache across replicas of
+					// a role. A take-over role gets no part of it, so a HostPath there would mean
+					// the renderer had reached past a command line it did not build. Every other
+					// volume, /dev/shm included, stays off the host.
+					if pod.Spec.Volumes[j].Name == ModelDeploymentCompileCacheVolumeName {
+						require.False(t, tc.takeOver,
+							"%s mounts %s although its role took over the command line", pod.Name,
+							ModelDeploymentCompileCacheVolumeName)
+						require.NotNil(t, pod.Spec.Volumes[j].HostPath,
+							"%s declares %s with no host path behind it", pod.Name,
+							ModelDeploymentCompileCacheVolumeName)
+						continue
+					}
 					require.Nil(t, pod.Spec.Volumes[j].HostPath, "%s reaches the host filesystem", pod.Name)
 					if pod.Spec.Volumes[j].Name == shmNames[0] {
 						backing = &pod.Spec.Volumes[j]

@@ -1512,7 +1512,11 @@ func TestRenderModelDeploymentPod_ClientConfigMount(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.Len(t, pod.Spec.Volumes, 2)
+	// Three volumes: the client configuration projection below, the connector's own, and the
+	// operator's compilation cache. The cache is asserted by name rather than by position because
+	// it is not what this test is about, and a positional assertion would report every future
+	// managed volume as a failure of the client configuration.
+	require.Len(t, pod.Spec.Volumes, 3)
 	require.NotNil(t, pod.Spec.Volumes[0].DownwardAPI,
 		"the file is a projection of an annotation, not a ConfigMap: there is no second object")
 	require.Len(t, pod.Spec.Volumes[0].DownwardAPI.Items, 1)
@@ -1523,10 +1527,241 @@ func TestRenderModelDeploymentPod_ClientConfigMount(t *testing.T) {
 	assert.NotEmpty(t, pod.Annotations[inject.ClientConfigAnnotationKey],
 		"the projection reads this annotation, so an absent or empty one mounts an empty file")
 
+	assert.NotNil(t, findVolume(pod, ModelDeploymentCompileCacheVolumeName),
+		"a managed replica carries the compilation cache")
+	assert.NotNil(t, findMount(&pod.Spec.Containers[0], ModelDeploymentCompileCacheVolumeName))
+
 	mounts := pod.Spec.Containers[0].VolumeMounts
-	require.Len(t, mounts, 2)
+	require.Len(t, mounts, 3)
 	assert.Equal(t, inject.ConfigMountPath, mounts[0].MountPath)
 	assert.True(t, mounts[0].ReadOnly)
+}
+
+// TestRenderModelDeploymentPod_StartupGateScalesWithTheDeclaredBudget pins that the kubelet is told
+// the budget the role asked for, in the only unit it counts in.
+//
+// The two directions are the ones that can each be got wrong alone: a threshold held at the default
+// restarts a role that declared an hour of loading after thirty minutes, and a threshold derived
+// without rounding up cuts the last period off the budget it was meant to honor. The other two
+// gates are asserted alongside because they must NOT move -- a startup budget is about the load
+// window, and a replica that has served once is governed by the failure it just had.
+func TestRenderModelDeploymentPod_StartupGateScalesWithTheDeclaredBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		startupTimeoutSeconds *int32
+		wantFailureThreshold  int32
+	}{
+		{
+			name:                 "no declared budget renders the gate this operator has always rendered",
+			wantFailureThreshold: modelDeploymentStartupFailureThreshold,
+		},
+		{
+			name:                  "a budget shorter than one period still gets a gate rather than none",
+			startupTimeoutSeconds: ptr.To(int32(10)),
+			wantFailureThreshold:  1,
+		},
+		{
+			name:                  "a budget between periods rounds up rather than short",
+			startupTimeoutSeconds: ptr.To(int32(25)),
+			wantFailureThreshold:  3,
+		},
+		{
+			name:                  "an hour is three hundred and sixty periods of ten seconds",
+			startupTimeoutSeconds: ptr.To(int32(3600)),
+			wantFailureThreshold:  360,
+		},
+		{
+			name:                  "the largest budget the schema admits is a whole day of periods",
+			startupTimeoutSeconds: ptr.To(int32(86400)),
+			wantFailureThreshold:  8640,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].StartupTimeoutSeconds = tc.startupTimeoutSeconds
+			})
+
+			c := renderOne(t, md, newRenderInstanceType()).Spec.Containers[0]
+
+			require.NotNil(t, c.StartupProbe)
+			assert.Equal(t, tc.wantFailureThreshold, c.StartupProbe.FailureThreshold)
+			assert.Equal(t, modelDeploymentProbePeriodSeconds, c.StartupProbe.PeriodSeconds)
+			assert.Equal(t, modelDeploymentProbeTimeoutSeconds, c.StartupProbe.TimeoutSeconds)
+
+			require.NotNil(t, c.ReadinessProbe)
+			assert.Equal(t, modelDeploymentReadinessFailureThreshold, c.ReadinessProbe.FailureThreshold)
+			require.NotNil(t, c.LivenessProbe)
+			assert.Equal(t, modelDeploymentLivenessFailureThreshold, c.LivenessProbe.FailureThreshold)
+			assert.Equal(t, modelDeploymentProbeTimeoutSeconds, c.ReadinessProbe.TimeoutSeconds)
+			assert.Equal(t, modelDeploymentProbeTimeoutSeconds, c.LivenessProbe.TimeoutSeconds)
+		})
+	}
+}
+
+// TestRenderModelDeploymentPod_CompileCacheMountsOnManagedRoles pins the cache's whole contract on
+// a rendered Pod: a managed role carries it on both engines and under every way the weights can
+// arrive, and a role that took over its command line carries none of it.
+//
+// The delivery modes are enumerated rather than sampled because the cache path is keyed on the
+// weights, so a mode this table skips is a mode whose identity derivation nothing here would cover.
+// The take-over case is the other half of the same rule: the operator did not build that command
+// line, so it cannot claim the container reads the cache, and a volume it mounted anyway would be
+// a host directory nothing ever writes.
+func TestRenderModelDeploymentPod_CompileCacheMountsOnManagedRoles(t *testing.T) {
+	for _, engine := range []string{
+		workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentEngineSGLang,
+	} {
+		for _, tc := range []struct {
+			name     string
+			artifact *ModelDeploymentArtifactRender
+		}{
+			{name: "no artifact, the engine fetches the weights itself", artifact: nil},
+			{name: "hub artifact delivered by the node plugin", artifact: testNodeArtifactRender()},
+			{name: "claim artifact mounted read-only", artifact: testPvcArtifactRender()},
+			{name: "image artifact mounted through an image volume", artifact: testImageArtifactRender()},
+			{name: "hub artifact downloaded by the engine", artifact: testEngineArtifactRender()},
+		} {
+			t.Run(engine+"/"+tc.name, func(t *testing.T) {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.Engine.Name = engine
+					md.Spec.KVCache = nil
+				})
+
+				pod := renderWithArtifact(t, md, tc.artifact)
+
+				volume := findVolume(pod, ModelDeploymentCompileCacheVolumeName)
+				require.NotNil(t, volume, "the managed role carries the compilation cache")
+				require.NotNil(t, volume.HostPath)
+				assert.Equal(t, core.HostPathDirectoryOrCreate, *volume.HostPath.Type,
+					"the node creates the directory rather than refusing a cold start")
+				// The host side is this role's own subdirectory, not the shared root: two roles
+				// that compiled for different shapes must not write over each other's kernels.
+				assert.True(t,
+					strings.HasPrefix(volume.HostPath.Path, DefaultModelDeploymentCompileCacheHostDir+"/"),
+					"%s is not a subdirectory of the cache root", volume.HostPath.Path)
+				assert.NotEqual(t, DefaultModelDeploymentCompileCacheHostDir, volume.HostPath.Path)
+
+				mount := findMount(&pod.Spec.Containers[0], ModelDeploymentCompileCacheVolumeName)
+				require.NotNil(t, mount, "the cache is mounted into the engine's container")
+				assert.Equal(t, ModelDeploymentCompileCacheMountPath, mount.MountPath)
+			})
+		}
+	}
+
+	t.Run("a take-over role is given no part of the cache", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
+		})
+
+		pod := renderWithArtifact(t, md, testNodeArtifactRender())
+
+		assert.Nil(t, findVolume(pod, ModelDeploymentCompileCacheVolumeName))
+		assert.Nil(t, findMount(&pod.Spec.Containers[0], ModelDeploymentCompileCacheVolumeName))
+	})
+
+	for _, tc := range []struct {
+		name      string
+		mountPath string
+	}{
+		{name: "exact compilation cache mount path", mountPath: ModelDeploymentCompileCacheMountPath},
+		{name: "parent directory covering compilation cache", mountPath: "/var/lib/gpustack"},
+		{name: "subdirectory inside compilation cache", mountPath: ModelDeploymentCompileCacheMountPath + "/vllm"},
+	} {
+		t.Run("user additionalVolumes yields default hostPath at "+tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.KVCache = nil
+				md.Spec.Roles[0].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{
+					{
+						MountPath:             tc.mountPath,
+						PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "shared-cache"},
+					},
+				}
+			})
+
+			pod := renderOne(t, md, newRenderInstanceType())
+
+			assert.Nil(t, findVolume(pod, ModelDeploymentCompileCacheVolumeName),
+				"default hostPath compilation cache volume must yield when user mounts an overlapping path")
+			assert.Nil(t, findMount(&pod.Spec.Containers[0], ModelDeploymentCompileCacheVolumeName))
+
+			userMount := findMount(&pod.Spec.Containers[0], "additional-0")
+			require.NotNil(t, userMount, "user's additionalVolume mount must remain intact")
+			assert.Equal(t, tc.mountPath, userMount.MountPath)
+
+			value, found := envValue(pod, "VLLM_CACHE_ROOT")
+			require.True(t, found, "defaulted VLLM_CACHE_ROOT remains set")
+			assert.Equal(t, ModelDeploymentCompileCacheMountPath, value)
+		})
+	}
+}
+
+// TestRenderModelDeploymentPod_CompileCacheRootIsDefaultedNotOwned pins who decides where an
+// engine's cache lives: the operator defaults it to the path it mounted, and a user entry replaces
+// it rather than colliding with it.
+//
+// Defaulted is the load-bearing half. An owned name would be refused at admission, so a user who
+// mounts the cache elsewhere, or runs an image whose engine spells the variable differently, could
+// not say so at all -- and the whole point of mounting the cache rather than hard-coding a path
+// into an argument is that the path stays negotiable.
+func TestRenderModelDeploymentPod_CompileCacheRootIsDefaultedNotOwned(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		engine    string
+		variable  string
+		userValue string
+		want      string
+	}{
+		{
+			name:   "vllm is pointed at the mounted cache",
+			engine: workercore.ModelDeploymentEngineVLLM, variable: "VLLM_CACHE_ROOT",
+			want: ModelDeploymentCompileCacheMountPath,
+		},
+		{
+			name:   "a user entry replaces the vllm default",
+			engine: workercore.ModelDeploymentEngineVLLM, variable: "VLLM_CACHE_ROOT",
+			userValue: "/mnt/scratch/vllm", want: "/mnt/scratch/vllm",
+		},
+		{
+			name:   "sglang is pointed at the mounted cache",
+			engine: workercore.ModelDeploymentEngineSGLang, variable: "SGLANG_CACHE_DIR",
+			want: ModelDeploymentCompileCacheMountPath,
+		},
+		{
+			name:   "a user entry replaces the sglang default",
+			engine: workercore.ModelDeploymentEngineSGLang, variable: "SGLANG_CACHE_DIR",
+			userValue: "/mnt/scratch/sglang", want: "/mnt/scratch/sglang",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = tc.engine
+				md.Spec.KVCache = nil
+				if tc.userValue != "" {
+					md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{
+						{Name: tc.variable, Value: tc.userValue},
+					}
+				}
+			})
+
+			value, found := envValue(renderOne(t, md, newRenderInstanceType()), tc.variable)
+
+			require.True(t, found, "the engine is told where its cache lives")
+			assert.Equal(t, tc.want, value)
+		})
+	}
+
+	t.Run("a take-over role is told nothing about a cache it does not have", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
+		})
+
+		pod := renderOne(t, md, newRenderInstanceType())
+
+		_, found := envValue(pod, "VLLM_CACHE_ROOT")
+		assert.False(t, found)
+	})
 }
 
 // TestRenderModelDeploymentPod_NoClientConfigWithoutOne pins the state a deployment is in before its
@@ -2460,7 +2695,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 //
 // THE ORIGINAL DIGESTS WERE CAPTURED FROM THE RENDERER AS IT STOOD BEFORE IT WAS SPLIT into a
 // template half and a stamp half, and that split had to reproduce every one of them exactly. The
-// table has been RE-BASELINED five times since, each time for a rendering change that was
+// table has been RE-BASELINED six times since, each time for a rendering change that was
 // intended: once for the per-replica groups, where the stamp began naming a (role, ordinal) group,
 // declaring a total of one and writing the ordinal label; once when the ordinal label's key took the
 // modeldeployment prefix the role-kind label and the spec-hash annotation already carry, so that one
@@ -2474,22 +2709,25 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // rather than by drift. The two direct-decoder cases then moved when the default routing sidecar
 // image advanced from v0.10.0 to v0.11.0, which is the only thing in those two Pods that carries
 // the setting; the seven cases rendering no sidecar stayed where they were, naming the move to
-// the setting's value the same way the router table does. Each case renders ORDINAL ZERO -- the
+// the setting's value the same way the router table does. The sixth re-baselining is the
+// compilation-cache and startup-probe update: every managed Pod gained the compilation cache
+// volume, mount and cache-root entry alongside a wider probe timeout, leaving the take-over case's
+// digest unchanged. Each case renders ORDINAL ZERO -- the
 // composite's zero value -- which is the
 // one ordinal a digest can name without the table growing a dimension. To re-baseline after an
 // intended rendering change: empty the table, run this case, and pin the digests the failures
 // print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "0c2b20ea8c15f627d161c551a009430eeab4dcb3f02412ba9db04f93cb0f2cec",
-		"a sole server role with a synthesized cache connector":                              "cb69cc4001e0d88329fb2ccf4bdac15bd38cb03a5f071501f66a33f61de0774f",
+		"a sole server role": "6e2178d73a9d589fa70dfdc3cecd33651946f0838d15b7357d31544079aac765",
+		"a sole server role with a synthesized cache connector":                              "57b7772f67dc741e5e12b7ac5f4abc3c5904625e8e4e7e272192799dbdf8eb06",
 		"a take-over role carrying a connector it must be given no part of":                  "951e69e8ca2b9eaf7be4e2d413296a86f6948f91f5cd2811a8ea9b39fb495177",
-		"a direct decoder with a native routing sidecar":                                     "1e67a96c8751b3c8c51244e269600b6e43bc046aa67884332777fff9a0c6ed39",
-		"a direct decoder with a classic routing sidecar":                                    "d7ee57984af847d53134823e0854aee82bb650fc5a28703d4e9798c4cc541c27",
-		"a role naming no image, which runs the engine's image":                              "0c2b20ea8c15f627d161c551a009430eeab4dcb3f02412ba9db04f93cb0f2cec",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "9ecc86333032b553de5789d414848a3a3e90b877ae6f43537f547620987cbac3",
-		"the prefill role of a two-role deployment":                                          "147ad5e517b94e5338e035bb4604cb5b810012a49b25a29a3441de4a312a21d1",
-		"the decode role of a two-role deployment":                                           "bede82c4a68c4af87e2ca3305cb9f8a561b5964851be292f1bed239b6788766f",
+		"a direct decoder with a native routing sidecar":                                     "f2ca7ac882a09b402f2fb666e5396e9f9925966426fac2af43a86ad1827804a2",
+		"a direct decoder with a classic routing sidecar":                                    "1e4511f8b0dfa320b8a715995c136f9545c140d5f2ebb056e8d83d0638807698",
+		"a role naming no image, which runs the engine's image":                              "6e2178d73a9d589fa70dfdc3cecd33651946f0838d15b7357d31544079aac765",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "633a10aa7ffce8ba5cb528c51ff0413f48be8cff56d777f3ac8f9dc05420dd96",
+		"the prefill role of a two-role deployment":                                          "af62e508ee1ebdc522e00479c59fb56ec6635b7f8ec6bffdc3f6181fdf9f693d",
+		"the decode role of a two-role deployment":                                           "92b8c1de832f782c35b8635196ef48418cd882f184801cf365a8c38a564ecbaa",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its

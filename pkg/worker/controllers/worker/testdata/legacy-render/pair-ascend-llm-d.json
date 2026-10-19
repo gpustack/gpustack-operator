@@ -48,6 +48,13 @@
           }
         },
         {
+          "name": "gpustack-compile-cache",
+          "hostPath": {
+            "path": "/var/lib/gpustack/cache/ascend-vllm/m-1a67e1afa7075ef35646bfd3ee97d8de/tp1-pp1-dp1-ep1-cp1_1-1cec8ba3",
+            "type": "DirectoryOrCreate"
+          }
+        },
+        {
           "name": "model-shm",
           "emptyDir": {
             "medium": "Memory",
@@ -86,6 +93,10 @@
             {
               "name": "MC_TE_METRIC",
               "value": "1"
+            },
+            {
+              "name": "VLLM_CACHE_ROOT",
+              "value": "/var/lib/gpustack/cache"
             }
           ],
           "resources": {
@@ -109,6 +120,10 @@
               "mountPath": "/usr/local/Ascend/driver"
             },
             {
+              "name": "gpustack-compile-cache",
+              "mountPath": "/var/lib/gpustack/cache"
+            },
+            {
               "name": "model-shm",
               "mountPath": "/dev/shm"
             }
@@ -119,7 +134,7 @@
               "port": 8000,
               "scheme": "HTTP"
             },
-            "timeoutSeconds": 3,
+            "timeoutSeconds": 5,
             "periodSeconds": 10,
             "failureThreshold": 6
           },
@@ -129,7 +144,7 @@
               "port": 8000,
               "scheme": "HTTP"
             },
-            "timeoutSeconds": 3,
+            "timeoutSeconds": 5,
             "periodSeconds": 10,
             "failureThreshold": 3
           },
@@ -139,7 +154,7 @@
               "port": 8000,
               "scheme": "HTTP"
             },
-            "timeoutSeconds": 3,
+            "timeoutSeconds": 5,
             "periodSeconds": 10,
             "failureThreshold": 180
           },
@@ -213,6 +228,13 @@
           }
         },
         {
+          "name": "gpustack-compile-cache",
+          "hostPath": {
+            "path": "/var/lib/gpustack/cache/ascend-vllm/m-1a67e1afa7075ef35646bfd3ee97d8de/tp1-pp1-dp1-ep1-cp1_1-1cec8ba3",
+            "type": "DirectoryOrCreate"
+          }
+        },
+        {
           "name": "model-shm",
           "emptyDir": {
             "medium": "Memory",
@@ -282,6 +304,10 @@
             {
               "name": "MC_TE_METRIC",
               "value": "1"
+            },
+            {
+              "name": "VLLM_CACHE_ROOT",
+              "value": "/var/lib/gpustack/cache"
             }
           ],
           "resources": {
@@ -305,6 +331,10 @@
               "mountPath": "/usr/local/Ascend/driver"
             },
             {
+              "name": "gpustack-compile-cache",
+              "mountPath": "/var/lib/gpustack/cache"
+            },
+            {
               "name": "model-shm",
               "mountPath": "/dev/shm"
             }
@@ -315,7 +345,7 @@
               "port": 8000,
               "scheme": "HTTP"
             },
-            "timeoutSeconds": 3,
+            "timeoutSeconds": 5,
             "periodSeconds": 10,
             "failureThreshold": 6
           },
@@ -325,7 +355,7 @@
               "port": 8000,
               "scheme": "HTTP"
             },
-            "timeoutSeconds": 3,
+            "timeoutSeconds": 5,
             "periodSeconds": 10,
             "failureThreshold": 3
           },
@@ -335,7 +365,7 @@
               "port": 8000,
               "scheme": "HTTP"
             },
-            "timeoutSeconds": 3,
+            "timeoutSeconds": 5,
             "periodSeconds": 10,
             "failureThreshold": 180
           },
