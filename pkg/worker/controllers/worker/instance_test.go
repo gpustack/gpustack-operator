@@ -1752,15 +1752,36 @@ func TestInstanceReconciler_ServiceAlignedOnPortEditsWhileStopped(t *testing.T) 
 			})
 			reconcileInstanceUntilSettled(t, cli)
 
+			// Seed a stale status.ports entry before the replacement Pod reaches Running to prove
+			// status.ports is reconciled level-wise from the Service rather than only when empty.
+			staleInst := getInstance(t, cli)
+			staleInst.Status.Ports = []workercore.InstanceServicePort{{
+				InstancePort: instancePort(1111),
+				NodePort:     39999,
+			}}
+			require.NoError(t, cli.Status().Update(ctx, staleInst))
+
+			setInstancePodRunning(t, cli)
+			reconcileInstanceUntilSettled(t, cli)
+
 			err := cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, &core.Service{})
 			if c.wantNoSvc {
 				assert.True(t, kerrors.IsNotFound(err),
 					"an Instance that asks for no port keeps no NodePort Service")
+				assert.Empty(t, getInstance(t, cli).Status.Ports,
+					"a portless Instance clears any stale status.ports")
 				return
 			}
 			require.NoError(t, err)
 			assert.Equal(t, c.wantPorts, serviceNodePorts(getInstanceService(t, cli)),
 				"an unchanged port keeps its number and only an added one is allocated")
+
+			gotStatusPorts := make(map[string]int32, len(getInstance(t, cli).Status.Ports))
+			for _, sp := range getInstance(t, cli).Status.Ports {
+				gotStatusPorts[getPortName(sp.InstancePort)] = sp.NodePort
+			}
+			assert.Equal(t, c.wantPorts, gotStatusPorts,
+				"status.ports reflects the aligned Service ports once the Pod is running")
 		})
 	}
 }

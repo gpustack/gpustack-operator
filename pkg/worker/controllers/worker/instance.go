@@ -224,7 +224,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// ensure the backing Pod is deleted and update the Instance status to "Stopped".
 	// The Service is left in place: it is what holds the NodePort numbers a user connects to, and
 	// releasing it here would make every stop/start cycle hand out different ones. It is deleted
-	// with the Instance, or as soon as the Instance stops asking for ports.
+	// with the Instance, or on the next start if spec.ports was cleared while stopped.
 	if inst.Spec.Stop {
 		// Pod already deleted, mark the Instance as stopped.
 		if pod == nil {
@@ -525,8 +525,10 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	instStatus.Phase, instStatus.PhaseMessage = apistatus.GetSummaryOfPod(&pod.Status)
 
 	if pod.Status.Phase == core.PodRunning {
-		// Surface the node ports once ready; skipped for a portless Instance (svc nil).
-		if svc != nil && len(instStatus.Ports) == 0 {
+		// Surface the node ports once ready; cleared for a portless Instance (svc nil).
+		if svc == nil {
+			instStatus.Ports = nil
+		} else {
 			allReady := true
 			portsMap := make(map[string]int32)
 			for i := range svc.Spec.Ports {

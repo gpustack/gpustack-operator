@@ -34,10 +34,11 @@ and reports the same node ports. The Service belongs to the Instance rather than
 selects the Pod by the part-of label the two share, so it keeps routing across both the Pod
 replacement and a change of the Instance's type.
 
-`spec.ports` may be edited while the Instance is stopped. Ports left unchanged keep their allocated
-node port, a port added to `spec.ports` is allocated a new one when the Instance starts, and a port
-removed from `spec.ports` is dropped from the Service. Clearing `spec.ports` deletes the Service
-along with its allocations, as does deleting the Instance itself.
+`spec.ports` may be edited while the Instance is stopped, and the changes take effect on the Service
+when the Instance starts again: ports left unchanged keep their allocated node port, a port added to
+`spec.ports` is allocated a new one, a port removed from `spec.ports` is dropped from the Service,
+and clearing `spec.ports` deletes the Service along with its allocations. Deleting the Instance
+itself also deletes the Service.
 
 ---
 
