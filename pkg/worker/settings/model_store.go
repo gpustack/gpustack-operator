@@ -34,8 +34,8 @@ const (
 var (
 	// ModelArtifactDeliveryMode is how a Hugging Face artifact's weights reach a ModelDeployment's
 	// engine. It is explicit and never inferred from whether the plugin is installed: changing it
-	// changes every Hugging Face deployment's Pods, which each roll once. The chart seeds "Node"
-	// when it deploys the plugin, and a seed fills only a key the store does not have yet.
+	// changes every Hugging Face deployment's Pods, which each roll once. The chart declares "Node"
+	// when it deploys the plugin, and the worker reasserts that declaration on every start.
 	ModelArtifactDeliveryMode = settings.NewEditable(
 		"model-artifact-delivery-mode",
 		"Indicates how a Hugging Face ModelArtifact's weights reach a ModelDeployment: Engine, the engine "+

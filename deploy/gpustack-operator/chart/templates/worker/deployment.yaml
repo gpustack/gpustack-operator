@@ -135,7 +135,8 @@ spec:
             - name: GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS
               value: {{ .Values.ledgerReleaseTerminatedPods | quote }}
             {{- if .Values.modelManager.enabled }}
-            # Seeds the delivery Setting where the cluster has none yet; a stored value always wins.
+            # Declares the chart-owned delivery mode; the worker asserts it on every start, reverting
+            # any stored value that differs from this declaration at the next worker start.
             - name: GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE
               value: Node
             {{- end }}

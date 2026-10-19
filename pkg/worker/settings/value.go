@@ -2,6 +2,8 @@ package settings
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"gpustack.ai/gpustack/pkg/modelartifact"
@@ -52,6 +54,36 @@ var (
 		"Indicates the image pull policy for pulling images.",
 		setting.InitializeFromEnv("IfNotPresent"),
 		setting.AllowBlank(),
+	)
+
+	// DefaultTracking names the Settings the operator keeps on its own built-in default, so a default
+	// shipped in a later release reaches a cluster that never chose a value of its own. It is written
+	// out longhand because a name derived from the image Setting vars could not disagree with the
+	// registry, and a disagreement is what the resolve test pins: the align pass drops a name it
+	// cannot resolve, at a verbosity nobody reads.
+	//
+	// It is the one Setting here initialized from a fixed value rather than from the environment.
+	// InitializeFrom reports no declaration, so neither rule can claim it and no environment variable
+	// can take the list over. That is deliberate even though every other Setting reads its seed from
+	// one: which Settings the operator owns is the administrator's decision, and the chart renders no
+	// variable for this Setting.
+	//
+	// Clearing the list is the only way to keep a stored image across an operator upgrade, so a blank
+	// value is admitted.
+	DefaultTracking = settings.NewEditable(
+		setting.DefaultTrackingName,
+		"Indicates the comma-separated Settings that follow the operator's built-in default on every "+
+			"worker start. Clear it to keep the value stored for a Setting, which is the only way to "+
+			"keep an image pin across an operator upgrade.",
+		setting.InitializeFrom(
+			"instance-ssh-server-image,"+
+				"kv-cache-backend-image,"+
+				"model-deployment-router-image,"+
+				"model-deployment-router-proxy-image,"+
+				"model-deployment-routing-sidecar-image,"+
+				"model-prefetch-warmup-image"),
+		setting.AllowBlank(),
+		admitNoSelfTracking,
 	)
 
 	// Instance.
@@ -459,3 +491,18 @@ var (
 		setting.AllowBool(),
 	)
 )
+
+// admitNoSelfTracking refuses a tracking list naming the tracking Setting itself, which would make
+// that Setting reconcile its own membership. It compares trimmed comma-separated segments exactly as
+// the align pass parses the list, so a padded or buried name is the same case here as it is there.
+// It refuses at the write rather than letting the align pass drop the segment, because a write that
+// appears to succeed and then does nothing is the silent failure this list exists to prevent.
+func admitNoSelfTracking(_ context.Context, _, newVal string) error {
+	for _, segment := range strings.Split(newVal, ",") {
+		if strings.TrimSpace(segment) == setting.DefaultTrackingName {
+			return fmt.Errorf("setting %s cannot name itself, remove it to track the other Settings",
+				setting.DefaultTrackingName)
+		}
+	}
+	return nil
+}

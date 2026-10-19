@@ -1223,7 +1223,7 @@
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Deploy the model-manager: the CSI node plugin that delivers a Hugging Face ModelArtifact's\nweights from each node's cache, and its CSIDriver `model.csi.gpustack.ai`.\n\nWhen enabled, the worker seeds the `model-artifact-delivery-mode` Setting with `Node`. A seed\nfills only a Setting the cluster does not have yet, so a later upgrade never overrides an\nadministrator's choice. Upgrading from a version without that Setting rolls every\nModelDeployment on a Hugging Face artifact once, to node delivery; set the Setting to `Engine`\nbefore upgrading, or upgrade with this disabled, to avoid it.",
+          "description": "Deploy the model-manager: the CSI node plugin that delivers a Hugging Face ModelArtifact's\nweights from each node's cache, and its CSIDriver `model.csi.gpustack.ai`.\n\nWhen enabled, the chart declares `GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node`, so the chart\nowns `model-artifact-delivery-mode`. The worker reasserts `Node` on every start and reverts\na runtime edit to the Setting. `modelManager.enabled` is the only signal that reaches this\nvalue; the worker flag `--model-manager-service-account` defaults to a non-empty name and\ncannot indicate whether the plugin is deployed. With the plugin enabled, upgrading from a\nversion without the Setting rolls every ModelDeployment on a Hugging Face artifact once,\nto node delivery.",
           "title": "enabled",
           "type": "boolean"
         },

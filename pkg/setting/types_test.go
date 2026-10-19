@@ -3,6 +3,7 @@ package setting
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +14,81 @@ import (
 
 	"gpustack.ai/gpustack/pkg/system"
 )
+
+func TestInitializerDeclarationSource(t *testing.T) {
+	const (
+		derivedName   = "GPUSTACK_TEST_SETTING"
+		specifiedName = "TEST_SPECIFIED_SETTING"
+	)
+
+	type testCase struct {
+		name         string
+		envName      string
+		envValue     *string
+		initializer  func() Initializer
+		wantValue    string
+		wantEnvName  string
+		wantDeclared bool
+	}
+
+	declaredValue := "configured"
+	emptyValue := ""
+	cases := []testCase{
+		{
+			name:         "environment declared",
+			envName:      derivedName,
+			envValue:     &declaredValue,
+			initializer:  func() Initializer { return InitializeFromEnv("fallback") },
+			wantValue:    declaredValue,
+			wantEnvName:  derivedName,
+			wantDeclared: true,
+		},
+		{
+			name:        "environment unset",
+			envName:     derivedName,
+			initializer: func() Initializer { return InitializeFromEnv("fallback") },
+			wantValue:   "fallback",
+			wantEnvName: derivedName,
+		},
+		{
+			name:         "environment declared empty",
+			envName:      derivedName,
+			envValue:     &emptyValue,
+			initializer:  func() Initializer { return InitializeFromEnv("fallback") },
+			wantEnvName:  derivedName,
+			wantDeclared: true,
+		},
+		{
+			name:         "specified environment declared",
+			envName:      specifiedName,
+			envValue:     &declaredValue,
+			initializer:  func() Initializer { return InitializeFromSpecifiedEnv(specifiedName, "fallback") },
+			wantValue:    declaredValue,
+			wantEnvName:  specifiedName,
+			wantDeclared: true,
+		},
+		{
+			name:        "fixed value",
+			initializer: func() Initializer { return InitializeFrom("fixed") },
+			wantValue:   "fixed",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.envValue == nil {
+				require.NoError(t, os.Unsetenv(tc.envName))
+			} else {
+				t.Setenv(tc.envName, *tc.envValue)
+			}
+
+			s := Settings{}.New("test-setting", "", PropPrivate, tc.initializer())
+			assert.Equal(t, tc.wantValue, s.DefaultValue())
+			assert.Equal(t, tc.wantEnvName, s.envName)
+			assert.Equal(t, tc.wantDeclared, s.declared)
+		})
+	}
+}
 
 // TestSettingValueBool pins what a bool Setting reads as. A read that fails, or finds no stored
 // value, yields the setting's default together with the error, so ShouldValueBool, which drops the
