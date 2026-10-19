@@ -1,4 +1,4 @@
-# Model Deployment Prefill and Decode
+# Prefill and Decode
 
 A deployment with `Prefill` and `Decode` roles is admitted as one set. Once both roles run, the
 operator connects them through a router and a transfer leg. [Prefill and
@@ -306,7 +306,7 @@ The `llm-d-router` plus vLLM requirement and supported floors are documented und
 | `sglang-gateway` with SGLang | Not applicable | SGLang uses its own disaggregation arguments; `--enable-scale-out` is a vLLM flag |
 | `llm-d-router` with SGLang | No vLLM flag applies; token path is unmeasured | SGLang uses its own disaggregation arguments; do not infer this path from the vLLM row |
 
-[Engine Versions](engine-versions.md#the-minimum-per-shape) carries the same floors as a
+[Engine Compatibility](engine-versions.md#the-minimum-per-shape) carries the same floors as a
 requirement on the vLLM and vLLM-Ascend rows.
 
 ## Direct transfer transport
@@ -429,7 +429,9 @@ What `status.endpoint` publishes in each shape is under [Status](status.md#statu
 
 **See also** — [Model Deployment](deployment.md) for the role fields, the owned-key
 table and what admission refuses · [Model Deployment Routing](routing.md) for which replica each
-router picks · [Engine Versions](engine-versions.md) for which transport each engine can use on
-each leg · [Model Deployment Status](status.md) for what `status.endpoint` publishes.
+router picks · [Engine Compatibility](engine-versions.md) for which transport each engine can use on
+each leg · [Model Deployment Status](status.md) for what `status.endpoint` publishes ·
+[Prefill and Decode Benchmark](prefill-decode-benchmark.md) for the measured
+comparison of a disaggregated pair with an aggregated group on equal GPUs.
 
 **Next** → [Model Deployment Routing](routing.md)
