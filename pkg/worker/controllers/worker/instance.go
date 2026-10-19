@@ -46,7 +46,8 @@ import (
 
 // InstanceReconciler reconciles v1alpha1.Instance objects to finish the following tasks:
 //   - Create/Update/Delete a Kubernetes Pod as the backing resource of the Instance based on the Instance spec.
-//   - Create a Kubernetes Service to expose the ports of the backing Pod if specified in the Instance spec.
+//   - Create a Kubernetes Service to expose the ports of the backing Pod if specified in the Instance spec. The Service
+//     belongs to the Instance rather than to the Pod, so it survives a stop and keeps its allocated node ports.
 //   - Update the Instance status based on the backing Pod status for better visibility and stability.
 type InstanceReconciler struct {
 	Client    ctrlcli.Client
@@ -118,7 +119,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, nil
 		}
 
-		// Ensure the backing Pod is deleted before unlocking and let other controllers or users to clean up the Instance.
+		// Ensure the backing Pod and Service are deleted before unlocking and let other controllers or users to clean up the Instance.
 		pod := new(core.Pod)
 		err = r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(inst), pod,
 			ctrlclix.WithoutQuorum)
@@ -130,7 +131,28 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			pod = nil
 		}
 
-		if pod == nil {
+		// The Service outlives a stopped Instance on purpose, so its lifetime ends here instead:
+		// leaving it behind would hold NodePort allocations for an Instance that no longer exists.
+		svc := new(core.Service)
+		err = r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(inst), svc,
+			ctrlclix.WithoutQuorum)
+		if err != nil {
+			if !kerrors.IsNotFound(err) {
+				logger.Error(err, "fetch service")
+				return ctrl.Result{}, err
+			}
+			svc = nil
+		}
+
+		// A Service that merely shares the name belongs to something else, so it is left alone and
+		// treated as absent: this Instance never owned it, and it must not hold the finalizer.
+		if svc != nil && !kubemeta.IsControlledBy(svc, inst) {
+			logger.V(2).Info("service of the same name belongs to something else; leaving it alone",
+				"service", ctrlcli.ObjectKeyFromObject(svc))
+			svc = nil
+		}
+
+		if pod == nil && svc == nil {
 			err = r.Client.Update(ctx, inst)
 			if err != nil {
 				logger.Error(err, "unlock instance")
@@ -151,7 +173,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 		}
 
-		if pod.DeletionTimestamp == nil {
+		if pod != nil && pod.DeletionTimestamp == nil {
 			err = r.Client.Delete(ctx, pod,
 				ctrlclix.Terminated)
 			if err != nil {
@@ -162,7 +184,18 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 		}
 
-		logger.V(3).Info("pod deletion in progress; requeue in 2s")
+		if svc != nil && svc.DeletionTimestamp == nil {
+			err = r.Client.Delete(ctx, svc,
+				ctrlclix.Terminated)
+			if err != nil {
+				if !kerrors.IsNotFound(err) {
+					logger.Error(err, "delete service")
+					return ctrl.Result{}, err
+				}
+			}
+		}
+
+		logger.V(3).Info("pod and service deletion in progress; requeue in 2s")
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
@@ -189,6 +222,9 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// If the Instance is marked as stopped,
 	// ensure the backing Pod is deleted and update the Instance status to "Stopped".
+	// The Service is left in place: it is what holds the NodePort numbers a user connects to, and
+	// releasing it here would make every stop/start cycle hand out different ones. It is deleted
+	// with the Instance, or on the next start if spec.ports was cleared while stopped.
 	if inst.Spec.Stop {
 		// Pod already deleted, mark the Instance as stopped.
 		if pod == nil {
@@ -422,21 +458,65 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		svc = nil
 	}
 
-	// Create the Service only when the Pod exposes ports: a portless NodePort Service is
-	// rejected by the API, which would fail every reconcile before the status is written.
-	if svc == nil {
-		desired := r.convertServiceFromPod(ctx, pod)
-		if len(desired.Spec.Ports) > 0 {
+	// The Service is reconciled rather than recreated, because it survives a stop: reusing it is
+	// what keeps the NodePort numbers a user connects to across a stop and start.
+	//
+	// A portless NodePort Service is rejected by the API, which would fail every reconcile before
+	// the status is written, so an Instance that asks for no port also gives up the one it kept.
+	if len(inst.Spec.Ports) == 0 {
+		// Only a Service this Instance owns is this Instance's to delete. One that merely shares the
+		// name belongs to something else, and is left serving whatever already points at it.
+		if svc != nil && !kubemeta.IsControlledBy(svc, inst) {
+			logger.V(2).Info("service of the same name belongs to something else; leaving it alone",
+				"service", ctrlcli.ObjectKeyFromObject(svc))
+			svc = nil
+		}
+
+		if svc != nil {
+			if svc.DeletionTimestamp == nil {
+				err = r.Client.Delete(ctx, svc,
+					ctrlclix.Terminated)
+				if err != nil && !kerrors.IsNotFound(err) {
+					logger.Error(err, "delete service")
+					return ctrl.Result{}, err
+				}
+			}
+
+			logger.V(3).Info("service deletion in progress; requeue in 2s")
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
+	} else {
+		desired := r.convertServiceFromInstance(inst)
+		switch {
+		case svc == nil:
 			err = r.Client.Create(ctx, desired)
 			if err != nil {
 				logger.Error(err, "create service")
 				return ctrl.Result{}, err
 			}
 			svc = desired
+		case !kubemeta.IsControlledBy(svc, inst):
+			// Redirecting or deleting a Service this Instance does not own would take over whatever
+			// already points at it, and nothing in this operator's logs would name the victim. Report
+			// the collision and let a human resolve it, as a deployment does with a name clash.
+			//
+			// TESTED BEFORE THE DELETION BELOW, because a Service of someone else's that happens to be
+			// terminating is still not this Instance's to wait on: ordering the arms the other way
+			// requeues every 2s and the collision is never reported at all.
+			return ctrl.Result{}, fmt.Errorf("service %s/%s is not owned by this instance",
+				svc.Namespace, svc.Name)
+		case svc.DeletionTimestamp != nil:
+			logger.V(3).Info("previous service deletion in progress; requeue in 2s")
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		default:
+			if alignServiceToInstance(svc, desired) {
+				err = r.Client.Update(ctx, svc)
+				if err != nil {
+					logger.Error(err, "update service")
+					return ctrl.Result{}, err
+				}
+			}
 		}
-	} else if svc.DeletionTimestamp != nil {
-		logger.V(3).Info("previous service deletion in progress; requeue in 2s")
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
 	instStatus := inst.Status.DeepCopy()
@@ -445,8 +525,10 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	instStatus.Phase, instStatus.PhaseMessage = apistatus.GetSummaryOfPod(&pod.Status)
 
 	if pod.Status.Phase == core.PodRunning {
-		// Surface the node ports once ready; skipped for a portless Instance (svc nil).
-		if svc != nil && len(instStatus.Ports) == 0 {
+		// Surface the node ports once ready; cleared for a portless Instance (svc nil).
+		if svc == nil {
+			instStatus.Ports = nil
+		} else {
 			allReady := true
 			portsMap := make(map[string]int32)
 			for i := range svc.Spec.Ports {
@@ -921,34 +1003,76 @@ func (r *InstanceReconciler) getNodeHostname(ctx context.Context, nodeName strin
 	return nodeName
 }
 
-func (r *InstanceReconciler) convertServiceFromPod(
-	_ context.Context,
-	pod *core.Pod,
+// convertServiceFromInstance renders the NodePort Service an Instance is reached through.
+//
+// IT IS OWNED BY THE INSTANCE, NOT BY THE POD IT FRONTS. A Service owned by the Pod shares the
+// Pod's lifetime: stopping an Instance deletes that Pod, and the Service and the NodePort numbers
+// it holds go with it, only for the API server to allocate different ones on the next start. The
+// port name encodes the protocol and the port, so an unchanged port keeps its number across an
+// edit that adds or removes others.
+//
+// IT SELECTS ON THE PART-OF LABEL ALONE rather than on the Pod's whole label set, so the Service
+// keeps routing to the replacement Pod when the Instance's queue changes, and so the selector has
+// one term to align instead of one per Pod label.
+func (r *InstanceReconciler) convertServiceFromInstance(
+	inst *workercore.Instance,
 ) *core.Service {
 	svc := &core.Service{
-		ObjectMeta: kubemeta.SanitizeObjectMeta(pod.ObjectMeta),
+		ObjectMeta: kubemeta.SanitizeObjectMeta(inst.ObjectMeta),
 		Spec: core.ServiceSpec{
-			Selector: pod.Labels,
-			Type:     core.ServiceTypeNodePort,
+			Selector: map[string]string{
+				deviceplugin.InstancePartOfLabelKey: string(inst.UID),
+			},
+			Type: core.ServiceTypeNodePort,
 		},
 	}
 
-	// Fill the service ports based on the pod container ports.
-	for i := range pod.Spec.Containers {
-		for j := range pod.Spec.Containers[i].Ports {
-			svc.Spec.Ports = append(svc.Spec.Ports, core.ServicePort{
-				Name:       pod.Spec.Containers[i].Ports[j].Name,
-				Port:       pod.Spec.Containers[i].Ports[j].ContainerPort,
-				Protocol:   pod.Spec.Containers[i].Ports[j].Protocol,
-				TargetPort: intstr.FromInt32(pod.Spec.Containers[i].Ports[j].ContainerPort),
-			})
-		}
+	for i := range inst.Spec.Ports {
+		p := inst.Spec.Ports[i]
+		svc.Spec.Ports = append(svc.Spec.Ports, core.ServicePort{
+			Name:       getPortName(p),
+			Port:       p.Port,
+			Protocol:   p.Protocol,
+			TargetPort: intstr.FromInt32(p.Port),
+		})
 	}
 
 	systemmeta.NoteResource(svc, "instances", nil)
-	kubemeta.ControlOnWithoutBlock(svc, pod, core.SchemeGroupVersion.WithKind("Pod"))
+	kubemeta.ControlOnWithoutBlock(svc, inst, workercore.SchemeGroupVersionKind("Instance"))
 
 	return svc
+}
+
+// alignServiceToInstance brings an existing Service to the shape convertServiceFromInstance renders
+// and reports whether it changed anything, so an unchanged Instance writes nothing.
+//
+// THE NODEPORT IS THE ALLOCATION, NOT A DESIRED VALUE. Writing zero for a port that already holds
+// one releases it and lets the API server hand out a different number, which is the churn this
+// alignment exists to avoid, so every port that keeps its name keeps its number and only a port
+// added by the edit is left for the API server to allocate.
+func alignServiceToInstance(svc, desired *core.Service) bool {
+	allocated := make(map[string]int32, len(svc.Spec.Ports))
+	for i := range svc.Spec.Ports {
+		allocated[svc.Spec.Ports[i].Name] = svc.Spec.Ports[i].NodePort
+	}
+
+	ports := make([]core.ServicePort, len(desired.Spec.Ports))
+	for i := range desired.Spec.Ports {
+		ports[i] = desired.Spec.Ports[i]
+		ports[i].NodePort = allocated[ports[i].Name]
+	}
+
+	if svc.Spec.Type == desired.Spec.Type &&
+		kubemeta.DeepEqual(svc.Spec.Selector, desired.Spec.Selector) &&
+		kubemeta.DeepEqual(svc.Spec.Ports, ports) {
+		return false
+	}
+
+	svc.Spec.Type = desired.Spec.Type
+	svc.Spec.Selector = desired.Spec.Selector
+	svc.Spec.Ports = ports
+
+	return true
 }
 
 func (r *InstanceReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {

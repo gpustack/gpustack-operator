@@ -13,6 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -23,7 +25,9 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/kubemetrics"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/setting/settingtest"
@@ -1409,6 +1413,602 @@ func TestInstanceReconciler_ExpectedWriteFailuresAreQuiet(t *testing.T) {
 			got := new(workercore.Instance)
 			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, got))
 			assert.Equal(t, InstancePhaseStopped, got.Status.Phase)
+		})
+	}
+}
+
+// The Service lifecycle an Instance owns: one Service, kept across a stop, aligned to an edit made
+// while stopped, and deleted with the Instance or as soon as it asks for no port.
+
+const (
+	// instanceServiceType is the InstanceType the Service lifecycle fixtures hang off. It is a
+	// CPU-only type so no accelerator detail has to be published before a Pod can be built.
+	instanceServiceType = "cpu-type"
+	// instanceServiceUID is the UID the Instance fixtures carry. The fake client assigns none, and
+	// the Service selector these tests pin is exactly this value.
+	instanceServiceUID = types.UID("11111111-2222-3333-4444-555555555555")
+	// instanceServiceObjectUID is stamped on the retained Service once it exists, so a start that
+	// replaced the Service instead of reusing it would be visible.
+	instanceServiceObjectUID = types.UID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+)
+
+// instancePort builds a TCP port fixture.
+func instancePort(p int32) workercore.InstancePort {
+	return workercore.InstancePort{Port: p, Protocol: core.ProtocolTCP}
+}
+
+// newInstanceServiceFixture builds the Instance under test together with the healthy, already
+// published type that lets its Pod be built, so a lifecycle step is not spent on the entrance wait.
+func newInstanceServiceFixture(ports ...workercore.InstancePort) (*workercore.Instance,
+	*worker.InstanceType, *kueue.ClusterQueue,
+) {
+	inst := &workercore.Instance{
+		ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst", UID: instanceServiceUID},
+		Spec: workercore.InstanceSpec{
+			Type: instanceServiceType,
+			InstanceTemplate: workercore.InstanceTemplate{
+				Image: "img",
+				Resources: &workercore.InstanceResources{
+					CPU:          qty("1"),
+					RAM:          qty("2Gi"),
+					LocalStorage: qty("10Gi"),
+				},
+				Ports: ports,
+			},
+			Volume: workercore.InstanceVolume{
+				Ephemeral: &workercore.InstanceEphemeralVolume{Capacity: qty("10Gi")},
+			},
+		},
+	}
+	instType := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: instanceServiceType},
+		Spec:       workercore.InstanceTypeSpec{Acceleratable: false},
+		Status: workercore.InstanceTypeStatus{
+			Entrance: nodefeature.FormatLocalQueueName(instanceServiceType),
+		},
+	}
+	cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: instanceServiceType}}
+	return inst, instType, cq
+}
+
+// newInstanceServiceFixtureService builds the Service a reconciled Instance leaves behind, carrying
+// the NodePort a cluster would have allocated for it.
+func newInstanceServiceFixtureService(inst *workercore.Instance,
+	nodePort int32,
+) *core.Service {
+	svc := &core.Service{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: inst.Namespace,
+			Name:      inst.Name,
+			UID:       instanceServiceObjectUID,
+		},
+		Spec: core.ServiceSpec{
+			Type:     core.ServiceTypeNodePort,
+			Selector: map[string]string{deviceplugin.InstancePartOfLabelKey: string(inst.UID)},
+			Ports: []core.ServicePort{{
+				Name:       "tcp-8080",
+				Port:       8080,
+				Protocol:   core.ProtocolTCP,
+				TargetPort: intstr.FromInt32(8080),
+				NodePort:   nodePort,
+			}},
+		},
+	}
+	kubemeta.ControlOnWithoutBlock(svc, inst, workercore.SchemeGroupVersionKind("Instance"))
+	return svc
+}
+
+// buildInstanceServiceClient builds a client whose Service writes behave like the API server in
+// the one way the fake does not: a port left without a NodePort is allocated one, and a port that
+// already holds one keeps it. Without it every port would read as zero, the controller would
+// requeue waiting for an allocation, and no number could ever be seen to survive a restart.
+func buildInstanceServiceClient(objs ...ctrlcli.Object) ctrlcli.Client {
+	next := int32(30000)
+	allocate := func(obj ctrlcli.Object) {
+		svc, ok := obj.(*core.Service)
+		if !ok {
+			return
+		}
+		for i := range svc.Spec.Ports {
+			if svc.Spec.Ports[i].NodePort != 0 {
+				continue
+			}
+			next++
+			svc.Spec.Ports[i].NodePort = next
+		}
+	}
+	return ctrlinterceptor.NewClient(buildInstanceClient(objs...).(ctrlcli.WithWatch),
+		ctrlinterceptor.Funcs{
+			Create: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption) error {
+				allocate(obj)
+				return c.Create(ctx, obj, opts...)
+			},
+			Update: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.UpdateOption) error {
+				allocate(obj)
+				return c.Update(ctx, obj, opts...)
+			},
+		})
+}
+
+// setInstancePodRunning marks the backing Pod Ready the way kubelet would, so the reconciler
+// publishes the Instance phase and its node ports from it.
+func setInstancePodRunning(t *testing.T, cli ctrlcli.Client) {
+	t.Helper()
+	ctx := context.Background()
+	pod := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, pod))
+	pod.Status = core.PodStatus{
+		Phase:  core.PodRunning,
+		PodIP:  "10.244.1.5",
+		PodIPs: []core.PodIP{{IP: "10.244.1.5"}},
+		Conditions: []core.PodCondition{
+			{Type: core.PodScheduled, Status: core.ConditionTrue},
+			{Type: core.PodInitialized, Status: core.ConditionTrue},
+			{Type: core.PodReady, Status: core.ConditionTrue},
+		},
+	}
+	require.NoError(t, cli.Status().Update(ctx, pod))
+}
+
+// serviceNodePorts reads the NodePort every Service port holds, which is the mapping the whole
+// lifecycle is about.
+func serviceNodePorts(svc *core.Service) map[string]int32 {
+	ports := make(map[string]int32, len(svc.Spec.Ports))
+	for i := range svc.Spec.Ports {
+		ports[svc.Spec.Ports[i].Name] = svc.Spec.Ports[i].NodePort
+	}
+	return ports
+}
+
+// getInstanceService reads the Instance's Service, failing the test when it is gone.
+func getInstanceService(t *testing.T, cli ctrlcli.Client) *core.Service {
+	t.Helper()
+	svc := new(core.Service)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, svc),
+		"the Service belongs to the Instance, so it outlives the Pod")
+	return svc
+}
+
+// getInstance reads the Instance under test.
+func getInstance(t *testing.T, cli ctrlcli.Client) *workercore.Instance {
+	t.Helper()
+	inst := new(workercore.Instance)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, inst))
+	return inst
+}
+
+// reconcileInstanceUntilSettled reconciles until a pass reports no requeue, which is how a
+// lifecycle step reaches its end state: the pass that deletes or creates something reports a
+// requeue, and the pass after it reports the outcome.
+func reconcileInstanceUntilSettled(t *testing.T, cli ctrlcli.Client) {
+	t.Helper()
+	for range 5 {
+		res, err := reconcileInstance(t, cli, "default", "inst")
+		require.NoError(t, err)
+		if res.RequeueAfter == 0 && !res.Requeue {
+			return
+		}
+	}
+	t.Fatal("reconcile did not settle within 5 passes")
+}
+
+// updateInstanceSpec applies a spec edit to the Instance under test.
+func updateInstanceSpec(t *testing.T, cli ctrlcli.Client, edit func(*workercore.Instance)) {
+	t.Helper()
+	inst := getInstance(t, cli)
+	edit(inst)
+	require.NoError(t, cli.Update(context.Background(), inst))
+}
+
+// TestInstanceReconciler_ServicePreservedAcrossStopAndRestart pins the reason the Service belongs
+// to the Instance: a user who stops an Instance to free its accelerator and starts it again must
+// find the address they were given still waiting.
+//
+// The Service selects the Pod by the part-of label alone and is owned by the Instance, so deleting
+// the Pod cannot collect it and a replacement Pod is selected without the Service changing. A start
+// therefore has nothing to recreate, which the Service UID pins as firmly as the port number does.
+func TestInstanceReconciler_ServicePreservedAcrossStopAndRestart(t *testing.T) {
+	ctx := context.Background()
+	inst, instType, cq := newInstanceServiceFixture(instancePort(8080))
+	cli := buildInstanceServiceClient(inst, instType, cq)
+
+	// The first pass builds the Pod and the Service; the pass that follows reports the running Pod.
+	reconcileInstanceUntilSettled(t, cli)
+	setInstancePodRunning(t, cli)
+	reconcileInstanceUntilSettled(t, cli)
+
+	svc := getInstanceService(t, cli)
+	allocated := serviceNodePorts(svc)
+	require.Equal(t, map[string]int32{"tcp-8080": 30001}, allocated,
+		"the API server allocates a node port for the Instance's port")
+
+	// The owner is the Instance, not the Pod the Service fronts. An owner reference naming the Pod
+	// would let the stop below collect the Service, which is the defect this lifecycle replaced.
+	owner := kubemeta.GetControllerOfNoCopy(svc)
+	require.NotNil(t, owner, "the Service names a controller owner")
+	assert.Equal(t, "Instance", owner.Kind, "the owner is the Instance")
+	assert.Equal(t, workercore.SchemeGroupVersionKind("Instance").GroupVersion().String(),
+		owner.APIVersion, "and it is named in the Instance's own API version")
+	assert.Equal(t, inst.Name, owner.Name)
+	assert.Equal(t, instanceServiceUID, owner.UID)
+	assert.True(t, ptr.Deref(owner.Controller, false), "as the controller owner")
+
+	// The selector is the part-of label alone. Copying the Pod's labels would bind the Service to a
+	// queue name, which an edit of the Instance's type rewrites, selecting nothing afterwards.
+	assert.Equal(t, map[string]string{
+		deviceplugin.InstancePartOfLabelKey: string(instanceServiceUID),
+	}, svc.Spec.Selector, "the Service selects its Pod by the part-of label alone")
+	assert.Equal(t, core.ServiceTypeNodePort, svc.Spec.Type)
+
+	running := getInstance(t, cli)
+	require.Len(t, running.Status.Ports, 1, "a running Instance publishes the port it is reached on")
+	firstNodePort := running.Status.Ports[0].NodePort
+
+	// The API server stamps the UID it assigned, so a later start that replaced the Service would
+	// leave a different one behind.
+	svc.UID = instanceServiceObjectUID
+	require.NoError(t, cli.Update(ctx, svc))
+
+	// Stop. The Pod goes, the Service stays, and the Instance stops advertising an address.
+	updateInstanceSpec(t, cli, func(inst *workercore.Instance) { inst.Spec.Stop = true })
+	reconcileInstanceUntilSettled(t, cli)
+
+	err := cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, &core.Pod{})
+	assert.True(t, kerrors.IsNotFound(err), "stopping deletes the backing Pod")
+
+	stopped := getInstanceService(t, cli)
+	assert.Equal(t, allocated, serviceNodePorts(stopped),
+		"stopping must not release the node port the user connects to")
+	assert.Equal(t, instanceServiceObjectUID, stopped.UID, "and it must not replace the Service")
+
+	stoppedInst := getInstance(t, cli)
+	assert.Equal(t, InstancePhaseStopped, stoppedInst.Status.Phase)
+	assert.Empty(t, stoppedInst.Status.Ports, "a stopped Instance serves nothing, so it reports no port")
+
+	// Start. A Pod is built again and the retained Service selects it without changing at all.
+	updateInstanceSpec(t, cli, func(inst *workercore.Instance) { inst.Spec.Stop = false })
+	reconcileInstanceUntilSettled(t, cli)
+
+	pod := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, pod),
+		"starting builds a Pod again")
+	for key, value := range getInstanceService(t, cli).Spec.Selector {
+		assert.Equal(t, value, pod.Labels[key], "the retained Service selects the new Pod")
+	}
+
+	setInstancePodRunning(t, cli)
+	reconcileInstanceUntilSettled(t, cli)
+
+	restarted := getInstanceService(t, cli)
+	assert.Equal(t, instanceServiceObjectUID, restarted.UID, "a restart reuses the Service it kept")
+	assert.Equal(t, allocated, serviceNodePorts(restarted),
+		"rather than publishing a new address for the user to chase")
+
+	restartedInst := getInstance(t, cli)
+	require.Len(t, restartedInst.Status.Ports, 1)
+	assert.Equal(t, firstNodePort, restartedInst.Status.Ports[0].NodePort,
+		"the address given before the stop is the one reported after it")
+	assert.Equal(t, InstancePhaseReady, restartedInst.Status.Phase)
+}
+
+// TestInstanceReconciler_ServiceAlignedOnPortEditsWhileStopped covers spec.ports edited between a
+// stop and a start, which the webhook permits in exactly that window. The retained Service is
+// aligned to the edit rather than replaced, so a port that did not change keeps the number its
+// user already has, and only a port the edit adds is left for the API server to allocate.
+func TestInstanceReconciler_ServiceAlignedOnPortEditsWhileStopped(t *testing.T) {
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+
+		// runPorts is what the Instance is started with; editedPorts is what it is stopped at.
+		runPorts    []workercore.InstancePort
+		editedPorts []workercore.InstancePort
+		wantPorts   map[string]int32
+		wantNoSvc   bool
+	}{
+		{
+			name:        "a port added while stopped joins the Service without disturbing the other",
+			runPorts:    []workercore.InstancePort{instancePort(8080)},
+			editedPorts: []workercore.InstancePort{instancePort(8080), instancePort(9090)},
+			wantPorts:   map[string]int32{"tcp-8080": 30001, "tcp-9090": 30002},
+		},
+		{
+			name:        "a port removed while stopped is dropped while the other keeps its number",
+			runPorts:    []workercore.InstancePort{instancePort(8080), instancePort(9090)},
+			editedPorts: []workercore.InstancePort{instancePort(9090)},
+			wantPorts:   map[string]int32{"tcp-9090": 30002},
+		},
+		{
+			name:        "every port removed while stopped deletes the Service it kept",
+			runPorts:    []workercore.InstancePort{instancePort(8080)},
+			editedPorts: nil,
+			wantNoSvc:   true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			inst, instType, cq := newInstanceServiceFixture(c.runPorts...)
+			cli := buildInstanceServiceClient(inst, instType, cq)
+
+			// Run first, so the ports that must be preserved hold numbers already.
+			reconcileInstanceUntilSettled(t, cli)
+			setInstancePodRunning(t, cli)
+			reconcileInstanceUntilSettled(t, cli)
+			runPorts := serviceNodePorts(getInstanceService(t, cli))
+			require.Len(t, runPorts, len(c.runPorts), "the ports the Instance ran with are allocated")
+
+			// Stop, edit, start. Being stopped is what makes the edit legal, and the pass that
+			// follows the start is the one that has to honor it.
+			updateInstanceSpec(t, cli, func(inst *workercore.Instance) { inst.Spec.Stop = true })
+			reconcileInstanceUntilSettled(t, cli)
+			updateInstanceSpec(t, cli, func(inst *workercore.Instance) {
+				inst.Spec.Stop = false
+				inst.Spec.Ports = c.editedPorts
+			})
+			reconcileInstanceUntilSettled(t, cli)
+
+			// Seed a stale status.ports entry before the replacement Pod reaches Running to prove
+			// status.ports is reconciled level-wise from the Service rather than only when empty.
+			staleInst := getInstance(t, cli)
+			staleInst.Status.Ports = []workercore.InstanceServicePort{{
+				InstancePort: instancePort(1111),
+				NodePort:     39999,
+			}}
+			require.NoError(t, cli.Status().Update(ctx, staleInst))
+
+			setInstancePodRunning(t, cli)
+			reconcileInstanceUntilSettled(t, cli)
+
+			err := cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, &core.Service{})
+			if c.wantNoSvc {
+				assert.True(t, kerrors.IsNotFound(err),
+					"an Instance that asks for no port keeps no NodePort Service")
+				assert.Empty(t, getInstance(t, cli).Status.Ports,
+					"a portless Instance clears any stale status.ports")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.wantPorts, serviceNodePorts(getInstanceService(t, cli)),
+				"an unchanged port keeps its number and only an added one is allocated")
+
+			gotStatusPorts := make(map[string]int32, len(getInstance(t, cli).Status.Ports))
+			for _, sp := range getInstance(t, cli).Status.Ports {
+				gotStatusPorts[getPortName(sp.InstancePort)] = sp.NodePort
+			}
+			assert.Equal(t, c.wantPorts, gotStatusPorts,
+				"status.ports reflects the aligned Service ports once the Pod is running")
+		})
+	}
+}
+
+// TestInstanceReconciler_DeletingInstanceDeletesServiceAndPod pins the end of the Service's life.
+// Retaining a Service is what keeps a node port across a stop, so the deletion has to clean it up
+// explicitly rather than leave the allocation behind for a user who will never come back.
+func TestInstanceReconciler_DeletingInstanceDeletesServiceAndPod(t *testing.T) {
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+
+		// What is still standing when the deletion is first observed.
+		withPod bool
+		withSvc bool
+
+		// Whether the first pass alone is enough, which it is only when nothing is left to delete.
+		wantReleasedFirstPass bool
+	}{
+		{
+			name:    "a running instance loses its Pod and its Service",
+			withPod: true, withSvc: true,
+		},
+		{
+			// A stopped instance has no Pod, so the retained Service is all that is left to clean up.
+			// The pass that deletes it must not release the finalizer in the same breath: the
+			// Instance would then be deleted by the API server before the Service it owns is gone.
+			name:    "a stopped instance loses its retained Service before the finalizer is released",
+			withSvc: true,
+		},
+		{
+			name:                  "an instance owning nothing is released at once",
+			wantReleasedFirstPass: true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			inst, instType, cq := newInstanceServiceFixture(instancePort(8080))
+			// Marked as deleted and locked up front, the way a deleted Instance is observed: the
+			// fake client refuses an update that sets a deletion timestamp.
+			now := meta.Now()
+			inst.DeletionTimestamp = &now
+			systemmeta.Lock(inst)
+
+			objs := []ctrlcli.Object{inst, instType, cq}
+			if c.withPod {
+				objs = append(objs, &core.Pod{ObjectMeta: meta.ObjectMeta{
+					Namespace: inst.Namespace, Name: inst.Name,
+				}})
+			}
+			if c.withSvc {
+				objs = append(objs, newInstanceServiceFixtureService(inst, 30001))
+			}
+			cli := buildInstanceServiceClient(objs...)
+
+			// The first pass deletes what the Instance still owns.
+			_, err := reconcileInstance(t, cli, "default", "inst")
+			require.NoError(t, err)
+
+			svcErr := cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, &core.Service{})
+			podErr := cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, &core.Pod{})
+			if c.withSvc {
+				assert.True(t, kerrors.IsNotFound(svcErr), "the Service is deleted with the Instance")
+			} else {
+				assert.True(t, kerrors.IsNotFound(svcErr), "an Instance that owned none has none to clean up")
+			}
+			if c.withPod {
+				assert.True(t, kerrors.IsNotFound(podErr), "the backing Pod is deleted with the Instance")
+			}
+
+			instErr := cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"},
+				&workercore.Instance{})
+			if !c.wantReleasedFirstPass {
+				// Nothing else is left, so the Instance itself still waits: releasing the finalizer
+				// while what it owns is still standing is what orphans it.
+				require.NoError(t, instErr, "the Instance is not released before its Service is gone")
+				got := new(workercore.Instance)
+				require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, got))
+				assert.Contains(t, got.Finalizers, systemmeta.LockedResourceFinalizer)
+			}
+
+			// The pass that finds nothing left releases the finalizer, and the Instance goes with it.
+			_, err = reconcileInstance(t, cli, "default", "inst")
+			require.NoError(t, err)
+			assert.True(t, kerrors.IsNotFound(
+				cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, &workercore.Instance{})),
+				"the Instance is released once nothing it owns is left")
+		})
+	}
+}
+
+// newUnownedInstanceServiceFixtureService builds a Service that shares the Instance's namespace and
+// name and belongs to nobody this controller serves. An Instance and a Service may legally collide
+// on that pair, so what tells them apart is the owner reference and nothing else.
+func newUnownedInstanceServiceFixtureService(inst *workercore.Instance) *core.Service {
+	return &core.Service{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: inst.Namespace,
+			Name:      inst.Name,
+			Labels:    map[string]string{"app": "something-else"},
+		},
+		Spec: core.ServiceSpec{
+			Type:     core.ServiceTypeClusterIP,
+			Selector: map[string]string{"app": "something-else"},
+			Ports:    []core.ServicePort{{Name: "http", Port: 80, Protocol: core.ProtocolTCP}},
+		},
+	}
+}
+
+// TestInstanceReconciler_RefusesAServiceItDoesNotOwn states that a name collision is reported or
+// ignored, never resolved. The lookup is by namespace and name alone, so a Service belonging to
+// something else is otherwise indistinguishable from this Instance's own, and taking it over would
+// redirect or delete whatever already points at it -- the one failure here nobody would find in
+// this operator's logs.
+//
+// The three cases are the three ways the Service is reached, and each ends differently on purpose:
+// a ported Instance refuses and surfaces the collision, while a portless and a deleting one leave
+// the stranger alone and carry on with the Instance they do own.
+func TestInstanceReconciler_RefusesAServiceItDoesNotOwn(t *testing.T) {
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+
+		// The Instance state that reaches the Service branch.
+		ports    []workercore.InstancePort
+		stopped  bool
+		deleting bool
+
+		// Whether the stranger is already going away under its own finalizer.
+		terminating bool
+
+		wantErr      bool
+		wantRequeue  bool
+		wantReleased bool
+	}{
+		{
+			name:    "a ported instance reports the collision rather than redirecting the Service",
+			ports:   []workercore.InstancePort{instancePort(8080)},
+			wantErr: true,
+		},
+		{
+			// The ordering this pins: a Service of someone else's that happens to be terminating
+			// is still not this Instance's to wait on. Reading the deletion arm first would requeue
+			// every 2s and never report the collision, so the Instance would spin in silence over
+			// a name clash that needs a human.
+			name:        "a terminating Service of someone else's still reports the collision",
+			ports:       []workercore.InstancePort{instancePort(8080)},
+			terminating: true,
+			wantErr:     true,
+		},
+		{
+			name: "a portless instance leaves it alone and carries on",
+		},
+		{
+			name:         "a deleting instance leaves it alone and releases its finalizer",
+			deleting:     true,
+			wantReleased: true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			inst, instType, cq := newInstanceServiceFixture(c.ports...)
+			inst.Spec.Stop = c.stopped
+			if c.deleting {
+				// Marked as deleted and locked up front: the fake client refuses an update that
+				// sets a deletion timestamp.
+				now := meta.Now()
+				inst.DeletionTimestamp = &now
+				systemmeta.Lock(inst)
+			}
+			stranger := newUnownedInstanceServiceFixtureService(inst)
+			var terminatingAt meta.Time
+			if c.terminating {
+				// Going away under its own finalizer, which is what keeps a deleting object alive
+				// here as it does in a real API server. The timestamp is cut to the second, which is
+				// the precision one is stored at, so reading it back compares equal.
+				now := meta.NewTime(time.Now().Truncate(time.Second))
+				stranger.DeletionTimestamp = &now
+				stranger.Finalizers = []string{"example.com/hold"}
+				terminatingAt = now
+			}
+			cli := buildInstanceServiceClient(inst, instType, cq, stranger)
+
+			res, err := reconcileInstance(t, cli, "default", "inst")
+			if c.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "not owned by this instance")
+			} else {
+				require.NoError(t, err)
+			}
+			if c.wantRequeue {
+				assert.Positive(t, res.RequeueAfter)
+			} else {
+				assert.Zero(t, res.RequeueAfter, "an ignored Service is not waited on")
+			}
+
+			// The stranger survives untouched: same selector, same type, same ports, no deletion.
+			kept := new(core.Service)
+			require.NoError(t, cli.Get(ctx,
+				ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, kept))
+			assert.Equal(t, map[string]string{"app": "something-else"}, kept.Spec.Selector)
+			assert.Equal(t, core.ServiceTypeClusterIP, kept.Spec.Type)
+			require.Len(t, kept.Spec.Ports, 1)
+			assert.Equal(t, int32(80), kept.Spec.Ports[0].Port)
+			if c.terminating {
+				// It was already going when this Instance saw it, and its own deletion is the only
+				// one that may be under way.
+				require.NotNil(t, kept.DeletionTimestamp)
+				assert.True(t, kept.DeletionTimestamp.Equal(&terminatingAt),
+					"the deletion timestamp is the stranger's own and must not be changed")
+			} else {
+				assert.Nil(t, kept.DeletionTimestamp,
+					"a Service this Instance does not own is never deleted")
+			}
+
+			if c.wantReleased {
+				// The Instance is not held by a Service that was never its own.
+				assert.True(t, kerrors.IsNotFound(cli.Get(ctx,
+					ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, &workercore.Instance{})),
+					"an unowned Service must not block the finalizer")
+			}
 		})
 	}
 }
