@@ -1,18 +1,100 @@
 # Settings & Environment Variables
 
 GPUStack Operator reads configuration from two places: the `Setting` resource, which you can change
-at runtime, and environment variables, which the process reads once at startup.
+at runtime, and environment variables, which the worker reads when it starts.
 
-> **First-deploy seeding vs. runtime changes.** On first deploy, `settings.Initialize` creates the delegated
-> Secret `gpustack-settings` in the system namespace and seeds every Setting from
-> `GPUSTACK_<UPPER_SNAKE_NAME>`, or the built-in default when that variable is unset. Later restarts only
-> **backfill missing** Settings and **never overwrite** a stored value: a `GPUSTACK_*` variable is an
-> *initial seed only*, so after the first deploy change the `Setting` resource, not the environment.
+> **The worker aligns every Setting on every start.** A `GPUSTACK_*` variable present in the worker
+> process environment is a standing declaration rather than a one-time default: while it holds a
+> non-blank value, the worker writes it to the Setting on every start and the stored value loses. A
+> Setting named in `settings-default-tracking` is written with the operator's built-in default on every
+> start. Every other Setting keeps the value you stored. [Who owns a value](#who-owns-a-value) states
+> the four rules in the order they run, and [Working out which rule owns a
+> Setting](#working-out-which-rule-owns-a-setting) tells you which of them owns yours.
 
 ## Contents
 
+- [Who owns a value](#who-owns-a-value)
 - [Online-adjustable settings](#online-adjustable-settings)
+- [When a Setting does not keep your value](#when-a-setting-does-not-keep-your-value)
 - [Deploy-time environment variables](#deploy-time-environment-variables)
+
+## Who owns a value
+
+Every registered Setting lives as one key of a single delegated Secret, `gpustack-settings` in the
+system namespace. The worker aligns that Secret once per worker start and asks one question about each
+key: does the operator own this value, or does the administrator? A value the operator owns is written
+on that start and logged; a value it does not own is left exactly as it was stored.
+
+Write `D` for a Setting's **seed**: the value of `GPUSTACK_<UPPER_SNAKE_NAME>` when that variable is
+present in the worker process environment, and the built-in default when the variable is absent. A
+variable present with an empty value yields a blank seed rather than the built-in default, and `{}` and
+`[]` read as blank too.
+
+The alignment applies four rules, in this order:
+
+1. **Backfill.** A key the Secret does not carry is added with its seed. A blank seed is a key like any
+   other, so a Setting with a blank default still appears in `kubectl get settings`.
+2. **A declared variable wins.** If the worker environment declares the variable for the Setting and
+   the seed is not blank, the seed replaces the stored value.
+3. **A tracked Setting follows the operator's default.** If `settings-default-tracking` names the
+   Setting and no declared variable has claimed it, the built-in default replaces the stored value.
+4. **Otherwise the stored value is the administrator's.** Nothing writes it, a blank one included.
+
+A Setting that is both declared and tracked is written by rule 2, with the variable's value. The two
+rules cannot disagree, because a Setting has one seed and both of them write it.
+
+Rules 2, 3 and 4 never write a blank value, rule 4 writing nothing at all, which is why a variable set
+to the empty string takes a Setting over nothing and a tracked Setting whose default is blank keeps what
+you stored. Only backfill writes a blank, and it runs first so that a newly registered Setting appears
+in the same pass that decides whether the operator owns it.
+
+Deleting the Secret is the case with nothing to preserve: the next worker start creates it again from
+every seed, and `settings-default-tracking` returns to the six names it ships with.
+
+### Every override is logged
+
+A start that changes a value writes one line per Setting to the worker log, naming the Setting, the
+value it replaced, the value it wrote and the rule that fired:
+
+```text
+setting overridden on start setting="container-registry" stored="registry.example" value="mirror.example" rule="env-declared" envName="GPUSTACK_CONTAINER_REGISTRY"
+```
+
+`rule` is `env-declared` for rule 2 and `default-tracked` for rule 3, and `envName` names the variable
+when the Setting reads one. A start that changes nothing logs nothing, and a stored value that already
+equals the seed is not an override.
+
+```bash
+kubectl -n gpustack-system logs deploy/gpustack-operator-worker | grep 'setting overridden on start'
+```
+
+### The tracking list
+
+`settings-default-tracking` holds a comma-separated list of Setting names. The worker reads it from the
+Secret and falls back to the six names the operator ships when the Secret carries no such key, so a
+cluster that predates the Setting is tracked from the first start that backfills the key.
+
+A stored value cannot silently change what is tracked. Each segment is trimmed, and a segment left
+empty, a duplicate, the list's own name and a name this operator does not register are dropped, each
+logged once at verbosity 4. A write that names the list itself is refused outright, because a Setting
+tracking its own membership would reconcile that membership against itself.
+
+### Working out which rule owns a Setting
+
+Two checks place any Setting you did not write yourself, and they are the two the rules read:
+
+```bash
+# 1. Does the worker Deployment render a variable for it, and with what value?
+kubectl -n gpustack-system get deploy -o yaml | grep -A1 'GPUSTACK_'
+
+# 2. Does the tracking list name it?
+kubectl -n gpustack-system get setting settings-default-tracking -o yaml
+```
+
+- The Deployment renders the variable with a non-blank value, so rule 2 owns the Setting whatever is
+  stored. The chart renders five of them itself, marked in the table below.
+- The Deployment does not render it and the tracking list names it, so rule 3 owns the Setting.
+- Neither, so rule 4 applies and the value you stored stands until you change it yourself.
 
 ## Online-adjustable settings
 
@@ -20,6 +102,12 @@ A fixed catalog of named values, served as the namespaced `Setting` aggregated A
 (`gpustack.ai/v1`, short name `set`, category `gpustack`) and read at runtime with `kubectl`; the operator
 picks a new value up on its next reconcile. Fixed means the resource serves
 `get,list,watch,apply,update,patch` and no create/delete: you edit a Setting's **value**, not its existence.
+
+The `Env seed` column names the variable a Setting reads. Every one of them is authoritative on every
+worker start while the variable is present and holds a non-blank value, whether the chart renders it or
+you add it yourself ([who owns a value](#who-owns-a-value)). The rows marked *chart-rendered* name a
+variable the chart writes onto the worker Deployment itself, so the chart re-asserts it on every start
+and every upgrade.
 
 ```bash
 # List every setting and its current value
@@ -33,10 +121,11 @@ kubectl -n gpustack-system patch setting instance-type-derived-from-node --type 
 
 | Setting | Env seed | Default | Effect |
 |---------|-------------------------|---------|--------|
-| `container-registry` | `GPUSTACK_CONTAINER_REGISTRY` | *(blank)* | Registry to pull images from, for all built-in applications' deployments. |
-| `container-namespace` | `GPUSTACK_CONTAINER_NAMESPACE` | *(blank)* | Namespace to pull images from, for all built-in applications' deployments. |
-| `image-pull-secrets` | `GPUSTACK_IMAGE_PULL_SECRETS` | *(blank)* | Image pull secret for pulling images, for all built-in applications' deployments — the subcharts the chart or the worker installs. It does NOT reach a workload a controller renders from a custom resource: a [KV cache backend](../modules/kv-cache/backend.md) names its own `spec.imagePullSecrets`. |
-| `image-pull-policy` | `GPUSTACK_IMAGE_PULL_POLICY` | `IfNotPresent` | Image pull policy for all built-in applications' deployments, on the same boundary as the secret above: a controller-rendered workload carries its own. |
+| `container-registry` | `GPUSTACK_CONTAINER_REGISTRY` — *chart-rendered; authoritative on every start once its chart value is non-blank* | *(blank)* | Registry to pull images from, for all built-in applications' deployments. |
+| `container-namespace` | `GPUSTACK_CONTAINER_NAMESPACE` — *chart-rendered; authoritative on every start once its chart value is non-blank* | *(blank)* | Namespace to pull images from, for all built-in applications' deployments. |
+| `image-pull-secrets` | `GPUSTACK_IMAGE_PULL_SECRETS` — *chart-rendered; authoritative on every start once its chart value is non-blank* | *(blank)* | Image pull secret for pulling images, for all built-in applications' deployments — the subcharts the chart or the worker installs. It does NOT reach a workload a controller renders from a custom resource: a [KV cache backend](../modules/kv-cache/backend.md) names its own `spec.imagePullSecrets`. |
+| `image-pull-policy` | `GPUSTACK_IMAGE_PULL_POLICY` — *chart-rendered; authoritative on every start* | `IfNotPresent` | Image pull policy for all built-in applications' deployments, on the same boundary as the secret above: a controller-rendered workload carries its own. The chart renders it, so a runtime edit to this Setting is reverted at the next worker start; change it through `global.imagePullPolicy` or `image.pullPolicy` and leave this Setting alone. |
+| `settings-default-tracking` | *(none)* | `instance-ssh-server-image`, `kv-cache-backend-image`, `model-deployment-router-image`, `model-deployment-router-proxy-image`, `model-deployment-routing-sidecar-image`, `model-prefetch-warmup-image` | Comma-separated names of the Settings the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its Setting follow rule 3 ([who owns a value](#who-owns-a-value)); removing a name is what keeps an image pin across an operator upgrade ([keeping a pin](#keeping-an-image-pin-across-an-operator-upgrade)). An empty value tracks nothing, and whitespace, duplicates and unregistered names are dropped ([the tracking list](#the-tracking-list)). No environment variable reads this Setting, so nothing on the Deployment can take the list over. |
 | `instance-general-resources-overcommit` | `GPUSTACK_INSTANCE_GENERAL_RESOURCES_OVERCOMMIT` | `true` | Overcommit an Instance's general resources: when enabled, a general unit requests 800m CPU / 128Mi RAM and one-eighth local storage, an accelerated unit 100m CPU / 128Mi RAM and one-eighth local storage — so e.g. a 1C/4Gi + 128Gi type requesting 2 accelerators and 64Gi storage resolves to 200m/256Mi + 8Gi. A CPU limit whose whole cores cost more than the limit itself (e.g. `100m`, or `1500m` whose half core rounds up) requests the limit instead — a request may never exceed its limit. |
 | `instance-ssh-server-image` | `GPUSTACK_INSTANCE_SSH_SERVER_IMAGE` | `gpustack/ssh-server:v1.3.0` | Image of the SSH server used when deploying Instances. |
 | `kv-cache-backend-image` | `GPUSTACK_KV_CACHE_BACKEND_IMAGE` | `gpustack/mirrored-mooncake:0.3.13.post1-cpu` | Image every role of a [KV cache backend](../modules/kv-cache/backend.md) runs when the object does not name one itself. The default is this project's own build — a CPU build carrying TCP and EFA over DRAM, and the only image that can run [`leader.electionBackend`](../modules/kv-cache/leader.md#high-availability). The per-vendor variant builds, their tags and which one a VRAM group needs are under [The project's own build variants](../modules/kv-cache/backend.md#the-projects-own-build-variants). **It does not fit every backend**: a backend on another transport or runtime names its own `spec.image`, which always wins over this. **Clearing this Setting restores the admission refusal** for a backend naming no image anywhere. Why one default cannot fit every backend, and what having one costs, is under [The image](../modules/kv-cache/backend.md#the-image). |
@@ -52,7 +141,7 @@ kubectl -n gpustack-system patch setting instance-type-derived-from-node --type 
 | `model-artifact-no-proxy` | `GPUSTACK_MODEL_ARTIFACT_NO_PROXY` | *(blank)* | Comma-separated hosts that bypass `model-artifact-https-proxy`, for the node plugin too, given to engines as `NO_PROXY` on the same terms. |
 | `model-artifact-ca-bundle` | `GPUSTACK_MODEL_ARTIFACT_CA_BUNDLE` | *(blank)* | Name of a ConfigMap in the worker's namespace whose `ca.crt` the resolution and the node plugin trust beside the system pool. **It is not given to engine Pods**: they run in tenant namespaces, which cannot mount it. |
 | `model-artifact-revalidate-interval` | `GPUSTACK_MODEL_ARTIFACT_REVALIDATE_INTERVAL` | `24h` | How often a resolved hub artifact's access is checked again, at least `1m`; a Secret change checks it at once. What a refusal does is under [Resolution and revalidation](../modules/model-delivery/artifact.md#resolution-and-revalidation). |
-| `model-artifact-delivery-mode` | `GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE` | `Engine` | How a hub artifact's weights reach a `ModelDeployment`: `Engine`, the engine downloads them, or `Node`, the node's [`model-manager` plugin](../modules/model-delivery/node-store.md) mounts a verified copy. The chart seeds `Node` when it deploys the plugin, and a seed never overrides a stored value. `Node` is refused while the CSIDriver `model.csi.gpustack.ai` does not exist. **Changing it rolls every deployment using a hub artifact once**; see [Switch delivery](../modules/model-delivery/operations.md#switch-delivery). |
+| `model-artifact-delivery-mode` | `GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE` — *chart-rendered when the plugin is deployed; authoritative on every start while it is rendered* | `Engine` | How a hub artifact's weights reach a `ModelDeployment`: `Engine`, the engine downloads them, or `Node`, the node's [`model-manager` plugin](../modules/model-delivery/node-store.md) mounts a verified copy. The chart declares `Node` when it deploys the plugin, and the chart owns the Setting from then on: a runtime edit is reverted at the next worker start. Deploying or removing the plugin (`modelManager.enabled`) is what changes the value. `Node` is refused while the CSIDriver `model.csi.gpustack.ai` does not exist. **Changing it rolls every deployment using a hub artifact once**; see [Switch delivery](../modules/model-delivery/operations.md#switch-delivery). |
 | `model-store-high-watermark` | `GPUSTACK_MODEL_STORE_HIGH_WATERMARK` | `80` | The node cache filesystem's usage percent above which the plugin removes content no Pod mounts; above the low watermark, at most `95`. On a filesystem shared with kubelet the plugin caps it below kubelet's thresholds ([the capacity rule](../modules/model-delivery/operations.md#the-capacity-rule)). |
 | `model-store-low-watermark` | `GPUSTACK_MODEL_STORE_LOW_WATERMARK` | `70` | The usage percent a collection removes down to; at least `1`, below the high watermark. |
 | `model-store-download-concurrency` | `GPUSTACK_MODEL_STORE_DOWNLOAD_CONCURRENCY` | `8` | Concurrent HTTP requests the plugin makes per node, across every download; `1` to `64`. |
@@ -199,9 +288,83 @@ A namespace enforcing the `baseline` or `restricted` Pod Security Standard refus
 creation instead, since the sysctl is not on that standard's allowed list either: no Pod appears,
 and the operator logs the refusal.
 
+## When a Setting does not keep your value
+
+Both symptoms below are rules 2 and 3 seen from the other side. A value that changed without your
+action was written by the operator at a worker start, and the override log line says which rule wrote
+it, along with the variable when one did.
+
+### A stored value stopped applying and a variable took over
+
+Rule 2 wrote a variable's value over the one you stored. The log line reports it as
+`rule="env-declared"` and names the variable in `envName`, so you do not have to work out which
+declaration claimed the Setting.
+
+The way out is the variable, not the Secret:
+
+- A variable you set yourself, through the chart's `worker.env` or by editing the worker Deployment.
+  Change it or remove it and your stored value stands at the next worker start. A hand-edited
+  Deployment is outside the chart's record, so a rollback or an upgrade run with
+  `--reset-then-reuse-values` drops it; a variable meant to last belongs in a chart value.
+- A variable the chart renders, the five rows marked above. Change the chart value, or clear it so the
+  chart renders an empty one, and `helm upgrade`. A blank declaration claims nothing, so clearing the
+  chart value is what hands the Setting back to you.
+
+| Chart-rendered variable | Chart value that produces it | Chart default |
+|---|---|---|
+| `GPUSTACK_CONTAINER_REGISTRY` | `global.imageRegistry`, falling back to `global.hub` | *(empty)* |
+| `GPUSTACK_CONTAINER_NAMESPACE` | `global.imageNamespace` | *(empty)* |
+| `GPUSTACK_IMAGE_PULL_SECRETS` | `global.imagePullSecrets` | *(empty)* |
+| `GPUSTACK_IMAGE_PULL_POLICY` | `global.imagePullPolicy`, falling back to `worker.image.pullPolicy` and then `image.pullPolicy` | `IfNotPresent` |
+| `GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE` | `modelManager.enabled`, which renders `Node` while the plugin is deployed | *(not rendered)* |
+
+Setting the chart value to an empty string is the same as clearing it. With `modelManager.enabled: false`
+the chart stops rendering the delivery mode entirely, and the stored value is then nobody's to write.
+
+### An edit reverted on the next worker start
+
+Either rule wrote over the edit, and `rule` in the log line says which one:
+
+- `rule="env-declared"` means a variable holds the value. Changing or clearing that variable is the way
+  out, as above.
+- `rule="default-tracked"` means the Setting's name is in `settings-default-tracking`. Removing the name
+  from that list is the way out.
+
+Your edit holds until the next worker start, and nothing reverts it while the worker runs. A node drain,
+a crash, a restart and an upgrade each start a worker, so each of them applies the rules again.
+
+### Keeping an image pin across an operator upgrade
+
+The six image Settings are tracked by default, so the operator writes each of them with its built-in
+default on **every** worker start, not only on the start where a release changes that default. A pin
+made with `kubectl patch` holds until the next start, and reverts to the default at that one:
+
+```bash
+kubectl -n gpustack-system patch setting kv-cache-backend-image --type merge \
+  -p '{"spec":{"value":"mirror.example/kv-cache:1.2.3"}}'
+```
+
+Untracking the Setting is the only thing that keeps the pin, and nothing else stands in for it: a
+variable set to an empty value is no declaration, and a default that is blank is never written at all.
+
+```bash
+# Read the list, drop the one name whose Setting you want to keep your own value for,
+# and write the rest back. This removes model-prefetch-warmup-image and tracks the other five.
+kubectl -n gpustack-system get setting settings-default-tracking -o yaml
+kubectl -n gpustack-system patch setting settings-default-tracking --type merge \
+  -p '{"spec":{"value":"instance-ssh-server-image,kv-cache-backend-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image"}}'
+```
+
+A pin that predates this behavior is replaced on the first worker start of the release that introduces
+it, and the log line names both values when it happens. Deleting the Secret has the same effect on the
+list, which comes back as its six default names.
+
 ## Deploy-time environment variables
 
-Read **once at process startup**, so changing one means restarting or redeploying the affected component.
+Read when the process starts, so changing one means restarting or redeploying the affected component.
+A variable a Setting reads is re-read on each of those starts rather than applied once
+([who owns a value](#who-owns-a-value)); the rest are plain process configuration.
+
 The Worker (WK) copies every `GPUSTACK_`-prefixed variable from its own Pod spec onto the Device Manager
 (DM) DaemonSets, so setting one on the Worker Deployment reaches the DMs automatically.
 

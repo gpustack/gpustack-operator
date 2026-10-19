@@ -140,7 +140,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - Use for: choosing chart or image mode; vendored subcharts and their patches; vendor prerequisites; upgrade and migration paths.
 - Aliases: `Helm chart`, `subchart`, `chart mode`, `image mode`, `values.yaml`
 - Guides: choices in [Installation Modes](operate/installation-modes.md); node drivers in [Vendor Prerequisites](getting-started/vendor-prerequisites.md); transfer in [Migrating to Bundled Subcharts](operate/migration/to-subcharts.md).
-- Specs: [bundled apps subchart split](../specs/2026-07-28-bundled-apps-subchart-split.md)
+- Specs: [bundled apps subchart split](../specs/2026-07-28-bundled-apps-subchart-split.md) · [settings sync semantics](../specs/2026-10-19-settings-env-sync-and-default-tracking.md)
 - Code: [deploy/gpustack-operator/chart](../deploy/gpustack-operator/chart/) · vendoring in [hack/deps.sh](../hack/deps.sh) · image-mode in-cluster install in [pkg/worker/kuberess](../pkg/worker/kuberess/)
 - Related: [Development](#development) (chart targets and subchart patches) · [Devices Manager](#devices-manager) (the Device Manager DaemonSets the chart deploys)
 - Skills: [gpustack-operator-chart-e2e](../.agents/skills/gpustack-operator-chart-e2e/SKILL.md) (install, rollout and uninstall verification) · [gpustack-operator-chart-subcharts-manage](../.agents/skills/gpustack-operator-chart-subcharts-manage/SKILL.md) (add, patch or bump a vendored subchart)

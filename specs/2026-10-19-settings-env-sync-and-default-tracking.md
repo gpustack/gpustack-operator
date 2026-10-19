@@ -157,8 +157,20 @@ which Settings are tracked:
 Every dropped segment is logged once, at `klog.V(4)`, naming the segment and the reason.
 
 **Override logging.** Each of rules 1 and 2 that changes a stored value emits one `klog.InfoS` line carrying the
-Setting name, the old value, the new value, and the rule that fired. A pass that changes nothing logs nothing.
-A rule-2 write where the stored value already equals `D` is not an override and is not logged.
+Setting name, the old value, the new value, the rule that fired, and the variable when the Setting declares one.
+A pass that changes nothing logs nothing. A rule-2 write where the stored value already equals `D` is not an
+override and is not logged.
+
+A Setting marked sensitive carries neither value. The line keeps the name, the rule and the variable, because
+together they are what tells an operator which Setting changed and why, and none of the three is the value; both
+values are replaced by one marker no value can equal, so a reader can tell it from an empty value and from an
+absent pair. The log is a wider audience than the delegated Secret — usually readable more broadly, and shipped to
+aggregators, CI output and backups — so a value the operator kept out of the Secret must not reach it. The marker
+is the repository's existing sensitivity flag, `Setting.Sensitive()`; no redaction convention was invented, because
+there is none to follow. No registered Setting carries that flag today, and none of the 37 can currently hold a
+credential: `container-registry` refuses credentials through its own admission, proxy admissions refuse them, image
+references are `repo:tag@digest`, and `image-pull-secrets` holds Secret names. The rule is what keeps the first
+sensitive Setting from becoming the first leak.
 
 **The chart keeps `model-artifact-delivery-mode`.** `GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE` is a non-blank
 declaration, so rule 1 makes it authoritative and the chart owns the Setting. The worker cannot take it over:
@@ -184,8 +196,11 @@ that owns that page.
 2. **`image-pull-policy` becomes chart-owned.** The chart renders `GPUSTACK_IMAGE_PULL_POLICY=IfNotPresent`, which
    is non-blank, so rule 1 applies and the chart is the source of truth. Change it through chart values, not
    through the Setting resource.
-3. **Manufacturer identity variables are unaffected.** The chart renders them on every start, but no
-   administrator patches them, so rule 1 writing them is a no-op.
+3. **Manufacturer identity variables are unaffected.** The chart renders `GPUSTACK_<MFR>_PCI_VENDOR_ID` and its
+   siblings into Pod environments from `_helpers.tpl`, and they are not among the registered Settings. Rule 1
+   matches a registered Setting's declared variable, so it cannot fire on them at any value. An earlier draft of
+   this caveat said rule 1 writing them is a no-op, which implied they were Settings rule 1 considered; measured
+   against this checkout on 2026-10-19, no such registration exists.
 4. **`container-registry`, `container-namespace`, and `image-pull-secrets` default to blank.** Rule 1 does not fire
    for a blank declaration, so these stay administrator-owned exactly as today.
 5. **Deleting the Secret resets the tracking list.** `settings-default-tracking` returns to its default, so image
@@ -437,7 +452,7 @@ T4 ───────────────┘
       changes.
       Verify: `make lint chart && make lint docs`
 
-- [ ] **T5 · Restate the Settings contract and index this spec**
+- [x] **T5 · Restate the Settings contract and index this spec**
       Blocked by: T2, T3, T4
       Owns: `docs/reference/settings.md`, `docs/README.md`
       Gate: none
