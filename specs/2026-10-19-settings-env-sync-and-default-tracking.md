@@ -415,7 +415,7 @@ T4 ───────────────┘
       rule and the variable; `TestSettingsInitialize` covers the table below and passes.
       Verify: `GOTOOLCHAIN=local GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -v ./pkg/setting -run TestSettingsInitialize && make lint`
 
-- [ ] **T3 · Register `settings-default-tracking`**
+- [x] **T3 · Register `settings-default-tracking`**
       Blocked by: T2
       Owns: `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`
       Gate: none
@@ -441,13 +441,32 @@ T4 ───────────────┘
       Blocked by: T2, T3, T4
       Owns: `docs/reference/settings.md`, `docs/README.md`
       Gate: none
-      Acceptance: the seeding paragraph states rules 1 to 4 with the blank, backfill and tracking-read
-      exceptions; the per-Setting table gains `settings-default-tracking` and marks every chart-rendered
-      variable as owned by the Deployment, which includes dropping the `model-artifact-delivery-mode` row's
-      "a seed never overrides a stored value"; the page states that a tracked image Setting reverts to the operator
-      default on every worker start and that untracking is what keeps a pin; `docs/README.md` links this spec
-      under Installation, whose stated purpose covers upgrade and migration paths. This is the first task at which
-      the docs gate is green, because it resolves T2's `-run` pattern against a test that now exists.
+      Acceptance:
+      - The callout under the page title that currently reads "**First-deploy seeding vs. runtime changes.**
+        ... *initial seed only*, so after the first deploy change the `Setting` resource, not the environment" is
+        replaced, not merely supplemented. That sentence is the rule this specification overturns, and a reader who
+        finds it has been told the opposite of the truth.
+      - The replacement states all four rules — backfill, declared override, tracked default, untracked
+        administrator-owned — in the order they apply on a worker start, each with its own condition, and names the
+        three that never write a blank value.
+      - The page answers the two questions an administrator will actually arrive with, each with the rule that
+        causes it and the way out of it: **a stored value stopped applying and an environment variable took over**,
+        and **an edited Setting reverted on the next worker start**. For each, the reader needs to know whether
+        untracking the Setting, clearing the variable, or changing the chart value is the escape, and which of those
+        is available for that particular Setting.
+      - The per-Setting table gains a `settings-default-tracking` row with its six defaults and the note that an
+        empty value tracks nothing. Every chart-rendered variable in the table's `Env seed` column is marked as
+        authoritative on every start rather than a first-deploy seed, which includes dropping the
+        `model-artifact-delivery-mode` row's "a seed never overrides a stored value".
+      - The page states that a tracked image Setting reverts to the operator default on every worker start, and that
+        untracking it is what keeps a pin.
+      - The page tells a reader how to work out which rule owns any given Setting, in terms they can check rather
+        than terms they must accept: whether the Deployment renders the variable, whether the name appears in
+        `settings-default-tracking`, and what follows when it does neither. A page that states the rules but leaves
+        the reader unable to place their own Setting in one of them has not explained the usage.
+      - `docs/README.md` links this spec under Installation, whose stated purpose covers upgrade and migration paths.
+      This is the first task at which the docs gate is green, because it resolves T2's `-run` pattern against a test
+      that now exists.
       Verify: `make lint docs`
 
 ### Test Plan
@@ -496,6 +515,18 @@ Coverage baseline for the two packages measured on 2026-10-19 with
 Every case is one table row with declarative data, run through a single loop, against
 `kubefake.NewSimpleClientset` with a reactor allowing `selfsubjectaccessreviews`, because `Initialize` calls
 `review.CanDoUpdate` first and the fake client denies it by default.
+
+The two admission cases call the admission directly rather than running the registration's chain, and that leaves a
+known gap. `Setting.admit` is unexported and `Configure` is the only path that runs it, and that path writes the
+delegated Secret through a process-wide loopback client that `model_store_test.go` configures; driving it from these
+cases would make their coverage depend on shuffle order, which `make test` decides. So the admission's logic is
+pinned and its wiring into the registration is not. A test that rebuilt the chain by hand does not close this gap —
+that is what the existing case does, and rebuilding the chain is exactly what cannot catch a later edit to the
+registration. Closing it needs a `TestMain` in `pkg/worker/settings` that configures the loopback clients once,
+which relocates `model_store_test.go`'s fixture and sits outside this change. `AllowBlank` is the concrete
+consequence: deleting it, or replacing it with `DisallowBlank`, leaves the suite green, because a blank value is
+admitted by `Allow()` plus the self-reference admission either way. `AllowBlank` is kept for intent and as a guard
+against a stricter future admission, and its absence is not detected today.
 
 #### Integration tests
 
