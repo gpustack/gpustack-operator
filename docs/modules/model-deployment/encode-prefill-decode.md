@@ -1,4 +1,4 @@
-# Model Deployment Encode, Prefill and Decode
+# Encode, Prefill and Decode
 
 A deployment with `Encode`, `Prefill` and `Decode` roles runs visual encoding and language generation
 in separate Pods. [Model Deployment Configuration](deployment.md) describes the base role fields and
@@ -121,6 +121,15 @@ The prefiller serves the encoder's registration port 8997. Admission reserves th
 HTTP server is refused. The operator also widens the prefiller's probes, so it is not restarted
 while it waits for an encoder to register.
 
+On the SGLang rows (`llm-d-router` and `sglang-gateway`), `status.endpoint` — the router Service — is
+the only supported client front door.
+
+The plain deployment Service (`<name>`) selects the first non-`Encode` role (`Prefill` under the
+ordinary `Encode`, `Prefill`, `Decode` ordering) and provides no router orchestration. Under the
+tested SGLang `0.5.18` EPD ordering, `Prefill` runs `--language-only` and expects a `bootstrap_room`
+prepared by the router, so a multimodal request sent directly to the plain Service fails with
+`HTTP 400` (`Invalid bootstrap_room`) before reaching `Encode`.
+
 ## Unadmitted engine and router candidates
 
 These candidates are refused or not configured:
@@ -169,6 +178,21 @@ SGLang owns `--encoder-only`, `--language-only`, `--encoder-urls` and
 
 Four flags the operator renders on the encoder are defaults, so a role's own value wins:
 `--enforce-eager`, `--no-enable-prefix-caching`, `--max-num-batched-tokens` and `--mm-encoder-only`.
+
+`--enforce-eager` is defaulted on the vLLM `Encode` role only — never on `Prefill`, `Decode` or
+`Server`. An `Encode` instance runs `--mm-encoder-only`: it executes the multimodal vision tower,
+allocates no KV cache (`num_gpu_blocks = 0`) and runs no language-model decoder loop.
+
+In upstream `vllm@v0.30.0`, vision-encoder CUDA graphs (`cudagraph_mm_encoder`) are disabled by
+default, and the V2 `MMEncoderModelRunner` behind `ECCPUConnector` captures zero graphs regardless.
+On the V1 `GPUModelRunner` behind `ECExampleConnector`, omitting `--enforce-eager` makes startup walk
+empty language-model graph capture sizes, which is why upstream's disaggregated encoder guide marks
+the flag as required on encoder instances.
+
+Because the flag is registered in `DefaultedArgs` rather than `OwnedKeys`, a workload can still
+override it — or tune `--compilation-config` — if a future engine version enables vision-encoder
+graph capture. Conversely, `Prefill` and `Decode` run the language model and keep default CUDA graph
+capture enabled: do not copy `--enforce-eager` onto those roles in production or benchmarks.
 
 ## Scheduling co-location
 
@@ -223,11 +247,11 @@ A live run on 4 × NVIDIA L40S compared EPD with prefill/decode and with a singl
 instance. The aggregated instance leads on short prompts and at low concurrency. EPD leads at `4k`
 and `8k` prompt tokens under concurrency, and when the same image is queried repeatedly.
 
-[Model Deployment Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) records the numbers, the
+[Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) records the numbers, the
 hardware and when EPD helps.
 
 ---
 
-**See also** — [Model Deployment Configuration](deployment.md) (base fields and admission rules) · [Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) · [Model Deployment Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) (measured three-arm latency and throughput) · [Engine Versions](engine-versions.md) (supported version floors) · [Model Deployment Routing](routing.md) (router selection and deciders) · [Model Deployment Status](status.md) (status conditions and role summaries) · [EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) (a recorded live run).
+**See also** — [Model Deployment Configuration](deployment.md) (base fields and admission rules) · [Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) · [Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) (measured three-arm latency and throughput) · [Engine Compatibility](engine-versions.md) (supported version floors) · [Model Deployment Routing](routing.md) (router selection and deciders) · [Model Deployment Status](status.md) (status conditions and role summaries) · [EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) (a recorded live run).
 
 **Next** → [Model Deployment Routing](routing.md) — choose a routing policy and inspect candidate endpoints.

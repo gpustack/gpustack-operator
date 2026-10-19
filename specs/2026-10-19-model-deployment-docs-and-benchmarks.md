@@ -588,7 +588,7 @@ PACKAGE_PUSH=true PACKAGE_NAMESPACE=$REGISTRY_NAMESPACE PACKAGE_TAG=dev-$(git re
       Acceptance: Every `## Validation record`, `## Validation summary`, and `## Check the software identity` section is removed from `docs/walkthroughs/`; zero personal registry namespaces or run-identity binary/image SHA256 digests remain under `docs/walkthroughs/`; all 10 walkthrough leaf pages use only `## Contents`, `## Summary`, `## Step 1: ...`..`## Step N: ...`, `## Limitation`, and `## Troubleshooting` (with `##` count <= 10 and line count <= 550); the two-GPU co-location note in `encode-prefill-decode.md` is folded into `## Limitation` and `Step 2` explains why `--enforce-eager` is rendered as a producer default on `encode`.
       Verify: `! grep -riE '## Validation (record|summary)' docs/walkthroughs/ && bash .agents/skills/gpustack-operator-docs/scripts/check-docs.sh --report`
 
-- [ ] **T2 · EPD `--enforce-eager` Clarification, SGLang Front-Door Relocation, and `External DP` Module Guide**
+- [x] **T2 · EPD `--enforce-eager` Clarification, SGLang Front-Door Relocation, and `External DP` Module Guide**
       Blocked by: None
       Owns: `docs/modules/model-deployment/_index.md`, `docs/modules/model-deployment/encode-prefill-decode.md`, `docs/modules/model-deployment/encode-prefill-decode-benchmark.md`, `docs/modules/model-deployment/external-dp.md`
       Gate: review
