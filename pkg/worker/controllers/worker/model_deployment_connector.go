@@ -463,9 +463,32 @@ func modelDeploymentEncoderCacheOwnedKeys(pick func(args, env []string) ([]strin
 // the path the engine is told to load. ModelDeploymentModelCachePath is where an engine that
 // downloads a hub artifact itself keeps the download. Both are reserved while spec.model.artifactRef
 // is set: a role's own volume at, inside or around either would shadow the weights or be shadowed.
+//
+// ModelDeploymentCompileCacheMountPath is the default container mount path for a managed role's
+// compilation cache. Unlike the weights paths, a role may mount its own volume at, inside or around
+// it via additionalVolumes, in which case the renderer yields its default host-backed volume and
+// lets the user's volume back the cache root.
 const (
 	ModelDeploymentModelMountPath = "/var/lib/gpustack/model"
 	ModelDeploymentModelCachePath = "/var/lib/gpustack/model-cache"
+
+	// DefaultModelDeploymentCompileCacheHostDir is the host directory the compilation cache of
+	// every managed role lives under, aligned with gpustack/gpustack's own default cache_dir so
+	// the two agree on where cached compilation artifacts sit.
+	DefaultModelDeploymentCompileCacheHostDir = "/var/lib/gpustack/cache"
+
+	// ModelDeploymentCompileCacheMountPath is where a role's own host cache subdirectory is
+	// mounted, which is also the value the engine's cache root variable is rendered to.
+	ModelDeploymentCompileCacheMountPath = "/var/lib/gpustack/cache"
+
+	// ModelDeploymentCompileCacheVolumeName is the name of the host-backed compilation cache
+	// volume on a managed Pod.
+	ModelDeploymentCompileCacheVolumeName = "gpustack-compile-cache"
+
+	// DefaultModelDeploymentStartupTimeoutSeconds is the startup probe budget a role gets
+	// without asking for one, which keeps the probe's failure threshold at the 30 minutes this
+	// operator has always rendered.
+	DefaultModelDeploymentStartupTimeoutSeconds int32 = 1800
 )
 
 // ModelDeploymentServedModelNameArg is the flag naming what the engine serves. It is DEFAULTED,
@@ -583,7 +606,19 @@ func ModelDeploymentServedModelNames(engine string, args []string) ([]string, bo
 // MC_FORCE_TCP pins a tcp point-to-point leg to TCP; the renderer emits it only where the pin
 // cannot strip a store in the same process of its fabric. The transfer engine reads it for presence alone, so a user's own
 // entry, whatever its value, asks for the same thing and is left in place.
-var modelDeploymentDefaultedEnvNames = []string{"MC_TE_METRIC", inject.MooncakeForceTCPEnv}
+//
+// VLLM_CACHE_ROOT and SGLANG_CACHE_DIR are where each engine keeps its compiled graphs and
+// kernels, which the renderer points at ModelDeploymentCompileCacheMountPath. They are defaulted
+// rather than owned for one reason: a user who mounts the cache somewhere else, or who runs an
+// image whose engine spells the variable differently, must be able to say so. An entry in
+// role.Env wins over the rendered one, and asking for a name this operator does not render is not
+// a conflict to refuse.
+var modelDeploymentDefaultedEnvNames = []string{
+	"MC_TE_METRIC",
+	inject.MooncakeForceTCPEnv,
+	"VLLM_CACHE_ROOT",
+	"SGLANG_CACHE_DIR",
+}
 
 // ModelDeploymentOwnsArg reports whether the named argument belongs to the operator on this engine.
 //
