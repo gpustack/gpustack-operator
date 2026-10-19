@@ -1,162 +1,191 @@
 # Encode, Prefill and Decode Walkthrough
 
-Deploy one multimodal model across three disaggregated roles. The `Encode` role runs the visual
-encoder, `Prefill` consumes the encoder's embeddings and fills the KV cache, and `Decode` generates
+Deploy one multimodal model across three disaggregated roles. The *Encode* role runs the visual
+encoder, *Prefill* consumes the encoder's embeddings and fills the KV cache, and *Decode* generates
 tokens. A managed `llm-d-router` fronts the three roles behind one endpoint.
-
-The operator admits the three roles together: all three Kueue `Workload` objects reserve quota, or
-none starts. This page keeps the CR and Pod output captured from a live NVIDIA L40S run.
 
 ## Contents
 
-- [Deployment shape](#deployment-shape)
-- [Prerequisites](#prerequisites)
-- [Step 1: start three-role disaggregated serving](#step-1-start-three-role-disaggregated-serving)
-- [Step 2: inspect the rendered encoder and decoder wiring](#step-2-inspect-the-rendered-encoder-and-decoder-wiring)
-- [Step 3: send a multimodal request](#step-3-send-a-multimodal-request)
-- [Step 4: inspect joint admission and co-location](#step-4-inspect-joint-admission-and-co-location)
-- [Step 5: release the application](#step-5-release-the-application)
-- [Validation summary](#validation-summary)
+- [Summary](#summary)
+- [Device and cluster](#device-and-cluster)
+- [Step 1: Start three-role serving](#step-1-start-three-role-serving)
+- [Step 2: Inspect role configuration](#step-2-inspect-role-configuration)
+- [Step 3: Send a multimodal request](#step-3-send-a-multimodal-request)
+- [Step 4: Admission and co-location](#step-4-admission-and-co-location)
+- [Step 5: Release the application](#step-5-release-the-application)
+- [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
-## Deployment shape
+## Summary
 
-A text request flows through prefill and then decode. A multimodal request adds the encoder in
-front: the router detects media in the request and picks an encoder first, and the decoder's routing
-sidecar coordinates the embedding transfer. See
-[The three roles and request flow](../../modules/model-deployment/encode-prefill-decode.md#the-three-roles-and-request-flow)
+*Encode*, *Prefill* and *Decode* disaggregation isolates compute-heavy multimodal vision encoding onto
+*Encode* `Pod`s. Separating this work can reduce interference from large-image bursts during token generation.
+Cross-role transfers and queueing still affect *time to first token (TTFT)* and *inter-token latency (ITL)*.
+
+A text request flows through *Prefill* and then *Decode*. A multimodal request adds the encoder in
+front: the router detects media in the request and picks an encoder first, and the decoder's
+routing sidecar coordinates the embedding transfer.
+See [Roles and request flow](../../modules/model-deployment/encode-prefill-decode.md#roles-and-request-flow)
 for the role contract.
 
-The shape below uses three GPUs, one per role, all on one accelerator platform. Kueue sees one
-`Workload` per role and reserves quota for the three together. Soft affinity prefers prefill beside
-decode (weight 100) and encode beside prefill (weight 50). Neither is a requirement.
+The configuration uses three GPUs, one per role. Kueue sees one `Workload` per role and reserves
+quota for the three together. Soft affinity prefers *prefill* beside *decode* (weight 100) and
+*encode* beside *prefill* (weight 50). Neither is a requirement.
 
-## Prerequisites
+The H100 benchmark supports large-image isolation and repeated-image or mixed workloads: *ITL* p99 improved **15.1×–21.8×**
+at `4k`/`8k`, concurrency 8; repeated-image *TTFT* p50 improved **5.9×** at concurrency 8.
+The comparison used one GPU for aggregated serving, two for *PD* and three for *EPD*.
+Small-prompt first-token latency often favored aggregated serving.
+See [Encode, Prefill and Decode Benchmark](../../modules/model-deployment/encode-prefill-decode-benchmark.md) for measured benefits and costs.
 
-The recorded cluster runs Kubernetes 1.32 with two GPU nodes holding four NVIDIA L40S 48 GB cards
-in total, plus one CPU node. Three exclusive cards must be free.
+## Device and cluster
 
-Weights must be readable on the nodes at the path `spec.model.name` names. The recorded run mounted
-them from a node-local `hostPath` through `roles[].additionalVolumes`. The
-[model prefetch walkthrough](../model-delivery/prefetch.md) shows the shared-cache alternative.
+The recorded run used this cluster and model setup:
 
-The run used `docker.io/gpustack/runner:cuda13.0-vllm0.30.0` for the engines and the operator's
-default router and sidecar images.
+| Item | Captured setup |
+|---|---|
+| Cluster | Kubernetes v1.35.7; one CPU node and one GPU node (`gpu-node-0`) |
+| GPUs | 8 × NVIDIA H100 80 GB HBM3 SXM5; three GPUs assigned to roles |
+| `InstanceType` | `bench-gpu`, configured for the H100 accelerator group |
+| Model | `qwen2-5-vl-7b-instruct` for `Qwen/Qwen2.5-VL-7B-Instruct`; node model delivery mounts the weights at `/var/lib/gpustack/model`, served as `/models` |
+| Runtime | vLLM `gpustack/runner:cuda13.0-vllm0.30.0`, with `llm-d-router` |
 
-## Step 1: start three-role disaggregated serving
+## Step 1: Start three-role serving
 
-Save the following manifest as `case120-epd.yaml`. One `Encode`, one `Prefill` and one `Decode`
-replica each request one GPU from the same InstanceType. The `spec.router` stanza deploys
-`llm-d-router` in front of the three roles.
+Save the following manifest as `epd-deployment.yaml`. It uses the discovered H100 `InstanceType`
+name `gpustack--nvidia-h100-80gb-hbm3-linux-amd64`.
+
+The recorded run used its custom `bench-gpu` `InstanceType`, configured for the same accelerator group.
+Replace all three `instanceType` values with `bench-gpu` to reproduce that configuration exactly.
+
+One *Encode*, one *Prefill* and one *Decode* replica each request one GPU. The `artifactRef` points to
+the existing `ModelArtifact`; *`spec.model.name`* exposes it to vLLM as `/models`. The *`spec.router`*
+stanza deploys `llm-d-router` in front of the roles.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: ModelDeployment
 metadata:
-  name: case120-epd
-  namespace: default
+  name: epd-arm3-epd
+  namespace: gpustack-bench
 spec:
+  model:
+    name: /models
+    artifactRef:
+      name: qwen2-5-vl-7b-instruct
   engine:
     name: vLLM
-    image: docker.io/gpustack/runner:cuda13.0-vllm0.30.0
-  model:
-    name: /models/Qwen2.5-VL-7B-Instruct
+    image: gpustack/runner:cuda13.0-vllm0.30.0
   router:
     name: llm-d-router
   roles:
     - name: encode
       kind: Encode
       replicas: 1
-      instanceType: gpustack--nvidia-l40s-linux-amd64
+      size: 1
+      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
         accelerator: "1"
-      additionalVolumes:
-        - hostPath:
-            path: /data/models/model_scope/Qwen/Qwen2.5-VL-7B-Instruct
-            type: Directory
-          mountPath: /models/Qwen2.5-VL-7B-Instruct
-          readOnly: true
+      extraArgs:
+        - --max-model-len
+        - "16384"
+        - --gpu-memory-utilization
+        - "0.85"
     - name: prefill
       kind: Prefill
       replicas: 1
-      instanceType: gpustack--nvidia-l40s-linux-amd64
+      size: 1
+      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
         accelerator: "1"
-      additionalVolumes:
-        - hostPath:
-            path: /data/models/model_scope/Qwen/Qwen2.5-VL-7B-Instruct
-            type: Directory
-          mountPath: /models/Qwen2.5-VL-7B-Instruct
-          readOnly: true
+      extraArgs:
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "16384"
+        - --gpu-memory-utilization
+        - "0.85"
     - name: decode
       kind: Decode
       replicas: 1
-      instanceType: gpustack--nvidia-l40s-linux-amd64
+      size: 1
+      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
         accelerator: "1"
-      additionalVolumes:
-        - hostPath:
-            path: /data/models/model_scope/Qwen/Qwen2.5-VL-7B-Instruct
-            type: Directory
-          mountPath: /models/Qwen2.5-VL-7B-Instruct
-          readOnly: true
+      extraArgs:
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "16384"
+        - --gpu-memory-utilization
+        - "0.85"
 ```
 
 Apply the manifest and wait for the deployment to reach `Ready`. The `ROLES` column reads
 `1R1E1P1D`: one router, then one replica for each of the encoder, prefiller and decoder.
 
 ```bash
-kubectl apply -f case120-epd.yaml
-kubectl get modeldeployment case120-epd -o wide
+kubectl apply -f epd-deployment.yaml
+kubectl get modeldeployment epd-arm3-epd -n gpustack-bench \
+  -o custom-columns=NAME:.metadata.name,ENGINE:.spec.engine.name,ROLES:.status.roleSummary,PHASE:.status.phase
 ```
 
 ```text
-NAME          ENGINE   ROLES      PHASE   AGE
-case120-epd   vLLM     1R1E1P1D   Ready   3m5s
+NAME          ENGINE   ROLES      PHASE
+epd-arm3-epd  vLLM     1R1E1P1D   Ready
 ```
 
-Four Pods run: one engine Pod per role and the router. The decode Pod shows two containers because
-its routing sidecar runs beside the engine.
+The captured wide listing below omits the IP and scheduling-gate columns.
+Four `Pod`s run: one engine `Pod` per role and the router. The *Decode* `Pod` shows two containers
+because its routing sidecar runs beside the engine.
 
 ```bash
-kubectl get pods -l app.kubernetes.io/instance=case120-epd -o wide
+kubectl get pods -n gpustack-bench -l app.kubernetes.io/instance=epd-arm3-epd \
+  -o wide
 ```
 
 ```text
-NAME                                  READY   STATUS    RESTARTS   AGE    IP             NODE         NOMINATED NODE   READINESS GATES
-case120-epd-decode-k7ks8              2/2     Running   0          3m9s   10.0.53.14     gpu-node-0   <none>           <none>
-case120-epd-encode-7wnfl              1/1     Running   0          3m9s   10.0.114.171   gpu-node-1   <none>           <none>
-case120-epd-prefill-s2ljm             1/1     Running   0          3m9s   10.0.53.12     gpu-node-0   <none>           <none>
-case120-epd-router-85c87bc6fc-fb9gt   2/2     Running   0          3m9s   10.0.53.40     gpu-node-0   <none>           <none>
+NAME                                  READY   STATUS    RESTARTS   AGE   NODE
+epd-arm3-epd-decode-h62cw               2/2     Running   0          95s   gpu-node-0
+epd-arm3-epd-encode-9jz5c               1/1     Running   0          94s   gpu-node-0
+epd-arm3-epd-prefill-26ls5              1/1     Running   0          95s   gpu-node-0
+epd-arm3-epd-router-6cc94d94b8-glnvt     2/2     Running   0          93s   gpu-node-0
 ```
 
-## Step 2: inspect the rendered encoder and decoder wiring
+## Step 2: Inspect role configuration
 
-The operator renders the encoder-cache connector for you. The encoder Pod runs `ECCPUConnector` as
+The operator renders the encoder-cache connector for you. The encoder `Pod` runs `ECCPUConnector` as
 the producer with a 1 GiB host buffer and publishes a side-channel socket on port 5601. The
 `--mm-encoder-only` flag keeps the language-model weights unloaded.
 
-The following blocks are captured Pod excerpts, not manifests to apply. They include the Pod identity
-and container nesting so each generated field has its Kubernetes context; probes, volumes and other
-generated fields are omitted where they do not explain the wiring.
+`--enforce-eager` and `--no-enable-prefix-caching` are operator defaults rendered on the *Encode*
+role only, so `epd-deployment.yaml` declares neither in *`extraArgs`*. See
+[Keys the operator owns](../../modules/model-deployment/encode-prefill-decode.md#keys-the-operator-owns)
+for the rationale; do not copy `--enforce-eager` onto *Prefill* or *Decode*, which keep CUDA graphs.
+
+The following blocks are captured `Pod` excerpts, not manifests to apply. They include the `Pod`
+identity and container nesting so each generated field has its Kubernetes context; probes, volumes and
+other generated fields are omitted where they do not explain the configuration.
 
 ```yaml
 apiVersion: v1
 kind: Pod
 metadata:
-  name: case120-epd-encode-7wnfl
-  namespace: default
+  name: epd-arm3-epd-encode-9jz5c
+  namespace: gpustack-bench
 spec:
   containers:
     - name: main
-      # Relevant fields from the rendered Pod; the complete Pod also carries probes and volumes.
       command:
         - vllm
         - serve
-        - /models/Qwen2.5-VL-7B-Instruct
+        - /var/lib/gpustack/model
         - --ec-transfer-config
         - '{"ec_connector":"ECCPUConnector","ec_role":"ec_producer","ec_connector_extra_config":{"ec_enable_nixl":true,"ec_cpu_bytes":1073741824}}'
         - --enforce-eager
@@ -164,6 +193,12 @@ spec:
         - --max-num-batched-tokens
         - "114688"
         - --mm-encoder-only
+        - --served-model-name
+        - /models
+        - --max-model-len
+        - "16384"
+        - --gpu-memory-utilization
+        - "0.85"
         - --host
         - 0.0.0.0
         - --port
@@ -178,47 +213,64 @@ spec:
         - name: VLLM_EC_SIDE_CHANNEL_PORT
           value: "5601"
       ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
         - containerPort: 5601
           name: ec-side-channel
           protocol: TCP
 ```
 
-The prefill Pod gets the consumer half of the same connector. It also keeps its usual KV transfer
+The *Prefill* `Pod` gets the consumer half of the same connector. It also keeps its usual KV transfer
 producer and the KV event publisher that the router reads:
 
 ```yaml
 apiVersion: v1
 kind: Pod
 metadata:
-  name: case120-epd-prefill-s2ljm
-  namespace: default
+  name: epd-arm3-epd-prefill-26ls5
+  namespace: gpustack-bench
 spec:
   containers:
     - name: main
-      # Relevant command entries from the rendered Pod; the complete command is omitted.
       command:
+        - vllm
+        - serve
+        - /var/lib/gpustack/model
         - --kv-transfer-config
         - '{"kv_connector":"MooncakeConnector","kv_role":"kv_producer","kv_connector_extra_config":{"mooncake_protocol":"tcp"}}'
         - --ec-transfer-config
         - '{"ec_connector":"ECCPUConnector","ec_role":"ec_consumer","ec_connector_extra_config":{"ec_enable_nixl":true,"ec_cpu_bytes":1073741824}}'
+        - --kv-events-config
+        - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@"}'
+        - --served-model-name
+        - /models
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "16384"
+        - --gpu-memory-utilization
+        - "0.85"
+        - --host
+        - 0.0.0.0
+        - --port
+        - "8000"
 ```
 
-The decode Pod pairs the KV consumer on its engine container with a `routing-proxy` sidecar. The
-sidecar owns the Pod's HTTP port, proxies to the engine, and carries `--ec-connector=ec-nixl`. That
-flag makes it fetch the encoder's embeddings before decoding:
+The *Decode* `Pod` pairs the KV consumer on its engine container with a `routing-proxy` sidecar. The
+sidecar owns the `Pod`'s HTTP port, proxies to the engine, and carries `--ec-connector=ec-nixl`. That
+flag makes it fetch the encoder's embeddings before decoding. Kubernetes 1.35 renders this as a
+native sidecar:
 
 ```yaml
 apiVersion: v1
 kind: Pod
 metadata:
-  name: case120-epd-decode-k7ks8
-  namespace: default
+  name: epd-arm3-epd-decode-h62cw
+  namespace: gpustack-bench
 spec:
-  # The capture cluster (Kubernetes 1.32) renders the routing proxy as a native sidecar;
-  # the shape follows the cluster version.
   initContainers:
     - name: routing-proxy
-      image: docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0
       restartPolicy: Always
       args:
         - --port=8000
@@ -227,145 +279,141 @@ spec:
         - --mooncake-bootstrap-port=8998
         - --secure-proxy=false
         - --ec-connector=ec-nixl
+  containers:
+    - name: main
+      command:
+        - vllm
+        - serve
+        - /var/lib/gpustack/model
+        - --kv-transfer-config
+        - '{"kv_connector":"MooncakeConnector","kv_role":"kv_consumer","kv_connector_extra_config":{"mooncake_protocol":"tcp"}}'
+        - --served-model-name
+        - /models
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "16384"
+        - --gpu-memory-utilization
+        - "0.85"
+        - --host
+        - 0.0.0.0
+        - --port
+        - "8200"
 ```
 
 Do not set these keys on the roles yourself. The operator owns them, and a role that names one is
 refused. See [Encoder-cache connectors](../../modules/model-deployment/encode-prefill-decode.md#encoder-cache-connectors).
 
-## Step 3: send a multimodal request
+## Step 3: Send a multimodal request
 
 Read the endpoint from the deployment status. It stays empty until the router passes readiness:
 
 ```bash
-kubectl get modeldeployment case120-epd -o jsonpath='{.status.endpoint}'
+kubectl get modeldeployment epd-arm3-epd -n gpustack-bench -o jsonpath='{.status.endpoint}'
 ```
 
 ```text
-http://case120-epd-router.default.svc:8000
+http://epd-arm3-epd-router.gpustack-bench.svc:8000
 ```
 
-Send a multimodal chat completion to that endpoint from inside the cluster. The recorded request
-carried a base64 PNG as an `image_url` part beside a text instruction, which makes the router use the
-encoder:
+Send a multimodal chat completion to that endpoint from inside the cluster.
+Include a base64 PNG as an `image_url` part beside a text instruction to select the encoder:
 
 ```bash
-kubectl run curl-probe --rm -i --restart=Never --image=curlimages/curl -- \
+kubectl run curl-probe -n gpustack-bench --rm -i --restart=Never --image=curlimages/curl -- \
   curl -sS -H 'Content-Type: application/json' \
-  --data-binary @request.json \
-  http://case120-epd-router.default.svc:8000/v1/chat/completions
+  --data-binary @- \
+  http://epd-arm3-epd-router.gpustack-bench.svc:8000/v1/chat/completions < request.json
 ```
 
-The response was HTTP 200 with 285 characters of generated text describing the image. To see which
-engine did what, read the access line each stage logged:
+The completed benchmark issued **236 measured requests with zero errors** and 28 warm-up requests.
+The captured logs contain 264 `POST /v1/chat/completions` lines in each role's `main` container and
+264 multimodal-item lines in the *Decode* `routing-proxy` sidecar. The router access log contains 280
+lines for this run.
 
-| Stage | Container | Log line |
+| Stage | Container | Captured log |
 |---|---|---|
-| Encoder | `case120-epd-encode/main` | `POST /v1/chat/completions` |
-| Prefiller | `case120-epd-prefill/main` | `POST /v1/chat/completions` |
-| Decoder | `case120-epd-decode/routing-proxy` | `processing multimodal items` |
+| *Encode* | `epd-arm3-epd-encode-9jz5c/main` | `POST /v1/chat/completions` (264 lines) |
+| *Prefill* | `epd-arm3-epd-prefill-26ls5/main` | `POST /v1/chat/completions` (264 lines) |
+| *Decode* | `epd-arm3-epd-decode-h62cw/main` | `POST /v1/chat/completions` (264 lines) |
+| *Decode* sidecar | `epd-arm3-epd-decode-h62cw/routing-proxy` | Multimodal items (264 lines) |
 
 The router picked an encoder, the encoder handed its embeddings to the prefiller over NIXL, and the
-decoder's sidecar pulled them before generating text. The decoder's sidecar, not its engine, logs
-the multimodal items it received.
+decoder's sidecar pulled them before generating text. The decoder's sidecar logs the multimodal items it received.
+Aggregate counts establish stage activity; they do not correlate each request across the roles.
 
-## Step 4: inspect joint admission and co-location
+## Step 4: Admission and co-location
 
-Each role owns one Kueue `Workload`. All three read `ADMITTED True` against the same capacity pool,
-so no role starts alone:
+The `ModelDeployment` reports quota reserved for all three role replicas. Each role owns one Kueue
+`Workload`; admission reserves the complete role set together. Check the individual objects with:
 
 ```bash
-kubectl get workloads
+kubectl get workloads -n gpustack-bench
 ```
 
-```text
-NAME                              QUEUE                             RESERVED IN                         ADMITTED   FINISHED   AGE
-gpustack-fnv64-5857f84abebd42ca   gpustack-fnv64-a730f1dca9e26fca   gpustack--nvidia-l40s-linux-amd64   True                  3m15s
-gpustack-fnv64-7e269c4ef1cfbda6   gpustack-fnv64-a730f1dca9e26fca   gpustack--nvidia-l40s-linux-amd64   True                  3m15s
-gpustack-fnv64-e4b1dda7357b15d6   gpustack-fnv64-a730f1dca9e26fca   gpustack--nvidia-l40s-linux-amd64   True                  3m15s
-```
+All three role `Pod`s and the router `Pod` ran on `gpu-node-0` in this recording. The node has eight
+GPUs, so this placement does not show how the roles behave when GPU capacity is constrained.
 
-Every replica Pod also carries soft co-location terms toward its peers. The weights pair the roles
+Each role exposed one GPU inside its own `Pod`, with private IPC and `/dev/shm`.
+No remote direct memory access (*RDMA*) interface was attached.
+**All cross-`Pod` NIXL encoder-cache and Mooncake KV transfers used TCP sockets over `eth0`.**
+The host's NVLink fabric was not used between roles.
+
+Every replica `Pod` also carries soft co-location terms toward its peers. The weights pair the roles
 that exchange the most data:
 
 | Replica | Prefers on the same node | Weight |
 |---|---|---|
-| `encode` | `prefill` | 50 |
-| `prefill` | `decode` | 100 |
-| `prefill` | `encode` | 50 |
-| `decode` | `prefill` | 100 |
+| *Encode* | *Prefill* | 50 |
+| *Prefill* | *Decode* | 100 |
+| *Prefill* | *Encode* | 50 |
+| *Decode* | *Prefill* | 100 |
 
-In the recorded run, prefill and decode landed together on `gpu-node-0` and the encoder landed on
-`gpu-node-1`. Each node had two free cards, so three single-GPU roles could not share one host.
 Soft affinity scores a placement and never blocks one. See
 [Scheduling co-location](../../modules/model-deployment/encode-prefill-decode.md#scheduling-co-location).
 
-## Step 5: release the application
+## Step 5: Release the application
 
-Delete the deployment to release the three GPUs, the router and the Services:
+Delete the deployment to release the three GPUs, the router and the `Service`s:
 
 ```bash
-kubectl delete modeldeployment case120-epd
-kubectl get pods,services -l app.kubernetes.io/instance=case120-epd
+kubectl delete modeldeployment epd-arm3-epd -n gpustack-bench
+kubectl get pods,services -n gpustack-bench -l app.kubernetes.io/instance=epd-arm3-epd
 ```
 
-No Pods or Services remain once the delete completes. An encoder replica is withdrawn from
-discovery and then removed after a fixed window. See the last rows of [Troubleshooting](#troubleshooting).
+Wait until the owned `Pod`s and `Service`s disappear; the recording does not include a cleanup snapshot.
+An encoder replica is withdrawn from discovery and then removed after a fixed window.
+See [Troubleshooting](#troubleshooting).
 
-## Validation summary
+## Limitations
 
-The model was `Qwen/Qwen2.5-VL-7B-Instruct`, served with `vLLM` `0.30.0` on the cluster described in
-[Prerequisites](#prerequisites). The Pod suffixes differ between applications because the Pods use
-`generateName`.
+Role kinds are fixed at creation and do not convert in place between *Encode*, *Prefill*, *Decode*,
+and *Server*.
 
-| Check | Result |
-|---|---|
-| Admission | The three-role deployment was admitted on `gpustack--nvidia-l40s-linux-amd64` |
-| Readiness | Encode, Prefill and Decode Pods `Ready`; every container restart count is 0 |
-| Endpoint | `http://case120-epd-router.default.svc:8000` |
-| Encoder wiring | `ECCPUConnector` as `ec_producer`, side channel on the Pod IP, port 5601 |
-| Prefiller wiring | `ECCPUConnector` as `ec_consumer`, no side-channel port |
-| Decoder wiring | `--ec-connector=ec-nixl` on `routing-proxy` |
-| Multimodal request | HTTP 200 with generated content |
-| Stage logs | Encoder and prefiller logged the request, and the decoder's sidecar logged `processing multimodal items` |
+The recording uses one 8-GPU H100 node and one CPU node. The deployment reserves three GPUs together;
+all three must be available for admission. All three roles fit on `gpu-node-0` in this run. It does
+not measure placement under GPU contention or across multiple GPU nodes.
 
-The stage logs matter because a 200 alone does not show which engines ran.
-
-### SGLang `EP + D` behind both routers
-
-SGLang `0.5.18` ran the same model on NVIDIA L40S behind `llm-d-router` and again behind
-`sglang-gateway`. Both reached `1R1E1P1D` `Ready` with no restarts and returned the same answers.
-
-| Reading | Result |
-|---|---|
-| Published endpoint | `http://sglang-epd-llmd-router.default.svc:8000` |
-| Encoder flags | The encoder runs `--encoder-only`; the prefiller runs `--language-only` and dials the encoder |
-| Text-only request | HTTP 200: `The capital of France is Paris.` |
-| `image_url` request | HTTP 200: `The image consists of a red and blue checkerboard pattern with alternating squares.` |
-| Image tokens billed | `prompt_tokens_details.image_tokens = 4` |
-| Encoder reached | The encoder Pod logged `POST /encode`, called from the prefiller Pod |
-| Decoder served | The decode Pod logged `POST /v1/chat/completions`, called from the router |
-
-Send SGLang requests to `status.endpoint`. The deployment's plain Service does not front a
-disaggregated SGLang server and answers HTTP 400. The co-location order was not exercised on this
-engine, because the pool held a single two-GPU node.
+Encoder retirement drains through a fixed window of about 300 seconds. A transfer still in flight
+when the window ends fails at the client.
 
 ## Troubleshooting
 
 | Symptom | Condition / Reason | Check & Mitigation |
 |---|---|---|
-| The apply is refused for the role set | Admission refusal message | An `Encode` role requires `Prefill` and `Decode`, admits one role per kind, is refused beside `Server`, and cannot take `spec.kvCache` or a role `command`. See [Shape rules and admission constraints](../../modules/model-deployment/encode-prefill-decode.md#shape-rules-and-admission-constraints) |
-| The apply is refused for engine, router or platform | Admission refusal message | All three roles must resolve to one accelerator platform, and the router, engine and platform must match [the admitted matrix](../../modules/model-deployment/encode-prefill-decode.md#the-admitted-matrix) (`vllm-router` is refused on Ascend). See [The admitted matrix](../../modules/model-deployment/encode-prefill-decode.md#the-admitted-matrix) |
+| The apply is refused for the role set | Admission refusal message | An *Encode* role requires *Prefill* and *Decode*, admits one role per kind, is refused beside *Server*, and cannot take *`spec.kvCache`* or a role *`command`*. See [Admission constraints](../../modules/model-deployment/encode-prefill-decode.md#admission-constraints) |
+| The apply is refused for engine, router or platform | Admission refusal message | All three roles must resolve to one accelerator platform, and the router, engine and platform must match [the admitted matrix](../../modules/model-deployment/encode-prefill-decode.md#admitted-matrix) (`vllm-router` is refused on Ascend). See [Admitted matrix](../../modules/model-deployment/encode-prefill-decode.md#admitted-matrix) |
 | The encoder image is older than its row's floor | No admission check reads a version | The floor lives in the image you name: vLLM `0.30.0`+ for `ECCPUConnector`, vllm-ascend `0.30.0rc1`+ for `ECExampleConnector`, SGLang `0.5.10`+ for `encoder-urls`. An image below the floor fails at container start with an `ImagePullBackOff` or an unknown-argument exit. See [Reading the table](../../modules/model-deployment/engine-versions.md#reading-the-table) |
-| Requests bypass Prefill | vLLM P/D token rendering is unavailable | The router cannot count tokens through the engine and falls back to Decode-only routing. See [Counting tokens through the engine](../../modules/model-deployment/prefill-decode.md#counting-tokens-through-the-engine) for supported versions and `--enable-scale-out` placement |
-| The Ascend encoder starts with no directory to write | `ECExampleConnector` needs a shared directory | Attach a ReadWriteMany claim through `spec.roles[].additionalVolumes[].persistentVolumeClaim` on `Encode` and `Prefill`. Both roles must match `claimName`, `mountPath` and `subPath`, and the encoder's mount must not be read-only |
-| The apply names port 5601 or 8997 | Admission refusal on an owned key | The `ECCPUConnector` encoder owns 5601, and an SGLang `Prefill` role owns 8997 once the deployment has an `Encode` role. Move the engine's HTTP port off these |
+| Requests bypass *Prefill* | vLLM *Prefill/Decode (PD)* token rendering is unavailable | The router cannot count tokens through the engine and falls back to *Decode*-only routing. See [Counting engine tokens](../../modules/model-deployment/prefill-decode.md#counting-engine-tokens) for supported versions and `--enable-scale-out` placement |
+| The Ascend encoder starts with no directory to write | `ECExampleConnector` needs a shared directory | Attach a ReadWriteMany claim through *`spec.roles[].additionalVolumes[].persistentVolumeClaim`* on *Encode* and *Prefill*. Both roles must match *`claimName`*, *`mountPath`* and *`subPath`*, and the encoder's mount must not be read-only |
+| The apply names port 5601 or 8997 | Admission refusal on an owned key | The `ECCPUConnector` encoder owns 5601, and an SGLang *Prefill* role owns 8997 once the deployment has an *Encode* role. Move the engine's HTTP port off these |
 | An encoder replica sits in `Draining` for minutes | The encoder exports no in-flight queue the drain can read | Retirement waits a fixed window of about 300 seconds. A transfer still in flight when it ends fails at the client |
-| `RoleKindsReady=False` | One role kind has zero ready replicas | Read the condition message for the kind, then inspect that role's Pods and engine logs. The other roles keep running while the failing kind recovers |
+| `RoleKindsReady=False` | One role kind has zero ready replicas | Read the condition message for the kind, then inspect that role's `Pod`s and engine logs. The other roles keep running while the failing kind recovers |
 
 ---
 
-**See also** — [Model Deployment Encode, Prefill and Decode](../../modules/model-deployment/encode-prefill-decode.md) (role contract and the admitted matrix) ·
-[Model Deployment Encode, Prefill and Decode Benchmark](../../modules/model-deployment/encode-prefill-decode-benchmark.md) (measured three-arm latency and throughput) ·
+**See also** — [Encode, Prefill and Decode](../../modules/model-deployment/encode-prefill-decode.md) (role contract and the admitted matrix) ·
+[Encode, Prefill and Decode Benchmark](../../modules/model-deployment/encode-prefill-decode-benchmark.md) (measured latency and throughput across three configurations) ·
 [Prefill and Decode Walkthrough](prefill-decode.md) (two-role disaggregation) ·
 [External DP Walkthrough](external-dp.md) (fixed per-rank serving)
 

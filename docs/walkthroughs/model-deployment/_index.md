@@ -1,28 +1,32 @@
 # Model Deployment Walkthroughs
 
-Choose a serving shape, prepare its model, then follow the matching walkthrough.
-The Elastic EP, External DP and Encode, Prefill and Decode examples use the official GPUStack runner and retain captured CR output and inference results.
-The Prefill and Decode and the Multi-Host pages are configuration examples. They record no captured run.
+Choose a serving configuration, then use its cluster profile and deployment manifest.
+The H100 walkthroughs distinguish recorded deployments from configuration examples.
+The illustrative *Multi-Host* configuration uses the separate `InstanceType` example below.
 
 ## Contents
 
 - [Choose an example](#choose-an-example)
 - [Prepare the cluster](#prepare-the-cluster)
 - [Prepare the GPU InstanceType](#prepare-the-gpu-instancetype)
-- [Check the software identity](#check-the-software-identity)
 
 ## Choose an example
 
-| Walkthrough | Serving shape | What it covers |
+*Tensor parallelism (TP)*, *data parallelism (DP)* and *expert parallelism (EP)* describe the parallel groups below.
+The *DP* width counts data-parallel ranks; the *EP* world size counts GPU workers in the expert-parallel collective.
+With *internal load balancing (Internal LB)*, the master distributes requests to its *DP* ranks.
+
+| Walkthrough | Serving configuration | What it covers |
 |---|---|---|
-| [Prefill and Decode](prefill-decode.md) | Disaggregated roles fronted by router | Not measured here. Separate Prefill and Decode roles, `llm-d-router` routing, joint admission, and KV cache transfer. |
+| [Prefill and Decode](prefill-decode.md) | Disaggregated roles fronted by Router | Recorded H100 deployment with one *Prefill* and two *Decode* replicas, *TP* = 2, TCP KV transfer, and a linked [benchmark](../../modules/model-deployment/prefill-decode-benchmark.md). |
 | [Encode, Prefill and Decode](encode-prefill-decode.md) | Disaggregated multimodal roles fronted by router | Encoder output transfer over NIXL, joint admission of three roles, and a multimodal request through the router. |
-| [Elastic EP](elastic-ep.md) | One Internal LB instance on Ray | TP2, DP width 2→4, EP world 4→8; ordinary and streaming requests before and after expansion. |
-| [External DP](external-dp.md) | Two fixed DP ranks using multiprocessing | TP2, DP2, EP world4; direct requests to each rank and Router distribution across both ranks. |
+| [Elastic EP](elastic-ep.md) | One *Internal LB* instance on Ray | Recorded H100 expansion: *TP* = 2, *DP* width 2 → 4, *EP* world size 4 → 8; 439 client requests with zero errors. |
+| [External DP](external-dp.md) | Four fixed *DP* ranks using multiprocessing | Recorded H100 deployment: *TP* = 2, *DP* = 4, *EP* world size 8; captured per-rank inference and Router coverage. |
 | [Multi-Host](multi-host.md) | Coordinated instance spanning multiple hosts | Not measured here. `size: 2`, sixteen GPUs across two physical nodes, leader `m0` routing, and gang admission. |
 
-A Router can front either shape. The engine's LB mode determines which Pods accept inference requests.
-Increasing `roles[].replicas` adds complete groups; see [role scaling](../../modules/model-deployment/deployment.md#rollout-behavior).
+A Router can front the *Internal LB* and *External LB* configurations.
+The engine's *load-balancing* mode determines which `Pod`s accept inference requests.
+Increasing *`roles[].replicas`* adds complete groups; see [role scaling](../../modules/model-deployment/deployment.md#rollout-behavior).
 That operation was not measured in these walkthroughs.
 
 ## Prepare the cluster
@@ -31,7 +35,10 @@ Install the operator and enable node model delivery using the
 [installation guide](../../operate/installation-modes.md) and
 [model-store operations](../../modules/model-delivery/operations.md).
 Use `kubectl`, `jq`, `curl`, and a kubeconfig for the intended cluster.
-The recorded cluster had one CPU node and one node with eight NVIDIA RTX PRO 6000 Blackwell GPUs.
+
+The H100 recordings use one CPU node and one GPU node with eight NVIDIA H100 80 GB HBM3 SXM5 GPUs.
+Read each walkthrough's device and cluster section for its allocation and evidence limits.
+The *Multi-Host* example instead needs two GPU nodes.
 
 ```bash
 kubectl get nodes
@@ -40,15 +47,21 @@ kubectl get instancetypes
 kubectl get nodemodelstores -o json
 ```
 
-Confirm model-manager readiness and free GPUs before creating a serving workload.
-External DP needs four free cards. Elastic EP needs four initially and eight after expansion.
-Complete the [model prefetch walkthrough](../model-delivery/prefetch.md) before starting either example.
+Confirm Model Manager readiness and free GPUs before creating a serving workload.
+*External DP* needs eight free cards. *Elastic EP* needs four initially and eight after expansion.
+Complete [model prefetch](../model-delivery/prefetch.md) with the artifact, namespace and node selection
+specified by the serving walkthrough.
 
 ## Prepare the GPU InstanceType
 
-Save the following as `gpu-instance-type.yaml` and apply it once.
-For another GPU family, select an appropriate whole-GPU InstanceType and verify model compatibility.
-Each serving member requests two GPUs; CPU and memory budgets scale with that count.
+The H100 manifests use the discovered whole-GPU type
+`gpustack--nvidia-h100-80gb-hbm3-linux-amd64`. The recordings used the custom type `bench-gpu`.
+Each walkthrough explains this substitution; captured queue output retains the recorded name.
+Confirm the selected type's capacity before applying a manifest.
+
+For the illustrative *Multi-Host* configuration, save this custom type as `gpu-instance-type.yaml`.
+Apply it only on nodes with the matching RTX PRO accelerator group.
+Select another whole-GPU type when using different hardware, and verify model compatibility.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -72,24 +85,8 @@ kubectl apply -f gpu-instance-type.yaml
 kubectl get instancetype elastic-cpu-gpu
 ```
 
-The `Prefill and Decode`, `Elastic EP`, `External DP` and `Multi-Host` examples refer to `elastic-cpu-gpu`, while `Encode, Prefill and Decode` uses the cluster's discovered `gpustack--nvidia-l40s-linux-amd64` InstanceType. Replace that name if you use an existing InstanceType.
-
-## Check the software identity
-
-Read the running images and binary versions. Repeat for the worker, device-manager, and model-manager Pods.
-Set the namespace, Pod, and container names from your installation:
-
-```bash
-kubectl get pods -A
-kubectl -n "$OPERATOR_NAMESPACE" get pod "$OPERATOR_POD" -o json |
-  jq '.status.containerStatuses[] | {name, image, imageID}'
-kubectl -n "$OPERATOR_NAMESPACE" exec "$OPERATOR_POD" -c "$OPERATOR_CONTAINER" -- \
-  gpustack-operator --version
-```
-
-The `dev` tag can move. Each walkthrough's validation record identifies the binary and image used.
-The serving manifests name the runner by tag. Validation records list the observed image tags or digests.
-No engine packages were replaced during validation.
+[Multi-Host](multi-host.md) uses `elastic-cpu-gpu` as an illustrative custom `InstanceType`.
+It is separate from the H100 type used by the other reusable manifests.
 
 ---
 

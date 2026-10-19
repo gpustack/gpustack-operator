@@ -1,4 +1,4 @@
-# RDMA Network Endpoints Walkthrough
+# RDMA Networking Walkthrough
 
 Request and verify RDMA endpoints for workloads, align network adapters with GPUs on NUMA nodes,
 and configure multi-tenant and cache fabric interconnects.
@@ -8,26 +8,28 @@ interface discovery, container injection, NUMA alignment, and deployment integra
 
 ## Contents
 
-- [Prerequisites](#prerequisites)
+- [Summary](#summary)
 - [Step 1: request RDMA from a Pod](#step-1-request-rdma-from-a-pod)
 - [Step 2: NUMA alignment with kubelet](#step-2-numa-alignment-with-kubelet)
 - [Step 3: prefill and decode interface requests](#step-3-prefill-and-decode-interface-requests)
 - [Step 4: KV cache fabric over RDMA](#step-4-kv-cache-fabric-over-rdma)
 - [Step 5: AWS EFA differences](#step-5-aws-efa-differences)
+- [Limitation](#limitation)
 - [Troubleshooting](#troubleshooting)
 
-## Prerequisites
+## Summary
 
-Device Manager discovers network interfaces from `/sys/class/net`, resolves bound RDMA devices, and
-verifies link status before publishing endpoints.
+Device Manager discovers RDMA NICs from `/sys/class/net`, resolves bound RDMA devices, verifies link
+status, and advertises three extended resource keys — shared, exclusive, and SR-IOV partitioned — so
+a workload can request network fabric beside its accelerators.
 
-When at least one endpoint is active, the node receives the `feature.gpustack.ai/rdma.capable=true`
-label (see [Network Topology](../../modules/rdma/network-topology.md)).
-Device Manager registers three extended resource keys with the kubelet — shared, exclusive, and
-SR-IOV partitioned — with capacities and semantics defined in
-[The RDMA resource keys](../../modules/rdma/network-topology.md#the-rdma-resource-keys).
+When at least one endpoint is active, the node carries `feature.gpustack.ai/rdma.capable=true` (see
+[Network Topology](../../modules/rdma/network-topology.md) and
+[The RDMA resource keys](../../modules/rdma/network-topology.md#the-rdma-resource-keys)).
 
-Inspect discovered interfaces and allocatable capacities:
+## Step 1: request RDMA from a Pod
+
+Inspect discovered interfaces and allocatable capacities on the target node first:
 
 ```bash
 kubectl get devices <node> -o json |
@@ -37,8 +39,6 @@ kubectl get devices <node> -o json |
 kubectl get node <node> -o json |
   jq '.status.allocatable | with_entries(select(.key | contains("gpustack.ai/rdma")))'
 ```
-
-## Step 1: request RDMA from a Pod
 
 A workload requests whole accelerators and RDMA endpoints within the same container.
 Pods must carry the `kueue.x-k8s.io/queue-name` label to participate in admission.
@@ -203,6 +203,18 @@ spec:
 In `ModelDeployment`, set `kvTransfer.protocol: EFA` and specify custom runner images containing
 `libfabric` and EFA-enabled Mooncake builds.
 
+## Limitation
+
+- Kubelet NUMA alignment policies (`none`, `restricted`, `single-numa-node`) and
+  `TopologyAffinityError` admission behavior are covered in
+  [Enabling NUMA alignment on the kubelet](../../modules/rdma/operations.md#enabling-numa-alignment-on-the-kubelet)
+  and [Reading the result](../../modules/devices/preflight.md#reading-the-result).
+- Kueue does not meter the RDMA extended resource keys; see
+  [RDMA Operations](../../modules/rdma/operations.md) and the second row of
+  [Troubleshooting](#troubleshooting).
+- AWS EFA nodes bypass `/sys/class/net` and require explicit `EFA` transport declaration as shown in
+  [Step 5](#step-5-aws-efa-differences).
+
 ## Troubleshooting
 
 | Symptom | Root cause | Check & Mitigation |
@@ -219,6 +231,6 @@ In `ModelDeployment`, set `kvTransfer.protocol: EFA` and specify custom runner i
 
 **See also** — [Network Topology](../../modules/rdma/network-topology.md) (discovery and link states) ·
 [RDMA Operations](../../modules/rdma/operations.md) (resource keys, limits, and EFA configuration) ·
-[Scheduling Walkthrough](../devices/scheduling.md)
+[Heterogeneous Devices Walkthrough](../devices/scheduling.md)
 
 **Next** → [Hierarchical Placement Walkthrough](../topology/hierarchical-placement.md)

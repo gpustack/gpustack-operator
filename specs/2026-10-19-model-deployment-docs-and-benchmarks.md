@@ -1,6 +1,6 @@
 # Spec: Model Deployment Documentation, Navigation, and Live Benchmarks
 
-Status: Planned
+Status: Building
 Type: Feature
 
 ## Summary
@@ -44,7 +44,7 @@ guide and executes live Nebius GPU benchmarks for `Prefill and decode`, `Elastic
 3. **Standardize every walkthrough's section layout.** Structure all ten walkthrough leaf pages under
    `docs/walkthroughs/` around `## Contents`, `## Summary`, `## Step N: ...`, `## Limitation`, and
    `## Troubleshooting` (plus the required footer), while staying within the 10-`##` section cap
-   enforced by `hack/check/check-docs.sh`.
+   enforced by `.agents/skills/gpustack-operator-docs/scripts/check-docs.sh`.
 4. **Restructure the Hugo sidebar and standardize menu capitalization.** Support nested child pages
    (`+ Benchmark`) under leaf module guides in `site/layouts/partials/nav-section.html` and
    `site/data/navigation.yaml` without moving flat Markdown files in `docs/modules/model-deployment/`,
@@ -71,7 +71,7 @@ guide and executes live Nebius GPU benchmarks for `Prefill and decode`, `Elastic
    `csi-driver-s3` chart, not user-facing documentation.
 3. **Converting leaf module guides into Hugo `_index.md` subdirectories.** Moving
    `docs/modules/model-deployment/*.md` into subdirectories would break relative links across `docs/`,
-   `.agents/skills/`, and `hack/check/check-docs.sh` exemption paths, and would force an extra
+   `.agents/skills/`, and `.agents/skills/gpustack-operator-docs/scripts/check-docs.sh` exemption paths, and would force an extra
    `Overview` item inside each collapsible section.
 4. **Multi-node InfiniBand RDMA benchmarking on presets without GPU clustering.** Where the Nebius
    platform preset does not expose InfiniBand fabric attachment, benchmarks run on a single multi-GPU
@@ -200,7 +200,7 @@ point where enabling the capability beats a simpler deployment—and where it do
 ### Notes/Constraints/Caveats
 
 - **Documentation gate compliance (`make lint docs`).** Every added or edited Markdown file under
-  `docs/` must pass `hack/check/check-docs.sh`:
+  `docs/` must pass `.agents/skills/gpustack-operator-docs/scripts/check-docs.sh`:
   - Rule 1: Every internal Markdown link and `#anchor` resolves.
   - Rule 2: Every page with `##` headings has a `## Contents` list whose entries and anchors match its
     `##` headings in exact order.
@@ -208,7 +208,7 @@ point where enabling the capability beats a simpler deployment—and where it do
   - Rule 4 & 8: Every page under `docs/` appears in `docs/README.md` under `## All pages` with a link
     label identical to its `# H1` title.
   - Rule 5, 6, 7: Line count `<= 550`, code blocks `<= 12`, and `##` headings (excluding
-    `## Contents`) `<= 10` unless explicitly exempted in `hack/check/check-docs.sh`.
+    `## Contents`) `<= 10` unless explicitly exempted in `.agents/skills/gpustack-operator-docs/scripts/check-docs.sh`.
 - **Walkthrough `H2_CAP = 10` ceiling.** `docs/walkthroughs/kv-cache/shared-cache.md` has 7 steps;
   with `## Summary`, `## Step 1`..`## Step 7`, `## Limitation`, and `## Troubleshooting`, it has
   exactly 10 `##` sections (excluding `## Contents`). No additional `##` heading may be added to that
@@ -568,7 +568,7 @@ PACKAGE_PUSH=true PACKAGE_NAMESPACE=$REGISTRY_NAMESPACE PACKAGE_TAG=dev-$(git re
 - **Always:**
   - Run `make lint docs` after any documentation, index, or Hugo template edit.
   - Keep walkthroughs within the 10-`##` section cap and 550-line cap enforced by
-    `hack/check/check-docs.sh`.
+    `.agents/skills/gpustack-operator-docs/scripts/check-docs.sh`.
   - Destroy Nebius GPU clusters via `terraform destroy` as soon as live benchmark collection finishes.
 - **Ask first:**
   - Any change to `pkg/` Go source code (only permitted if live benchmark testing uncovers a genuine
@@ -582,18 +582,18 @@ PACKAGE_PUSH=true PACKAGE_NAMESPACE=$REGISTRY_NAMESPACE PACKAGE_TAG=dev-$(git re
 
 ### Implementation Plan
 
-- [ ] **T1 · Walkthrough Hygiene, Checksum/Identifier Removal, and Section Standardization**
+- [x] **T1 · Walkthrough Hygiene, Checksum/Identifier Removal, and Section Standardization**
       Blocked by: None
-      Owns: `docs/walkthroughs/**`
+      Owns: `docs/walkthroughs/**`, `docs/reference/instance-type-unit-resources.md`
       Acceptance: Every `## Validation record`, `## Validation summary`, and `## Check the software identity` section is removed from `docs/walkthroughs/`; zero personal registry namespaces or run-identity binary/image SHA256 digests remain under `docs/walkthroughs/`; all 10 walkthrough leaf pages use only `## Contents`, `## Summary`, `## Step 1: ...`..`## Step N: ...`, `## Limitation`, and `## Troubleshooting` (with `##` count <= 10 and line count <= 550); the two-GPU co-location note in `encode-prefill-decode.md` is folded into `## Limitation` and `Step 2` explains why `--enforce-eager` is rendered as a producer default on `encode`.
-      Verify: `! grep -riE '## Validation (record|summary)' docs/walkthroughs/ && bash hack/check/check-docs.sh --report`
+      Verify: `! grep -riE '## Validation (record|summary)' docs/walkthroughs/ && bash .agents/skills/gpustack-operator-docs/scripts/check-docs.sh --report`
 
 - [ ] **T2 · EPD `--enforce-eager` Clarification, SGLang Front-Door Relocation, and `External DP` Module Guide**
       Blocked by: None
       Owns: `docs/modules/model-deployment/_index.md`, `docs/modules/model-deployment/encode-prefill-decode.md`, `docs/modules/model-deployment/encode-prefill-decode-benchmark.md`, `docs/modules/model-deployment/external-dp.md`
       Gate: review
       Acceptance: `docs/modules/model-deployment/encode-prefill-decode.md` documents why `--enforce-eager` is defaulted on `RoleEncode` alone (`MMEncoderModelRunner` / `--mm-encoder-only` runs no language model, KV cache, or decoder CUDA graphs, and V1 `GPUModelRunner` / upstream vLLM `v0.30.0` requires `--enforce-eager` on encoder instances while `Prefill` and `Decode` keep CUDA graphs enabled) and includes the SGLang `status.endpoint` front-door contract under `### SGLang`; `encode-prefill-decode-benchmark.md` updates its SGLang anchor to `encode-prefill-decode.md#sglang`; `docs/modules/model-deployment/external-dp.md` documents External DP derivation, per-rank Pods, Service/Router endpoint eligibility, and admission rules, and is linked from `docs/modules/model-deployment/_index.md`.
-      Verify: `test -s docs/modules/model-deployment/external-dp.md && bash hack/check/check-docs.sh --report`
+      Verify: `test -s docs/modules/model-deployment/external-dp.md && bash .agents/skills/gpustack-operator-docs/scripts/check-docs.sh --report`
 
 - [ ] **T3 · Live Nebius Benchmark Batch 1: `Prefill and decode` Benchmark**
       Blocked by: None
@@ -623,7 +623,7 @@ code solid enough prior to committing the changes necessary to implement this en
 
 #### Prerequisite testing updates
 
-None. `hack/check/check-docs.sh` and `hack/docs.sh` (`make lint docs`) already validate link/anchor
+None. `.agents/skills/gpustack-operator-docs/scripts/check-docs.sh` and `hack/docs.sh` (`make lint docs`) already validate link/anchor
 resolution, `## Contents` parity, footer structure, `docs/README.md` index completeness, H1 label
 matching, and line/code-block/heading caps.
 
@@ -635,7 +635,7 @@ None unless a live benchmark uncovers a controller/webhook bug under `pkg/` requ
 #### Integration tests
 
 - Documentation and Hugo site build verification via `make lint docs`:
-  - `hack/check/check-docs.sh`: verifies all 9 documentation rules across all existing and new Markdown pages.
+  - `.agents/skills/gpustack-operator-docs/scripts/check-docs.sh`: verifies all 9 documentation rules across all existing and new Markdown pages.
   - Hugo site build + `hack/site/verify.py`: verifies the generated HTML sidebar hierarchy, `children:` nesting under `Model Deployment`, and exported Markdown/LLM indexes.
 
 #### e2e tests
@@ -686,7 +686,7 @@ None unless a live benchmark uncovers a controller/webhook bug under `pkg/` requ
 2. **Convert `prefill-decode.md`, `encode-prefill-decode.md`, `elastic-ep.md`, and `external-dp.md`
    into Hugo `_index.md` subdirectories.** Rejected (`jev` confidence 0.98 for data-driven `children:`)
    because moving those files breaks relative links across `docs/`, `.agents/skills/`, and
-   `hack/check/check-docs.sh`, and forces a redundant `Overview` link under each collapsible item.
+   `.agents/skills/gpustack-operator-docs/scripts/check-docs.sh`, and forces a redundant `Overview` link under each collapsible item.
 3. **Provision a separate Nebius cluster per benchmark.** Rejected (`jev` confidence 0.72 for two warm
    batches) because cold node provisioning, image pulls, and model weight downloads dominate wall-clock
    time and cluster cost.

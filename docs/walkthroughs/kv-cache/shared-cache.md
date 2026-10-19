@@ -7,7 +7,7 @@ name in the manifests below, then apply them in that order.
 
 ## Contents
 
-- [Creation order](#creation-order)
+- [Summary](#summary)
 - [Step 1: the store](#step-1-the-store)
 - [Step 2: the pool and the grant](#step-2-the-pool-and-the-grant)
 - [Step 3: the workload](#step-3-the-workload)
@@ -15,9 +15,15 @@ name in the manifests below, then apply them in that order.
 - [Step 5: local disk tier](#step-5-local-disk-tier)
 - [Step 6: post-failover state](#step-6-post-failover-state)
 - [Step 7: a second team and a second domain](#step-7-a-second-team-and-a-second-domain)
+- [Limitation](#limitation)
 - [Troubleshooting](#troubleshooting)
 
-## Creation order
+## Summary
+
+A shared Mooncake cache pool lets serving replicas reuse each other's prefix KV blocks and spill
+blocks across DRAM and local-disk tiers, so a replica answering prompts another replica already
+processed skips the recompute.
+This walkthrough creates the objects in a fixed order; the table is the order and the reason for it.
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
@@ -28,7 +34,7 @@ name in the manifests below, then apply them in that order.
 
 The order is fixed because each object names the one above it, so creating them the other way round
 leaves references that resolve to nothing. Why the two scopes split this way is on
-[KV Cache Pool](../../modules/kv-cache/pool.md#two-kinds-split-by-scope).
+[KV Cache Pools and Bindings](../../modules/kv-cache/pool.md#two-kinds-split-by-scope).
 
 **The Binding is the authorization point.** A namespace gets access to a store when an administrator
 creates a Binding in it. A user naming a pool is not a path this API has: `poolRef` is a
@@ -348,11 +354,15 @@ the store recuts each grant against the capacity it can serve, in proportion to 
 asked. `status.effectiveQuota` on each Binding shows the grant. See
 [Ceiling and grant](../../modules/kv-cache/pool.md#ceiling-and-grant).
 
-**A domain separates cached blocks. It does not wall off a tenant.** A Binding is not an enforcement
-boundary: a workload that knows another domain's name can still read and write that domain. Isolation
-of reuse needs a master that keeps a tenant ledger (the Step 1 default) and an engine that forwards
-the injected tenant. See [Limitations](../../modules/kv-cache/pool.md#limitations) and
-[Tenant compatibility](../../modules/kv-cache/injection.md#tenant-compatibility).
+## Limitation
+
+- Domain reuse boundaries and tenant-ledger requirements are covered in
+  [Limitations](../../modules/kv-cache/pool.md#limitations) and
+  [Tenant compatibility](../../modules/kv-cache/injection.md#tenant-compatibility).
+- Binding deletion holds (`Releasable=False`, including `HeldByWorkloads`) are covered in
+  [Operating notes](../../modules/kv-cache/pool.md#operating-notes).
+- Engine-version and `blockSize` / `dtype` compatibility across workloads sharing a domain are
+  covered in [Tenant compatibility](../../modules/kv-cache/injection.md#tenant-compatibility).
 
 ## Troubleshooting
 
@@ -376,11 +386,11 @@ the injected tenant. See [Limitations](../../modules/kv-cache/pool.md#limitation
 ---
 
 **See also** — [KV Cache Backend](../../modules/kv-cache/backend.md) (every field of the store, and what status reports) ·
-[KV Cache Leader](../../modules/kv-cache/leader.md) (the election, why there is no snapshot, and the member addressing choice in full) ·
-[KV Cache Pool](../../modules/kv-cache/pool.md) (quota, domains and what a full quota does) ·
+[KV Cache Election and Failover](../../modules/kv-cache/leader.md) (the election, why there is no snapshot, and the member addressing choice in full) ·
+[KV Cache Pools and Bindings](../../modules/kv-cache/pool.md) (quota, domains and what a full quota does) ·
 [KV Cache Local Disk Tier](../../modules/kv-cache/local-disk-tier.md) (directory, bucket and cleanup rules) ·
 [Model Deployment](../../modules/model-deployment/deployment.md) (roles, prefill/decode, rollout) ·
-[Model Deployment Prefill and Decode](../../modules/model-deployment/prefill-decode.md) (router, transfer) ·
+[Prefill and Decode](../../modules/model-deployment/prefill-decode.md) (router, transfer) ·
 [KV Cache Injection](../../modules/kv-cache/injection.md) (what a Pod actually receives)
 
 **Next** → [Model Prefetch Walkthrough](../model-delivery/prefetch.md) — cache weights on GPU nodes before serving.

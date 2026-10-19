@@ -6,32 +6,34 @@ The operator coordinates leader discovery and environment variable injection acr
 
 ## Contents
 
-- [Deployment shape](#deployment-shape)
-- [Prerequisites](#prerequisites)
+- [Summary](#summary)
 - [Step 1: define the multi-host deployment](#step-1-define-the-multi-host-deployment)
 - [Step 2: verify gang admission and leader injection](#step-2-verify-gang-admission-and-leader-injection)
 - [Step 3: verify distributed inference](#step-3-verify-distributed-inference)
 - [Step 4: scale replicas and update member size](#step-4-scale-replicas-and-update-member-size)
 - [Step 5: release the application](#step-5-release-the-application)
+- [Limitation](#limitation)
 - [Troubleshooting](#troubleshooting)
 
-## Deployment shape
+## Summary
+
+Multi-host serving runs a model whose *tensor parallelism (TP)* and *pipeline parallelism (PP)*
+require more GPUs than one node provides. One serving instance spans multiple hosts as one
+collective unit, admitted as a gang and served through its leader `m0`.
 
 A multi-host serving role configures `spec.roles[].size` greater than one.
-Each serving replica forms a collective unit composed of *size* distinct member Pods.
+Each serving replica forms a collective unit composed of `size` distinct member Pods.
 All member Pods in a group live and die together under gang scheduling.
 
 Member `m0` acts as the primary master replica and receives all incoming Service traffic.
 Subordinate members (`m1`, `m2`, etc.) run auxiliary parallel workers and synchronize with `m0`.
 The operator injects cluster discovery environment variables into each container automatically.
 
-## Prerequisites
-
 Prepare a cluster with at least two physical GPU nodes containing identical accelerator counts.
 Complete [cluster preparation](_index.md#prepare-the-cluster) and [model prefetch](../model-delivery/prefetch.md).
 Verify inter-node network connectivity and high-speed fabric (such as RoCE, InfiniBand, or AWS EFA).
 Each node in this walkthrough provides eight GPUs.
-Tensor parallelism spans the GPUs inside each host. Pipeline parallelism spans the two hosts.
+*TP* spans the GPUs inside each host. *PP* spans the two hosts.
 
 This layout is a configuration example. The walkthrough does not record a measured run on sixteen GPUs.
 
@@ -39,7 +41,7 @@ This layout is a configuration example. The walkthrough does not record a measur
 
 Save the following definition as `multi-host.yaml`.
 The specification declares `replicas: 1` and `size: 2`, allocating sixteen whole GPUs across two Pods.
-The launch script configures tensor parallelism across eight local GPUs and pipeline parallelism across the two hosts.
+The launch script sets *TP* = 8 across local GPUs and *PP* = 2 across the two hosts.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -173,8 +175,8 @@ It then creates the replacement in that slot and waits for fresh Kueue gang admi
 The next old instance is deleted only after the replacement is admitted.
 A role with one replica therefore stops serving during the replacement.
 
-The script reads `GPUSTACK_REPLICA_SIZE`, so the pipeline degree follows `size`.
-The tensor degree is fixed at 8, so it must still match the accelerators per member.
+The script reads `GPUSTACK_REPLICA_SIZE`, so the *PP* size follows `size`.
+The *TP* size is fixed at 8, so it must still match the accelerators per member.
 See [Rollout behavior](../../modules/model-deployment/deployment.md#rollout-behavior).
 
 ## Step 5: release the application
@@ -193,6 +195,17 @@ kubectl get devices -o json | jq '[.items[].status.groups[].accelerators[] |
   {mode, remaining, allocatedSlices: (.allocatedSlices // 0)}]'
 ```
 
+## Limitation
+
+Gang scheduling is all-or-nothing: all `size` members of an instance need placement at once, or the
+whole instance waits.
+
+HTTP ingress is leader-only under *internal load balancing (Internal LB)*: the Service targets
+member `m0`, and subordinate members expose no serving endpoint.
+
+Changing `size` replaces whole replicas rather than resizing a running collective. With one replica,
+the role stops serving while its replacement is rebuilt.
+
 ## Troubleshooting
 
 | Symptom | Condition / Reason | Check & Mitigation |
@@ -201,7 +214,7 @@ kubectl get devices -o json | jq '[.items[].status.groups[].accelerators[] |
 | An instance was lost and is being rebuilt | `ReplicasUpToDate=False/ReplacementInProgress` | A replica disappeared for a reason outside the spec: a drained node, Kueue reclaiming quota, an eviction or a manual delete. The Pods of an instance share one lifecycle, so the whole instance is rebuilt. Check the node and Kueue events |
 | Replicas wait for quota | `QuotaReserved=False/Pending` | The ClusterQueue has insufficient capacity to admit the replica. Free capacity, raise the pool quota, or reduce per-member accelerator requests |
 | Secondary worker cannot reach the leader | Engine logs on `m1` | Check that the headless Service resolves `GPUSTACK_REPLICA_LEADER_ADDRESS` and that no NetworkPolicy blocks the engine's distributed port |
-| Engine errors on parallel size | Engine startup log | Check that `--tensor-parallel-size` equals the accelerators per member and that the pipeline degree equals `size` |
+| Engine errors on parallel size | Engine startup log | Check that `--tensor-parallel-size` matches the accelerators per member (*TP* size) and that `--pipeline-parallel-size` equals `size` (*PP* size) |
 
 ---
 

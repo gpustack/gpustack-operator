@@ -8,21 +8,23 @@ workloads, and manage topology updates.
 
 ## Contents
 
-- [Prerequisites](#prerequisites)
+- [Summary](#summary)
 - [Step 1: read-only cloud zone discovery](#step-1-read-only-cloud-zone-discovery)
 - [Step 2: request zone placement from ModelDeployment](#step-2-request-zone-placement-from-modeldeployment)
 - [Step 3: static inventory snapshot with ConfigMap](#step-3-static-inventory-snapshot-with-configmap)
 - [Step 4: request rack placement](#step-4-request-rack-placement)
 - [Step 5: move a node, then change the hierarchy](#step-5-move-a-node-then-change-the-hierarchy)
+- [Limitation](#limitation)
 - [Troubleshooting](#troubleshooting)
 
-## Prerequisites
+## Summary
 
-Topology-Aware Scheduling (TAS) operates continuously through Kueue. When no custom `TopologySource` is
-declared, nodes use a single-level hierarchy consisting solely of `kubernetes.io/hostname`.
+Topology-Aware Scheduling (TAS) places multi-Pod replicas inside one failure domain — a cloud zone
+or a physical rack — instead of scattering their Pods across domains. This walkthrough configures a
+read-only cloud-zone `TopologySource`, narrows placement to a static rack inventory snapshot, and
+shows how a node rack move differs from a hierarchy-level change.
 
-Each node must match exactly one Ready `TopologySource`. If a node matches zero or multiple sources,
-the operator falls back to the hostname profile to prevent ambiguous hierarchy trees.
+## Step 1: read-only cloud zone discovery
 
 Verify existing node labels and cluster status before configuring topology sources:
 
@@ -31,8 +33,6 @@ kubectl get nodes --show-labels
 kubectl get topologysources
 kubectl get topologies.kueue.x-k8s.io
 ```
-
-## Step 1: read-only cloud zone discovery
 
 When nodes already carry cloud provider labels for regions and zones, define a read-only
 `TopologySource` using `nodeLabels`:
@@ -196,6 +196,15 @@ A change to the ordered level keys is a different operation that can evict and r
 unlike the revision-only change in Step 5. See
 [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy) for the
 `HoldAndDrain` migration sequence and its interruption impact before editing `levels`.
+
+## Limitation
+
+- Single-source node ownership and the hostname-only profile fallback are covered in
+  [Hierarchy profiles](../../modules/topology/scheduling.md#hierarchy-profiles).
+- Domain capacity packing and multi-role gang holds are covered in
+  [Failure surfaces](../../modules/topology/scheduling.md#failure-surfaces).
+- Changing the ordered `levels` list on a live hierarchy triggers `HoldAndDrain` migration; see
+  [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
 
 ## Troubleshooting
 

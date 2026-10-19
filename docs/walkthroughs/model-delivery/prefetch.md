@@ -6,21 +6,27 @@ The output below was captured with node model delivery enabled.
 
 ## Contents
 
-- [Prerequisites](#prerequisites)
+- [Summary](#summary)
 - [Step 1: create the artifact and prefetch](#step-1-create-the-artifact-and-prefetch)
 - [Step 2: verify the cached model](#step-2-verify-the-cached-model)
 - [Step 3: start a serving workload](#step-3-start-a-serving-workload)
 - [Step 4: pin weights against eviction](#step-4-pin-weights-against-eviction)
 - [Step 5: release the cache](#step-5-release-the-cache)
+- [Limitation](#limitation)
 - [Troubleshooting](#troubleshooting)
 
-## Prerequisites
+## Summary
 
-Enable [node model delivery](../../modules/model-delivery/operations.md) and select the GPU node.
-You need `kubectl`, `jq`, access to cluster-scoped model stores, and enough disk for the weights.
-The example uses a dedicated namespace and store grant.
+`NodeModelStore`, `ModelArtifact` and `ModelPrefetch` verify and cache Hugging Face weights on the
+node's disk before a serving Pod starts, so the rollout finds warm, checksum-verified weights and
+does not wait on a hub download.
+This shared preparation serves both the Elastic EP and External DP walkthroughs.
 
 ## Step 1: create the artifact and prefetch
+
+Enable [node model delivery](../../modules/model-delivery/operations.md) and select the GPU node
+before applying the manifest (`kubectl`, `jq`, access to cluster-scoped model stores, and enough
+disk for the weights are required).
 
 Save the following as `model-delivery.yaml`. Replace both `gpu-node` values with your GPU node's
 `kubernetes.io/hostname` label. The store grant and the prefetch placement must select that same node.
@@ -203,6 +209,14 @@ kubectl delete modelstore rtx6000-models
 
 Cache collection follows the [retention rules](../../modules/model-delivery/prefetch.md).
 Deleting these CRs does not delete the Kubernetes cluster or its disks.
+
+## Limitation
+
+This walkthrough warms one node (`minReady: 1`); serving Pods scheduled onto nodes outside
+`placement.nodeSelector` find no warmed cache. High-watermark eviction order, pin behavior
+([Step 4](#step-4-pin-weights-against-eviction)), and `retention.ttlAfterLastUse` expiry are
+covered in [Pinning and expiry](../../modules/model-delivery/prefetch.md#pinning-and-expiry) and
+[References, restart and collection](../../modules/model-delivery/node-store.md#references-restart-and-collection).
 
 ## Troubleshooting
 
