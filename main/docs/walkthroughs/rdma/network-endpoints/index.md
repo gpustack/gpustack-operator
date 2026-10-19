@@ -115,7 +115,7 @@ spec:
     name: Qwen/Qwen2.5-7B-Instruct
   engine:
     name: vLLM
-    version: "0.29.0"
+    image: gpustack/runner:cuda13.0-vllm0.29.0
   router:
     name: llm-d-router
   kvTransfer:

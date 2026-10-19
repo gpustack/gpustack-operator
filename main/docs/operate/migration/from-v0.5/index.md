@@ -2,7 +2,7 @@
 
 Versions after v0.5.x rename and restructure the scheduling objects the operator creates.
 The first, v0.6.x ("unified-pool refactor",
-[`specs/2026-06-29-instancetype-unified-pool-refactor.md`](https://github.com/gpustack/gpustack-operator/blob/cee81e860ecfae89948846337aa693d1491e1473/specs/2026-06-29-instancetype-unified-pool-refactor.md)),
+[`specs/2026-06-29-instancetype-unified-pool-refactor.md`](https://github.com/gpustack/gpustack-operator/blob/79c912a40ff94b99a0040f785dd427f087738b1a/specs/2026-06-29-instancetype-unified-pool-refactor.md)),
 renames nearly every Kueue/NFD object it manages and drops the `Cohort` layer; later versions may
 reshape v0.5.x structures further.
 
