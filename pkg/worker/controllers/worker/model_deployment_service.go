@@ -132,7 +132,7 @@ func renderModelDeploymentReplicaService(
 
 // renderModelDeploymentService renders the one Service a deployment is reached through.
 //
-// It is deliberately NOT what instance.go does. convertServiceFromPod renders one NodePort Service
+// It is deliberately NOT what instance.go does. convertServiceFromInstance renders one NodePort Service
 // PER POD, which is right for an Instance — a single addressable development box a user connects
 // to. N interchangeable replicas behind one address is a different shape: a per-Pod NodePort would
 // publish N addresses with no load balancing across them, and burn one node port per replica.

@@ -8,6 +8,7 @@ the user enter the workload container.
 
 - [Instance configuration](#instance-configuration)
 - [Device access](#device-access)
+- [Service lifecycle](#service-lifecycle)
 
 ## Instance configuration
 
@@ -21,6 +22,22 @@ The workload container owns the accelerator request. The optional SSH sidecar us
 visibility resource to enter the same workspace without acquiring a second accelerator. See
 [Device Discovery](../devices/discovery.md#ssh-enabled-instances-and-the-visibility-resource).
 [Instance Metrics](../../reference/instance-metrics.md) explains the reported utilization.
+
+## Service lifecycle
+
+An Instance listing `spec.ports` is reached through a NodePort Service named after it, and
+`status.ports` reports the node port allocated for each of them.
+
+Stopping the Instance (`spec.stop: true`) deletes the Pod but retains the Service, so the node ports
+a user already connected to stay allocated. Starting it again (`spec.stop: false`) builds a new Pod
+and reports the same node ports. The Service belongs to the Instance rather than to the Pod, and
+selects the Pod by the part-of label the two share, so it keeps routing across both the Pod
+replacement and a change of the Instance's type.
+
+`spec.ports` may be edited while the Instance is stopped. Ports left unchanged keep their allocated
+node port, a port added to `spec.ports` is allocated a new one when the Instance starts, and a port
+removed from `spec.ports` is dropped from the Service. Clearing `spec.ports` deletes the Service
+along with its allocations, as does deleting the Instance itself.
 
 ---
 
