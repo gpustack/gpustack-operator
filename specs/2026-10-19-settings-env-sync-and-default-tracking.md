@@ -1,6 +1,6 @@
 # Spec: Settings Sync Semantics — Environment Declarations and Default Tracking
 
-Status: Building
+Status: Built
 Blocked on: nothing. T1 to T5 are ready to build; the open question at the end is a confirmation, not a dependency.
 Type: Feature
 
@@ -427,7 +427,8 @@ T4 ───────────────┘
       evaluated without it; the name is an exported constant so the task registering the Setting cannot drift from
       the one reading it; `desiredValue` returns a value only for a non-blank seed that is either declared or
       tracked; every change to a stored value logs one `klog.InfoS` line carrying the Setting, both values, the
-      rule and the variable; `TestSettingsInitialize` covers the table below and passes.
+      rule and the variable, and a sensitive Setting carries neither value behind a marker instead; `TestSettingsInitialize`
+      covers the table below and passes.
       Verify: `GOTOOLCHAIN=local GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -v ./pkg/setting -run TestSettingsInitialize && make lint`
 
 - [x] **T3 · Register `settings-default-tracking`**

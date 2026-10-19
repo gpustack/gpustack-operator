@@ -64,6 +64,12 @@ setting overridden on start setting="container-registry" stored="registry.exampl
 when the Setting reads one. A start that changes nothing logs nothing, and a stored value that already
 equals the seed is not an override.
 
+A Setting the operator marks sensitive logs neither value. Its line carries the name, the rule and the
+variable — enough to tell you which Setting changed and why — and replaces both values with
+`values="[withheld: sensitive setting]"`. The log reaches a wider audience than this Secret, so a value
+kept out of the Secret stays out of the log. No registered Setting carries that mark today; the operator
+sets it on a Setting whose value should not appear in a log at all.
+
 ```bash
 kubectl -n gpustack-system logs deploy/gpustack-operator-worker | grep 'setting overridden on start'
 ```
