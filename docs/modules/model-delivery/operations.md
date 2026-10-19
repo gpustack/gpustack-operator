@@ -47,7 +47,7 @@ hands each mount its artifact's Secret.
 
 | Layer | Carrier | Who changes it | What |
 | --- | --- | --- | --- |
-| Deploy time | chart values; in image mode the worker's overlay, which sets only the switch | installer | the switch, the cache root, the kubelet directory, images, resources and placement, the delivery seed |
+| Deploy time | chart values; in image mode the worker's overlay, which sets only the switch | installer | the switch, the cache root, the kubelet directory, images, resources and placement, the delivery mode |
 | Cluster runtime | [Settings](../../reference/settings.md#online-adjustable-settings) in the operator namespace | administrator | delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth |
 | Object | the `ModelArtifact` | tenant | source, revision, patterns, Secret; immutable |
 
@@ -57,7 +57,7 @@ writes chooses where a node connects. The Settings this adds:
 
 | Setting | Default | Check |
 | --- | --- | --- |
-| `model-artifact-delivery-mode` | `Engine`; the chart seeds `Node` with the plugin | `Engine` or `Node`; `Node` needs the CSIDriver |
+| `model-artifact-delivery-mode` | `Engine`; the chart declares `Node` with the plugin, and the worker reasserts it | `Engine` or `Node`; `Node` needs the CSIDriver |
 | `model-store-high-watermark` | `80` | integer, above the low watermark, at most `95` |
 | `model-store-low-watermark` | `70` | integer, at least `1`, below the high watermark |
 | `model-store-download-concurrency` | `8` | concurrent requests per node, `1` to `64` |

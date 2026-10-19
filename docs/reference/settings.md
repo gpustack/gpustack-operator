@@ -77,8 +77,9 @@ kubectl -n gpustack-system logs deploy/gpustack-operator-worker | grep 'setting 
 ### The tracking list
 
 `settings-default-tracking` holds a comma-separated list of Setting names. The worker reads it from the
-Secret and falls back to the six names the operator ships when the Secret carries no such key, so a
-cluster that predates the Setting is tracked from the first start that backfills the key.
+Secret, and the backfill has already written the six names the operator ships into a Secret that carries
+no such key, so a cluster that predates the Setting is tracked from the first start that backfills the
+key.
 
 A stored value cannot silently change what is tracked. Each segment is trimmed, and a segment left
 empty, a duplicate, the list's own name and a name this operator does not register are dropped, each

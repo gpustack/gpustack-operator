@@ -179,12 +179,14 @@ is deployed, and the code comment in `pkg/worker/settings/model_store.go` states
 from plugin installation. The chart's `modelManager.enabled` is the only signal that reaches the value.
 
 The cost is that an administrator who sets the Setting to `Engine` at runtime sees it revert on the next worker
-start, and `GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node` is reinstalled. Three places promise the opposite today, so
-all three change:
+start, and `GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node` is reinstalled. Every place that promises the opposite
+changes:
 [operations.md](../docs/modules/model-delivery/operations.md),
-[values.yaml](../deploy/gpustack-operator/chart/values.yaml), and the comment above the variable in
+[values.yaml](../deploy/gpustack-operator/chart/values.yaml), the comment above the variable in
 [deployment.yaml](../deploy/gpustack-operator/chart/templates/worker/deployment.yaml), which says a stored value
-always wins. The template renders the same variable and the same value; only its comment changes. The
+always wins, and the comment in
+[model_store.go](../pkg/worker/settings/model_store.go), which says a seed fills only a key the store does not have
+yet. The template renders the same variable and the same value; only its comment changes. The
 `model-artifact-delivery-mode` row of the Settings table carries the same promise and is restated by the task
 that owns that page.
 
@@ -561,6 +563,13 @@ three are closed, and no runtime behavior changed.
 3. **The blank-declaration test never reached the blank gate.** The `isBlank` gate treats the empty list and the
    empty map as blank, and only the empty string was covered. Both forms are covered now, and the gate is
    load-bearing.
+
+A second review of the branch found a fourth place that still promised the retired model: the comment on
+`ModelArtifactDeliveryMode` in `pkg/worker/settings/model_store.go` said a seed fills only a key the store does not
+have yet. The chart's declaration is reasserted on every worker start, so a stored `Engine` is overwritten. The
+comment now says the chart declares the value and the worker reasserts it, and the two residual "seed" cells on the
+model delivery operations page were restated in the same way. The specification's own count of the places that
+promised the old model was short by one, and it named them without a count instead.
 
 Each correction is proven by deletion, and each proof was run again against the final tree.
 

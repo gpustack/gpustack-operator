@@ -281,12 +281,13 @@ func TestSettingsDefaultTracking_BlankListIsAllowed(t *testing.T) {
 		"an administrator must be able to stop tracking everything")
 }
 
-// TestSettingsDefaultTracking_FallsBackWhenKeyAbsent pins the seam between this registration and the
-// align pass: on a Secret predating this Setting the key is absent, and the built-in list still
-// applies, so a cluster reaches the new defaults on the upgrade rather than a start later. The
-// second row clears the list and pins the other side of the same pass, so the first row cannot pass
-// because the align pass rewrites those Settings whatever the list says.
-func TestSettingsDefaultTracking_FallsBackWhenKeyAbsent(t *testing.T) {
+// TestSettingsDefaultTracking_AppliesOnThePassThatBackfillsItsKey pins the seam between this
+// registration and the align pass: on a Secret predating this Setting the key is absent, and the
+// backfill writes the built-in list into the Secret before the align pass reads it, so the built-in
+// list still applies and a cluster reaches the new defaults on the upgrade rather than a start
+// later. The second row clears the list and pins the other side of the same pass, so the first row
+// cannot pass because the align pass rewrites those Settings whatever the list says.
+func TestSettingsDefaultTracking_AppliesOnThePassThatBackfillsItsKey(t *testing.T) {
 	const driftedImage = "pinned.example/image:v0"
 
 	// A declaration claims a Setting ahead of the tracking list, so a variable set in the process
@@ -296,7 +297,7 @@ func TestSettingsDefaultTracking_FallsBackWhenKeyAbsent(t *testing.T) {
 		envName := "GPUSTACK_" + stringx.UnderscoreUpper(name)
 		if _, declared := os.LookupEnv(envName); declared {
 			t.Skipf("%s is declared in this process environment, so the env rule claims the six "+
-				"ahead of the tracking list and this case cannot observe the fallback", envName)
+				"ahead of the tracking list and this case cannot observe the built-in list", envName)
 		}
 	}
 
