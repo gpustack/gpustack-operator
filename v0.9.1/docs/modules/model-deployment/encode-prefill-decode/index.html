@@ -1,0 +1,1004 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.1/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  
+  <title>Model Deployment Encode, Prefill and Decode · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/encode-prefill-decode/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.1/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.1/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.1/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.1/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.1/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.1/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.1"
+    data-home="/gpustack-operator/v0.9.1/" data-page="/gpustack-operator/v0.9.1/docs/modules/model-deployment/encode-prefill-decode/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.1</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.1</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.1/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.1/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.1/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.1/docs/getting-started/vendor-prerequisites/" >Vendor prerequisites</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.1/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.1/docs/walkthroughs/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.1/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.1/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.9.1/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="External DP Walkthrough" href="/gpustack-operator/v0.9.1/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+      
+    
+      
+      
+        <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.9.1/docs/walkthroughs/model-deployment/multi-host/" >Multi-host serving</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+      
+      
+        <a title="Scheduling Walkthrough" href="/gpustack-operator/v0.9.1/docs/walkthroughs/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.9.1/docs/walkthroughs/kv-cache/shared-cache/" >Shared cache</a>
+      
+    
+      
+      
+        <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.9.1/docs/walkthroughs/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="RDMA Network Endpoints Walkthrough" href="/gpustack-operator/v0.9.1/docs/walkthroughs/rdma/network-endpoints/" >RDMA network endpoints</a>
+      
+    
+      
+      
+        <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.9.1/docs/walkthroughs/topology/hierarchical-placement/" >Hierarchical placement</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.1/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.1/docs/modules/devices/preflight/" >Preflight operations</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.1/docs/modules/devices/discovery/" >Device discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.1/docs/modules/devices/requests/" >Accelerator requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.1/docs/modules/devices/scheduling/" >Scheduling chain</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.1/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.1/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.1/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.1/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.1/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.1/docs/modules/rdma/network-topology/" >Network topology</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.1/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.1/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.1/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.1/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.1/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.1/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.1/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.1/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.1/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.1/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.1/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.1/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.1/docs/modules/model-delivery/artifact/" >Model artifact</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.1/docs/modules/model-delivery/image-source/" >Model image source</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.1/docs/modules/model-delivery/prefetch/" >Model prefetch</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.1/docs/modules/model-delivery/node-store/" >Node model store</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.1/docs/modules/model-delivery/peer-sync/" >Node-to-node sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.1/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.1/docs/modules/model-delivery/views/" >Model artifact API</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/deployment/" >Deployment configuration</a>
+      
+    
+      
+      
+        <a title="Elastic EP" href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/encode-prefill-decode/" aria-current="page">Encode, prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >EPD benchmark</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.1/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.1/docs/operate/installation-modes/" >Installation modes</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.1/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.1/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.1/docs/operate/migration/to-subcharts/" >Bundled subcharts</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.1/docs/operate/migration/kv-cache-dtype/" >Enforced binding dtype</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.1/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.1/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.1/docs/reference/settings/" >Settings &amp; environment variables</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.1/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.1/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.1/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Deployment Encode, Prefill and Decode</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-deployment-encode-prefill-and-decode">Model Deployment Encode, Prefill and Decode</h1>
+<p>A deployment with <code>Encode</code>, <code>Prefill</code> and <code>Decode</code> roles runs visual encoding and language generation
+in separate Pods. <a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
+ describes the base role fields and
+admission rules.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#the-three-roles-and-request-flow">The three roles and request flow</a>
+</li>
+<li><a href="#shape-rules-and-admission-constraints">Shape rules and admission constraints</a>
+</li>
+<li><a href="#the-admitted-matrix">The admitted matrix</a>
+</li>
+<li><a href="#unadmitted-engine-and-router-candidates">Unadmitted engine and router candidates</a>
+</li>
+<li><a href="#encoder-cache-connectors">Encoder-cache connectors</a>
+</li>
+<li><a href="#scheduling-co-location">Scheduling co-location</a>
+</li>
+<li><a href="#request-routing-across-roles">Request routing across roles</a>
+</li>
+<li><a href="#replica-drain-and-retirement">Replica drain and retirement</a>
+</li>
+<li><a href="#upgrade-and-rollout-behavior">Upgrade and rollout behavior</a>
+</li>
+<li><a href="#measured-behavior">Measured behavior</a>
+</li>
+</ul>
+<h2 id="the-three-roles-and-request-flow">The three roles and request flow</h2>
+<p>Encode-prefill-decode (EPD) serving separates visual encoding from language generation. Each role
+runs in its own Pod set.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Role</th>
+          <th>Does</th>
+          <th>Notes</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Encode</code></td>
+          <td>Runs the visual encoder on images and other media</td>
+          <td>Allocates no KV cache and loads no language-model weights</td>
+      </tr>
+      <tr>
+          <td><code>Prefill</code></td>
+          <td>Consumes the encoder&rsquo;s embeddings and fills the KV cache</td>
+          <td>Receives the prompt tokens</td>
+      </tr>
+      <tr>
+          <td><code>Decode</code></td>
+          <td>Generates completion tokens from the KV cache</td>
+          <td>Streams the response</td>
+      </tr>
+  </tbody>
+</table>
+<p>A multimodal request goes through the encoder, then the prefiller, then the decoder. A text-only
+request skips the encoder and goes straight to prefill and decode.</p>
+<h2 id="shape-rules-and-admission-constraints">Shape rules and admission constraints</h2>
+<p>An EPD deployment must satisfy the rules below. Admission enforces every one except the encoder
+image floor, which is a requirement on the image you name.</p>
+<ul>
+<li>An <code>Encode</code> role requires a <code>Prefill</code> role and a <code>Decode</code> role in the same deployment, at most one
+role of each kind, and no <code>Server</code> role.</li>
+<li><code>spec.router</code> is required. Without a router, nothing pairs the three roles.</li>
+<li><code>spec.kvCache</code> is refused, because the encoder keeps no KV cache.</li>
+<li>A role <code>command</code> is refused on all three roles, because a custom command replaces the managed
+arguments and the sidecar proxy.</li>
+<li>All three roles must run on the same accelerator platform. Admission reads it from each role&rsquo;s
+InstanceType, so mixed or unknown platforms are refused.</li>
+<li>The image an <code>Encode</code> deployment runs must carry an engine build that meets the floor of the
+matching row in <a href="#the-admitted-matrix">the admitted matrix</a>
+. This is a requirement on the image
+you name, not an admission rule: no check reads a version at apply time.</li>
+<li>An <code>Encode</code> replica has size 1. The role refuses Elastic EP and external data parallelism.</li>
+</ul>
+<h2 id="the-admitted-matrix">The admitted matrix</h2>
+<p>Admission accepts only the combinations below. Anything else is refused when the object is applied.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Router</th>
+          <th>Engine</th>
+          <th>Platform</th>
+          <th>Encoder transfer</th>
+          <th>Minimum version</th>
+          <th>Hardware status</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td><code>vLLM</code></td>
+          <td><code>nvidia</code></td>
+          <td><code>ECCPUConnector</code> over NIXL</td>
+          <td><code>0.30.0</code></td>
+          <td>Verified on 4 × NVIDIA L40S</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td><code>vLLM</code></td>
+          <td><code>amd</code> (ROCm)</td>
+          <td><code>ECCPUConnector</code> over NIXL</td>
+          <td><code>0.30.0</code></td>
+          <td>Not verified</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td><code>vLLM</code></td>
+          <td><code>ascend</code></td>
+          <td><code>ECExampleConnector</code> over a shared volume</td>
+          <td><code>0.30.0rc1</code></td>
+          <td>Verified on Ascend 910B2</td>
+      </tr>
+      <tr>
+          <td><code>vllm-router</code></td>
+          <td><code>vLLM</code></td>
+          <td><code>nvidia</code></td>
+          <td><code>ECCPUConnector</code> over NIXL</td>
+          <td><code>0.30.0</code></td>
+          <td>Verified on 4 × NVIDIA L40S</td>
+      </tr>
+      <tr>
+          <td><code>vllm-router</code></td>
+          <td><code>vLLM</code></td>
+          <td><code>amd</code> (ROCm)</td>
+          <td><code>ECCPUConnector</code> over NIXL</td>
+          <td><code>0.30.0</code></td>
+          <td>Not verified</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td><code>SGLang</code></td>
+          <td><code>nvidia</code></td>
+          <td><code>encoder-urls</code></td>
+          <td><code>0.5.10</code></td>
+          <td>Verified on 2 × NVIDIA L40S</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td><code>SGLang</code></td>
+          <td><code>amd</code> (ROCm)</td>
+          <td><code>encoder-urls</code></td>
+          <td><code>0.5.10</code></td>
+          <td>Not verified</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td><code>SGLang</code></td>
+          <td><code>ascend</code></td>
+          <td><code>encoder-urls</code></td>
+          <td><code>0.5.10</code></td>
+          <td>Not verified</td>
+      </tr>
+      <tr>
+          <td><code>sglang-gateway</code></td>
+          <td><code>SGLang</code></td>
+          <td><code>nvidia</code></td>
+          <td><code>encoder-urls</code></td>
+          <td><code>0.5.10</code></td>
+          <td>Verified on 2 × NVIDIA L40S</td>
+      </tr>
+      <tr>
+          <td><code>sglang-gateway</code></td>
+          <td><code>SGLang</code></td>
+          <td><code>amd</code> (ROCm)</td>
+          <td><code>encoder-urls</code></td>
+          <td><code>0.5.10</code></td>
+          <td>Not verified</td>
+      </tr>
+      <tr>
+          <td><code>sglang-gateway</code></td>
+          <td><code>SGLang</code></td>
+          <td><code>ascend</code></td>
+          <td><code>encoder-urls</code></td>
+          <td><code>0.5.10</code></td>
+          <td>Not verified</td>
+      </tr>
+  </tbody>
+</table>
+<p>A verified row served a multimodal request through the router on the hardware named. A row marked
+Not verified is admitted from the design and has not run on that hardware. Issue
+<a href="https://github.com/gpustack/gpustack-operator/issues/763">#763</a>
+ tracks the rows still unrun: the AMD ROCm rows and the SGLang Ascend rows.
+The <code>Minimum version</code> column is a requirement on the image you name, not an admission check:
+nothing reads a version, so an image below it is applied as written.</p>
+<h3 id="version-and-configuration-limits">Version and configuration limits</h3>
+<p>The floor applies to the engine image named by <code>spec.engine.image</code> or <code>roles[].image</code>; the
+<a href="#the-admitted-matrix">admitted matrix</a>
+ records the requirement and its admission boundary.</p>
+<p>For the <code>llm-d-router</code> token-estimation path, see <a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/prefill-decode/#counting-tokens-through-the-engine">Counting tokens through the engine</a>
+.</p>
+<p><code>vllm-router</code> receives the encoder addresses through its rendered <code>--epd-config</code>, and the SGLang
+rows use their own encoder arguments. Do not copy the P/D vLLM flag requirement into an EPD
+deployment; that requirement is documented under <a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/prefill-decode/#counting-tokens-through-the-engine">Counting tokens through the engine</a>
+.</p>
+<p>See <a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/prefill-decode/#version-and-configuration-limits">Prefill and Decode</a>
+ for the
+<code>resources.accelerator</code> and engine-parallelism rule. The <a href="#shape-rules-and-admission-constraints">shape rules</a>
+
+list the <code>Encode</code> role&rsquo;s own limits.</p>
+<p>Use <a href="#vllm-on-nvidia-and-amd">vLLM on NVIDIA and AMD</a>
+, <a href="#vllm-on-ascend">vLLM on Ascend</a>
+ and
+<a href="#sglang">SGLang</a>
+ for engine-specific encoder arguments and image floors. <a href="#encoder-cache-connectors">Encoder-cache connectors</a>
+
+describes generated flags. <a href="#keys-the-operator-owns">Keys the operator owns</a>
+ describes refused and
+overrideable arguments.</p>
+<h3 id="vllm-on-nvidia-and-amd">vLLM on NVIDIA and AMD</h3>
+<p>These rows run <code>ECCPUConnector</code> over NIXL behind either <code>llm-d-router</code> or <code>vllm-router</code>, moving
+embeddings across the network with no shared volume. The NVIDIA rows were verified with the
+connector live on both halves.
+See <a href="#encoder-cache-connectors">Encoder-cache connectors</a>
+ for the buffer and port rules.</p>
+<h3 id="vllm-on-ascend">vLLM on Ascend</h3>
+<p>The Ascend row uses <code>ECExampleConnector</code> over a shared directory, because Ascend network transfers
+have no NIXL copy path. Its floor, <code>0.30.0rc1</code>, is the first vllm-ascend release that starts
+<code>--mm-encoder-only</code> cleanly and pins the encoder-cache load to each rank&rsquo;s own NPU under tensor
+parallelism.</p>
+<p>Runner tags carrying that release exist for 910B — <code>cann9.1-910b-vllm0.30.0</code> is published and
+reachable. A variant with no published tag for it names its own image in <code>roles[].image</code>.</p>
+<h3 id="sglang">SGLang</h3>
+<p>SGLang splits the encoder by address and uses no encoder-cache connector. An <code>Encode</code> role runs
+<code>--encoder-only</code>, and a <code>Prefill</code> role runs <code>--language-only</code> and dials the encoder through
+<code>--encoder-urls</code>, which carries the encoder&rsquo;s per-role Service address.</p>
+<p>The prefiller serves the encoder&rsquo;s registration port 8997. Admission reserves that port on a
+<code>Prefill</code> role whenever the deployment declares an <code>Encode</code> role, so a role naming it for its own
+HTTP server is refused. The operator also widens the prefiller&rsquo;s probes, so it is not restarted
+while it waits for an encoder to register.</p>
+<h2 id="unadmitted-engine-and-router-candidates">Unadmitted engine and router candidates</h2>
+<p>These candidates are refused or not configured:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Candidate</th>
+          <th>Status</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ECMooncakeConnector</code></td>
+          <td>Refused. It needs static prefiller addresses, which do not fit Kubernetes discovery, and the decode sidecar supports only <code>ec-example</code> and <code>ec-nixl</code></td>
+      </tr>
+      <tr>
+          <td><code>ECMemcacheConnector</code></td>
+          <td>Not configured by the operator</td>
+      </tr>
+      <tr>
+          <td><code>ECCPUConnector</code> on Ascend</td>
+          <td>Refused. NPU memory has no copy path to host memory, and the Ascend runner images install no NIXL</td>
+      </tr>
+      <tr>
+          <td><code>vllm-router</code> on Ascend</td>
+          <td>Refused. vLLM-Ascend&rsquo;s P/D KV transfer requires the <code>nixlv2</code> handshake that only <code>llm-d-router</code>&rsquo;s decode sidecar implements</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="encoder-cache-connectors">Encoder-cache connectors</h2>
+<p>The encoder-cache connector decides how embeddings travel from the encoder to the prefiller. The
+operator renders two of them.</p>
+<h3 id="ecexampleconnector">ECExampleConnector</h3>
+<p><code>ECExampleConnector</code> passes embeddings through a shared directory. Attach a ReadWriteMany PVC to
+<code>roles[].additionalVolumes</code> on both roles, with the same <code>claimName</code>, <code>mountPath</code> and <code>subPath</code>.
+The <code>Encode</code> mount must not be read-only.</p>
+<p>The connector has no file locking and no expiry, and storage latency can delay a transfer.
+The operator does not set <code>VLLM_USE_V2_MODEL_RUNNER</code> on this row, because the vllm-ascend second
+model runner has no multimodal encoder path.</p>
+<h3 id="eccpuconnector">ECCPUConnector</h3>
+<p><code>ECCPUConnector</code> moves embeddings between Pods over NIXL. The operator sets
+<code>VLLM_USE_V2_MODEL_RUNNER=1</code> on both roles and renders a 1 GiB host buffer (<code>ec_cpu_bytes</code>) in
+<code>--ec-transfer-config</code>. No field changes the buffer size. The value is upstream&rsquo;s example default
+and has not been tuned here.</p>
+<p>The <code>Encode</code> Pod binds a side-channel socket on port 5601 and publishes it through
+<code>VLLM_EC_SIDE_CHANNEL_HOST</code> from <code>status.podIP</code>. An <code>Encode</code> role that names 5601, in <code>ports</code> or as
+<code>--port</code>, is refused. The shared-directory row binds no socket, so its encoder may serve on 5601.</p>
+<h3 id="keys-the-operator-owns">Keys the operator owns</h3>
+<p>Every key the encoder stage writes is operator-owned, and a role that names one is refused in every
+spelling the engine reads. On vLLM that is <code>--ec-transfer-config</code>; <code>ECCPUConnector</code> also owns
+<code>VLLM_USE_V2_MODEL_RUNNER</code> and the two side-channel variables.</p>
+<p>SGLang owns <code>--encoder-only</code>, <code>--language-only</code>, <code>--encoder-urls</code> and
+<code>--encoder-bootstrap-port</code>. See <a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/deployment/#operator-owned-keys">Operator-owned keys</a>
+.</p>
+<p>Four flags the operator renders on the encoder are defaults, so a role&rsquo;s own value wins:
+<code>--enforce-eager</code>, <code>--no-enable-prefix-caching</code>, <code>--max-num-batched-tokens</code> and <code>--mm-encoder-only</code>.</p>
+<h2 id="scheduling-co-location">Scheduling co-location</h2>
+<p>A deployment with an <code>Encode</code> role renders a soft co-location preference on every replica Pod. Each
+term scores placement by node hostname and none is a requirement, so a cluster too tight to
+co-locate a pair still schedules it across hosts.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Replica</th>
+          <th>Prefers on the same node</th>
+          <th>Weight</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Prefill</code></td>
+          <td><code>Decode</code></td>
+          <td>100</td>
+      </tr>
+      <tr>
+          <td><code>Decode</code></td>
+          <td><code>Prefill</code></td>
+          <td>100</td>
+      </tr>
+      <tr>
+          <td><code>Encode</code></td>
+          <td><code>Prefill</code></td>
+          <td>50</td>
+      </tr>
+      <tr>
+          <td><code>Prefill</code></td>
+          <td><code>Encode</code></td>
+          <td>50</td>
+      </tr>
+  </tbody>
+</table>
+<p>Prefill and decode exchange KV cache on every generated token, so that pair gains the most from one
+host. The encoder&rsquo;s output reaches the prefiller once per request. Each term matches the peer role&rsquo;s
+<code>modeldeployment.gpustack.ai/role-kind</code> label within the same deployment. A deployment with no
+<code>Encode</code> role renders no affinity.</p>
+<h2 id="request-routing-across-roles">Request routing across roles</h2>
+<p>How the encoder is reached depends on the engine and router. Under <code>llm-d-router</code> with <code>vLLM</code>, the
+router selects an encoder for any request carrying media, and the decode sidecar coordinates the
+transfer. Under <code>vllm-router</code> with <code>vLLM</code>, the router drives the encode, prefill and decode stages
+directly through <code>--epd-config</code>. Under <code>SGLang</code>, the <code>Prefill</code> role calls the <code>Encode</code> role
+directly, and the router adds no encode stage.</p>
+<p><code>Encode</code> Pods never receive deployment-wide traffic. The deployment Service and <code>status.endpoint</code>
+exclude them, and so do the KV event publisher lists. Send requests to <code>status.endpoint</code>. See
+<a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/routing/#encode-stage-routing">Encode stage routing</a>
+ for each router&rsquo;s behavior.</p>
+<h2 id="replica-drain-and-retirement">Replica drain and retirement</h2>
+<p>An encoder exports no in-flight request gauges, so the normal drain hook cannot tell when it is
+idle. Retirement therefore protects an <code>Encode</code> replica with a fixed window.</p>
+<p>The controller withdraws the replica from discovery and marks it <code>Draining</code>. It then waits a
+240-second drain window, plus a 30-second withdrawal and a 30-second settle, before deleting the Pod.
+A transfer still in flight when the window ends fails at the client.</p>
+<h2 id="upgrade-and-rollout-behavior">Upgrade and rollout behavior</h2>
+<p>A deployment without an <code>Encode</code> role renders the same Pod specifications as before, so upgrading
+the operator rolls nothing on existing server or prefill/decode deployments.</p>
+<p>Role kinds cannot change after creation. To move an existing deployment to EPD, create a new
+<code>ModelDeployment</code>.</p>
+<h2 id="measured-behavior">Measured behavior</h2>
+<p>A live run on 4 × NVIDIA L40S compared EPD with prefill/decode and with a single aggregated
+instance. The aggregated instance leads on short prompts and at low concurrency. EPD leads at <code>4k</code>
+and <code>8k</code> prompt tokens under concurrency, and when the same image is queried repeatedly.</p>
+<p><a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/encode-prefill-decode-benchmark/">Model Deployment Encode, Prefill and Decode Benchmark</a>
+ records the numbers, the
+hardware and when EPD helps.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
+ (base fields and admission rules)</li><li><a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
+ (pairing prefill and decode roles)</li><li><a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/encode-prefill-decode-benchmark/">Model Deployment Encode, Prefill and Decode Benchmark</a>
+ (measured three-arm latency and throughput)</li><li><a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/engine-versions/">Engine Versions</a>
+ (supported version floors)</li><li><a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/routing/">Model Deployment Routing</a>
+ (router selection and deciders)</li><li><a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/status/">Model Deployment Status</a>
+ (status conditions and role summaries)</li><li><a href="/gpustack-operator/v0.9.1/docs/walkthroughs/model-deployment/encode-prefill-decode/">EPD Walkthrough</a>
+ (a recorded live run).</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.1/docs/modules/model-deployment/routing/">Model Deployment Routing</a>
+ — choose a routing policy and inspect candidate endpoints.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/79c912a40ff94b99a0040f785dd427f087738b1a/docs/modules/model-deployment/encode-prefill-decode.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#the-three-roles-and-request-flow">The three roles and request flow</a></li>
+    <li><a href="#shape-rules-and-admission-constraints">Shape rules and admission constraints</a></li>
+    <li><a href="#the-admitted-matrix">The admitted matrix</a>
+      <ul>
+        <li><a href="#version-and-configuration-limits">Version and configuration limits</a></li>
+        <li><a href="#vllm-on-nvidia-and-amd">vLLM on NVIDIA and AMD</a></li>
+        <li><a href="#vllm-on-ascend">vLLM on Ascend</a></li>
+        <li><a href="#sglang">SGLang</a></li>
+      </ul>
+    </li>
+    <li><a href="#unadmitted-engine-and-router-candidates">Unadmitted engine and router candidates</a></li>
+    <li><a href="#encoder-cache-connectors">Encoder-cache connectors</a>
+      <ul>
+        <li><a href="#ecexampleconnector">ECExampleConnector</a></li>
+        <li><a href="#eccpuconnector">ECCPUConnector</a></li>
+        <li><a href="#keys-the-operator-owns">Keys the operator owns</a></li>
+      </ul>
+    </li>
+    <li><a href="#scheduling-co-location">Scheduling co-location</a></li>
+    <li><a href="#request-routing-across-roles">Request routing across roles</a></li>
+    <li><a href="#replica-drain-and-retirement">Replica drain and retirement</a></li>
+    <li><a href="#upgrade-and-rollout-behavior">Upgrade and rollout behavior</a></li>
+    <li><a href="#measured-behavior">Measured behavior</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.1/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>
