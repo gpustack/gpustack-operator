@@ -302,7 +302,7 @@ The `llm-d-router` plus vLLM requirement and supported floors are documented und
 
 | Router and engine shape | `--enable-scale-out` status | Configuration path |
 |---|---|---|
-| `vllm-router` with vLLM | No equivalent requirement is established here | The router uses its own P/D mode and endpoint selectors; EPD uses operator-rendered `--epd-config` |
+| `vllm-router` with vLLM | No equivalent requirement is established here | The router uses its own P/D mode and endpoint selectors; EPD uses operator-rendered [`--epd-config`](routing.md#encode-stage-routing) |
 | `sglang-gateway` with SGLang | Not applicable | SGLang uses its own disaggregation arguments; `--enable-scale-out` is a vLLM flag |
 | `llm-d-router` with SGLang | No vLLM flag applies; token path is unmeasured | SGLang uses its own disaggregation arguments; do not infer this path from the vLLM row |
 

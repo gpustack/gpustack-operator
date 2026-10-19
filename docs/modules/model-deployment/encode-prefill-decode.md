@@ -78,17 +78,14 @@ nothing reads a version, so an image below it is applied as written.
 The floor applies to the engine image named by `spec.engine.image` or `roles[].image`; the
 [admitted matrix](#the-admitted-matrix) records the requirement and its admission boundary.
 
-The admitted EPD paths do not need vLLM's `--enable-scale-out` flag. With an `Encode` role,
-`llm-d-router` uses its built-in multimodal estimator instead of calling the language engine's
-`/v1/chat/completions/render` endpoint.
+For the `llm-d-router` token-estimation path, see [Counting tokens through the engine](prefill-decode.md#counting-tokens-through-the-engine).
 
 `vllm-router` receives the encoder addresses through its rendered `--epd-config`, and the SGLang
 rows use their own encoder arguments. Do not copy the P/D vLLM flag requirement into an EPD
 deployment; that requirement is documented under [Counting tokens through the engine](prefill-decode.md#counting-tokens-through-the-engine).
 
-As in [Prefill and Decode](prefill-decode.md#version-and-configuration-limits),
-`resources.accelerator` only requests capacity; declare a role's engine parallelism in its
-`extraArgs` when the process must use more than one device. The [shape rules](#shape-rules-and-admission-constraints)
+See [Prefill and Decode](prefill-decode.md#version-and-configuration-limits) for the
+`resources.accelerator` and engine-parallelism rule. The [shape rules](#shape-rules-and-admission-constraints)
 list the `Encode` role's own limits.
 
 Use [vLLM on NVIDIA and AMD](#vllm-on-nvidia-and-amd), [vLLM on Ascend](#vllm-on-ascend) and
