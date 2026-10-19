@@ -31,8 +31,12 @@ type (
 		name        string
 		description string
 		defVal      string
-		admit       Admission
-		props       Prop
+		// envName is the environment variable read during registration, or empty when none.
+		envName string
+		// declared reports whether envName was present during registration, including an empty value.
+		declared bool
+		admit    Admission
+		props    Prop
 	}
 
 	// IndexFunc is a function type that takes a setting name and returns the corresponding setting and a boolean indicating whether the setting exists.
@@ -254,9 +258,12 @@ func (h Settings) New(
 	name, description string, props Prop,
 	init Initializer, admits ...Admission,
 ) Setting {
+	defVal, envName, declared := init(name)
 	s := Setting{
 		name:        name,
-		defVal:      init(name),
+		defVal:      defVal,
+		envName:     envName,
+		declared:    declared,
 		admit:       AdmitWith(admits...),
 		description: description,
 		props:       props,

@@ -368,7 +368,7 @@ T1 ──▶ T2 ──▶ T3 ──┐
 T4 ───────────────┘
 ```
 
-- [ ] **T1 · Carry the declaration source on `Setting`**
+- [x] **T1 · Carry the declaration source on `Setting`**
       Blocked by: None
       Owns: `pkg/setting/helper.go`, `pkg/setting/types.go`, `pkg/setting/types_test.go`,
       `pkg/worker/settings/value_test.go`

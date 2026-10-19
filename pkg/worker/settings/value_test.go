@@ -58,7 +58,8 @@ func TestInstanceHostAccessSettings(t *testing.T) {
 			assert.True(t, c.s.Editable(), "must stay editable for runtime adjustment")
 
 			t.Setenv(c.wantEnv, "true")
-			assert.Equal(t, "true", setting.InitializeFromEnv("false")(c.s.Name()),
+			value, _, _ := setting.InitializeFromEnv("false")(c.s.Name())
+			assert.Equal(t, "true", value,
 				"env %s must override the default", c.wantEnv)
 		})
 	}
@@ -97,7 +98,8 @@ func TestModelDeploymentImageSettings(t *testing.T) {
 			assert.True(t, c.s.Editable(), "must stay editable so a cluster can redirect or pin it")
 
 			t.Setenv(c.wantEnv, "registry.example.com/override:v0")
-			assert.Equal(t, "registry.example.com/override:v0", setting.InitializeFromEnv(c.wantDefault)(c.s.Name()),
+			value, _, _ := setting.InitializeFromEnv(c.wantDefault)(c.s.Name())
+			assert.Equal(t, "registry.example.com/override:v0", value,
 				"env %s must override the default", c.wantEnv)
 		})
 	}
@@ -114,7 +116,8 @@ func TestModelDeploymentTCPTWReuseSetting(t *testing.T) {
 	assert.True(t, s.Editable(), "must stay editable for runtime adjustment")
 
 	t.Setenv("GPUSTACK_MODEL_DEPLOYMENT_TCP_TW_REUSE", "true")
-	assert.Equal(t, "true", setting.InitializeFromEnv("false")(s.Name()),
+	value, _, _ := setting.InitializeFromEnv("false")(s.Name())
+	assert.Equal(t, "true", value,
 		"env GPUSTACK_MODEL_DEPLOYMENT_TCP_TW_REUSE must override the default")
 }
 
@@ -136,7 +139,8 @@ func TestInstanceTypeManagementSettingsEnvMapping(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Setenv(c.env, c.set)
-			assert.Equal(t, c.want, setting.InitializeFromEnv(c.def)(c.name),
+			value, _, _ := setting.InitializeFromEnv(c.def)(c.name)
+			assert.Equal(t, c.want, value,
 				"env %s must override the default", c.env)
 		})
 	}

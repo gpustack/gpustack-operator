@@ -17,30 +17,35 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
-// Initializer defines the stereotype for initializing the default value.
-type Initializer func(name string) (value string)
+// Initializer defines the stereotype for initializing a setting's value and environment metadata.
+// declared reports whether envName was present, including when its value was empty.
+type Initializer func(name string) (value, envName string, declared bool)
 
 // InitializeFromSpecifiedEnv searches the variable of the given environment name,
-// returns the default value if not found the specified environment.
+// returns the default value if not found, and reports the variable's registration-time presence.
 func InitializeFromSpecifiedEnv(envName string, defValue ...string) Initializer {
-	return func(_ string) string {
-		return osx.ExpandEnv(envName, defValue...)
+	return func(_ string) (string, string, bool) {
+		value := osx.ExpandEnv(envName, defValue...)
+		_, declared := osx.LookupEnv(envName)
+		return value, envName, declared
 	}
 }
 
 // InitializeFromEnv searches the variable of the `GPUSTACK_${UpperSnakeCase_of_SettingName}`,
-// returns the default value if not found the environment.
+// returns the default value if not found, and reports the variable's registration-time presence.
 func InitializeFromEnv(defValue ...string) Initializer {
-	return func(name string) string {
+	return func(name string) (string, string, bool) {
 		envName := "GPUSTACK_" + stringx.UnderscoreUpper(name)
-		return osx.ExpandEnv(envName, defValue...)
+		value := osx.ExpandEnv(envName, defValue...)
+		_, declared := osx.LookupEnv(envName)
+		return value, envName, declared
 	}
 }
 
-// InitializeFrom initializes with the given value.
+// InitializeFrom initializes with the given value without an environment source.
 func InitializeFrom(value string) Initializer {
-	return func(_ string) string {
-		return value
+	return func(_ string) (string, string, bool) {
+		return value, "", false
 	}
 }
 
