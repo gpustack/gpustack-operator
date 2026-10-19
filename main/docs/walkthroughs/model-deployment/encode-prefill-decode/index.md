@@ -24,7 +24,7 @@ none starts. This page keeps the CR and Pod output captured from a live NVIDIA L
 A text request flows through prefill and then decode. A multimodal request adds the encoder in
 front: the router detects media in the request and picks an encoder first, and the decoder's routing
 sidecar coordinates the embedding transfer. See
-[The three roles and request flow](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md#the-three-roles-and-request-flow)
+[The three roles and request flow](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#the-three-roles-and-request-flow)
 for the role contract.
 
 The shape below uses three GPUs, one per role, all on one accelerator platform. Kueue sees one
@@ -139,45 +139,68 @@ The operator renders the encoder-cache connector for you. The encoder Pod runs `
 the producer with a 1 GiB host buffer and publishes a side-channel socket on port 5601. The
 `--mm-encoder-only` flag keeps the language-model weights unloaded.
 
+The following blocks are captured Pod excerpts, not manifests to apply. They include the Pod identity
+and container nesting so each generated field has its Kubernetes context; probes, volumes and other
+generated fields are omitted where they do not explain the wiring.
+
 ```yaml
-command:
-  - vllm
-  - serve
-  - /models/Qwen2.5-VL-7B-Instruct
-  - --ec-transfer-config
-  - '{"ec_connector":"ECCPUConnector","ec_role":"ec_producer","ec_connector_extra_config":{"ec_enable_nixl":true,"ec_cpu_bytes":1073741824}}'
-  - --enforce-eager
-  - --no-enable-prefix-caching
-  - --max-num-batched-tokens
-  - "114688"
-  - --mm-encoder-only
-  - --host
-  - 0.0.0.0
-  - --port
-  - "8000"
-env:
-  - name: VLLM_USE_V2_MODEL_RUNNER
-    value: "1"
-  - name: VLLM_EC_SIDE_CHANNEL_HOST
-    valueFrom:
-      fieldRef:
-        fieldPath: status.podIP
-  - name: VLLM_EC_SIDE_CHANNEL_PORT
-    value: "5601"
-ports:
-  - containerPort: 5601
-    name: ec-side-channel
-    protocol: TCP
+apiVersion: v1
+kind: Pod
+metadata:
+  name: case120-epd-encode-7wnfl
+  namespace: default
+spec:
+  containers:
+    - name: main
+      # Relevant fields from the rendered Pod; the complete Pod also carries probes and volumes.
+      command:
+        - vllm
+        - serve
+        - /models/Qwen2.5-VL-7B-Instruct
+        - --ec-transfer-config
+        - '{"ec_connector":"ECCPUConnector","ec_role":"ec_producer","ec_connector_extra_config":{"ec_enable_nixl":true,"ec_cpu_bytes":1073741824}}'
+        - --enforce-eager
+        - --no-enable-prefix-caching
+        - --max-num-batched-tokens
+        - "114688"
+        - --mm-encoder-only
+        - --host
+        - 0.0.0.0
+        - --port
+        - "8000"
+      env:
+        - name: VLLM_USE_V2_MODEL_RUNNER
+          value: "1"
+        - name: VLLM_EC_SIDE_CHANNEL_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: VLLM_EC_SIDE_CHANNEL_PORT
+          value: "5601"
+      ports:
+        - containerPort: 5601
+          name: ec-side-channel
+          protocol: TCP
 ```
 
 The prefill Pod gets the consumer half of the same connector. It also keeps its usual KV transfer
 producer and the KV event publisher that the router reads:
 
 ```yaml
-  - --kv-transfer-config
-  - '{"kv_connector":"MooncakeConnector","kv_role":"kv_producer","kv_connector_extra_config":{"mooncake_protocol":"tcp"}}'
-  - --ec-transfer-config
-  - '{"ec_connector":"ECCPUConnector","ec_role":"ec_consumer","ec_connector_extra_config":{"ec_enable_nixl":true,"ec_cpu_bytes":1073741824}}'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: case120-epd-prefill-s2ljm
+  namespace: default
+spec:
+  containers:
+    - name: main
+      # Relevant command entries from the rendered Pod; the complete command is omitted.
+      command:
+        - --kv-transfer-config
+        - '{"kv_connector":"MooncakeConnector","kv_role":"kv_producer","kv_connector_extra_config":{"mooncake_protocol":"tcp"}}'
+        - --ec-transfer-config
+        - '{"ec_connector":"ECCPUConnector","ec_role":"ec_consumer","ec_connector_extra_config":{"ec_enable_nixl":true,"ec_cpu_bytes":1073741824}}'
 ```
 
 The decode Pod pairs the KV consumer on its engine container with a `routing-proxy` sidecar. The
@@ -185,21 +208,29 @@ sidecar owns the Pod's HTTP port, proxies to the engine, and carries `--ec-conne
 flag makes it fetch the encoder's embeddings before decoding:
 
 ```yaml
-initContainers:
-  - args:
-      - --port=8000
-      - --model-server-port=8200
-      - --kv-connector=mooncake
-      - --mooncake-bootstrap-port=8998
-      - --secure-proxy=false
-      - --ec-connector=ec-nixl
-    image: docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0
-    name: routing-proxy
-    restartPolicy: Always
+apiVersion: v1
+kind: Pod
+metadata:
+  name: case120-epd-decode-k7ks8
+  namespace: default
+spec:
+  # The capture cluster (Kubernetes 1.32) renders the routing proxy as a native sidecar;
+  # the shape follows the cluster version.
+  initContainers:
+    - name: routing-proxy
+      image: docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0
+      restartPolicy: Always
+      args:
+        - --port=8000
+        - --model-server-port=8200
+        - --kv-connector=mooncake
+        - --mooncake-bootstrap-port=8998
+        - --secure-proxy=false
+        - --ec-connector=ec-nixl
 ```
 
 Do not set these keys on the roles yourself. The operator owns them, and a role that names one is
-refused. See [Encoder-cache connectors](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md#encoder-cache-connectors).
+refused. See [Encoder-cache connectors](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#encoder-cache-connectors).
 
 ## Step 3: send a multimodal request
 
@@ -266,7 +297,7 @@ that exchange the most data:
 In the recorded run, prefill and decode landed together on `gpu-node-0` and the encoder landed on
 `gpu-node-1`. Each node had two free cards, so three single-GPU roles could not share one host.
 Soft affinity scores a placement and never blocks one. See
-[Scheduling co-location](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md#scheduling-co-location).
+[Scheduling co-location](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#scheduling-co-location).
 
 ## Step 5: release the application
 
@@ -322,9 +353,10 @@ engine, because the pool held a single two-GPU node.
 
 | Symptom | Condition / Reason | Check & Mitigation |
 |---|---|---|
-| The apply is refused for the role set | Admission refusal message | An `Encode` role requires `Prefill` and `Decode`, admits one role per kind, is refused beside `Server`, and cannot take `spec.kvCache` or a role `command`. See [Shape rules and admission constraints](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md#shape-rules-and-admission-constraints) |
-| The apply is refused for engine, router or platform | Admission refusal message | All three roles must resolve to one accelerator platform, and the router, engine and platform must match [the admitted matrix](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md#the-admitted-matrix) (`vllm-router` is refused on Ascend). See [The admitted matrix](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md#the-admitted-matrix) |
+| The apply is refused for the role set | Admission refusal message | An `Encode` role requires `Prefill` and `Decode`, admits one role per kind, is refused beside `Server`, and cannot take `spec.kvCache` or a role `command`. See [Shape rules and admission constraints](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#shape-rules-and-admission-constraints) |
+| The apply is refused for engine, router or platform | Admission refusal message | All three roles must resolve to one accelerator platform, and the router, engine and platform must match [the admitted matrix](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#the-admitted-matrix) (`vllm-router` is refused on Ascend). See [The admitted matrix](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#the-admitted-matrix) |
 | The encoder image is older than its row's floor | No admission check reads a version | The floor lives in the image you name: vLLM `0.30.0`+ for `ECCPUConnector`, vllm-ascend `0.30.0rc1`+ for `ECExampleConnector`, SGLang `0.5.10`+ for `encoder-urls`. An image below the floor fails at container start with an `ImagePullBackOff` or an unknown-argument exit. See [Reading the table](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md#reading-the-table) |
+| Requests bypass Prefill | vLLM P/D token rendering is unavailable | The router cannot count tokens through the engine and falls back to Decode-only routing. See [Counting tokens through the engine](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md#counting-tokens-through-the-engine) for supported versions and `--enable-scale-out` placement |
 | The Ascend encoder starts with no directory to write | `ECExampleConnector` needs a shared directory | Attach a ReadWriteMany claim through `spec.roles[].additionalVolumes[].persistentVolumeClaim` on `Encode` and `Prefill`. Both roles must match `claimName`, `mountPath` and `subPath`, and the encoder's mount must not be read-only |
 | The apply names port 5601 or 8997 | Admission refusal on an owned key | The `ECCPUConnector` encoder owns 5601, and an SGLang `Prefill` role owns 8997 once the deployment has an `Encode` role. Move the engine's HTTP port off these |
 | An encoder replica sits in `Draining` for minutes | The encoder exports no in-flight queue the drain can read | Retirement waits a fixed window of about 300 seconds. A transfer still in flight when it ends fails at the client |
@@ -332,8 +364,8 @@ engine, because the pool held a single two-GPU node.
 
 ---
 
-**See also** — [Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md) (role contract and the admitted matrix) ·
-[Model Deployment Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/index.md) (measured three-arm latency and throughput) ·
+**See also** — [Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) (role contract and the admitted matrix) ·
+[Model Deployment Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md) (measured three-arm latency and throughput) ·
 [Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) (two-role disaggregation) ·
 [External DP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) (fixed per-rank serving)
 

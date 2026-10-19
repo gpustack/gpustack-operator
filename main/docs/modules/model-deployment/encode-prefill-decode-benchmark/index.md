@@ -3,7 +3,7 @@
 A live run on 4 × NVIDIA L40S compared three serving shapes for `Qwen/Qwen2.5-VL-7B-Instruct`:
 aggregated, prefill/decode and encode/prefill/decode (EPD). Three workloads exercise them: a prompt
 sweep from `1k` to `8k` tokens, a mixed stream of heavy-vision and small requests, and one image
-queried repeatedly. [Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md) describes the EPD topology.
+queried repeatedly. [Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) describes the EPD topology.
 
 EPD is not faster everywhere. At `1k` and `2k` tokens the aggregated arm has the lowest time to
 first token (TTFT), because two network hops cost more than a short vision pass. At `4k` and `8k`
@@ -45,11 +45,11 @@ arms differ in topology and in how many cards they use.
 The aggregated arm needs no connector, because one instance holds the whole model. Prefill and
 decode hand KV blocks across two Pods, pinned to tcp because the nodes have no RDMA interface. EPD
 adds the encoder leg on top of the same KV transfer. See
-[Encoder-cache connectors](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md#encoder-cache-connectors) for what each connector moves.
+[Encoder-cache connectors](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#encoder-cache-connectors) for what each connector moves.
 
 The scheduler placed the roles on two nodes, `node-a` and `node-b`. In the EPD arm, encode and
 prefill shared `node-a` and decode ran on `node-b` — the weight-50 pair in
-[Scheduling co-location](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md#scheduling-co-location). The other two arms landed as follows:
+[Scheduling co-location](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#scheduling-co-location). The other two arms landed as follows:
 
 | Arm | Role | Node |
 |---|---|---|
@@ -324,8 +324,8 @@ role only moves embeddings that a single engine would have produced in place.
   decode throughput relative to a default deployment.
 - **Model coverage.** One 7B vision-language model, on one engine (`vLLM`) and one platform
   (`nvidia`). The `SGLang` `nvidia` rows are verified functionally in the
-  [EPD Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/index.md#sglang-ep--d-behind-both-routers).
-  The `ascend` and `amd` rows of the [admitted matrix](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md#the-admitted-matrix) are not verified
+  [EPD Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md#sglang-ep--d-behind-both-routers).
+  The `ascend` and `amd` rows of the [admitted matrix](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#the-admitted-matrix) are not verified
   on hardware.
 - **Cache hit rate.** Suite 3 shows what a repeated image does, not how the hit rate is computed or
   what invalidates an entry. The benefit assumes the same image arrives with the same preprocessed
@@ -333,10 +333,10 @@ role only moves embeddings that a single engine would have produced in place.
 
 ---
 
-**See also** — [Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md) (the topology this run measures) ·
+**See also** — [Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) (the topology this run measures) ·
 [Model Deployment Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) (the two-role arm) ·
 [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) (the roles each arm declares) ·
 [Model Deployment Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) (which replica the router picks) ·
-[EPD Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/index.md) (a recorded live run).
+[EPD Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) (a recorded live run).
 
 **Next** → [Model Deployment Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) — choose a routing policy and inspect candidate endpoints.

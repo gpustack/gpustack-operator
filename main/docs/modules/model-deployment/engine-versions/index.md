@@ -79,7 +79,7 @@ says it works.
 **An EPD encoder image must meet its row's floor, and nothing refuses a lower one.** The
 requirement: the image an `Encode` deployment runs must carry vllm-ascend `0.30.0rc1` or later for
 Ascend `ECExampleConnector`, and vLLM `0.30.0` or later for NVIDIA/AMD `ECCPUConnector`
-([the admitted matrix](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md#the-admitted-matrix)). Admission does not check it — the version
+([the admitted matrix](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#the-admitted-matrix)). Admission does not check it — the version
 field and its gate are gone.
 
 An image below the floor fails at container start with an `ImagePullBackOff` on a tag that does not
@@ -170,7 +170,7 @@ On AWS the `RDMA` rows do not apply; [choose `EFA` or
 
 **See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) (the fields these versions go into) ·
 [Model Deployment Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) (pairing prefill and decode roles) ·
-[Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md) (encode, prefill and decode disaggregation) ·
+[Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) (encode, prefill and decode disaggregation) ·
 [KV Cache Backend](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md) (the store a client needs) ·
 [RDMA Operations](/gpustack-operator/main/docs/modules/rdma/operations/index.md) (fabric devices and the engine image they need).
 

@@ -460,7 +460,7 @@ levels back to `True` on its own once a later pass proves the live world again.
 
 **See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) (the contract this status reports on) ·
 [Model Deployment Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) (pairing prefill and decode roles) ·
-[Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md) (encode, prefill and decode disaggregation) ·
+[Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) (encode, prefill and decode disaggregation) ·
 [KV Cache Leader](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md) (the leader process the conditions distinguish from the operator's own).
 
 **Next** → [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md)

@@ -150,7 +150,7 @@
     
       
       
-        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, prefill and decode</a>
       
     
       
@@ -424,12 +424,12 @@
     
       
       
-        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/" >Encode, prefill and decode</a>
       
     
       
       
-        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >EPD benchmark</a>
       
     
       
@@ -739,7 +739,7 @@ says it works.</p>
 <p><strong>An EPD encoder image must meet its row&rsquo;s floor, and nothing refuses a lower one.</strong> The
 requirement: the image an <code>Encode</code> deployment runs must carry vllm-ascend <code>0.30.0rc1</code> or later for
 Ascend <code>ECExampleConnector</code>, and vLLM <code>0.30.0</code> or later for NVIDIA/AMD <code>ECCPUConnector</code>
-(<a href="/gpustack-operator/main/docs/modules/model-deployment/epd/#the-admitted-matrix">the admitted matrix</a>
+(<a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#the-admitted-matrix">the admitted matrix</a>
 ). Admission does not check it — the version
 field and its gate are gone.</p>
 <p>An image below the floor fails at container start with an <code>ImagePullBackOff</code> on a tag that does not
@@ -926,7 +926,7 @@ connections open instead of opening one per transfer, and held at most nine sock
       <h2>See also</h2>
       <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
  (the fields these versions go into)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
- (pairing prefill and decode roles)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/epd/">Model Deployment Encode, Prefill and Decode</a>
+ (pairing prefill and decode roles)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/">Model Deployment Encode, Prefill and Decode</a>
  (encode, prefill and decode disaggregation)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/backend/">KV Cache Backend</a>
  (the store a client needs)</li><li><a href="/gpustack-operator/main/docs/modules/rdma/operations/">RDMA Operations</a>
  (fabric devices and the engine image they need).</li></ul>
@@ -944,7 +944,7 @@ connections open instead of opening one per transfer, and held at most nine sock
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/287b6510ad2d11a818f435d5d5ee500b61bc1b99/docs/modules/model-deployment/engine-versions.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/de723c8e16aef498b81fb4619dcf5a368f3e37a1/docs/modules/model-deployment/engine-versions.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/engine-versions.md">Edit this page</a>
             

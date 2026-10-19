@@ -64,6 +64,12 @@ The leg reads each role's parallel size from that role's own command line: a man
 literal environment entry, `VLLM_DP_SIZE`, rides alongside either. A role declaring none renders
 `1/1`, exactly as before.
 
+`resources.accelerator` is a scheduling request. It does not become `--tensor-parallel-size`,
+`--pipeline-parallel-size` or `--data-parallel-size`. If one engine process must use two cards,
+declare the engine's parallel arguments on that role. The operator reads those declarations for the
+transfer document and validates them against the role's card request; it does not choose a topology
+from the card count.
+
 The command line is the whole of what the leg can see. A degree arriving any other way is invisible
 to it: the image's own entrypoint (never part of the rendered argv), a config file, a flag inside a
 `sh -c` string, `--additional-config`'s JSON value, an environment value pulled from a ConfigMap or
@@ -252,14 +258,53 @@ What the declared shape decides:
 answers `404`, no token count comes back, and the prefix decider routes every request to the
 decoder alone. Requests return `200`, the prefill stage receives nothing, no KV moves, and no
 error is reported. The render calls do appear in the router's access log, so the stage counts
-name the gap ([what the counts showed](/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/index.md#stage-execution-verification)).
+name the gap ([what the counts showed](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md#stage-execution-verification)).
 
 **The floor is vLLM `0.30.0` and vllm-ascend `0.30.0rc1`.** Earlier releases lack
 `--enable-scale-out`, and at vLLM-Ascend `0.23.0` the render route itself is absent.
 
 Setting the flag registers the render, derender and generate endpoints; it changes nothing else
-about the engine. The flag and the endpoint are vLLM's. What SGLang behind `llm-d-router`, and
-any shape behind the other two routers, use to count tokens was not measured here.
+about the engine. The flag and the endpoint are vLLM's. Other router paths are summarized under
+[Version and configuration limits](#version-and-configuration-limits).
+
+For a vLLM `Prefill` and `Decode` deployment behind `llm-d-router`, add the flag to both roles.
+This diff shows the fields to add to the [complete deployment](#two-ways-to-configure-a-pair):
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: qwen-pd
+   namespace: team-a
+ spec:
+   roles:
+     - name: prefill
+       kind: Prefill
++      extraArgs:
++        - --enable-scale-out
+     - name: decode
+       kind: Decode
++      extraArgs:
++        - --enable-scale-out
+```
+
+Older vLLM images below [the documented floor](#counting-tokens-through-the-engine) predate the
+flag, so adding it to them can make the engine reject its command line.
+The operator does not choose between these cases from the image tag.
+
+### Version and configuration limits
+
+For each shape, name an image that meets the documented floor and add the engine-specific arguments
+it needs.
+
+The `llm-d-router` plus vLLM requirement and supported floors are documented under
+[Counting tokens through the engine](#counting-tokens-through-the-engine). The other router paths are:
+
+| Router and engine shape | `--enable-scale-out` status | Configuration path |
+|---|---|---|
+| `vllm-router` with vLLM | No equivalent requirement is established here | The router uses its own P/D mode and endpoint selectors; EPD uses operator-rendered [`--epd-config`](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md#encode-stage-routing) |
+| `sglang-gateway` with SGLang | Not applicable | SGLang uses its own disaggregation arguments; `--enable-scale-out` is a vLLM flag |
+| `llm-d-router` with SGLang | No vLLM flag applies; token path is unmeasured | SGLang uses its own disaggregation arguments; do not infer this path from the vLLM row |
 
 [Engine Versions](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md#the-minimum-per-shape) carries the same floors as a
 requirement on the vLLM and vLLM-Ascend rows.

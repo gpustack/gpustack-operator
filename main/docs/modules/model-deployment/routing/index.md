@@ -74,7 +74,7 @@ The operator keeps a vLLM encoder in the router's candidate set on every platfor
 address-based encoder path applies only to SGLang.
 
 The decode sidecar's `--ec-connector` follows the admitted row: `ec-example` on Ascend and `ec-nixl`
-on NVIDIA and AMD. See [The admitted matrix](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md#the-admitted-matrix).
+on NVIDIA and AMD. See [The admitted matrix](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#the-admitted-matrix).
 
 With `vllm-router` and `vLLM` (on NVIDIA and AMD), the operator passes `--epd-config={"encoder_urls":["http://<md>-<encode-role>.<ns>.svc:<port>"]}` to the router. The router calls the encoder Service first, forwards `ec_transfer_params` to the prefill worker so it pulls the embeddings over NIXL (`ECCPUConnector`), and strips `ec_transfer_params` before forwarding to decode. `--epd-config` is operator-owned and refused in `spec.router.extraArgs`.
 
@@ -212,6 +212,6 @@ the engine Pods' own counts instead, such as each Pod's TTFT histogram `_count`.
 
 ---
 
-**See also** — [Model Deployment Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) for `spec.router` and the flags each router refuses · [Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/epd/index.md) for EPD disaggregation and connector options · [Model Deployment Metrics](/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md) for the router counters a deployment's snapshot reads.
+**See also** — [Model Deployment Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) for `spec.router` and the flags each router refuses · [Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) for EPD disaggregation and connector options · [Model Deployment Metrics](/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md) for the router counters a deployment's snapshot reads.
 
 **Next** → [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md)

@@ -150,7 +150,7 @@
     
       
       
-        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, prefill and decode</a>
       
     
       
@@ -424,12 +424,12 @@
     
       
       
-        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/" >Encode, prefill and decode</a>
       
     
       
       
-        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >EPD benchmark</a>
       
     
       
@@ -659,6 +659,11 @@ ships with the transfer leg alone; an Ascend deployment without one carries no h
 <code>extraArgs</code>, or a take-over role&rsquo;s whole <code>command</code>, never both. The one degree vLLM accepts as a
 literal environment entry, <code>VLLM_DP_SIZE</code>, rides alongside either. A role declaring none renders
 <code>1/1</code>, exactly as before.</p>
+<p><code>resources.accelerator</code> is a scheduling request. It does not become <code>--tensor-parallel-size</code>,
+<code>--pipeline-parallel-size</code> or <code>--data-parallel-size</code>. If one engine process must use two cards,
+declare the engine&rsquo;s parallel arguments on that role. The operator reads those declarations for the
+transfer document and validates them against the role&rsquo;s card request; it does not choose a topology
+from the card count.</p>
 <p>The command line is the whole of what the leg can see. A degree arriving any other way is invisible
 to it: the image&rsquo;s own entrypoint (never part of the rendered argv), a config file, a flag inside a
 <code>sh -c</code> string, <code>--additional-config</code>&rsquo;s JSON value, an environment value pulled from a ConfigMap or
@@ -869,13 +874,72 @@ role&rsquo;s <code>extraArgs</code>.</p>
 answers <code>404</code>, no token count comes back, and the prefix decider routes every request to the
 decoder alone. Requests return <code>200</code>, the prefill stage receives nothing, no KV moves, and no
 error is reported. The render calls do appear in the router&rsquo;s access log, so the stage counts
-name the gap (<a href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/#stage-execution-verification">what the counts showed</a>
+name the gap (<a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/#stage-execution-verification">what the counts showed</a>
 ).</p>
 <p><strong>The floor is vLLM <code>0.30.0</code> and vllm-ascend <code>0.30.0rc1</code>.</strong> Earlier releases lack
 <code>--enable-scale-out</code>, and at vLLM-Ascend <code>0.23.0</code> the render route itself is absent.</p>
 <p>Setting the flag registers the render, derender and generate endpoints; it changes nothing else
-about the engine. The flag and the endpoint are vLLM&rsquo;s. What SGLang behind <code>llm-d-router</code>, and
-any shape behind the other two routers, use to count tokens was not measured here.</p>
+about the engine. The flag and the endpoint are vLLM&rsquo;s. Other router paths are summarized under
+<a href="#version-and-configuration-limits">Version and configuration limits</a>
+.</p>
+<p>For a vLLM <code>Prefill</code> and <code>Decode</code> deployment behind <code>llm-d-router</code>, add the flag to both roles.
+This diff shows the fields to add to the <a href="#two-ways-to-configure-a-pair">complete deployment</a>
+:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeployment
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: qwen-pd
+</span></span><span class="line"><span class="cl">   namespace: team-a
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   roles:
+</span></span><span class="line"><span class="cl">     - name: prefill
+</span></span><span class="line"><span class="cl">       kind: Prefill
+</span></span><span class="line"><span class="cl"><span class="gi">+      extraArgs:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        - --enable-scale-out
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span>     - name: decode
+</span></span><span class="line"><span class="cl">       kind: Decode
+</span></span><span class="line"><span class="cl"><span class="gi">+      extraArgs:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        - --enable-scale-out
+</span></span></span></code></pre></div>
+</div><p>Older vLLM images below <a href="#counting-tokens-through-the-engine">the documented floor</a>
+ predate the
+flag, so adding it to them can make the engine reject its command line.
+The operator does not choose between these cases from the image tag.</p>
+<h3 id="version-and-configuration-limits">Version and configuration limits</h3>
+<p>For each shape, name an image that meets the documented floor and add the engine-specific arguments
+it needs.</p>
+<p>The <code>llm-d-router</code> plus vLLM requirement and supported floors are documented under
+<a href="#counting-tokens-through-the-engine">Counting tokens through the engine</a>
+. The other router paths are:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Router and engine shape</th>
+          <th><code>--enable-scale-out</code> status</th>
+          <th>Configuration path</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>vllm-router</code> with vLLM</td>
+          <td>No equivalent requirement is established here</td>
+          <td>The router uses its own P/D mode and endpoint selectors; EPD uses operator-rendered <a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#encode-stage-routing"><code>--epd-config</code></a>
+</td>
+      </tr>
+      <tr>
+          <td><code>sglang-gateway</code> with SGLang</td>
+          <td>Not applicable</td>
+          <td>SGLang uses its own disaggregation arguments; <code>--enable-scale-out</code> is a vLLM flag</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code> with SGLang</td>
+          <td>No vLLM flag applies; token path is unmeasured</td>
+          <td>SGLang uses its own disaggregation arguments; do not infer this path from the vLLM row</td>
+      </tr>
+  </tbody>
+</table>
 <p><a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#the-minimum-per-shape">Engine Versions</a>
  carries the same floors as a
 requirement on the vLLM and vLLM-Ascend rows.</p>
@@ -1012,7 +1076,7 @@ each leg</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/287b6510ad2d11a818f435d5d5ee500b61bc1b99/docs/modules/model-deployment/prefill-decode.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/de723c8e16aef498b81fb4619dcf5a368f3e37a1/docs/modules/model-deployment/prefill-decode.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/prefill-decode.md">Edit this page</a>
             
@@ -1027,7 +1091,11 @@ each leg</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/
     <li><a href="#two-ways-to-configure-a-pair">Two ways to configure a pair</a></li>
     <li><a href="#the-router-block">The router block</a></li>
     <li><a href="#the-two-router-fields">The two router fields</a></li>
-    <li><a href="#counting-tokens-through-the-engine">Counting tokens through the engine</a></li>
+    <li><a href="#counting-tokens-through-the-engine">Counting tokens through the engine</a>
+      <ul>
+        <li><a href="#version-and-configuration-limits">Version and configuration limits</a></li>
+      </ul>
+    </li>
     <li><a href="#direct-transfer-transport">Direct transfer transport</a></li>
     <li><a href="#different-hardware-per-role">Different hardware per role</a></li>
     <li><a href="#addressing-a-role">Addressing a role</a></li>

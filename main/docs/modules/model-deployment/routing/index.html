@@ -150,7 +150,7 @@
     
       
       
-        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, prefill and decode</a>
       
     
       
@@ -424,12 +424,12 @@
     
       
       
-        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/" >Encode, prefill and decode</a>
       
     
       
       
-        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" >EPD benchmark</a>
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >EPD benchmark</a>
       
     
       
@@ -700,7 +700,7 @@ the result to <code>Prefill</code> through the shared volume both roles mount; t
 <p>The operator keeps a vLLM encoder in the router&rsquo;s candidate set on every platform. Its
 address-based encoder path applies only to SGLang.</p>
 <p>The decode sidecar&rsquo;s <code>--ec-connector</code> follows the admitted row: <code>ec-example</code> on Ascend and <code>ec-nixl</code>
-on NVIDIA and AMD. See <a href="/gpustack-operator/main/docs/modules/model-deployment/epd/#the-admitted-matrix">The admitted matrix</a>
+on NVIDIA and AMD. See <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#the-admitted-matrix">The admitted matrix</a>
 .</p>
 <p>With <code>vllm-router</code> and <code>vLLM</code> (on NVIDIA and AMD), the operator passes <code>--epd-config={&quot;encoder_urls&quot;:[&quot;http://&lt;md&gt;-&lt;encode-role&gt;.&lt;ns&gt;.svc:&lt;port&gt;&quot;]}</code> to the router. The router calls the encoder Service first, forwards <code>ec_transfer_params</code> to the prefill worker so it pulls the embeddings over NIXL (<code>ECCPUConnector</code>), and strips <code>ec_transfer_params</code> before forwarding to decode. <code>--epd-config</code> is operator-owned and refused in <code>spec.router.extraArgs</code>.</p>
 <p>With <code>llm-d-router</code> and <code>SGLang</code>, the router splits every request between prefill and decode,
@@ -911,7 +911,7 @@ the engine Pods&rsquo; own counts instead, such as each Pod&rsquo;s TTFT histogr
     <section>
       <h2>See also</h2>
       <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
- for <code>spec.router</code> and the flags each router refuses</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/epd/">Model Deployment Encode, Prefill and Decode</a>
+ for <code>spec.router</code> and the flags each router refuses</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/">Model Deployment Encode, Prefill and Decode</a>
  for EPD disaggregation and connector options</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
  for the router counters a deployment&rsquo;s snapshot reads.</li></ul>
     </section><section class="next-page">
@@ -928,7 +928,7 @@ the engine Pods&rsquo; own counts instead, such as each Pod&rsquo;s TTFT histogr
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/287b6510ad2d11a818f435d5d5ee500b61bc1b99/docs/modules/model-deployment/routing.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/de723c8e16aef498b81fb4619dcf5a368f3e37a1/docs/modules/model-deployment/routing.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/routing.md">Edit this page</a>
             

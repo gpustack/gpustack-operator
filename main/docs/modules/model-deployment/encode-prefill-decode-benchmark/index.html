@@ -21,7 +21,7 @@
   <meta name="robots" content="noindex, follow">
   <title>Model Deployment Encode, Prefill and Decode Benchmark · GPUStack Operator</title>
   
-  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/index.md">
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
   <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
@@ -45,7 +45,7 @@
       
   <details class="picker version-picker" id="version-picker"
     data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
-    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/">
+    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/">
     <summary>
       <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
       <span class="visually-hidden">Documentation version: </span><span class="picker-value">main</span>
@@ -150,7 +150,7 @@
     
       
       
-        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/" >Encode, prefill and decode</a>
+        <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, prefill and decode</a>
       
     
       
@@ -424,12 +424,12 @@
     
       
       
-        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/epd/" >Encode, prefill and decode</a>
+        <a title="Model Deployment Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/" >Encode, prefill and decode</a>
       
     
       
       
-        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/epd-benchmark/" aria-current="page">EPD benchmark</a>
+        <a title="Model Deployment Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/" aria-current="page">EPD benchmark</a>
       
     
       
@@ -584,7 +584,7 @@
 <p>A live run on 4 × NVIDIA L40S compared three serving shapes for <code>Qwen/Qwen2.5-VL-7B-Instruct</code>:
 aggregated, prefill/decode and encode/prefill/decode (EPD). Three workloads exercise them: a prompt
 sweep from <code>1k</code> to <code>8k</code> tokens, a mixed stream of heavy-vision and small requests, and one image
-queried repeatedly. <a href="/gpustack-operator/main/docs/modules/model-deployment/epd/">Model Deployment Encode, Prefill and Decode</a>
+queried repeatedly. <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/">Model Deployment Encode, Prefill and Decode</a>
  describes the EPD topology.</p>
 <p>EPD is not faster everywhere. At <code>1k</code> and <code>2k</code> tokens the aggregated arm has the lowest time to
 first token (TTFT), because two network hops cost more than a short vision pass. At <code>4k</code> and <code>8k</code>
@@ -657,11 +657,11 @@ arms differ in topology and in how many cards they use.</p>
 <p>The aggregated arm needs no connector, because one instance holds the whole model. Prefill and
 decode hand KV blocks across two Pods, pinned to tcp because the nodes have no RDMA interface. EPD
 adds the encoder leg on top of the same KV transfer. See
-<a href="/gpustack-operator/main/docs/modules/model-deployment/epd/#encoder-cache-connectors">Encoder-cache connectors</a>
+<a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#encoder-cache-connectors">Encoder-cache connectors</a>
  for what each connector moves.</p>
 <p>The scheduler placed the roles on two nodes, <code>node-a</code> and <code>node-b</code>. In the EPD arm, encode and
 prefill shared <code>node-a</code> and decode ran on <code>node-b</code> — the weight-50 pair in
-<a href="/gpustack-operator/main/docs/modules/model-deployment/epd/#scheduling-co-location">Scheduling co-location</a>
+<a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#scheduling-co-location">Scheduling co-location</a>
 . The other two arms landed as follows:</p>
 <table>
   <thead>
@@ -1666,9 +1666,9 @@ each role holds and what separating them buys.</li>
 decode throughput relative to a default deployment.</li>
 <li><strong>Model coverage.</strong> One 7B vision-language model, on one engine (<code>vLLM</code>) and one platform
 (<code>nvidia</code>). The <code>SGLang</code> <code>nvidia</code> rows are verified functionally in the
-<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/#sglang-ep--d-behind-both-routers">EPD Walkthrough</a>
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/#sglang-ep--d-behind-both-routers">EPD Walkthrough</a>
 .
-The <code>ascend</code> and <code>amd</code> rows of the <a href="/gpustack-operator/main/docs/modules/model-deployment/epd/#the-admitted-matrix">admitted matrix</a>
+The <code>ascend</code> and <code>amd</code> rows of the <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#the-admitted-matrix">admitted matrix</a>
  are not verified
 on hardware.</li>
 <li><strong>Cache hit rate.</strong> Suite 3 shows what a repeated image does, not how the hit rate is computed or
@@ -1678,11 +1678,11 @@ token prefix.</li>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
-      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/epd/">Model Deployment Encode, Prefill and Decode</a>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/">Model Deployment Encode, Prefill and Decode</a>
  (the topology this run measures)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
  (the two-role arm)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
  (the roles each arm declares)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/">Model Deployment Routing</a>
- (which replica the router picks)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/epd/">EPD Walkthrough</a>
+ (which replica the router picks)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/">EPD Walkthrough</a>
  (a recorded live run).</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
@@ -1699,9 +1699,9 @@ token prefix.</li>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/287b6510ad2d11a818f435d5d5ee500b61bc1b99/docs/modules/model-deployment/epd-benchmark.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/de723c8e16aef498b81fb4619dcf5a368f3e37a1/docs/modules/model-deployment/encode-prefill-decode-benchmark.md">View page source</a>
             
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/epd-benchmark.md">Edit this page</a>
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/encode-prefill-decode-benchmark.md">Edit this page</a>
             
           </nav>
         
