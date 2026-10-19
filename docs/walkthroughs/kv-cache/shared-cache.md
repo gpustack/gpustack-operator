@@ -145,7 +145,7 @@ spec:
     name: Qwen/Qwen2.5-7B-Instruct
   engine:
     name: vLLM
-    version: "0.29.0"                    # on the same store line as Step 1's default image
+    image: gpustack/runner:cuda13.0-vllm0.29.0                    # on the same store line as Step 1's default image
   kvCache:
     poolRef:
       name: team-a                       # the Binding above, in this namespace
@@ -327,7 +327,7 @@ spec:
     name: Qwen/Qwen2.5-7B-Instruct
   engine:
     name: vLLM
-    version: "0.29.0"
+    image: gpustack/runner:cuda13.0-vllm0.29.0
   kvCache:
     poolRef:
       name: qwen-fp8

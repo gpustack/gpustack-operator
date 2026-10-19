@@ -235,7 +235,7 @@ spec:
       name: qwen-7b
   engine:
     name: vLLM
-    version: "0.29.0"
+    image: gpustack/runner:cuda13.0-vllm0.29.0
   kvCache:
     poolRef:
       name: qwen-cache
