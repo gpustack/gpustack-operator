@@ -588,9 +588,11 @@ the user enter the workload container.</p>
 </li>
 <li><a href="#device-access">Device access</a>
 </li>
+<li><a href="#service-lifecycle">Service lifecycle</a>
+</li>
 </ul>
 <h2 id="instance-configuration">Instance configuration</h2>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/1c149b1c087a157bff55c136f6fba4871b8938a5/README.md#usage">Usage</a>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/34d37cde39c9476a7527b9cab9b737c5b0471f4a/README.md#usage">Usage</a>
  example creates a sliced Instance. <a href="/gpustack-operator/main/docs/modules/devices/requests/#requesting-through-the-instance-api">Accelerator
 Requests</a>
  explains how
@@ -602,6 +604,19 @@ visibility resource to enter the same workspace without acquiring a second accel
 .
 <a href="/gpustack-operator/main/docs/reference/instance-metrics/">Instance Metrics</a>
  explains the reported utilization.</p>
+<h2 id="service-lifecycle">Service lifecycle</h2>
+<p>An Instance listing <code>spec.ports</code> is reached through a NodePort Service named after it, and
+<code>status.ports</code> reports the node port allocated for each of them.</p>
+<p>Stopping the Instance (<code>spec.stop: true</code>) deletes the Pod but retains the Service, so the node ports
+a user already connected to stay allocated. Starting it again (<code>spec.stop: false</code>) builds a new Pod
+and reports the same node ports. The Service belongs to the Instance rather than to the Pod, and
+selects the Pod by the part-of label the two share, so it keeps routing across both the Pod
+replacement and a change of the Instance&rsquo;s type.</p>
+<p><code>spec.ports</code> may be edited while the Instance is stopped, and the changes take effect on the Service
+when the Instance starts again: ports left unchanged keep their allocated node port, a port added to
+<code>spec.ports</code> is allocated a new one, a port removed from <code>spec.ports</code> is dropped from the Service,
+and clearing <code>spec.ports</code> deletes the Service along with its allocations. Deleting the Instance
+itself also deletes the Service.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
@@ -610,7 +625,7 @@ visibility resource to enter the same workspace without acquiring a second accel
  (mounting model weights)</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
-        <div><a href="https://github.com/gpustack/gpustack-operator/blob/1c149b1c087a157bff55c136f6fba4871b8938a5/README.md#usage">Usage</a>
+        <div><a href="https://github.com/gpustack/gpustack-operator/blob/34d37cde39c9476a7527b9cab9b737c5b0471f4a/README.md#usage">Usage</a>
  — launch a sliced Instance.</div>
       </section></nav>
   
@@ -624,7 +639,7 @@ visibility resource to enter the same workspace without acquiring a second accel
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/1c149b1c087a157bff55c136f6fba4871b8938a5/docs/modules/instances/_index.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/34d37cde39c9476a7527b9cab9b737c5b0471f4a/docs/modules/instances/_index.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/instances/_index.md">Edit this page</a>
             
@@ -637,6 +652,7 @@ visibility resource to enter the same workspace without acquiring a second accel
     <li><a href="#contents">Contents</a></li>
     <li><a href="#instance-configuration">Instance configuration</a></li>
     <li><a href="#device-access">Device access</a></li>
+    <li><a href="#service-lifecycle">Service lifecycle</a></li>
   </ul>
 </nav>
         
