@@ -44,7 +44,7 @@ order:
     - prefetch
   /docs/walkthroughs/model-deployment/:
     - prefill-decode
-    - epd
+    - encode-prefill-decode
     - elastic-ep
     - external-dp
     - multi-host
@@ -82,8 +82,8 @@ order:
     - deployment
     - elastic-ep
     - engine-versions
-    - epd
-    - epd-benchmark
+    - encode-prefill-decode
+    - encode-prefill-decode-benchmark
     - prefill-decode
     - routing
     - metrics
@@ -120,7 +120,7 @@ labels:
   /docs/walkthroughs/model-delivery/prefetch/: Model prefetch
   /docs/walkthroughs/model-deployment/: Model deployment
   /docs/walkthroughs/model-deployment/prefill-decode/: Prefill and decode
-  /docs/walkthroughs/model-deployment/epd/: Encode, prefill and decode
+  /docs/walkthroughs/model-deployment/encode-prefill-decode/: Encode, prefill and decode
   /docs/walkthroughs/model-deployment/elastic-ep/: Elastic EP
   /docs/walkthroughs/model-deployment/external-dp/: External DP
   /docs/walkthroughs/model-deployment/multi-host/: Multi-host serving
@@ -154,8 +154,8 @@ labels:
   /docs/modules/model-deployment/deployment/: Deployment configuration
   /docs/modules/model-deployment/elastic-ep/: Elastic EP
   /docs/modules/model-deployment/engine-versions/: Engine versions
-  /docs/modules/model-deployment/epd/: Encode, prefill and decode
-  /docs/modules/model-deployment/epd-benchmark/: EPD benchmark
+  /docs/modules/model-deployment/encode-prefill-decode/: Encode, prefill and decode
+  /docs/modules/model-deployment/encode-prefill-decode-benchmark/: EPD benchmark
   /docs/modules/model-deployment/prefill-decode/: Prefill and decode
   /docs/modules/model-deployment/routing/: Routing
   /docs/modules/model-deployment/metrics/: Metrics

@@ -79,7 +79,7 @@ says it works.
 **An EPD encoder image must meet its row's floor, and nothing refuses a lower one.** The
 requirement: the image an `Encode` deployment runs must carry vllm-ascend `0.30.0rc1` or later for
 Ascend `ECExampleConnector`, and vLLM `0.30.0` or later for NVIDIA/AMD `ECCPUConnector`
-([the admitted matrix](epd.md#the-admitted-matrix)). Admission does not check it — the version
+([the admitted matrix](encode-prefill-decode.md#the-admitted-matrix)). Admission does not check it — the version
 field and its gate are gone.
 
 An image below the floor fails at container start with an `ImagePullBackOff` on a tag that does not
@@ -170,7 +170,7 @@ On AWS the `RDMA` rows do not apply; [choose `EFA` or
 
 **See also** — [Model Deployment Configuration](deployment.md) (the fields these versions go into) ·
 [Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) ·
-[Model Deployment Encode, Prefill and Decode](epd.md) (encode, prefill and decode disaggregation) ·
+[Model Deployment Encode, Prefill and Decode](encode-prefill-decode.md) (encode, prefill and decode disaggregation) ·
 [KV Cache Backend](../kv-cache/backend.md) (the store a client needs) ·
 [RDMA Operations](../rdma/operations.md) (fabric devices and the engine image they need).
 

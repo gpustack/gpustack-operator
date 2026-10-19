@@ -460,7 +460,7 @@ levels back to `True` on its own once a later pass proves the live world again.
 
 **See also** — [Model Deployment Configuration](deployment.md) (the contract this status reports on) ·
 [Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) ·
-[Model Deployment Encode, Prefill and Decode](epd.md) (encode, prefill and decode disaggregation) ·
+[Model Deployment Encode, Prefill and Decode](encode-prefill-decode.md) (encode, prefill and decode disaggregation) ·
 [KV Cache Leader](../kv-cache/leader.md) (the leader process the conditions distinguish from the operator's own).
 
 **Next** → [Model Deployment Configuration](deployment.md)

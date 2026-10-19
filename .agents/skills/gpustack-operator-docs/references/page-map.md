@@ -271,7 +271,7 @@ hardware, and a role's own Service.
 **Never** — the deployment-level contract around the pair (`deployment.md`) or the KV cache leg's
 transport (`../kv-cache/backend.md`); this page owns the P/D leg.
 
-## `docs/modules/model-deployment/epd.md`
+## `docs/modules/model-deployment/encode-prefill-decode.md`
 
 **Owns** — three-role (`Encode`, `Prefill`, `Decode`) multimodal disaggregation: the admitted
 platform/engine/router matrix, encoder-cache connectors (`ECCPUConnector` over NIXL and
@@ -280,17 +280,17 @@ pairing rules, soft co-location affinity (`Prefill`↔`Decode` weight 100, `Enco
 and the bounded 240s encoder drain window.
 
 **Never** — the two-role KV cache leg (`prefill-decode.md` owns that), the measured three-arm
-latency and throughput numbers (`epd-benchmark.md` owns those), or the live walkthrough sequence
-(`../../walkthroughs/model-deployment/epd.md`).
+latency and throughput numbers (`encode-prefill-decode-benchmark.md` owns those), or the live walkthrough sequence
+(`../../walkthroughs/model-deployment/encode-prefill-decode.md`).
 
-## `docs/modules/model-deployment/epd-benchmark.md`
+## `docs/modules/model-deployment/encode-prefill-decode-benchmark.md`
 
 **Owns** — the measured comparison of aggregated, prefill/decode and EPD serving: time to first
 token, time per output token, end-to-end latency and throughput at each concurrency, the hardware,
 model and workload behind the numbers, the conditions under which EPD helps, and the limits of the
 run that produced them.
 
-**Never** — the connector each topology renders (`epd.md` and `prefill-decode.md` own those), or the
+**Never** — the connector each topology renders (`encode-prefill-decode.md` and `prefill-decode.md` own those), or the
 admission rules that admit a shape. A number stated here as a measurement must not restate as a
 guarantee, and a row the run did not exercise stays unverified wherever it is already marked so.
 
@@ -469,14 +469,14 @@ per-rank inference checks, Router coverage limits, and application cleanup. Link
 **Never** — imply online collective resize from fixed-group inference, or claim all ranks receive Router
 traffic from HTTP success alone. P/D combinations remain with their owning guide and follow-up issue.
 
-## `docs/walkthroughs/model-deployment/epd.md`
+## `docs/walkthroughs/model-deployment/encode-prefill-decode.md`
 
 **Owns** — the recorded three-role EPD deployment sequence (`Encode`, `Prefill`, `Decode` fronted by
 `llm-d-router`), captured CR/Pod/Service/Workload output, rendered connector and router ConfigMap
 snippets, multimodal chat completion check, and application release.
 
-**Never** — the normative admission matrix or connector contract (`../../modules/model-deployment/epd.md`
-owns those) or the multi-concurrency benchmark comparison (`../../modules/model-deployment/epd-benchmark.md`).
+**Never** — the normative admission matrix or connector contract (`../../modules/model-deployment/encode-prefill-decode.md`
+owns those) or the multi-concurrency benchmark comparison (`../../modules/model-deployment/encode-prefill-decode-benchmark.md`).
 
 ## `docs/walkthroughs/model-delivery/prefetch.md`
 

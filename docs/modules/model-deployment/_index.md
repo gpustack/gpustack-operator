@@ -12,12 +12,12 @@ its own replicas and resources.
 
 [Model Deployment Configuration](deployment.md) starts with a minimal manifest and explains
 the role contract. [Prefill and Decode](prefill-decode.md) covers split roles, and
-[Encode, Prefill and Decode](epd.md) covers multimodal disaggregation.
+[Encode, Prefill and Decode](encode-prefill-decode.md) covers multimodal disaggregation.
 [Engine Versions](engine-versions.md) records tested version floors, and
-[EPD Benchmark](epd-benchmark.md) measures that disaggregation against an aggregated instance.
+[Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) measures that disaggregation against an aggregated instance.
 
 Follow [Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/prefill-decode.md) for
-disaggregated serving, [Encode, Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/epd.md) for
+disaggregated serving, [Encode, Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) for
 multimodal disaggregation, and [Multi-Host Serving Walkthrough](../../walkthroughs/model-deployment/multi-host.md)
 for distributed multi-node serving.
 
