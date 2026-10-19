@@ -97,7 +97,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - Use for: giving model weights a stable identity; node caching and delivery; prefetch, peer sync, progress views and cache operations.
 - Aliases: `ModelArtifact`, `NodeModelStore`, `ModelStore`, `ModelPrefetch`, `model cache`, `Hugging Face`
 - Guides: [Model Delivery](modules/model-delivery/_index.md); the artifact contract in [Model Artifact](modules/model-delivery/artifact.md); the node cache in [Node Model Store](modules/model-delivery/node-store.md); the runbook in [Model Store Operations](modules/model-delivery/operations.md); a measured example in [Model Prefetch Walkthrough](walkthroughs/model-delivery/prefetch.md).
-- Specs: [model artifact](../specs/2026-09-25-model-artifact.md) · [node model store](../specs/2026-09-25-node-model-store.md) · [prefetch](../specs/2026-09-27-model-prefetch.md) · [peer sync](../specs/2026-09-27-model-peer-sync.md) · [image source](../specs/2026-09-27-model-image-source.md)
+- Specs: [model artifact](../specs/2026-09-25-model-artifact.md) · [node model store](../specs/2026-09-25-node-model-store.md) · [prefetch](../specs/2026-09-27-model-prefetch.md) · [peer sync](../specs/2026-09-27-model-peer-sync.md) · [image source](../specs/2026-09-27-model-image-source.md) · [settings sync semantics](../specs/2026-10-19-settings-env-sync-and-default-tracking.md)
 - Code: Hub resolution in [pkg/modelartifact](../pkg/modelartifact/) · the per-node plugin and cache in [pkg/modelmanager](../pkg/modelmanager/) · cache configuration in [pkg/modelstore](../pkg/modelstore/)
 - Related: [Model Deployment](#model-deployment) (deployments mount or download artifacts) · [KV Cache](#kv-cache) (the weight identity enters KV keys) · [GPU Instances](#gpu-instances) (an Instance can mount weights)
 - Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (node-delivery cases)
@@ -141,7 +141,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - Aliases: `Helm chart`, `subchart`, `chart mode`, `image mode`, `values.yaml`
 - Guides: choices in [Installation Modes](operate/installation-modes.md); node drivers in [Vendor Prerequisites](getting-started/vendor-prerequisites.md); transfer in [Migrating to Bundled Subcharts](operate/migration/to-subcharts.md).
 - Specs: [bundled apps subchart split](../specs/2026-07-28-bundled-apps-subchart-split.md) · [settings sync semantics](../specs/2026-10-19-settings-env-sync-and-default-tracking.md)
-- Code: [deploy/gpustack-operator/chart](../deploy/gpustack-operator/chart/) · vendoring in [hack/deps.sh](../hack/deps.sh) · image-mode in-cluster install in [pkg/worker/kuberess](../pkg/worker/kuberess/)
+- Code: [deploy/gpustack-operator/chart](../deploy/gpustack-operator/chart/) · vendoring in [hack/deps.sh](../hack/deps.sh) · image-mode in-cluster install in [pkg/worker/kuberess](../pkg/worker/kuberess/) · the settings sync on every worker start in [pkg/setting](../pkg/setting/) and [pkg/worker/settings](../pkg/worker/settings/)
 - Related: [Development](#development) (chart targets and subchart patches) · [Devices Manager](#devices-manager) (the Device Manager DaemonSets the chart deploys)
 - Skills: [gpustack-operator-chart-e2e](../.agents/skills/gpustack-operator-chart-e2e/SKILL.md) (install, rollout and uninstall verification) · [gpustack-operator-chart-subcharts-manage](../.agents/skills/gpustack-operator-chart-subcharts-manage/SKILL.md) (add, patch or bump a vendored subchart)
 

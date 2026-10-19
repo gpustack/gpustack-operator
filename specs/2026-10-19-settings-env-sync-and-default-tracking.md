@@ -114,9 +114,11 @@ a Setting is never written twice in one pass with two different values.
 Secret does not carry, exactly as today. Rule 1 and rule 2 then decide only whether to overwrite a key that
 already exists. Without this order a newly registered blank-default Setting would never appear.
 
-**The tracking list is read from the live Secret, falling back to the built-in default.** On a Secret that
-predates this spec the key is absent, so the built-in default applies on the same start that backfills the key.
-Reading only the live Secret would defer the transition to a later start.
+**The tracking list is read from the live Secret, and the backfill has already given the Secret the built-in
+default.** On a Secret that predates this spec the key is absent. The backfill writes the built-in default into the
+Secret before the list is read, so the built-in list applies on the same start that backfills the key. The read
+carries no fallback of its own: a list the Secret does not hold is an empty list. The backfill that runs first is
+what puts the default there, and a test pins that order.
 
 **Removing a variable does not restore a built-in default.** With no declaration and no tracking membership,
 row 3 applies and the stored value is kept, including a value a previous release declared. Unsetting a variable
@@ -338,9 +340,9 @@ alignFn := func(aSec *core.Secret) (_ *core.Secret, skip bool, err error) {
 		}
 	}
 
-	// The tracking list is read from the live Secret, falling back to the built-in default, so a
-	// Secret that predates this Setting gets the default on the same start that backfills it.
-	tracking := parseTrackedSettings(h, h.trackingValue(aSec))
+	// The tracking list is read from the live Secret. The backfill above has already given the
+	// Secret the built-in default when the key was absent.
+	tracking := parseTrackedSettings(h, trackingValue(aSec))
 
 	for name, s := range h {
 		stored := string(aSec.Data[name])
@@ -424,9 +426,9 @@ T4 ───────────────┘
       Owns: `pkg/setting/kuberes.go`, `pkg/setting/kuberes_test.go`
       Gate: review
       Acceptance: absent keys are backfilled first, so a blank-default Setting is still added; the tracking list
-      is read from the live Secret and falls back to the built-in default when the key is absent, and is parsed
-      by the five-step contract in Core Features, which takes the registry because steps four and five cannot be
-      evaluated without it; the name is an exported constant so the task registering the Setting cannot drift from
+      is read from the live Secret, which the backfill has already given the built-in default when the key was
+      absent, and is parsed by the five-step contract in Core Features, which takes the registry because steps
+      four and five cannot be evaluated without it; the name is an exported constant so the task registering the Setting cannot drift from
       the one reading it; `desiredValue` returns a value only for a non-blank seed that is either declared or
       tracked; every change to a stored value logs one `klog.InfoS` line carrying the Setting, both values, the
       rule and the variable, and a sensitive Setting carries neither value behind a marker instead; `TestSettingsInitialize`
@@ -583,6 +585,12 @@ The override log line's message is pinned as a literal in both the align pass an
 joined by a shared constant. A renamed message therefore needs the test updated with it, and a rename that misses
 the test leaves the guard green over the change it is meant to catch. This coupling is known and accepted by
 decision.
+
+This spec supersedes [the node model store spec](2026-09-25-node-model-store.md) in part. That spec states the
+create-once seeding rule in its "Seeding" paragraph, in its "Upgrading from the version before this one" paragraph,
+in the heading of its settings table and in its `model-artifact-delivery-mode` row, and it states that a seed fills
+only a key the cluster does not have yet. The operator no longer follows that rule. The sections of the older spec
+stay as written, being the historical record of what it delivered; this spec states what replaced them.
 
 #### Integration tests
 
