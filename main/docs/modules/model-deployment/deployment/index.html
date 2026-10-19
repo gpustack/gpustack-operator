@@ -919,7 +919,7 @@ Without one, users patch the rendered Pod and the reconcile loop silently overwr
       </tr>
       <tr>
           <td>overlay</td>
-          <td>the role&rsquo;s own Pod fields — <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>privileged</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>, <code>terminationGracePeriodSeconds</code></td>
+          <td>the role&rsquo;s own Pod fields — <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>privileged</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>, <code>terminationGracePeriodSeconds</code>, <code>startupTimeoutSeconds</code></td>
           <td>the operator renders first, then merges this overlay on top</td>
       </tr>
       <tr>
@@ -987,6 +987,21 @@ Kubelet lowers the mount size when the Pod memory limit or node allocatable memo
 <p>Changing the rendered capacity follows ordinary role rollout behavior.
 Existing Elastic members keep their mounts; new or replacement Pods use the current value.
 Upgrading the operator adds the default mount to ordinary roles and triggers their recreate rollout.</p>
+<h3 id="compilation-cache-and-startup-timeout">Compilation cache and startup timeout</h3>
+<p>For an operator-managed role (<code>roles[].command</code> empty), the operator mounts a <code>DirectoryOrCreate</code>
+<code>HostPath</code> volume (<code>gpustack-compile-cache</code>) at <code>/var/lib/gpustack/cache</code> on the <code>main</code> container,
+backed by <code>/var/lib/gpustack/cache/&lt;manufacturer&gt;-&lt;engine&gt;/&lt;model-identity&gt;/tp&lt;TP&gt;-pp&lt;PP&gt;-dp&lt;DP&gt;-ep&lt;EP&gt;-cp&lt;PCP&gt;_&lt;DCP&gt;-&lt;hash8&gt;</code>
+on the node, and defaults <code>VLLM_CACHE_ROOT=/var/lib/gpustack/cache</code> (<code>vLLM</code>) or
+<code>SGLANG_CACHE_DIR=/var/lib/gpustack/cache</code> (<code>SGLang</code>).</p>
+<p>An explicit <code>/var/lib/gpustack/cache</code> mount in <code>additionalVolumes</code> takes precedence: the operator
+omits the default <code>gpustack-compile-cache</code> <code>HostPath</code> volume while preserving the defaulted
+<code>VLLM_CACHE_ROOT</code> or <code>SGLANG_CACHE_DIR</code> environment variable unless overridden in <code>roles[].env</code>.
+Take-over roles (<code>roles[].command</code> non-empty) receive neither the default cache volume nor the
+defaulted cache variable.</p>
+<p><code>spec.roles[].startupTimeoutSeconds</code> sets the role&rsquo;s startup budget in seconds (default <code>1800</code>,
+range <code>10</code>..<code>86400</code>), scaling <code>startupProbe.failureThreshold</code> as <code>ceil(startupTimeoutSeconds / 10)</code>
+at <code>periodSeconds: 10</code> (<code>timeoutSeconds: 5</code>) so cold-start graph compilation is not killed by
+<code>livenessProbe</code> or disqualified by whole-group health before <code>startupProbe</code> succeeds.</p>
 <h2 id="operator-owned-keys">Operator-owned keys</h2>
 <p>Ownership is per (engine, key): a key one engine owns is an ordinary user argument on another.
 <code>SGLANG_HICACHE_MOONCAKE_CONFIG_PATH</code> is meaningless to <code>vllm</code> and is a plain user variable there.</p>
@@ -1033,9 +1048,10 @@ update that clears its finalizer on deletion is not.</li>
 <code>1</code>, and a user&rsquo;s own value wins with no refusal. It turns on the transfer engine&rsquo;s metrics, without
 which the hit rate this design rests on cannot be measured at all.</p>
 <p>So are <code>MC_FORCE_TCP</code> <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#direct-transfer-transport">on a <code>tcp</code> leg</a>
- and
+,
 <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#sglang-host-memory-tier">SGLang&rsquo;s two cache switches</a>
-.</p>
+, and the compilation
+cache root (<code>VLLM_CACHE_ROOT</code> on <code>vLLM</code>, <code>SGLANG_CACHE_DIR</code> on <code>SGLang</code>).</p>
 <p>Two of SGLang&rsquo;s owned keys are owned for what a user entry would <strong>destroy</strong> rather than duplicate,
 and the operator does not set either of them:</p>
 <ul>
@@ -1094,7 +1110,7 @@ uses it as written.</p>
 not reload their weights and keep their cached blocks. What still replaces <strong>every</strong> instance of the
 role is an edit that changes what a replica&rsquo;s Pod renders: <code>size</code>, <code>instanceType</code>, <code>resources</code>,
 <code>command</code>, <code>image</code>, <code>extraArgs</code>, <code>env</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>,
-<code>terminationGracePeriodSeconds</code>.</p>
+<code>terminationGracePeriodSeconds</code>, <code>startupTimeoutSeconds</code>.</p>
 <p>Such an edit <strong>deletes and recreates</strong> the role&rsquo;s replicas, one replica per role per pass, waited
 out. The role set itself cannot be edited at all; admission refuses a role added, removed, renamed
 or moved to another kind, so there is none of that to roll. There are no surge or unavailable knobs.</p>
@@ -1326,7 +1342,7 @@ table below lists both groups.</p>
       </tr>
       <tr>
           <td></td>
-          <td>the role&rsquo;s own Pod fields — <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>privileged</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>, <code>terminationGracePeriodSeconds</code></td>
+          <td>the role&rsquo;s own Pod fields — <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>privileged</code>, <code>ports</code>, <code>additionalVolumes</code>, <code>shmSize</code>, <code>terminationGracePeriodSeconds</code>, <code>startupTimeoutSeconds</code></td>
       </tr>
       <tr>
           <td></td>
@@ -1626,7 +1642,7 @@ structured snapshot and Pod scrape endpoints.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/34d37cde39c9476a7527b9cab9b737c5b0471f4a/docs/modules/model-deployment/deployment.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/287b6510ad2d11a818f435d5d5ee500b61bc1b99/docs/modules/model-deployment/deployment.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/deployment.md">Edit this page</a>
             
@@ -1649,6 +1665,7 @@ structured snapshot and Pod scrape endpoints.</li></ul>
       <ul>
         <li><a href="#take-over-roles-and-the-reuse-domain">Take-over roles and the reuse domain</a></li>
         <li><a href="#shared-memory">Shared memory</a></li>
+        <li><a href="#compilation-cache-and-startup-timeout">Compilation cache and startup timeout</a></li>
       </ul>
     </li>
     <li><a href="#operator-owned-keys">Operator-owned keys</a></li>

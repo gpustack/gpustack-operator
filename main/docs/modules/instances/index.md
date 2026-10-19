@@ -12,7 +12,7 @@ the user enter the workload container.
 
 ## Instance configuration
 
-The [Usage](https://github.com/gpustack/gpustack-operator/blob/34d37cde39c9476a7527b9cab9b737c5b0471f4a/README.md#usage) example creates a sliced Instance. [Accelerator
+The [Usage](https://github.com/gpustack/gpustack-operator/blob/287b6510ad2d11a818f435d5d5ee500b61bc1b99/README.md#usage) example creates a sliced Instance. [Accelerator
 Requests](../devices/requests.md#requesting-through-the-instance-api) explains how
 `spec.resources` maps to the accelerator resource families.
 
@@ -45,4 +45,4 @@ itself also deletes the Service.
 **See also** — [Heterogeneous Devices](/gpustack-operator/main/docs/modules/devices/index.md) (resource families) ·
 [Model Delivery](/gpustack-operator/main/docs/modules/model-delivery/index.md) (mounting model weights)
 
-**Next** → [Usage](https://github.com/gpustack/gpustack-operator/blob/34d37cde39c9476a7527b9cab9b737c5b0471f4a/README.md#usage) — launch a sliced Instance.
+**Next** → [Usage](https://github.com/gpustack/gpustack-operator/blob/287b6510ad2d11a818f435d5d5ee500b61bc1b99/README.md#usage) — launch a sliced Instance.
