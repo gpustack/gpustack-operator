@@ -1,6 +1,12 @@
 {
-  "latest": "v0.9.0",
+  "latest": "v0.9.1",
   "versions": [
+    {
+      "name": "v0.9.1",
+      "path": "v0.9.1/",
+      "commit": "cee81e860ecfae89948846337aa693d1491e1473",
+      "kind": "stable"
+    },
     {
       "name": "v0.9.0",
       "path": "v0.9.0/",
@@ -38,6 +44,12 @@
       "path": "v0.9.0-rc3/",
       "commit": "d7dffeab10b4baa46ccdf377928f567629b61017",
       "kind": "prerelease"
+    },
+    {
+      "name": "v0.9.1",
+      "path": "v0.9.1/",
+      "commit": "cee81e860ecfae89948846337aa693d1491e1473",
+      "kind": "stable"
     }
   ]
 }
