@@ -6311,6 +6311,13 @@ func (m *ModelDeploymentRole) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.StartupTimeoutSeconds != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.StartupTimeoutSeconds))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0xa0
+	}
 	if m.ShmSize != nil {
 		{
 			size, err := m.ShmSize.MarshalToSizedBuffer(dAtA[:i])
@@ -11447,6 +11454,9 @@ func (m *ModelDeploymentRole) Size() (n int) {
 		l = m.ShmSize.Size()
 		n += 2 + l + sovGenerated(uint64(l))
 	}
+	if m.StartupTimeoutSeconds != nil {
+		n += 2 + sovGenerated(uint64(*m.StartupTimeoutSeconds))
+	}
 	return n
 }
 
@@ -14146,6 +14156,7 @@ func (this *ModelDeploymentRole) String() string {
 		`TerminationGracePeriodSeconds:` + valueToStringGenerated(this.TerminationGracePeriodSeconds) + `,`,
 		`ElasticEP:` + strings.Replace(this.ElasticEP.String(), "ModelDeploymentRoleElasticEP", "ModelDeploymentRoleElasticEP", 1) + `,`,
 		`ShmSize:` + strings.Replace(fmt.Sprintf("%v", this.ShmSize), "Quantity", "resource.Quantity", 1) + `,`,
+		`StartupTimeoutSeconds:` + valueToStringGenerated(this.StartupTimeoutSeconds) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -34647,6 +34658,26 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 20:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field StartupTimeoutSeconds", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.StartupTimeoutSeconds = &v
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

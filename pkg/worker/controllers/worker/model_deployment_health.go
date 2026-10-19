@@ -334,6 +334,14 @@ func qualifyModelDeploymentInstance(
 		// after the create, which is a write an unchanged spec should not issue.
 		membersReady.Verdict = modelDeploymentLegUnknown
 		membersReady.Reason = "no member's readiness has been observed yet"
+	case unready == 0 && unobserved > 0:
+		// ONE MEMBER'S READINESS IS NOT THE WHOLE GROUP'S. A replica with a ready member and a
+		// sibling still inside its startup window has not made the observation this leg names,
+		// so it holds: reading it as "every member reports ready" would grant eligibility on a
+		// partial answer.
+		membersReady.Verdict = modelDeploymentLegUnknown
+		membersReady.Reason = strconvx.Itoa(unobserved) + " of " +
+			strconvx.Itoa(len(view.Members)) + " members are still starting"
 	case unready == 0:
 		membersReady.Reason = "every member reports ready"
 	default:
@@ -414,19 +422,48 @@ func qualifyModelDeploymentInstance(
 // (a kubelet that is restarting, a node gone quiet, an eviction in progress), and at that moment
 // nothing is known about the member's health; reading it as Failed would report a definite fault
 // the cluster never observed. Only False is the definite answer.
+//
+// A CONTAINER STILL IN ITS STARTUP WINDOW IS NOT A FAULT EITHER. A running container kubelet has
+// not marked Started is one whose startupProbe has not yet succeeded, which is the state a large
+// model can sit in for a long time while it compiles graphs; reading it as Failed would revoke a
+// replica for starting slowly and restart the very compilation the startup budget exists to
+// protect. A container stuck in a terminal waiting reason is the opposite: a definite fault
+// reported as one even before any readiness answer exists, because a group known to be broken
+// needs no further evidence.
 func modelDeploymentMemberReadiness(pod *core.Pod) modelDeploymentLegVerdict {
 	for _, condition := range pod.Status.Conditions {
-		if condition.Type != core.PodReady {
-			continue
-		}
-		if condition.Status == core.ConditionTrue {
+		if condition.Type == core.PodReady && condition.Status == core.ConditionTrue {
 			return modelDeploymentLegVerified
 		}
-		if condition.Status == core.ConditionFalse {
-			return modelDeploymentLegFailed
-		}
+	}
 
-		return modelDeploymentLegUnknown
+	for _, statuses := range [][]core.ContainerStatus{
+		pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses,
+	} {
+		for _, status := range statuses {
+			if status.State.Waiting != nil &&
+				isTerminalWaitReason(status.State.Waiting.Reason) {
+				return modelDeploymentLegFailed
+			}
+		}
+	}
+
+	if pod.Status.Phase == core.PodRunning {
+		for _, status := range pod.Status.ContainerStatuses {
+			if status.State.Running != nil && (status.Started == nil || !*status.Started) {
+				return modelDeploymentLegUnknown
+			}
+		}
+	}
+
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == core.PodReady {
+			if condition.Status == core.ConditionFalse {
+				return modelDeploymentLegFailed
+			}
+
+			return modelDeploymentLegUnknown
+		}
 	}
 
 	return modelDeploymentLegUnknown

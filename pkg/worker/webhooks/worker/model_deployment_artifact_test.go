@@ -175,6 +175,8 @@ func TestValidateModelDeploymentReservedMountPaths(t *testing.T) {
 	}{
 		{name: "an unrelated path", path: "/data"},
 		{name: "a sibling sharing a prefix", path: "/var/lib/gpustack/models"},
+		{name: "the compilation cache is open to user override", path: "/var/lib/gpustack/cache"},
+		{name: "the compilation cache without an artifact", path: "/var/lib/gpustack/cache", noRef: true},
 		{name: "the weights", path: "/var/lib/gpustack/model", want: true},
 		{name: "inside the weights", path: "/var/lib/gpustack/model/tokenizer", want: true},
 		{name: "around the weights", path: "/var/lib/gpustack", want: true},

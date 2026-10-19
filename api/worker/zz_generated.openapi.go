@@ -10062,6 +10062,15 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							Ref:         ref(v1alpha1.ModelDeploymentRoleElasticEP{}.OpenAPIModelName()),
 						},
 					},
+					"startupTimeoutSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StartupTimeoutSeconds is the maximum time in seconds that a role replica's main container is given to pass its startup probe before kubelet restarts it. Unset defaults to 1800 (30 minutes), which renders a startupProbe with periodSeconds 10 and failureThreshold 180.",
+							Minimum:     ptr.To[float64](10),
+							Maximum:     ptr.To[float64](86400),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
 				},
 				Required: []string{"name", "instanceType"},
 			},

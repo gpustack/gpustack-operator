@@ -260,7 +260,7 @@ Without one, users patch the rendered Pod and the reconcile loop silently overwr
 | Tier | Field | Semantics |
 |---|---|---|
 | append | `roles[].extraArgs`, `roles[].env` | appended **after** the operator-synthesized arguments; a key the operator owns is refused, never merged |
-| overlay | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `shmSize`, `terminationGracePeriodSeconds` | the operator renders first, then merges this overlay on top |
+| overlay | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `shmSize`, `terminationGracePeriodSeconds`, `startupTimeoutSeconds` | the operator renders first, then merges this overlay on top |
 | take over | `roles[].command` | the user owns the whole argv; the operator synthesizes **no** engine argument and **no** client environment |
 
 A role's Pod fields sit on the role itself, unlike the `Instance` that keeps its pod shape inside an
@@ -334,6 +334,25 @@ Changing the rendered capacity follows ordinary role rollout behavior.
 Existing Elastic members keep their mounts; new or replacement Pods use the current value.
 Upgrading the operator adds the default mount to ordinary roles and triggers their recreate rollout.
 
+### Compilation cache and startup timeout
+
+For an operator-managed role (`roles[].command` empty), the operator mounts a `DirectoryOrCreate`
+`HostPath` volume (`gpustack-compile-cache`) at `/var/lib/gpustack/cache` on the `main` container,
+backed by `/var/lib/gpustack/cache/<manufacturer>-<engine>/<model-identity>/tp<TP>-pp<PP>-dp<DP>-ep<EP>-cp<PCP>_<DCP>-<hash8>`
+on the node, and defaults `VLLM_CACHE_ROOT=/var/lib/gpustack/cache` (`vLLM`) or
+`SGLANG_CACHE_DIR=/var/lib/gpustack/cache` (`SGLang`).
+
+An explicit `/var/lib/gpustack/cache` mount in `additionalVolumes` takes precedence: the operator
+omits the default `gpustack-compile-cache` `HostPath` volume while preserving the defaulted
+`VLLM_CACHE_ROOT` or `SGLANG_CACHE_DIR` environment variable unless overridden in `roles[].env`.
+Take-over roles (`roles[].command` non-empty) receive neither the default cache volume nor the
+defaulted cache variable.
+
+`spec.roles[].startupTimeoutSeconds` sets the role's startup budget in seconds (default `1800`,
+range `10`..`86400`), scaling `startupProbe.failureThreshold` as `ceil(startupTimeoutSeconds / 10)`
+at `periodSeconds: 10` (`timeoutSeconds: 5`) so cold-start graph compilation is not killed by
+`livenessProbe` or disqualified by whole-group health before `startupProbe` succeeds.
+
 ## Operator-owned keys
 
 Ownership is per (engine, key): a key one engine owns is an ordinary user argument on another.
@@ -367,8 +386,9 @@ not in the table because it is conditional:
 `1`, and a user's own value wins with no refusal. It turns on the transfer engine's metrics, without
 which the hit rate this design rests on cannot be measured at all.
 
-So are `MC_FORCE_TCP` [on a `tcp` leg](prefill-decode.md#direct-transfer-transport) and
-[SGLang's two cache switches](../kv-cache/injection.md#sglang-host-memory-tier).
+So are `MC_FORCE_TCP` [on a `tcp` leg](prefill-decode.md#direct-transfer-transport),
+[SGLang's two cache switches](../kv-cache/injection.md#sglang-host-memory-tier), and the compilation
+cache root (`VLLM_CACHE_ROOT` on `vLLM`, `SGLANG_CACHE_DIR` on `SGLang`).
 
 Two of SGLang's owned keys are owned for what a user entry would **destroy** rather than duplicate,
 and the operator does not set either of them:
@@ -442,7 +462,7 @@ Changing `replicas` adds or removes instances and nothing more: the survivors ar
 not reload their weights and keep their cached blocks. What still replaces **every** instance of the
 role is an edit that changes what a replica's Pod renders: `size`, `instanceType`, `resources`,
 `command`, `image`, `extraArgs`, `env`, `ports`, `additionalVolumes`, `shmSize`,
-`terminationGracePeriodSeconds`.
+`terminationGracePeriodSeconds`, `startupTimeoutSeconds`.
 
 Such an edit **deletes and recreates** the role's replicas, one replica per role per pass, waited
 out. The role set itself cannot be edited at all; admission refuses a role added, removed, renamed
@@ -643,7 +663,7 @@ table below lists both groups.
 | the set of roles, and each role's `name` and `kind` | `roles[].replicas`, `roles[].size` |
 | on a role carrying `elasticEp`: its `size`, `instanceType`, `resources` and `command` | `roles[].instanceType`, `roles[].resources`, `roles[].command` |
 | | `roles[].extraArgs`, `roles[].env` |
-| | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `shmSize`, `terminationGracePeriodSeconds` |
+| | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `shmSize`, `terminationGracePeriodSeconds`, `startupTimeoutSeconds` |
 | | labels and annotations |
 
 The role's shape fields — `size`, `instanceType`, `resources`, `command` — are editable on the same

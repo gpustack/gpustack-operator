@@ -201,10 +201,14 @@ const (
 	// thresholds comparable to each other.
 	modelDeploymentProbePeriodSeconds int32 = 10
 	// modelDeploymentProbeTimeoutSeconds bounds one probe request. It is above the kubelet's
-	// one-second default because the route is served by the same process that is loading the model.
-	modelDeploymentProbeTimeoutSeconds int32 = 3
-	// modelDeploymentStartupFailureThreshold is how many periods a replica may take to load before
-	// the kubelet gives up on it, which at the period above is thirty minutes.
+	// one-second default because the route is served by the same process that is loading the
+	// model, and it is wide enough that a probe which arrives while a large weight shard is being
+	// read reports a timeout rather than cutting the read short.
+	modelDeploymentProbeTimeoutSeconds int32 = 5
+	// modelDeploymentStartupFailureThreshold is how many periods a replica that declared no
+	// startup budget may take to load before the kubelet gives up on it, which at the period above
+	// and DefaultModelDeploymentStartupTimeoutSeconds is thirty minutes. A role that declares a
+	// budget gets its own threshold, derived from that budget rather than from this constant.
 	//
 	// The budget is generous on purpose: load time grows with model size and with how the weights
 	// arrive, and a threshold that fits the smallest model turns a slow start into a restart loop.
@@ -524,6 +528,34 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	if !takeOver {
 		vols = append(vols, in.Connector.Volumes...)
 		mounts = append(mounts, in.Connector.VolumeMounts...)
+		// THE COMPILATION CACHE IS MOUNTED AT ONE PATH FOR EVERY MANAGED ROLE UNLESS THE ROLE'S
+		// OWN VOLUMES ALREADY COVER IT, and each role's own subdirectory of it is what the default
+		// volume carries. The path is therefore a constant to the engine -- which is what lets one
+		// cache-root variable be set without knowing which weights, parallel shape or flag set
+		// this particular role compiled for -- while the host side is computed per role, so two
+		// roles that would otherwise overwrite each other's generated kernels cannot. When the
+		// role mounts its own volume at, inside or around that path, the operator yields the
+		// host-backed volume just as /dev/shm yields below, leaving the user's volume to back the
+		// cache root. When the default host volume is used, a path that cannot be built is the
+		// loud direction rather than an omitted cache: a role silently sharing a root with a role
+		// it has nothing in common with is the collision this separation exists to prevent, so the
+		// render refuses instead.
+		if !modelDeploymentCompileCacheMountOverridden(mounts) {
+			compileCacheSubPath, err := BuildModelDeploymentCompileCacheSubPath(
+				ModelDeploymentCompileCacheInput{
+					Deployment:   md,
+					Role:         role,
+					InstanceType: in.InstanceType,
+					Artifact:     in.Artifact,
+				})
+			if err != nil {
+				return nil, fmt.Errorf(
+					"role %q cannot place its compilation cache: %w", role.Name, err)
+			}
+			cacheVolume, cacheMount := modelDeploymentCompileCacheVolumes(compileCacheSubPath)
+			vols = append(vols, cacheVolume)
+			mounts = append(mounts, cacheMount)
+		}
 	}
 	vols, mounts = modelDeploymentSharedMemoryVolumes(role, vols, mounts)
 
@@ -534,7 +566,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		probePath = modelDeploymentDirectDecodeProbePath
 	}
 	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(
-		servingPort, probeScheme, probePath, gradable, modelDeploymentProbesEncoderStage(md, role, takeOver))
+		servingPort, probeScheme, probePath, gradable,
+		modelDeploymentProbesEncoderStage(md, role, takeOver), role.StartupTimeoutSeconds)
 	ports, err := appendModelDeploymentConnectorPorts(declaredPorts, in.Connector, takeOver)
 	if err != nil {
 		return nil, err
@@ -1368,8 +1401,17 @@ func ModelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
 // service port is owned by its routing sidecar, which answers /health itself, so the gates read
 // the route the sidecar forwards to the engine instead -- a different path on the SAME address,
 // which leaves the one-fact property above intact.
+//
+// THE STARTUP BUDGET IS THE ROLE'S, and the threshold is derived from it rather than fixed, because
+// the two are the same statement written twice: the kubelet counts failures in periods and knows
+// nothing of seconds, so a role asking for two hours of loading has to be rendered a gate that
+// spends two hours before it gives up. A threshold left at the default for every role would cap
+// every one of them at thirty minutes no matter what the spec said. The derivation rounds UP, so
+// the budget is never spent slightly short of what was asked for, and floors at one period so a
+// budget shorter than a period still gets a gate rather than none.
 func modelDeploymentProbes(
 	servingPort core.ContainerPort, scheme core.URIScheme, path string, gradable, probesEncoder bool,
+	startupTimeoutSeconds *int32,
 ) (startup, readiness, liveness *core.Probe) {
 	if !gradable {
 		return nil, nil, nil
@@ -1403,9 +1445,26 @@ func modelDeploymentProbes(
 		}
 	}
 
-	return gate(modelDeploymentStartupFailureThreshold),
+	return gate(modelDeploymentStartupProbeFailureThreshold(startupTimeoutSeconds)),
 		gate(readinessThreshold),
 		gate(livenessThreshold)
+}
+
+// modelDeploymentStartupProbeFailureThreshold is how many probe periods a role's startup gate is
+// allowed before the kubelet restarts a replica still loading, derived from the budget the role
+// declared.
+//
+// A budget of nil or of no positive length is the default budget rather than a budget of nothing:
+// an object stored before the field existed must render the gate this operator has always
+// rendered, and an empty gate would restart every replica of it immediately.
+func modelDeploymentStartupProbeFailureThreshold(startupTimeoutSeconds *int32) int32 {
+	if startupTimeoutSeconds == nil || *startupTimeoutSeconds <= 0 {
+		return modelDeploymentStartupFailureThreshold
+	}
+
+	periods := (*startupTimeoutSeconds + modelDeploymentProbePeriodSeconds - 1) / modelDeploymentProbePeriodSeconds
+
+	return max(periods, 1)
 }
 
 // modelDeploymentProbesEncoderStage reports whether a role's gates grade a server that depends on
@@ -1444,11 +1503,18 @@ func mergeModelDeploymentEnv(
 		artifactEnv, artifactDefaulted = artifact.env(takeOver, engine)
 	}
 
+	// THE CACHE ROOT IS DEFAULTED, not owned, and the tier is what says so. A user who mounts the
+	// cache somewhere else, or runs an image whose engine spells the variable differently, has to
+	// be able to say so and have the entry survive: the operator's claim is only about the default,
+	// which the volume mounted above is what makes true.
+	defaulted := slices.Concat(
+		connector.DefaultedEnv, artifactDefaulted, modelDeploymentCompileCacheDefaultedEnv(engine))
+
 	env := make([]core.EnvVar, 0,
-		len(connector.Env)+len(artifactEnv)+len(connector.DefaultedEnv)+len(artifactDefaulted)+len(role.Env))
+		len(connector.Env)+len(artifactEnv)+len(defaulted)+len(role.Env))
 	env = append(env, connector.Env...)
 	env = append(env, artifactEnv...)
-	for _, e := range slices.Concat(connector.DefaultedEnv, artifactDefaulted) {
+	for _, e := range defaulted {
 		if modelDeploymentUserSetsEnv(role.Env, e.Name) {
 			continue
 		}

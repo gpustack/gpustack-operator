@@ -1776,13 +1776,12 @@ func TestModelDeployment_UnreadableDeclaredParallelismFailsTheRender(t *testing.
 	require.ErrorContains(t, err, "is not an integer")
 }
 
-// TestModelDeployment_UnreadableDeclaredParallelismOffThePairStaysTheEngines pins the gate the
-// loud direction wears: a deployment holding ONE half renders no transfer document, so the
-// resolution has no consumer and an unreadable degree on its books stays the engine's own
-// startup refusal rather than failing the reconcile of every unrelated field. Admission still
-// refuses the same declaration on a new object -- this path exists for objects written before
-// the webhook learned the check.
-func TestModelDeployment_UnreadableDeclaredParallelismOffThePairStaysTheEngines(t *testing.T) {
+// TestModelDeployment_UnreadableDeclaredParallelismOffThePairFailsTheRender pins that even when a
+// deployment holds only one half and renders no KV transfer document, a managed role's compilation
+// cache path still reads the declared parallel degrees and refuses an unreadable one rather than
+// guessing a 1/1 directory. Admission already refuses the same declaration on a new object -- this
+// path exists for objects written before the webhook learned the check.
+func TestModelDeployment_UnreadableDeclaredParallelismOffThePairFailsTheRender(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
 		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "banana"}
@@ -1790,7 +1789,8 @@ func TestModelDeployment_UnreadableDeclaredParallelismOffThePairStaysTheEngines(
 	cli := newModelDeploymentClient(md, newRenderInstanceType())
 
 	_, err := reconcileModelDeployment(t, cli)
-	require.NoError(t, err)
+	require.ErrorContains(t, err, `role "server" cannot place its compilation cache`)
+	require.ErrorContains(t, err, "is not an integer")
 }
 
 // TestModelDeployment_DegreeEditRollsThePair pins the rollout shape a degree edit has: the

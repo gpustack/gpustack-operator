@@ -49,6 +49,26 @@ func TestModelDeploymentRoleSizeBoundsSurviveMutability(t *testing.T) {
 	assert.InDelta(t, 1024, *replicas.Maximum, 0)
 }
 
+// TestModelDeploymentRoleStartupTimeoutBounds pins the schema contract of the per-role startup
+// timeout the renderer sizes the startup probe with. An omitted field must land on the schema
+// default of 1800, the historical 30-minute probe budget, and the admitted range must stay
+// inside 10..86400: below 10 one 10-second probe period can never pass, and above 86400 the
+// probe budget would exceed a day. These are schema facts, so they are pinned where the schema
+// is generated rather than assumed to have survived an annotation edit.
+func TestModelDeploymentRoleStartupTimeoutBounds(t *testing.T) {
+	role := roleSchema(t, "spec")
+
+	startupTimeout, ok := role.Properties["startupTimeoutSeconds"]
+	require.True(t, ok, "the schema has no spec.roles[].startupTimeoutSeconds")
+	require.NotNil(t, startupTimeout.Default, "startupTimeoutSeconds carries a default")
+	assert.Equal(t, "1800", string(startupTimeout.Default.Raw),
+		"an omitted startupTimeoutSeconds lands on 1800")
+	require.NotNil(t, startupTimeout.Minimum, "startupTimeoutSeconds carries a lower bound")
+	assert.InDelta(t, 10, *startupTimeout.Minimum, 0)
+	require.NotNil(t, startupTimeout.Maximum, "startupTimeoutSeconds carries an upper bound")
+	assert.InDelta(t, 86400, *startupTimeout.Maximum, 0)
+}
+
 // TestModelDeploymentRolesRemainAMapOnName pins the role list's merge identity. Roles are
 // listType=map keyed on name: reordering the list is not a change, and a name is what matches
 // an update to the role it edits. The mutable role contract depends on exactly this identity.
