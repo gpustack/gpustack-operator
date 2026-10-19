@@ -1,4 +1,4 @@
-# KV Cache Pool
+# KV Cache Pools and Bindings
 
 A `KVCacheBackend` runs a store. A `KVCachePool` publishes one, and a `KVCachePoolBinding` gives a
 namespace a quota on it under one reuse domain.

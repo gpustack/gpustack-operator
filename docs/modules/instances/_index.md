@@ -1,4 +1,4 @@
-# Accelerated Instances
+# GPU Instances
 
 An `Instance` is a container workspace backed by a Kubernetes Pod. It can use a whole, shared,
 sliced or partitioned accelerator. With an SSH public key, the operator adds a sidecar that lets

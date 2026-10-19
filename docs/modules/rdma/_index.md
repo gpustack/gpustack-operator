@@ -13,7 +13,7 @@ count; kubelet decides which endpoints a container receives.
 [RDMA Operations](operations.md) covers the resource keys, endpoint counts and kubelet
 TopologyManager policy. It also explains why Kueue admission alone does not reserve an interface.
 
-Follow [RDMA Network Endpoints Walkthrough](../../walkthroughs/rdma/network-endpoints.md) to
+Follow [RDMA Networking Walkthrough](../../walkthroughs/rdma/network-endpoints.md) to
 request and verify endpoints and NUMA alignment.
 
 ## Interface discovery
@@ -23,7 +23,7 @@ checks and labels the Device Manager reports.
 
 ---
 
-**See also** — [Topology Management](../topology/_index.md) (placing a workload within a domain) ·
+**See also** — [Topology](../topology/_index.md) (placing a workload within a domain) ·
 [Heterogeneous Devices](../devices/_index.md) (accelerator allocation)
 
 **Next** → [RDMA Operations](operations.md) — request and verify an endpoint.

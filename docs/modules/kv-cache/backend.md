@@ -41,7 +41,7 @@ spec:
 ```
 
 The example uses Mooncake `0.3.13`, which is compatible with the documented vLLM client. SGLang
-requires a different version; check [Engine Versions](../model-deployment/engine-versions.md) before
+requires a different version; check [Engine Compatibility](../model-deployment/engine-versions.md) before
 choosing `spec.image`.
 
 `connection.managed` and `connection.external` are both optional pointers and **exactly one** must be
@@ -222,7 +222,7 @@ defaulting on) every request resolves to the default tenant.
 
 **The client's version is a property of the engine image, not of anything on this CR.** Which
 client each supported engine's runner image carries, and so which line its store runs, is in the
-[Engine Versions](../model-deployment/engine-versions.md); an engine below its minimum there is
+[Engine Compatibility](../model-deployment/engine-versions.md); an engine below its minimum there is
 not supported.
 
 For any other image, read the client off the image in hand rather than off an engine version. A
@@ -901,7 +901,7 @@ running. Clearing the last claim lets the teardown complete.
 
 **A backend in use also cannot have `leader.multiTenancy` turned off.** The webhook refuses the edit
 while `status.usedBy` names a consumer, and the refusal names them. Remove the consumers first. See
-[KV Cache Pool](pool.md#operating-notes) for what the withdrawal costs on their side.
+[KV Cache Pools and Bindings](pool.md#operating-notes) for what the withdrawal costs on their side.
 
 > **Why** — the flag decides whether the master keeps a per-tenant ledger, and a consumer's quota is
 > both written and released through that ledger. Withdrawing it under a live consumer therefore takes
@@ -936,9 +936,9 @@ judging on another is how an object goes missing from its own teardown.
 
 ---
 
-**See also** — [KV Cache Leader](leader.md) (the metadata process, its probes and its
+**See also** — [KV Cache Election and Failover](leader.md) (the metadata process, its probes and its
 Lease election) · [KV Cache Local Disk Tier](local-disk-tier.md) (the optional disk layer on a member
-group, and the bucket that is its write unit) · [KV Cache Pool](pool.md) (how a namespace is granted
+group, and the bucket that is its write unit) · [KV Cache Pools and Bindings](pool.md) (how a namespace is granted
 a quota on this store, and what a quota ceiling buys) · [Admission](../devices/admission.md) (the gates and the four-view status pattern) ·
 [Settings & Environment Variables](../../reference/settings.md) (the `kv-cache-backend-image` Setting) ·
 [Installation Modes](../../operate/installation-modes.md) (why the CRD is applied by the worker, not the chart)

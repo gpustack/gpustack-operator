@@ -1,4 +1,4 @@
-# KV Cache Leader
+# KV Cache Election and Failover
 
 A `KVCacheBackend` runs a leader process for cache metadata. The operator manages its Deployment,
 Service, probes and Kubernetes Lease election.

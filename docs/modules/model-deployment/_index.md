@@ -13,8 +13,13 @@ its own replicas and resources.
 [Model Deployment Configuration](deployment.md) starts with a minimal manifest and explains
 the role contract. [Prefill and Decode](prefill-decode.md) covers split roles, and
 [Encode, Prefill and Decode](encode-prefill-decode.md) covers multimodal disaggregation.
-[Engine Versions](engine-versions.md) records tested version floors, and
-[Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) measures that disaggregation against an aggregated instance.
+[Engine Compatibility](engine-versions.md) lists minimum releases, client and store requirements,
+transport support and known failures.
+
+[Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) measures that
+disaggregation against an aggregated instance.
+[Prefill and Decode Benchmark](prefill-decode-benchmark.md) measures a text-only
+prefill/decode pair against an aggregated group on equal GPUs.
 
 Follow [Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/prefill-decode.md) for
 disaggregated serving, [Encode, Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) for
@@ -30,11 +35,16 @@ are directed.
 [Elastic EP](elastic-ep.md) keeps one serving instance and changes its collective while it runs.
 [Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) follows prefetch, TP2/DP2 startup, and DP2→4 expansion
 with captured resource output and completed inference requests.
+[Elastic EP Benchmark](elastic-ep-benchmark.md) measures the same width change under a live request
+stream.
 
 [External DP](external-dp.md) runs one fixed DP group with an HTTP endpoint on every rank and
 Router-balanced traffic across all of them.
-The [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md) runs a fixed group with one HTTP endpoint per rank
-and checks managed Router coverage.
+The [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md) runs a fixed group
+with one HTTP endpoint per rank and checks managed Router coverage.
+
+[External DP Benchmark](external-dp-benchmark.md) compares that group with a
+monolithic wide tensor-parallel group on the same GPUs.
 
 ---
 

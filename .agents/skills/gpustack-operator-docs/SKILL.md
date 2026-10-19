@@ -70,12 +70,17 @@ one, not to widen the overview.
 | A `NodeModelStore` or the `model-manager` plugin: a field and its writer, the status guard, mount authorization, materialization, a failure reason, collection, a metric | `docs/modules/model-delivery/node-store.md` |
 | Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, where replicas land and turning the preference off, upgrading, removing the cache | `docs/modules/model-delivery/operations.md` |
 | The `ModelDeployment` contract: the inherited reuse domain, the three override tiers, the owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field contract | `docs/modules/model-deployment/deployment.md` |
+| How an `elasticEp` profile resizes a serving instance's expert-parallel collective in place without replacing surviving pods | `docs/modules/model-deployment/elastic-ep.md` |
+| The measured comparison of an expert-parallel collective before, during, and after a live `elasticEp.width` resize | `docs/modules/model-deployment/elastic-ep-benchmark.md` |
 | A recorded Elastic EP expansion, its captured CR output and inference checks | `docs/walkthroughs/model-deployment/elastic-ep.md` |
 | A recorded model prefetch sequence and captured artifact, prefetch and node-store output | `docs/walkthroughs/model-delivery/prefetch.md` |
+| How External DP runs one fixed data-parallel collective with an HTTP endpoint on every rank behind `vllm-router` or `sglang-gateway` | `docs/modules/model-deployment/external-dp.md` |
+| The measured comparison of External DP per-rank serving against a monolithic wide tensor-parallel group | `docs/modules/model-deployment/external-dp-benchmark.md` |
 | A fixed External DP group, its minimum arguments, per-rank requests, or measured Router coverage | `docs/walkthroughs/model-deployment/external-dp.md` |
 | A `ModelDeployment` metrics snapshot, which series each field reads per engine, role and router, cache-hit scope or Pod scrape annotation | `docs/modules/model-deployment/metrics.md` |
 | What a `ModelDeployment` status condition or published field means, and how to read them when a deployment misbehaves | `docs/modules/model-deployment/status.md` |
 | How a prefill role and a decode role are paired: the connector each engine and router renders, `spec.router` and its fields, `spec.kvTransfer`, roles on different hardware, a role's own Service | `docs/modules/model-deployment/prefill-decode.md` |
+| The measured comparison of disaggregated prefill/decode serving against an equal-GPU aggregated group across uniform and mixed prompt lengths | `docs/modules/model-deployment/prefill-decode-benchmark.md` |
 | How an `Encode` role pairs with `Prefill` and `Decode`: the admitted EPD matrix, encoder-cache connectors (`ECCPUConnector`, `ECExampleConnector`), shared RWX PVC rules, soft co-location affinity, and bounded encoder drain | `docs/modules/model-deployment/encode-prefill-decode.md` |
 | The measured comparison of aggregated, prefill/decode and EPD serving: latency and throughput at each concurrency, the hardware and workload behind it, and the conditions under which EPD does not help | `docs/modules/model-deployment/encode-prefill-decode-benchmark.md` |
 | A recorded three-role EPD deployment (`Encode` + `Prefill` + `Decode` + `llm-d-router`), its captured CR/Pod output and multimodal inference check | `docs/walkthroughs/model-deployment/encode-prefill-decode.md` |
@@ -141,7 +146,21 @@ HTML examples inside fenced or inline code. The existing site gate checks this a
 link templates retain automatic URL escaping.
 When adding a page, add its order and short menu label to `site/data/navigation.yaml`. Put setup
 and configuration before operations and diagnosis; keep related vendor procedures together.
-Menu labels omit the parent module's name. Article titles and the agent index keep the full names.
+Name top-level groups for capabilities, such as `Heterogeneous Devices`, `RDMA Networking` and `Topology`.
+Use component names such as `Device Manager` when describing those components.
+Use short, Title-Cased nouns or noun phrases for menu labels. Name the article's purpose within
+its hierarchy and omit the parent module's name. Use `children` for subordinate pages, such as
+`Benchmark` under a serving mode or `API` under `Model Artifact`.
+Walkthrough module links use the same names and order as the outer capability groups.
+
+Choose titles from the page's task or subject. Check them against its introduction and main sections.
+For example, use `Election and Failover` for the menu of a page about those tasks.
+Article H1 titles may retain module names and useful `Operations`, `Reference` or `Walkthrough` suffixes.
+Keep accurate existing titles. Change a title only when it is unclear, misstates the content or conflicts with its menu label.
+The menu label and H1 must describe the same subject; they need not use identical words.
+Use `Overview` for a module introduction. Give a page about preparation or example selection a label that names that purpose.
+The `All pages` labels in `docs/README.md` must match each page's H1 character for character.
+Keep that table in navigation order, with child articles immediately after their parent.
 
 ## Page shape
 
@@ -163,7 +182,7 @@ These pages are not free text. Changing one side without the other breaks a buil
 | `docs/modules/model-deployment/deployment.md` owned-key table | `modelDeploymentOwnedKeys` | compare the owned keys with each engine's table row when either changes; the Go documentation test was removed |
 | `docs/reference/settings.md` tables | `pkg/worker/settings` and the `GPUSTACK_*` readers | nothing fails; an operator configures something that no longer exists |
 | `docs/README.md` page table | the set of files under `docs/` | `check-docs.sh` fails |
-| `docs/README.md` page **labels** | each page's `#` H1, character for character | `check-docs.sh` fails; a page's file name, H1 and index label are one set of words |
+| `docs/README.md` page **labels** | each page's `#` H1, character for character | `check-docs.sh` fails when an index label differs from its page title |
 
 ## Before you finish
 

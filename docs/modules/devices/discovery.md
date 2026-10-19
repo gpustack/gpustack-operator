@@ -409,7 +409,7 @@ than only a correctness one, because the files predate the allocation being retr
 `device-manager preflight` reads, on a bare host, the allocation-time preconditions the allocator
 reads when a workload lands. It drives each manufacturer's own responder with a synthetic
 allocation request rather than a copy of it, so a preflight answer and the allocation it predicts
-cannot disagree. The runbook is [Preflight Operations](preflight.md).
+cannot disagree. The runbook is [Preflight Checks](preflight.md).
 
 It asks three questions per manufacturer, in order, and each is answerable on its own:
 

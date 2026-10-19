@@ -20,14 +20,14 @@ together, or browse the [documentation](./docs/README.md).
   manufacturers and allocate whole devices, shared devices, logical slices or hardware partitions.
 - [RDMA Networking](./docs/modules/rdma/_index.md) — give workloads RDMA network interfaces
   alongside their accelerators.
-- [Topology Management](./docs/modules/topology/_index.md) — place related workloads within the
+- [Topology](./docs/modules/topology/_index.md) — place related workloads within the
   requested network or location domain.
 - [KV Cache](./docs/modules/kv-cache/_index.md) — share inference cache across workloads.
 - [Model Delivery](./docs/modules/model-delivery/_index.md) — fetch, verify and cache model weights
   on nodes before workloads need them.
 - [Model Deployment](./docs/modules/model-deployment/_index.md) — run model serving replicas with
   routing and optional prefill/decode roles.
-- [Accelerated Instances](./docs/modules/instances/_index.md) — enter accelerator-backed container
+- [GPU Instances](./docs/modules/instances/_index.md) — enter accelerator-backed container
   workspaces over SSH.
 
 ## Installation
@@ -112,7 +112,7 @@ interface; use an exclusive request when it must be the adapter's only tenant. T
 usable endpoint, and NUMA alignment depends on its kubelet policy. See
 [RDMA Operations](./docs/modules/rdma/operations.md) for the other resource keys and checks.
 
-### Topology Management
+### Topology
 
 When nodes already carry region and zone labels, an administrator can publish their hierarchy:
 
@@ -251,7 +251,7 @@ For a standalone serving example, read
 [Model Deployment](./docs/modules/model-deployment/deployment.md). [Prefill and
 Decode](./docs/modules/model-deployment/prefill-decode.md) shows how to split the serving roles.
 
-### Accelerated Instances
+### GPU Instances
 
 Choose an `InstanceType` from the pool list whose `SL` capacity has room for a slice. Replace
 `spec.type` with that name and `spec.data` with your SSH public key. This workspace gives you SSH

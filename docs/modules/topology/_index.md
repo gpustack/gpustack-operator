@@ -1,4 +1,4 @@
-# Topology Management
+# Topology
 
 GPUStack can describe domains such as zones and racks, then let Kueue account for capacity within
 those domains.

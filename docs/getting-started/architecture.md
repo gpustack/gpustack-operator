@@ -41,8 +41,8 @@ admission chain. Model delivery and KV cache are optional services alongside tha
 flowchart TB
     REQUEST["GPU Instances<br/>ModelDeployment / Pods"]
     WORKER["Worker"]
-    DEVICES["Devices Manager<br/>Accelerators / RDMA"]
-    TOPOLOGY["Topology Aware"]
+    DEVICES["Device Manager<br/>Accelerators / RDMA"]
+    TOPOLOGY["Topology"]
     QUEUES["Kueue<br/>Pools and queues"]
     ARTIFACT["Model Delivery<br/>ModelArtifact"]
     MODELS["Model Manager<br/>Node cache"]

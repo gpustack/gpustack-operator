@@ -1,6 +1,6 @@
 # Spec: Model Deployment Documentation, Navigation, and Live Benchmarks
 
-Status: Building
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -422,110 +422,149 @@ following structure (compliant with `check-docs.sh` caps):
 
 ### 5. Nebius Live Benchmark Plan and Scenario Justification
 
-Every benchmark follows the methodology established in
-`docs/modules/model-deployment/encode-prefill-decode-benchmark.md`: **benchmarks are not run to fit or
-cherry-pick favorable numbers, but to test the exact operational scenario each capability was designed
-for and identify both where it wins and where a simpler topology is better.**
+Every benchmark follows a clear pedagogical contract: **demonstrate both the regime where a simpler
+baseline is sufficient and the concrete crossover regime where turning on the capability wins**, while
+recording hardware/interconnect boundaries (`## Limitation`) when the capability is run on unsuitable
+fabric (such as plain PCIe or TCP without RDMA/NVSwitch).
 
-#### 5.1 Hardware Batches and Cost Discipline
+#### 5.1 Root-Cause Retrospective of Phase 1 (Plain-PCIe / TCP Run) and Hardware Redesign
 
-To minimize paid GPU cluster runtime, image pull overhead, and model download time, live execution is
-organized into two single-node warm batches:
+In the initial run on `gpu-rtx6000-a` (`8 × NVIDIA RTX PRO 6000 Blackwell Server Edition 96 GB` on
+plain PCIe without NVLink and without InfiniBand RDMA):
 
-1. **Batch 1 — `Prefill and decode` Benchmark (`project-e00xbnvkpr009f9sk2gcsz`, region `eu-north1`)**
-   - **Node shape**: 1 × `gpu-l40s-d` node with preset `4gpu-128vcpu-768gb` (4 × NVIDIA L40S 48 GB on
-     a single host, 400 GiB boot disk, no InfiniBand assumption).
-   - **Why 1 × 4-GPU node**: Guarantees deterministic placement without hostname pinning (which Kueue
-     and `ModelDeployment` topology rules reject), keeps both arms on identical hardware, and allows
-     4-card equal-GPU comparison in one warm `NodeModelStore` cache.
-   - **Lifecycle**: Provision once -> pull runner/router images and prefetch model once -> run Arm A
-     (Aggregated) and Arm B (Prefill/Decode) across all 3 suites -> verify stage execution counters ->
-     `terraform destroy` immediately upon completion.
+1. **`Prefill and Decode` (`Qwen/Qwen3-8B` on 1-GPU PCIe/TCP)**:
+   - Model was too small (`16 GB` weights on a `96 GB` GPU, leaving `64 GiB` KV cache per card so one GPU
+     was never compute- or KV-capacity-bound), and KV transfer ran over `MooncakeConnector` TCP loopback
+     without RDMA (`1.2×–6.5×` TTFT penalty and `103/104` empty-body drops under `ret=-1` burst saturation).
+2. **`Elastic EP` (`DeepSeek-V2-Lite-Chat` on PCIe with `--max-num-seqs=64`)**:
+   - With `--max-num-seqs=64` per DP rank, `Width 2` already had `128` concurrent slots (`4×` the maximum
+     tested concurrency `c=32`), so `Width 2` never queued; meanwhile, expanding `EP=4 -> EP=8` doubled
+     `allgather_reducescatter` payload across plain PCIe without NVSwitch, increasing single-token TPOT by
+     `82%` and reducing throughput by `27%–40%`.
+3. **`External DP` (`DeepSeek-V2-Lite-Chat` on PCIe with `--max-num-seqs=64`)**:
+   - Even `Wide TP (TP8)` had `64` slots (`2×` maximum concurrency `c=32`), so its single scheduler and
+     8× replicated MLA KV cache never saturated; meanwhile, 8-card PCIe `allgather_reducescatter` cost
+     `4.3×` the TPOT of `TP8`.
 
-2. **Batch 2 — `Elastic EP` and `External DP` Benchmarks (`project-e07nm50ama00jwzpb60mhy`, region `eu-south1`, or fallback `project-e00xbnvkpr009f9sk2gcsz` 4-GPU L40S if `gpu-rtx6000-a` quota/region is unavailable)**
-   - **Primary node shape**: 1 × `gpu-rtx6000-a` node with preset `8gpu-192vcpu-1744gb` (8 × NVIDIA
-     RTX PRO 6000 96 GB on a single host, 400 GiB boot disk).
-   - **Fallback node shape (if `eu-south1` `gpu-rtx6000-a` is unavailable or quota-blocked)**: reuse
-     1 × `gpu-l40s-d` `4gpu-128vcpu-768gb` node in `project-e00xbnvkpr009f9sk2gcsz` with scaled-down
-     degrees (`TP=1, DP=2 -> DP=4` for Elastic EP; `TP=4` vs `TP=1, DP=4, EP=4` for External DP).
-   - **Shared model & cache**: Both `Elastic EP` and `External DP` use `deepseek-ai/DeepSeek-V2-Lite-Chat`
-     (revision `85864749cd611b4353ce1decdb286193298f64c7`), so the model weights and runner image are
-     downloaded once and reused across both benchmarks before `terraform destroy`.
-   - **Scale-down rule**: Do not scale down GPU nodes between consecutive suites in the same batch.
-     Scale GPU node count to `0` via Terraform only if an operator code bug requires a rebuild and fix
-     cycle exceeding 30 minutes. Destroy the cluster immediately after Batch 2 finishes.
+**Unified Phase 2 Hardware Base (Cost-Controlled SXM5 + NVSwitch + InfiniBand RDMA)**:
+- **Cluster shape**: **1 × 8-GPU SXM5 node** (`gpu-h100-sxm` in `eu-north1` `project-e00xbnvkpr009f9sk2gcsz`,
+  or `gpu-h200-sxm` in `eu-west1` `project-e01yvmeppr008t3kdsqkkw` / `eu-north1`, preset
+  `8gpu-128vcpu-1600gb`, **`preemptible = true`** for ~50%–70% cost reduction, `boot_disk_size_gb = 400`,
+  with **900 GB/s intra-node NVSwitch NVLink** and **InfiniBand RDMA `infiniband_fabric`**) + **1 × CPU
+  node** (`cpu-d3` or `cpu-e2` `4vcpu-16gb` within the 9 vCPU non-GPU quota in `eu-north1`).
+- **Execution discipline**: Run all 4 scenarios sequentially on the same warm 8-GPU SXM5 node, prefetching
+  each model (`Qwen/Qwen2.5-VL-7B-Instruct`, `Qwen/Qwen3-32B`, `deepseek-ai/DeepSeek-V2-Lite-Chat`) once
+  into `NodeModelStore`, capturing both the benchmark suites and the corresponding walkthrough outputs, and
+  running `terraform destroy` immediately after verification.
+- **Preserving Phase 1 lessons**: Retain the measured plain-PCIe / TCP (`RTX PRO 6000`) negative results
+  as concrete quantitative evidence in each benchmark and walkthrough page's **`## Limitation`** section.
 
-#### 5.2 Benchmark 1: `Prefill and decode` (`docs/modules/model-deployment/prefill-decode-benchmark.md`)
+#### 5.2 Scenario 1: `Encode, Prefill and Decode` (`encode-prefill-decode-benchmark.md` + `walkthroughs/model-deployment/encode-prefill-decode.md`)
 
-- **Scenario hypothesis**: Disaggregating `prefill` and `decode` onto dedicated GPUs isolates ongoing
-  decode streams from compute-bound prefill bursts (stabilizing TPOT and tail ITL p99 under long
-  prompts or mixed traffic), at the cost of a KV-cache transfer hop (`MooncakeConnector` over TCP)
-  that hurts TTFT at concurrency 1 or on short prompts, and splits the total GPU pool between fixed
-  prefill and decode capacities.
-- **Equal-GPU arms (4 × NVIDIA L40S 48 GB total per arm, `Qwen/Qwen3-8B` BF16, vLLM `0.30.0`, no
-  `--enforce-eager`)**:
-  - **Arm 1 — Aggregated (`server`)**: `replicas: 4`, `size: 1` (4 independent `server` replicas, 1
-    GPU each, fronted by `gpustack/llm-router:v0.3.1`).
-  - **Arm 2 — Disaggregated (`prefill` + `decode`, 2P2D)**: `prefill` (`replicas: 2`, 1 GPU each) +
-    `decode` (`replicas: 2`, 1 GPU each), connected via `MooncakeConnector` over `tcp`.
+- **Model**: `Qwen/Qwen2.5-VL-7B-Instruct` (revision `cc594898137f460bfe9f0759e9844b3ce807cfb5`, BF16).
+- **Arms on Unified SXM5 Hardware**:
+  - **Arm 1 — Aggregated (`1 × Server`, 1 GPU)**: Vision encoder + prefill + decode in one engine.
+  - **Arm 2 — `PD` (`1 × Prefill + 1 × Decode`, 2 GPUs)**: Vision encoder still inside `Prefill`; KV cache
+    transferred to `Decode`.
+  - **Arm 3 — `EPD` (`1 × Encode + 1 × Prefill + 1 × Decode`, 3 GPUs)**: Dedicated vision encoder
+    (`--mm-encoder-only`, defaulted `--enforce-eager`) transferring visual embeddings via `ECCPUConnector`
+    (NIXL + shared RWX volume) to `Prefill`, and KV cache to `Decode`.
 - **Workload suites**:
-  - **Suite 1: Context-length & concurrency sweep** — Prompt/output token shapes `512 / 256` (short
-    prompt), `4096 / 128` (prefill-heavy), and `256 / 1024` (decode-heavy) at concurrencies `1`, `4`,
-    `8`, and `16` with unique non-cached prompts. Shows where Aggregated 4-way data parallelism beats
-    2P2D on TTFT/throughput and where 2P2D wins on ITL p99 and long-prompt interference.
-  - **Suite 2: Mixed long-prefill bursts and steady decode stream** — Two concurrent streams against
-    the same endpoint: 4 workers sending steady `512`-prompt / `256`-output decode requests while 4
-    workers inject `4096`–`8192` token prefill bursts (`max_tokens=64`). Measures decode stream ITL
-    p95/p99 protection (`chunked prefill` interference on Aggregated vs physical GPU isolation on
-    2P2D).
-  - **Suite 3: Stage execution & KV transfer verification** — Verifies router request distribution and
-    confirms both `prefill` and `decode` engines execute every disaggregated request.
+  - **Suite 1: Image resolution & concurrency sweep** — `1k`, `2k`, `4k`, and `8k` total tokens (visual +
+    text prompt, `128` output tokens, unique non-cached images) at concurrencies `1`, `4`, and `8`. Shows
+    `Aggregated` winning at `1k`/`2k` low concurrency (lowest GPU cost, no transfer hop) and `EPD` crossing
+    over to win at `4k`/`8k` under concurrency (`4, 8`).
+  - **Suite 2: Mixed small-image steady stream + heavy-vision burst** — Concurrent `1k` steady decode stream
+    and `4k` heavy-vision bursts (`c=4` + `c=4`), demonstrating how `EPD` isolates both `Prefill` and
+    `Decode` from ViT forward stalls.
+  - **Suite 3: Repeated-image multi-turn queries (encoder cache reuse)** — `4k` shared PNG with unique text
+    questions at concurrencies `4` and `8`, showing `EPD` encoder cache reuse cutting TTFT and boosting
+    total throughput across all metrics.
+- **Walkthrough update (`docs/walkthroughs/model-deployment/encode-prefill-decode.md`)**:
+  - Verify and align the walkthrough manifest, CR status, and curl verification against the unified SXM5
+    environment, while keeping the 2-GPU node co-location rule documented in `## Limitation`.
 
-#### 5.3 Benchmark 2: `Elastic EP` (`docs/modules/model-deployment/elastic-ep-benchmark.md`)
+#### 5.3 Scenario 2: `Prefill and Decode` (`prefill-decode-benchmark.md` + `walkthroughs/model-deployment/prefill-decode.md`)
 
-- **Scenario hypothesis**: `Elastic EP` allows a running MoE `ModelDeployment` (`DeepSeek-V2-Lite-Chat`)
-  to expand its expert-parallel world size in place (`DP=2 -> DP=4` at `TP=2`, growing `EP` from `4`
-  to `8` GPUs, or `DP=2 -> DP=4` at `TP=1` on 4 GPUs) when concurrency rises, without replacing the
-  deployment or losing the master endpoint, trading a brief readiness withdrawal / resize window during
-  Ray collective reconfiguration for `~2×` higher saturation throughput after scale-up.
-- **Arms & states (`deepseek-ai/DeepSeek-V2-Lite-Chat`, vLLM `0.29.0` + Ray `2.54.0`)**:
-  - **State 1 — Baseline before scale-up (`DP=2`, 4 GPUs on 8-GPU node or 2 GPUs on 4-GPU node)**:
-    Measure steady-state latency (TTFT p50/p95, TPOT p50, ITL p99) and throughput (`tok/s`, `req/s`)
-    at concurrencies `1`, `4`, `8`, `16`, and `32` (`1024` prompt / `256` output tokens).
-  - **State 2 — Live scale-up transition (`DP=2 -> DP=4`) under load**: Patch `role.replicas` / width
-    to `4` while a steady request stream runs; measure total resize duration (`Scaling` condition
-    transition), readiness withdrawal window, HTTP 503 / error count during collective rebuild, and
-    time to first successful post-resize response.
-  - **State 3 — Expanded steady state (`DP=4`, 8 GPUs on 8-GPU node or 4 GPUs on 4-GPU node)**:
-    Re-run the same concurrency sweep (`1`, `4`, `8`, `16`, `32`) and compare against State 1. Show
-    that at concurrency `1`–`4`, `DP=4` buys no latency improvement over `DP=2` (wasting 2× GPUs),
-    whereas at concurrency `16`–`32`, `DP=4` substantially reduces queueing TTFT and nearly doubles
-    token throughput.
-
-#### 5.4 Benchmark 3: `External DP` (`docs/modules/model-deployment/external-dp-benchmark.md`)
-
-- **Scenario hypothesis**: For MoE models (`DeepSeek-V2-Lite-Chat`), wide Tensor Parallelism (`TP=8` or
-  `TP=4`) shards every attention and expert layer across all GPUs, incurring all-reduce synchronization
-  on every layer and routing all HTTP traffic through a single API server process. `External DP + EP`
-  (`size: 4` ranks × `TP=2`, `EP=8` on 8 GPUs; or `size: 4` ranks × `TP=1`, `EP=4` on 4 GPUs) keeps
-  attention local to each narrow TP rank, shards experts across the full EP world, and gives every DP
-  rank its own HTTP endpoint behind `gpustack/llm-router`. At concurrency `1`, `TP` can have lower
-  single-request latency because all GPUs cooperate on one request; under concurrent load (`4`–`32`),
-  `External DP + EP` wins on aggregate throughput (`tok/s`, `req/s`) and TTFT by running independent
-  attention batches per rank.
-- **Equal-GPU arms (`deepseek-ai/DeepSeek-V2-Lite-Chat`, same vLLM image and graph setting)**:
-  - **Arm 1 — Monolithic Wide TP (`server`, `replicas: 1, size: 1`, `TP=8` on 8 GPUs or `TP=4` on 4
-    GPUs)**: Single HTTP endpoint, full-width tensor parallelism.
-  - **Arm 2 — External DP + EP (`server`, `replicas: 1, size: 4`, `TP=2, DP=4, EP=8` on 8 GPUs or
-    `TP=1, DP=4, EP=4` on 4 GPUs)**: Four per-rank Pods (`--data-parallel-rank $(GPUSTACK_MEMBER_INDEX)`),
-    each exposing an HTTP endpoint balanced by `gpustack/llm-router` (`round-robin`).
+- **Model**: **`Qwen/Qwen3-32B`** (BF16, ~64 GB weights — sized appropriately for 80 GB SXM5 GPUs with
+  `TP2`, replacing the undersized `Qwen3-8B` so prefill compute and KV transfer volume are realistic).
+- **Equal-GPU arms (6 GPUs total per arm, matching `docs/walkthroughs/model-deployment/prefill-decode.md`)**:
+  - **Arm 1 — Aggregated (`3 × Server`, `TP2`, 6 GPUs total)**: `replicas: 3`, `size: 1`, 2 GPUs per
+    replica (`--tensor-parallel-size=2`), fronted by `gpustack/llm-router:v0.3.1` (`round_robin`).
+  - **Arm 2 — Disaggregated `PD` (`1 × Prefill TP2 + 2 × Decode TP2`, 6 GPUs total)**: `prefill`
+    (`replicas: 1`, 2 GPUs, `TP2`) + `decode` (`replicas: 2`, 2 GPUs each, `TP2`) behind `llm-d-router`,
+    using high-speed RDMA / NVLink KV transfer (**target: 100% request success, 0 empty-body drops across
+    all suites**).
 - **Workload suites**:
-  - **Suite 1: Concurrency & prompt-length sweep** — `1024 / 256` and `4096 / 128` prompt/output shapes
-    across concurrencies `1`, `4`, `8`, `16`, and `32`. Captures the single-stream vs high-concurrency
-    crossover between wide TP and External DP + EP.
-  - **Suite 2: Per-rank endpoint registration and load-balance verification** — Verifies all 4 rank
-    endpoints are registered in the router ConfigMap/status, confirms distinct GPU UUIDs and native
-    `DP_rank` identities, and records per-rank `vllm:request_success_total` counters after the run.
+  - **Suite 1: Context-length & concurrency sweep** — `512 / 256` (short prompt), `4096 / 512` (balanced
+    long context), and `8192 / 256` (prefill-heavy) across concurrencies `1`, `4`, `8`, and `16`. At
+    `512/256` low concurrency, `Aggregated` has lower TTFT (no KV transfer hop); at `4096/512` and
+    `8192/256` under concurrency `8–16`, `PD` wins on ITL p99 and sustained decode throughput.
+  - **Suite 2: Mixed long-prefill bursts and steady decode stream (`100%` completion)** — 4 steady decode
+    workers (`512` prompt / `512` output) + 4 burst prefill workers (`8192` prompt / `64` output). Shows
+    `Aggregated` suffering severe ITL p99 spikes when 8k prefills interrupt active decode batches, while
+    `PD` keeps steady-stream ITL p99 flat (`3×–5×` lower) and achieves higher combined throughput.
+  - **Suite 3: Stage execution & KV transfer verification** — Confirms 100% request completion through
+    `prefill` -> KV connector -> `decode`.
+- **`## Limitation`**: Retain the measured plain-PCIe / TCP (`RTX PRO 6000` without RDMA) numbers showing
+  that over TCP without RDMA, KV transfer latency (`1.2×–6.5×` TTFT penalty) and Mooncake TCP `ret=-1`
+  burst drops negate disaggregation benefits.
+- **Walkthrough update (`docs/walkthroughs/model-deployment/prefill-decode.md`)**:
+  - Replace `This page records no captured run.` with live captured CR JSON, router status, inference curl
+    response, and Kueue workload admission on the 6-GPU `1 × Prefill (TP2) + 2 × Decode (TP2)` deployment.
+
+#### 5.4 Scenario 3: `Elastic EP` (`elastic-ep-benchmark.md` + `walkthroughs/model-deployment/elastic-ep.md`)
+
+- **Model**: `deepseek-ai/DeepSeek-V2-Lite-Chat` (revision `85864749cd611b4353ce1decdb286193298f64c7`, BF16)
+  on 8 × SXM5 GPUs (900 GB/s NVSwitch NVLink).
+- **Deployment shape & bounded per-rank capacity**:
+  - Single `Server` role with `--tensor-parallel-size=2`, `--enable-expert-parallel`,
+    `--all2all-backend=allgather_reducescatter`, `--elastic-ep-max-dp-size=4`, and bounded per-rank batch
+    slots **`--max-num-seqs=16`** (so `Width 2` provides `2 × 16 = 32` active sequence slots across 4 GPUs,
+    and `Width 4` provides `4 × 16 = 64` active sequence slots across 8 GPUs).
+- **States & workload suites**:
+  - **State 1 — Baseline `Width 2` (`DP2, TP2, EP4`, 4 GPUs)** across concurrencies `1, 8, 16, 32, 64`
+    (`1024` prompt / `256` output tokens).
+  - **State 2 — Live scale-up transition (`Width 2 -> Width 4`, `4 GPUs -> 8 GPUs`) under load**: Patch
+    `elasticEp.width: 4`, recording exact `Scaling` duration, readiness withdrawal window, in-flight drain,
+    and zero weight reload on surviving members `0` and `1`.
+  - **State 3 — Expanded `Width 4` (`DP4, TP2, EP8`, 8 GPUs)** across concurrencies `1, 8, 16, 32, 64`.
+    Shows that at `c=1, 8`, `Width 2` is sufficient and saves 4 GPUs; at `c=32, 64`, `Width 2` saturates
+    its 32 slots and queues heavily, whereas `Width 4` over NVSwitch eliminates queueing, **slashes TTFT,
+    and nearly doubles output throughput (`tok/s` and `req/s`)**.
+- **`## Limitation`**: Retain the measured plain-PCIe (`RTX PRO 6000`) finding that without NVSwitch/RDMA,
+  expanding `allgather_reducescatter` from 4 to 8 GPUs over PCIe increases single-token TPOT by `82%` and
+  reduces throughput by `27%–40%`.
+- **Walkthrough update (`docs/walkthroughs/model-deployment/elastic-ep.md`)**:
+  - Align image tag (`vllm0.30.0`), `--elastic-ep-max-dp-size=4`, `--max-num-seqs=16`, and captured scale-up
+    logs/status with the live SXM5 run.
+
+#### 5.5 Scenario 4: `External DP` (`external-dp-benchmark.md` + `walkthroughs/model-deployment/external-dp.md`)
+
+- **Model**: `deepseek-ai/DeepSeek-V2-Lite-Chat` (revision `85864749cd611b4353ce1decdb286193298f64c7`, BF16,
+  reusing the warm `NodeModelStore` artifact from Scenario 3).
+- **Equal-GPU arms (8 × SXM5 GPUs per arm, 900 GB/s NVSwitch NVLink, `--max-num-seqs=16` per scheduler)**:
+  - **Arm 1 — Monolithic `Wide TP` (`1 × Server TP8`, 8 GPUs)**: `replicas: 1, size: 1`, 8 GPUs
+    (`--tensor-parallel-size=8`, `--max-num-seqs=16`), 1 HTTP API server & scheduler (`16` active slots
+    total), 8× duplicated MLA KV cache across all 8 GPUs.
+  - **Arm 2 — `External DP` (`1 × Server, size: 4, TP2, DP4, EP8`, 8 GPUs)**: `replicas: 1, size: 4`, 2
+    GPUs per member (`--tensor-parallel-size=2`, `--data-parallel-size=4`, `--enable-expert-parallel`,
+    `--data-parallel-rank $(GPUSTACK_MEMBER_INDEX)`, `--max-num-seqs=16`), 4 independent HTTP API servers &
+    schedulers (`4 × 16 = 64` active slots total, `4×` effective MLA KV cache capacity) fronted by
+    `gpustack/llm-router:v0.3.1` (`round_robin`).
+- **Workload suites**:
+  - **Prompt shape and concurrency sweep** — `1024 / 256` and `4096 / 256` across concurrencies `1, 4, 8,
+    16, 32, 64`. Shows `Wide TP` winning at `c=1, 4` (all 8 GPUs cooperate on one request's attention for
+    lowest single-stream TTFT/TPOT), and **`External DP` crossing over to win decisively at `c=16, 32, 64`**
+    (where `Wide TP`'s single 16-slot scheduler queues heavily while `External DP`'s 4 independent
+    schedulers and NVSwitch-backed EP deliver much lower TTFT and higher total throughput).
+  - **Per-rank registration and load balance** — Verifies all 4 rank endpoints in the router ConfigMap and
+    balanced `vllm:request_success_total` counters across ranks `0..3`.
+- **`## Limitation`**: Retain the measured plain-PCIe (`RTX PRO 6000`) finding where 8-card PCIe
+  `allgather_reducescatter` cost `4.3×` the TPOT of `TP8`.
+- **Walkthrough update (`docs/walkthroughs/model-deployment/external-dp.md`)**:
+  - Align image tags (`vllm0.30.0`, `llm-router:v0.3.1`), manifest flags, and captured status/metrics with
+    the live SXM5 run.
 
 ### Commands
 
@@ -595,25 +634,39 @@ PACKAGE_PUSH=true PACKAGE_NAMESPACE=$REGISTRY_NAMESPACE PACKAGE_TAG=dev-$(git re
       Acceptance: `docs/modules/model-deployment/encode-prefill-decode.md` documents why `--enforce-eager` is defaulted on `RoleEncode` alone (`MMEncoderModelRunner` / `--mm-encoder-only` runs no language model, KV cache, or decoder CUDA graphs, and V1 `GPUModelRunner` / upstream vLLM `v0.30.0` requires `--enforce-eager` on encoder instances while `Prefill` and `Decode` keep CUDA graphs enabled) and includes the SGLang `status.endpoint` front-door contract under `### SGLang`; `encode-prefill-decode-benchmark.md` updates its SGLang anchor to `encode-prefill-decode.md#sglang`; `docs/modules/model-deployment/external-dp.md` documents External DP derivation, per-rank Pods, Service/Router endpoint eligibility, and admission rules, and is linked from `docs/modules/model-deployment/_index.md`.
       Verify: `test -s docs/modules/model-deployment/external-dp.md && bash .agents/skills/gpustack-operator-docs/scripts/check-docs.sh --report`
 
-- [ ] **T3 · Live Nebius Benchmark Batch 1: `Prefill and decode` Benchmark**
+- [x] **T3 · Live Nebius Benchmark Batch 1: `Prefill and decode` Benchmark**
       Blocked by: None
       Owns: `docs/modules/model-deployment/prefill-decode-benchmark.md`, `docs/modules/model-deployment/prefill-decode.md`
       Gate: review
-      Acceptance: Live Nebius benchmark executed by `mcode` (cross-reviewed by `qwen-code`) on 4 × NVIDIA L40S (`project-e00xbnvkpr009f9sk2gcsz`, `gpu-l40s-d` `4gpu-128vcpu-768gb`) comparing equal-GPU Aggregated (`4 × 1-GPU server`) vs Disaggregated (`2 × 1-GPU prefill + 2 × 1-GPU decode` over `MooncakeConnector` TCP) on `Qwen/Qwen3-8B` BF16 (vLLM `0.30.0`, no `--enforce-eager`) across Suite 1 (`512/256`, `4096/128`, `256/1024` at concurrencies `1, 4, 8, 16`), Suite 2 (mixed long-prefill bursts + steady decode stream), and Suite 3 (stage execution verification). `docs/modules/model-deployment/prefill-decode-benchmark.md` is written and reviewed by `codex`, linked from `prefill-decode.md`, and contains zero personal registry namespaces or SHA256 digests.
+      Acceptance: Live Nebius benchmark executed by `mcode` (cross-reviewed by `qwen-code`) on 4 × NVIDIA RTX PRO 6000 (`project-e07nm50ama00jwzpb60mhy`, `eu-south1` `gpu-rtx6000-a` `8gpu-192vcpu-1744gb`, or 4 × NVIDIA L40S in `project-e00xbnvkpr009f9sk2gcsz`) comparing equal-GPU Aggregated (`4 × 1-GPU server`) vs Disaggregated (`2 × 1-GPU prefill + 2 × 1-GPU decode` over `MooncakeConnector` TCP) on `Qwen/Qwen3-8B` BF16 (vLLM `0.30.0`, no `--enforce-eager`) across Suite 1 (`512/256`, `4096/128`, `256/1024` at concurrencies `1, 4, 8, 16`), Suite 2 (mixed long-prefill bursts + steady decode stream), and Suite 3 (stage execution verification). `docs/modules/model-deployment/prefill-decode-benchmark.md` is written and reviewed by `codex`, linked from `prefill-decode.md`, and contains zero personal registry namespaces or SHA256 digests.
       Verify: `test -s docs/modules/model-deployment/prefill-decode-benchmark.md && ! grep -riE '@sha256:' docs/modules/model-deployment/prefill-decode-benchmark.md`
 
-- [ ] **T4 · Live Nebius Benchmark Batch 2: `Elastic EP` and `External DP` Benchmarks & Cluster Teardown**
+- [x] **T4 · Live Nebius Benchmark Batch 2: `Elastic EP` and `External DP` Benchmarks & Cluster Teardown**
       Blocked by: T2, T3
       Owns: `docs/modules/model-deployment/elastic-ep-benchmark.md`, `docs/modules/model-deployment/elastic-ep.md`, `docs/modules/model-deployment/external-dp-benchmark.md`
       Gate: review
       Acceptance: Live Nebius benchmarks executed by `mcode` (cross-reviewed by `qwen-code`) on `deepseek-ai/DeepSeek-V2-Lite-Chat` (`85864749cd611b4353ce1decdb286193298f64c7`) using 1 × 8-GPU `gpu-rtx6000-a` (`project-e07nm50ama00jwzpb60mhy`) or the warm 4-GPU `gpu-l40s-d` node (`project-e00xbnvkpr009f9sk2gcsz`): (1) `Elastic EP` measures baseline `DP=2`, live scale-up `DP=2 -> DP=4` under concurrent load (resize duration, readiness withdrawal window, HTTP 503/error count, recovery time), and expanded `DP=4` across concurrencies `1, 4, 8, 16, 32`; (2) `External DP` compares equal-GPU Monolithic Wide TP (`replicas: 1, size: 1`) vs `External DP + EP` (`replicas: 1, size: 4`, `--enable-expert-parallel`, per-rank HTTP endpoints behind `gpustack/llm-router` `round-robin`) across `1024/256` and `4096/128` at concurrencies `1, 4, 8, 16, 32` plus per-rank counter verification. All Nebius clusters are destroyed via `terraform destroy` with zero remaining GPU nodes. Both benchmark pages are reviewed by `codex`.
       Verify: `test -s docs/modules/model-deployment/elastic-ep-benchmark.md && test -s docs/modules/model-deployment/external-dp-benchmark.md && ! grep -riE '@sha256:' docs/modules/model-deployment/elastic-ep-benchmark.md docs/modules/model-deployment/external-dp-benchmark.md`
 
-- [ ] **T5 · Hugo Sidebar Nesting, Menu Ordering, Capitalization, and Shared Index Sync**
+- [x] **T5 · Hugo Sidebar Nesting, Menu Ordering, Capitalization, and Shared Index Sync**
       Blocked by: T1, T2, T3, T4
       Owns: `site/data/navigation.yaml`, `site/layouts/partials/nav-section.html`, `site/layouts/partials/ordered-pages.html`, `docs/README.md`, `.agents/skills/gpustack-operator-docs/SKILL.md`
       Gate: review
       Acceptance: `site/data/navigation.yaml`, `ordered-pages.html`, and `nav-section.html` render the reordered `Model Deployment` menu (`Overview`, `Configuration`, `Prefill and decode` + `Benchmark`, `Encode, prefill and decode` + `Benchmark`, `Elastic EP` + `Benchmark`, `External DP` + `Benchmark`, `Engine versions`, `Routing`, `Metrics`, `Status`, `Shutdown`) with Title Case `groups:` (`Getting Started`) and Sentence case `labels:` (`Model delivery`); `docs/README.md` (`## Module map` and `## All pages`) and `.agents/skills/gpustack-operator-docs/SKILL.md` index all 4 new pages; `make lint docs` passes with zero warnings or errors.
+      Verify: `make lint docs`
+
+- [x] **T6 · Live Nebius SXM5 Re-Run: 4-Scenario Benchmarks (`EPD`, `PD`, `Elastic EP`, `External DP`) and Walkthrough Captures**
+      Blocked by: T5
+      Owns: `testing/infra/clusters/nebius/terraform.tfvars` (ephemeral, uncommitted)
+      Gate: review
+      Acceptance: Provision 1 × 8-GPU SXM5 node (`gpu-h100-sxm` in `eu-north1` `project-e00xbnvkpr009f9sk2gcsz`, or `gpu-h200-sxm`, `8gpu-128vcpu-1600gb`, `preemptible = true`, 900 GB/s NVSwitch NVLink + InfiniBand RDMA) + 1 × CPU node (`cpu-d3` / `cpu-e2` `4vcpu-16gb`), executed by `mcode` and cross-reviewed by `qwen`: (1) `EPD` (`Qwen/Qwen2.5-VL-7B-Instruct`: `Aggregated 1 GPU` vs `PD 2 GPUs` vs `EPD 3 GPUs` across Suites 1–3 + walkthrough verification); (2) `PD` (`Qwen/Qwen3-32B`: `Aggregated 3 × TP2 = 6 GPUs` vs `PD 1 × Prefill TP2 + 2 × Decode TP2 = 6 GPUs` with 100% completion across Suites 1–3 + walkthrough capture); (3) `Elastic EP` (`deepseek-ai/DeepSeek-V2-Lite-Chat`, `--max-num-seqs=16`: `Width 2 (4 GPUs) -> Width 4 (8 GPUs)` live resize + concurrency sweep `1..64` showing high-concurrency crossover + walkthrough capture); (4) `External DP` (`deepseek-ai/DeepSeek-V2-Lite-Chat`, `--max-num-seqs=16`: `Wide TP (TP8, 8 GPUs)` vs `External DP (size: 4, TP2, DP4, EP8, 8 GPUs)` across concurrencies `1..64` showing high-concurrency crossover + per-rank balance + walkthrough capture). Immediately run `terraform destroy` upon completion.
+      Verify: `cd testing/infra/clusters/nebius && terraform state list | wc -l | grep -qx '0'`
+
+- [x] **T7 · Update 4 Benchmark Pages and 4 Walkthrough Pages with SXM5 Crossover Results and PCIe/TCP Limitations**
+      Blocked by: T6
+      Owns: `docs/modules/model-deployment/encode-prefill-decode-benchmark.md`, `docs/modules/model-deployment/prefill-decode-benchmark.md`, `docs/modules/model-deployment/elastic-ep-benchmark.md`, `docs/modules/model-deployment/external-dp-benchmark.md`, `docs/walkthroughs/model-deployment/encode-prefill-decode.md`, `docs/walkthroughs/model-deployment/prefill-decode.md`, `docs/walkthroughs/model-deployment/elastic-ep.md`, `docs/walkthroughs/model-deployment/external-dp.md`
+      Gate: review
+      Acceptance: Update all 4 benchmark pages and 4 walkthrough pages with the SXM5/NVSwitch/RDMA measurements and walkthrough outputs, bold winning cell numbers, highlight notable crossover rows, preserve the Phase 1 plain-PCIe / TCP (`RTX PRO 6000`) negative results as quantitative evidence in `## Limitation`, pass `codex` review, and pass `make lint docs` with zero errors.
       Verify: `make lint docs`
 
 ### Test Plan
@@ -629,8 +682,8 @@ matching, and line/code-block/heading caps.
 
 #### Unit tests
 
-None unless a live benchmark uncovers a controller/webhook bug under `pkg/` requiring a Go fix:
-- `pkg/worker/kvcache/inject`: `2026-10-19` - existing `vllm_ec_test.go` verifies `DefaultedArgs` on `RoleEncode`.
+- `pkg/worker/kvcache/inject`: `2026-10-20` - `vllm_ec_test.go` verifies `DefaultedArgs` on `RoleEncode`, and `inject_test.go` / `sglang_test.go` verify Mooncake TCP defaulted environment variables (`MC_TCP_*`) and coarse KV block/page sizes (`--block-size 128` on vLLM, `--page-size 64` on SGLang).
+- `pkg/worker/controllers/worker` and `pkg/worker/webhooks/worker`: `2026-10-20` - `model_deployment_connector_test.go`, `model_deployment_render_test.go`, `model_deployment_test.go`, and `pod_kv_cache_inject_test.go` verify TCP defaulted env/args override semantics and `resources.interface` admission on multi-Pod `Server` roles (`size > 1` or `elasticEp != nil`).
 
 #### Integration tests
 
@@ -640,13 +693,11 @@ None unless a live benchmark uncovers a controller/webhook bug under `pkg/` requ
 
 #### e2e tests
 
-- **Live Nebius Benchmark Suite 1 (`Prefill and decode`)**:
-  - Provision 1 × 4-GPU `gpu-l40s-d` (`4gpu-128vcpu-768gb`) node in Nebius `project-e00xbnvkpr009f9sk2gcsz`.
-  - Run `Qwen/Qwen3-8B` BF16 on `Aggregated` (4 × 1-GPU `server`) vs `Prefill/Decode` (2 × 1-GPU `prefill` + 2 × 1-GPU `decode`, `MooncakeConnector` over TCP) across `512/256`, `4096/128`, `256/1024` at concurrencies `1, 4, 8, 16`, mixed burst traffic, and stage execution verification.
-- **Live Nebius Benchmark Suite 2 (`Elastic EP`)**:
-  - Run `deepseek-ai/DeepSeek-V2-Lite-Chat` (`85864749cd611b4353ce1decdb286193298f64c7`) on `Elastic EP`, measuring `DP=2` baseline, live online scale-up `DP=2 -> DP=4` under load, and `DP=4` expanded state across concurrencies `1, 4, 8, 16, 32`.
-- **Live Nebius Benchmark Suite 3 (`External DP`)**:
-  - Run `deepseek-ai/DeepSeek-V2-Lite-Chat` comparing monolithic wide `TP` vs `External DP + EP` (`size: 4` ranks with per-rank HTTP endpoints behind `gpustack/llm-router` `round-robin`) across `1024/256` and `4096/128` at concurrencies `1, 4, 8, 16, 32` and verify per-rank request counters.
+- **Unified SXM5 Live Nebius Benchmark & Walkthrough Suite (`gpu-h100-sxm` / `gpu-h200-sxm` `8gpu-128vcpu-1600gb`, `preemptible = true`)**:
+  - **Scenario 1 (`Encode, Prefill and Decode`)**: `Qwen/Qwen2.5-VL-7B-Instruct` on `Aggregated (1 GPU)` vs `PD (2 GPUs)` vs `EPD (3 GPUs)` across Suites 1–3 (`1k, 2k, 4k, 8k` at `c=1, 4, 8`, mixed burst, repeated-image cache reuse) + walkthrough verification.
+  - **Scenario 2 (`Prefill and Decode`)**: `Qwen/Qwen3-32B` on `Aggregated (3 × TP2 = 6 GPUs)` vs `PD (1 × Prefill TP2 + 2 × Decode TP2 = 6 GPUs)` over RDMA/NVLink across Suites 1–3 (`512/256`, `4096/512`, `8192/256` at `c=1, 4, 8, 16`, mixed steady + 8k prefill bursts with 100% completion, stage verification) + walkthrough capture.
+  - **Scenario 3 (`Elastic EP`)**: `deepseek-ai/DeepSeek-V2-Lite-Chat` (`--max-num-seqs=16`) on `TP2, Width 2 (4 GPUs) -> Width 4 (8 GPUs)` across concurrencies `1, 8, 16, 32, 64` + live scale-up transition + walkthrough capture.
+  - **Scenario 4 (`External DP`)**: `deepseek-ai/DeepSeek-V2-Lite-Chat` (`--max-num-seqs=16`) on `Wide TP (TP8, 8 GPUs)` vs `External DP (size: 4, TP2, DP4, EP8, 8 GPUs)` across `1024/256` and `4096/256` at concurrencies `1, 4, 8, 16, 32, 64` + per-rank load balance + walkthrough capture.
 - **Cluster Teardown Verification**:
   - Run `terraform destroy` and verify via `nebius compute instance list` / `nebius mk8s cluster list` that zero test instances or clusters remain active.
 
@@ -660,11 +711,12 @@ None unless a live benchmark uncovers a controller/webhook bug under `pkg/` requ
 3. All 10 walkthrough leaf pages under `docs/walkthroughs/` use only `## Contents`, `## Summary`,
    `## Step N: ...`, `## Limitation`, and `## Troubleshooting`.
 4. The Hugo sidebar renders the reordered `Model Deployment` hierarchy with `Benchmark` nested under
-   `Prefill and decode`, `Encode, prefill and decode`, `Elastic EP`, and `External DP`, and consistent
-   capitalization across all groups and labels.
-5. `docs/modules/model-deployment/external-dp.md` and the three new benchmark pages
-   (`prefill-decode-benchmark.md`, `elastic-ep-benchmark.md`, `external-dp-benchmark.md`) are published
-   with live Nebius GPU measurements and indexed in `docs/README.md`.
+   `Prefill and Decode`, `Encode, Prefill and Decode`, `Elastic EP`, and `External DP`, and consistent
+   concise noun-phrase labels across all groups and pages.
+5. All four benchmark pages (`encode-prefill-decode-benchmark.md`, `prefill-decode-benchmark.md`,
+   `elastic-ep-benchmark.md`, `external-dp-benchmark.md`) and four walkthrough pages under
+   `docs/walkthroughs/model-deployment/` are updated with live SXM5/NVSwitch/RDMA measurements showing
+   each capability's true crossover regime, while preserving plain-PCIe / TCP boundaries in `## Limitation`.
 6. `make lint docs` passes with zero errors.
 
 ## Drawbacks
@@ -672,9 +724,9 @@ None unless a live benchmark uncovers a controller/webhook bug under `pkg/` requ
 1. Adding four benchmark pages and one module guide increases the total page count under
    `docs/modules/model-deployment/` from 10 to 14, requiring `children:` nesting in
    `site/data/navigation.yaml` so the sidebar stays compact.
-2. Single-node multi-GPU benchmarks measure PCIe/NVLink/host-loopback TCP transfers rather than
-   cross-node Ethernet or InfiniBand fabric latency; each benchmark page must state this boundary
-   explicitly in its `What this run does not measure` section.
+2. Single-node 8-GPU SXM5 benchmarks measure intra-node NVSwitch (900 GB/s) and RDMA/host-local transfers
+   rather than multi-rack cross-switch fabric latency; each benchmark page states this boundary
+   explicitly in its `## Limitation` section alongside the measured plain-PCIe / TCP penalties.
 
 ## Alternatives
 
@@ -687,13 +739,14 @@ None unless a live benchmark uncovers a controller/webhook bug under `pkg/` requ
    into Hugo `_index.md` subdirectories.** Rejected (`jev` confidence 0.98 for data-driven `children:`)
    because moving those files breaks relative links across `docs/`, `.agents/skills/`, and
    `.agents/skills/gpustack-operator-docs/scripts/check-docs.sh`, and forces a redundant `Overview` link under each collapsible item.
-3. **Provision a separate Nebius cluster per benchmark.** Rejected (`jev` confidence 0.72 for two warm
-   batches) because cold node provisioning, image pulls, and model weight downloads dominate wall-clock
+3. **Provision a separate Nebius cluster per benchmark.** Rejected (`jev` confidence 0.72 for warm
+   unified batch) because cold node provisioning, image pulls, and model weight downloads dominate wall-clock
    time and cluster cost.
 
 ## Infrastructure Needed
 
-1. Nebius project `project-e00xbnvkpr009f9sk2gcsz` (`eu-north1`, `gpu-l40s-d` `4gpu-128vcpu-768gb`)
-   and/or `project-e07nm50ama00jwzpb60mhy` (`eu-south1`, `gpu-rtx6000-a` `8gpu-192vcpu-1744gb`) managed
-   via `testing/infra/clusters/nebius/`.
+1. Nebius project `project-e00xbnvkpr009f9sk2gcsz` (`eu-north1`, `gpu-h100-sxm` `8gpu-128vcpu-1600gb`,
+   `preemptible = true`, `infiniband_fabric`, plus `cpu-d3` / `cpu-e2` `4vcpu-16gb`) or
+   `project-e01yvmeppr008t3kdsqkkw` (`eu-west1`, `gpu-h200-sxm` `8gpu-128vcpu-1600gb`, `preemptible = true`)
+   managed via `testing/infra/clusters/nebius/`.
 2. Container registry push access (only if an operator code fix is required during live testing).

@@ -473,7 +473,7 @@ rescheduled onto another node.
 `device-manager preflight` reports the node's TopologyManager policy as a `topology` section, read
 off the running kubelet's own command line and the configuration it names; `unknown` means no
 readable source named one, never a guess of the default. See
-[Preflight Operations](./preflight.md).
+[Preflight Checks](./preflight.md).
 
 ## Requesting through the `Instance` API
 

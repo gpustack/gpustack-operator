@@ -53,22 +53,31 @@ required; `Next` is expected wherever a next step exists.
 
 ## Titles and file names
 
-The file name, the `#` H1 and the `docs/README.md` index label say the same words — `check-docs.sh`
-compares the last two character for character. The H1 is a Title-Case noun phrase of at most six words,
-shaped by the directory it lives in:
+Name top-level groups for capabilities, such as `Heterogeneous Devices`, `RDMA Networking` and `Topology`.
+Use component names such as `Device Manager` when describing those components.
+Use short, Title-Cased nouns or noun phrases for menu labels. Omit the parent module's name from the menu.
+Check each article title against its introduction and main sections. Keep accurate existing titles.
+Article H1 titles may retain module names and useful `Operations`, `Reference` or `Walkthrough` suffixes.
+Change titles that are unclear, misstate the content or conflict with their menu labels.
 
-| Directory | H1 form | Example |
+| Context | Menu label | H1 |
 |---|---|---|
-| `getting-started/`, `operate/`, `contribute/` | `<Subject>` | `Installation Modes` |
-| `modules/<capability>/` | `<Domain> <Topic>` where the domain reads naturally; a subject that names itself (`Engine Versions`, `Node-to-Node Sync`) stands without it; runbooks keep the `Operations` suffix | `KV Cache Backend`, `Model Artifact`, `Engine Versions`, `Node-to-Node Sync` |
-| `operate/` and runbooks under `modules/` | `<Subject> Operations` | `High Availability Operations` |
-| `operate/migration/` | `Migrating <from\|to> <what>`; a recovery page is `<Subject> Troubleshooting` | `Migrating from v0.5.x`, `Migration Troubleshooting` |
-| `reference/` | `<Subject> Reference` | `Instance Metrics Reference` |
+| Model Deployment | `Configuration` | `Model Deployment Configuration` |
+| External DP child article | `Benchmark` | `External DP Benchmark` |
+| Model Artifact child article | `API` | `Model Artifact API` |
+| KV Cache | `Election and Failover` | `KV Cache Election and Failover` |
+| KV Cache | `Pools and Bindings` | `KV Cache Pools and Bindings` |
+| Walkthroughs / Model Deployment | `Elastic EP` | `Elastic EP Walkthrough` |
 
-A domain directory collects every page orbiting one CR family — the contracts, the field references,
-the views, the runbook — under short file names (`backend.md`, `artifact.md`, `deployment.md`) whose
-H1s name the domain where it reads naturally. It exists so `reference/` stays true lookup tables
-rather than becoming the dumping ground for whichever domain landed last.
+Menu labels and H1 titles must describe the same subject; they need not use identical words.
+Use `Overview` for module introductions. Name preparation and example-selection pages by their purpose.
+Use `children` in `site/data/navigation.yaml` for subordinate articles.
+Walkthrough module links use the same names and order as the outer capability groups.
+Keep existing file names when changing display titles to preserve page URLs.
+
+Each `docs/README.md` `All pages` label must match its page's H1 character for character;
+`check-docs.sh` checks this rule. Keep the table in navigation order, with child articles immediately
+after their parent. Update links that name a changed title and any links to its old H1 anchor.
 
 `##` and `###` headings are sentence case. GitHub lowercases anchors, so re-casing a heading keeps every
 inbound link; changing its *words* does not.
@@ -175,6 +184,11 @@ capacity, timing or a safety limit.
 - **Prefer a table for anything enumerable** — modes, keys, vendors, gates, knobs.
 - **Keep table headers short.** Use a precise noun or short phrase, such as `Resource`, `Scope` or
   `Default`. Put conditions and explanations in the cells or adjacent prose. Preserve technical names.
+- **Use consistent parallelism terms.** Expand abbreviations at first use in each article's prose.
+  Italicize parallelism, load-balancing and latency terms, including their abbreviations:
+  `*tensor parallelism (TP)*`, `*TP* = 2`, `*DP* width`, `*EP* world size`.
+  Keep titles and link labels plain. Use code formatting for API fields, enum values and flags.
+  Preserve commands, manifests and captured output.
 - **Name code in contributor guides.** Give a source path when the reader is editing that code.
   User guides state the behavior and link to the owning spec for its implementation.
 - **No symbol-numbered cross-references** (`switch ①`, "gate-2 above"). Use the heading name and a

@@ -62,7 +62,7 @@ engine's own `GET /health` on the port the Service targets, so `ready == desired
 answers" are one fact rather than two.
 
 The KV cache store's leader answers a route of the same name that is deliberately **not** a readiness
-signal; see [KV Cache Leader](../kv-cache/leader.md). They are different programs, and only the
+signal; see [KV Cache Election and Failover](../kv-cache/leader.md). They are different programs, and only the
 engine's route is read here.
 
 **The startup gate allows thirty minutes per attempt, not in total.** A replica that has not
@@ -459,8 +459,8 @@ levels back to `True` on its own once a later pass proves the live world again.
 ---
 
 **See also** — [Model Deployment Configuration](deployment.md) (the contract this status reports on) ·
-[Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) ·
-[Model Deployment Encode, Prefill and Decode](encode-prefill-decode.md) (encode, prefill and decode disaggregation) ·
-[KV Cache Leader](../kv-cache/leader.md) (the leader process the conditions distinguish from the operator's own).
+[Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) ·
+[Encode, Prefill and Decode](encode-prefill-decode.md) (encode, prefill and decode disaggregation) ·
+[KV Cache Election and Failover](../kv-cache/leader.md) (the leader process the conditions distinguish from the operator's own).
 
 **Next** → [Model Deployment Configuration](deployment.md)

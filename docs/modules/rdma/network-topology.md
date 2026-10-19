@@ -413,6 +413,6 @@ to check when a selector on the gate stops picking a node that still has the har
 [Accelerator Requests](../devices/requests.md) (the request rules the RDMA keys obey) ·
 [RDMA Operations](operations.md) (how many endpoints a workload asks for, and the kubelet
 policy that aligns them with its accelerators) ·
-[Preflight Operations](../devices/preflight.md) (the same link check, before anything is installed)
+[Preflight Checks](../devices/preflight.md) (the same link check, before anything is installed)
 
 **Next** → [Scheduling Chain](../devices/scheduling.md) — how these labels become ResourceFlavors.

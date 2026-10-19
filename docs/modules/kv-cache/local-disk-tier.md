@@ -370,8 +370,7 @@ the node's disk fills.
 
 **See also** — [KV Cache Backend](backend.md) (the object this tier is a layer on, and where its
 leader, members and status are documented) · [KV Cache on Disk-Heavy Nodes](disk-heavy-nodes.md) (the
-configuration guide for a node whose capacity is disk rather than memory) · [KV Cache
-Pool](pool.md) (how a namespace is granted a quota on the store this tier belongs to)
+configuration guide for a node whose capacity is disk rather than memory) · [KV Cache Pools and Bindings](pool.md) (how a namespace is granted a quota on the store this tier belongs to)
 
 **Next** → [KV Cache on Disk-Heavy Nodes](disk-heavy-nodes.md) — the thin-segment shape and the
 memory floor that makes this tier reachable.

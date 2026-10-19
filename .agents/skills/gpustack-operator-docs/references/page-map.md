@@ -268,8 +268,18 @@ contract, and what turns a replica over.
 renders, the router block and its fields, the direct transfer's transport, roles on different
 hardware, and a role's own Service.
 
-**Never** — the deployment-level contract around the pair (`deployment.md`) or the KV cache leg's
-transport (`../kv-cache/backend.md`); this page owns the P/D leg.
+**Never** — the deployment-level contract around the pair (`deployment.md`), the KV cache leg's
+transport (`../kv-cache/backend.md`), or the measured disaggregated-versus-aggregated numbers
+(`prefill-decode-benchmark.md`); this page owns the P/D leg.
+
+## `docs/modules/model-deployment/prefill-decode-benchmark.md`
+
+**Owns** — the measured comparison of disaggregated prefill/decode serving against an equal-GPU
+aggregated group across uniform prompt/decode cells and mixed short-chat plus long-prompt burst
+traffic: TTFT, TPOT, ITL tail jitter, throughput, and the conditions under which P/D disaggregation
+helps or hurts.
+
+**Never** — the connector or router configuration contract (`prefill-decode.md` owns that).
 
 ## `docs/modules/model-deployment/encode-prefill-decode.md`
 
@@ -293,6 +303,40 @@ run that produced them.
 **Never** — the connector each topology renders (`encode-prefill-decode.md` and `prefill-decode.md` own those), or the
 admission rules that admit a shape. A number stated here as a measurement must not restate as a
 guarantee, and a row the run did not exercise stays unverified wherever it is already marked so.
+
+## `docs/modules/model-deployment/elastic-ep.md`
+
+**Owns** — the `elasticEp` profile contract: how an expert-parallel collective resizes its data-parallel
+width in place, the master/worker Ray topology, status conditions during resize, and when a spec change
+falls back to a rolling replacement.
+
+**Never** — the live walkthrough sequence (`../../walkthroughs/model-deployment/elastic-ep.md`) or the
+measured pre/during/post-resize latency and throughput tables (`elastic-ep-benchmark.md`).
+
+## `docs/modules/model-deployment/elastic-ep-benchmark.md`
+
+**Owns** — the measured pre-resize (`width=2`), live-resize window (`2 -> 4`), and post-resize
+(`width=4`) performance of an expert-parallel collective, including resize phase durations, surviving
+pod stability, and the interconnect conditions under which widening EP helps or hurts.
+
+**Never** — the `elasticEp` field contract (`elastic-ep.md` owns that).
+
+## `docs/modules/model-deployment/external-dp.md`
+
+**Owns** — the External DP deployment pattern (`replicas[].size >= 2` with `--data-parallel-size` /
+`--dp-size` and `--enable-expert-parallel` / `--ep-size`): per-rank HTTP endpoints, router fan-out,
+status reporting (`loadBalance: External`), and failure domain boundaries.
+
+**Never** — the live walkthrough sequence (`../../walkthroughs/model-deployment/external-dp.md`) or the
+measured External DP versus wide TP comparison (`external-dp-benchmark.md`).
+
+## `docs/modules/model-deployment/external-dp-benchmark.md`
+
+**Owns** — the measured comparison of External DP per-rank serving against a monolithic wide
+tensor-parallel group on the same total GPU budget, including per-rank router distribution, KV cache
+capacity, and the interconnect/KV-pressure crossover.
+
+**Never** — the External DP configuration contract (`external-dp.md` owns that).
 
 ## `docs/modules/model-deployment/routing.md`
 

@@ -1,4 +1,4 @@
-# Preflight Operations
+# Preflight Checks
 
 Run preflight on a bare host to check which accelerators the node can serve and what an allocation
 would require. It needs no cluster, CRDs, NFD labels or running Device Manager. This page covers

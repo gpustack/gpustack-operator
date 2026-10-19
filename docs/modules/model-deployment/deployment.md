@@ -166,7 +166,7 @@ Two roles may share a `kind` and differ in `name` only where that `kind` is `Ser
 servers is a set of equals, whereas nothing consuming these roles expresses a second prefiller, so a
 deployment declaring one would render a role nothing downstream can reach.
 
-What pairs the two roles is on [Model Deployment Prefill and Decode](prefill-decode.md): the connector each engine and router renders, the
+What pairs the two roles is on [Prefill and Decode](prefill-decode.md): the connector each engine and router renders, the
 router block and its fields, the direct transfer and its transport, roles on different hardware, and
 a role's own address.
 
@@ -249,7 +249,7 @@ is decided by the image, not by the render.
 Users who require tenant isolation must select a compatible engine image and verify it themselves; see
 [Tenant compatibility](../kv-cache/injection.md#tenant-compatibility) for what
 the image must consume. The API states the requested boundary, while the engine enforces it
-(the same caveat [KV Cache Pool](../kv-cache/pool.md#limitations) states for
+(the same caveat [KV Cache Pools and Bindings](../kv-cache/pool.md#limitations) states for
 capacity).
 
 ## The three override tiers
@@ -838,9 +838,9 @@ and therefore neither locates its window.
 
 ---
 
-**See also** — [KV Cache Pool](../kv-cache/pool.md) for the Binding that grants the quota and declares
+**See also** — [KV Cache Pools and Bindings](../kv-cache/pool.md) for the Binding that grants the quota and declares
 the domain · [Elastic EP](elastic-ep.md) for the profile that resizes one serving instance's collective
-instead of adding replicas · [Model Deployment Prefill and Decode](prefill-decode.md) for
+instead of adding replicas · [Prefill and Decode](prefill-decode.md) for
 what pairs a prefill role with a decode role · [Accelerator Requests](../devices/requests.md) for the request fields
 `roles[].resources` mirrors · [Admission](../devices/admission.md) for the gates a replica passes
 as an ordinary Pod · [Model Deployment Status](status.md) for what each condition

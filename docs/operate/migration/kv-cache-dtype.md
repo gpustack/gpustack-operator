@@ -93,7 +93,7 @@ An injected Pod carries the same two entries at the end of its `args`, where the
 
 ---
 
-**See also** — [KV Cache Pool](../../modules/kv-cache/pool.md) (the dtype rule) ·
+**See also** — [KV Cache Pools and Bindings](../../modules/kv-cache/pool.md) (the dtype rule) ·
 [ModelDeployment](../../modules/model-deployment/deployment.md#operator-owned-keys) (what the operator owns) ·
 [KV Cache Injection](../../modules/kv-cache/injection.md) (the Pod path) ·
 [Settings](../../reference/settings.md) (the escape switch)

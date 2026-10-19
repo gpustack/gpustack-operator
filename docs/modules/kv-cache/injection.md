@@ -503,7 +503,7 @@ Its [host pool](#sglang-host-memory-tier) is the one host allocation it adds the
 ---
 
 
-**See also** — [KV Cache Pool](pool.md) (the grant and the reuse domain this page consumes) ·
+**See also** — [KV Cache Pools and Bindings](pool.md) (the grant and the reuse domain this page consumes) ·
 [KV Cache Backend](backend.md) (the store the pool draws from) ·
 [Admission](../devices/admission.md) (where this webhook sits relative to the five gates)
 

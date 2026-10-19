@@ -1,4 +1,7 @@
-# Engine Versions
+# Engine Compatibility
+
+Check engine and transport compatibility before choosing images for a deployment.
+This page lists minimum releases, Mooncake client and store requirements, supported transports and known failures.
 
 **An engine below its minimum here is not supported.** Older releases fail in ways that belong to
 those releases, and this documentation does not track them; upgrading is the fix for each of them.
@@ -169,8 +172,8 @@ On AWS the `RDMA` rows do not apply; [choose `EFA` or
 ---
 
 **See also** — [Model Deployment Configuration](deployment.md) (the fields these versions go into) ·
-[Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) ·
-[Model Deployment Encode, Prefill and Decode](encode-prefill-decode.md) (encode, prefill and decode disaggregation) ·
+[Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) ·
+[Encode, Prefill and Decode](encode-prefill-decode.md) (encode, prefill and decode disaggregation) ·
 [KV Cache Backend](../kv-cache/backend.md) (the store a client needs) ·
 [RDMA Operations](../rdma/operations.md) (fabric devices and the engine image they need).
 

@@ -212,6 +212,6 @@ the engine Pods' own counts instead, such as each Pod's TTFT histogram `_count`.
 
 ---
 
-**See also** — [Model Deployment Prefill and Decode](prefill-decode.md) for `spec.router` and the flags each router refuses · [Model Deployment Encode, Prefill and Decode](encode-prefill-decode.md) for EPD disaggregation and connector options · [Model Deployment Metrics](metrics.md) for the router counters a deployment's snapshot reads.
+**See also** — [Prefill and Decode](prefill-decode.md) for `spec.router` and the flags each router refuses · [Encode, Prefill and Decode](encode-prefill-decode.md) for EPD disaggregation and connector options · [Model Deployment Metrics](metrics.md) for the router counters a deployment's snapshot reads.
 
 **Next** → [Model Deployment Status](status.md)

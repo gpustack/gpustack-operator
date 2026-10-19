@@ -360,8 +360,8 @@ verbs path fails creating its completion queue, as above.
 **See also** — [Accelerator Requests](../devices/requests.md) (the normative request contract
 these keys sit beside, and the seven rules they are exempt from) ·
 [Network Topology](network-topology.md) (what the keys are, which endpoint serves
-each, and what an allocation resolves) · [Preflight Operations](../devices/preflight.md) (reading a node's link
+each, and what an allocation resolves) · [Preflight Checks](../devices/preflight.md) (reading a node's link
 verdicts and its topology policy before anything is installed)
 
-**Next** → [Preflight Operations](../devices/preflight.md) — what a node can detect, slice and manage, read on
+**Next** → [Preflight Checks](../devices/preflight.md) — what a node can detect, slice and manage, read on
 the bare host.

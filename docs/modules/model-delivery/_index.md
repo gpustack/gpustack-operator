@@ -31,6 +31,6 @@ weights from another node's cache.
 ---
 
 **See also** — [Model Deployment](../model-deployment/_index.md) (serving a model) ·
-[Accelerated Instances](../instances/_index.md) (using weights in an Instance)
+[GPU Instances](../instances/_index.md) (using weights in an Instance)
 
 **Next** → [Model Artifact](artifact.md) — choose a source and delivery.
