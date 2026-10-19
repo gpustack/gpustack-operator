@@ -199,16 +199,15 @@ names refuses to start, so a Kueue upgrade checks it first.
 
 ## Upgrade notes
 
-**From the version before node delivery.** With the plugin enabled, the upgrade seeds
-`model-artifact-delivery-mode=Node`, and every `ModelDeployment` using a hub artifact rolls
-once, to Node delivery. A seed fills only a Setting the cluster does not have yet, so there are two
-ways to avoid the roll:
+**From the version before node delivery.** With `modelManager.enabled: true`, the chart declares
+`GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node`. The worker reasserts that value on every start, so
+a runtime edit of `model-artifact-delivery-mode` to `Engine` is reverted at the next worker start;
+it does not avoid the upgrade roll. Every `ModelDeployment` using a hub artifact rolls once, to
+Node delivery.
 
-1. set the Setting to `Engine` before upgrading, which the seed then leaves alone; or
-2. upgrade with `--set modelManager.enabled=false`, which seeds nothing and keeps `Engine`.
-
-Either way you can switch later, at a time of your choosing. A later `helm upgrade` never overrides
-the Setting.
+To keep `Engine` through the upgrade, set `modelManager.enabled=false`; this also removes the
+plugin and its CSIDriver. If you enable the plugin later, the chart declares `Node` again and the
+worker writes it at its next start.
 
 **To the version with the placement preference.** Kueue restarts with `TASRespectNodeAffinityPreferred`
 on. Running replicas are not touched; new node-delivered Pods carry the preference. A Pod in a TAS
