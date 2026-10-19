@@ -513,12 +513,15 @@ Coverage baseline for the two packages measured on 2026-10-19 with
     administrator value and a blank one.
   - `TestSettingsInitialize_BackfillsAbsentKeysIncludingBlanks`: the Secret lacks a key whose seed is blank, and
     the key is present afterwards, matching today's behavior.
-  - `TestSettingsInitialize_TrackingFallsBackToDefaultWhenKeyAbsent`: the Secret has no
-    `settings-default-tracking` key, and a tracked Setting follows the built-in default on that same pass.
+  - `TestSettingsInitialize_TrackingAppliesOnThePassThatBackfillsItsKey`: the Secret has no
+    `settings-default-tracking` key, and a tracked Setting follows the built-in default on that same pass. The
+    backfill writes the built-in default into the Secret before any rule runs, and that ordering is what makes the
+    list apply on that same pass.
   - `TestSettingsInitialize_EqualValueIsNotAnOverride`: the stored value already equals the seed, and nothing is
-    written and nothing is logged.
-  - `TestSettingsInitialize_BlankDeclarationReadsAsNoDeclaration`: the variable is present with an empty value, and
-    an untracked Setting keeps its stored value.
+    written and nothing is logged. The log capture is the only guard the equal-value clause has, because writing an
+    equal value is a data no-op.
+  - `TestSettingsInitialize_BlankDeclarationReadsAsNoDeclaration`: the variable is present with a blank value, and
+    an untracked Setting keeps its stored value. Blank is the empty string and the empty list and map forms.
   - `TestParseTrackedSettings`: whitespace around a segment, empty segments, duplicates, an unknown name, and
     the Setting's own name, asserting the five-step normalization and that a dropped segment does not track.
   - `TestSettingsInitialize_CreationSeedsEverySetting`: an empty Secret receives every registered key, blank
@@ -544,6 +547,34 @@ consequence: deleting it, or replacing it with `DisallowBlank`, leaves the suite
 admitted by `Allow()` plus the self-reference admission either way. `AllowBlank` is kept for intent and as a guard
 against a stricter future admission, and its absence is not detected today.
 
+#### Post-build corrections
+
+A review of the T2 commit found three places where the code or a test said something the code did not do. All
+three are closed, and no runtime behavior changed.
+
+1. **`trackingValue` carried a fallback that could not run.** The align pass backfills every registered key into the
+   Secret before it reads the tracking list, so the Secret already holds the tracking key whenever the registry
+   carries it. The fallback branch and the receiver it needed are gone; the function reads the Secret alone.
+2. **The equal-value test did not assert that it logs nothing.** The operator's log is now captured, and the test
+   fails when the align pass logs an override line for a value it did not change. The capture is the only guard that
+   clause has, because writing an equal value is a data no-op.
+3. **The blank-declaration test never reached the blank gate.** The `isBlank` gate treats the empty list and the
+   empty map as blank, and only the empty string was covered. Both forms are covered now, and the gate is
+   load-bearing.
+
+Each correction is proven by deletion, and each proof was run again against the final tree.
+
+| Guard | Deleted or moved | Failing test |
+|---|---|---|
+| 1 | the backfill loop, moved below the rule loop | `TestSettingsInitialize_TrackingAppliesOnThePassThatBackfillsItsKey` |
+| 2 | `desired == stored`, from the rule loop | `TestSettingsInitialize_EqualValueIsNotAnOverride` |
+| 3 | the `isBlank` gate, from `desiredValue` | `TestSettingsInitialize_BlankDeclarationReadsAsNoDeclaration` |
+
+The override log line's message is pinned as a literal in both the align pass and the test, and the two are not
+joined by a shared constant. A renamed message therefore needs the test updated with it, and a rename that misses
+the test leaves the guard green over the change it is meant to catch. This coupling is known and accepted by
+decision.
+
 #### Integration tests
 
 None. No controller reads these keys on a path this change alters, and `Settings.Initialize` runs once at
@@ -555,7 +586,7 @@ Justification for not adding one: the behavior under test is a table of writes a
 startup. An e2e run would assert the same rows through a slower path and would need a cluster this repository's
 `testing/infra` provisions per session. The rows that an e2e could add value to — a Helm upgrade replacing a
 pinned image Setting — is the accepted risk recorded above rather than a defect, and it is asserted by
-`TestSettingsInitialize_TrackingFallsBackToDefaultWhenKeyAbsent` at the unit level.
+`TestSettingsInitialize_TrackingAppliesOnThePassThatBackfillsItsKey` at the unit level.
 
 ## Alternatives
 

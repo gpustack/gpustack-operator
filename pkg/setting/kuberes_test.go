@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	authz "k8s.io/api/authorization/v1"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	k8stesting "k8s.io/client-go/testing"
+	klog "k8s.io/klog/v2"
 
 	kubefake "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/fake"
 )
@@ -46,19 +48,22 @@ type (
 	// Secret that already exists and the values it must hold afterwards. A nil stored map
 	// means no Secret exists, so Initialize takes the creation path; a non-nil map means the
 	// Secret exists holding exactly those keys, and a key the registry also carries is
-	// already present rather than backfilled.
+	// already present rather than backfilled. wantNoOverrideLog opts the row into asserting
+	// that its run logs no override line, which only a row that changes nothing can claim.
 	initializeCase struct {
-		name     string
-		settings []caseSetting
-		env      map[string]string
-		stored   map[string]string
-		want     map[string]string
+		name              string
+		settings          []caseSetting
+		env               map[string]string
+		stored            map[string]string
+		want              map[string]string
+		wantNoOverrideLog bool
 	}
 )
 
 // runInitializeCases runs each row through one execution loop: declare the environment, build
 // the registry, run Initialize against a fake clientset, then assert on the Secret the clientset
-// holds. It must not be called from a parallel test, because a row declares its environment.
+// holds. It must not be called from a parallel test, because a row declares its environment and
+// a row that captures the log replaces the global klog logger.
 func runInitializeCases(t *testing.T, cases []initializeCase) {
 	t.Helper()
 
@@ -66,6 +71,12 @@ func runInitializeCases(t *testing.T, cases []initializeCase) {
 		t.Run(c.name, func(t *testing.T) {
 			for name, value := range c.env {
 				t.Setenv(name, value)
+			}
+			var capture *logCapture
+			if c.wantNoOverrideLog {
+				capture = &logCapture{}
+				klog.SetLogger(logr.New(capture))
+				t.Cleanup(klog.ClearLogger)
 			}
 			cli := kubefake.NewSimpleClientset(delegatedSecretObjects(c.stored)...)
 			allowSelfSubjectAccessReviews(cli)
@@ -80,6 +91,12 @@ func runInitializeCases(t *testing.T, cases []initializeCase) {
 				got, ok := sec.Data[name]
 				assert.True(t, ok, "setting %s is present", name)
 				assert.Equal(t, want, string(got), "setting %s", name)
+			}
+			if c.wantNoOverrideLog {
+				for _, line := range capture.lines {
+					assert.NotEqual(t, "setting overridden on start", line.message,
+						"the run logs an override line")
+				}
 			}
 		})
 	}
@@ -140,6 +157,33 @@ func allowSelfSubjectAccessReviews(cli *kubefake.Clientset) {
 			return true, sar, nil
 		})
 }
+
+// logLine is one captured log line: its message and its key-value pairs.
+type logLine struct {
+	message string
+	pairs   []any
+}
+
+// logCapture is a logr sink that records every line it receives, so a row can assert on what its
+// run through Initialize logged. klog routes its log calls through the sink once a row installs
+// it with klog.SetLogger.
+type logCapture struct {
+	lines []logLine
+}
+
+func (*logCapture) Init(logr.RuntimeInfo) {}
+func (*logCapture) Enabled(int) bool      { return true }
+
+func (l *logCapture) Info(_ int, message string, pairs ...any) {
+	l.lines = append(l.lines, logLine{message: message, pairs: pairs})
+}
+
+func (l *logCapture) Error(_ error, message string, pairs ...any) {
+	l.lines = append(l.lines, logLine{message: message, pairs: pairs})
+}
+
+func (l *logCapture) WithValues(...any) logr.LogSink { return l }
+func (l *logCapture) WithName(string) logr.LogSink   { return l }
 
 const (
 	trackedImage = "kv-cache-backend-image"
@@ -229,10 +273,10 @@ func TestSettingsInitialize_BackfillsAbsentKeysIncludingBlanks(t *testing.T) {
 	})
 }
 
-// TestSettingsInitialize_TrackingFallsBackToDefaultWhenKeyAbsent pins that the built-in tracking
-// list applies on the same pass that backfills its key, so a Secret predating the setting does
-// not defer the transition to a later start.
-func TestSettingsInitialize_TrackingFallsBackToDefaultWhenKeyAbsent(t *testing.T) {
+// TestSettingsInitialize_TrackingAppliesOnThePassThatBackfillsItsKey pins that the built-in
+// tracking list applies on the same pass that backfills its key, so a Secret predating the
+// setting does not defer the transition to a later start.
+func TestSettingsInitialize_TrackingAppliesOnThePassThatBackfillsItsKey(t *testing.T) {
 	runInitializeCases(t, []initializeCase{
 		{
 			name: "the built-in list applies when the Secret has no tracking key",
@@ -255,11 +299,12 @@ func TestSettingsInitialize_EqualValueIsNotAnOverride(t *testing.T) {
 	const envName = "GPUSTACK_TEST_IMAGE"
 	runInitializeCases(t, []initializeCase{
 		{
-			name:     "a declared variable equal to the stored value leaves it alone",
-			settings: []caseSetting{{name: trackedImage, defVal: "operator-default/image:v1", envName: envName}},
-			env:      map[string]string{envName: "operator-default/image:v1"},
-			stored:   map[string]string{trackedImage: "operator-default/image:v1"},
-			want:     map[string]string{trackedImage: "operator-default/image:v1"},
+			name:              "a declared variable equal to the stored value leaves it alone",
+			settings:          []caseSetting{{name: trackedImage, defVal: "operator-default/image:v1", envName: envName}},
+			env:               map[string]string{envName: "operator-default/image:v1"},
+			stored:            map[string]string{trackedImage: "operator-default/image:v1"},
+			want:              map[string]string{trackedImage: "operator-default/image:v1"},
+			wantNoOverrideLog: true,
 		},
 		{
 			name: "a tracked setting already holding its default is left alone",
@@ -267,15 +312,18 @@ func TestSettingsInitialize_EqualValueIsNotAnOverride(t *testing.T) {
 				{name: trackedImage, defVal: "operator-default/image:v1"},
 				{name: DefaultTrackingName, defVal: trackedImage},
 			},
-			stored: map[string]string{trackedImage: "operator-default/image:v1", DefaultTrackingName: trackedImage},
-			want:   map[string]string{trackedImage: "operator-default/image:v1"},
+			stored:            map[string]string{trackedImage: "operator-default/image:v1", DefaultTrackingName: trackedImage},
+			want:              map[string]string{trackedImage: "operator-default/image:v1"},
+			wantNoOverrideLog: true,
 		},
 	})
 }
 
 // TestSettingsInitialize_BlankDeclarationReadsAsNoDeclaration pins that a variable present with
-// an empty value claims nothing, even for a Setting that has a built-in default to fall back on:
-// a default is substituted only for an absent variable, so the seed here is blank.
+// a blank value claims nothing, even for a Setting that has a built-in default to fall back on:
+// a default is substituted only for an absent variable, so the seed here is blank. Blank is the
+// empty string and the empty list and map forms, each of which reads as no declaration rather
+// than as a value to write over the administrator's.
 func TestSettingsInitialize_BlankDeclarationReadsAsNoDeclaration(t *testing.T) {
 	const envName = "GPUSTACK_TEST_IMAGE"
 	runInitializeCases(t, []initializeCase{
@@ -283,6 +331,20 @@ func TestSettingsInitialize_BlankDeclarationReadsAsNoDeclaration(t *testing.T) {
 			name:     "an empty declaration leaves an untracked setting alone",
 			settings: []caseSetting{{name: trackedImage, defVal: "operator-default/image:v1", envName: envName}},
 			env:      map[string]string{envName: ""},
+			stored:   map[string]string{trackedImage: "my.pin/image:1.0"},
+			want:     map[string]string{trackedImage: "my.pin/image:1.0"},
+		},
+		{
+			name:     "an empty-list declaration leaves an untracked setting alone",
+			settings: []caseSetting{{name: trackedImage, defVal: "operator-default/image:v1", envName: envName}},
+			env:      map[string]string{envName: "[]"},
+			stored:   map[string]string{trackedImage: "my.pin/image:1.0"},
+			want:     map[string]string{trackedImage: "my.pin/image:1.0"},
+		},
+		{
+			name:     "an empty-map declaration leaves an untracked setting alone",
+			settings: []caseSetting{{name: trackedImage, defVal: "operator-default/image:v1", envName: envName}},
+			env:      map[string]string{envName: "{}"},
 			stored:   map[string]string{trackedImage: "my.pin/image:1.0"},
 			want:     map[string]string{trackedImage: "my.pin/image:1.0"},
 		},

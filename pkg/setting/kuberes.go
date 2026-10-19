@@ -83,7 +83,7 @@ func (h Settings) Initialize(ctx context.Context, cli kubernetes.Interface) erro
 				skip = false
 			}
 		}
-		tracking := parseTrackedSettings(h, h.trackingValue(aSec))
+		tracking := parseTrackedSettings(h, trackingValue(aSec))
 		for name, s := range h {
 			stored := string(aSec.Data[name])
 			desired, rule := s.desiredValue(tracking)
@@ -140,21 +140,12 @@ func (s Setting) overrideLogPairs(stored, desired, rule string) []any {
 	return pairs
 }
 
-// trackingValue returns the tracking list, read from the live Secret and falling back to the
-// registered Setting's built-in default when the Secret carries no such key. Reading the Secret
-// alone would defer the built-in list to a later start on a Secret that predates the setting.
-//
-// The setting is registered by the release that introduces it. Until the registry carries it the
-// fallback is empty, so nothing is tracked, which is the correct intermediate state rather than a
-// failure to report.
-func (h Settings) trackingValue(aSec *core.Secret) string {
-	if raw, ok := aSec.Data[DefaultTrackingName]; ok {
-		return string(raw)
-	}
-	if s, ok := h.Index(DefaultTrackingName); ok {
-		return s.defVal
-	}
-	return ""
+// trackingValue returns the raw tracking list from the live Secret, or an empty string when the
+// Secret carries no such key. The Secret is the only source the align pass consults, because its
+// backfill has already written the built-in default into a Secret that predates the setting, so
+// what the Secret holds here is the administrator's list or that default.
+func trackingValue(aSec *core.Secret) string {
+	return string(aSec.Data[DefaultTrackingName])
 }
 
 // parseTrackedSettings returns the registered settings the raw tracking list names. It splits on a
