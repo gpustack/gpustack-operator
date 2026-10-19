@@ -47,7 +47,7 @@ hands each mount its artifact's Secret.
 
 | Layer | Carrier | Who changes it | What |
 | --- | --- | --- | --- |
-| Deploy time | chart values; in image mode the worker's overlay, which sets only the switch | installer | the switch, the cache root, the kubelet directory, images, resources and placement, the delivery seed |
+| Deploy time | chart values; in image mode the worker's overlay, which sets only the switch | installer | the switch, the cache root, the kubelet directory, images, resources and placement, the delivery mode |
 | Cluster runtime | [Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) in the operator namespace | administrator | delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth |
 | Object | the `ModelArtifact` | tenant | source, revision, patterns, Secret; immutable |
 
@@ -57,7 +57,7 @@ writes chooses where a node connects. The Settings this adds:
 
 | Setting | Default | Check |
 | --- | --- | --- |
-| `model-artifact-delivery-mode` | `Engine`; the chart seeds `Node` with the plugin | `Engine` or `Node`; `Node` needs the CSIDriver |
+| `model-artifact-delivery-mode` | `Engine`; the chart declares `Node` with the plugin, and the worker reasserts it | `Engine` or `Node`; `Node` needs the CSIDriver |
 | `model-store-high-watermark` | `80` | integer, above the low watermark, at most `95` |
 | `model-store-low-watermark` | `70` | integer, at least `1`, below the high watermark |
 | `model-store-download-concurrency` | `8` | concurrent requests per node, `1` to `64` |
@@ -199,16 +199,15 @@ names refuses to start, so a Kueue upgrade checks it first.
 
 ## Upgrade notes
 
-**From the version before node delivery.** With the plugin enabled, the upgrade seeds
-`model-artifact-delivery-mode=Node`, and every `ModelDeployment` using a hub artifact rolls
-once, to Node delivery. A seed fills only a Setting the cluster does not have yet, so there are two
-ways to avoid the roll:
+**From the version before node delivery.** With `modelManager.enabled: true`, the chart declares
+`GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node`. The worker reasserts that value on every start, so
+a runtime edit of `model-artifact-delivery-mode` to `Engine` is reverted at the next worker start;
+it does not avoid the upgrade roll. Every `ModelDeployment` using a hub artifact rolls once, to
+Node delivery.
 
-1. set the Setting to `Engine` before upgrading, which the seed then leaves alone; or
-2. upgrade with `--set modelManager.enabled=false`, which seeds nothing and keeps `Engine`.
-
-Either way you can switch later, at a time of your choosing. A later `helm upgrade` never overrides
-the Setting.
+To keep `Engine` through the upgrade, set `modelManager.enabled=false`; this also removes the
+plugin and its CSIDriver. If you enable the plugin later, the chart declares `Node` again and the
+worker writes it at its next start.
 
 **To the version with the placement preference.** Kueue restarts with `TASRespectNodeAffinityPreferred`
 on. Running replicas are not touched; new node-delivered Pods carry the preference. A Pod in a TAS

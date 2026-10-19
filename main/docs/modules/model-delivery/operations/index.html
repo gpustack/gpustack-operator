@@ -676,7 +676,7 @@ mode cannot set it, so there the plugin only works with the standard <code>/var/
           <td>Deploy time</td>
           <td>chart values; in image mode the worker&rsquo;s overlay, which sets only the switch</td>
           <td>installer</td>
-          <td>the switch, the cache root, the kubelet directory, images, resources and placement, the delivery seed</td>
+          <td>the switch, the cache root, the kubelet directory, images, resources and placement, the delivery mode</td>
       </tr>
       <tr>
           <td>Cluster runtime</td>
@@ -707,7 +707,7 @@ writes chooses where a node connects. The Settings this adds:</p>
   <tbody>
       <tr>
           <td><code>model-artifact-delivery-mode</code></td>
-          <td><code>Engine</code>; the chart seeds <code>Node</code> with the plugin</td>
+          <td><code>Engine</code>; the chart declares <code>Node</code> with the plugin, and the worker reasserts it</td>
           <td><code>Engine</code> or <code>Node</code>; <code>Node</code> needs the CSIDriver</td>
       </tr>
       <tr>
@@ -853,16 +853,14 @@ Setting for it.</p>
 <p><strong>The gate is alpha</strong> in the bundled Kueue. A Kueue that does not know a gate its configuration
 names refuses to start, so a Kueue upgrade checks it first.</p>
 <h2 id="upgrade-notes">Upgrade notes</h2>
-<p><strong>From the version before node delivery.</strong> With the plugin enabled, the upgrade seeds
-<code>model-artifact-delivery-mode=Node</code>, and every <code>ModelDeployment</code> using a hub artifact rolls
-once, to Node delivery. A seed fills only a Setting the cluster does not have yet, so there are two
-ways to avoid the roll:</p>
-<ol>
-<li>set the Setting to <code>Engine</code> before upgrading, which the seed then leaves alone; or</li>
-<li>upgrade with <code>--set modelManager.enabled=false</code>, which seeds nothing and keeps <code>Engine</code>.</li>
-</ol>
-<p>Either way you can switch later, at a time of your choosing. A later <code>helm upgrade</code> never overrides
-the Setting.</p>
+<p><strong>From the version before node delivery.</strong> With <code>modelManager.enabled: true</code>, the chart declares
+<code>GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node</code>. The worker reasserts that value on every start, so
+a runtime edit of <code>model-artifact-delivery-mode</code> to <code>Engine</code> is reverted at the next worker start;
+it does not avoid the upgrade roll. Every <code>ModelDeployment</code> using a hub artifact rolls once, to
+Node delivery.</p>
+<p>To keep <code>Engine</code> through the upgrade, set <code>modelManager.enabled=false</code>; this also removes the
+plugin and its CSIDriver. If you enable the plugin later, the chart declares <code>Node</code> again and the
+worker writes it at its next start.</p>
 <p><strong>To the version with the placement preference.</strong> Kueue restarts with <code>TASRespectNodeAffinityPreferred</code>
 on. Running replicas are not touched; new node-delivered Pods carry the preference. A Pod in a TAS
 queue whose author wrote a preferred node affinity is now ranked by it, where before it was
@@ -944,7 +942,7 @@ patterns</li><li><a href="/gpustack-operator/main/docs/reference/settings/#onlin
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/de723c8e16aef498b81fb4619dcf5a368f3e37a1/docs/modules/model-delivery/operations.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/cee81e860ecfae89948846337aa693d1491e1473/docs/modules/model-delivery/operations.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/operations.md">Edit this page</a>
             
