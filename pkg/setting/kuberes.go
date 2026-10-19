@@ -94,11 +94,7 @@ func (h Settings) Initialize(ctx context.Context, cli kubernetes.Interface) erro
 			}
 			aSec.Data[name] = []byte(desired)
 			skip = false
-			pairs := []any{"setting", name, "stored", stored, "value", desired, "rule", rule}
-			if s.envName != "" {
-				pairs = append(pairs, "envName", s.envName)
-			}
-			klog.InfoS("setting overridden on start", pairs...)
+			klog.InfoS("setting overridden on start", s.overrideLogPairs(stored, desired, rule)...)
 		}
 		return aSec, skip, nil
 	}
@@ -111,6 +107,37 @@ func (h Settings) Initialize(ctx context.Context, cli kubernetes.Interface) erro
 	}
 
 	return nil
+}
+
+// sensitiveValuesWithheld stands in for both values of a sensitive Setting on the override log
+// line. It is a literal no value can equal, so a reader can tell it from an empty value, which
+// reads as a Setting that holds nothing, and from an absent pair, which reads as one the operator
+// never wrote.
+const sensitiveValuesWithheld = "[withheld: sensitive setting]"
+
+// overrideLogPairs returns the key-value pairs the override log line carries for this Setting,
+// given the stored value it replaces, the new value it writes and the rule that claimed it.
+//
+// A sensitive Setting's line carries neither value in any form. The log is a wider audience than
+// the delegated Secret: it is usually readable more broadly and it is shipped to aggregators, CI
+// output and backups, so a value the operator took care to keep out of the Secret must not appear
+// there. The name, the rule and the variable stay, because together they are what tells an
+// operator which Setting changed and why, and none of the three is the value.
+//
+// A Setting that is not sensitive keeps the line it carried before the marker was honored here,
+// pair for pair and in the same order.
+func (s Setting) overrideLogPairs(stored, desired, rule string) []any {
+	pairs := []any{"setting", s.name}
+	if s.Sensitive() {
+		pairs = append(pairs, "values", sensitiveValuesWithheld)
+	} else {
+		pairs = append(pairs, "stored", stored, "value", desired)
+	}
+	pairs = append(pairs, "rule", rule)
+	if s.envName != "" {
+		pairs = append(pairs, "envName", s.envName)
+	}
+	return pairs
 }
 
 // trackingValue returns the tracking list, read from the live Secret and falling back to the

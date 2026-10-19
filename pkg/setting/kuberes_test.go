@@ -19,11 +19,27 @@ import (
 type (
 	// caseSetting declares one Setting a case registers. A non-empty envName registers it
 	// through that environment variable, and such a case must also declare that variable,
-	// because a Setting's declaration is fixed when it is registered.
+	// because a Setting's declaration is fixed when it is registered. A sensitive one is
+	// registered through the constructor that carries the sensitivity marker.
 	caseSetting struct {
-		name    string
-		defVal  string
-		envName string
+		name      string
+		defVal    string
+		envName   string
+		sensitive bool
+	}
+
+	// overrideLogCase is one row: the Setting a case registers and the key-value pairs one
+	// override of it must then carry on its log line. A sensitive row must not list either value
+	// among them, or it passes for a line that published what it was meant to withhold.
+	overrideLogCase struct {
+		name      string
+		setting   string
+		sensitive bool
+		envName   string
+		stored    string
+		value     string
+		rule      string
+		want      []any
 	}
 
 	// initializeCase is one row: the registry it builds, the environment it declares, the
@@ -73,14 +89,22 @@ func runInitializeCases(t *testing.T, cases []initializeCase) {
 func registerCaseSettings(declared []caseSetting) Settings {
 	h := Settings{}
 	for _, s := range declared {
-		if s.envName != "" {
-			h.NewEditable(s.name, "A setting registered by a case.",
-				InitializeFromSpecifiedEnv(s.envName, s.defVal))
-			continue
-		}
-		h.NewEditable(s.name, "A setting registered by a case.", InitializeFrom(s.defVal))
+		registerCaseSetting(h, s)
 	}
 	return h
+}
+
+// registerCaseSetting registers one declared Setting in the given registry and returns it, so a
+// case can assert on the Setting a row built as well as on the Secret it goes on to produce.
+func registerCaseSetting(h Settings, c caseSetting) Setting {
+	init := InitializeFrom(c.defVal)
+	if c.envName != "" {
+		init = InitializeFromSpecifiedEnv(c.envName, c.defVal)
+	}
+	if c.sensitive {
+		return h.NewSensitive(c.name, "A setting registered by a case.", init)
+	}
+	return h.NewEditable(c.name, "A setting registered by a case.", init)
 }
 
 // delegatedSecretObjects returns the objects a fake clientset starts with, so that a row either
@@ -120,6 +144,14 @@ func allowSelfSubjectAccessReviews(cli *kubefake.Clientset) {
 const (
 	trackedImage = "kv-cache-backend-image"
 	blankImage   = "container-registry"
+
+	// overrideEnvName is the variable a case registers a Setting through when it wants that
+	// Setting's override line to carry a variable.
+	overrideEnvName = "GPUSTACK_TEST_CREDENTIAL"
+
+	// credentialSetting is a name no registry carries, and the rows use it on both sides of the
+	// test, so what decides what a line carries is the Setting's marker and not its name.
+	credentialSetting = "registry-credential"
 )
 
 // TestSettingsInitialize_DeclaredSettingOverridesStoredValue pins that a variable declared in the
@@ -270,6 +302,93 @@ func TestSettingsInitialize_CreationSeedsEverySetting(t *testing.T) {
 			want: map[string]string{
 				trackedImage: "operator-default/image:v1",
 				blankImage:   "",
+			},
+		},
+	})
+}
+
+// runOverrideLogCases runs each row through one execution loop: declare the environment the row
+// registers its Setting through, register that Setting, build the line one override of it must
+// carry, and assert on the pairs it carries. It must not be called from a parallel test, because
+// a row declares its environment.
+func runOverrideLogCases(t *testing.T, cases []overrideLogCase) {
+	t.Helper()
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// Only a sensitive row claims to withhold, so only it can be voided by an expected
+			// line that carries the value anyway.
+			if c.sensitive {
+				require.NotContains(t, c.want, c.stored,
+					"the expected line already carries the stored value, so the row proves nothing")
+				require.NotContains(t, c.want, c.value,
+					"the expected line already carries the new value, so the row proves nothing")
+			}
+
+			if c.envName != "" {
+				t.Setenv(c.envName, c.value)
+			}
+			s := registerCaseSetting(Settings{},
+				caseSetting{name: c.setting, envName: c.envName, sensitive: c.sensitive})
+
+			assert.Equal(t, c.want, s.overrideLogPairs(c.stored, c.value, c.rule))
+		})
+	}
+}
+
+// TestSetting_OverrideLogPairs pins that the override line follows the Setting's own sensitivity
+// marker and nothing else. A sensitive value is withheld behind a marker a reader cannot mistake
+// for an empty or a missing one, while the name, the rule and the variable stay, because they are
+// what tells an operator why the value changed and none of them is the value. A Setting that is
+// not sensitive keeps its line exactly as it was, so this cannot pass by withholding everything.
+func TestSetting_OverrideLogPairs(t *testing.T) {
+	runOverrideLogCases(t, []overrideLogCase{
+		{
+			name:      "a sensitive setting withholds both values and keeps what explains the change",
+			setting:   credentialSetting,
+			sensitive: true,
+			envName:   overrideEnvName,
+			stored:    "stored-secret",
+			value:     "new-secret",
+			rule:      "env-declared",
+			want: []any{
+				"setting", credentialSetting, "values", sensitiveValuesWithheld,
+				"rule", "env-declared", "envName", overrideEnvName,
+			},
+		},
+		{
+			name:      "a sensitive setting with no environment name withholds both values",
+			setting:   credentialSetting,
+			sensitive: true,
+			stored:    "stored-secret",
+			value:     "new-secret",
+			rule:      "default-tracked",
+			want: []any{
+				"setting", credentialSetting, "values", sensitiveValuesWithheld,
+				"rule", "default-tracked",
+			},
+		},
+		{
+			name:    "a setting that is not sensitive carries both values",
+			setting: credentialSetting,
+			envName: overrideEnvName,
+			stored:  "stored-value",
+			value:   "new-value",
+			rule:    "env-declared",
+			want: []any{
+				"setting", credentialSetting, "stored", "stored-value",
+				"value", "new-value", "rule", "env-declared", "envName", overrideEnvName,
+			},
+		},
+		{
+			name:    "a setting that is not sensitive and has no environment name carries both values",
+			setting: credentialSetting,
+			stored:  "stored-value",
+			value:   "new-value",
+			rule:    "default-tracked",
+			want: []any{
+				"setting", credentialSetting, "stored", "stored-value",
+				"value", "new-value", "rule", "default-tracked",
 			},
 		},
 	})
