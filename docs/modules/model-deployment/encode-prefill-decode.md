@@ -73,6 +73,26 @@ Not verified is admitted from the design and has not run on that hardware. Issue
 The `Minimum version` column is a requirement on the image you name, not an admission check:
 nothing reads a version, so an image below it is applied as written.
 
+### Version and configuration limits
+
+The floor applies to the engine image named by `spec.engine.image` or `roles[].image`; the
+[admitted matrix](#the-admitted-matrix) records the requirement and its admission boundary.
+
+For the `llm-d-router` token-estimation path, see [Counting tokens through the engine](prefill-decode.md#counting-tokens-through-the-engine).
+
+`vllm-router` receives the encoder addresses through its rendered `--epd-config`, and the SGLang
+rows use their own encoder arguments. Do not copy the P/D vLLM flag requirement into an EPD
+deployment; that requirement is documented under [Counting tokens through the engine](prefill-decode.md#counting-tokens-through-the-engine).
+
+See [Prefill and Decode](prefill-decode.md#version-and-configuration-limits) for the
+`resources.accelerator` and engine-parallelism rule. The [shape rules](#shape-rules-and-admission-constraints)
+list the `Encode` role's own limits.
+
+Use [vLLM on NVIDIA and AMD](#vllm-on-nvidia-and-amd), [vLLM on Ascend](#vllm-on-ascend) and
+[SGLang](#sglang) for engine-specific encoder arguments and image floors. [Encoder-cache connectors](#encoder-cache-connectors)
+describes generated flags. [Keys the operator owns](#keys-the-operator-owns) describes refused and
+overrideable arguments.
+
 ### vLLM on NVIDIA and AMD
 
 These rows run `ECCPUConnector` over NIXL behind either `llm-d-router` or `vllm-router`, moving
@@ -203,11 +223,11 @@ A live run on 4 × NVIDIA L40S compared EPD with prefill/decode and with a singl
 instance. The aggregated instance leads on short prompts and at low concurrency. EPD leads at `4k`
 and `8k` prompt tokens under concurrency, and when the same image is queried repeatedly.
 
-[Model Deployment Encode, Prefill and Decode Benchmark](epd-benchmark.md) records the numbers, the
+[Model Deployment Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) records the numbers, the
 hardware and when EPD helps.
 
 ---
 
-**See also** — [Model Deployment Configuration](deployment.md) (base fields and admission rules) · [Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) · [Model Deployment Encode, Prefill and Decode Benchmark](epd-benchmark.md) (measured three-arm latency and throughput) · [Engine Versions](engine-versions.md) (supported version floors) · [Model Deployment Routing](routing.md) (router selection and deciders) · [Model Deployment Status](status.md) (status conditions and role summaries) · [EPD Walkthrough](../../walkthroughs/model-deployment/epd.md) (a recorded live run).
+**See also** — [Model Deployment Configuration](deployment.md) (base fields and admission rules) · [Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) · [Model Deployment Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) (measured three-arm latency and throughput) · [Engine Versions](engine-versions.md) (supported version floors) · [Model Deployment Routing](routing.md) (router selection and deciders) · [Model Deployment Status](status.md) (status conditions and role summaries) · [EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) (a recorded live run).
 
 **Next** → [Model Deployment Routing](routing.md) — choose a routing policy and inspect candidate endpoints.

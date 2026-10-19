@@ -16,7 +16,7 @@ The Prefill and Decode and the Multi-Host pages are configuration examples. They
 | Walkthrough | Serving shape | What it covers |
 |---|---|---|
 | [Prefill and Decode](prefill-decode.md) | Disaggregated roles fronted by router | Not measured here. Separate Prefill and Decode roles, `llm-d-router` routing, joint admission, and KV cache transfer. |
-| [Encode, Prefill and Decode](epd.md) | Disaggregated multimodal roles fronted by router | Encoder output transfer over NIXL, joint admission of three roles, and a multimodal request through the router. |
+| [Encode, Prefill and Decode](encode-prefill-decode.md) | Disaggregated multimodal roles fronted by router | Encoder output transfer over NIXL, joint admission of three roles, and a multimodal request through the router. |
 | [Elastic EP](elastic-ep.md) | One Internal LB instance on Ray | TP2, DP width 2→4, EP world 4→8; ordinary and streaming requests before and after expansion. |
 | [External DP](external-dp.md) | Two fixed DP ranks using multiprocessing | TP2, DP2, EP world4; direct requests to each rank and Router distribution across both ranks. |
 | [Multi-Host](multi-host.md) | Coordinated instance spanning multiple hosts | Not measured here. `size: 2`, sixteen GPUs across two physical nodes, leader `m0` routing, and gang admission. |

@@ -708,7 +708,7 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
 
 - [x] **T13 · Documents**
       Blocked by: T5, T7a, T8, T9
-      Owns: `docs/modules/model-deployment/epd.md`, `docs/modules/model-deployment/engine-versions.md`, `docs/modules/model-deployment/routing.md`, `docs/modules/model-deployment/status.md`, `docs/modules/model-deployment/_index.md`, `docs/README.md`
+      Owns: `docs/modules/model-deployment/encode-prefill-decode.md`, `docs/modules/model-deployment/engine-versions.md`, `docs/modules/model-deployment/routing.md`, `docs/modules/model-deployment/status.md`, `docs/modules/model-deployment/_index.md`, `docs/README.md`
       Acceptance: F10 holds, and the limits of F10 sit beside each admission rule.
       `make lint docs` passes.
       Verify: `make lint docs`
@@ -745,13 +745,13 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
 
 - [x] **T16 · Three-arm benchmark report**
       Blocked by: T15, T13
-      Owns: `docs/modules/model-deployment/epd-benchmark.md`, `docs/README.md`
+      Owns: `docs/modules/model-deployment/encode-prefill-decode-benchmark.md`, `docs/README.md`
       Acceptance: F8 holds, with fixed concurrency values, warm-up and repetitions in the page.
       Verify: `make lint docs`
 
 - [x] **T17 · EPD walkthrough**
       Blocked by: T15, T13, T16
-      Owns: `docs/walkthroughs/model-deployment/epd.md`, `docs/walkthroughs/model-deployment/_index.md`, `docs/README.md`
+      Owns: `docs/walkthroughs/model-deployment/encode-prefill-decode.md`, `docs/walkthroughs/model-deployment/_index.md`, `docs/README.md`
       Acceptance: F11 holds, and every output block comes from the T15 run.
       Verify: `make lint docs`
 
@@ -780,9 +780,9 @@ T9 follows T6 (`model_deployment_render.go`), T7b follows T7a (`inject/vllm.go`)
 
 - [x] **T19 · EPD role co-location soft affinity**
       Blocked by: T4, T7c, T13
-      Owns: `pkg/worker/controllers/worker/model_deployment_render.go`, `pkg/worker/controllers/worker/model_deployment_connector_epd.go`, `pkg/worker/controllers/worker/model_deployment_epd_render_test.go`, `docs/modules/model-deployment/epd.md`
+      Owns: `pkg/worker/controllers/worker/model_deployment_render.go`, `pkg/worker/controllers/worker/model_deployment_connector_epd.go`, `pkg/worker/controllers/worker/model_deployment_epd_render_test.go`, `docs/modules/model-deployment/encode-prefill-decode.md`
       Gate: review
-      Acceptance: on a deployment that declares an `Encode` role, rendered replica Pods carry `preferredDuringSchedulingIgnoredDuringExecution` `PodAffinity` terms on `kubernetes.io/hostname` scoped to the same deployment instance (`app.kubernetes.io/name=model-deployment`, `app.kubernetes.io/instance=<md.Name>`): `Prefill` and `Decode` mutually prefer each other at weight `100`, and `Encode` and `Prefill` mutually prefer each other at weight `50`. Deployments without an `Encode` role render no `PodAffinity` and keep the T0 legacy fixtures unchanged. `docs/modules/model-deployment/epd.md` documents the weighted co-location preference.
+      Acceptance: on a deployment that declares an `Encode` role, rendered replica Pods carry `preferredDuringSchedulingIgnoredDuringExecution` `PodAffinity` terms on `kubernetes.io/hostname` scoped to the same deployment instance (`app.kubernetes.io/name=model-deployment`, `app.kubernetes.io/instance=<md.Name>`): `Prefill` and `Decode` mutually prefer each other at weight `100`, and `Encode` and `Prefill` mutually prefer each other at weight `50`. Deployments without an `Encode` role render no `PodAffinity` and keep the T0 legacy fixtures unchanged. `docs/modules/model-deployment/encode-prefill-decode.md` documents the weighted co-location preference.
       Verify: `go test ./pkg/worker/controllers/worker/ -count=1 && make lint docs`
 
 - [x] **T20 · Ascend KVCache, P/D and combined KV verification**

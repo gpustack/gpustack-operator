@@ -87,7 +87,7 @@ Update all tests, e2e scripts, and documentation pages that reference the router
 
 - Unit tests in [`pkg/worker/kvcache/router`](../pkg/worker/kvcache/router/), [`pkg/worker/controllers/worker`](../pkg/worker/controllers/worker/), and [`pkg/worker/extensionapis/worker`](../pkg/worker/extensionapis/worker/).
 - End-to-end test cases in [`.agents/skills/gpustack-operator-e2e/cases`](../.agents/skills/gpustack-operator-e2e/cases/) (`case-71.sh`, `case-91.sh`, `case-94.sh`, `case-120.sh`, `case-121.sh`).
-- Documentation in [`docs/walkthroughs/model-deployment/epd.md`](../docs/walkthroughs/model-deployment/epd.md), [`docs/walkthroughs/model-deployment/external-dp.md`](../docs/walkthroughs/model-deployment/external-dp.md), and [`docs/README.md`](../docs/README.md).
+- Documentation in [`docs/walkthroughs/model-deployment/encode-prefill-decode.md`](../docs/walkthroughs/model-deployment/encode-prefill-decode.md), [`docs/walkthroughs/model-deployment/external-dp.md`](../docs/walkthroughs/model-deployment/external-dp.md), and [`docs/README.md`](../docs/README.md).
 
 ### Notes, Constraints and Caveats
 
@@ -174,7 +174,7 @@ const (
 
 - [x] **T2 · Update end-to-end test cases and walkthrough documentation to port `8000`**
       Blocked by: T1
-      Owns: `.agents/skills/gpustack-operator-e2e/cases/case-71.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-91.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-94.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-120.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-121.sh`, `docs/walkthroughs/model-deployment/epd.md`, `docs/walkthroughs/model-deployment/external-dp.md`, `docs/README.md`
+      Owns: `.agents/skills/gpustack-operator-e2e/cases/case-71.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-91.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-94.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-120.sh`, `.agents/skills/gpustack-operator-e2e/cases/case-121.sh`, `docs/walkthroughs/model-deployment/encode-prefill-decode.md`, `docs/walkthroughs/model-deployment/external-dp.md`, `docs/README.md`
       Acceptance: Every end-to-end script and walkthrough targeting `Service/<md>-router` or router `Pod` HTTP port uses `8000` instead of `8081`, `docs/README.md` indexes this spec under `Model Deployment`, and both `make lint agents-shell` and `make lint docs` pass.
       Verify: `make lint agents-shell && make lint docs`
 

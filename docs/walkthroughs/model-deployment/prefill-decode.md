@@ -38,6 +38,10 @@ Save the following manifest as `pd-deployment.yaml`.
 The definition specifies one Prefill replica with two GPUs and two Decode replicas with two GPUs each.
 The `spec.router` stanza deploys `llm-d-router` as the unified front door.
 
+`--tensor-parallel-size 2` makes each vLLM process use its two requested accelerators. This deployment
+has no `Encode` role, so both roles also set `--enable-scale-out`; see [Counting tokens through the
+engine](../../modules/model-deployment/prefill-decode.md#counting-tokens-through-the-engine).
+
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: ModelDeployment
@@ -51,7 +55,7 @@ spec:
       name: deepseek-v2-lite-chat
   engine:
     name: vLLM
-    image: gpustack/runner:cuda13.0-vllm0.29.0
+    image: gpustack/runner:cuda13.0-vllm0.30.0
   router:
     name: llm-d-router
   roles:
@@ -59,16 +63,24 @@ spec:
       kind: Prefill
       replicas: 1
       instanceType: elastic-cpu-gpu
-      image: gpustack/runner:cuda13.0-vllm0.29.0
+      image: gpustack/runner:cuda13.0-vllm0.30.0
       resources:
         accelerator: "2"
+      extraArgs:
+        - --tensor-parallel-size
+        - "2"
+        - --enable-scale-out
     - name: decode
       kind: Decode
       replicas: 2
       instanceType: elastic-cpu-gpu
-      image: gpustack/runner:cuda13.0-vllm0.29.0
+      image: gpustack/runner:cuda13.0-vllm0.30.0
       resources:
         accelerator: "2"
+      extraArgs:
+        - --tensor-parallel-size
+        - "2"
+        - --enable-scale-out
 ```
 
 Apply the manifest to the cluster:
@@ -204,6 +216,6 @@ kubectl get devices -o json | jq '[.items[].status.groups[].accelerators[] |
 [Routing](../../modules/model-deployment/routing.md) (router engine combinations) ·
 [Elastic EP Walkthrough](elastic-ep.md) (collective expansion) ·
 [External DP Walkthrough](external-dp.md) (fixed per-rank serving) ·
-[EPD Walkthrough](epd.md) (multimodal disaggregation)
+[EPD Walkthrough](encode-prefill-decode.md) (multimodal disaggregation)
 
 **Next** → [Multi-Host Serving Walkthrough](multi-host.md) — scale models across multiple GPU nodes.
