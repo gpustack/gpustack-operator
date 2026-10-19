@@ -1,7 +1,7 @@
 # Spec: Settings Sync Semantics — Environment Declarations and Default Tracking
 
-Status: Built
-Blocked on: nothing. T1 to T5 are ready to build; the open question at the end is a confirmation, not a dependency.
+Status: Shipped
+Blocked on: nothing. T1 to T5 are built and shipped; the open question at the end was confirmed before the build.
 Type: Feature
 
 ## Summary
