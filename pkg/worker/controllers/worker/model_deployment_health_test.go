@@ -63,6 +63,41 @@ func healthPod(role string, ordinal, member int, ready *bool, uid string) core.P
 
 func healthBool(v bool) *bool { return &v }
 
+// healthRunningContainer builds a container status kubelet reports as running, carrying the
+// Started answer it has made so far. A nil started is kubelet having made no answer, which is
+// the state a container sits in while its startupProbe is still running.
+func healthRunningContainer(started *bool) core.ContainerStatus {
+	status := core.ContainerStatus{
+		State: core.ContainerState{Running: &core.ContainerStateRunning{}},
+	}
+	if started != nil {
+		status.Started = started
+	}
+
+	return status
+}
+
+// healthWaitingContainer builds a container status kubelet reports as stuck waiting in the
+// named state.
+func healthWaitingContainer(reason string) core.ContainerStatus {
+	return core.ContainerStatus{
+		State: core.ContainerState{Waiting: &core.ContainerStateWaiting{Reason: reason}},
+	}
+}
+
+// healthStartingPod stamps a running phase and one main container onto a member, so a case can
+// place the replica inside its startup window. Which container kubelet reports is data: a
+// running one kubelet has not marked Started is the state a large model compiles graphs in.
+func healthStartingPod(
+	role string, ordinal, member int, ready *bool, container core.ContainerStatus, uid string,
+) core.Pod {
+	pod := healthPod(role, ordinal, member, ready, uid)
+	pod.Status.Phase = core.PodRunning
+	pod.Status.ContainerStatuses = []core.ContainerStatus{container}
+
+	return pod
+}
+
 // stampHealthGroupTotals writes onto every member the Kueue group total a rendered replica always
 // carries, taken from the size of the role it belongs to.
 //
@@ -356,6 +391,63 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 			wantLeg:     modelDeploymentLegMembersReady,
 			wantVect:    modelDeploymentLegFailed,
 		},
+		{
+			// The replica is inside its startupProbe window: the container is up, kubelet has
+			// made no Started answer, and readiness is still false. That is an open question, not
+			// a fault, so the replica holds instead of revoking.
+			name: "a replica mid-startup holds instead of revoking",
+			pods: []core.Pod{
+				healthStartingPod("server", 0, 0,
+					healthBool(false), healthRunningContainer(healthBool(false)), "uid-a"),
+			},
+			wantEligible: false, wantActivated: true,
+			wantFailure:  healthBool(false),
+			wantLeg:      modelDeploymentLegMembersReady,
+			wantVect:     modelDeploymentLegUnknown,
+			wantHeldLegs: []modelDeploymentQualificationLegName{modelDeploymentLegMembersReady},
+			wantObserved: healthBool(false),
+		},
+		{
+			// Once kubelet has marked the container Started, a false readiness answer is the
+			// definite fault it always was, so the startup hold must not swallow it.
+			name: "a replica whose startup succeeded but readiness is false is revoked as before",
+			pods: []core.Pod{
+				healthStartingPod("server", 0, 0,
+					healthBool(false), healthRunningContainer(healthBool(true)), "uid-a"),
+			},
+			wantEligible: false, wantActivated: true,
+			wantFailure: healthBool(true),
+			wantLeg:     modelDeploymentLegMembersReady,
+			wantVect:    modelDeploymentLegFailed,
+		},
+		{
+			name: "a member stuck in CrashLoopBackOff fails the replica during startup",
+			pods: []core.Pod{
+				healthStartingPod("server", 0, 0,
+					nil, healthWaitingContainer("CrashLoopBackOff"), "uid-a"),
+			},
+			wantEligible: false, wantActivated: true,
+			wantFailure: healthBool(true),
+			wantLeg:     modelDeploymentLegMembersReady,
+			wantVect:    modelDeploymentLegFailed,
+		},
+		{
+			// The multi-member rule: one ready member is not the whole group while a sibling is
+			// still starting, so the readiness leg holds rather than reporting every member ready.
+			name: "a replica with one member ready and a sibling still starting holds",
+			md:   healthDeployment(2),
+			pods: []core.Pod{
+				healthPod("server", 0, 0, healthBool(true), "uid-a"),
+				healthStartingPod("server", 0, 1,
+					healthBool(false), healthRunningContainer(healthBool(false)), "uid-b"),
+			},
+			wantEligible: false, wantActivated: true,
+			wantFailure:  healthBool(false),
+			wantLeg:      modelDeploymentLegMembersReady,
+			wantVect:     modelDeploymentLegUnknown,
+			wantHeldLegs: []modelDeploymentQualificationLegName{modelDeploymentLegMembersReady},
+			wantObserved: healthBool(true),
+		},
 	}
 
 	for _, tc := range testCases {
@@ -425,6 +517,108 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 						"the derived membership generation")
 				}
 			}
+		})
+	}
+}
+
+// TestModelDeploymentMemberReadinessStartupHold is the case table for one member's readiness
+// around startup. The distinctions it pins: a running container kubelet has not marked Started
+// is a hold and not a fault, a container stuck in a bad waiting reason is a fault even before
+// any readiness report, and a Started container whose readiness is still false remains the
+// fault it always was.
+func TestModelDeploymentMemberReadinessStartupHold(t *testing.T) {
+	testCases := []struct {
+		name string
+		// phase is the pod phase; the zero value is the phase a just-created Pod carries.
+		phase core.PodPhase
+		// ready is the PodReady condition answer; nil means the condition is absent.
+		ready *bool
+		// containers and initContainers are the statuses kubelet has reported.
+		containers     []core.ContainerStatus
+		initContainers []core.ContainerStatus
+		want           modelDeploymentLegVerdict
+	}{
+		{
+			name:  "a running container kubelet has not marked started holds instead of failing",
+			phase: core.PodRunning, ready: healthBool(false),
+			containers: []core.ContainerStatus{healthRunningContainer(healthBool(false))},
+			want:       modelDeploymentLegUnknown,
+		},
+		{
+			name:  "a running container with no started answer holds too",
+			phase: core.PodRunning, ready: healthBool(false),
+			containers: []core.ContainerStatus{healthRunningContainer(nil)},
+			want:       modelDeploymentLegUnknown,
+		},
+		{
+			name:  "a started container whose readiness is false is a fault as before",
+			phase: core.PodRunning, ready: healthBool(false),
+			containers: []core.ContainerStatus{healthRunningContainer(healthBool(true))},
+			want:       modelDeploymentLegFailed,
+		},
+		{
+			name:  "a container in CrashLoopBackOff is a fault before any readiness report",
+			phase: core.PodRunning,
+			containers: []core.ContainerStatus{
+				healthWaitingContainer("CrashLoopBackOff"),
+			},
+			want: modelDeploymentLegFailed,
+		},
+		{
+			name:  "an image pull backoff is a fault too",
+			phase: core.PodPending,
+			containers: []core.ContainerStatus{
+				healthWaitingContainer("ImagePullBackOff"),
+			},
+			want: modelDeploymentLegFailed,
+		},
+		{
+			name:  "a stuck init container is a fault whatever the main container is doing",
+			phase: core.PodRunning,
+			initContainers: []core.ContainerStatus{
+				healthWaitingContainer("CreateContainerConfigError"),
+			},
+			containers: []core.ContainerStatus{healthRunningContainer(healthBool(true))},
+			want:       modelDeploymentLegFailed,
+		},
+		{
+			// A ready pod carries the authoritative answer, so a waiting entry in its status
+			// arrays must not overturn it.
+			name:  "a ready pod is verified whatever its container history says",
+			phase: core.PodRunning, ready: healthBool(true),
+			containers: []core.ContainerStatus{healthWaitingContainer("CrashLoopBackOff")},
+			want:       modelDeploymentLegVerified,
+		},
+		{
+			// A waiting state that is not a definite fault is the ordinary pull-and-create
+			// window, and stays a hold.
+			name:  "a container still being created is not a fault",
+			phase: core.PodPending,
+			containers: []core.ContainerStatus{
+				healthWaitingContainer("ContainerCreating"),
+			},
+			want: modelDeploymentLegUnknown,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := core.Pod{Status: core.PodStatus{
+				Phase:                 tc.phase,
+				InitContainerStatuses: tc.initContainers,
+				ContainerStatuses:     tc.containers,
+			}}
+			if tc.ready != nil {
+				status := core.ConditionFalse
+				if *tc.ready {
+					status = core.ConditionTrue
+				}
+				pod.Status.Conditions = []core.PodCondition{
+					{Type: core.PodReady, Status: status},
+				}
+			}
+
+			assert.Equal(t, tc.want, modelDeploymentMemberReadiness(&pod), tc.name)
 		})
 	}
 }
@@ -546,6 +740,17 @@ func TestEndpointEligibilityStatusMapping(t *testing.T) {
 			},
 			wantStatus: "False", wantReason: modelDeploymentReasonEndpointsRevoked,
 			wantEligible: healthCount(int32(1)), wantServing: workercore.ModelDeploymentServingStateNotConfigured,
+		},
+		{
+			// A replica mid-startup has made no readiness answer this operator may call a fault,
+			// so the deployment reports an open question at both levels and never a revocation.
+			name: "a replica mid-startup is never reported revoked",
+			pods: []core.Pod{
+				healthStartingPod("server", 0, 0,
+					healthBool(false), healthRunningContainer(healthBool(false)), "uid-a"),
+			},
+			wantStatus: "Unknown", wantReason: modelDeploymentReasonNotObserved,
+			wantEligible: nil, wantServing: workercore.ModelDeploymentServingStateNotConfigured,
 		},
 	}
 
