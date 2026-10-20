@@ -103,6 +103,21 @@ const (
 	// RadixCache, and the first request raises AttributeError on hicache_storage_pass_prefix_keys.
 	sglangHierarchicalCacheArg = "--enable-hierarchical-cache"
 
+	// sglangPageSizeArg sets SGLang's KV cache page granularity (`arg_groups/fields/schedule.py`,
+	// default None -> effective 1 token in `model_executor/model_runner.py` and `mooncake_store.py`).
+	// With page_size=1, both HiCache Mooncake store objects (`_batch_io_v2`) and P/D transfer
+	// descriptors (`disaggregation/mooncake/conn.py`) degenerate into per-token operations
+	// (`arg_groups/kv_shard_hook.py`). Over Mooncake TCP, defaulting --page-size to 64 cuts
+	// descriptor counts by 64x, matches SGLang's Mooncake store and KV-sharding recommendations,
+	// satisfies attention backends that cap or require page_size == 64 (flashmla, trtllm_mla,
+	// tokenspeed_mla, cutedsl_mla, dsa, hpc_ops), evenly divides chunked_prefill_size, and keeps
+	// prefill and decode halves on the identical --page-size required by `disaggregation/common/conn.py`.
+	// Emitted in DefaultedArgs so a workload whose model or attention backend requires another
+	// value (such as hybrid/linear-attention models requiring `--page-size 1`) overrides the
+	// default by declaring `--page-size` in its own arguments.
+	sglangPageSizeArg        = "--page-size"
+	defaultSGLangTCPPageSize = "64"
+
 	// THE PAIR'S PORTS, AND WHY ONLY ONE OF THEM IS A NUMBER. The encoder serves its requests on
 	// the engine's own --port: an encoder-only server runs its HTTP server on server_args.port
 	// (v0.5.18 `disaggregation/encode_server.py:4110`) and advertises itself as
@@ -374,6 +389,11 @@ func renderSGLang(in Input) (*Result, error) {
 			}
 			result.PodAnnotations[sglangBootstrapPortAnnotation] = strconv.Itoa(int(SGLangBootstrapPort))
 		}
+	}
+	if (hasStore && in.Connection.Protocol == "tcp") ||
+		(in.Disaggregated && (in.Role == RolePrefill || in.Role == RoleDecode) && directLegForcesTCP(in)) {
+		result.DefaultedEnv = append(result.DefaultedEnv, mooncakeTCPDefaultedEnv()...)
+		result.DefaultedArgs = append(result.DefaultedArgs, []string{sglangPageSizeArg, defaultSGLangTCPPageSize})
 	}
 
 	// THE ENCODER LEG IS THE THIRD STAGE, AND IT IS WRITTEN LAST because the address flag takes a

@@ -288,7 +288,10 @@ func TestRender_SGLangDisaggregationRendersBothHalves(t *testing.T) {
 				"--disaggregation-transfer-backend", "mooncake_tcp",
 				"--disaggregation-bootstrap-port", "8998",
 			},
-			wantDefaultedArgs: [][]string{{"--enable-hierarchical-cache"}},
+			wantDefaultedArgs: [][]string{
+				{"--enable-hierarchical-cache"},
+				{"--page-size", "64"},
+			},
 			wantPorts: []core.ContainerPort{
 				{Name: "bootstrap", Protocol: core.ProtocolTCP, ContainerPort: 8998},
 			},
@@ -302,9 +305,12 @@ func TestRender_SGLangDisaggregationRendersBothHalves(t *testing.T) {
 				"--disaggregation-mode", "decode",
 				"--disaggregation-transfer-backend", "mooncake_tcp",
 			},
-			wantDefaultedArgs: [][]string{{"--disaggregation-decode-retraction-backup", "cpu_tensor"}},
-			wantPorts:         nil,
-			wantAnnotations:   nil,
+			wantDefaultedArgs: [][]string{
+				{"--disaggregation-decode-retraction-backup", "cpu_tensor"},
+				{"--page-size", "64"},
+			},
+			wantPorts:       nil,
+			wantAnnotations: nil,
 		},
 	}
 
@@ -390,34 +396,41 @@ func TestRender_SGLangTransferBackendFollowsTheLeg(t *testing.T) {
 func TestRender_SGLangDefaultedArgsFollowTheShape(t *testing.T) {
 	hierarchical := []string{"--enable-hierarchical-cache"}
 	retraction := []string{"--disaggregation-decode-retraction-backup", "cpu_tensor"}
+	pageSize := []string{"--page-size", "64"}
+	rdmaStore := testConnection()
+	rdmaStore.Protocol = "rdma"
 	for _, tc := range []struct {
 		name string
 		in   Input
 		want [][]string
 	}{
 		{
-			name: "no role with a store", want: [][]string{hierarchical},
+			name: "no role with a store", want: [][]string{hierarchical, pageSize},
 			in: Input{Engine: EngineSGLang, Connection: testConnection()},
 		},
 		{
-			name: "prefill half with a store", want: [][]string{hierarchical},
+			name: "prefill half with a store", want: [][]string{hierarchical, pageSize},
 			in: Input{Engine: EngineSGLang, Role: RolePrefill, Connection: testConnection(), Disaggregated: true},
 		},
 		{
-			name: "decode half with a store", want: [][]string{retraction},
+			name: "decode half with a store", want: [][]string{retraction, pageSize},
 			in: Input{Engine: EngineSGLang, Role: RoleDecode, Connection: testConnection(), Disaggregated: true},
 		},
 		{
-			name: "prefill half without a store",
-			in:   Input{Engine: EngineSGLang, Role: RolePrefill, Disaggregated: true, KVTransfer: true},
+			name: "prefill half without a store", want: [][]string{pageSize},
+			in: Input{Engine: EngineSGLang, Role: RolePrefill, Disaggregated: true, KVTransfer: true},
 		},
 		{
-			name: "decode half without a store", want: [][]string{retraction},
+			name: "decode half without a store", want: [][]string{retraction, pageSize},
 			in: Input{Engine: EngineSGLang, Role: RoleDecode, Disaggregated: true, KVTransfer: true},
 		},
 		{
-			name: "lone decode with a store", want: [][]string{hierarchical},
+			name: "lone decode with a store", want: [][]string{hierarchical, pageSize},
 			in: Input{Engine: EngineSGLang, Role: RoleDecode, Connection: testConnection()},
+		},
+		{
+			name: "prefill half with rdma store and rdma transfer", want: [][]string{hierarchical},
+			in: Input{Engine: EngineSGLang, Role: RolePrefill, Connection: rdmaStore, Disaggregated: true, KVTransfer: true, KVTransferProtocol: "rdma"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -426,6 +439,7 @@ func TestRender_SGLangDefaultedArgsFollowTheShape(t *testing.T) {
 			assert.Equal(t, tc.want, result.DefaultedArgs)
 			assert.NotContains(t, result.Args, "--enable-hierarchical-cache")
 			assert.NotContains(t, result.Args, "--disaggregation-decode-retraction-backup")
+			assert.NotContains(t, result.Args, "--page-size")
 		})
 	}
 }
@@ -968,7 +982,95 @@ func TestRender_VLLMForcesTheTCPLeg(t *testing.T) {
 				assert.NotContains(t, envNames(result.DefaultedEnv), "MC_FORCE_TCP")
 				return
 			}
-			assert.Equal(t, []core.EnvVar{{Name: "MC_FORCE_TCP", Value: "1"}}, result.DefaultedEnv)
+			assert.Contains(t, result.DefaultedEnv, core.EnvVar{Name: "MC_FORCE_TCP", Value: "1"})
+		})
+	}
+}
+
+func TestRender_MooncakeTCPDefaults(t *testing.T) {
+	rdmaStore := testConnection()
+	rdmaStore.Protocol = "rdma"
+	ascendStore := testConnection()
+	ascendStore.Protocol = "ascend"
+
+	wantTCPEnv := []core.EnvVar{
+		{Name: "MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER", Value: "65535"},
+		{Name: "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER", Value: "65535"},
+		{Name: "MC_TCP_LANES_PER_PEER", Value: "16"},
+		{Name: "MC_TCP_ADMISSION_TIMEOUT_MS", Value: "60000"},
+	}
+
+	for _, tc := range []struct {
+		name     string
+		in       Input
+		wantTCP  bool
+		wantFlag []string
+	}{
+		{
+			name:     "vllm tcp store",
+			in:       Input{Engine: EngineVLLM, Connection: testConnection()},
+			wantTCP:  true,
+			wantFlag: []string{"--block-size", "128"},
+		},
+		{
+			name:     "vllm tcp transfer without store",
+			in:       Input{Engine: EngineVLLM, Role: RolePrefill, KVTransfer: true},
+			wantTCP:  true,
+			wantFlag: []string{"--block-size", "128"},
+		},
+		{
+			name:    "vllm rdma store and rdma transfer",
+			in:      Input{Engine: EngineVLLM, Role: RolePrefill, Connection: rdmaStore, KVTransfer: true, KVTransferProtocol: "rdma"},
+			wantTCP: false,
+		},
+		{
+			name:    "vllm rdma store and tcp transfer omits process-wide tcp defaults",
+			in:      Input{Engine: EngineVLLM, Role: RolePrefill, Connection: rdmaStore, KVTransfer: true, KVTransferProtocol: "tcp"},
+			wantTCP: false,
+		},
+		{
+			name:    "vllm-ascend omits tcp defaults",
+			in:      Input{Engine: EngineVLLMAscend, Role: RolePrefill, Connection: ascendStore, KVTransfer: true},
+			wantTCP: false,
+		},
+		{
+			name:     "sglang tcp store",
+			in:       Input{Engine: EngineSGLang, Connection: testConnection()},
+			wantTCP:  true,
+			wantFlag: []string{"--page-size", "64"},
+		},
+		{
+			name:     "sglang tcp transfer without store",
+			in:       Input{Engine: EngineSGLang, Role: RolePrefill, Disaggregated: true, KVTransfer: true},
+			wantTCP:  true,
+			wantFlag: []string{"--page-size", "64"},
+		},
+		{
+			name:    "sglang rdma store and rdma transfer",
+			in:      Input{Engine: EngineSGLang, Role: RolePrefill, Connection: rdmaStore, Disaggregated: true, KVTransfer: true, KVTransferProtocol: "rdma"},
+			wantTCP: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(tc.in)
+			require.NoError(t, err)
+			for _, e := range wantTCPEnv {
+				assert.NotContains(t, envNames(result.Env), e.Name,
+					"TCP tuning variables must be defaulted, never owned")
+				if tc.wantTCP {
+					assert.Contains(t, result.DefaultedEnv, e)
+				} else {
+					assert.NotContains(t, envNames(result.DefaultedEnv), e.Name)
+				}
+			}
+			if tc.wantTCP {
+				assert.Contains(t, result.DefaultedArgs, tc.wantFlag)
+			} else {
+				for _, group := range result.DefaultedArgs {
+					assert.NotEqual(t, "--block-size", group[0])
+					assert.NotEqual(t, "--page-size", group[0])
+				}
+			}
 		})
 	}
 }

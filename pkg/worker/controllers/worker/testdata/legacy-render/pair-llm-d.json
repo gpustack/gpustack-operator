@@ -67,6 +67,8 @@
             "{\"kv_connector\":\"MooncakeConnector\",\"kv_role\":\"kv_producer\",\"kv_connector_extra_config\":{\"mooncake_protocol\":\"tcp\"}}",
             "--kv-events-config",
             "{\"enable_kv_cache_events\":true,\"publisher\":\"zmq\",\"endpoint\":\"tcp://*:5557\",\"replay_endpoint\":\"tcp://*:5558\",\"buffer_steps\":10000,\"hwm\":100000,\"max_queue_size\":100000,\"topic\":\"kv@\"}",
+            "--block-size",
+            "128",
             "--host",
             "0.0.0.0",
             "--port",
@@ -106,6 +108,22 @@
             {
               "name": "MC_FORCE_TCP",
               "value": "1"
+            },
+            {
+              "name": "MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER",
+              "value": "65535"
+            },
+            {
+              "name": "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER",
+              "value": "65535"
+            },
+            {
+              "name": "MC_TCP_LANES_PER_PEER",
+              "value": "16"
+            },
+            {
+              "name": "MC_TCP_ADMISSION_TIMEOUT_MS",
+              "value": "60000"
             },
             {
               "name": "VLLM_CACHE_ROOT",
@@ -290,6 +308,8 @@
             "Qwen/Qwen2.5-72B-Instruct",
             "--kv-transfer-config",
             "{\"kv_connector\":\"MooncakeConnector\",\"kv_role\":\"kv_consumer\",\"kv_connector_extra_config\":{\"mooncake_protocol\":\"tcp\"}}",
+            "--block-size",
+            "128",
             "--host",
             "0.0.0.0",
             "--port",
@@ -310,6 +330,22 @@
             {
               "name": "MC_FORCE_TCP",
               "value": "1"
+            },
+            {
+              "name": "MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER",
+              "value": "65535"
+            },
+            {
+              "name": "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER",
+              "value": "65535"
+            },
+            {
+              "name": "MC_TCP_LANES_PER_PEER",
+              "value": "16"
+            },
+            {
+              "name": "MC_TCP_ADMISSION_TIMEOUT_MS",
+              "value": "60000"
             },
             {
               "name": "VLLM_CACHE_ROOT",

@@ -106,6 +106,14 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 		}
 	}
 
+	tcpDefaultedEnv := []core.EnvVar{
+		{Name: "MC_TE_METRIC", Value: "1"},
+		{Name: "MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER", Value: "65535"},
+		{Name: "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER", Value: "65535"},
+		{Name: "MC_TCP_LANES_PER_PEER", Value: "16"},
+		{Name: "MC_TCP_ADMISSION_TIMEOUT_MS", Value: "60000"},
+	}
+
 	testCases := []struct {
 		name             string
 		engine           string
@@ -126,7 +134,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 			wantEnv: []core.EnvVar{
 				{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"},
 			},
-			wantDefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
+			wantDefaultedEnv: tcpDefaultedEnv,
 			wantConfig:       wantFileConfig(nodefeature.ManufacturerNVIDIA),
 		},
 		{
@@ -175,7 +183,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 					},
 				},
 			},
-			wantDefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
+			wantDefaultedEnv: tcpDefaultedEnv,
 			wantConfig:       nil,
 		},
 	}
@@ -403,6 +411,12 @@ func TestSynthesizeModelDeploymentConnector_KVTransferProtocol(t *testing.T) {
 func TestSynthesizeModelDeploymentConnector_ForcesTheTCPLeg(t *testing.T) {
 	metrics := core.EnvVar{Name: "MC_TE_METRIC", Value: "1"}
 	pin := core.EnvVar{Name: "MC_FORCE_TCP", Value: "1"}
+	tcpTuning := []core.EnvVar{
+		{Name: "MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER", Value: "65535"},
+		{Name: "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER", Value: "65535"},
+		{Name: "MC_TCP_LANES_PER_PEER", Value: "16"},
+		{Name: "MC_TCP_ADMISSION_TIMEOUT_MS", Value: "60000"},
+	}
 	for _, tc := range []struct {
 		name         string
 		manufacturer string
@@ -414,15 +428,15 @@ func TestSynthesizeModelDeploymentConnector_ForcesTheTCPLeg(t *testing.T) {
 	}{
 		{
 			name: "prefill without a store", kind: workercore.ModelDeploymentRoleKindPrefill,
-			transfer: true, want: []core.EnvVar{metrics, pin},
+			transfer: true, want: slices.Concat([]core.EnvVar{metrics, pin}, tcpTuning),
 		},
 		{
 			name: "decode without a store", kind: workercore.ModelDeploymentRoleKindDecode,
-			transfer: true, want: []core.EnvVar{metrics, pin},
+			transfer: true, want: slices.Concat([]core.EnvVar{metrics, pin}, tcpTuning),
 		},
 		{
 			name: "prefill with a tcp store", kind: workercore.ModelDeploymentRoleKindPrefill,
-			protocols: []string{"tcp"}, transfer: true, want: []core.EnvVar{metrics, pin},
+			protocols: []string{"tcp"}, transfer: true, want: slices.Concat([]core.EnvVar{metrics, pin}, tcpTuning),
 		},
 		{
 			name: "prefill with an rdma store", kind: workercore.ModelDeploymentRoleKindPrefill,
@@ -434,7 +448,7 @@ func TestSynthesizeModelDeploymentConnector_ForcesTheTCPLeg(t *testing.T) {
 		},
 		{
 			name: "server with a store", kind: workercore.ModelDeploymentRoleKindServer,
-			protocols: []string{"tcp"}, want: []core.EnvVar{metrics},
+			protocols: []string{"tcp"}, want: slices.Concat([]core.EnvVar{metrics}, tcpTuning),
 		},
 		{
 			name: "prefill on ascend", manufacturer: nodefeature.ManufacturerAscend,

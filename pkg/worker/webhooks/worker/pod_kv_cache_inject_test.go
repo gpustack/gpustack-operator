@@ -59,15 +59,19 @@ func TestPodKVCacheInject_VLLMCarriesTheFileVehicle(t *testing.T) {
 	ctr := &pod.Spec.Containers[0]
 	env := containerEnv(ctr)
 	assert.Equal(t, "/etc/gpustack/kvcache/mooncake.json", env["MOONCAKE_CONFIG_PATH"])
+	assert.Equal(t, "65535", env["MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER"])
+	assert.Equal(t, "65535", env["MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER"])
+	assert.Equal(t, "16", env["MC_TCP_LANES_PER_PEER"])
+	assert.Equal(t, "60000", env["MC_TCP_ADMISSION_TIMEOUT_MS"])
 	// The flag and its value are checked separately, and the document semantically: comparing the
 	// whole slice pinned a JSON key order that JSON does not define, which is what kept the renderer
 	// hand-building the string instead of marshaling a type.
-	require.Len(t, ctr.Args, 5)
+	require.Len(t, ctr.Args, 7)
 	assert.Equal(t, []string{"serve", "--kv-transfer-config"}, ctr.Args[:2],
 		"the injection is appended, so the workload's own arguments come first and stay intact")
 	assert.JSONEq(t, `{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}`, ctr.Args[2])
-	assert.Equal(t, []string{"--kv-cache-dtype", "bfloat16"}, ctr.Args[3:],
-		"the Binding's dtype, verbatim, because the store key does not carry it")
+	assert.Equal(t, []string{"--kv-cache-dtype", "bfloat16", "--block-size", "128"}, ctr.Args[3:],
+		"the Binding's dtype, verbatim, followed by the defaulted TCP block size")
 
 	require.Len(t, pod.Spec.Volumes, 1)
 	require.Len(t, ctr.VolumeMounts, 1)
@@ -325,16 +329,18 @@ func TestPodKVCacheInject_SGLangDefaultedArgsYieldToTheContainer(t *testing.T) {
 
 		args := pod.Spec.Containers[0].Args
 		assert.Equal(t, 1, count(args))
-		assert.Equal(t, "--enable-hierarchical-cache", args[len(args)-1],
-			"the default follows the rendered arguments")
+		assert.Equal(t, []string{"--enable-hierarchical-cache", "--page-size", "64"}, args[len(args)-3:],
+			"the defaults follow the rendered arguments")
 	})
 
 	t.Run("container set, so not repeated", func(t *testing.T) {
 		pod := kvCachePodForEngine("SGLang")
-		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "--enable-hierarchical-cache")
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "--enable-hierarchical-cache", "--page-size", "16")
 		require.NoError(t, admit(t, pod))
 
 		assert.Equal(t, 1, count(pod.Spec.Containers[0].Args))
+		assert.Contains(t, pod.Spec.Containers[0].Args, "16")
+		assert.NotContains(t, pod.Spec.Containers[0].Args, "64")
 	})
 }
 

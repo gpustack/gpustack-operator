@@ -291,6 +291,8 @@ func TestRenderVLLM_PrefillComposesTheConsumerWithItsKVProducer(t *testing.T) {
 // stage already renders. The literals are the whole contract: this renderer gained an arm, and any
 // change to a role that never asks for it is a regression whether or not a reader can tell why.
 func TestRenderVLLM_DecodeAndUnsplitRolesAreUnchanged(t *testing.T) {
+	tcpEnv := mooncakeTCPDefaultedEnv()
+	forceTCPEnv := append([]core.EnvVar{{Name: "MC_FORCE_TCP", Value: "1"}}, tcpEnv...)
 	testCases := []struct {
 		name         string
 		in           Input
@@ -300,16 +302,18 @@ func TestRenderVLLM_DecodeAndUnsplitRolesAreUnchanged(t *testing.T) {
 		ports        []core.ContainerPort
 	}{
 		{
-			name: "an undivided server reads and writes",
-			in:   Input{Engine: EngineVLLM, Connection: testConnection()},
-			args: []string{vllmTransferConfigArg, `{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}`},
-			env:  []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"}},
+			name:         "an undivided server reads and writes",
+			in:           Input{Engine: EngineVLLM, Connection: testConnection()},
+			args:         []string{vllmTransferConfigArg, `{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}`},
+			env:          []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"}},
+			defaultedEnv: tcpEnv,
 		},
 		{
-			name: "a decode half consumes",
-			in:   Input{Engine: EngineVLLM, Role: RoleDecode, Connection: testConnection()},
-			args: []string{vllmTransferConfigArg, `{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}`},
-			env:  []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"}},
+			name:         "a decode half consumes",
+			in:           Input{Engine: EngineVLLM, Role: RoleDecode, Connection: testConnection()},
+			args:         []string{vllmTransferConfigArg, `{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}`},
+			env:          []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"}},
+			defaultedEnv: tcpEnv,
 		},
 		{
 			name: "a prefill half produces and publishes its handshake",
@@ -318,10 +322,8 @@ func TestRenderVLLM_DecodeAndUnsplitRolesAreUnchanged(t *testing.T) {
 				vllmTransferConfigArg,
 				`{"kv_connector":"MooncakeConnector","kv_role":"kv_producer","kv_connector_extra_config":{"mooncake_protocol":"tcp"}}`,
 			},
-			env: []core.EnvVar{{Name: "VLLM_MOONCAKE_BOOTSTRAP_PORT", Value: "8998"}},
-			defaultedEnv: []core.EnvVar{
-				{Name: "MC_FORCE_TCP", Value: "1"},
-			},
+			env:          []core.EnvVar{{Name: "VLLM_MOONCAKE_BOOTSTRAP_PORT", Value: "8998"}},
+			defaultedEnv: forceTCPEnv,
 			ports: []core.ContainerPort{{
 				Name: "mc-bootstrap", Protocol: core.ProtocolTCP, ContainerPort: 8998,
 			}},
@@ -335,7 +337,7 @@ func TestRenderVLLM_DecodeAndUnsplitRolesAreUnchanged(t *testing.T) {
 			},
 			// No store means no config path variable and no bootstrap port: the decode half learns
 			// the prefiller's address per request and never listens itself.
-			defaultedEnv: []core.EnvVar{{Name: "MC_FORCE_TCP", Value: "1"}},
+			defaultedEnv: forceTCPEnv,
 		},
 		{
 			name: "a store-backed decode half keeps its dtype",
@@ -344,7 +346,8 @@ func TestRenderVLLM_DecodeAndUnsplitRolesAreUnchanged(t *testing.T) {
 				vllmTransferConfigArg, `{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}`,
 				KVCacheDtypeArg, "fp8",
 			},
-			env: []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"}},
+			env:          []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"}},
+			defaultedEnv: tcpEnv,
 		},
 	}
 
