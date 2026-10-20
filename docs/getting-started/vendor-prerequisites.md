@@ -1,24 +1,21 @@
 # Vendor Prerequisites
 
-Vendor value keys and component names change between releases, so each manufacturer section names the
-vendor artifact and product version its statements were read against.
-
-Every section starts with what to **install before GPUStack**. Where the vendor also ships a GPU
-Operator, it goes on to say which of that operator's components conflict with ours, how to **install
-it** alongside GPUStack, and, if it is **already installed**, what to change before GPUStack can go
-on the same node.
+Install the manufacturer's driver and any required container toolkit before GPUStack. If a vendor GPU
+Operator is installed, disable components that conflict with GPUStack before sharing the node.
+Vendor keys and component names depend on the release.
+Check the cited artifact and version for each manufacturer.
 
 ## Contents
 
 - [Allocator injection](#allocator-injection)
 - [Device plugin name collisions](#device-plugin-name-collisions)
-- [One Node Feature Discovery per cluster](#one-node-feature-discovery-per-cluster)
+- [Single NFD per cluster](#single-nfd-per-cluster)
 - [Resource removal lag](#resource-removal-lag)
 - [Per manufacturer](#per-manufacturer)
 
 ## Allocator injection
 
-Whether a container toolkit is required at all follows directly from how our own allocator makes the
+Whether a container toolkit is required at all follows directly from how GPUStack's allocator makes the
 accelerator visible: a `/dev` node needs nothing from the toolkit, while an env var needs the vendor's
 runtime hook to interpret it.
 
@@ -45,41 +42,41 @@ produces a running container with the variable set and no accelerator behind it.
 
 The kubelet does not reject a second device-plugin registration for a resource name it already knows:
 it replaces the endpoint. Both plugins keep writing their own device sets, so node capacity oscillates
-between the two views, and a Pod can fail admission during the flap.
+between the two views, and a `Pod` can fail admission during the flap.
 
 Allocation can also fail when kubelet sends one plugin's device IDs to the other. Remove the duplicate
 plugin before submitting workloads.
 
-## One Node Feature Discovery per cluster
+## Single NFD per cluster
 
 Run exactly one NFD master. Two masters write and garbage-collect the same
 `feature.node.kubernetes.io/*` labels, so each one's GC pass can erase the other's writes. Every
-device-manager DaemonSet in this operator is placed onto a node by a `pci-<vendor>.present` label that
-NFD produces, so a lost label stops that DaemonSet from scheduling at all.
+Device Manager `DaemonSet` in this operator is placed onto a node by a `pci-<vendor>.present` label that
+NFD produces, so a lost label stops that `DaemonSet` from scheduling at all.
 
-A vendor GPU Operator reaches its own node labels in one of two ways, and only one of them is
-unaffected by turning its bundled NFD off. Some ship a cluster-scoped `NodeFeatureRule` and let
-whichever NFD is running evaluate it — AMD's operator does, and ours evaluates it: our master denies no
-label namespace, honours NodeFeature labels, and is pinned to no namespace. Others read a label an NFD
-*source* produces, which exists only where that source is enabled — see [NVIDIA](#nvidia).
+A vendor GPU Operator obtains its node labels through a `NodeFeatureRule` or an NFD source.
+AMD's operator installs a cluster-scoped `NodeFeatureRule`, which the active NFD installation evaluates.
+GPUStack's bundled NFD can evaluate it: its master denies no label namespace and accepts `NodeFeature`
+labels from every namespace. Other operators require labels from a specific NFD source.
+Enable that source in the replacement NFD installation; see [NVIDIA](#nvidia).
 
-**Bringing your own NFD.** Turning ours off hands the job to a cluster's own, through whichever lever
-the install mode gives you: `--set node-feature-discovery.enabled=false` in chart mode, or
-`--disable-applications=node-feature-discovery` on the worker in image mode — [Installation
-Modes](../operate/installation-modes.md#chart-mode-and-image-mode) has the difference.
+**Bringing your own NFD.** To use an existing NFD installation, disable GPUStack's bundled NFD.
+Set `--set node-feature-discovery.enabled=false` in chart mode, or
+`--disable-applications=node-feature-discovery` on the worker in image mode.
+See [Installation Modes](../operate/installation-modes.md#chart-and-image-modes) for the mode differences.
 
-Either way the worker still applies the `gpustack-cpu-info` NodeFeatureRule itself, so that one is never
-the replacement's to install, only to evaluate. Ours is configured for six things an NFD must do
-here, and a replacement must be too:
+The worker still installs the `gpustack-cpu-info` `NodeFeatureRule` in either mode.
+The replacement NFD installation must evaluate it and meet these requirements:
 
 1. A worker collecting `pci`, with `vendor` among its `deviceLabelFields` and device classes `02`, `03`,
    `0b` and `12` whitelisted. Those are what produce the `pci-<vendor>.present` labels, and the
-   `gpustack-cpu-info` NodeFeatureRule matches the same classes.
-2. A worker collecting `system`, which publishes `system-os_release.*`. This chain reads none of it;
-   the NVIDIA GPU Operator does, and ours publishes it so that operator can run with its own NFD off
-   — [NVIDIA](#nvidia).
+   `gpustack-cpu-info` `NodeFeatureRule` matches the same classes.
+2. A worker collecting `system`, which publishes `system-os_release.*`.
+   GPUStack's scheduling chain does not use these labels, but the NVIDIA GPU Operator requires them.
+   GPUStack's bundled NFD publishes them, so the NVIDIA operator can run with its own NFD disabled.
+   See [NVIDIA](#nvidia).
 3. A master that evaluates `NodeFeature` objects from **every** namespace. The worker's and the
-   device-managers' own `<node>-gpustack-*` objects are how their detections reach the Node.
+   Device Managers' own `<node>-gpustack-*` objects are how their detections reach the `Node`.
 4. `restrictions.denyNodeFeatureLabels: false` and `disableExtendedResources: false`, since those
    detections arrive as labels *and* as extended resources.
 5. A `denyLabelNs` that admits `acceleratable.feature.gpustack.ai` and `general.feature.gpustack.ai`.
@@ -91,7 +88,7 @@ The NVIDIA GPU Operator's already publishes `vendor` as its only `deviceLabelFie
 item 1 asks for, and collects every source, which is item 2; its device classes are the gap.
 
 It whitelists `0300` and `0302` (the GPUs it was written for) and neither `0b` nor `12`, so an
-accelerator in either class never gets the label its device manager schedules on, and that DaemonSet
+accelerator in either class never gets the label its Device Manager schedules on, and that `DaemonSet`
 stays unscheduled with nothing to say why. Both values live under that chart's
 `node-feature-discovery.worker.config.sources.pci`.
 
@@ -100,12 +97,12 @@ and all that has to be settled is which release owns them. And the class gap onl
 manufacturer is present: the display-controller classes it does whitelist cover NVIDIA and AMD, so a
 cluster holding only those is already served by its list.
 
-Read the six items as a checklist rather than a recipe: every cluster this page was written against
-ran the NFD this chart bundles, so a handover has not been observed end to end.
+Treat these requirements as a checklist. Hardware validation used the bundled NFD;
+a handover to an existing NFD installation has not been tested end to end.
 
 ## Resource removal lag
 
-Removing a vendor's device plugin does not immediately remove its extended resource from the Node
+Removing a vendor's device plugin does not immediately remove its extended resource from the `Node`
 object: the kubelet only drops it once it reconverges. A scheduler can keep seeing the old resource as
 allocatable for a window after the plugin is gone, so "disabled" is not the same moment as "gone" from
 a scheduling decision's point of view.
@@ -120,12 +117,12 @@ Read against **AMD GPU Operator v1.5.1** —
 [Toolkit Install](https://instinct.docs.amd.com/projects/container-toolkit/en/latest/index.html).
 
 **Install before GPUStack** — the ROCm driver alone. Per [Allocator
-injection](#allocator-injection), our allocator injects `/dev/kfd` and each granted accelerator's
+injection](#allocator-injection), GPUStack's allocator injects `/dev/kfd` and each granted accelerator's
 DRM nodes itself, so neither the AMD Container Toolkit nor `amd-container-runtime` is needed.
 
 A non-root workload still needs `video` and `render` supplementary-group membership on its container's
 user: the device plugin API has no field to grant a supplementary group, so this is the workload's or
-the cluster's own `securityContext` to set. Measured, the failure mode without it is **zero enumerated
+the cluster's own *`securityContext`* to set. Measured, the failure mode without it is **zero enumerated
 ROCm agents, not an error**: `rocm-smi` reads sysfs and keeps reporting the accelerator regardless, so
 it is not a valid check here; use `rocminfo` instead.
 
@@ -136,7 +133,7 @@ it is not a valid check here; use `rocminfo` instead.
 | Driver | Keep | `DeviceConfig.spec.driver.enable` (default `true`) |
 | Metrics exporter (DCGM-class) | Keep | `DeviceConfig.spec.metricsExporter.enable` — **default `false`**, enable it |
 | Device plugin | Disable | `DeviceConfig.spec.devicePlugin.enableDevicePlugin: false` |
-| Node Labeller | Disable | `DeviceConfig.spec.devicePlugin.enableNodeLabeller: false` |
+| `Node` Labeller | Disable | `DeviceConfig.spec.devicePlugin.enableNodeLabeller: false` |
 | Bundled Node Feature Discovery | Disable | `--set node-feature-discovery.enabled=false` |
 | Bundled Kernel Module Management | Disable when the driver is pre-installed | `--set kmm.enabled=false --set kmm.watch=false` |
 | DRA driver | Leave enabled to test whole-card allocation | `DeviceConfig.spec.draDriver.enable` — mutually exclusive with `devicePlugin.enableDevicePlugin` on one CR |
@@ -158,15 +155,15 @@ kubectl -n kube-amd-gpu patch deviceconfig <name> --type merge -p \
   '{"spec":{"devicePlugin":{"enableDevicePlugin":false,"enableNodeLabeller":false},"metricsExporter":{"enable":true}}}'
 ```
 
-**Already installed** — the operator's device plugin advertises `amd.com/gpu`, the same name ours
-does, so it has to stop before GPUStack goes on that node:
+**Already installed** — the vendor plugin and GPUStack's plugin both advertise `amd.com/gpu`.
+Stop the vendor plugin before installing GPUStack on that node:
 
-1. **Device plugin and Node Labeller** — turn both off on the existing `DeviceConfig`, the same patch as
-   above against the CR the running release created. Do not delete the DaemonSet: the controller
+1. **Device plugin and `Node` Labeller** — turn both off on the existing `DeviceConfig`, the same patch as
+   above against the CR the running release created. Do not delete the `DaemonSet`: the controller
    recreates whatever the CR still asks for.
 2. **Bundled Node Feature Discovery** — if that release brought its own, `helm upgrade` it with the
    values it was installed with plus `--set node-feature-discovery.enabled=false`.
-3. **Verify** — wait for `amd.com/gpu` to leave the Node before installing GPUStack;
+3. **Verify** — wait for `amd.com/gpu` to leave the `Node` before installing GPUStack;
    `kubectl get node <node> -o jsonpath='{.status.allocatable}'` no longer lists it. The kubelet drops
    it a moment after the plugin goes, not at the same instant.
 
@@ -179,10 +176,10 @@ statements below, **MindCluster 26.1.0**, the release carried by the A5 host the
 [MindCluster](https://www.hiascend.com/software/mindx-dl).
 
 **Install before GPUStack** — the Ascend NPU driver and firmware, and the Ascend Docker Runtime: per
-[Allocator injection](#allocator-injection), our allocator emits `ASCEND_VISIBLE_DEVICES` and no
+[Allocator injection](#allocator-injection), GPUStack's allocator emits `ASCEND_VISIBLE_DEVICES` and no
 device node, so that runtime is what turns an allocation into `/dev` entries.
 
-Register the runtime under the handler name `ascend`, which is the RuntimeClass this chart creates for
+Register the runtime under the handler name `ascend`, which is the `RuntimeClass` this chart creates for
 this manufacturer, or set `deviceManager.createRuntimeClasses=false` and attach your own.
 
 **Atlas A5 (the 950 series) needs MindCluster 26.0.0 or newer.** A5 support landed in that release,
@@ -210,14 +207,14 @@ grep '^version=' /usr/local/Ascend/Ascend-Docker-Runtime/ascend_docker_runtime_i
 ```
 
 `gpustack-operator device-manager preflight` reads the same file and reports it as the
-[`ascend-docker-runtime` check](../modules/devices/preflight.md#the-a5-host-state-rows) on each A5 accelerator,
+[`ascend-docker-runtime` check](../modules/devices/preflight.md#a5-host-state-rows) on each A5 accelerator,
 so a node too old to serve them is named before a workload lands on it.
 
-#### A5: the host ranktable must be absent or version 2.0
+#### A5 host ranktable requirement
 
-`/etc/hccl_rootinfo.json` is optional state generated by `mindcluster-tools`, owned by no package.
-`ascend-docker-runtime` mounts it into every container whenever the host carries it, on presence
-alone and with no version check.
+The host ranktable must be absent or version 2.0. `/etc/hccl_rootinfo.json` is optional state
+generated by `mindcluster-tools`, owned by no package. `ascend-docker-runtime` mounts it into every
+container whenever the host carries it, on presence alone and with no version check.
 
 Its format is fixed by the chip generation: **1.0 serves A2** (910/910B/310P), **1.2 serves A3**
 (910C), **2.0 serves A5**. A5 loads `libhccl_v2`, which refuses anything but 2.0:
@@ -239,7 +236,7 @@ test -e /etc/hccl_rootinfo.json && grep -o '"version"[^,]*' /etc/hccl_rootinfo.j
 ```
 
 `gpustack-operator device-manager preflight` reports this as the [`hccl-ranktable`
-check](../modules/devices/preflight.md#the-a5-host-state-rows) on each A5 accelerator. A multi-node deployment
+check](../modules/devices/preflight.md#a5-host-state-rows) on each A5 accelerator. A multi-node deployment
 does need a ranktable; this rule covers the single-node case.
 
 
@@ -249,7 +246,7 @@ Read against **Cambricon driver 5.10.22** (Neuware SDK 1.15.0) —
 [Driver Install](https://www.cambricon.com/docs/sdk_1.15.0/driver_5.10.22/user_guide/index.html).
 
 **Install before GPUStack** — the Cambricon MLU driver alone. Per [Allocator
-injection](#allocator-injection), our allocator injects the card's own node and the host's control
+injection](#allocator-injection), GPUStack's allocator injects the card's own node and the host's control
 nodes on both the whole-card and the sliced path, so `cntoolkit` is not required. It still sets the
 `CAMBRICON_VISIBLE_DEVICES` a deployment running `cambricon-container-runtime` keys on, naming the
 same cards the injected nodes do.
@@ -263,7 +260,7 @@ with no pinned semantic version —
 
 **Install before GPUStack** — the Hygon DCU driver and firmware, with the device files (`/dev/kfd`,
 `/dev/mkfd`, `/dev/dri/card*`, `/dev/dri/renderD*`) visible on the node. Per [Allocator
-injection](#allocator-injection), our allocator injects those nodes directly, and the DCU Operator
+injection](#allocator-injection), GPUStack's allocator injects those nodes directly, and the DCU Operator
 ships no container runtime of its own, so no container toolkit is required.
 
 **Vendor GPU Operator** — the DCU Operator, driven by a single `DeviceConfig` CR (`kubectl explain
@@ -274,7 +271,7 @@ deviceconfig.spec`); every component below is a field under that one CR, not a s
 | DCU-Exporter (metrics) | Keep | `DeviceConfig.spec.metricsExporter.enable` — disabled by default, enable it |
 | DCU-DCGM (diagnostics) | Keep | `DeviceConfig.spec.dcgm.enable` — disabled by default, enable it |
 | DCU-Device-Plugin | Disable | `DeviceConfig.spec.devicePlugin.enableDevicePlugin: false` |
-| DCU-Label-Node (NFD-equivalent) | Disable | `DeviceConfig.spec.devicePlugin.enableNodeLabeller: false` |
+| DCU-Label-`Node` (NFD-equivalent) | Disable | `DeviceConfig.spec.devicePlugin.enableNodeLabeller: false` |
 
 **Install it** — the vendor's install chapter sits behind its authenticated documentation portal, so no
 install command is reproduced here. Whatever installs the operator, turn the two components off on the
@@ -285,13 +282,13 @@ kubectl -n kube-system patch deviceconfig <name> --type merge -p \
   '{"spec":{"devicePlugin":{"enableDevicePlugin":false,"enableNodeLabeller":false},"metricsExporter":{"enable":true},"dcgm":{"enable":true}}}'
 ```
 
-**Already installed** — the operator's device plugin advertises `hygon.com/dcu`, the same name ours
-does, so it has to stop before GPUStack goes on that node:
+**Already installed** — the vendor plugin and GPUStack's plugin both advertise `hygon.com/dcu`.
+Stop the vendor plugin before installing GPUStack on that node:
 
-1. **Device plugin and Node Labeller** — turn `enableDevicePlugin` and `enableNodeLabeller` off on the
+1. **Device plugin and `Node` Labeller** — turn `enableDevicePlugin` and `enableNodeLabeller` off on the
    existing `DeviceConfig`, with the patch above against the CR the running release created. Do not
-   delete the DaemonSets: the controller recreates whatever the CR still asks for.
-2. **Verify** — wait for `hygon.com/dcu` to leave the Node before installing GPUStack.
+   delete the `DaemonSet`s: the controller recreates whatever the CR still asks for.
+2. **Verify** — wait for `hygon.com/dcu` to leave the `Node` before installing GPUStack.
 
 
 ### Iluvatar
@@ -301,11 +298,11 @@ Read against **ix-GPU-Operator v4.4.0** and **ix-Container-Toolkit v1.1.0** —
 [Toolkit Install](https://developer.iluvatar.com/docs/generaldocs_ix_container_toolkit?category=%E4%BA%91%E5%8E%9F%E7%94%9F%E4%B8%8E%E9%9B%86%E7%BE%A4%E9%83%A8%E7%BD%B2&manual=generaldocs_k8stools_all).
 
 **Install before GPUStack** — the Iluvatar driver and the ix-Container-Toolkit: per [Allocator
-injection](#allocator-injection), our allocator emits `IX_VISIBLE_DEVICES` and no device node. The
+injection](#allocator-injection), GPUStack's allocator emits `IX_VISIBLE_DEVICES` and no device node. The
 two are paired by version — a v4.4.0 driver needs the v1.1.0 toolkit, and the vendor states the two
 must match on host and in-container.
 
-Register the runtime under the handler name `iluvatar`, which is the RuntimeClass this chart creates
+Register the runtime under the handler name `iluvatar`, which is the `RuntimeClass` this chart creates
 for this manufacturer, or set `deviceManager.createRuntimeClasses=false` and attach your own.
 
 **Vendor GPU Operator** — the ix-GPU-Operator, a Helm chart with one switch per component.
@@ -331,13 +328,13 @@ helm install --wait ix-gpu-operator \
   --set ixfd.enabled=false
 ```
 
-**Already installed** — ix-Device-Plugin advertises `iluvatar.com/gpu`, the same name ours does, so it
-has to stop before GPUStack goes on that node:
+**Already installed** — ix-Device-Plugin and GPUStack's plugin both advertise `iluvatar.com/gpu`.
+Stop ix-Device-Plugin before installing GPUStack on that node:
 
 1. **ix-Device-Plugin and ix-Feature-Discovery** — `helm upgrade` the release with the values it was
    installed with plus `--set ixDevicePlugin.enabled=false --set ixfd.enabled=false`. The operator
    removes both workloads itself; deleting one by hand only makes it come back on the next reconcile.
-2. **Verify** — wait for `iluvatar.com/gpu` to leave the Node before installing GPUStack.
+2. **Verify** — wait for `iluvatar.com/gpu` to leave the `Node` before installing GPUStack.
 
 Below software-stack v4.3.0 the operator is deployed from YAML manifests with no per-component toggle.
 There the only lever is the whole manifest: delete it, and install the driver and ix-Container-Toolkit
@@ -352,7 +349,7 @@ Read against **MetaX Kubernetes GPU Operator v0.15.3** —
 [Components](https://developer.metax-tech.com/api/client/document/preview/1411/k8s/03_component.html).
 
 **Install before GPUStack** — the MetaX driver and the MXMACA SDK. Per [Allocator
-injection](#allocator-injection), our allocator injects the three control nodes (`/dev/mxcd`,
+injection](#allocator-injection), GPUStack's allocator injects the three control nodes (`/dev/mxcd`,
 `/dev/mxnd`, `/dev/mxgd`) and each granted accelerator's DRM nodes directly, so no container toolkit
 is required.
 
@@ -382,16 +379,16 @@ helm install oci://DOMAIN/PROJECT/metax-operator \
   --set minimalMode=true
 ```
 
-**Already installed** — `gpu-device` advertises `metax-tech.com/gpu`, the same name ours does, and the
-vendor marks it mandatory in every install mode, so the two cannot share a node. The operator has to
-go:
+**Already installed** — `gpu-device` and GPUStack's plugin both advertise `metax-tech.com/gpu`.
+The vendor requires `gpu-device` in every install mode, so the plugins cannot share a node.
+Uninstall the vendor operator before installing GPUStack:
 
 1. **Kernel driver and MXMACA SDK** — make sure both are on the node independently of the operator.
    Under `minimalMode` they already are; otherwise install them first, or uninstalling takes them with
    it.
 2. **The whole release** — `helm uninstall` it. `gpu-device` and `gpu-label` have no switch, so there
    is nothing narrower to turn off.
-3. **Verify** — wait for `metax-tech.com/gpu` to leave the Node before installing GPUStack.
+3. **Verify** — wait for `metax-tech.com/gpu` to leave the `Node` before installing GPUStack.
 
 
 ### Moore Threads
@@ -401,7 +398,7 @@ Read against **MT GPU Operator v2.1.0** (KUAE Cloud Native) —
 [Helm Chart Install](https://docs.mthreads.com/cloud-native/cloud-native-doc-online/install_guide#mt-gpu-operator).
 
 **Install before GPUStack** — the Moore Threads driver and the MT Container Toolkit: per [Allocator
-injection](#allocator-injection), our allocator emits `MTHREADS_VISIBLE_DEVICES` and no device node.
+injection](#allocator-injection), GPUStack's allocator emits `MTHREADS_VISIBLE_DEVICES` and no device node.
 Both can come from the operator's own `full` mode below.
 
 **Vendor GPU Operator** — the MT GPU Operator, installed in one of two modes rather than by a single
@@ -419,7 +416,7 @@ manifests carrying only the device plugin and the exporter.
 | Device plugin | No switch | it ships inside the operator's reconciliation loop under `full` mode |
 
 **Install it** — from the chart directories the vendor's bundle unpacks, with the cluster-level add-ons
-off. No key disables the device plugin under `full` mode, so a node that must run ours instead is
+off. No key disables the device plugin under `full` mode, so a node that must run GPUStack's device plugin is
 served by `core` mode with that manifest's device plugin removed.
 
 ```bash
@@ -431,8 +428,9 @@ helm install --wait mt-gpu-operator-custom-resources mt-gpu-operator-custom-reso
   --set mtGpuClusterPolicyClusterpolicy.aiOps.enabled=false
 ```
 
-**Already installed** — the vendor's device plugin advertises `mthreads.com/gpu`, the same name ours
-does, and `full` mode exposes no key that removes it, so what to do depends on which mode installed it:
+**Already installed** — the vendor plugin and GPUStack's plugin both advertise `mthreads.com/gpu`.
+Stop the vendor plugin before installing GPUStack on that node.
+The `full` mode has no switch to disable it; follow the procedure for the installed mode:
 
 1. **Cluster-level add-ons** (bundled NFD, `kured`, node-problem-detector, `aiOps`) — under `full`,
    `helm upgrade` the `mt-gpu-operator-custom-resources` release with the switches above. `core` ships
@@ -443,7 +441,7 @@ does, and `full` mode exposes no key that removes it, so what to do depends on w
      operator, and go on below.
    - **`core`** — there is no controller, so edit the manifests directly: drop the device plugin from
      `deployments.yaml`, leave the exporter, and re-apply.
-3. **Verify** — wait for `mthreads.com/gpu` to leave the Node before installing GPUStack.
+3. **Verify** — wait for `mthreads.com/gpu` to leave the `Node` before installing GPUStack.
 
 
 ### NVIDIA
@@ -453,13 +451,13 @@ Read against **NVIDIA GPU Operator v26.3.3** —
 [Helm Chart Install](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html).
 
 **Install before GPUStack** — the NVIDIA driver and the NVIDIA Container Toolkit: per [Allocator
-injection](#allocator-injection), our allocator emits `NVIDIA_VISIBLE_DEVICES` by default and no
+injection](#allocator-injection), GPUStack's allocator emits `NVIDIA_VISIBLE_DEVICES` by default and no
 device node. The toolkit is what the other channel needs too — it is what writes the node's CDI
 specifications. Both can come from the operator itself.
 
-**The toolkit is also what MIG needs**, not only workloads: the Device Manager Pod reads the management
+**The toolkit is also what MIG needs**, not only workloads: the Device Manager `Pod` reads the management
 library through it, and the chart declares `NVIDIA_MIG_CONFIG_DEVICES` / `NVIDIA_MIG_MONITOR_DEVICES` on
-that Pod so the runtime stops hiding the driver's MIG capabilities from it — see
+that `Pod` so the runtime stops hiding the driver's MIG capabilities from it — see
 [MIG prerequisites](../modules/devices/nvidia-mig.md#prerequisites) for the two ways to break that.
 
 **Vendor GPU Operator** — the NVIDIA GPU Operator, a Helm chart with one switch per component.
@@ -471,8 +469,8 @@ that Pod so the runtime stops hiding the driver's MIG capabilities from it — s
 | DCGM exporter | Keep | `dcgmExporter.enabled` (default `true`) |
 | Device plugin | Disable | `--set devicePlugin.enabled=false` |
 | GPU Feature Discovery | Keep | `gfd.enabled` (default `true`) |
-| Bundled Node Feature Discovery | Disable — or keep it and turn ours off instead | `--set nfd.enabled=false`, or [hand the job over](#one-node-feature-discovery-per-cluster) |
-| MIG Manager | Disable | `--set migManager.enabled=false` — it reconfigures MIG geometry from node labels and fights this operator's Allocate-time MIG actuation. One profile does not: [NVIDIA MIG](../modules/devices/nvidia-mig.md#across-a-fleet-with-the-nvidia-gpu-operator) |
+| Bundled Node Feature Discovery | Disable — or keep it and disable GPUStack's bundled NFD instead | `--set nfd.enabled=false`, or [hand the job over](#single-nfd-per-cluster) |
+| MIG Manager | Disable | `--set migManager.enabled=false` — it reconfigures MIG geometry from node labels and fights this operator's Allocate-time MIG actuation. One profile does not: [NVIDIA MIG](../modules/devices/nvidia-mig.md#fleet-wide-mig-manager) |
 | CDI | Disable | `--set cdi.enabled=false` — default `true` from v25.10, see below |
 
 **Check the node is not opted out.** Some GPU distributions ship their nodes already labelled
@@ -495,24 +493,24 @@ helm install --wait --generate-name \
   --set cdi.enabled=false
 ```
 
-**Already installed** — the operator's device plugin advertises `nvidia.com/gpu`, the same name ours
-does, and its MIG Manager drives the same hardware our allocator does, so both have to stop before
-GPUStack goes on that node.
+**Already installed** — the vendor plugin and GPUStack's plugin both advertise `nvidia.com/gpu`.
+The vendor's MIG Manager also reconfigures hardware that GPUStack's allocator manages.
+Stop both vendor components before installing GPUStack on that node.
 
 One `helm upgrade`, with the values the release was installed with plus the three switches below. The
-operator removes those DaemonSets itself; deleting one by hand only makes it come back, because the
+operator removes those `DaemonSet`s itself; deleting one by hand only makes it come back, because the
 `ClusterPolicy` still asks for it.
 
-1. **Device plugin** — `--set devicePlugin.enabled=false`. It advertises the resource name ours does.
-2. **MIG Manager** — `--set migManager.enabled=false`. A node whose geometry it had been maintaining
-   keeps whatever it was left in, and our allocator reconfigures that at `Allocate` time from then on.
-3. **Bundled Node Feature Discovery** — `--set nfd.enabled=false`. Ours publishes the
+1. **Device plugin** — set `--set devicePlugin.enabled=false`.
+2. **MIG Manager** — set `--set migManager.enabled=false`. The node retains its existing geometry.
+   GPUStack's allocator reconfigures it during subsequent `Allocate` calls.
+3. **Bundled Node Feature Discovery** — `--set nfd.enabled=false`. GPUStack's bundled NFD publishes the
    `system-os_release.*` labels that release had been publishing, so nothing has to be carried over by
-   hand. Keeping this one and turning ours off is the other way round — [One NFD per
-   cluster](#one-node-feature-discovery-per-cluster).
+   hand. Keeping this one and disabling GPUStack's bundled NFD is the other way round — [One NFD per
+   cluster](#single-nfd-per-cluster).
 4. **Driver, container toolkit, DCGM exporter, GPU Feature Discovery** — leave running. GPUStack needs
    the first two.
-5. **Verify** — wait for `nvidia.com/gpu` to leave the Node before installing GPUStack.
+5. **Verify** — wait for `nvidia.com/gpu` to leave the `Node` before installing GPUStack.
 
 **CDI mode.** `--set cdi.enabled=false` is the narrower choice for a node this operator's allocator
 must control end to end. Leaving it on is workable.
@@ -522,14 +520,14 @@ must control end to end. Leaving it on is workable.
 > accelerator UUID against the node's specifications, and a name it cannot resolve fails container
 > creation loudly rather than silently — which is what makes leaving it on workable rather than wrong.
 
-**A node serving MIG wants CDI off.** Our own side of it is safe whatever the toolkit does: a
+**A node serving MIG wants CDI off.** GPUStack's allocation path is safe whatever the toolkit does: a
 partition allocation is always carried by the variable, never by a CDI request.
 
 > **Why** — in `cdi` mode the runtime resolves whatever `NVIDIA_VISIBLE_DEVICES` holds against the
-> node's specifications, and the MIG instance our allocator materializes at `Allocate` time is named
+> node's specifications, and the MIG instance GPUStack's allocator materializes at `Allocate` time is named
 > in none of them, so a partition request has nothing to resolve against.
 
-**Which channel carries our own grant.** Prefer `auto`, set through
+**Device injection channel.** Prefer `auto`, set through
 [`GPUSTACK_NVIDIA_DEVICE_INJECTION_STRATEGY`](../reference/settings.md#per-manufacturer-overrides), over naming a
 channel yourself. It answers per container, independently of the switch above.
 
@@ -544,11 +542,11 @@ channel yourself. It answers per container, independently of the switch above.
 > [Settings](../reference/settings.md#per-manufacturer-overrides) what it checks, when it declines, and the one
 > engine that has to be told.
 
-`auto` leaves a Pod that names a `runtimeClassName` to that handler, whose configuration it cannot
-read — correctly, since the handler is what injects. Whether that covers the Instances this operator
+`auto` leaves a `Pod` that names a *`runtimeClassName`* to that handler, whose configuration it cannot
+read — correctly, since the handler is what injects. Whether that covers the `Instance`s this operator
 creates depends on the class existing: the worker attaches `runtimeClassName: nvidia` only where it
-finds one, so with `deviceManager.createRuntimeClasses=false` and none supplied, an Instance runs
-under the engine's default handler and `auto` answers for it like any other Pod.
+finds one, so with `deviceManager.createRuntimeClasses=false` and none supplied, an `Instance` runs
+under the engine's default handler and `auto` answers for it like any other `Pod`.
 
 
 ### T-Head
@@ -562,7 +560,7 @@ download centre, installs to `/usr/local/PPU_SDK` by default, and is verified wi
 prints the driver version) and `hgcc --version`. Take HGGCRT v3 rather than v2: it is backward
 compatible with the v2 API.
 
-Per [Allocator injection](#allocator-injection), our allocator injects T-Head accelerators as `/dev`
+Per [Allocator injection](#allocator-injection), GPUStack's allocator injects T-Head accelerators as `/dev`
 nodes directly, which is the mechanism the vendor's own container guide uses — it isolates a
 container by passing those nodes to `docker run --device`, with no vendor runtime in the path. Which
 nodes a container receives is in [Device Discovery](../modules/devices/discovery.md).
@@ -570,7 +568,7 @@ nodes a container receives is in [Device Discovery](../modules/devices/discovery
 ---
 
 **See also** — [Device Discovery](../modules/devices/discovery.md) (how the allocator and
-`runtimeInjects*` decide what a Pod's container receives) · [Settings & Environment
+`runtimeInjects*` decide what a `Pod`'s container receives) · [Settings & Environment
 Variables](../reference/settings.md) (per-manufacturer overrides and toolkit paths)
 
 **Next** → [Installation Modes](../operate/installation-modes.md) — what the chart owns, what the

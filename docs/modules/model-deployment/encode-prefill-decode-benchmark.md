@@ -232,10 +232,10 @@ The cross-role TCP transfers and unequal GPU budgets prevent a universal latency
 
 ## InfiniBand RDMA comparison
 
-A separate follow-up used one GPU node with **8 × H100 SXM5 and 8 × ConnectX-7 InfiniBand adapters**.
-The adapters were `mlx5_0`–`mlx5_7`; the serving roles remained co-located on `gpu-node-0`.
-The same three-role `epd-arm3-epd` allocation used one GPU per role.
-**All 16 measured cells completed: 236/236 requests, with zero errors.**
+A follow-up on the same ConnectX-7 InfiniBand node setup described in
+[Prefill and Decode Benchmark](prefill-decode-benchmark.md#infiniband-rdma-comparison) ran the
+three-role `epd-arm3-epd` allocation with one GPU per role. **All 16 measured cells completed:
+236/236 requests, with zero errors.**
 
 ### Transport verification
 
@@ -355,4 +355,4 @@ Single-request *ITL* p99 rose slightly in all four context shapes, despite lower
 [Encode, Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) (deployment manifest) ·
 [Prefill and Decode Benchmark](prefill-decode-benchmark.md) (equal-GPU text-model comparison)
 
-**Next** → [Model Deployment Status](status.md)
+**Next** → [Elastic EP](elastic-ep.md) — resize one serving instance's collective in place.

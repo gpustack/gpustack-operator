@@ -19,7 +19,7 @@ With *internal load balancing (Internal LB)*, the master distributes requests to
 | Walkthrough | Serving configuration | What it covers |
 |---|---|---|
 | [Prefill and Decode](prefill-decode.md) | Disaggregated roles fronted by Router | Recorded H100 deployment with one *Prefill* and two *Decode* replicas, *TP* = 2, TCP KV transfer, and a linked [benchmark](../../modules/model-deployment/prefill-decode-benchmark.md). |
-| [Encode, Prefill and Decode](encode-prefill-decode.md) | Disaggregated multimodal roles fronted by router | Encoder output transfer over NIXL, joint admission of three roles, and a multimodal request through the router. |
+| [Encode, Prefill and Decode](encode-prefill-decode.md) | Disaggregated multimodal roles fronted by Router | Recorded H100 deployment with one *Encode*, one *Prefill* and one *Decode* replica, NIXL encoder transfer, and a linked [benchmark](../../modules/model-deployment/encode-prefill-decode-benchmark.md). |
 | [Elastic EP](elastic-ep.md) | One *Internal LB* instance on Ray | Recorded H100 expansion: *TP* = 2, *DP* width 2 → 4, *EP* world size 4 → 8; 439 client requests with zero errors. |
 | [External DP](external-dp.md) | Four fixed *DP* ranks using multiprocessing | Recorded H100 deployment: *TP* = 2, *DP* = 4, *EP* world size 8; captured per-rank inference and Router coverage. |
 | [Multi-Host](multi-host.md) | Coordinated instance spanning multiple hosts | Not measured here. `size: 2`, sixteen GPUs across two physical nodes, leader `m0` routing, and gang admission. |

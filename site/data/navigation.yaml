@@ -32,16 +32,6 @@ order:
     - kv-cache/shared-cache
     - model-delivery/prefetch
     - model-deployment
-  /docs/walkthroughs/devices/:
-    - scheduling
-  /docs/walkthroughs/rdma/:
-    - network-endpoints
-  /docs/walkthroughs/topology/:
-    - hierarchical-placement
-  /docs/walkthroughs/kv-cache/:
-    - shared-cache
-  /docs/walkthroughs/model-delivery/:
-    - prefetch
   /docs/walkthroughs/model-deployment/:
     - prefill-decode
     - encode-prefill-decode
@@ -125,15 +115,10 @@ children:
     - external-dp-benchmark
 labels:
   /docs/walkthroughs/: Walkthroughs
-  /docs/walkthroughs/devices/: Heterogeneous Devices
   /docs/walkthroughs/devices/scheduling/: Heterogeneous Devices
-  /docs/walkthroughs/rdma/: RDMA Networking
   /docs/walkthroughs/rdma/network-endpoints/: RDMA Networking
-  /docs/walkthroughs/topology/: Topology
   /docs/walkthroughs/topology/hierarchical-placement/: Topology
-  /docs/walkthroughs/kv-cache/: KV Cache
   /docs/walkthroughs/kv-cache/shared-cache/: KV Cache
-  /docs/walkthroughs/model-delivery/: Model Delivery
   /docs/walkthroughs/model-delivery/prefetch/: Model Delivery
   /docs/walkthroughs/model-deployment/: Model Deployment
   /docs/walkthroughs/model-deployment/prefill-decode/: Prefill and Decode

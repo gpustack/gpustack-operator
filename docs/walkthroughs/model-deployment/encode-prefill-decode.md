@@ -52,6 +52,10 @@ The recorded run used this cluster and model setup:
 
 ## Step 1: Start three-role serving
 
+Create `ModelArtifact` `qwen2-5-vl-7b-instruct` for `Qwen/Qwen2.5-VL-7B-Instruct` in `gpustack-bench`
+and prefetch it onto the H100 node using the [model prefetch walkthrough](../model-delivery/prefetch.md)
+(substituting `qwen2-5-vl-7b-instruct` and `gpustack-bench` for its DeepSeek example).
+
 Save the following manifest as `epd-deployment.yaml`. It uses the discovered H100 `InstanceType`
 name `gpustack--nvidia-h100-80gb-hbm3-linux-amd64`.
 

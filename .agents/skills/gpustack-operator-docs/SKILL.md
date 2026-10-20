@@ -40,9 +40,9 @@ The local module map stays out of the site's article list and navigation.
 `docs/getting-started/architecture.md` is the **front door**: what the operator builds, the scheduling chain, one worked
 request trace, the vocabulary. It is capped at ~200 lines and must stay readable in under 10 minutes.
 
-**Never add a new mechanism, rationale or table to it.** New detail goes on a deep page; the overview
-gains at most one clause and a link. If you cannot find a deep page that fits, that is a signal to add
-one, not to widen the overview.
+Cover each major capability and its role in the workload flow, including model delivery. Keep the
+diagram, workflow and vocabulary aligned. Put mechanisms, rationale and detailed configuration on
+the owning deep page, then link to it. Add a deep page when no existing page owns the detail.
 
 ## Where a fact belongs
 
@@ -86,9 +86,9 @@ one, not to widen the overview.
 | A recorded three-role EPD deployment (`Encode` + `Prefill` + `Decode` + `llm-d-router`), its captured CR/Pod output and multimodal inference check | `docs/walkthroughs/model-deployment/encode-prefill-decode.md` |
 | Which replica a managed router picks, its default routing policy, switching it through `spec.router.extraArgs`, the router's own per-replica series | `docs/modules/model-deployment/routing.md` |
 | What a `ModelDeployment` replica does between its Pod's delete and its engine's exit: the drain hook, its timings, what it does not cover | `docs/modules/model-deployment/shutdown.md` |
-| The lowest engine release a deployment shape runs on, the Mooncake client its runner image carries, the store line it needs, which transport each engine can use on each leg | `docs/modules/model-deployment/engine-versions.md` |
+| The lowest engine release a deployment configuration runs on, the Mooncake client its runner image carries, the store line it needs, which transport each engine can use on each path | `docs/modules/model-deployment/engine-versions.md` |
 | A resource key, a request rule, a request example | `docs/modules/devices/requests.md` |
-| How many RDMA endpoints a workload asks for, setting or reading the kubelet TopologyManager policy, what to do about RDMA keys no queue meters, the engine image an EFA leg needs | `docs/modules/rdma/operations.md` |
+| How many RDMA endpoints a workload asks for, setting or reading the kubelet TopologyManager policy, what to do about RDMA keys no queue meters, the engine image an EFA path needs | `docs/modules/rdma/operations.md` |
 | Enabling Topograph, publishing topology snapshots, webhook trust, requesting a level, TAS diagnosis or EKS validation | `docs/modules/topology/operations.md` |
 | A `Setting` or a `GPUSTACK_*` variable | `docs/reference/settings.md` |
 | A make target, a subchart patch, code generation, a vendored dependency | `docs/contribute/development.md` |
@@ -118,14 +118,25 @@ An inventory snapshot's format version is separate from a Kubernetes resource AP
 
 ## YAML examples
 
-REQUIRED: write Pretty YAML in `README.md` and `docs/`. Expand nonempty mappings and sequences
+REQUIRED: write Pretty YAML in `README.md`, `docs/` and site content. Expand nonempty mappings and sequences
 into block style with two-space indentation, one field or list item per line. Do not embed
 JSON-style objects or arrays in YAML examples, including commented alternatives. Empty collections
 use `{}` or `[]`; removing their delimiters would change them to null.
 
-When formatting is requested, preserve field order, values, scalar types, quoting, comments and
-intentional invalid examples. Review the YAML diff field by field before finishing. A string whose
-consumer requires JSON and a captured JSON response keep that format.
+When formatting is requested, preserve field order, values, scalar types, quoting and intentional
+invalid examples. Preserve the facts in comments. Correct stale comments only after checking the
+current API, defaults or rendering code. A string whose consumer requires JSON and a captured JSON
+response keep that format.
+
+Attach each comment to the field it explains. Put a long comment immediately above that field at
+the same indentation. Keep inline comments at least two spaces after the value. Align adjacent
+short comments when this needs little padding; do not align an entire block to its longest value.
+Write short, factual comments for defaults, constraints and non-obvious behavior. Keep commented
+alternatives indented like the active fields. Avoid arrows, all-capital emphasis and vague references
+such as "the same". Review every changed comment against its field and source.
+
+For comment or whitespace edits, compare parsed YAML before and after to verify that values and
+scalar types are unchanged. Check commented alternatives separately; parsers ignore them.
 
 ## Reader documentation and technical ownership
 
@@ -148,7 +159,8 @@ When adding a page, add its order and short menu label to `site/data/navigation.
 and configuration before operations and diagnosis; keep related vendor procedures together.
 Name top-level groups for capabilities, such as `Heterogeneous Devices`, `RDMA Networking` and `Topology`.
 Use component names such as `Device Manager` when describing those components.
-Use short, Title-Cased nouns or noun phrases for menu labels. Name the article's purpose within
+Use short, Title-Cased nouns or noun phrases for menu labels at every depth, including child menus.
+Name the article's purpose within
 its hierarchy and omit the parent module's name. Use `children` for subordinate pages, such as
 `Benchmark` under a serving mode or `API` under `Model Artifact`.
 Walkthrough module links use the same names and order as the outer capability groups.
@@ -158,6 +170,8 @@ For example, use `Election and Failover` for the menu of a page about those task
 Article H1 titles may retain module names and useful `Operations`, `Reference` or `Walkthrough` suffixes.
 Keep accurate existing titles. Change a title only when it is unclear, misstates the content or conflicts with its menu label.
 The menu label and H1 must describe the same subject; they need not use identical words.
+Breadcrumbs use the page title and its source parent. Sidebar child groups do not change that parent.
+Review the rendered sidebar, breadcrumb and H1 together; each must identify the same article and capability.
 Use `Overview` for a module introduction. Give a page about preparation or example selection a label that names that purpose.
 The `All pages` labels in `docs/README.md` must match each page's H1 character for character.
 Keep that table in navigation order, with child articles immediately after their parent.
@@ -168,6 +182,20 @@ Every page in `docs/` (the index excepted) opens with a short introduction, has 
 mirroring its `##` headings and a `**See also**` / `**Next**` footer. Templates and the writing rules
 are in
 [references/conventions.md](references/conventions.md).
+Apply its [section names and steps](references/conventions.md#section-names-and-steps) rules:
+use one name for each section purpose, concise plain headings and `Step N: <short imperative>`
+for ordered operations. Keep every H2–H6 heading within four words and 32 visible characters,
+excluding a numbered prefix such as `Step 2:`. In numbered headings, capitalize the first word after
+the colon and use sentence case for the rest. Preserve the meaning of architecture stages, admission
+gates and request rules.
+Apply its [terminology and numbers](references/conventions.md#terminology-and-numbers) rules to
+guides, operations, benchmarks and reference pages as well as walkthroughs. Expand unfamiliar
+abbreviations, italicize the defined concept terms, roles and fields, and use consistent degree and unit notation.
+Use inline code for Kubernetes resource kinds; add bold when a resource needs emphasis.
+Keep identifiers and captured evidence intact. Search related pages for competing names before editing.
+Apply the [narrative voice](references/conventions.md#narrative-voice) to README, docs and site content:
+use imperative instructions and objective descriptions. Name technical subjects directly; avoid author
+first person and page self-description.
 
 ## Sync invariants
 
@@ -194,19 +222,40 @@ bash .agents/skills/gpustack-operator-docs/scripts/check-docs.sh --report   # wh
 It verifies relative links and `#anchor`s across `README.md`, `AGENTS.md`, `docs/**` and
 `.agents/skills/**`; and — for `docs/**` only — each page's `## Contents` against its headings, a
 `**See also**` footer at the end, registration in the `## All pages` table of `docs/README.md`, the
-label there against the page's H1, and the three size caps (paragraph, page length, `##` count; see
-`references/conventions.md`). `--report` demotes the caps to warnings and
+label there against the page's H1, and the size caps for paragraphs, page length, section count and
+H2–H6 heading length (see `references/conventions.md`). The heading word and character limits and
+numbered-heading capitalization apply to all authored Markdown under `docs/` and `site/content/`,
+plus `README.md`, `ADOPTERS.md` and the two csrc READMEs. They remain fatal under `--report`.
+`--report` demotes the paragraph, page-length, section-count and index-label checks to warnings and
 prints the per-page metrics. The gate also resolves literal `docs/*.md` paths named across skills,
 so a moved page cannot leave a skill reading a missing file.
 
 `make lint docs` checks source links and page shape, including Copilot instruction links. It also
 builds the Hugo site and checks HTML links, module routing, `llms.txt` and Markdown exports.
-`.github/workflows/docs.yml` runs the same gate.
+`.github/workflows/docs.yml` runs the same gate. The target also checks spec status and task
+completion. Report the failing subcheck when unrelated spec work prevents a clean result; do not
+mark unfinished tasks complete to make the gate pass.
 
 It still does **not** read prose: everything below is on you.
 
 - [ ] `wc -l docs/getting-started/architecture.md` is still ≤ ~200.
 - [ ] The new fact is stated **once**; every other page links to it.
+- [ ] Terminology matches related guides, operations, benchmarks, reference pages and walkthroughs.
+      Name configurations, transfer paths, criteria and settings directly; avoid unexplained metaphors.
+      Expand unfamiliar abbreviations; walkthroughs may use established terms from a linked owning guide.
+      The concept terms listed in the conventions use italics in prose; component names remain plain.
+      Resource kinds use code, emphasized resources use bold code, and roles and fields use italics.
+      Check degree notation, units and measured precision against `references/conventions.md`.
+- [ ] Changed a title or navigation label? Compare the page's subject, sidebar, breadcrumb and H1 in
+      the rendered site. Check capitalization at every menu depth and the `All pages` index alignment.
+- [ ] Instructions use imperatives, behavior uses objective statements, and authors and pages are not
+      the subject. Preserve captured evidence and explicit measurement limits.
+- [ ] Same-purpose sections use the shared names, including `Prerequisites` and `Limitations`.
+      Headings are short, plain and free of unnecessary `The`; numbered headings use a colon.
+      Step headings state reader actions. Update Contents and every inbound anchor after renaming.
+      For a full sweep, account for every authored page, including pages that need no edit.
+- [ ] YAML comments describe the correct fields and current contracts. Check indentation, local
+      alignment and commented alternatives; compare parsed values when formatting examples.
 - [ ] Read the diff once for the prose tells in `references/conventions.md` (*Prose tells*): not-X-but-Y
       contrasts, one-line closers, forced triads, dashes as connectors, stock AI words, bold labels.
 - [ ] Touched `docs/reference/instance-type-unit-resources.md`? Compare its rows with

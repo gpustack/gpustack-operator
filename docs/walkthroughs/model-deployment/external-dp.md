@@ -132,29 +132,7 @@ Keep matching *DP* widths, distinct ranks and a reachable leader address on ever
 
 ### Port allocation
 
-For the recorded Linux ephemeral range `32768–60999`, use **`1024 <= VLLM_PORT < 32768`**, such as **`19500`**, on every rank.
-Keep all candidates below `32768` and clear of `8000`, `29500`, `29550` and other listeners.
-Check `net.ipv4.ip_local_port_range` if customized. This avoids ephemeral-source collisions for that range;
-it does not prevent other listeners or races from occupying a candidate.
-
-vLLM v0.30.0's [`get_open_ports_list`](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/utils/network_utils.py)
-probes and closes five ports. Without `VLLM_PORT`, it asks the kernel for ports; with a base, it scans upward past occupied ports.
-The *MoE* startup handshake distributes the leader's initial list, but the probe sockets do not reserve it.
-
-Fixed multiprocessing *External DP* does not activate the *Elastic EP* coordination store, leaving *`_coord_store_port`* = `0`.
-In [`parallel.py`](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/config/parallel.py),
-`stateless_init_dp_group` makes at most five attempts on `EADDRINUSE`.
-`_pick_stateless_dp_port` consumes local candidates without broadcasting a retry port.
-The *MoE* `DPCoordinator` is a separate wave-coordination process.
-
-If all `Pod`s find `19500` occupied during allocation, matching scans advance to the next free sequence and can initialize together.
-This symmetric avoidance does not cover a later leader-only conflict.
-In the failed capture, an outbound connection used `m0` source port `36558`; the leader hit `EADDRINUSE` and retried `36557`.
-Ranks `m1`–`m3` kept connecting to `36558` without a local bind error or a replacement-port notification.
-
-Setting `VLLM_PORT=19500` avoided that ephemeral-source collision; the ready group's logs recorded initialization at `19502`.
-That observed port is not a fixed base-plus-two contract.
-See [Port allocation](../../modules/model-deployment/external-dp.md#port-allocation) for the full fallback boundary.
+For the recorded Linux ephemeral range `32768–60999`, set **`1024 <= VLLM_PORT < 32768`** (such as **`19500`**) on every rank, keeping candidates clear of `8000`, `29500`, `29550` and other listeners. In the recorded capture, `VLLM_PORT=19500` avoided an ephemeral-source collision and initialized at `19502`. See [Port allocation](../../modules/model-deployment/external-dp.md#port-allocation) for vLLM's five-port probing, `stateless_init_dp_group` retry behavior, and the asymmetric `EADDRINUSE` failure mode.
 
 ```bash
 kubectl apply --dry-run=server -f external-dp.yaml
@@ -281,7 +259,7 @@ for request in 1 2 3 4 5 6 7 8; do
     -o "router-$request.json"
 done
 curl --fail-with-body http://127.0.0.1:19090/metrics > router-after.prom
-rg '^vllm_router_processed_requests_total' router-before.prom router-after.prom
+grep -H '^vllm_router_processed_requests_total' router-before.prom router-after.prom
 ```
 
 Require four healthy rank endpoints in the registry and increased request counters for every rank.
@@ -290,18 +268,13 @@ If only rank 0 is registered, inspect endpoint qualification before interpreting
 For *Internal LB* and [Prefill and Decode](../../modules/model-deployment/prefill-decode.md), leader-only discovery remains intentional.
 
 The final registry confirmed four registered, healthy endpoints in selection, with closed circuits.
-The captured per-worker Router counters matched the engine's completion access lines on every rank:
+The captured per-worker Router counters matched the engine's completion access lines on every rank
+(**285** on `server-r0-m0` and **284** on each of `server-r0-m1` through `server-r0-m3`, totaling
+**1,137 requests** across **1,088/1,088 measured requests**, 48 warm-ups and one calibration request,
+with zero errors).
 
-| Rank | Router requests | Engine completion lines |
-|---|---:|---:|
-| `server-r0-m0` | **285** | **285** |
-| `server-r0-m1` | **284** | **284** |
-| `server-r0-m2` | **284** | **284** |
-| `server-r0-m3` | **284** | **284** |
-
-These **1,137 requests** include **1,088/1,088 successful measured requests**, 48 warm-ups and one calibration request.
-The twelve measured cells reported **zero request errors**.
-See [External DP Benchmark](../../modules/model-deployment/external-dp-benchmark.md) for latency, throughput and the wide-*TP* comparison.
+See [External DP Benchmark](../../modules/model-deployment/external-dp-benchmark.md#routing-verification)
+for the per-rank breakdown, latency and throughput tables, and the wide-*TP* comparison.
 
 ## Step 5: Inspect and release
 
@@ -338,10 +311,10 @@ The H100 recording establishes a ready fixed group, four confirmed endpoints and
 It does not include direct nonstreaming responses per rank or a final GPU-release snapshot.
 The benchmark measured one model, two prompt/output targets and one run per configuration.
 
-This fixed group does not resize its collective online. Use [Elastic EP](elastic-ep.md) for width growth.
-Increasing *`replicas`* adds complete groups. Changing *`size`* replaces whole replicas;
-it does not resize a running *DP* collective. See
-[rollout behavior](../../modules/model-deployment/deployment.md#rollout-behavior).
+This fixed group does not resize its collective online; use [Elastic EP](elastic-ep.md) for width
+growth. Group sizing and replacement semantics are covered in
+[Admission constraints](../../modules/model-deployment/external-dp.md#admission-constraints) and
+[Rollout behavior](../../modules/model-deployment/deployment.md#rollout-behavior).
 
 The example does not establish *External DP* with *Prefill/Decode*, hybrid load balancing, multiple HTTP ports per `Pod`,
 or placement across GPU nodes. Those configurations need separate compatibility and runtime checks.

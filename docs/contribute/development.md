@@ -8,8 +8,8 @@ before changing the operator's behavior.
 
 - [Commands](#commands)
 - [Documentation site](#documentation-site)
-- [Checks that can report false success](#checks-that-can-report-false-success)
-- [Shipped specification corrections](#shipped-specification-corrections)
+- [Checks reporting false success](#checks-reporting-false-success)
+- [Shipped specification edits](#shipped-specification-edits)
 - [Runtime log verbosity](#runtime-log-verbosity)
 - [API groups & code generation](#api-groups--code-generation)
 - [Vendored / patched dependencies](#vendored--patched-dependencies)
@@ -54,8 +54,8 @@ clone. The verdict on committed `.agents` shell comes from `agents-shell.yml` an
 [chart-testing](https://github.com/helm/chart-testing),
 [helm-docs](https://github.com/norwoodj/helm-docs) and helm-schema:
 
-- `make generate chart` — regenerate `README.md` (from `README.md.gotmpl`) and `values.schema.json`. **Never hand-edit those two**: edit `values.yaml`/its annotations/`README.md.gotmpl` and re-run, after **any** `values.yaml` edit — the generated schema is what rejects a bad install. Nothing in `values.yaml` is generated: Kueue's `resources.transformations` is rendered at install time by a chart helper a patch adds to its config.
-- `make lint chart` — `ct lint` in a container, then assert the `global.*` image knobs reach every image the chart and its subcharts render (`gpustack::helm::verify_images`).
+- `make generate chart` — regenerate `README.md` (from `README.md.gotmpl`) and `values.schema.json`. **Never hand-edit those two**: edit `values.yaml`/its annotations/`README.md.gotmpl` and re-run, after **any** `values.yaml` edit — the generated schema is what rejects a bad install. Nothing in `values.yaml` is generated: Kueue's *`resources.transformations`* is rendered at install time by a chart helper a patch adds to its config.
+- `make lint chart` — `ct lint` in a container, then assert the `global.*` image settings reach every image the chart and its subcharts render (`gpustack::helm::verify_images`).
 - `make test chart` — `ct install` onto the current cluster in a container; needs a reachable cluster (e.g. kind) and `~/.kube/config`. It installs `CHART_TEST_IMAGE_REPOSITORY`:`CHART_TEST_IMAGE_TAG`, by default the published `gpustack/gpustack-operator:dev`, which is built from `main`. To test a chart change together with the binary it needs, build the tree, load the image into the cluster, and name it in those two variables. The Chart workflow does this on every run.
 
 ### Vendored subcharts
@@ -69,7 +69,7 @@ applies `hack/deploy/gpustack-operator/chart/charts/<name>/*.patch`; a tree at t
 so runs are idempotent and a patched tree is never clobbered.
 
 Unpacked is what lets the patches exist: Helm merges subchart values rather than rendering them, so the
-parent cannot compose `global.imageRegistry` into a subchart's `image.repository`; each tree's
+parent cannot compose `global.imageRegistry` into a subchart's *`image.repository`*; each tree's
 `global-image.patch` makes the subchart's templates read `.Values.global.*`, which Helm does propagate.
 
 To change an upstream chart:
@@ -85,7 +85,7 @@ To change an upstream chart:
 
 **Mirror the images before bumping a pinned version**: every image the chart renders points at a
 `gpustack/mirrored-*` repository, an unmirrored bump lands every install in `ImagePullBackOff`, and
-`make lint chart` only checks that the override knobs reach each reference, not that it resolves.
+`make lint chart` only checks that the override settings reach each reference, not that it resolves.
 
 `chart.yml` runs all three across the supported Kubernetes matrix and gates drift: `make generate chart`
 must leave `README.md`/`values.schema.json` unchanged, `make deps` the vendored trees; both fail with the
@@ -109,8 +109,8 @@ as a reusable workflow — this repository only pins its model backing and maps 
 re-review the latest head, comment `/open-code-review` on the PR (MEMBER/OWNER/COLLABORATOR only).
 
 What each file is reviewed *against* is owned here, in `.opencodereview/rule.json`: its
-include/exclude lists and path-scoped rules are the single source of truth, and a review-scope change
-lands there, not in this document. Verify a rule change before committing: `npx -y
+include/exclude lists and path-scoped rules define the review scope. Change those rules to change
+which files are reviewed. Verify a rule change before committing: `npx -y
 @alibaba-group/open-code-review rules check <path>` shows which rule a file resolves to; `npx -y
 @alibaba-group/open-code-review review --preview` shows which files a diff would send to review.
 
@@ -146,7 +146,7 @@ page structure, index entries and rendered site links. CI runs the same gate.
 
 The [shared module map](../README.md#module-map) connects guides, specs, code and skills for code
 changes. Update its routing in the same PR when those entry points or associations change.
-`make site` also generates `/llms.txt` from that index and `index.md` beside each article's HTML.
+`make site` also generates `/llms.txt` from that index and *`index.md`* beside each article's HTML.
 Markdown exports preserve the prose and code blocks, with links adjusted for the website.
 Hugo watches the shared index and article sources during `make site-serve`.
 
@@ -165,7 +165,7 @@ that existing chart bytes stay unchanged.
 The publisher comes from `main`; the requested revision supplies all pages and Hugo layouts.
 Changes to publisher inputs and version metadata must remain compatible with existing published tags.
 
-Deployment uses the published content commit as its build identity, even when a tag and `main`
+`Deployment` uses the published content commit as its build identity, even when a tag and `main`
 share a source commit. The workflow verifies public version metadata, the chart index and the
 released package against the uploaded snapshot. A successful deployment status with stale public
 files fails publication.
@@ -224,7 +224,7 @@ pages. Remove `zh` from `disableLanguages` in `site/hugo.toml` once that work is
 menu links only translations that actually exist; each language builds its own search index.
 
 
-## Checks that can report false success
+## Checks reporting false success
 
 REQUIRED: take a check's verdict from its **return code** and from the object under test, never from
 the shape of its output. The traps below can make a failed check look successful when stderr, a
@@ -257,7 +257,7 @@ only a check that exits non-zero. Carry the verdict in the status
 (`[ -n "$a" ] && [ -n "$b" ] && [ "$a" = "$b" ] && rm -rf "$tree"`) rather than printing `SAME` or
 `DIFF` and returning `0` either way. The non-empty tests matter: two missing values compare equal.
 
-## Shipped specification corrections
+## Shipped specification edits
 
 Shipped specifications are historical design records. A later design change MUST be recorded in a new
 specification whose header names the earlier sections it supersedes; leave those sections unchanged.
@@ -286,8 +286,8 @@ once that file is gone. The prohibition is on the dangling path, not on the ment
 ## Runtime log verbosity
 
 Every component registers `PUT /debug/flags/v` on its own secure port, so klog verbosity can be raised on
-a running pod and dropped again without a restart (`pkg/manager/manager.go`, `pkg/worker/worker.go`,
-`pkg/workergateway/gateway.go`; the device-manager's port is 32443, from `pkg/devicemanager/option.go`).
+a running `Pod` and dropped again without a restart (`pkg/manager/manager.go`, `pkg/worker/worker.go`,
+`pkg/workergateway/gateway.go`; the Device Manager's port is 32443, from `pkg/devicemanager/option.go`).
 
 ```bash
 kubectl -n gpustack-system exec <pod> -- \
@@ -304,7 +304,7 @@ answers `406 unsupported http method`, which is the guard passing.
 
 Use it to see a decision logged above the deployment's verbosity. The device plugin is the sharpest case:
 its `ResourceServer`s use `Logger: logger.V(3)` (`pkg/devicemanager/allocator/allocator.go`) while the
-DaemonSet runs `-v=2`, so `Allocate`/`GetPreferredAllocation` decisions (which accelerator a slice landed
+`DaemonSet` runs `-v=2`, so `Allocate`/`GetPreferredAllocation` decisions (which accelerator a slice landed
 on) are discarded by default.
 
 Raise `v` **before** creating the workload to trace; those lines fire only on an allocation, so a quiet

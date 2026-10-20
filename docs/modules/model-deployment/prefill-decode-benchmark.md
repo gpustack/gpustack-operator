@@ -41,7 +41,7 @@ The TCP results alone do not establish the same trade-off over *remote direct me
 | Cluster | Kubernetes v1.35.7; one CPU node and one GPU node |
 | Hardware | 8 × NVIDIA H100 80 GB HBM3 SXM5 on one node; physical NVLink bandwidth 900 GB/s |
 | GPUStack Operator | v0.9.1 |
-| Runner | `gpustack/runner:cuda13.0-vllm0.30.0`; reported vLLM 0.19.0 |
+| Runner | `gpustack/runner:cuda13.0-vllm0.30.0`; internal package metadata in this build logs `vLLM 0.19.0` at startup |
 | Model | Qwen/Qwen3-32B, 16-bit brain floating-point weights, or BF16 |
 | Model delivery | `ModelArtifact` `qwen3-32b`, mounted at `/models` through node delivery |
 | Captured `InstanceType` | `bench-gpu`, selecting the H100 accelerator group |
@@ -51,7 +51,6 @@ The TCP results alone do not establish the same trade-off over *remote direct me
 | Engine limits | `--max-model-len 16384`, `--max-num-seqs 64`, `--gpu-memory-utilization 0.90` |
 
 The configurations ran sequentially on the same node. Two GPUs were outside each serving allocation.
-The runner tag and its reported engine version are recorded separately.
 
 Each serving `Pod` exposed only its assigned two GPUs and had a private `/dev/shm` and IPC namespace.
 *`hostIPC`* was disabled, and no *RDMA* interface was attached.

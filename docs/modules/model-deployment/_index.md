@@ -19,7 +19,7 @@ transport support and known failures.
 [Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) measures that
 disaggregation against an aggregated instance.
 [Prefill and Decode Benchmark](prefill-decode-benchmark.md) measures a text-only
-prefill/decode pair against an aggregated group on equal GPUs.
+*prefill/decode* pair against an aggregated group on equal GPUs.
 
 Follow [Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/prefill-decode.md) for
 disaggregated serving, [Encode, Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) for
@@ -33,12 +33,14 @@ for distributed multi-node serving.
 are directed.
 
 [Elastic EP](elastic-ep.md) keeps one serving instance and changes its collective while it runs.
-[Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) follows prefetch, TP2/DP2 startup, and DP2→4 expansion
-with captured resource output and completed inference requests.
+[Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) follows prefetch, startup with
+*tensor parallelism (TP)* = 2 and *data parallelism (DP)* = 2, and *DP* width 2 → 4 expansion.
+It includes captured resource output and completed inference requests.
+
 [Elastic EP Benchmark](elastic-ep-benchmark.md) measures the same width change under a live request
 stream.
 
-[External DP](external-dp.md) runs one fixed DP group with an HTTP endpoint on every rank and
+[External DP](external-dp.md) runs one fixed *DP* group with an HTTP endpoint on every rank and
 Router-balanced traffic across all of them.
 The [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md) runs a fixed group
 with one HTTP endpoint per rank and checks managed Router coverage.

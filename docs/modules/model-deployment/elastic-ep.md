@@ -288,7 +288,7 @@ The operator retains existing elastic `Pod`s, so an env edit does not change the
 - The profile cannot be added to or removed from an existing role.
 - There is one serving instance per deployment. *`replicas`* and *`size`* are not a width mechanism.
 - Only the master serves HTTP.
-- An RDMA fabric (`resources.interface`) is optional on the `Server` role when `parallelism.ep.max > 1`; single-node deployments omit it and use shared-memory transport (`UCX_TLS=rc,sm,self`), while multi-node deployments can request RDMA interfaces for cross-node expert dispatch (see [Elastic EP Benchmark](elastic-ep-benchmark.md#infiniband-rdma-comparison)).
+- An RDMA fabric (*`resources.interface`*) is optional on the `Server` role; see the [Elastic EP Benchmark](elastic-ep-benchmark.md#infiniband-rdma-comparison) for a measured InfiniBand comparison.
 - The ordinary role fields' editability does not apply: the configuration fields are frozen with the
   profile, as described above.
 - Scale-down is not supported. A width decrease is rejected by admission; see [issue #741](https://github.com/gpustack/gpustack-operator/issues/741).

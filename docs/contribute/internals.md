@@ -10,7 +10,7 @@ changes to the operator's services. Vendor libraries and object names have their
 - [Worker gateway](#worker-gateway)
 - [Device plugin re-registration](#device-plugin-re-registration)
 - [Per-manufacturer device support](#per-manufacturer-device-support)
-- [CGO bindings (`binding/`)](#cgo-bindings-binding)
+- [CGO bindings](#cgo-bindings)
 - [63-character limits](#63-character-limits)
 
 ## Operator subcommands
@@ -31,8 +31,8 @@ changes to the operator's services. Vendor libraries and object names have their
 ## Worker startup order
 
 `pkg/worker/worker.go` runs `Prepare` (system namespace → CRDs → extension API services → webhook
-configs → settings → applications → the `gpustack-cpu-info` NodeFeatureRule → the
-`gpustack-node-devices` AdmissionCheck → the `gpustack-model-deployment-joint` AdmissionCheck).
+configs → settings → applications → the `gpustack-cpu-info` `NodeFeatureRule` → the
+`gpustack-node-devices` `AdmissionCheck` → the `gpustack-model-deployment-joint` `AdmissionCheck`).
 
 In `Start`, the controller manager starts only after the extension API services report ready, so
 controllers can index extension-API resources. Preserve this ordering when adding steps.
@@ -40,9 +40,9 @@ controllers can index extension-API resources. Preserve this ordering when addin
 The last three steps each retry for up to 5 minutes while their CRD becomes available. A worker
 starting alongside NFD and Kueue can reach these steps before their CRDs are served. The worker
 applies the resources in both installation modes; see [Installation
-Modes](../operate/installation-modes.md#chart-deployed-and-worker-applied-resources).
+Modes](../operate/installation-modes.md#deployed-and-applied-resources).
 
-### Every `Prepare` step runs in every replica
+### Preparation in every replica
 
 Every step of `Prepare` runs in **all** replicas, before leader election, so each is conflict-tolerant
 or idempotent by construction. Keep it that way when adding a step: a rolling update overlaps two
@@ -73,7 +73,7 @@ with no repair loop and no way to report that.
 >
 > - Helm never deletes CRDs on upgrade, and the operator's own come from Go rather than `crds/`;
 > - the migration hooks prune only what carries a legacy sub-release's Helm labels, which the worker's
->   APIServices lack;
+>   `APIService`s lack;
 > - `drain.sh`, `drain-kueue.sh` and `cleanup.sh` run only on uninstall, behind `cleanupOnUninstall`
 >   (default false), as `pre-delete` and `post-delete` hooks. Neither event fires on an upgrade or a
 >   rollback, and an uninstall has no incoming replica to inherit anything.
@@ -84,7 +84,7 @@ with no repair loop and no way to report that.
 ### Application installation lock
 
 Installing the applications is the one step for which neither property was available, so it holds a
-`coordination.k8s.io` Lease (`applications.worker.gpustack.ai` in the system namespace, via
+`coordination.k8s.io` `Lease` (`applications.worker.gpustack.ai` in the system namespace, via
 `pkg/kubeapp`'s `Lock`) for its whole duration: exactly one replica installs at a time. The lock is a
 last resort, not a pattern to copy; reach for it only where idempotence is out of reach, and read
 `pkg/kubeapp/lock.go` for what it does and does not guarantee.
@@ -113,10 +113,10 @@ missed aggregation site; walk them.
 
 kubelet's device-plugin registration server unlinks **every socket** in
 `/var/lib/kubelet/device-plugins` each time it starts, and only then listens on a fresh
-`kubelet.sock`. That directory is a hostPath in the device-manager, so the unlink takes the plugin's
+*`kubelet.sock`*. That directory is a hostPath in the Device Manager, so the unlink takes the plugin's
 own socket with it while the plugin's process carries on untouched.
 
-`serving.Start` (`pkg/deviceplugin/serving.go`) therefore serves in **generations** (a socket, a
+*`serving.Start`* (`pkg/deviceplugin/serving.go`) therefore serves in **generations** (a socket, a
 gRPC server on it, and a registration naming the two to kubelet) and loops over them. The socket
 going missing is the level-based signal that kubelet restarted, so the next generation listens and
 registers again.
@@ -133,26 +133,26 @@ The path therefore outlives its listener, and a listener that died under one is 
 socket check.
 
 A generation retries its registration for as long as it lives, because right after the wipe
-`kubelet.sock` is not back yet. Listening again is not optional either: kubelet dials the endpoint
+*`kubelet.sock`* is not back yet. Listening again is not optional either: kubelet dials the endpoint
 back, blocking, from inside `Register`, and refuses a registration whose socket it cannot reach.
 
 > **The invariant** — kubelet's checkpoint restores a forgotten resource with an *empty* healthy set,
-> so the Node reports it at **zero capacity**, not merely zero allocatable, and drops the key outright
+> so the `Node` reports it at **zero capacity**, not merely zero allocatable, and drops the key outright
 > once the stopped endpoint's grace period expires. A zero pool key fails `poolAdvertised`, so
 > `NodeCapacityReconciler` reverse-patches that family's whole `.sliced.*` / `.partitioned.*` counting
-> set off the Node too — the flavor and InstanceType views move, not just allocatability.
+> set off the `Node` too — the flavor and `InstanceType` views move, not just allocatability.
 
-Nothing about the *process* looks wrong while that lasts, and its Pod stays Ready, so the plugin-side
-signal is the allocator's `registering to kubelet, retrying` error (visible at the DaemonSet's
+Nothing about the *process* looks wrong while that lasts, and its `Pod` stays Ready, so the plugin-side
+signal is the allocator's `registering to kubelet, retrying` error (visible at the `DaemonSet`'s
 shipped `-v=2`, because `Error` is not gated by V level the way `Info` is). The cluster-side signal is
-louder and comes first: the family's keys leave the Node.
+louder and comes first: the family's keys leave the `Node`.
 
 `Stop` ends the serving loop rather than one generation of it, and reports nothing for having been
 asked to.
 
 The layer above it draws the same distinction through the `gox.Lifecycle`
 (`pkg/utils/gox/lifecycle.go`) a vendor allocator runs its tasks under: its `Stop` cancels the context
-every task its `Start` launched runs under, and waits for them. The device manager's own `Start` needs
+every task its `Start` launched runs under, and waits for them. The Device Manager's own `Start` needs
 none of that (nothing stops it but its caller), so its detector, allocator, exporter and controller
 manager run under a plain `gox.GroupWithContextIn` group.
 
@@ -168,12 +168,12 @@ manager run under a plain `gox.GroupWithContextIn` group.
 >
 > So a task that *fails* ends its siblings: the group cancels the context they share on any task's
 > error, which is also what lets that failure be reported at all. At the manager's level that is
-> what ends the process, rather than leaving a Pod passing its liveness probe with a dead subsystem
+> what ends the process, rather than leaving a `Pod` passing its liveness probe with a dead subsystem
 > inside it. A task that merely *finishes* is left to have finished: the metrics exporter serves no
-> Instance gauges on a node whose name it cannot read and says so by returning, and ending the run
+> `Instance` gauges on a node whose name it cannot read and says so by returning, and ending the run
 > there would take the node's device plugin down over one missing environment variable.
 >
-> Being stopped is not an outcome to report either. The device manager treats **any** error from an
+> Being stopped is not an outcome to report either. The Device Manager treats **any** error from an
 > allocator's `Start` as fatal to the node (`pkg/devicemanager/allocator/allocator.go`), so reporting
 > `context.Canceled` for an ordinary undetect would take the node down. A `Stop` that arrives before
 > its run does is kept, not lost: an allocator's `Start` is submitted to a pool, so it can reach the
@@ -188,9 +188,9 @@ Platform-specific code splits into `_linux.go` / `_other.go` build-constrained f
 
 The supported manufacturers and their PCI vendor IDs / resource names live in `pkg/nodefeature`,
 overridable via `GPUSTACK_*` env vars that the chart fans out from `global.manufacturers`. What each row
-of that map decides is in [Device Discovery](../modules/devices/discovery.md#the-gpustack-cpu-info-nodefeaturerule).
+of that map decides is in [Device Discovery](../modules/devices/discovery.md#gpustack-cpu-info-rule).
 
-## CGO bindings (`binding/`)
+## CGO bindings
 
 Generated Go bindings to the manufacturers' GPU runtime/management libraries (nvml,
 rsmi/amdsmi/amdgpu, cndev, dcmi, hgml, ixml, mtml/mxsml, hsa, dl). The generators read
@@ -206,14 +206,14 @@ means editing C, not a config.
 > **Why** — `dl.DynamicLibrary` pins `dlopen` and the `dlerror` that reads its reason to one OS
 > thread, because that reason is thread-local. The dcmi wrapper needs the same pinning arranged by
 > hand (`binding/dcmi`'s `Init` documents it), and it is the kind of thing that has to be
-> rediscovered rather than inherited. Every other binding calls `binding.Library.Load`; dcmi calls
+> rediscovered rather than inherited. Every other binding calls *`binding.Library.Load`*; dcmi calls
 > only `Path()`.
 
 ## 63-character limits
 
-Kubernetes label *values* cap at 63 chars. Long names (ClusterQueue names, queue references) live in
-`schedule.gpustack.ai/*` **annotations**, not labels; LocalQueues are named `gpustack-fnv64-<hash>`
-(always 31 chars; see [Scheduling Chain](../modules/devices/scheduling.md#a-localqueue-in-every-namespace)).
+Kubernetes label *values* cap at 63 chars. Long names (`ClusterQueue` names, queue references) live in
+`schedule.gpustack.ai/*` **annotations**, not labels; `LocalQueue`s are named `gpustack-fnv64-<hash>`
+(always 31 chars; see [Scheduling Chain](../modules/devices/scheduling.md#localqueue-in-every-namespace)).
 Check this limit for any name that flows into a label value.
 
 ---

@@ -12,8 +12,8 @@ member. Add local disks to that member, then size the memory segment as describe
 ## Memory segment requirement
 
 **Every member group mounts a memory segment, and a disk tier is a layer on a group that already
-holds one.** `members[].medium` names which memory (`DRAM` for the host's, `VRAM` for the
-accelerator's), and the disk is declared beside it in `members[].localDisks`, a layer on either one.
+holds one.** *`members[].medium`* names which memory (`DRAM` for the host's, `VRAM` for the
+accelerator's), and the disk is declared beside it in *`members[].localDisks`*, a layer on either one.
 See [Connection and medium](backend.md#connection-and-medium) for the full shape.
 
 The shape is the store's own data flow: the leader routes an offload task to the client holding the
@@ -26,7 +26,7 @@ group shape and the memory floor.
 ## Configuration
 
 **Declare one group with a thin memory segment and a thick tier.** The terabytes go on
-`localDisks[].capacity`; `capacityPerMember` is sized to drive the tier rather than to hold the cache,
+*`localDisks[].capacity`*; *`capacityPerMember`* is sized to drive the tier rather than to hold the cache,
 and **declaring the tier on the group is the whole switch**: the leader's offload flags are derived
 from that declaration, so there is no second half to forget.
 
@@ -43,20 +43,19 @@ spec:
       members:
         - nodeSelector:
             kvcache: "true"
-          medium: DRAM                 # the SEGMENT, which is memory on every group
-          capacityPerMember: 8Gi       # sized below — NOT a figure to copy
-          localDisks:                  # declaring an entry is what turns the tier on
-            - path: /var/lib/kvcache   # must already exist on every selected node
-              capacity: 4Ti            # where the node's disk is declared
+          medium: DRAM            # every group requires a memory segment
+          capacityPerMember: 8Gi  # derive from the memory budget below
+          localDisks:             # an entry enables the local disk tier
+            - path: /var/lib/kvcache  # must already exist on every selected node
+              capacity: 4Ti  # disk capacity on each selected node
               eviction:
                 enabled: true
                 policy: LRU
 ```
 
-Pin the example's `spec.image` per [The store version must match the engine's
-client](backend.md#the-store-version-must-match-the-engines-client) before copying it.
+Pin the example's *`spec.image`* per [Version compatibility](backend.md#version-compatibility) before copying it.
 
-**Rendering this shape correctly does not make the tier fill.** `status.capacity` will not tell
+**Rendering this shape correctly does not make the tier fill.** *`status.capacity`* will not tell
 you either way. What decides it, and the figure to read instead, are in
 [bucket writes](local-disk-tier.md#bucket-writes).
 Read that section before concluding this backend works.
@@ -74,7 +73,7 @@ Three things that manifest depends on and does not state:
 
 ## Memory segment floor
 
-**`capacityPerMember` has a floor of 16Mi on a group declaring `localDisks`.** That is one bucket,
+***`capacityPerMember`* has a floor of 16Mi on a group declaring *`localDisks`*.** That is one bucket,
 the unit the tier is written in. Why a segment below one bucket can never fill one is in
 [bucket writes](local-disk-tier.md#bucket-writes).
 
@@ -93,22 +92,22 @@ which are properties of the workload rather than of the disk. Every key on its w
 occupies the segment until its bucket closes, so the segment has to hold the buckets in flight; a
 segment holding only those is a write-through path to disk with no memory cache ahead of it.
 
-**`capacityPerMember` is also a scheduling constraint.** It is counted into the member Pod's own
+***`capacityPerMember`* is also a scheduling constraint.** It is counted into the member `Pod`'s own
 memory request, so a member that does not fit stays Pending rather than overcommitting the node.
 That is what makes a thin segment worth having on a node whose RAM is already spoken for, and what
 keeps the value from being free to raise later.
 
 The tier's own ceilings carry a matching floor, and a disk-heavy node is nowhere near it. `capacity`
-sits far above one bucket, and the example leaves `keyLimit` unset, so the store's own applies and
+sits far above one bucket, and the example leaves *`keyLimit`* unset, so the store's own applies and
 there is no declared ceiling to be near. Those two rules belong to
 [bucket writes](local-disk-tier.md#bucket-writes); the
 floor that binds here is the memory one above.
 
 ---
 
-**See also** — [KV Cache Backend](backend.md) (the API this page configures, and where the tier's own
-knobs, failure modes and exits are documented) · [KV Cache Pools and Bindings](pool.md) (how a namespace is granted
+**See also** — [KV Cache Backend](backend.md) (the backend API and the tier's own
+settings, failure modes and exits are documented) · [KV Cache Pools and Bindings](pool.md) (how a namespace is granted
 a quota on the store this backend runs) · [Settings & Environment Variables](../../reference/settings.md) (the
-`kv-cache-backend-image` Setting)
+`kv-cache-backend-image` `Setting`)
 
 **Next** → [KV Cache Pools and Bindings](pool.md) — granting a namespace a quota on the store configured here.

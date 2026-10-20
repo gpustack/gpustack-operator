@@ -1,7 +1,7 @@
 # Hierarchical Placement Walkthrough
 
 Configure topology levels across cloud zones and physical racks, request domain placement for
-multi-Pod replicas, and see what a node move and a hierarchy change do.
+multi-`Pod` replicas, and see what a node move and a hierarchy change do.
 
 Follow these steps to discover infrastructure hierarchies, apply placement constraints to serving
 workloads, and manage topology updates.
@@ -9,22 +9,22 @@ workloads, and manage topology updates.
 ## Contents
 
 - [Summary](#summary)
-- [Step 1: read-only cloud zone discovery](#step-1-read-only-cloud-zone-discovery)
-- [Step 2: request zone placement from ModelDeployment](#step-2-request-zone-placement-from-modeldeployment)
-- [Step 3: static inventory snapshot with ConfigMap](#step-3-static-inventory-snapshot-with-configmap)
-- [Step 4: request rack placement](#step-4-request-rack-placement)
-- [Step 5: move a node, then change the hierarchy](#step-5-move-a-node-then-change-the-hierarchy)
-- [Limitation](#limitation)
+- [Step 1: Discover cloud zones](#step-1-discover-cloud-zones)
+- [Step 2: Request zone placement](#step-2-request-zone-placement)
+- [Step 3: Publish an inventory snapshot](#step-3-publish-an-inventory-snapshot)
+- [Step 4: Request rack placement](#step-4-request-rack-placement)
+- [Step 5: Move a node](#step-5-move-a-node)
+- [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
 ## Summary
 
-Topology-Aware Scheduling (TAS) places multi-Pod replicas inside one failure domain — a cloud zone
-or a physical rack — instead of scattering their Pods across domains. This walkthrough configures a
-read-only cloud-zone `TopologySource`, narrows placement to a static rack inventory snapshot, and
-shows how a node rack move differs from a hierarchy-level change.
+*Topology-aware scheduling (TAS)* places multi-`Pod` replicas inside one failure domain — a cloud zone
+or a physical rack. Configure a read-only cloud-zone `TopologySource`, then narrow placement to a
+static rack inventory snapshot. Moving a node between racks and changing the hierarchy levels have
+different effects on existing workloads.
 
-## Step 1: read-only cloud zone discovery
+## Step 1: Discover cloud zones
 
 Verify existing node labels and cluster status before configuring topology sources:
 
@@ -35,7 +35,7 @@ kubectl get topologies.kueue.x-k8s.io
 ```
 
 When nodes already carry cloud provider labels for regions and zones, define a read-only
-`TopologySource` using `nodeLabels`:
+`TopologySource` using *`nodeLabels`*:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -53,7 +53,7 @@ spec:
 ```
 
 The operator validates that labels form a strict tree (each zone belongs to exactly one region) and
-computes a profile hash. Nodes receive `topology.gpustack.ai/profile=fnv64-<hash>`, and Kueue
+computes a profile hash. `Node`s receive `topology.gpustack.ai/profile=fnv64-<hash>`, and Kueue
 materializes the matching `Topology` resource.
 
 Check source readiness:
@@ -62,9 +62,9 @@ Check source readiness:
 kubectl get topologysources cloud-zones -o yaml
 ```
 
-## Step 2: request zone placement from ModelDeployment
+## Step 2: Request zone placement
 
-When a serving replica consists of multiple Pods (such as tensor-parallel groups spanning multiple nodes),
+When a serving replica consists of multiple `Pod`s (such as tensor-parallel groups spanning multiple nodes),
 request placement within a single availability zone:
 
 ```diff
@@ -90,11 +90,11 @@ request placement within a single availability zone:
 +        requiredLevel: topology.kubernetes.io/zone
 ```
 
-Kueue TAS admits the replica only when a single zone contains enough unallocated capacity to host all
-2 Pods. If capacity is scattered across zones without filling any single zone, the workload waits in
-`Pending` rather than stranding split Pods.
+Kueue *TAS* admits the replica only when a single zone contains enough unallocated capacity to host all
+2 `Pod`s. If capacity is scattered across zones without filling any single zone, the workload waits in
+`Pending` rather than stranding split `Pod`s.
 
-## Step 3: static inventory snapshot with ConfigMap
+## Step 3: Publish an inventory snapshot
 
 In private data centers without cloud labels, publish rack hierarchies using a versioned snapshot
 stored in a `ConfigMap`:
@@ -140,7 +140,7 @@ spec:
 The operator validates the snapshot atomically, creates NFD `NodeFeature` resources, and writes the
 custom labels to each node.
 
-## Step 4: request rack placement
+## Step 4: Request rack placement
 
 With rack labels published, narrow the workload constraint from zone-level to rack-level:
 
@@ -158,12 +158,12 @@ With rack labels published, narrow the workload constraint from zone-level to ra
 +        requiredLevel: topology.gpustack.ai/rack
 ```
 
-All Pods within each replica group are placed within the same physical rack, minimizing inter-switch
+All `Pod`s within each replica group are placed within the same physical rack, minimizing inter-switch
 network latency.
 
-## Step 5: move a node, then change the hierarchy
+## Step 5: Move a node
 
-When a node is cabled into a new rack, update the ConfigMap snapshot with an incremented revision:
+When a node is cabled into a new rack, update the `ConfigMap` snapshot with an incremented revision:
 
 ```diff
  apiVersion: v1
@@ -193,37 +193,37 @@ The node keeps its profile, so the worker creates no flavor and applies no hold.
 The node carries the new rack value after NFD publishes it.
 
 A change to the ordered level keys is a different operation that can evict and readmit workloads,
-unlike the revision-only change in Step 5. See
+unlike the revision-only change shown above. See
 [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy) for the
 `HoldAndDrain` migration sequence and its interruption impact before editing `levels`.
 
-## Limitation
+## Limitations
 
 - Single-source node ownership and the hostname-only profile fallback are covered in
   [Hierarchy profiles](../../modules/topology/scheduling.md#hierarchy-profiles).
 - Domain capacity packing and multi-role gang holds are covered in
-  [Failure surfaces](../../modules/topology/scheduling.md#failure-surfaces).
+  [Troubleshooting](../../modules/topology/scheduling.md#troubleshooting).
 - Changing the ordered `levels` list on a live hierarchy triggers `HoldAndDrain` migration; see
   [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
 
 ## Troubleshooting
 
 For general failure surfaces (including `AwaitingQueueStatus`, `HoldAndDrain` flavor migration, and
-domain capacity fragmentation), see [Topology-Aware Scheduling Failure Surfaces](../../modules/topology/scheduling.md#failure-surfaces)
+domain capacity fragmentation), see [Topology-Aware Scheduling Failure Surfaces](../../modules/topology/scheduling.md#troubleshooting)
 and [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
 
 | Condition / Symptom | Status / Reason | Root cause & Mitigation |
 |---|---|---|
 | `TopologySource` `Ready=False` | `InvalidHierarchy` / `SnapshotInvalid` | Label hierarchy invalid (child key must have unique parent value); fix snapshot syntax or missing node entries |
 | `TopologySource` `Ready=False` | `OwnershipConflict` | Multiple writable sources target the same node; adjust node selectors to ensure disjoint sets |
-| `TopologySource` `Valid=False` | `ConfigMapReadFailed` | Verify ConfigMap name and namespace match the worker installation |
-| Node Topology Profile falls back to single-level `hostname` | Ambiguous source ownership | Node selected by 0 or multiple Ready sources; check node selectors across all sources |
-| Multi-role deployment has 1 Workload reserved but Pod not bound | Joint admission gang hold | First role fits in domain, but held until secondary role (prefill/decode) secures domain capacity; check other roles |
+| `TopologySource` `Valid=False` | `ConfigMapReadFailed` | Verify `ConfigMap` name and namespace match the worker installation |
+| Node Topology Profile falls back to single-level `hostname` | Ambiguous source ownership | `Node` selected by 0 or multiple Ready sources; check node selectors across all sources |
+| Multi-role deployment has 1 `Workload` reserved but `Pod` not bound | Joint admission gang hold | First role fits in domain, but held until secondary role (*prefill*/*decode*) secures domain capacity; check other roles |
 
 ---
 
 **See also** — [Topology-Aware Scheduling](../../modules/topology/scheduling.md) (levels and profiles) ·
-[Topology-Aware Scheduling Operations](../../modules/topology/operations.md) (ConfigMap and Webhook sources) ·
+[Topology-Aware Scheduling Operations](../../modules/topology/operations.md) (`ConfigMap` and Webhook sources) ·
 [Model Deployment Configuration](../../modules/model-deployment/deployment.md)
 
 **Next** → [Shared Cache Walkthrough](../kv-cache/shared-cache.md)

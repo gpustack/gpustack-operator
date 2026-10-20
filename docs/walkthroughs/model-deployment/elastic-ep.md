@@ -331,6 +331,6 @@ Environment changes apply to newly created `Pod`s; preserve logs before replacin
 ---
 
 **See also** — [Elastic EP](../../modules/model-deployment/elastic-ep.md) (profile contract) ·
-[External DP Walkthrough](external-dp.md) (fixed per-rank configuration example)
+[External DP Walkthrough](external-dp.md) (recorded four-rank H100 deployment)
 
 **Next** → [Model Deployment Status](../../modules/model-deployment/status.md)

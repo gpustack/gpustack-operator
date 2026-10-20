@@ -9,12 +9,14 @@
 {{ end }}
 {{ $sectionChildKeys := slice }}
 {{ range $page.Pages }}
-  {{ range (index $childrenMap (partial "page-key.html" .) | default slice) }}
-    {{ $childSlug := . }}
-    {{ with index $pagesBySlug $childSlug }}
-      {{ $sectionChildKeys = $sectionChildKeys | append $childSlug }}
-      {{ if eq $current.RelPermalink .RelPermalink }}
-        {{ $active = true }}
+  {{ with index $childrenMap (partial "page-key.html" .) }}
+    {{ range . }}
+      {{ $childSlug := . }}
+      {{ with index $pagesBySlug $childSlug }}
+        {{ $sectionChildKeys = $sectionChildKeys | append $childSlug }}
+        {{ if eq $current.RelPermalink .RelPermalink }}
+          {{ $active = true }}
+        {{ end }}
       {{ end }}
     {{ end }}
   {{ end }}

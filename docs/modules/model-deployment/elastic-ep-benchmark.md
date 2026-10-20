@@ -185,10 +185,10 @@ Choose width from the workload's latency targets and GPU cost, rather than assum
 
 ## InfiniBand RDMA comparison
 
-A separate follow-up used **8 × H100 SXM5 and 8 × ConnectX-7 InfiniBand adapters** on `gpu-node-0`.
-The adapter inventory was `mlx5_0`–`mlx5_7`.
-The same model and *TP* = 2 member layout expanded from width 2 to width 4.
-The final selected cells completed **416/416 requests per width, with zero errors**.
+A follow-up on the same ConnectX-7 InfiniBand node setup described in
+[Prefill and Decode Benchmark](prefill-decode-benchmark.md#infiniband-rdma-comparison) expanded the
+*TP* = 2 member layout from width 2 to width 4. The final selected cells completed **416/416
+requests per width, with zero errors**.
 
 ### Transport verification
 

@@ -11,7 +11,7 @@ capacity they receive.
 ## Quick start
 
 [Shared Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md) creates the backend, pool, binding and
-deployment in order. A plain Pod can also use a binding through [KV Cache
+deployment in order. A plain `Pod` can also use a binding through [KV Cache
 Injection](injection.md).
 
 ## Cache configuration

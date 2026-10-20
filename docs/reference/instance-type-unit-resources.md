@@ -4,14 +4,14 @@ With `instance-type-derived-from-node` enabled, the operator summarizes a node i
 `InstanceType` and stamps its **unit resources**: the CPU and RAM for *one unit*, which for an
 acceleratable type is **one whole accelerator**.
 
-Chosen once, at creation: `spec.unitResources` is immutable afterwards and the operator never
+Chosen once, at creation: *`spec.unitResources`* is immutable afterwards and the operator never
 updates a type it did not just create, so a type you authored, or one an earlier version created,
 is never touched.
 
 ## Contents
 
 - [Preset scope](#preset-scope)
-- [The tiers](#the-tiers)
+- [Tiers](#tiers)
 - [NVIDIA](#nvidia)
 - [Ascend](#ascend)
 - [AMD](#amd)
@@ -28,16 +28,16 @@ is never touched.
 
 ## Preset scope
 
-- **It is the default request.** An Instance omitting `cpu`/`ram` is sized from it — by accelerator
+- **It is the default request.** An `Instance` omitting `cpu`/`ram` is sized from it — by accelerator
   count for a whole accelerator, by memory percentage for a slice or partition.
-- **It caps an explicit request.** An Instance setting `cpu`/`ram` is capped against it.
+- **It caps an explicit request.** An `Instance` setting `cpu`/`ram` is capped against it.
 
 With `instance-general-resources-overcommit` enabled (the default), the preset is the container
 *limit* and the scheduler sees `100m` CPU per core, `128Mi` per Gi instead: an `xlarge` accelerator
 asks for 1.2 CPU / 24Gi. With it disabled, the limit *is* the request; check the presets against
 what your nodes provide per accelerator.
 
-## The tiers
+## Tiers
 
 | Tier | VRAM band | Unit CPU | Unit RAM |
 |---|---|---|---|
@@ -47,17 +47,17 @@ what your nodes provide per accelerator.
 | `large` | > 48, ≤ 96 GiB | `12` | `128Gi` |
 | `xlarge` | > 96 GiB | `12` | `192Gi` |
 
-`spec.localStorage` is always `100Gi`, never preset per product; a CPU-only derived type is always
+*`spec.localStorage`* is always `100Gi`, never preset per product; a CPU-only derived type is always
 `1` CPU / `2Gi`.
 
 **An accelerator not listed below gets `fallback`**: `4` CPU / `16Gi`, what every accelerator got
 before presets existed.
 
 A family's tier starts from its VRAM band, then drops to what its **lowest** published
-multi-accelerator host configuration supports on both axes; single-accelerator cloud tiers are
+multi-accelerator host configuration supports for both CPU and memory; single-accelerator cloud tiers are
 ignored, tracking the buyer's instance size rather than the accelerator. The CPU ladder stops at
 `12` on purpose: the preset is also the defaulted request, so with overcommit disabled a generous
-CPU number is the first thing that leaves single-accelerator Pods `Pending`.
+CPU number is the first thing that leaves single-accelerator `Pod`s `Pending`.
 
 `Anchor` is the published configuration each preset was taken from, per accelerator.
 
@@ -243,7 +243,7 @@ Create the `InstanceType` yourself: an administrator-created type is never touch
 and no preset overrides it. There is no setting to override the table; it ships in the operator
 image. Two things to know first:
 
-- Presets apply only to types created after the upgrade, since `spec.unitResources` is immutable and
+- Presets apply only to types created after the upgrade, since *`spec.unitResources`* is immutable and
   the operator only ever creates; an upgraded cluster carries mixed old and new sizing.
 - Deleting a derived `InstanceType` has the operator author it again at the current presets (the
   supported way to re-size a pool the operator owns); the pool is not schedulable in between.
@@ -254,7 +254,7 @@ at the top of that file; when either changes, compare the rows here with the pre
 ---
 
 **See also** — [Scheduling Chain](../modules/devices/scheduling.md#unit-spec-defaults)
-(where the unit spec is stamped) · [Admission](../modules/devices/admission.md#the-instancetype-and-instance-webhooks)
+(where the unit spec is stamped) · [Admission](../modules/devices/admission.md#instancetype-instance-webhooks)
 (what the webhooks enforce on it) · [Walkthrough](../walkthroughs/devices/scheduling.md#step-4-manage-a-custom-instancetype)
 
-**Next** → [Settings](settings.md#online-adjustable-settings) — the switches named on this page.
+**Next** → [Settings](settings.md#online-adjustable-settings) — configure resource derivation and CPU awareness.

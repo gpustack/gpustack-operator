@@ -19,7 +19,7 @@ choices. [Model Image Source](image-source.md) covers image-backed weights.
 ## Cache operations
 
 [Model Store Operations](operations.md) covers configuration, watermarks and
-removal. [Model Prefetch](prefetch.md) covers warming weights before a Pod needs
+removal. [Model Prefetch](prefetch.md) covers warming weights before a `Pod` needs
 them. [Node Model Store](node-store.md) describes the per-node record and plugin.
 
 ## Observing and syncing
@@ -31,6 +31,6 @@ weights from another node's cache.
 ---
 
 **See also** — [Model Deployment](../model-deployment/_index.md) (serving a model) ·
-[GPU Instances](../instances/_index.md) (using weights in an Instance)
+[GPU Instances](../instances/_index.md) (using weights in an `Instance`)
 
 **Next** → [Model Artifact](artifact.md) — choose a source and delivery.

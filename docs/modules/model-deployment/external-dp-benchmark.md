@@ -52,7 +52,6 @@ The host's NVLink fabric did not provide a cross-`Pod` transport in this recordi
 | Cluster | Kubernetes v1.35.7; one CPU node and one GPU node |
 | Accelerators | 8 × NVIDIA H100 80 GB HBM3 SXM5 on one GPU node |
 | Interconnect | NVLink within each `Pod`; TCP over `eth0` between `Pod`s |
-| Driver | 580.173.02; CUDA 13.0 |
 | GPUStack Operator | v0.9.1 |
 | Captured `InstanceType` | `bench-gpu`, selecting the H100 accelerator group |
 | Runner | `gpustack/runner:cuda13.0-vllm0.30.0`; startup logs report vLLM 0.30.0 |
@@ -66,27 +65,11 @@ The host's NVLink fabric did not provide a cross-`Pod` transport in this recordi
 
 ### Port allocation
 
-vLLM v0.30.0's [`get_open_ports_list`](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/utils/network_utils.py)
-probes and closes five ports. An unset `VLLM_PORT` uses kernel allocation; a configured base scans upward past occupied ports.
-The *MoE* startup handshake shares the leader's initial list, but the probes do not reserve those ports.
-
-Fixed multiprocessing *External DP* leaves *`_coord_store_port`* = `0` because the *Elastic EP* coordination-store path is inactive.
-[`stateless_init_dp_group`](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/config/parallel.py)
-retries `EADDRINUSE` for at most five attempts. `_pick_stateless_dp_port` consumes local candidates without broadcasting a replacement.
-The *MoE* `DPCoordinator` is separate from that port-coordination store.
-
-A symmetric allocation-time conflict, such as `19500` occupied in every `Pod`, shifts matching scans to the next free ports.
-Initialization can then succeed with an aligned sequence. This does not coordinate a later leader-only bind failure.
-In the failed capture, an outgoing connection occupied `m0` source port `36558`;
-`m0` retried `36557`, while `m1`–`m3` kept connecting to `36558` without local `EADDRINUSE`.
-
-For the recorded ephemeral range `32768–60999`, use **`1024 <= VLLM_PORT < 32768`**, such as **`19500`**, on every rank.
-Keep every candidate below `32768` and clear of `8000`, `29500`, `29550` and other listeners.
-This eliminates ephemeral-source collisions for that range, while other conflicts remain possible.
-The successful capture used `19502` for collective initialization; it is not a fixed base-plus-two rule.
-
-See [Port allocation](external-dp.md#port-allocation) for the source boundary and
-the [walkthrough manifest](../../walkthroughs/model-deployment/external-dp.md#step-1-start-the-fixed-group) for the setting.
+The captured deployment set `VLLM_PORT=19500` on every rank, and the successful run selected port
+`19502` for collective initialization (an observed runtime choice rather than a fixed base-plus-two
+offset). See [Port allocation](external-dp.md#port-allocation) for vLLM's port-probing,
+candidate-broadcast and retry behavior, and the recorded bootstrap-port race that motivates a fixed
+`VLLM_PORT`, and the [walkthrough manifest](../../walkthroughs/model-deployment/external-dp.md#step-1-start-the-fixed-group) for the setting.
 
 ### Workload
 
@@ -217,10 +200,10 @@ The crossover does not establish a general advantage for multi-node or *RDMA* de
 
 ## InfiniBand RDMA comparison
 
-A separate follow-up used **8 × H100 SXM5 and 8 × ConnectX-7 InfiniBand adapters** on `gpu-node-0`.
-The adapter inventory was `mlx5_0`–`mlx5_7`.
-The four-rank group retained *DP* = 4, *TP* = 2 per `Pod`, one API server per rank and `round_robin` routing.
-All twelve measured cells completed **1,088/1,088 requests with zero errors**.
+A follow-up on the same ConnectX-7 InfiniBand node setup described in
+[Prefill and Decode Benchmark](prefill-decode-benchmark.md#infiniband-rdma-comparison) retained
+*DP* = 4, *TP* = 2 per `Pod`, one API server per rank and `round_robin` routing. All twelve measured
+cells completed **1,088/1,088 requests with zero errors**.
 
 ### Transport verification
 

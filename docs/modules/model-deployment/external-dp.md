@@ -192,20 +192,25 @@ width-only growth of a Ray *Internal LB* group.
 
 The H100 SXM5 recording served `DeepSeek-V2-Lite-Chat` under vLLM v0.30.0 with *TP* = 2, *DP* = 4
 and *EP* world size = 8. All four rank endpoints were healthy behind the `round_robin` Router.
-Router counters matched engine completion counts: **285 + 284 × 3 requests**.
-Both configurations completed **1,088/1,088 measured requests with zero errors**.
+Router counters matched engine completion counts: **285 + 284 × 3 requests** (1,137 total: 1,088
+measured requests plus 48 warm-ups and 1 calibration probe). Both configurations completed
+**1,088/1,088 measured requests with zero errors**.
 
-At concurrency 64, *time to first token (TTFT)* p50 crossed in favor of *External DP*:
+In the initial TCP recording at concurrency 64, *time to first token (TTFT)* p50 crossed in favor of *External DP*:
 
 | Prompt/output target | Wide *TP* = 8 (ms) | *DP* = 4, *TP* = 2 (ms) | Median reduction |
 |---|---:|---:|---:|
 | `1024/256` | 4,798.411 | **1,863.100** | **2.58×** |
 | `4096/128` | 3,814.139 | **3,094.017** | **1.23×** |
 
-Wide *TP* still delivered **2.27×–6.99× higher output throughput** across all twelve matched cells.
-At `4096/128`, concurrency 64, *External DP* also had much worse first-token and token-gap tails.
-Choose by median first-token, tail-latency and throughput targets together.
-Cross-node placement and *RDMA* performance remain unmeasured.
+Over TCP, wide *TP* still delivered **2.27×–6.99× higher output throughput** across all twelve matched cells,
+and at `4096/128`, concurrency 64, TCP *External DP* had much worse first-token and token-gap tails.
+
+With ConnectX-7 InfiniBand *RDMA* enabled (`resources.interface: "2"`), four-rank *External DP*
+reduced median *TTFT* by **6.26×–8.47×** and increased output throughput by **3.85×–7.01×** over TCP,
+exceeding the wide-*TP* output throughput at concurrency 64; see
+[InfiniBand RDMA comparison](external-dp-benchmark.md#infiniband-rdma-comparison). Cross-node
+placement remains unmeasured.
 
 [External DP Benchmark](external-dp-benchmark.md) compares a four-rank *TP* = 2, *DP* = 4
 *External DP* group against a monolithic *TP* = 8 group on the same eight GPUs; the

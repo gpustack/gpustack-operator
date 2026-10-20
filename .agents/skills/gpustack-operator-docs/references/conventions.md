@@ -13,7 +13,7 @@ resources. [Architecture](../../getting-started/architecture.md) introduces the 
 ## Contents
 
 - [Stage 3: capacity profiling](#stage-3-capacity-profiling)
-- [Stage 4: the Kueue chain](#stage-4-the-kueue-chain)
+- [Stage 4: Kueue chain](#stage-4-kueue-chain)
 
 ## Stage 3: capacity profiling
 
@@ -26,7 +26,7 @@ resources. [Architecture](../../getting-started/architecture.md) introduces the 
 **Next** → [Admission](admission.md) — the admission gates a request passes.
 ```
 
-**Introduction** — start with the subject or the task in one short paragraph. If the page already
+**Introduction** — start with the subject or the task in a short introduction. If the page already
 opens with useful prose, use it. Do not prepend a second summary or metadata fields for purpose,
 audience or reading time. Put required software, permissions and earlier steps beside the operation
 that needs them, or in a prerequisites section when several steps share them. Link to background
@@ -55,7 +55,9 @@ required; `Next` is expected wherever a next step exists.
 
 Name top-level groups for capabilities, such as `Heterogeneous Devices`, `RDMA Networking` and `Topology`.
 Use component names such as `Device Manager` when describing those components.
-Use short, Title-Cased nouns or noun phrases for menu labels. Omit the parent module's name from the menu.
+Use short, Title-Cased nouns or noun phrases for menu labels at every depth, including child menus.
+Capitalize the first word and main words; keep connecting words such as `and` lowercase.
+Omit the parent module's name from the menu.
 Check each article title against its introduction and main sections. Keep accurate existing titles.
 Article H1 titles may retain module names and useful `Operations`, `Reference` or `Walkthrough` suffixes.
 Change titles that are unclear, misstate the content or conflict with their menu labels.
@@ -70,6 +72,10 @@ Change titles that are unclear, misstate the content or conflict with their menu
 | Walkthroughs / Model Deployment | `Elastic EP` | `Elastic EP Walkthrough` |
 
 Menu labels and H1 titles must describe the same subject; they need not use identical words.
+The breadcrumb's current-page label uses the full page title, as does the browser title.
+Its parent comes from the source directory. A sidebar child group does not create a breadcrumb parent.
+Check all three in the rendered site when changing titles or navigation. A short sidebar label must
+still lead to the article the reader expects from its breadcrumb and H1.
 Use `Overview` for module introductions. Name preparation and example-selection pages by their purpose.
 Use `children` in `site/data/navigation.yaml` for subordinate articles.
 Walkthrough module links use the same names and order as the outer capability groups.
@@ -79,8 +85,152 @@ Each `docs/README.md` `All pages` label must match its page's H1 character for c
 `check-docs.sh` checks this rule. Keep the table in navigation order, with child articles immediately
 after their parent. Update links that name a changed title and any links to its old H1 anchor.
 
-`##` and `###` headings are sentence case. GitHub lowercases anchors, so re-casing a heading keeps every
+Headings below H1 use sentence case. Preserve official names, resource-kind casing and abbreviations.
+For a numbered heading, capitalize the first word after the colon: `Step 1: Create the deployment`,
+`Stage 1: Node Feature Discovery`, `Gate 3: Per-accelerator AdmissionCheck` and
+`Rule 1: Family and container group`. Keep the rest in sentence case. Preserve official spellings
+that begin with a lowercase letter. Apply the same capitalization to Contents labels and other
+heading labels.
+Titles, headings, navigation and link labels stay plain. GitHub lowercases anchors, so re-casing keeps every
 inbound link; changing its *words* does not.
+
+## Section names and steps
+
+Use the same heading for the same section purpose across README, docs and site content.
+Choose by the section's content, not its current name. Keep technical topic headings when these
+categories do not fit. Do not add empty sections or force every article into the same outline.
+
+| Section purpose | Heading | Avoid competing names |
+|---|---|---|
+| Brief task context, outcome or synthesis | Summary | TL;DR, Recap, Conclusion |
+| Software, permissions, hardware or prior setup required to proceed | Prerequisites | Prerequisite, Requirements, Before you begin |
+| Fields, options and configuration choices | Configuration | Setup options, Config |
+| Ordered procedure grouped beneath one heading | Steps | Procedure, Instructions |
+| Checks that confirm the expected state | Verification | Validation, Checks |
+| Removing resources created by an example | Cleanup | Teardown, Release resources |
+| Measurements and observed outcomes | Results | Findings, Outcomes |
+| Reasons to choose a capability | Benefits | Advantages, Strengths |
+| Costs and workloads where the benefit decreases | Trade-offs | Disadvantages, Good at / Not good at |
+| Constraints, unsupported cases and measurement boundaries | Limitations | Limitation, Weaknesses, Weak points |
+| Symptoms, diagnosis and recovery actions | Troubleshooting | Problems, Common issues |
+
+An introduction can supply the summary without a `Summary` heading. A closing synthesis may use
+`Summary` when the introduction has no such section. Do not repeat it as `Conclusion` or `TL;DR`.
+Keep technical requirements in their owning topic; not every occurrence of "requirements" means
+prerequisites. A verification procedure is distinct from a description of webhook validation.
+For a section that combines prerequisites and constraints, use `Prerequisites and limitations`
+or split it by purpose. Do not classify the whole section by whichever kind of bullet is more common.
+Use `Verification` for checks of a configured capability; name the object in its first paragraph.
+Benchmark summaries use `Benefits` and `Trade-offs` for observed gains and costs. Keep the
+measurement boundaries in `Limitations`; do not create competing `Limitations` headings on one page.
+
+Keep every H2–H6 heading to at most four words and 32 visible characters. Exclude a numbered prefix
+such as `Step 2:` or `Rule 3:` from both counts. Count hyphenated parts as separate words. This is a
+hard limit, including in `--report` mode. Move conditions, quantities and explanations into the
+first paragraph. Omit an initial `The` unless it belongs to an official name. Do not bold,
+italicize or add code formatting to headings; exact identifiers in body text keep their format.
+
+- Number dependent operations as `Step N: <short imperative>`, such as `Step 1: Create the deployment`.
+  Restart at 1 for each independent procedure. When steps are direct `##` headings, omit a redundant
+  `Steps` wrapper. A standalone `Verification` or `Cleanup` section need not carry a step number.
+- Keep `Stage N: <topic>` for numbered architecture stages, `Gate N: <topic>` for admission checkpoints
+  and `Rule N: <topic>` for normative rules. Use the same capitalization after the colon for these
+  and other numbered headings: capitalize the first word, then use sentence case. These describe system behavior, not reader operations.
+  Use a colon consistently; do not replace their technical meaning with `Step`.
+  Name the topic in the heading, such as `Rule 2: Logical slice count`. State the complete rule in
+  the first paragraph: "A logical slice request must set `<base>.sliced` to `1`."
+  Keep quantities, scope words such as "exactly" and "at most", and conditions in that paragraph.
+  Review the rendered table of contents; it should list topics without repeating full rule sentences.
+- Use topic headings for independent component responsibilities, such as `PCI vendor labels`.
+  Avoid arbitrary `Job N` numbering. Keep numbers when they identify an actual Kubernetes `Job`.
+- Configuration scenarios and behavior descriptions use topic headings, such as `Mixed configuration`
+  or `Failover behavior`. An imperative verb alone does not make an explanation an operation.
+  Number only the actions the reader performs; keep observations and accounting explanations as topics.
+- Update Contents, self links, prose references and every inbound anchor when heading words change.
+  Preserve rule and stage relationships when shortening their headings.
+
+For a style sweep, inventory all authored Markdown in scope, excluding fenced content from heading
+classification. Read each affected section before renaming it. Record files reviewed without changes
+as well as edits. Review like sections across page types, then run link and site checks. Keep examples,
+captured output, measured values and comparison highlights intact. Generated documentation follows
+its source template; do not hand-edit generated files to satisfy this vocabulary.
+
+## Terminology and numbers
+
+Apply these rules across guides, operations, benchmarks, reference pages and walkthroughs.
+Read the owning guide and search related pages before choosing a term. Use one name for one concept.
+Keep distinct concepts separate: a scheduling request does not declare engine parallelism, and a
+component such as `Device Manager` does not name the whole device-management capability.
+
+Name the object or behavior directly. Avoid body-part and mechanical metaphors such as "arm",
+"leg", "knob" and "wiring" when describing software. Use `configuration` for benchmark alternatives,
+`transfer path` for data movement, `criterion` for eligibility checks, `source type` for inventory
+choices and `setting` or `parameter` for configurable values. Name CPU and memory constraints
+instead of calling them "axes". Use a more specific term when the context requires it; do not
+collapse different concepts into one replacement word. Keep literal chart axes, hardware names,
+identifiers and quoted diagnostics unchanged. Apply the same terms to headings, prose, table
+headers and link descriptions.
+
+Expand unfamiliar abbreviations at first use in each article's prose, even when its title uses the abbreviation.
+Introduce terms before tables that depend on them. A link label or heading is not a prose definition.
+Walkthroughs may use established abbreviations such as *TP* and *EP* directly when they link to the
+owning guide for background. Keep operation steps focused; do not repeat definitions from that guide.
+Italicize the serving terms listed below and introduced domain concepts such as *RDMA* and *NUMA*
+in prose, lists and explanatory table cells. Do not italicize every technical noun.
+Keep titles, headings, navigation and link labels plain. Keep product and component names, such as
+Kubernetes, vLLM, kubelet, TopologyManager and Device Manager, in their official form.
+Use Device Manager for the component and `device-manager` for its command or workload name.
+Use Model Manager for the component and `model-manager` for its command or workload name.
+
+Format prose by meaning, including lists and explanatory table cells:
+
+| Meaning | Format | Example |
+|---|---|---|
+| Kubernetes resource kind, including upstream and operator resources | Inline code | `Pod`, `ModelDeployment`, `ClusterQueue` |
+| Resource that needs emphasis | Bold inline code | **`ModelDeployment`** |
+| Stage, role or submodule | Italics | *encode*, *prefill*, *decode*, *Prefill* role |
+| Custom-resource field or field path | Italics; retain code for an exact identifier | *replicas*, *`roles[].kind`*, *`spec.router`* |
+| Literal value, flag, environment variable, resource key or command | Inline code | `kind: Prefill`, `--tensor-parallel-size`, `GPUSTACK_LOG_LEVEL` |
+
+Use the singular kind inside code when adding a plural suffix: `Pod`s.
+For irregular plurals, write `Topology` resources. Classify names by context: an Ascend super pod
+and an NVIDIA GPU instance are hardware concepts, not Kubernetes resources.
+A role name in prose uses italics; an exact enum assignment keeps code formatting.
+Do not use bold or code alone for stage names in prose. Bold may highlight an actionable rule,
+warning, comparison winner or a short lead-in. It can wrap an italic term or field within that text.
+Avoid decorating every list item with bold. Keep manifests, commands and captured output unchanged.
+
+Use these serving terms consistently:
+
+| Concept | First prose use | Later use |
+|---|---|---|
+| Tensor parallelism | `*tensor parallelism (TP)*` | `*TP*` |
+| Data parallelism | `*data parallelism (DP)*` | `*DP*` |
+| Expert parallelism | `*expert parallelism (EP)*` | `*EP*` |
+| Pipeline parallelism | `*pipeline parallelism (PP)*` | `*PP*` |
+| Internal load balancing | `*internal load balancing (Internal LB)*` | `*Internal LB*` |
+| External load balancing | `*external load balancing (External LB)*` | `*External LB*` |
+| Hybrid load balancing | `*hybrid load balancing (Hybrid LB)*` | `*Hybrid LB*` |
+| Mixture of experts | `*mixture of experts (MoE)*` | `*MoE*` |
+| Prefill/decode | `*prefill/decode (PD)*` | `*PD*` |
+| Encode/prefill/decode | `*encode/prefill/decode (EPD)*` | `*EPD*` |
+| Time to first token | `*time to first token (TTFT)*` | `*TTFT*` |
+| Time per output token | `*time per output token (TPOT)*` | `*TPOT*` |
+| Inter-token latency | `*inter-token latency (ITL)*` | `*ITL*` |
+
+Use `PD` for the serving configuration in prose; keep `P/D`, `pd_*` or other spellings in literal engine output and identifiers.
+Use `*TP* = 2` for a degree, `*DP* width 2 → 4` for a width change and `*EP* world size` for the collective size.
+Avoid competing forms such as `TP2`, `TP 2` and `TP=2`. Distinguish a fixed degree from a changing width.
+Apply the same first-use rule to domain concepts such as remote direct memory access (RDMA) and
+non-uniform memory access (NUMA). Do not infer an acronym's expansion from its spelling.
+
+Use `×` for multiplication and `→` for transitions in prose. Space multiplication operands: `2 × 8 GPUs`.
+Put a space between a number and its unit: `22 ms`, `1 GiB`, `128.24 tok/s`.
+Keep percentages and ratio multipliers compact: `13.3%`, `2.22×`.
+Keep decimal and binary units distinct, and put units in table headers when a whole column shares them.
+Use the same number style for comparable quantities. Keep literal configuration values and output in code formatting.
+Preserve measured precision, values, comparison highlights, sample counts and evidence limits.
+Do not round results or change a captured command, manifest, log or output block to satisfy prose style.
 
 ## Size caps
 
@@ -89,7 +239,7 @@ something that belongs in a list, a table, or another page.
 
 | Cap | Limit | Exempt |
 |---|---|---|
-| prose paragraph | 5 lines / 500 rendered characters | fenced blocks, table rows, list *markers*, `> **Why**` notes, the footer |
+| prose paragraph | 5 lines / 500 rendered characters | fenced blocks, table rows, list *markers*, blockquotes, the footer |
 | page length | 1000 lines | `docs/walkthroughs/devices/scheduling.md`, `docs/operate/*`, `docs/modules/devices/*-mig.md` — recordings and runbooks |
 | `##` sections | 10 per page, `## Contents` not counted | `docs/README.md`, `docs/reference/*` — both are lookup tables |
 
@@ -110,10 +260,10 @@ per-page metrics, so one page can be measured before the rest is done.
 
 ## Diátaxis, mapped onto this repository
 
-[Diátaxis](https://diataxis.fr/) splits documentation by what the reader is doing. Our pages map onto
+[Diátaxis](https://diataxis.fr/) splits documentation by what the reader is doing. The repository maps
 it as follows — when a page starts serving two modes at once, that is the moment to split it:
 
-| Mode | Reader is… | Our pages |
+| Mode | Reader is… | Repository pages |
 |---|---|---|
 | Tutorial | learning by doing | `README.md` Usage examples, `docs/walkthroughs/devices/scheduling.md`, the MIG walkthrough, `docs/walkthroughs/kv-cache/shared-cache.md` |
 | How-to | achieving a goal | `docs/operate/*`, `docs/modules/devices/*-mig.md`, `docs/operate/migration/*`, `docs/contribute/development.md`, a domain runbook (`docs/modules/model-delivery/operations.md`) |
@@ -123,8 +273,9 @@ it as follows — when a page starts serving two modes at once, that is the mome
 Two consequences worth stating:
 
 - **Do not teach in a reference page**, and do not put a lookup table in an explanation page — link.
-- **A tutorial shows real output.** Every command and result in a walkthrough is captured from a live
-  cluster, with node names genericized. Never hand-write plausible output.
+- **Keep examples and recordings distinct.** Label an illustrative configuration as an example.
+  Captured output must come from a live run, with node names genericized. Never invent runtime output
+  or present an unexecuted configuration as measured behavior.
 
 ## Reader and implementation detail
 
@@ -145,6 +296,22 @@ A documentation review checks both sides of a move: the guide still gives the re
 operation and limits, and the spec retains the implementation information. Check referenced skills
 as well; a skill that needs source or measurement detail should read the owning spec explicitly.
 Existing docs lint checks structure and links; it does not prove that a moved contract is complete.
+
+## Narrative voice
+
+Apply one reader-focused voice to `README.md`, `docs/` and site content:
+
+- Use imperative sentences for operations: "Create a `ModelArtifact`."
+- State system behavior objectively: "The worker creates a `ClusterQueue`."
+- Use second person when identifying the reader's responsibility prevents ambiguity: "If you use an existing NFD installation, disable the bundled NFD."
+- Avoid author first person (`I`, `we`, `our`) and page self-description (`This page records`, `This walkthrough shows`, `This section covers`). Name the task, configuration or observed behavior directly.
+- State measurement scope directly: "The captured run uses two ranks." Keep the hardware, versions,
+  untested cases and distinction between examples and captured results.
+
+Keep quotations, commands, logs and captured output verbatim. Links may direct readers to another
+article. Contributor instructions may describe document structure when editing documentation is the task.
+Replace ownership pronouns with specific component names, such as "the bundled NFD" or "GPUStack's allocator".
+Do not replace first-person wording inside a literal identifier or external title.
 
 ## Writing rules
 
@@ -181,14 +348,9 @@ capacity, timing or a safety limit.
 - **Break a wall of text into named subsections.** If a paragraph carries more than one rule, it is
   more than one paragraph — and past 5 lines it fails the paragraph cap. A `###` heading is cheap and
   becomes an anchor others can link to.
-- **Prefer a table for anything enumerable** — modes, keys, vendors, gates, knobs.
+- **Prefer a table for anything enumerable** — modes, keys, vendors, gates, settings.
 - **Keep table headers short.** Use a precise noun or short phrase, such as `Resource`, `Scope` or
   `Default`. Put conditions and explanations in the cells or adjacent prose. Preserve technical names.
-- **Use consistent parallelism terms.** Expand abbreviations at first use in each article's prose.
-  Italicize parallelism, load-balancing and latency terms, including their abbreviations:
-  `*tensor parallelism (TP)*`, `*TP* = 2`, `*DP* width`, `*EP* world size`.
-  Keep titles and link labels plain. Use code formatting for API fields, enum values and flags.
-  Preserve commands, manifests and captured output.
 - **Name code in contributor guides.** Give a source path when the reader is editing that code.
   User guides state the behavior and link to the owning spec for its implementation.
 - **No symbol-numbered cross-references** (`switch ①`, "gate-2 above"). Use the heading name and a
@@ -202,11 +364,14 @@ capacity, timing or a safety limit.
 
 ## Prose tells
 
+These are manual review heuristics; lint checks structure, links, synchronization and size limits.
+A matching phrase needs context before it becomes a finding.
+
 Docs here are reference and technical text, so the voice is neutral and plain. Text written on autopilot
 carries patterns a careful writer rarely chooses on purpose. Read a draft once for them before you run
 the checker; the checker does not read prose. The patterns are adapted from the
-[humanizer](https://github.com/blader/humanizer) skill (MIT), strongest first. The first five justify an
-edit on one sighting.
+[humanizer](https://github.com/blader/humanizer) skill (MIT), strongest first.
+Keep wording that states a necessary technical distinction.
 
 | Pattern | Watch for | Write instead |
 |---|---|---|
@@ -222,9 +387,9 @@ edit on one sighting.
 | Stock AI words | additionally, delve, robust (figurative), seamless, leverage, showcase, highlight (verb), landscape, tapestry, testament, underscore, valuable, key (adjective) | A plain word, or nothing. "Gate" and "robust" used in their technical sense are fine |
 | Avoiding is, are, has | "serves as", "acts as", "features", "boasts", "offers" | "is", "are", "has" |
 | Shallow -ing riders | ", ensuring X", ", enabling Y", ", reflecting Z" tacked onto a fact | Drop the rider, or make it its own sentence with the mechanism named |
-| Bold as decoration | bold on ordinary terms, a bold label and colon on every bullet | Plain text. Turn a list whose labels carry nothing into a sentence or a table |
-| Decorative headings | Title Case below the H1, emoji, arrows, a rule between sections, a heading that restates its first sentence | Sentence case, none of the decoration |
-| Writing about the page | "the table below compares", "this section is organized by", "was added to replace" | State the subject. Mention a previous version only in `docs/operate/migration/*` and release notes |
+| Bold as decoration | isolated bold ordinary words, a bold label and colon on every bullet | Use bold for an actionable rule, warning, short lead-in or comparison highlight. Keep labels plain when they add no structure |
+| Decorative headings | Title Case on ordinary words below the H1, emoji, arrows, a rule between sections, a heading that restates its first sentence | Sentence case with official names and abbreviations preserved; keep the required footer separator |
+| Writing about the page | "This page records", "This walkthrough shows", "the table below compares", "this section is organized by" | Name the task, technical object or observed result. Preserve measurement scope and useful navigation links |
 | Chat residue | "Certainly!", "I hope this helps", "let me know", an offer to expand | Delete it |
 
 Three limits keep the cleanup from doing harm:
@@ -245,9 +410,9 @@ dashes and bold labels.
 
 ## Adding a page
 
-1. Put it under the directory that fits: the reader it serves (`architecture/`, `operation/`,
-   `migration/`, `reference/`), or the domain directory of the CR family it orbits
-   (`kv-cache/`, `model-store/`, `model-deployment/`) when the page joins a family that already has one.
+1. Choose the owning capability under `docs/modules/`, or the task directory under `docs/`:
+   `getting-started/`, `walkthroughs/`, `operate/`, `reference/` or `contribute/`.
+   Check the module map before choosing a location.
 2. Copy the template above and write a short introduction. Add prerequisites only when the task needs them.
 3. Add a row to the `docs/README.md` page table, and a step to any reading path it belongs on.
 4. Add it to the routing table in the skill's `SKILL.md` and to `references/page-map.md`, saying what it

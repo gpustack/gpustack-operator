@@ -34,7 +34,7 @@ together, or browse the [documentation](./docs/README.md).
 
 Use Kubernetes 1.29 or newer for scheduling and node model delivery, Helm 3.8 or newer, and
 cluster-admin access. The chart accepts Kubernetes 1.23 and newer, but simple allocation on
-1.23–1.28 is untested; see [version requirements](./docs/operate/installation-modes.md#kubernetes-requirements).
+1.23–1.28 is untested; see [prerequisites](./docs/operate/installation-modes.md#prerequisites).
 
 Install the manufacturer's driver on each accelerator node. Some devices also need a container
 toolkit; see [Vendor Prerequisites](./docs/getting-started/vendor-prerequisites.md).

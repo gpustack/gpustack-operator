@@ -1,29 +1,29 @@
 # Network Topology
 
 The Device Manager records a node's network interfaces and accelerator fabric in `Devices`. It
-checks RDMA links before publishing the labels and resource keys used for scheduling.
+checks *remote direct memory access (RDMA)* links before publishing the labels and resource keys used for scheduling.
 
 ## Contents
 
-- [The interface inventory](#the-interface-inventory)
+- [Interface inventory](#interface-inventory)
 - [pciRootId and pciSwitches](#pcirootid-and-pciswitches)
-- [The RDMA link check](#the-rdma-link-check)
-- [The three node labels](#the-three-node-labels)
-- [The RDMA resource keys](#the-rdma-resource-keys)
-- [The allocation response](#the-allocation-response)
-- [The scale-up fabric](#the-scale-up-fabric)
+- [RDMA link check](#rdma-link-check)
+- [Three node labels](#three-node-labels)
+- [RDMA resource keys](#rdma-resource-keys)
+- [Allocation response](#allocation-response)
+- [Scale-up fabric](#scale-up-fabric)
 - [Inspecting the record](#inspecting-the-record)
 
-## The interface inventory
+## Interface inventory
 
-`Devices.spec.interfaces` holds one entry per kernel interface: its bus, PCI coordinates, NUMA and
-CPU affinity, MTU, whether it is up, whether it is virtual, the RDMA device bound to it if any, and
-its SR-IOV virtual functions **nested under their physical function** so one card appears once.
+`Devices.spec.interfaces` holds one entry per kernel interface: its bus, PCI coordinates, *non-uniform memory access (NUMA)* and
+CPU affinity, MTU, whether it is up, whether it is virtual, the *RDMA* device bound to it if any, and
+its *single-root I/O virtualization (SR-IOV)* virtual functions **nested under their physical function** so one card appears once.
 
 **Enumeration starts at the interface.** `/sys/class/net` is the list, and each interface's PCI
 device is resolved as an *attribute* of it. Walking the bus and correlating back cannot see an
 interface that is not a PCI device at all, and that is the case the inventory most needs: on some
-accelerator platforms the RDMA-capable port is not on the bus.
+accelerator platforms the *RDMA*-capable port is not on the bus.
 
 Such an interface reports its own bus in `bus` and leaves every PCI field empty, so the absence
 reads as a **kind** of interface rather than as a failed lookup.
@@ -41,13 +41,13 @@ logged at `Error`. A pass that enumerated and found none *does* write the empty 
 > compare unequal on passes where nothing changed and issue an API write on every pass, forever,
 > with correct data in the object the whole time.
 
-## `pciRootId` and `pciSwitches`
+## pciRootId and pciSwitches
 
 `DeviceTopology.pciRootId` holds the **address of the outermost PCI bridge** above the device. The
 name suggests the root complex; the field is not that. Code that reads it as the root complex claims
 a closeness nothing measured.
 
-`pciSwitches` is the full upstream bridge path, innermost first. Two devices sharing the whole path
+*`pciSwitches`* is the full upstream bridge path, innermost first. Two devices sharing the whole path
 sit behind the same switch, which is strictly tighter than sharing the outermost bridge. The two
 fields answer different questions and are never read as the same claim.
 
@@ -56,12 +56,12 @@ fields answer different questions and are never read as the same claim.
 > across the two sides, so sharing the code makes them identical by construction rather than by
 > discipline.
 
-## The RDMA link check
+## RDMA link check
 
-`rdma: true` says an RDMA device is bound. It does not say the link works, and on real hardware the
+`rdma: true` says an *RDMA* device is bound. It does not say the link works, and on real hardware the
 two differ: a port can be fully configured, with an address and a gateway, while its link is down.
 
-Each RDMA device's ports are read for their transport state and their physical link state:
+Each *RDMA* device's ports are read for their transport state and their physical link state:
 
 | State | Meaning | Usable |
 |---|---|---|
@@ -75,25 +75,25 @@ a link nothing can use.
 
 The Device Manager sets `rdma.capable` when at least one interface or virtual function is usable.
 An endpoint is usable when its verdict is anything other than `Failed`. When there is no verdict,
-the Device Manager checks whether an RDMA device is bound.
+the Device Manager checks whether an *RDMA* device is bound.
 
 So an explicit verdict wins over the `rdma` flag in both directions. A record from an unreadable
 tree says `rdma: false` and carries an `Unverified` verdict, and the node still counts as usable. A
 bound device whose verdict is `Failed` does not. The key disappears only from a node where every
 endpoint is unusable, which is stricter than "every bound interface reports `Failed`".
 
-A node with a broken NIC beside a working one keeps the label, because it can still serve an RDMA
+A node with a broken NIC beside a working one keeps the label, because it can still serve an *RDMA*
 workload. Withholding there would let an unplugged second card take a working node out of
 scheduling, the same error as withholding on an unreadable file. A node label says nothing about
 individual interfaces, so a consumer that needs to know which one is broken reads `Devices`.
 
-An RDMA device bound to an SR-IOV virtual function counts the same way. A VF is nested under its
-physical function rather than listed at top level, so a node whose only RDMA devices are VFs would
+An *RDMA* device bound to an *SR-IOV* virtual function counts the same way. A VF is nested under its
+physical function rather than listed at top level, so a node whose only *RDMA* devices are VFs would
 otherwise report none.
 
 A VF is its own PCI function with its own address. What it shares with the parent is the upstream
-bridge path, which is what the distance is computed from, so inheriting the parent's `pciRootId`
-and `pciSwitches` claims nothing extra. Its NUMA node is its own, and is published as such.
+bridge path, which is what the distance is computed from, so inheriting the parent's *`pciRootId`*
+and *`pciSwitches`* claims nothing extra. Its *NUMA* node is its own, and is published as such.
 
 **`Failed` is never reached from a file that could not be read.** One unreadable port beside several
 down ones leaves "all ports are down" unestablished, so that mixture is `Unverified`. An inability
@@ -105,28 +105,28 @@ for as long as it persists so an operator can answer "how long has this been bro
 merged from what is already recorded before the inventory is compared; taking the clock each pass
 would make the comparison never match and rewrite the object forever.
 
-The check is not per-manufacturer: it reads the RDMA subsystem's own port attributes, so it applies
-to every RDMA device there is. `preflight` runs this same pass rather than reimplementing it, which
+The check is not per-manufacturer: it reads the *RDMA* subsystem's own port attributes, so it applies
+to every *RDMA* device there is. `preflight` runs this same pass rather than reimplementing it, which
 makes the two readings interpret the host identically. The readings are not identical to each other,
 since `preflight` reads sysfs when it is invoked and the published record is as old as the last pass
-that had a reason to run. See [Preflight operations](../devices/preflight.md).
+that had a reason to run. See [Preflight Checks](../devices/preflight.md).
 
-## The three node labels
+## Three node labels
 
 | Label | Value | Selectable |
 |---|---|---|
 | `feature.gpustack.ai/rdma.capable` | `true` | **yes** — the link gate, for a nodeSelector or affinity you write |
-| `feature.gpustack.ai/rdma.distance` | the closest bus distance any accelerator has to an RDMA-capable interface | no — informational |
-| `feature.gpustack.ai/rdma.numa` | the NUMA nodes carrying one, joined with `_` | no — informational |
+| `feature.gpustack.ai/rdma.distance` | the closest bus distance any accelerator has to an *RDMA*-capable interface | no — informational |
+| `feature.gpustack.ai/rdma.numa` | the *NUMA* nodes carrying one, joined with `_` | no — informational |
 
-No operator-generated ResourceFlavor pins any of the three: a flavor selects on accelerator and pool
+No operator-generated `ResourceFlavor` pins any of the three: a flavor selects on accelerator and pool
 labels only, so withholding `rdma.capable` removes a node from the workloads that select on it, not
 from a queue.
 
 Only the gate key is unconditional. **`rdma.distance` is omitted on a node with no accelerator**,
 because a distance is a statement about a pair and a node with no accelerator gives the label no pair
 to measure; the key is absent, not unknown. **`rdma.numa` is omitted when the kernel gave no
-affinity** for any capable interface: publishing a member nobody read would assert a NUMA node, and
+affinity** for any capable interface: publishing a member nobody read would assert a *NUMA* node, and
 normalising the blank to `0` would assert the one the kernel declined to give.
 
 The distance vocabulary is the product's existing one: `SELF` `LINK` `PIX` `PXB` `PHB` `NODE`
@@ -139,7 +139,7 @@ Where two levels are indistinguishable the **further** is reported, because the 
 proximity claim and overclaiming closeness is the error nothing downstream can catch. A missing
 coordinate yields `UNK`, never a distance.
 
-**Withholding a label is implemented as removing it.** The NodeFeature the DM writes is otherwise
+**Withholding a label is implemented as removing it.** The `NodeFeature` the DM writes is otherwise
 add-only, so a key that stops being reported would not stop existing; the label would read `true`
 for as long as the object lived while the same pass's inventory reported the link as broken. The
 removal is scoped to the `rdma.` prefix and is skipped entirely when the enumeration failed:
@@ -156,11 +156,11 @@ The `rdma.numa` set is joined with an underscore, not a comma. A comma is not a 
 character and it does not fail validation: the sanitizer every label value passes through drops it
 silently, so `{0,1}` would publish as `01` and read as node 01.
 
-## The RDMA resource keys
+## RDMA resource keys
 
-The inventory and the link verdict describe an RDMA endpoint. Three device-plugin resources make one
+The inventory and the link verdict describe an *RDMA* endpoint. Three device-plugin resources make one
 allocatable: the interface inventory decides which endpoints each key serves, the link verdict
-decides their health, and every token carries its endpoint's NUMA affinity.
+decides their health, and every token carries its endpoint's *NUMA* affinity.
 
 The keys are node-level and carry no
 manufacturer: a network interface belongs to the node rather than to a vendor.
@@ -169,7 +169,7 @@ manufacturer: a network interface belongs to the node rather than to a vendor.
 |---|---|---|---|
 | `device.gpustack.ai/rdma` | exclusive | one whole interface | 1 |
 | `device.gpustack.ai/rdma.shared` | shared | one concurrent use of one interface | 64 |
-| `device.gpustack.ai/rdma.partitioned` | partitioned | one SR-IOV virtual function | 1 per virtual function |
+| `device.gpustack.ai/rdma.partitioned` | partitioned | one *SR-IOV* virtual function | 1 per virtual function |
 
 EFA is allocated under none of these keys. AWS's EFA device plugin advertises its own
 `vpc.amazonaws.com/efa` key, and an EFA allocation follows that plugin's capacity rather than
@@ -177,9 +177,9 @@ EFA is allocated under none of these keys. AWS's EFA device plugin advertises it
 
 The mode is **read off the node, never chosen**:
 
-| Interface | Serves | Endpoints |
+| Interface | Serves | `Endpoints` |
 |---|---|---|
-| an SR-IOV physical function with virtual functions configured | `partitioned` only | each of its virtual functions |
+| an *SR-IOV* physical function with virtual functions configured | `partitioned` only | each of its virtual functions |
 | anything else — a physical function with none configured, or not a physical function | `exclusive`, `shared` | the interface itself |
 
 A physical function with virtual functions configured does not also serve the whole-function modes:
@@ -188,9 +188,9 @@ at run time. Being a physical function and having virtual functions configured a
 in the record, and both are read; either alone sends a record the other distinguishes into the
 wrong branch.
 
-An endpoint with no bound RDMA device name is advertised in no mode at all: the name is what an
+An endpoint with no bound *RDMA* device name is advertised in no mode at all: the name is what an
 allocation resolves to a character device, so an endpoint without one has nothing to hand over. A
-node whose RDMA tree exists but could not be read produces exactly that shape, an `Unverified`
+node whose *RDMA* tree exists but could not be read produces exactly that shape, an `Unverified`
 record with no device, and advertises zero.
 
 The link verdict above gates health, not existence: `OK`,
@@ -200,65 +200,65 @@ a bound device, so a missing link record is the `Unverified` case arriving by a 
 
 **A `Failed` endpoint keeps its tokens rather than dropping them.** The kubelet checkpoints the
 exact device IDs it offered a container, and withdrawing an advertised ID strands that checkpoint.
-The holder keeps its allocation while new Pods are granted none, and a container that restarts
+The holder keeps its allocation while new `Pod`s are granted none, and a container that restarts
 while the link is down cannot re-establish its allocation, because the checkpoint check requires
 every offered ID still healthy. It stays stuck until the link heals.
 
-Every advertised token carries a `TopologyInfo` naming its endpoint's own NUMA node. A virtual
+Every advertised token carries a `TopologyInfo` naming its endpoint's own *NUMA* node. A virtual
 function falls back to its parent's affinity when its own is blank (a blank reading is the kernel
 declining to answer), and when neither answers, **no hint is attached rather than one naming node
 0**: under `single-numa-node` the hint decides admission, so a stand-in value would place a
 container against a proximity nobody measured.
 
-A hint's unit is the NUMA node; a shared PCIe switch is finer than a hint can express (see
+A hint's unit is the *NUMA* node; a shared PCIe switch is finer than a hint can express (see
 [`pciRootId` above](#pcirootid-and-pciswitches)).
 
-The `partitioned` family is the one place an RDMA token publishes a hint where its accelerator
-counterpart publishes none: an RDMA partition token names exactly one virtual function, whose
+The `partitioned` family is the one place an *RDMA* token publishes a hint where its accelerator
+counterpart publishes none: an *RDMA* partition token names exactly one virtual function, whose
 affinity a hint can honor, while an accelerator partition token names no accelerator at all. What
 that means for a request pairing the two is stated with the request rules
-([Accelerator Requests](../devices/requests.md#co-locating-an-accelerator-and-an-rdma-interface)).
+([Accelerator Requests](../devices/requests.md#co-location-conditions)).
 
 > **Why** one interface serves many shared holders — its multiple queue pairs are how the hardware
 > is meant to be used, with the isolation done by firmware and kernel, so several processes on one
-> is ordinary use rather than oversubscription. The count is a scheduling knob, not a hardware
+> is ordinary use rather than oversubscription. The count is a scheduling setting, not a hardware
 > limit, and nothing is injected or intercepted to enforce it.
 >
-> It matches the default the ecosystem's own shared-RDMA device plugin ships, so a workload written
+> It matches the default the ecosystem's own shared-*RDMA* device plugin ships, so a workload written
 > against that plugin meets no tighter limit here. There is one pooled key rather than two because
 > two would draw on the same interfaces without decrementing each other, leaving neither count a
 > ceiling.
 
-Nothing an allocation does is written down: no entry in `Devices.status`, no Pod annotation, no
+Nothing an allocation does is written down: no entry in `Devices.status`, no `Pod` annotation, no
 in-process reservation. Every response is recomputed from `Devices.spec.interfaces[]`, so a fact
 the detector has since corrected cannot survive into a response built from an older one. The cost
-is that no cluster-level view maps a Pod to the interface it holds; the container itself is the
+is that no cluster-level view maps a `Pod` to the interface it holds; the container itself is the
 record, through its injected device nodes and its `NCCL_IB_HCA` value.
 
-The Device Manager registers one RDMA resource server per mode with kubelet, once per node.
+The Device Manager registers one *RDMA* resource server per mode with kubelet, once per node.
 
 Every node the Device Manager serves on Linux runs the servers, accelerator or not, so a node with
-no RDMA-capable interface registers all three keys with zero devices.
+no *RDMA*-capable interface registers all three keys with zero devices.
 
 Registering zero devices is a published fact, not an absence of one. `ListAndWatch` re-reads the
 inventory, so a device that appears when a driver loads is picked up by the next pass, with no second
 mechanism for the same fact. The `--no-shared` and `--no-partitioned` switches drop the matching
 families; exclusive is ungated.
 
-## The allocation response
+## Allocation response
 
 A granted token is resolved back to its endpoint in `Devices.spec.interfaces[]` at allocation
 time, and the response hands the container three things:
 
-- the endpoint's own verbs character device, resolved from its RDMA device name;
+- the endpoint's own verbs character device, resolved from its *RDMA* device name;
 - the node-level connection-manager device (`rdma_cm`), once per response however many endpoints
   were granted, and only where the host has one;
-- `NCCL_IB_HCA`, naming the granted RDMA devices, comma-joined.
+- `NCCL_IB_HCA`, naming the granted *RDMA* devices, comma-joined.
 
-If the endpoint's verbs device cannot be resolved from the host's RDMA inventory, allocation
+If the endpoint's verbs device cannot be resolved from the host's *RDMA* inventory, allocation
 fails with a diagnostic naming the locations checked.
 
-Devices are injected one endpoint at a time, never the whole `/dev/infiniband` directory: injecting
+`Devices` are injected one endpoint at a time, never the whole `/dev/infiniband` directory: injecting
 a directory hands every container every adapter on the node, and degrades to handing it none with
 no error. A granted token that parses to no endpoint of the family is refused rather than silently
 dropped.
@@ -269,27 +269,27 @@ container on such a host can be granted an endpoint, open it, and still fail ins
 transport library. And the two layouts above are exercised against fixture trees; which one a live
 host answers through has not been read yet.
 
-## The scale-up fabric
+## Scale-up fabric
 
-Everything above is the node's *Ethernet* view: interfaces the kernel enumerates, and RDMA over them.
+Everything above is the node's *Ethernet* view: interfaces the kernel enumerates, and *RDMA* over them.
 Beside it, several accelerator generations carry a **scale-up fabric** of their own: an interconnect
 over which accelerators address one another's memory directly, and which on the newest generations
 **spans machines**. That fabric is invisible to the interface inventory: it has no kernel interface,
 no PCI function of its own, and no IP.
 
-It is recorded per accelerator, in `spec.groups[].accelerators[].topology.fabric`:
+It is recorded per accelerator, in *`spec.groups[].accelerators[].topology.fabric`*:
 
 | Field | Meaning |
 |---|---|
-| `kind` | the interconnect — `ub`, `nvlink` or `xgmi`. Part of every comparison: two ids from different interconnects share no namespace |
+| *`kind`* | the interconnect — `ub`, `nvlink` or `xgmi`. Part of every comparison: two ids from different interconnects share no namespace |
 | `id` | the domain's identity, **comparable across nodes** — which is the only reason publishing it is worth anything |
 | `type` | the domain's shape as a word (`pod-1d`, `server-8p`, `card-4p`) |
-| `cliqueId` | the subset that can actually address one another, where the domain is partitioned |
-| `memberCount` | how many members the domain reports |
-| `nodeIndex`, `rackId` | where this machine sits inside the domain, as the domain numbers them |
+| *`cliqueId`* | the subset that can actually address one another, where the domain is partitioned |
+| *`memberCount`* | how many members the domain reports |
+| *`nodeIndex`*, *`rackId`* | where this machine sits inside the domain, as the domain numbers them |
 | `endpoints` | this accelerator's own addresses on the fabric |
 
-**Four of these are published only for a super pod.** `id`, `memberCount`, `nodeIndex` and `rackId`
+**Four of these are published only for a super pod.** `id`, *`memberCount`*, *`nodeIndex`* and *`rackId`*
 are withheld on an Ascend node that is in none. The driver answers the super pod query even there,
 since that answer is what establishes the shape, so the shape alone does not decide it. The rule is
 the vendor's own:
@@ -302,14 +302,14 @@ the vendor's own:
 
 Membership is established by `id` alone, so each of the other three carries its own check on top of
 that: a domain can be identified while its size, this machine's index in it, or its rack are not.
-`kind`, `type` and `endpoints` travel either way. Publishing an invalid marker would hand one domain
+*`kind`*, `type` and `endpoints` travel either way. Publishing an invalid marker would hand one domain
 to every unrelated machine carrying it (or sort this one as the pod's four-billionth member), while
 reading the shape alone would cost a real super server the domain it is in.
 
 > **Why per accelerator, when a domain plainly spans machines** — because it also **cross-cuts** a
 > machine. NVIDIA reports a clique per GPU and one node can hold several; AMD's hive id is likewise
 > read per GPU. A node- or group-level field would flatten that. The domain itself is a **derived
-> aggregation** (the accelerators sharing `kind` and `id`), which is the same rule the interface
+> aggregation** (the accelerators sharing *`kind`* and `id`), which is the same rule the interface
 > inventory follows: publish comparable coordinates, never a stored cross-reference.
 
 **What each manufacturer publishes differs, and absence is not uniform.**
@@ -330,7 +330,7 @@ every machine in that state one shared domain, and this id is compared across ma
 A registration that completed with an error, and an all-zero cluster uuid, are refused on the same
 grounds: neither identifies a cluster.
 
-**RoCE is unreadable on Ascend A5, by construction.** `topology.roce` is always absent there, and that
+**RoCE is unreadable on Ascend A5, by construction.** *`topology.roce`* is always absent there, and that
 is not a gap to fill: the dcmi V2 API that generation serves declares no device-IP and no
 device-gateway entry point, so the question cannot be asked. Its cross-machine addressing lives in
 the `endpoints` above instead.
@@ -350,7 +350,7 @@ Two node labels sit alongside the three above:
 | `feature.gpustack.ai/fabric.members` | the member count | informational |
 
 The kind is inside the value, not just the key, because a bare `7` could name an Ascend super pod
-and an AMD hive alike. `fabric.domain` is withheld unless every accelerator on the node reports
+and an AMD hive alike. *`fabric.domain`* is withheld unless every accelerator on the node reports
 the same domain: a node whose accelerators sit in different domains has no single answer, and
 publishing one of them would advertise co-location the hardware does not offer.
 
@@ -360,15 +360,15 @@ naming the cluster alone would promise co-location to the nodes on the far side 
 which is exactly where this value is compared. A manufacturer reporting no clique keeps the two-part
 form.
 
-`fabric.members` also needs a nonzero count that every accelerator agrees on. It can
-therefore be absent where `fabric.domain` is present: a manufacturer that names a domain without
+*`fabric.members`* also needs a nonzero count that every accelerator agrees on. It can
+therefore be absent where *`fabric.domain`* is present: a manufacturer that names a domain without
 sizing it, or two cards in one domain reporting different sizes, publishes the domain alone.
 
 Like `rdma.capable`, a key that stops being reported is **removed**, so a node taken out of its super
 pod loses the label rather than keeping a domain it has left.
 
 That removal is what forces the reduction over the **whole node** rather than one detect pass. A
-mixed-vendor node has one device-manager DaemonSet per manufacturer writing this one object, so a
+mixed-vendor node has one Device Manager `DaemonSet` per manufacturer writing this one object, so a
 per-pass answer would claim the GPU is in the NPU's super pod, and the two passes would delete each
 other's key forever. A pass that cannot read the node's other manufacturers withholds nothing and
 leaves the labels as published.
@@ -410,9 +410,9 @@ to check when a selector on the gate stops picking a node that still has the har
 
 **See also** — [Device Discovery](../devices/discovery.md) (the accelerator side of the same ledger) ·
 [Scheduling Chain](../devices/scheduling.md) (how a node label reaches a flavor selector) ·
-[Accelerator Requests](../devices/requests.md) (the request rules the RDMA keys obey) ·
+[Accelerator Requests](../devices/requests.md) (the request rules the *RDMA* keys obey) ·
 [RDMA Operations](operations.md) (how many endpoints a workload asks for, and the kubelet
 policy that aligns them with its accelerators) ·
 [Preflight Checks](../devices/preflight.md) (the same link check, before anything is installed)
 
-**Next** → [Scheduling Chain](../devices/scheduling.md) — how these labels become ResourceFlavors.
+**Next** → [Scheduling Chain](../devices/scheduling.md) — how these labels become `ResourceFlavor`s.
