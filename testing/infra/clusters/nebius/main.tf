@@ -41,6 +41,8 @@ locals {
         node_count        = cfg.node_count
         gpu               = null
         infiniband_fabric = null
+        # A CPU group never joins a fabric.
+        gpu_cluster_id = null
         # The CPU group pulls no engine images, so it never outgrows the module-wide default.
         boot_disk_size_gb = null
       }
@@ -71,11 +73,44 @@ locals {
         # Null unless the group asked for a fabric. A fabric is what puts RDMA devices on the node,
         # and it can only be joined at creation time, so this cannot be added to a running group.
         infiniband_fabric = cfg.infiniband_fabric
+        # The GPU cluster to join, resolved once in local.gpu_cluster_ids below: an explicit
+        # gpu_cluster_id, an existing project cluster reused by fabric, or the cluster this module
+        # creates. Null leaves the group without RDMA.
+        gpu_cluster_id = local.gpu_cluster_ids[name]
         # Null falls through to var.node_boot_disk_size_gb in the boot_disk block below.
         boot_disk_size_gb = cfg.boot_disk_size_gb
       }
     },
   )
+
+  # The GPU clusters this module creates, keyed by the group that asked for one. Groups are read
+  # through this map rather than by indexing the resource, so a group that ends up reusing an
+  # existing cluster -- no entry here -- never touches a resource address that does not exist.
+  created_gpu_cluster_ids = { for name, cluster in nebius_compute_v1_gpu_cluster.this : name => cluster.id }
+
+  # Existing project GPU clusters by fabric, from data.external.gpu_clusters above. {} when the
+  # lookup is switched off (no group asked for reuse), and a miss behaves the same either way
+  # through lookup()'s default.
+  reusable_gpu_clusters = coalesce(one(data.external.gpu_clusters[*].result), {})
+
+  # The GPU cluster each GPU group joins, resolved once and consumed by both the node-group
+  # template and the creation decision below. First match wins: an explicit gpu_cluster_id; else,
+  # when a fabric is named and reuse_gpu_cluster is true, an existing project cluster on that
+  # fabric; else the cluster this module creates. Null when the group asked for neither, which is
+  # what keeps a plain group's template exactly as it was before reuse existed.
+  #
+  # Note: reuse_gpu_cluster picks the lexicographically smallest existing cluster ID on the fabric
+  # at plan time, assuming no concurrent out-of-band creation or deletion of lower-ID clusters on
+  # the same fabric (pin gpu_cluster_id explicitly when sharing a project with concurrent writers,
+  # because changing a node group's gpu_cluster forces replacement).
+  gpu_cluster_ids = {
+    for name, cfg in var.gpu_instance_types : name =>
+    cfg.gpu_cluster_id != null ? cfg.gpu_cluster_id :
+    (cfg.infiniband_fabric != null ? coalesce(
+      cfg.reuse_gpu_cluster ? lookup(local.reusable_gpu_clusters, cfg.infiniband_fabric, null) : null,
+      lookup(local.created_gpu_cluster_ids, name, null),
+    ) : null)
+  }
 
   # Node preparation, per GPU node group — keyed by group because half of it is MIG-only. The
   # managed GPU image ships two things GPUStack must not compete with: a vendor device plugin as a
@@ -146,29 +181,109 @@ locals {
 
 # Resolve each GPU group's os + drivers_preset from Nebius' live compatibility matrix for
 # var.release, picking the newest available driver preset (per-group overrides in
-# var.gpu_instance_types take precedence via coalesce above). NOTE: as a data source this runs on
-# every plan, apply AND destroy, so the `nebius` CLI (authenticated) and `jq` must be available
-# whenever Terraform runs against this module — including `terraform destroy`.
+# var.gpu_instance_types take precedence via coalesce above). The same script reads the region's
+# platform list, so a group that asks to join a GPU cluster -- by fabric or by ID -- fails at PLAN
+# when its preset has allow_gpu_clustering=false, with the presets that do allow it named, instead
+# of at apply with a provider error that names none of them. Groups that ask for no GPU cluster
+# skip that check: a preset that cannot join a fabric is perfectly fine on its own.
+# NOTE: as a data source this runs on every plan, apply AND destroy, so the `nebius` CLI
+# (authenticated) and `jq` must be available whenever Terraform runs against this module —
+# including `terraform destroy`.
 data "external" "gpu_compat" {
   for_each = var.gpu_instance_types
 
   program = ["bash", "-c", <<-EOT
     set -euo pipefail
-    eval "$(jq -r '@sh "REL=\(.release) PLAT=\(.platform)"')"
-    nebius mk8s node-group get-compatibility-matrix \
-      --cluster-kubernetes-version "$REL" --platform "$PLAT" --format json \
-    | jq -e '
+    for tool in jq nebius; do
+      command -v "$tool" >/dev/null || { echo "$tool is required to resolve os/drivers_preset and check allow_gpu_clustering; install it" >&2; exit 1; }
+    done
+    eval "$(jq -r '@sh "PROJECT=\(.project_id) REL=\(.release) PLAT=\(.platform) PRESET=\(.preset) WANTS=\(.wants_cluster)"')"
+    matrix="$(nebius mk8s node-group get-compatibility-matrix \
+      --cluster-kubernetes-version "$REL" --platform "$PLAT" --format json)"
+    platforms="$(nebius compute platform list --parent-id "$PROJECT" --format json)"
+    os_drivers="$(printf '%s' "$matrix" | jq -e '
         .versions[0].items
         | map(select(.drivers_preset != null and .drivers_preset != ""))
         | sort_by(.drivers_preset) | last
         | {os: .os, drivers_preset: .drivers_preset}
+      ')"
+    # "unknown" means the platform or the preset answered nothing, which is its own failure mode:
+    # an attachment request against a preset that does not exist should say so, not just "no".
+    allow="$(printf '%s' "$platforms" | jq -r --arg plat "$PLAT" --arg preset "$PRESET" '
+        [.items[] | select(.metadata.name == $plat) | .spec.presets[] | select(.name == $preset)]
+        | if length == 0 then "unknown" else (.[0].allow_gpu_clustering // false | tostring) end
+      ')"
+    if [ "$WANTS" = true ] && [ "$allow" != true ]; then
+      allowed="$(printf '%s' "$platforms" | jq -r --arg plat "$PLAT" '
+          [.items[] | select(.metadata.name == $plat)
+           | .spec.presets[] | select(.allow_gpu_clustering == true) | .name] | sort | join(", ")
+        ')"
+      if [ "$allow" = unknown ]; then
+        echo "preset '$PRESET' was not found on platform '$PLAT', so it cannot be attached to a GPU cluster; presets of '$PLAT' with allow_gpu_clustering=true: $${allowed:-none}" >&2
+      else
+        echo "preset '$PRESET' has allow_gpu_clustering=false, so it cannot join an InfiniBand fabric or an existing GPU cluster; presets of '$PLAT' with allow_gpu_clustering=true: $${allowed:-none}" >&2
+      fi
+      exit 1
+    fi
+    jq -n --argjson od "$os_drivers" --arg allow "$allow" '$od + {allow_gpu_clustering: $allow}'
+  EOT
+  ]
+
+  query = {
+    project_id    = var.project_id
+    release       = var.release
+    platform      = each.value.platform
+    preset        = each.value.preset
+    wants_cluster = (each.value.infiniband_fabric != null || each.value.gpu_cluster_id != null) ? "true" : "false"
+  }
+}
+
+# Lists the GPU clusters already present in the project as a flat fabric->id map, so a group that
+# names a fabric with reuse_gpu_cluster = true (the default) attaches to an existing cluster and
+# leaves a compute.gpucluster.count unit unspent. When several clusters share a fabric the map
+# keeps the lowest cluster ID, so the pick is stable across runs. data.external accepts one flat
+# object of strings and nothing else, which is exactly what a fabric->id map is. Gated on count:
+# a run that names no fabric, or pins every group by gpu_cluster_id, pays no CLI round trip.
+# NOTE the same bargain gpu_compat makes: when live, this runs on every plan, apply and destroy,
+# and needs the CLI authenticated each time.
+data "external" "gpu_clusters" {
+  count = anytrue([
+    for cfg in values(var.gpu_instance_types) :
+    cfg.infiniband_fabric != null && cfg.gpu_cluster_id == null && cfg.reuse_gpu_cluster
+  ]) ? 1 : 0
+
+  program = ["bash", "-c", <<-EOT
+    set -euo pipefail
+    for tool in jq nebius; do
+      command -v "$tool" >/dev/null || { echo "$tool is required to look up reusable GPU clusters; install it, or set reuse_gpu_cluster = false on every fabric group to skip the lookup" >&2; exit 1; }
+    done
+    eval "$(jq -r '@sh "PROJECT=\(.project_id) STATE_PATH=\(.state_path)"')"
+    # Exclude GPU clusters already managed in this module's Terraform state (local terraform.tfstate
+    # by default, or `terraform state pull` when a non-default backend is configured) so a second
+    # plan/apply never treats the module's own created cluster as an external reusable one.
+    OWN_IDS="[]"
+    if [ -s "$STATE_PATH" ]; then
+      OWN_IDS="$(jq -c '[.resources[]? | select(.type == "nebius_compute_v1_gpu_cluster" and .name == "this") | .instances[]?.attributes.id // empty]' "$STATE_PATH")"
+    elif command -v terraform >/dev/null; then
+      OWN_IDS="$(terraform -chdir="$(dirname "$STATE_PATH")" state pull 2>/dev/null | jq -c '[.resources[]? | select(.type == "nebius_compute_v1_gpu_cluster" and .name == "this") | .instances[]?.attributes.id // empty]' 2>/dev/null || echo '[]')"
+    fi
+    nebius compute gpu-cluster list --parent-id "$PROJECT" --format json \
+    | jq -e --argjson own_ids "$OWN_IDS" '
+        [ (.items // [])[]
+          | select((.spec.infiniband_fabric // "") != "")
+          | select((.metadata.id as $id | $own_ids | index($id)) | not)
+          | { key: .spec.infiniband_fabric, value: .metadata.id } ]
+        | sort_by(.value)
+        # First assignment per fabric wins -- the map keeps the lowest cluster ID, which is what
+        # makes the pick stable across runs; setpath alone would let the highest overwrite it.
+        | reduce .[] as $e ({}; if has($e.key) then . else setpath([$e.key]; $e.value) end)
       '
   EOT
   ]
 
   query = {
-    release  = var.release
-    platform = each.value.platform
+    project_id = var.project_id
+    state_path = "${path.root}/terraform.tfstate"
   }
 }
 
@@ -268,10 +383,13 @@ resource "nebius_mk8s_v1_cluster" "this" {
   }
 }
 
-# One GPU cluster per node group that named a fabric. The cluster resource is the handle that binds
-# nodes to a physical InfiniBand fabric, and joining one is what puts RDMA devices on the node --
-# without it the accelerators are there but the interconnect is not. Every node in a cluster shares
-# its fabric, so a group that wants a different one gets its own cluster rather than a shared one.
+# One GPU cluster per node group that named a fabric AND will not reuse one that already exists --
+# an explicit gpu_cluster_id, or reuse_gpu_cluster = true (the default) finding a cluster already on
+# that fabric in the project, both attach without spending a compute.gpucluster.count unit. The
+# cluster resource is the handle that binds nodes to a physical InfiniBand fabric, and joining one
+# is what puts RDMA devices on the node -- without it the accelerators are there but the
+# interconnect is not. Every node in a cluster shares its fabric, so a group that wants a different
+# one gets its own cluster rather than a shared one.
 #
 # The resource itself allocates no hardware -- the nodes attached to it do -- but it is quota'd
 # per region by compute.gpucluster.count, which counts clusters rather than nodes. A fabric name
@@ -279,8 +397,9 @@ resource "nebius_mk8s_v1_cluster" "this" {
 # typo fails the apply rather than producing a group without RDMA.
 resource "nebius_compute_v1_gpu_cluster" "this" {
   for_each = {
-    for name, group in local.node_groups : name => group
-    if group.infiniband_fabric != null
+    for name, cfg in var.gpu_instance_types : name => cfg
+    if cfg.infiniband_fabric != null &&
+    !(cfg.reuse_gpu_cluster && lookup(local.reusable_gpu_clusters, cfg.infiniband_fabric, null) != null)
   }
 
   parent_id         = var.project_id
@@ -349,9 +468,12 @@ resource "nebius_mk8s_v1_node_group" "this" {
 
     # Attaching the group to its fabric. The API accepts this only at creation, and only for a
     # preset whose allow_gpu_clustering is true -- a single-card preset carves up a host whose
-    # interconnect stays with the host, so it cannot be attached however the fabric is named.
-    gpu_cluster = each.value.infiniband_fabric != null ? {
-      id = nebius_compute_v1_gpu_cluster.this[each.key].id
+    # interconnect stays with the host, so it cannot be attached however the fabric is named
+    # (checked at plan in data.external.gpu_compat). The ID is whatever local.gpu_cluster_ids
+    # resolved to: the cluster created above, an existing project cluster reused by fabric, or the
+    # explicit gpu_cluster_id the group named.
+    gpu_cluster = each.value.gpu_cluster_id != null ? {
+      id = each.value.gpu_cluster_id
     } : null
   }
 

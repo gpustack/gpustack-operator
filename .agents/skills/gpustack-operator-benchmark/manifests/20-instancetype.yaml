@@ -1,0 +1,14 @@
+apiVersion: worker.gpustack.ai/v1
+kind: InstanceType
+metadata:
+  name: bench-gpu
+spec:
+  generalGroup: generic
+  acceleratable: true
+  acceleratorGroup: nvidia-h100-80gb-hbm3
+  os: linux
+  arch: amd64
+  localStorage: 20Gi
+  unitResources:
+    cpu: "8"
+    ram: 64Gi

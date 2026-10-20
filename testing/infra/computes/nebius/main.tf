@@ -89,7 +89,7 @@ data "external" "image" {
     for tool in jq nebius; do
       command -v "$tool" >/dev/null || { echo "$tool is required to resolve instance_type.image_family; install it, or pin image_family to skip the lookup" >&2; exit 1; }
     done
-    eval "$(jq -r '@sh "PROJECT=\(.project_id) PLAT=\(.platform) PRESET=\(.preset)"')"
+    eval "$(jq -r '@sh "PROJECT=\(.project_id) PLAT=\(.platform) PRESET=\(.preset) WANTS=\(.wants_cluster)"')"
 
     region="$(nebius iam project get --id "$PROJECT" --format json | jq -er '.spec.region')"
 
@@ -107,6 +107,28 @@ data "external" "image" {
       '.items[] | select(.metadata.name == $p) | [.spec.presets[].name] | index($preset) != null' >/dev/null; then
       echo "preset '$PRESET' is not offered by platform '$PLAT'; available: $presets" >&2
       exit 1
+    fi
+
+    # A preset whose allow_gpu_clustering is false cannot join a GPU cluster at all: an
+    # instance_type.gpu_cluster_id against one fails here, at plan, naming the presets that can,
+    # instead of at apply with a provider error that names none of them.
+    if [ "$WANTS" = true ]; then
+      allow="$(printf '%s' "$platforms" | jq -r --arg plat "$PLAT" --arg preset "$PRESET" '
+          [.items[] | select(.metadata.name == $plat) | .spec.presets[] | select(.name == $preset)]
+          | if length == 0 then "unknown" else (.[0].allow_gpu_clustering // false | tostring) end
+        ')"
+      if [ "$allow" != true ]; then
+        allowed="$(printf '%s' "$platforms" | jq -r --arg plat "$PLAT" '
+            [.items[] | select(.metadata.name == $plat)
+             | .spec.presets[] | select(.allow_gpu_clustering == true) | .name] | sort | join(", ")
+          ')"
+        if [ "$allow" = unknown ]; then
+          echo "preset '$PRESET' was not found on platform '$PLAT', so it cannot be attached to a GPU cluster; presets of '$PLAT' with allow_gpu_clustering=true: $${allowed:-none}" >&2
+        else
+          echo "preset '$PRESET' has allow_gpu_clustering=false, so it cannot join an InfiniBand GPU cluster; presets of '$PLAT' with allow_gpu_clustering=true: $${allowed:-none}" >&2
+        fi
+        exit 1
+      fi
     fi
 
     # The family whose recommended_platforms carries this platform; newest by created_at when more than
@@ -135,9 +157,10 @@ data "external" "image" {
   ]
 
   query = {
-    project_id = var.project_id
-    platform   = var.instance_type.platform
-    preset     = var.instance_type.preset
+    project_id    = var.project_id
+    platform      = var.instance_type.platform
+    preset        = var.instance_type.preset
+    wants_cluster = var.instance_type.gpu_cluster_id != null ? "true" : "false"
   }
 }
 
@@ -175,6 +198,14 @@ resource "nebius_compute_v1_instance" "this" {
       }
     }
   }
+
+  # Joins the VM to an already-existing GPU cluster's InfiniBand fabric when instance_type
+  # names a gpu_cluster_id -- the thing that puts RDMA devices on it. The API accepts this only
+  # when the VM is created (never afterwards), and only for a preset whose allow_gpu_clustering
+  # is true; that flag is checked at plan in the data source above, on the unpinned path.
+  gpu_cluster = var.instance_type.gpu_cluster_id != null ? {
+    id = var.instance_type.gpu_cluster_id
+  } : null
 
   lifecycle {
     # The image publishes its own minimum (10 GiB driverless, 40 GiB CUDA) and the provider only

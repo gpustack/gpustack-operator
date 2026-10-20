@@ -77,6 +77,8 @@ one by name is your job. The change on the left is the trigger.
 - `pack/gpustack-operator/Dockerfile`, `pack/gpustack-operator/external/`, `pack/thead-ppu-devel/`,
   a slicing shim under `csrc/`, or `pkg/devicemanager/allocator/hygon/`
   → `gpustack-operator-xbuild-and-verify`
+- a `ModelDeployment` serving topology, router, KV/EC connector, or benchmark page under
+  `docs/modules/model-deployment/` → `gpustack-operator-benchmark`
 
 The `gpustack-operator-lint` hook dispatches on what a turn left dirty and implements this table;
 `hack/check/hook-dispatch.sh` asserts that it still does. It is report-only and runs once the turn
