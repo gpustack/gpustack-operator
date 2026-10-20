@@ -51,10 +51,10 @@ metadata:
 timestamp: "2026-09-26T00:00:00Z"  # when it was computed
 manifestDigest: sha256:...
 sizeBytes: 145424101604
-ready: 1        # nodes holding the content published
+ready: 1  # nodes holding the content published
 downloading: 2  # nodes downloading it
-failed: 1       # nodes waiting to retry a failed attempt
-downloadingPercent: 42          # the downloading nodes' mean, whole percent
+failed: 1  # nodes waiting to retry a failed attempt
+downloadingPercent: 42  # the downloading nodes' mean, whole percent
 downloadingBytes: 123482472448  # what the downloading nodes hold, summed
 live: 2  # nodes contributing live bytes; other nodes contribute stored progress
 failureReasons:

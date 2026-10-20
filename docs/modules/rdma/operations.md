@@ -309,7 +309,7 @@ The image is yours from then on, and nothing in the operator tracks it:
 - **The Mooncake version.** Install the EFA build of the version the base carries (which client
   each runner image carries is [its table](../model-deployment/engine-versions.md#minimum-versions))
   and keep the store on that client's minor line: [the store version must match the engine's
-  client](../kv-cache/backend.md#version-compatibility).
+  client](../kv-cache/backend.md#image).
 - **libfabric**, from the EFA installer, whose version the recipe pins.
 - **The image on every EFA role.** A new role, or a role you re-create, runs the runner image until
   you name yours on it.

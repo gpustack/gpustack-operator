@@ -21,7 +21,6 @@ color-scheme: dark;
   --button-fg: #ffffff;
   --row-current-bg: #24292f;
   --row-current-fg: #ffffff;
-  --row-highlight-bg: #1d2736;
   --panel-shadow: 0 8px 24px rgba(0, 0, 0, .5);
   --code-tag: #79c0ff;
   --code-string: #a5d6ff;
@@ -55,7 +54,6 @@ color-scheme: dark;
   --button-fg: #ffffff;
   --row-current-bg: #24292f;
   --row-current-fg: #ffffff;
-  --row-highlight-bg: #eef4ff;
   --panel-shadow: 0 8px 24px rgba(23, 27, 31, .13);
   --code-tag: #0550ae;
   --code-string: #116329;
@@ -331,9 +329,6 @@ article :not(pre) > code { padding: .08rem .2rem; border-radius: .18rem; backgro
 article table { display: block; width: 100%; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: .9rem; }
 article th, article td { padding: .55rem .7rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 article th { background: var(--bg-subtle); }
-/* Benchmark summary tables highlight the recommended/winning row when its first cell uses **`code`**. */
-article tbody tr:has(> td:first-child > strong > code) { background: var(--row-highlight-bg); }
-article tbody tr:has(> td:first-child > strong > code) > td:first-child { box-shadow: inset 3px 0 0 var(--link); }
 article blockquote { margin: 1.2rem 0; padding: .25rem 0 .25rem 1rem; border-left: 3px solid var(--quote-border); color: var(--quote-text); }
 article blockquote p { margin: .2rem 0; }
 article hr { margin: 2rem 0; border: 0; border-top: 1px solid var(--line); }

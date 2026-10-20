@@ -5,7 +5,7 @@ Measures per-request TTFT, inter-token latency, TPOT and end-to-end latency agai
 an OpenAI-compatible chat-completions endpoint, and writes one JSON record per cell.
 
 Subcommands:
-  calibrate  Ask the engine how many tokens a candidate prompt is, via /tokenize.
+  calibrate  Measure prompt token overhead via a /v1/chat/completions probe.
   run        One cell: N requests at a fixed concurrency against one prompt shape.
   burst      Two concurrent streams with different prompt shapes (mixed-traffic suite).
   load       Long-running single-shape load that keeps recording until stopped, for
@@ -160,10 +160,10 @@ async def one_request(session, endpoint, model, prompt, max_tokens, timeout_s):
                     for alternate in ALTERNATE_MODEL_NAMES:
                         if alternate == model:
                             continue
-                        payload["model"] = alternate
+                        retry_payload = {**payload, "model": alternate}
                         async with session.post(
                             f"{endpoint}/v1/chat/completions",
-                            json=payload,
+                            json=retry_payload,
                             timeout=aiohttp.ClientTimeout(total=timeout_s),
                         ) as retry:
                             if retry.status != 200:
@@ -421,6 +421,7 @@ async def run_load(args):
     stop_at = time.time() + args.duration
     out_path = args.requests_out
     started = time.perf_counter()
+    dispatched = 0
     count = 0
     errors = 0
 
@@ -428,10 +429,12 @@ async def run_load(args):
         model = await resolve_model(session, args.endpoint, args.model)
         with open(out_path, "w", encoding="utf-8") as sink:
             async def worker(index):
-                nonlocal count, errors
+                nonlocal dispatched, count, errors
                 while time.time() < stop_at:
                     async with semaphore:
-                        prompt = build_prompt(args.input_tokens, f"load-{index}-{count}", args.token_offset)
+                        dispatched += 1
+                        req_id = dispatched
+                        prompt = build_prompt(args.input_tokens, f"load-{index}-{req_id}", args.token_offset)
                         res = await one_request(session, args.endpoint, model, prompt,
                                                 args.output_tokens, args.timeout)
                     count += 1
@@ -525,10 +528,12 @@ def _delegate_if_local(script_name):
     for name in sorted({"bench_client.py", script_name}):
         src = os.path.join(script_dir, name)
         if os.path.isfile(src):
-            subprocess.call(
+            if subprocess.call(
                 ["kubectl", "-n", driver_ns, "cp", src, f"{driver_pod}:/tmp/bench/{name}"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
+            ) != 0:
+                print(f"warning: failed to copy {name} to {driver_ns}/{driver_pod}; running locally", file=sys.stderr)
+                return None
 
     argv = list(sys.argv[1:])
     local_out = None

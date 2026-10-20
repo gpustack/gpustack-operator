@@ -257,20 +257,26 @@ data "external" "gpu_clusters" {
     for tool in jq nebius; do
       command -v "$tool" >/dev/null || { echo "$tool is required to look up reusable GPU clusters; install it, or set reuse_gpu_cluster = false on every fabric group to skip the lookup" >&2; exit 1; }
     done
-    eval "$(jq -r '@sh "PROJECT=\(.project_id) STATE_PATH=\(.state_path)"')"
-    # Exclude GPU clusters already managed in this module's Terraform state (local terraform.tfstate
-    # by default, or `terraform state pull` when a non-default backend is configured) so a second
-    # plan/apply never treats the module's own created cluster as an external reusable one.
+    eval "$(jq -r '@sh "PROJECT=\(.project_id) STATE_PATH=\(.state_path) CLUSTER_PREFIX=\(.cluster_prefix)"')"
+    # Exclude GPU clusters owned by this module (by name prefix "${local.cluster_name}-*" and by any
+    # IDs recorded in this module's Terraform state) so a second plan/apply never treats the module's
+    # own created cluster as an external reusable one.
     OWN_IDS="[]"
+    STATE_DIR="$(dirname "$STATE_PATH")"
     if [ -s "$STATE_PATH" ]; then
-      OWN_IDS="$(jq -c '[.resources[]? | select(.type == "nebius_compute_v1_gpu_cluster" and .name == "this") | .instances[]?.attributes.id // empty]' "$STATE_PATH")"
-    elif command -v terraform >/dev/null; then
-      OWN_IDS="$(terraform -chdir="$(dirname "$STATE_PATH")" state pull 2>/dev/null | jq -c '[.resources[]? | select(.type == "nebius_compute_v1_gpu_cluster" and .name == "this") | .instances[]?.attributes.id // empty]' 2>/dev/null || echo '[]')"
+      OWN_IDS="$(jq -ec '[.resources[]? | select(.type == "nebius_compute_v1_gpu_cluster" and .name == "this") | .instances[]?.attributes.id // empty]' "$STATE_PATH")"
+    elif [ -d "$STATE_DIR/.terraform" ]; then
+      command -v terraform >/dev/null || { echo "terraform is required to inspect state in $STATE_DIR/.terraform" >&2; exit 1; }
+      STATE_JSON="$(terraform -chdir="$STATE_DIR" state pull)"
+      if [ -n "$STATE_JSON" ]; then
+        OWN_IDS="$(printf '%s\n' "$STATE_JSON" | jq -ec '[.resources[]? | select(.type == "nebius_compute_v1_gpu_cluster" and .name == "this") | .instances[]?.attributes.id // empty]')"
+      fi
     fi
     nebius compute gpu-cluster list --parent-id "$PROJECT" --format json \
-    | jq -e --argjson own_ids "$OWN_IDS" '
+    | jq -e --argjson own_ids "$OWN_IDS" --arg prefix "$CLUSTER_PREFIX" '
         [ (.items // [])[]
           | select((.spec.infiniband_fabric // "") != "")
+          | select(((.metadata.name // "") | startswith($prefix)) | not)
           | select((.metadata.id as $id | $own_ids | index($id)) | not)
           | { key: .spec.infiniband_fabric, value: .metadata.id } ]
         | sort_by(.value)
@@ -282,8 +288,9 @@ data "external" "gpu_clusters" {
   ]
 
   query = {
-    project_id = var.project_id
-    state_path = "${path.root}/terraform.tfstate"
+    project_id     = var.project_id
+    state_path     = "${path.root}/terraform.tfstate"
+    cluster_prefix = "${local.cluster_name}-"
   }
 }
 

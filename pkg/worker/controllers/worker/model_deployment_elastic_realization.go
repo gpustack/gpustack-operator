@@ -78,7 +78,6 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 	}
 	copyMD := md.DeepCopy()
 	gpu := copyMD.Spec.Roles[0].DeepCopy()
-	gpu.ElasticEP = nil
 	gpu.Replicas = role.ElasticEP.Width
 	for _, env := range []workercore.ModelDeploymentEnvVar{
 		{Name: "RAY_LOG_TO_STDERR", Value: "1"},
@@ -90,10 +89,11 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 		}
 	}
 	copyMD.Spec.Roles = []workercore.ModelDeploymentRole{*gpu}
-	desired, err := r.renderModelDeploymentPods(ctx, copyMD, connection, protocols, weights)
+	desired, err := r.renderModelDeploymentRolePods(ctx, copyMD, connection, protocols, weights)
 	if err != nil {
 		return nil, err
 	}
+	gpu.ElasticEP = nil
 	address := modelDeploymentElasticHeadName(md) + "." + md.Namespace + ".svc:6379"
 	for ordinal, members := range desired[role.Name] {
 		pod := members[0]

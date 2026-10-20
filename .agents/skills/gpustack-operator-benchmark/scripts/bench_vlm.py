@@ -114,10 +114,10 @@ async def one_vlm_request(session, endpoint, model, image_uri, text_prompt, max_
                     for alt in ALTERNATE_MODEL_NAMES:
                         if alt == model:
                             continue
-                        payload["model"] = alt
+                        retry_payload = {**payload, "model": alt}
                         async with session.post(
                             f"{endpoint}/v1/chat/completions",
-                            json=payload,
+                            json=retry_payload,
                             timeout=aiohttp.ClientTimeout(total=timeout_s),
                         ) as retry:
                             if retry.status != 200:

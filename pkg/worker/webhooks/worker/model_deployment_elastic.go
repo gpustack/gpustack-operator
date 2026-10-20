@@ -203,7 +203,7 @@ func validateModelDeploymentElasticShape(
 }
 
 // validateModelDeploymentElasticResources requires the complete fixed TP group per member.
-// Every accelerator is whole, unsliced and unpartitioned, with no fabric interface.
+// Every accelerator is whole, unsliced and unpartitioned.
 func validateModelDeploymentElasticResources(
 	role *workercore.ModelDeploymentRole, rolePath *field.Path, tp int,
 ) field.ErrorList {
@@ -236,12 +236,6 @@ func validateModelDeploymentElasticResources(
 		errs = append(errs, field.Forbidden(
 			resPath.Child("acceleratorPartitionedProfile"),
 			"the elastic profile takes whole, non-partitioned accelerators",
-		))
-	}
-	if res.Interface != nil && res.Interface.CmpInt64(0) != 0 {
-		errs = append(errs, field.Forbidden(
-			resPath.Child("interface"),
-			"the initial elastic profile requests no fabric interface",
 		))
 	}
 
