@@ -17,6 +17,7 @@ import (
 
 	"gpustack.ai/gpustack/pkg/setting"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 // TestInstanceIsolationReconciler_EnsuresNamespacePolicy pins the isolation contract every
@@ -169,6 +170,30 @@ func TestInstanceIsolationReconciler_NamespacePoliciesFollowTheSetting(t *testin
 			},
 		},
 		{
+			name:    "configured setting leaves a same-named stranger exactly as found",
+			setting: "10.42.0.0/16",
+			seed: &networking.NetworkPolicy{
+				ObjectMeta: meta.ObjectMeta{
+					Namespace: "default",
+					Name:      instanceIsolationPolicyName,
+				},
+				Spec: networking.NetworkPolicySpec{
+					PodSelector: meta.LabelSelector{
+						MatchLabels: map[string]string{"hand-written": "true"},
+					},
+					PolicyTypes: []networking.PolicyType{networking.PolicyTypeIngress},
+				},
+			},
+			wantPresent: true,
+			want: func(t *testing.T, np *networking.NetworkPolicy) {
+				assert.Equal(t, map[string]string{"hand-written": "true"},
+					np.Spec.PodSelector.MatchLabels,
+					"a configured Setting rewrites only the policy this operator rendered")
+				assert.Equal(t, []networking.PolicyType{networking.PolicyTypeIngress},
+					np.Spec.PolicyTypes, "the stranger's own shape survives untouched")
+			},
+		},
+		{
 			name:    "a hand-widened policy converges back to the configured render",
 			setting: "10.42.0.0/16",
 			seed: func() *networking.NetworkPolicy {
@@ -222,7 +247,7 @@ func TestInstanceIsolationReconciler_NamespacePoliciesFollowTheSetting(t *testin
 func delegatedSettingsSecret(podCIDRs string) *core.Secret {
 	data := map[string][]byte{}
 	if podCIDRs != "" {
-		data[instanceIsolationPodCIDRsSettingName] = []byte(podCIDRs)
+		data[settings.InstanceIsolationPodCIDRs.Name()] = []byte(podCIDRs)
 	}
 	return &core.Secret{
 		ObjectMeta: meta.ObjectMeta{

@@ -27,6 +27,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 // instanceIsolationPolicyName is the fixed name of the NetworkPolicy every non-reserved
@@ -34,12 +35,6 @@ import (
 // there: the selector is the stable resource-type label, so a stop/start or a new Instance
 // changes nothing about it.
 const instanceIsolationPolicyName = "gpustack-instance-isolation"
-
-// instanceIsolationPodCIDRsSettingName is the delegated-Secret data key the
-// InstanceIsolationPodCIDRs Setting is stored under. The controller reads the Setting
-// through the Secret — the extension-API Setting is a view over it — so the key has to agree
-// with the name value.go registers the Setting under.
-const instanceIsolationPodCIDRsSettingName = "instance-isolation-pod-cidrs"
 
 // convertIsolationPolicy renders the isolation contract for one namespace: Instance Pods
 // may be reached from their own namespace and from anywhere outside the pod network — which is
@@ -171,6 +166,15 @@ func (r *InstanceIsolationReconciler) Reconcile(ctx context.Context, req ctrlrec
 		return ctrl.Result{}, nil
 	}
 
+	// The same courtesy the opt-out extends: a same-named policy nobody here rendered belongs
+	// to whoever wrote it, and rewriting their networking over a Setting change is not this
+	// controller's call either.
+	if systemmeta.DescribeResourceType(np) != "instances" {
+		logger.V(2).Info("namespace isolation policy was not rendered by this operator; leaving it alone",
+			"namespace", ns.Name)
+		return ctrl.Result{}, nil
+	}
+
 	if kubemeta.DeepEqual(np.Spec, desired.Spec) {
 		return ctrl.Result{}, nil
 	}
@@ -218,7 +222,7 @@ func (r *InstanceIsolationReconciler) enqueueNamespacesForSettingsSecret(ctx con
 	if !ok {
 		return nil
 	}
-	fresh := parseIsolationPodCIDRs(string(sec.Data[instanceIsolationPodCIDRsSettingName]))
+	fresh := parseIsolationPodCIDRs(string(sec.Data[settings.InstanceIsolationPodCIDRs.Name()]))
 	if current, ok := r.currentPodCIDRs.Load().([]string); ok && slices.Equal(current, fresh) {
 		return nil
 	}
@@ -265,7 +269,7 @@ func (r *InstanceIsolationReconciler) refreshPodCIDRsFromSecret(ctx context.Cont
 	if err != nil {
 		return fmt.Errorf("read the delegated settings secret: %w", err)
 	}
-	r.currentPodCIDRs.Store(parseIsolationPodCIDRs(string(sec.Data[instanceIsolationPodCIDRsSettingName])))
+	r.currentPodCIDRs.Store(parseIsolationPodCIDRs(string(sec.Data[settings.InstanceIsolationPodCIDRs.Name()])))
 	return nil
 }
 

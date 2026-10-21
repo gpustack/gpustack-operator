@@ -220,6 +220,20 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		pod = nil
 	}
 
+	// Pods that predate the resource-type label — rendered by an earlier operator before the
+	// namespace-isolation policy existed — carry nothing for that policy to select them by.
+	// Labels are mutable metadata, so patch the drifted one in place; no restart involved.
+	if pod != nil && pod.Labels[systemmeta.ResourceTypeLabel] != "instances" {
+		if pod.Labels == nil {
+			pod.Labels = map[string]string{}
+		}
+		pod.Labels[systemmeta.ResourceTypeLabel] = "instances"
+		if err = r.Client.Update(ctx, pod); err != nil {
+			logger.Error(err, "patch instance resource-type label")
+			return ctrl.Result{}, err
+		}
+	}
+
 	// If the Instance is marked as stopped,
 	// ensure the backing Pod is deleted and update the Instance status to "Stopped".
 	// The Service is left in place: it is what holds the NodePort numbers a user connects to, and

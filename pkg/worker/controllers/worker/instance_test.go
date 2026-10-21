@@ -1204,6 +1204,40 @@ func TestConvertPodFromInstance_InstanceResourceTypeLabel(t *testing.T) {
 		"the namespace-isolation NetworkPolicy selects Instance Pods by this stable label")
 }
 
+// TestInstanceReconciler_PatchesResourceTypeLabelOnRunningPod pins the upgrade path: a Pod that
+// predates the resource-type label is patched in place on the next reconcile — labels are
+// metadata, so namespace isolation reaches running Pods without a restart.
+func TestInstanceReconciler_PatchesResourceTypeLabelOnRunningPod(t *testing.T) {
+	const (
+		ns       = "default"
+		name     = "inst"
+		typeName = "active-type"
+	)
+
+	inst, instType, cq := newInstanceServiceFixture()
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: ns,
+			Name:      name,
+			Labels: map[string]string{
+				deviceplugin.InstancePartOfLabelKey: string(inst.UID),
+			},
+		},
+	}
+	cli := buildInstanceClient(inst, pod, instType, cq)
+	r := &InstanceReconciler{Client: cli, APIReader: cli}
+
+	_, err := r.Reconcile(context.Background(), ctrlreconcile.Request{
+		NamespacedName: ctrlcli.ObjectKey{Namespace: ns, Name: name},
+	})
+	require.NoError(t, err)
+
+	updated := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: ns, Name: name}, updated))
+	assert.Equal(t, "instances", updated.Labels[systemmeta.ResourceTypeLabel],
+		"a pod that predates the label is patched in place, so the policy can select it")
+}
+
 // TestInstanceReconciler_RebuildsAdmissionRejectedPod covers the admission-rejection rebuild
 // loop: a backing Pod kubelet rejected with UnexpectedAdmissionError (the device-plugin's
 // Allocate failing, e.g. the cross-mode FailedPrecondition) is deleted and recreated while
