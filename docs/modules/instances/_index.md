@@ -9,6 +9,7 @@ the user enter the workload container.
 - [Instance configuration](#instance-configuration)
 - [Device access](#device-access)
 - [Service lifecycle](#service-lifecycle)
+- [Network isolation](#network-isolation)
 
 ## Instance configuration
 
@@ -39,6 +40,41 @@ when the `Instance` starts again: ports left unchanged keep their allocated node
 *`spec.ports`* is allocated a new one, a port removed from *`spec.ports`* is dropped from the `Service`,
 and clearing *`spec.ports`* deletes the `Service` along with its allocations. Deleting the `Instance`
 itself also deletes the `Service`.
+
+## Network isolation
+
+The operator isolates `Instance`s of different tenants at the namespace boundary. The behavior is
+opt-in: with the `instance-isolation-pod-cidrs` Setting blank — the default — no policy is
+rendered and `Instance` networking stays untouched.
+
+When the Setting names the cluster's pod CIDRs, the operator renders one `NetworkPolicy` named
+`gpustack-instance-isolation` in every namespace that holds an `Instance`, selecting the
+instance `Pod`s by their `resource.gpustack.ai/type: instances` label.
+
+The policy allows traffic to and from `Pod`s of the same namespace, and to and from anywhere
+outside the pod CIDRs the Setting names, which is how external clients arrive through the NodePort
+`Service`. It blocks traffic to and from `Pod`s of every other namespace in both directions, so a
+shell inside one `Instance` cannot scan or reach another tenant's `Instance`s. DNS (port 53) stays
+open.
+
+The pod CIDRs cannot be learned reliably for every CNI — a node's pod CIDR and what the CNI's own
+IPAM allocates routinely disagree — so the Setting is the one source. Find the values with
+`kubectl get ippools.crd.projectcalico.org` on a Calico-IPAM cluster, or
+`kubectl get nodes -o jsonpath='{.items[*].spec.podCIDRs}'` where the nodes carve the pod
+addresses.
+
+The chart carries the same value as `worker.instanceIsolationPodCIDRs`; the Setting can also
+be edited at runtime through the Settings API.
+
+The object belongs to the namespace rather than to one `Instance`: deleting the last `Instance` of
+a namespace does not remove it, and the reconcile rewrites any manual edit back to the rendered
+shape. Emptying the Setting collects the policy again — but only the object the operator rendered
+itself, never a same-named one written by hand.
+
+Enforcing the policy takes a CNI that implements `NetworkPolicy`, such as Calico or Cilium; with a
+non-enforcing CNI the object renders but filters nothing. The Kubernetes policy contract always
+allows traffic from the node hosting a `Pod`, so a client inside one `Instance` can still reach
+another tenant's `Service` through the hosting node's address and node port.
 
 ---
 

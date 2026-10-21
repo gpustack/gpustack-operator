@@ -130,6 +130,12 @@ spec:
               value: "{{ range $i, $s := .Values.global.imagePullSecrets }}{{ if $i }},{{ end }}{{ if kindIs "string" $s }}{{ $s }}{{ else }}{{ $s.name }}{{ end }}{{ end }}"
             - name: GPUSTACK_IMAGE_PULL_POLICY
               value: {{ include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" .Values.worker.image) | quote }}
+            # Instance cross-namespace isolation is opt-in: the Setting admits only IPv4 CIDRs,
+            # and a blank value renders no namespace-isolation policy at all.
+            {{- with .Values.worker.instanceIsolationPodCIDRs }}
+            - name: GPUSTACK_INSTANCE_ISOLATION_POD_CIDRS
+              value: {{ join "," . | quote }}
+            {{- end }}
             # Read by the node-devices check, which rebuilds the ledger the device-managers publish;
             # the two must agree on what a finished Pod still holds.
             - name: GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS

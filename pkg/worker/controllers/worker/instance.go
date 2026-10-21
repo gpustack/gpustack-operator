@@ -152,6 +152,14 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			svc = nil
 		}
 
+		// Same rule for the Pod: one that merely shares the name belongs to something else, and
+		// deleting it would terminate a stranger's workload.
+		if pod != nil && !kubemeta.IsControlledBy(pod, inst) {
+			logger.V(2).Info("pod of the same name belongs to something else; leaving it alone",
+				"pod", ctrlcli.ObjectKeyFromObject(pod))
+			pod = nil
+		}
+
 		if pod == nil && svc == nil {
 			err = r.Client.Update(ctx, inst)
 			if err != nil {
@@ -218,6 +226,29 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, err
 		}
 		pod = nil
+	}
+
+	// A same-named Pod this Instance does not own belongs to something else: treat it as absent —
+	// this Instance never owned it, so it must not be patched, stopped, deleted, or status-synced
+	// as the backing Pod. Same rule as the Service in the deletion path above.
+	if pod != nil && !kubemeta.IsControlledBy(pod, inst) {
+		logger.V(2).Info("pod of the same name belongs to something else; leaving it alone",
+			"pod", ctrlcli.ObjectKeyFromObject(pod))
+		pod = nil
+	}
+
+	// Pods that predate the resource-type label — rendered by an earlier operator before the
+	// namespace-isolation policy existed — carry nothing for that policy to select them by.
+	// Labels are mutable metadata, so patch the drifted one in place; no restart involved.
+	if pod != nil && pod.Labels[systemmeta.ResourceTypeLabel] != "instances" {
+		if pod.Labels == nil {
+			pod.Labels = map[string]string{}
+		}
+		pod.Labels[systemmeta.ResourceTypeLabel] = "instances"
+		if err = r.Client.Update(ctx, pod); err != nil {
+			logger.Error(err, "patch instance resource-type label")
+			return ctrl.Result{}, err
+		}
 	}
 
 	// If the Instance is marked as stopped,
@@ -719,6 +750,10 @@ func (r *InstanceReconciler) convertPodFromInstance(
 				// guarantees it is non-empty; see the entrance guard in Reconcile.
 				kueuectrlconst.QueueLabel:           instType.Status.Entrance, // Scheduling.
 				deviceplugin.InstancePartOfLabelKey: string(inst.UID),         // Accessing.
+				// The value rides the operator's own resource-type vocabulary, stable across
+				// Instances — not a generic recommended label a third-party workload could
+				// carry too — so one policy selects every Instance Pod and nothing else.
+				systemmeta.ResourceTypeLabel: "instances", // Isolating.
 			},
 		},
 		Spec: core.PodSpec{

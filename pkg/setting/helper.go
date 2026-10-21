@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"slices"
 	"strconv"
@@ -237,6 +238,44 @@ func AllowDurationInRange(minVal, maxVal time.Duration) Admission {
 		}
 		if v < minVal || v > maxVal {
 			return fmt.Errorf("value %v is out of range [%v, %v]", v, minVal, maxVal)
+		}
+		return nil
+	}
+}
+
+// AllowIPv4CIDRList implements the Admission stereotype,
+// which means the value can be modified if it's a comma-separated list of IPv4 CIDRs, blank
+// included. IPv6 prefixes are refused at the write rather than dropped at the render, so an
+// ipBlock except list never loses an entry to a silent filter.
+func AllowIPv4CIDRList() Admission {
+	return func(ctx context.Context, oldVal, newVal string) error {
+		for _, segment := range strings.Split(newVal, ",") {
+			cidr := strings.TrimSpace(segment)
+			if cidr == "" {
+				continue
+			}
+			ip, _, err := net.ParseCIDR(cidr)
+			if err != nil {
+				return fmt.Errorf("invalid CIDR %q: %w", cidr, err)
+			}
+			if ip.To4() == nil {
+				return fmt.Errorf("invalid CIDR %q: only IPv4 prefixes can ride an IPv4 rule's except list", cidr)
+			}
+		}
+		return nil
+	}
+}
+
+// DisallowListWith implements the Admission stereotype,
+// which means the value can not be modified if it's a comma-separated list containing the
+// forbidden segment. Comparing trimmed segments keeps a padded or buried name the same case
+// here as it is at the parse site.
+func DisallowListWith(forbidden string) Admission {
+	return func(_ context.Context, _, newVal string) error {
+		for _, segment := range strings.Split(newVal, ",") {
+			if strings.TrimSpace(segment) == forbidden {
+				return fmt.Errorf("segment %q is not allowed in this list", forbidden)
+			}
 		}
 		return nil
 	}

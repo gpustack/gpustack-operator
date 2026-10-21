@@ -2143,6 +2143,14 @@
           "title": "image",
           "type": "object"
         },
+        "instanceIsolationPodCIDRs": {
+          "description": "The IPv4 pod CIDRs the Instance namespace-isolation NetworkPolicy carves out of its\n0.0.0.0/0 external rule: Instance Pods stay reachable from their own namespace and from\noutside the cluster, and never from another namespace's Pods. The policy exists only while\nthis list is non-empty — isolation is opt-in, and emptying the list collects the policy\nagain. Reserved namespaces (kube-system and the operator's own) are never isolated. Needs a\nCNI that enforces NetworkPolicy (Calico is the documented one); find the values with\n`kubectl get ippools.crd.projectcalico.org` on a Calico-IPAM cluster, or\n`kubectl get nodes -o jsonpath='{.items[*].spec.podCIDRs}'` where the nodes carve the pod\naddresses. Rendered into the worker's GPUSTACK_INSTANCE_ISOLATION_POD_CIDRS\nenvironment variable; the Setting can also be edited at runtime through the Settings API\nwithout an upgrade.",
+          "items": {
+            "required": []
+          },
+          "title": "instanceIsolationPodCIDRs",
+          "type": "array"
+        },
         "nodeSelector": {
           "description": "Node selector for the worker; falls back to `global.nodeSelector` when empty.",
           "required": [],

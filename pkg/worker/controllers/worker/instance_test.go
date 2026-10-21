@@ -1172,6 +1172,79 @@ func TestConvertPodFromInstance_QueueLabelIsThePublishedEntrance(t *testing.T) {
 		"the fixture spells the two differently so this test can discriminate")
 }
 
+func TestConvertPodFromInstance_InstanceResourceTypeLabel(t *testing.T) {
+	inst := &workercore.Instance{
+		ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
+		Spec: workercore.InstanceSpec{
+			Type: "generic",
+			InstanceTemplate: workercore.InstanceTemplate{
+				Image: "img",
+				Resources: &workercore.InstanceResources{
+					CPU:          qty("1"),
+					RAM:          qty("2Gi"),
+					LocalStorage: qty("10Gi"),
+				},
+			},
+			Volume: workercore.InstanceVolume{
+				Ephemeral: &workercore.InstanceEphemeralVolume{Capacity: qty("10Gi")},
+			},
+		},
+	}
+	it := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: "generic"},
+		Status:     workercore.InstanceTypeStatus{Entrance: "queue-for-generic"},
+	}
+
+	cli := buildInstanceClient(inst, it)
+	r := &InstanceReconciler{Client: cli, APIReader: cli}
+	pod := r.convertPodFromInstance(context.Background(), inst, it, nil)
+
+	require.NotNil(t, pod)
+	assert.Equal(t, "instances", pod.Labels[systemmeta.ResourceTypeLabel],
+		"the namespace-isolation NetworkPolicy selects Instance Pods by this stable label")
+}
+
+// TestInstanceReconciler_PatchesResourceTypeLabelOnRunningPod pins the upgrade path: a Pod that
+// predates the resource-type label is patched in place on the next reconcile — labels are
+// metadata, so namespace isolation reaches running Pods without a restart.
+func TestInstanceReconciler_PatchesResourceTypeLabelOnRunningPod(t *testing.T) {
+	const (
+		ns       = "default"
+		name     = "inst"
+		typeName = "active-type"
+	)
+
+	inst, instType, cq := newInstanceServiceFixture()
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: ns,
+			Name:      name,
+			OwnerReferences: []meta.OwnerReference{{
+				APIVersion: "worker.gpustack.ai/v1alpha1",
+				Kind:       "Instance",
+				Name:       inst.Name,
+				UID:        inst.UID,
+				Controller: ptr.To(true),
+			}},
+			Labels: map[string]string{
+				deviceplugin.InstancePartOfLabelKey: string(inst.UID),
+			},
+		},
+	}
+	cli := buildInstanceClient(inst, pod, instType, cq)
+	r := &InstanceReconciler{Client: cli, APIReader: cli}
+
+	_, err := r.Reconcile(context.Background(), ctrlreconcile.Request{
+		NamespacedName: ctrlcli.ObjectKey{Namespace: ns, Name: name},
+	})
+	require.NoError(t, err)
+
+	updated := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: ns, Name: name}, updated))
+	assert.Equal(t, "instances", updated.Labels[systemmeta.ResourceTypeLabel],
+		"a pod that predates the label is patched in place, so the policy can select it")
+}
+
 // TestInstanceReconciler_RebuildsAdmissionRejectedPod covers the admission-rejection rebuild
 // loop: a backing Pod kubelet rejected with UnexpectedAdmissionError (the device-plugin's
 // Allocate failing, e.g. the cross-mode FailedPrecondition) is deleted and recreated while
@@ -1195,6 +1268,13 @@ func TestInstanceReconciler_RebuildsAdmissionRejectedPod(t *testing.T) {
 				Namespace:         ns,
 				Name:              name,
 				CreationTimestamp: meta.NewTime(now.Add(-podAge)),
+				OwnerReferences: []meta.OwnerReference{{
+					APIVersion: "worker.gpustack.ai/v1alpha1",
+					Kind:       "Instance",
+					Name:       inst.Name,
+					UID:        inst.UID,
+					Controller: ptr.To(true),
+				}},
 			},
 			Status: core.PodStatus{Phase: podPhase, Reason: podReason},
 		}
@@ -1833,6 +1913,13 @@ func TestInstanceReconciler_DeletingInstanceDeletesServiceAndPod(t *testing.T) {
 			if c.withPod {
 				objs = append(objs, &core.Pod{ObjectMeta: meta.ObjectMeta{
 					Namespace: inst.Namespace, Name: inst.Name,
+					OwnerReferences: []meta.OwnerReference{{
+						APIVersion: "worker.gpustack.ai/v1alpha1",
+						Kind:       "Instance",
+						Name:       inst.Name,
+						UID:        inst.UID,
+						Controller: ptr.To(true),
+					}},
 				}})
 			}
 			if c.withSvc {

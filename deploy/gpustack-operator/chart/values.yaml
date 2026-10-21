@@ -281,6 +281,18 @@ worker:
   # `node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`, `model-manager`.
   disableApplications:
     - "*"
+  # -- The IPv4 pod CIDRs the Instance namespace-isolation NetworkPolicy carves out of its
+  # 0.0.0.0/0 external rule: Instance Pods stay reachable from their own namespace and from
+  # outside the cluster, and never from another namespace's Pods. The policy exists only while
+  # this list is non-empty — isolation is opt-in, and emptying the list collects the policy
+  # again. Reserved namespaces (kube-system and the operator's own) are never isolated. Needs a
+  # CNI that enforces NetworkPolicy (Calico is the documented one); find the values with
+  # `kubectl get ippools.crd.projectcalico.org` on a Calico-IPAM cluster, or
+  # `kubectl get nodes -o jsonpath='{.items[*].spec.podCIDRs}'` where the nodes carve the pod
+  # addresses. Rendered into the worker's GPUSTACK_INSTANCE_ISOLATION_POD_CIDRS
+  # environment variable; the Setting can also be edited at runtime through the Settings API
+  # without an upgrade.
+  instanceIsolationPodCIDRs: []
   podDisruptionBudget:
     # -- Create a PodDisruptionBudget for the worker. Leave it off on a single-replica install,
     # where it would only block node drains.

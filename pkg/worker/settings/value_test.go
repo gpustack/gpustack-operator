@@ -254,7 +254,7 @@ func TestSettingsDefaultTracking_RefusesItsOwnName(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := admitNoSelfTracking(context.Background(), "", c.value)
+			err := setting.DisallowListWith(setting.DefaultTrackingName)(context.Background(), "", c.value)
 			if !c.wantErr {
 				assert.NoError(t, err)
 				return
@@ -276,7 +276,7 @@ func TestSettingsDefaultTracking_RefusesItsOwnName(t *testing.T) {
 // depend on that test running first, which the shuffled order of make test decides. What the
 // blank value then does to the align pass is pinned by the cleared row of the test below.
 func TestSettingsDefaultTracking_BlankListIsAllowed(t *testing.T) {
-	admit := setting.AdmitWith(setting.AllowBlank(), admitNoSelfTracking)
+	admit := setting.AdmitWith(setting.AllowBlank(), setting.DisallowListWith(setting.DefaultTrackingName))
 	assert.NoError(t, admit(context.Background(), trackedImageSettings[0], ""),
 		"an administrator must be able to stop tracking everything")
 }
