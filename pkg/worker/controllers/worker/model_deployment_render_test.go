@@ -3504,3 +3504,101 @@ func TestRenderModelDeploymentPods_TCPTWReuseFollowsTheSetting(t *testing.T) {
 		}, sysctls(t))
 	})
 }
+
+func TestRenderModelDeploymentPod_EngramCapabilities(t *testing.T) {
+	engramCaps := &core.SecurityContext{
+		Capabilities: &core.Capabilities{
+			Add: []core.Capability{"IPC_LOCK", "SYS_RESOURCE"},
+		},
+	}
+	privilegedSC := &core.SecurityContext{Privileged: ptr.To(true)}
+
+	cases := []struct {
+		name string
+		md   *workercore.ModelDeployment
+		want *core.SecurityContext
+	}{
+		{
+			name: "plain vLLM role renders no securityContext",
+			md:   newRenderDeployment(),
+			want: nil,
+		},
+		{
+			name: "vLLM with --engram-config cpu_offload true grants IPC_LOCK and SYS_RESOURCE",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = []string{"--engram-config", `{"cpu_offload":true,"use_thp":true}`}
+			}),
+			want: engramCaps,
+		},
+		{
+			name: "vLLM with --engram-config omitting cpu_offload defaults to true and grants capabilities",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = []string{"--engram-config={\"use_thp\":true}"}
+			}),
+			want: engramCaps,
+		},
+		{
+			name: "vLLM with --engram-config cpu_offload false renders no securityContext",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = []string{"--engram-config", `{"cpu_offload":false,"embedding_across_dp":true}`}
+			}),
+			want: nil,
+		},
+		{
+			name: "vLLM with dotted --engram-config.cpu_offload=true grants capabilities",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = []string{"--engram_config.cpu_offload=true"}
+			}),
+			want: engramCaps,
+		},
+		{
+			name: "vLLM with dotted --engram-config.cpu_offload=false renders no securityContext",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = []string{"--engram-config", `{"cpu_offload":true}`, "--engram-config.cpu_offload=false"}
+			}),
+			want: nil,
+		},
+		{
+			name: "vLLM take-over command with --engram-config grants capabilities",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Command = []string{"vllm", "serve", "deepseek-ai/DeepSeek-V4.1-Flash", "--engram-config", `{"cpu_offload":true}`}
+			}),
+			want: engramCaps,
+		},
+		{
+			name: "SGLang with SGLANG_ENABLE_DSV41_ENGRAM_HOST_TABLE=1 grants capabilities",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{
+					{Name: "SGLANG_ENABLE_DSV41_ENGRAM_HOST_TABLE", Value: "1"},
+				}
+			}),
+			want: engramCaps,
+		},
+		{
+			name: "SGLang with SGLANG_ENABLE_DSV41_ENGRAM_HOST_TABLE=0 renders no securityContext",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{
+					{Name: "SGLANG_ENABLE_DSV41_ENGRAM_HOST_TABLE", Value: "0"},
+				}
+			}),
+			want: nil,
+		},
+		{
+			name: "privileged role keeps Privileged without adding capabilities",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Privileged = true
+				md.Spec.Roles[0].ExtraArgs = []string{"--engram-config", `{"cpu_offload":true}`}
+			}),
+			want: privilegedSC,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := renderOne(t, tc.md, newRenderInstanceType())
+			assert.Equal(t, tc.want, pod.Spec.Containers[0].SecurityContext)
+		})
+	}
+}
