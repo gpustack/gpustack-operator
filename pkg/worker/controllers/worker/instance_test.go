@@ -1268,6 +1268,13 @@ func TestInstanceReconciler_RebuildsAdmissionRejectedPod(t *testing.T) {
 				Namespace:         ns,
 				Name:              name,
 				CreationTimestamp: meta.NewTime(now.Add(-podAge)),
+				OwnerReferences: []meta.OwnerReference{{
+					APIVersion: "worker.gpustack.ai/v1alpha1",
+					Kind:       "Instance",
+					Name:       inst.Name,
+					UID:        inst.UID,
+					Controller: ptr.To(true),
+				}},
 			},
 			Status: core.PodStatus{Phase: podPhase, Reason: podReason},
 		}
@@ -1906,6 +1913,13 @@ func TestInstanceReconciler_DeletingInstanceDeletesServiceAndPod(t *testing.T) {
 			if c.withPod {
 				objs = append(objs, &core.Pod{ObjectMeta: meta.ObjectMeta{
 					Namespace: inst.Namespace, Name: inst.Name,
+					OwnerReferences: []meta.OwnerReference{{
+						APIVersion: "worker.gpustack.ai/v1alpha1",
+						Kind:       "Instance",
+						Name:       inst.Name,
+						UID:        inst.UID,
+						Controller: ptr.To(true),
+					}},
 				}})
 			}
 			if c.withSvc {

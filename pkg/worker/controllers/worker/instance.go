@@ -152,6 +152,14 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			svc = nil
 		}
 
+		// Same rule for the Pod: one that merely shares the name belongs to something else, and
+		// deleting it would terminate a stranger's workload.
+		if pod != nil && !kubemeta.IsControlledBy(pod, inst) {
+			logger.V(2).Info("pod of the same name belongs to something else; leaving it alone",
+				"pod", ctrlcli.ObjectKeyFromObject(pod))
+			pod = nil
+		}
+
 		if pod == nil && svc == nil {
 			err = r.Client.Update(ctx, inst)
 			if err != nil {
@@ -220,12 +228,19 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		pod = nil
 	}
 
+	// A same-named Pod this Instance does not own belongs to something else: treat it as absent —
+	// this Instance never owned it, so it must not be patched, stopped, deleted, or status-synced
+	// as the backing Pod. Same rule as the Service in the deletion path above.
+	if pod != nil && !kubemeta.IsControlledBy(pod, inst) {
+		logger.V(2).Info("pod of the same name belongs to something else; leaving it alone",
+			"pod", ctrlcli.ObjectKeyFromObject(pod))
+		pod = nil
+	}
+
 	// Pods that predate the resource-type label — rendered by an earlier operator before the
 	// namespace-isolation policy existed — carry nothing for that policy to select them by.
 	// Labels are mutable metadata, so patch the drifted one in place; no restart involved.
-	// A same-named Pod this Instance does not own belongs to something else, and is left alone:
-	// stamping it would place a stranger's workload under this policy.
-	if pod != nil && kubemeta.IsControlledBy(pod, inst) && pod.Labels[systemmeta.ResourceTypeLabel] != "instances" {
+	if pod != nil && pod.Labels[systemmeta.ResourceTypeLabel] != "instances" {
 		if pod.Labels == nil {
 			pod.Labels = map[string]string{}
 		}
