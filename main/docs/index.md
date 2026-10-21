@@ -12,11 +12,11 @@ Install the operator, configure a capability, or find the reference for a runnin
 
 - [Heterogeneous Devices](/gpustack-operator/main/docs/modules/devices/index.md)
 - [RDMA Networking](/gpustack-operator/main/docs/modules/rdma/index.md)
-- [Topology Management](/gpustack-operator/main/docs/modules/topology/index.md)
+- [Topology](/gpustack-operator/main/docs/modules/topology/index.md)
 - [KV Cache](/gpustack-operator/main/docs/modules/kv-cache/index.md)
 - [Model Delivery](/gpustack-operator/main/docs/modules/model-delivery/index.md)
 - [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md)
-- [Accelerated Instances](/gpustack-operator/main/docs/modules/instances/index.md)
+- [GPU Instances](/gpustack-operator/main/docs/modules/instances/index.md)
 
 ## Operations and reference
 

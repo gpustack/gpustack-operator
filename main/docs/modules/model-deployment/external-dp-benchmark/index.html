@@ -1,0 +1,2257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>External DP Benchmark · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">main</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">main</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/main/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling Chain</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Network Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod Injection</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-Heavy Nodes</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image Source</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node Store</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+          
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/" aria-current="page">Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">External DP Benchmark</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="external-dp-benchmark">External DP Benchmark</h1>
+<p>On one eight-GPU H100 SXM5 node, wide <em>tensor parallelism (TP)</em> delivered <strong>2.27×–6.99× higher
+output throughput</strong> than <em>External DP</em> across twelve matched workloads.
+<em>External DP</em> had lower median first-token latency at concurrency 64 for both prompt shapes.
+Both configurations used eight GPUs and completed <strong>1,088/1,088 measured requests with zero errors</strong>.</p>
+<p>The model was <code>deepseek-ai/DeepSeek-V2-Lite-Chat</code>, a <em>mixture of experts (MoE)</em> model.
+Wide <em>TP</em> kept all eight GPUs inside one <code>Pod</code> and used intra-<code>Pod</code> NVLink.
+<em>External DP</em> used four two-GPU <code>Pod</code>s: local <em>TP</em> used NVLink, while cross-<code>Pod</code> expert collectives used TCP.
+<a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/">External DP</a>
+ describes the serving contract.</p>
+<p>The initial suites and conclusions describe cross-<code>Pod</code> TCP.
+The separate <a href="#infiniband-rdma-comparison">InfiniBand RDMA comparison</a>
+ records the follow-up.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#configurations">Configurations</a>
+</li>
+<li><a href="#hardware-model-and-workload">Hardware, model and workload</a>
+</li>
+<li><a href="#prompt-lengths-and-concurrency">Prompt lengths and concurrency</a>
+</li>
+<li><a href="#per-rank-registration">Per-rank registration</a>
+</li>
+<li><a href="#summary">Summary</a>
+</li>
+<li><a href="#infiniband-rdma-comparison">InfiniBand RDMA comparison</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+</ul>
+<h2 id="configurations">Configurations</h2>
+<p>Each configuration used one <code>ModelDeployment</code> on the same GPU node, <code>gpu-node-0</code>.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Configuration</th>
+          <th>Roles</th>
+          <th style="text-align: right"><code>Pod</code>s</th>
+          <th style="text-align: right">GPUs per <code>Pod</code></th>
+          <th>Router</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Wide <em>TP</em></td>
+          <td>1 <em>Server</em></td>
+          <td style="text-align: right">1</td>
+          <td style="text-align: right">8</td>
+          <td>None; direct engine HTTP</td>
+      </tr>
+      <tr>
+          <td><em>External DP</em></td>
+          <td>1 <em>Server</em> group</td>
+          <td style="text-align: right">4</td>
+          <td style="text-align: right">2</td>
+          <td><code>vllm-router</code>, <code>round_robin</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>Wide <em>TP</em> set <code>--tensor-parallel-size 8</code> without <code>--enable-expert-parallel</code>.
+Attention and expert layers used <em>TP</em> across the eight GPUs within that <code>Pod</code>.</p>
+<p><em>External DP</em> set <em>data parallelism (DP)</em> to 4, local <em>TP</em> to 2, and enabled <em>expert parallelism (EP)</em>.
+Each rank exposed its own API server and used <code>--all2all-backend allgather_reducescatter</code>.
+The four ranks shared an eight-GPU expert collective; each rank kept its own attention KV cache.
+There was no cross-rank KV-block transfer.</p>
+<p><strong>NVLink was used only inside a <code>Pod</code>.</strong> Each <code>Pod</code> exposed only its assigned GPUs, with private
+IPC and <code>/dev/shm</code>, <em><code>hostIPC</code></em> disabled and no <em>remote direct memory access (RDMA)</em> interface.
+Cross-<code>Pod</code> <em>EP</em> communication, including <code>allgather_reducescatter</code>, used TCP sockets over <code>eth0</code>.
+The host&rsquo;s NVLink fabric did not provide a cross-<code>Pod</code> transport in this recording.</p>
+<h2 id="hardware-model-and-workload">Hardware, model and workload</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Property</th>
+          <th>Captured value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Cluster</td>
+          <td>Kubernetes v1.35.7; one CPU node and one GPU node</td>
+      </tr>
+      <tr>
+          <td>Accelerators</td>
+          <td>8 × NVIDIA H100 80 GB HBM3 SXM5 on one GPU node</td>
+      </tr>
+      <tr>
+          <td>Interconnect</td>
+          <td>NVLink within each <code>Pod</code>; TCP over <code>eth0</code> between <code>Pod</code>s</td>
+      </tr>
+      <tr>
+          <td>GPUStack Operator</td>
+          <td>v0.9.1</td>
+      </tr>
+      <tr>
+          <td>Captured <code>InstanceType</code></td>
+          <td><code>bench-gpu</code>, selecting the H100 accelerator group</td>
+      </tr>
+      <tr>
+          <td>Runner</td>
+          <td><code>gpustack/runner:cuda13.0-vllm0.30.0</code>; startup logs report vLLM 0.30.0</td>
+      </tr>
+      <tr>
+          <td>Router</td>
+          <td><code>gpustack/llm-router:v0.3.1</code>, <code>round_robin</code></td>
+      </tr>
+      <tr>
+          <td>Model</td>
+          <td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code>, revision <code>85864749cd611b4353ce1decdb286193298f64c7</code></td>
+      </tr>
+      <tr>
+          <td>Model delivery</td>
+          <td><code>ModelArtifact</code> <code>deepseek-v2-lite-chat</code>; node delivery, served as <code>/models</code></td>
+      </tr>
+      <tr>
+          <td>Shared limits</td>
+          <td><code>--max-model-len 8192</code>, <code>--max-num-seqs 16</code>, <code>--gpu-memory-utilization 0.90</code></td>
+      </tr>
+      <tr>
+          <td>Wide parallelism</td>
+          <td><em>TP</em> = 8; <em>EP</em> disabled</td>
+      </tr>
+      <tr>
+          <td>External parallelism</td>
+          <td><em>TP</em> = 2, <em>DP</em> = 4, <em>EP</em> world size = 8</td>
+      </tr>
+      <tr>
+          <td>External port setting</td>
+          <td><code>VLLM_PORT=19500</code></td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="port-allocation">Port allocation</h3>
+<p>The captured deployment set <code>VLLM_PORT=19500</code> on every rank, and the successful run selected port
+<code>19502</code> for collective initialization (an observed runtime choice rather than a fixed base-plus-two
+offset). See <a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/#port-allocation">Port allocation</a>
+ for vLLM&rsquo;s port-probing,
+candidate-broadcast and retry behavior, and the recorded bootstrap-port race that motivates a fixed
+<code>VLLM_PORT</code>, and the <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/#step-1-start-the-fixed-group">walkthrough manifest</a>
+ for the setting.</p>
+<h3 id="workload">Workload</h3>
+<p>Prompt/output targets were <code>1024/256</code> and <code>4096/128</code>, at concurrency 1, 4, 8, 16, 32 and 64.
+The request counts were 32, 32, 32, 64, 128 and 256 per shape, respectively.
+Each cell had four excluded warm-up requests. One calibration request preceded each configuration.
+Prompts used unique request markers; early stopping produced different output-token totals.</p>
+<h3 id="method">Method</h3>
+<p>The streaming load generator ran inside the cluster and called the cluster-internal endpoint.
+Each configuration ran once, sequentially on the same node with warmed model weights.
+The 24 result files contain 12 cells per configuration and <strong>2,176 measured requests in total</strong>.
+Output throughput uses actual generated tokens divided by each cell&rsquo;s wall time.</p>
+<p>Latency columns report <em>time to first token (TTFT)</em>, <em>time per output token (TPOT)</em> and
+<em>inter-token latency (ITL)</em>. <em>TPOT</em> is a per-request average; <em>ITL</em> measures streamed-token gaps.
+Bold values mark lower latency or higher throughput within each matched workload and concurrency.
+They do not establish statistical significance.</p>
+<h2 id="prompt-lengths-and-concurrency">Prompt lengths and concurrency</h2>
+<p>Every cell completed its requested count with zero errors.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Workload</th>
+          <th>Prompt tokens</th>
+          <th style="text-align: right">Concurrency</th>
+          <th>Configuration</th>
+          <th style="text-align: right">Requests</th>
+          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+          <th style="text-align: right">Output (tok/s)</th>
+          <th style="text-align: right">Throughput (req/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,023–1,027</td>
+          <td style="text-align: right">1</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right"><strong>58.302</strong></td>
+          <td style="text-align: right"><strong>61.457</strong></td>
+          <td style="text-align: right"><strong>2.340</strong></td>
+          <td style="text-align: right"><strong>2.609</strong></td>
+          <td style="text-align: right"><strong>383.386</strong></td>
+          <td style="text-align: right"><strong>1.796</strong></td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,022–1,025</td>
+          <td style="text-align: right">1</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right">207.622</td>
+          <td style="text-align: right">262.956</td>
+          <td style="text-align: right">17.045</td>
+          <td style="text-align: right">18.609</td>
+          <td style="text-align: right">55.741</td>
+          <td style="text-align: right">0.256</td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,023–1,027</td>
+          <td style="text-align: right">4</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right"><strong>107.743</strong></td>
+          <td style="text-align: right"><strong>125.242</strong></td>
+          <td style="text-align: right"><strong>3.160</strong></td>
+          <td style="text-align: right"><strong>3.418</strong></td>
+          <td style="text-align: right"><strong>1,089.625</strong></td>
+          <td style="text-align: right"><strong>4.490</strong></td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,022–1,025</td>
+          <td style="text-align: right">4</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right">244.112</td>
+          <td style="text-align: right">443.151</td>
+          <td style="text-align: right">18.300</td>
+          <td style="text-align: right">20.467</td>
+          <td style="text-align: right">200.483</td>
+          <td style="text-align: right">0.916</td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,023–1,026</td>
+          <td style="text-align: right">8</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right"><strong>138.536</strong></td>
+          <td style="text-align: right"><strong>192.776</strong></td>
+          <td style="text-align: right"><strong>3.554</strong></td>
+          <td style="text-align: right"><strong>5.566</strong></td>
+          <td style="text-align: right"><strong>1,786.289</strong></td>
+          <td style="text-align: right"><strong>7.514</strong></td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,022–1,025</td>
+          <td style="text-align: right">8</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right">614.447</td>
+          <td style="text-align: right">748.791</td>
+          <td style="text-align: right">22.836</td>
+          <td style="text-align: right">26.162</td>
+          <td style="text-align: right">316.739</td>
+          <td style="text-align: right">1.355</td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,023–1,027</td>
+          <td style="text-align: right">16</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">64/64</td>
+          <td style="text-align: right"><strong>115.262</strong></td>
+          <td style="text-align: right"><strong>192.078</strong></td>
+          <td style="text-align: right"><strong>5.267</strong></td>
+          <td style="text-align: right"><strong>53.111</strong></td>
+          <td style="text-align: right"><strong>2,647.004</strong></td>
+          <td style="text-align: right"><strong>11.643</strong></td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,022–1,025</td>
+          <td style="text-align: right">16</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">64/64</td>
+          <td style="text-align: right">887.432</td>
+          <td style="text-align: right">1,387.311</td>
+          <td style="text-align: right">30.771</td>
+          <td style="text-align: right">142.235</td>
+          <td style="text-align: right">436.861</td>
+          <td style="text-align: right">1.866</td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,023–1,027</td>
+          <td style="text-align: right">32</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">128/128</td>
+          <td style="text-align: right"><strong>1,403.260</strong></td>
+          <td style="text-align: right"><strong>1,689.522</strong></td>
+          <td style="text-align: right"><strong>5.799</strong></td>
+          <td style="text-align: right"><strong>53.587</strong></td>
+          <td style="text-align: right"><strong>2,637.925</strong></td>
+          <td style="text-align: right"><strong>11.829</strong></td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,022–1,025</td>
+          <td style="text-align: right">32</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">128/128</td>
+          <td style="text-align: right">1,598.815</td>
+          <td style="text-align: right">2,879.049</td>
+          <td style="text-align: right">37.393</td>
+          <td style="text-align: right">163.243</td>
+          <td style="text-align: right">671.889</td>
+          <td style="text-align: right">2.918</td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,023–1,027</td>
+          <td style="text-align: right">64</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">256/256</td>
+          <td style="text-align: right">4,798.411</td>
+          <td style="text-align: right">5,215.017</td>
+          <td style="text-align: right"><strong>6.705</strong></td>
+          <td style="text-align: right"><strong>53.361</strong></td>
+          <td style="text-align: right"><strong>2,314.155</strong></td>
+          <td style="text-align: right"><strong>10.107</strong></td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td>1,021–1,026</td>
+          <td style="text-align: right">64</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">256/256</td>
+          <td style="text-align: right"><strong>1,863.100</strong></td>
+          <td style="text-align: right"><strong>4,921.601</strong></td>
+          <td style="text-align: right">51.115</td>
+          <td style="text-align: right">326.941</td>
+          <td style="text-align: right">1,017.434</td>
+          <td style="text-align: right">4.483</td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,096–4,098</td>
+          <td style="text-align: right">1</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right"><strong>68.253</strong></td>
+          <td style="text-align: right"><strong>71.414</strong></td>
+          <td style="text-align: right"><strong>2.456</strong></td>
+          <td style="text-align: right"><strong>2.698</strong></td>
+          <td style="text-align: right"><strong>330.439</strong></td>
+          <td style="text-align: right"><strong>2.812</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,095–4,097</td>
+          <td style="text-align: right">1</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right">509.759</td>
+          <td style="text-align: right">629.659</td>
+          <td style="text-align: right">16.946</td>
+          <td style="text-align: right">18.233</td>
+          <td style="text-align: right">47.246</td>
+          <td style="text-align: right">0.395</td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,096–4,099</td>
+          <td style="text-align: right">4</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right"><strong>75.354</strong></td>
+          <td style="text-align: right"><strong>180.279</strong></td>
+          <td style="text-align: right"><strong>4.325</strong></td>
+          <td style="text-align: right"><strong>55.155</strong></td>
+          <td style="text-align: right"><strong>787.884</strong></td>
+          <td style="text-align: right"><strong>6.872</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,095–4,097</td>
+          <td style="text-align: right">4</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right">458.764</td>
+          <td style="text-align: right">1,540.988</td>
+          <td style="text-align: right">26.951</td>
+          <td style="text-align: right">404.635</td>
+          <td style="text-align: right">120.167</td>
+          <td style="text-align: right">1.104</td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,095–4,098</td>
+          <td style="text-align: right">8</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right"><strong>139.801</strong></td>
+          <td style="text-align: right"><strong>300.532</strong></td>
+          <td style="text-align: right"><strong>4.806</strong></td>
+          <td style="text-align: right"><strong>55.997</strong></td>
+          <td style="text-align: right"><strong>1,249.468</strong></td>
+          <td style="text-align: right"><strong>10.236</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,094–4,097</td>
+          <td style="text-align: right">8</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">32/32</td>
+          <td style="text-align: right">823.096</td>
+          <td style="text-align: right">2,766.188</td>
+          <td style="text-align: right">30.710</td>
+          <td style="text-align: right">397.794</td>
+          <td style="text-align: right">180.100</td>
+          <td style="text-align: right">1.517</td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,096–4,099</td>
+          <td style="text-align: right">16</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">64/64</td>
+          <td style="text-align: right"><strong>126.666</strong></td>
+          <td style="text-align: right"><strong>458.393</strong></td>
+          <td style="text-align: right"><strong>9.262</strong></td>
+          <td style="text-align: right"><strong>56.268</strong></td>
+          <td style="text-align: right"><strong>1,378.472</strong></td>
+          <td style="text-align: right"><strong>12.351</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,094–4,097</td>
+          <td style="text-align: right">16</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">64/64</td>
+          <td style="text-align: right">1,501.351</td>
+          <td style="text-align: right">5,478.015</td>
+          <td style="text-align: right">58.200</td>
+          <td style="text-align: right">703.247</td>
+          <td style="text-align: right">210.812</td>
+          <td style="text-align: right">1.798</td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,095–4,099</td>
+          <td style="text-align: right">32</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">128/128</td>
+          <td style="text-align: right"><strong>1,320.714</strong></td>
+          <td style="text-align: right"><strong>1,543.407</strong></td>
+          <td style="text-align: right"><strong>9.783</strong></td>
+          <td style="text-align: right"><strong>56.110</strong></td>
+          <td style="text-align: right"><strong>1,518.784</strong></td>
+          <td style="text-align: right"><strong>12.875</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,094–4,098</td>
+          <td style="text-align: right">32</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">128/128</td>
+          <td style="text-align: right">1,794.637</td>
+          <td style="text-align: right">9,484.716</td>
+          <td style="text-align: right">102.404</td>
+          <td style="text-align: right">1,262.285</td>
+          <td style="text-align: right">253.940</td>
+          <td style="text-align: right">2.167</td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,094–4,099</td>
+          <td style="text-align: right">64</td>
+          <td>Wide <em>TP</em></td>
+          <td style="text-align: right">256/256</td>
+          <td style="text-align: right">3,814.139</td>
+          <td style="text-align: right"><strong>4,057.352</strong></td>
+          <td style="text-align: right"><strong>10.136</strong></td>
+          <td style="text-align: right"><strong>55.619</strong></td>
+          <td style="text-align: right"><strong>1,491.536</strong></td>
+          <td style="text-align: right"><strong>12.761</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td>4,094–4,098</td>
+          <td style="text-align: right">64</td>
+          <td><em>External DP</em></td>
+          <td style="text-align: right">256/256</td>
+          <td style="text-align: right"><strong>3,094.017</strong></td>
+          <td style="text-align: right">17,594.349</td>
+          <td style="text-align: right">193.557</td>
+          <td style="text-align: right">1,953.899</td>
+          <td style="text-align: right">290.025</td>
+          <td style="text-align: right">2.537</td>
+      </tr>
+  </tbody>
+</table>
+<p>Wide <em>TP</em> delivered higher output throughput in all twelve matched cells.
+Its peak was <strong>2,647.004 tok/s</strong> at <code>1024/256</code>, concurrency 16, against <code>436.861 tok/s</code> for <em>External DP</em>.
+<em>External DP</em> peaked at <strong>1,017.434 tok/s</strong> at <code>1024/256</code>, concurrency 64.</p>
+<p>At concurrency 1, <em>External DP</em> had <strong>6.9×–7.3× higher TPOT p50</strong> across the two shapes.
+The configurations differ in expert sharding, transport, router path and API-server count.
+The measurements do not isolate the contribution of each difference.</p>
+<p>At <code>1024/256</code>, concurrency 64, <em>External DP</em> reduced <em>TTFT</em> p50 from <code>4,798.411 ms</code> to
+<strong>1,863.100 ms</strong>, or <strong>2.58× lower</strong>. Its <em>TTFT</em> p95 was also lower, <code>4,921.601 ms</code> against <code>5,215.017 ms</code>.
+Wide <em>TP</em> still delivered <strong>2.27× higher output throughput</strong>, with lower <em>TPOT</em> and <em>ITL</em> tails.</p>
+<p>At <code>4096/128</code>, concurrency 64, <em>External DP</em> reduced median <em>TTFT</em> from <code>3,814.139 ms</code> to
+<strong>3,094.017 ms</strong>, or <strong>1.23× lower</strong>.
+Its tail worsened: <em>TTFT</em> p95 reached <strong>17,594.349 ms</strong>, and <em>ITL</em> p99 reached <strong>1,953.899 ms</strong>.
+Wide <em>TP</em> recorded <code>4,057.352 ms</code> and <code>55.619 ms</code>, respectively.
+A lower first-token median did not imply better generation latency or throughput.</p>
+<h2 id="per-rank-registration">Per-rank registration</h2>
+<p>The final capture combines operator status, the Router registry, per-worker counters and engine access logs.
+The role reported one ready replica group with four confirmed serving endpoints:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>json</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;name&#34;</span><span class="p">:</span> <span class="s2">&#34;server&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;kind&#34;</span><span class="p">:</span> <span class="s2">&#34;Server&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;desired&#34;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;ready&#34;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;parallelism&#34;</span><span class="p">:</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;declared&#34;</span><span class="p">:</span> <span class="p">{</span> <span class="nt">&#34;dataParallel&#34;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span> <span class="nt">&#34;tensorParallel&#34;</span><span class="p">:</span> <span class="mi">2</span> <span class="p">},</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;loadBalance&#34;</span><span class="p">:</span> <span class="s2">&#34;External&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;modes&#34;</span><span class="p">:</span> <span class="p">{</span> <span class="nt">&#34;expertParallel&#34;</span><span class="p">:</span> <span class="kc">true</span> <span class="p">},</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;source&#34;</span><span class="p">:</span> <span class="p">{</span> <span class="nt">&#34;complete&#34;</span><span class="p">:</span> <span class="kc">true</span><span class="p">,</span> <span class="nt">&#34;kind&#34;</span><span class="p">:</span> <span class="s2">&#34;ExtraArgs&#34;</span> <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="p">},</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;endpoints&#34;</span><span class="p">:</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;eligible&#34;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;serving&#34;</span><span class="p">:</span> <span class="p">{</span> <span class="nt">&#34;state&#34;</span><span class="p">:</span> <span class="s2">&#34;Confirmed&#34;</span><span class="p">,</span> <span class="nt">&#34;value&#34;</span><span class="p">:</span> <span class="mi">4</span> <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></div>
+</div><p><em><code>eligible</code></em> counts the replica group. <em><code>serving.value</code></em> counts the HTTP endpoints confirmed by the Router.
+All four endpoints were registered, healthy, in selection and had closed circuits.
+The rank names below replace endpoint IPs with their corresponding member identities.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Rank</th>
+          <th>Registered</th>
+          <th>Healthy</th>
+          <th>In selection</th>
+          <th style="text-align: right">Router requests</th>
+          <th style="text-align: right">Engine completion lines</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>server-r0-m0</code></td>
+          <td>true</td>
+          <td>true</td>
+          <td>true</td>
+          <td style="text-align: right"><strong>285</strong></td>
+          <td style="text-align: right"><strong>285</strong></td>
+      </tr>
+      <tr>
+          <td><code>server-r0-m1</code></td>
+          <td>true</td>
+          <td>true</td>
+          <td>true</td>
+          <td style="text-align: right"><strong>284</strong></td>
+          <td style="text-align: right"><strong>284</strong></td>
+      </tr>
+      <tr>
+          <td><code>server-r0-m2</code></td>
+          <td>true</td>
+          <td>true</td>
+          <td>true</td>
+          <td style="text-align: right"><strong>284</strong></td>
+          <td style="text-align: right"><strong>284</strong></td>
+      </tr>
+      <tr>
+          <td><code>server-r0-m3</code></td>
+          <td>true</td>
+          <td>true</td>
+          <td>true</td>
+          <td style="text-align: right"><strong>284</strong></td>
+          <td style="text-align: right"><strong>284</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>The counters total <strong>1,137 requests</strong>: 1,088 measured requests, 48 warm-ups and one calibration request.
+The wide <em>TP</em> engine also logged 1,137 completion lines.
+Router counters matched every rank&rsquo;s engine completion count, establishing traffic on all four ranks.
+The generic router-access-line capture reported zero; it is separate from these nonzero per-worker counters.</p>
+<h2 id="summary">Summary</h2>
+<h3 id="benefits">Benefits</h3>
+<ul>
+<li><em>External DP</em> registered <strong>four healthy serving endpoints</strong> and spread requests evenly: <strong>285 + 284 × 3</strong>.</li>
+<li>At <code>1024/256</code>, concurrency 64, <em>External DP</em> had <strong>2.58× lower TTFT p50</strong> than wide <em>TP</em>.</li>
+<li>At <code>4096/128</code>, concurrency 64, its <em>TTFT</em> p50 was <strong>1.23× lower</strong>, despite worse tail latency.</li>
+<li>Both configurations completed <strong>1,088/1,088 measured requests</strong>, with zero errors.</li>
+</ul>
+<h3 id="trade-offs">Trade-offs</h3>
+<ul>
+<li>Wide <em>TP</em> delivered <strong>2.27×–6.99× higher output throughput</strong> across all matched cells.</li>
+<li>Cross-<code>Pod</code> <em>EP</em> used TCP, while the wide configuration kept its full collective inside one NVLink-connected <code>Pod</code>.</li>
+<li>At <code>4096/128</code>, concurrency 64, <em>External DP</em> had lower median <em>TTFT</em> but much higher first-token and token-gap tails.</li>
+</ul>
+<p>Choose the fixed four-rank group when per-rank ingress or lower median <em>TTFT</em> at concurrency 64 fits the workload.
+Choose wide <em>TP</em> when output throughput and generation latency dominate on this single-node NVLink setup.
+The crossover does not establish a general advantage for multi-node or <em>RDMA</em> deployments.</p>
+<h2 id="infiniband-rdma-comparison">InfiniBand RDMA comparison</h2>
+<p>A follow-up on the same ConnectX-7 InfiniBand node setup described in
+<a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/#infiniband-rdma-comparison">Prefill and Decode Benchmark</a>
+ retained
+<em>DP</em> = 4, <em>TP</em> = 2 per <code>Pod</code>, one API server per rank and <code>round_robin</code> routing. All twelve measured
+cells completed <strong>1,088/1,088 requests with zero errors</strong>.</p>
+<h3 id="transport-verification">Transport verification</h3>
+<p>Update <code>external-dp.yaml</code> from the
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/#step-1-start-the-fixed-group">TCP walkthrough</a>
+:
+The diff uses current interface allocation; the recorded run used manual device exposure.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   roles:
+</span></span><span class="line"><span class="cl">     - name: server
+</span></span><span class="line"><span class="cl">       kind: Server
+</span></span><span class="line"><span class="cl">       size: 4
+</span></span><span class="line"><span class="cl">       resources:
+</span></span><span class="line"><span class="cl">         accelerator: &#34;2&#34;
+</span></span><span class="line"><span class="cl"><span class="gi">+        interface: &#34;2&#34;
+</span></span></span></code></pre></div>
+</div><p>NCCL logged <code>Using network IB</code> and channel transfers <code>via NET/IB/.../GDRDMA</code>.
+This establishes InfiniBand transport for the cross-<code>Pod</code> expert collective.
+Intra-<code>Pod</code> <em>TP</em> still used NVLink; HTTP and bootstrap traffic remained separate from collective transport.</p>
+<p>The model, engine limits and collective backend matched the TCP run.
+Keep <strong><code>VLLM_PORT=19500</code></strong> on every rank; InfiniBand does not fix the <a href="#port-allocation">bootstrap-port race</a>
+.</p>
+<h3 id="tcp-and-rdma">TCP and RDMA</h3>
+<p>Bold values mark lower latency or higher throughput within each matched <em>External DP</em> pair.
+The target shapes, concurrencies and measured request counts matched the TCP sweep.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Shape</th>
+          <th style="text-align: right">Concurrency</th>
+          <th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right">TCP <em>ITL</em> p99 (ms)</th>
+          <th style="text-align: right">RDMA <em>ITL</em> p99 (ms)</th>
+          <th style="text-align: right">TCP output (tok/s)</th>
+          <th style="text-align: right">RDMA output (tok/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td style="text-align: right">1</td>
+          <td style="text-align: right">207.622</td>
+          <td style="text-align: right"><strong>86.763</strong></td>
+          <td style="text-align: right">18.609</td>
+          <td style="text-align: right"><strong>7.425</strong></td>
+          <td style="text-align: right">55.741</td>
+          <td style="text-align: right"><strong>138.181</strong></td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td style="text-align: right">4</td>
+          <td style="text-align: right">244.112</td>
+          <td style="text-align: right"><strong>90.480</strong></td>
+          <td style="text-align: right">20.467</td>
+          <td style="text-align: right"><strong>11.774</strong></td>
+          <td style="text-align: right">200.483</td>
+          <td style="text-align: right"><strong>476.304</strong></td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td style="text-align: right">8</td>
+          <td style="text-align: right">614.447</td>
+          <td style="text-align: right"><strong>146.641</strong></td>
+          <td style="text-align: right"><strong>26.162</strong></td>
+          <td style="text-align: right">64.911</td>
+          <td style="text-align: right">316.739</td>
+          <td style="text-align: right"><strong>833.031</strong></td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td style="text-align: right">16</td>
+          <td style="text-align: right">887.432</td>
+          <td style="text-align: right"><strong>160.823</strong></td>
+          <td style="text-align: right">142.235</td>
+          <td style="text-align: right"><strong>66.483</strong></td>
+          <td style="text-align: right">436.861</td>
+          <td style="text-align: right"><strong>1,451.568</strong></td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td style="text-align: right">32</td>
+          <td style="text-align: right">1,598.815</td>
+          <td style="text-align: right"><strong>206.110</strong></td>
+          <td style="text-align: right">163.243</td>
+          <td style="text-align: right"><strong>73.343</strong></td>
+          <td style="text-align: right">671.889</td>
+          <td style="text-align: right"><strong>2,147.777</strong></td>
+      </tr>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td style="text-align: right">64</td>
+          <td style="text-align: right">1,863.100</td>
+          <td style="text-align: right"><strong>297.546</strong></td>
+          <td style="text-align: right">326.941</td>
+          <td style="text-align: right"><strong>74.152</strong></td>
+          <td style="text-align: right">1,017.434</td>
+          <td style="text-align: right"><strong>3,921.562</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td style="text-align: right">1</td>
+          <td style="text-align: right">509.759</td>
+          <td style="text-align: right"><strong>102.983</strong></td>
+          <td style="text-align: right">18.233</td>
+          <td style="text-align: right"><strong>7.510</strong></td>
+          <td style="text-align: right">47.246</td>
+          <td style="text-align: right"><strong>129.502</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td style="text-align: right">4</td>
+          <td style="text-align: right">458.764</td>
+          <td style="text-align: right"><strong>103.246</strong></td>
+          <td style="text-align: right">404.635</td>
+          <td style="text-align: right"><strong>65.134</strong></td>
+          <td style="text-align: right">120.167</td>
+          <td style="text-align: right"><strong>404.577</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td style="text-align: right">8</td>
+          <td style="text-align: right">823.096</td>
+          <td style="text-align: right"><strong>136.206</strong></td>
+          <td style="text-align: right">397.794</td>
+          <td style="text-align: right"><strong>70.939</strong></td>
+          <td style="text-align: right">180.100</td>
+          <td style="text-align: right"><strong>704.793</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td style="text-align: right">16</td>
+          <td style="text-align: right">1,501.351</td>
+          <td style="text-align: right"><strong>160.059</strong></td>
+          <td style="text-align: right">703.247</td>
+          <td style="text-align: right"><strong>78.096</strong></td>
+          <td style="text-align: right">210.812</td>
+          <td style="text-align: right"><strong>1,000.937</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td style="text-align: right">32</td>
+          <td style="text-align: right">1,794.637</td>
+          <td style="text-align: right"><strong>205.085</strong></td>
+          <td style="text-align: right">1,262.285</td>
+          <td style="text-align: right"><strong>144.559</strong></td>
+          <td style="text-align: right">253.940</td>
+          <td style="text-align: right"><strong>1,448.982</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td style="text-align: right">64</td>
+          <td style="text-align: right">3,094.017</td>
+          <td style="text-align: right"><strong>365.352</strong></td>
+          <td style="text-align: right">1,953.899</td>
+          <td style="text-align: right"><strong>182.693</strong></td>
+          <td style="text-align: right">290.025</td>
+          <td style="text-align: right"><strong>2,033.762</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>At <code>1024/256</code>, concurrency 64, median <em>TTFT</em> fell <strong>6.26×</strong>, with <strong>3.85× higher output throughput</strong> than TCP.
+At <code>4096/128</code>, concurrency 64, median <em>TTFT</em> fell <strong>8.47×</strong>, with <strong>7.01× higher output throughput</strong>.
+The long-prompt <em>TTFT</em> p95 fell from <strong>17,594.349 to 1,477.799 ms</strong>.
+Its <em>ITL</em> p99 fell from <strong>1,953.899 to 182.693 ms</strong>, reducing the severe TCP generation stalls.</p>
+<h3 id="wide-tp-comparison">Wide TP comparison</h3>
+<p>At concurrency 64, RDMA <em>External DP</em> exceeded the recorded wide-<em>TP</em> output throughput for both shapes.
+Wide <em>TP</em> kept all eight GPUs inside one NVLink-connected <code>Pod</code> and was not rerun for this follow-up.
+Both configurations allocated eight GPUs; the measurements are separate runs.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Shape, concurrency 64</th>
+          <th style="text-align: right">Wide <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right">Wide <em>ITL</em> p99 (ms)</th>
+          <th style="text-align: right">RDMA <em>ITL</em> p99 (ms)</th>
+          <th style="text-align: right">Wide output (tok/s)</th>
+          <th style="text-align: right">RDMA output (tok/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td style="text-align: right">4,798.411</td>
+          <td style="text-align: right"><strong>297.546</strong></td>
+          <td style="text-align: right"><strong>53.361</strong></td>
+          <td style="text-align: right">74.152</td>
+          <td style="text-align: right">2,314.155</td>
+          <td style="text-align: right"><strong>3,921.562</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td style="text-align: right">3,814.139</td>
+          <td style="text-align: right"><strong>365.352</strong></td>
+          <td style="text-align: right"><strong>55.619</strong></td>
+          <td style="text-align: right">182.693</td>
+          <td style="text-align: right">1,491.536</td>
+          <td style="text-align: right"><strong>2,033.762</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>RDMA <em>External DP</em> had <strong>16.13× lower median TTFT</strong> and <strong>1.69× higher output throughput</strong> at <code>1024/256</code>, concurrency 64.
+At <code>4096/128</code>, the corresponding gains were <strong>10.44× lower median TTFT</strong> and <strong>1.36× higher output throughput</strong>.
+This reverses the TCP throughput disadvantage at the highest tested concurrency.</p>
+<h3 id="routing-verification">Routing verification</h3>
+<p>The captured role status confirmed <strong>four serving endpoints</strong> for one replica group.
+Engine completion counts were <strong>285 + 284 + 284 + 284 = 1,137</strong> across the four ranks.
+These include 1,088 measured requests, 48 warm-ups and one calibration request.
+The counts establish traffic on every rank; the generic Router access-line capture is a separate counter.</p>
+<h3 id="remaining-trade-offs">Remaining trade-offs</h3>
+<p>Wide <em>TP</em> still had higher output throughput in <strong>ten of twelve</strong> matched cells, covering concurrencies 1–32.
+It retained lower <em>TPOT</em> p50 and <em>ITL</em> p99 in all twelve cells.
+At <code>4096/128</code>, concurrency 64, RDMA <em>External DP</em> still had <strong>182.693 ms ITL p99</strong>, versus <strong>55.619 ms</strong> for wide <em>TP</em>.</p>
+<p>RDMA also regressed one TCP tail metric: at <code>1024/256</code>, concurrency 8, <em>ITL</em> p99 rose from <strong>26.162 to 64.911 ms</strong>.
+The faster first-token median and higher aggregate throughput do not establish uniformly smoother token generation.
+No repeated trials isolate the cause of that tail difference.</p>
+<p>Choose RDMA <em>External DP</em> when high-concurrency ingress and first-token latency justify a distributed expert collective.
+Wide <em>TP</em> remains the measured choice for lower-concurrency throughput and token-generation latency on this single-node setup.
+Cross-node behavior, other models and other collective backends remain unmeasured.</p>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>One run per configuration, with 32–256 requests per cell. There are no repeated-run confidence intervals.</li>
+<li>Both configurations used eight GPUs, but batching limits were per engine. Four rank API servers differ from one wide API server.</li>
+<li>Parallelism, transport and routing changed together. No isolated collective or Router-overhead measurement was captured.</li>
+<li>The initial cross-<code>Pod</code> <em>EP</em> capture used TCP over <code>eth0</code>; the follow-up verified InfiniBand collective transport.
+Cross-<code>Pod</code> NVLink was not measured, and the separate runs do not isolate transport from run-to-run variation.</li>
+<li>All ranks shared one GPU node. Cross-node placement, other <em>DP</em> widths and online resizing were not measured.</li>
+<li>Only one <em>MoE</em> model and two prompt/output targets were measured. Dense-model behavior cannot be inferred from these results.</li>
+<li>Prompt markers and early stopping produced small prompt-length differences and different generated-token totals.</li>
+<li>Direct nonstreaming probes to each rank and a final released-device snapshot were not part of the TCP capture.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/">External DP</a>
+ (fixed-group contract)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
+ (manifest and endpoint checks)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/">Model Deployment Routing</a>
+ (router policies and discovery)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/">Elastic EP Benchmark</a>
+ (live collective expansion)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Model Deployment Status</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ffe734016c60d39a890150175cc1df5216195fc/docs/modules/model-deployment/external-dp-benchmark.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/external-dp-benchmark.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#configurations">Configurations</a></li>
+    <li><a href="#hardware-model-and-workload">Hardware, model and workload</a>
+      <ul>
+        <li><a href="#port-allocation">Port allocation</a></li>
+        <li><a href="#workload">Workload</a></li>
+        <li><a href="#method">Method</a></li>
+      </ul>
+    </li>
+    <li><a href="#prompt-lengths-and-concurrency">Prompt lengths and concurrency</a></li>
+    <li><a href="#per-rank-registration">Per-rank registration</a></li>
+    <li><a href="#summary">Summary</a>
+      <ul>
+        <li><a href="#benefits">Benefits</a></li>
+        <li><a href="#trade-offs">Trade-offs</a></li>
+      </ul>
+    </li>
+    <li><a href="#infiniband-rdma-comparison">InfiniBand RDMA comparison</a>
+      <ul>
+        <li><a href="#transport-verification">Transport verification</a></li>
+        <li><a href="#tcp-and-rdma">TCP and RDMA</a></li>
+        <li><a href="#wide-tp-comparison">Wide TP comparison</a></li>
+        <li><a href="#routing-verification">Routing verification</a></li>
+        <li><a href="#remaining-trade-offs">Remaining trade-offs</a></li>
+      </ul>
+    </li>
+    <li><a href="#limitations">Limitations</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

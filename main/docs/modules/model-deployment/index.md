@@ -13,8 +13,13 @@ its own replicas and resources.
 [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) starts with a minimal manifest and explains
 the role contract. [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) covers split roles, and
 [Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) covers multimodal disaggregation.
-[Engine Versions](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) records tested version floors, and
-[Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md) measures that disaggregation against an aggregated instance.
+[Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) lists minimum releases, client and store requirements,
+transport support and known failures.
+
+[Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md) measures that
+disaggregation against an aggregated instance.
+[Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md) measures a text-only
+*prefill/decode* pair against an aggregated group on equal GPUs.
 
 Follow [Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) for
 disaggregated serving, [Encode, Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) for
@@ -28,10 +33,20 @@ for distributed multi-node serving.
 are directed.
 
 [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) keeps one serving instance and changes its collective while it runs.
-[Elastic EP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) follows prefetch, TP2/DP2 startup, and DP2→4 expansion
-with captured resource output and completed inference requests.
-[External DP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) runs a fixed group with one HTTP endpoint per rank
-and checks managed Router coverage.
+[Elastic EP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) follows prefetch, startup with
+*tensor parallelism (TP)* = 2 and *data parallelism (DP)* = 2, and *DP* width 2 → 4 expansion.
+It includes captured resource output and completed inference requests.
+
+[Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md) measures the same width change under a live request
+stream.
+
+[External DP](/gpustack-operator/main/docs/modules/model-deployment/external-dp/index.md) runs one fixed *DP* group with an HTTP endpoint on every rank and
+Router-balanced traffic across all of them.
+The [External DP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) runs a fixed group
+with one HTTP endpoint per rank and checks managed Router coverage.
+
+[External DP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/index.md) compares that group with a
+monolithic wide tensor-parallel group on the same GPUs.
 
 ---
 

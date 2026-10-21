@@ -1,4 +1,4 @@
-# Getting started
+# Getting Started
 
 - [Architecture](/gpustack-operator/main/docs/getting-started/architecture/index.md)
 

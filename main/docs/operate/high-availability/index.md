@@ -2,38 +2,38 @@
 
 Every control-plane component the chart deploys elects a leader, so extra replicas stand by. They buy
 failover, not throughput. A highly available install raises each replica count and turns on its
-disruption budget; everything else is one pod per node (device managers, NFD worker, both CSI node
-DaemonSets).
+disruption budget; everything else is one `Pod` per node (Device Managers, NFD worker, both CSI node
+`DaemonSet`s).
 
-Configure it in `values.yaml`: no HA values file ships. Every knob below sits at its chart's default,
+Configure it in `values.yaml`: no HA values file ships. Every setting below sits at its chart's default,
 and the caveats are inline.
 
 ## Contents
 
-- [Node count prerequisites](#node-count-prerequisites)
-- [Per-component settings](#per-component-settings)
-- [The non-redundant topology](#the-non-redundant-topology)
-- [Verify](#verify)
+- [Prerequisites](#prerequisites)
+- [Configuration](#configuration)
+- [Non-redundant topology](#non-redundant-topology)
+- [Verification](#verification)
 
-## Node count prerequisites
+## Prerequisites
 
 A `DoNotSchedule` spread needs **at least as many schedulable nodes as your largest replica count**; below
-that, surplus replicas stay `Pending` forever. This page assumes three replicas on three nodes; with
-fewer, lower the counts or use `ScheduleAnyway`, a preference. The components tolerate control-plane
+that, surplus replicas stay `Pending` forever. The configuration assumes three replicas on three nodes.
+With fewer nodes, lower the counts or use `ScheduleAnyway`, a preference. The components tolerate control-plane
 taints, so three control-plane nodes spread fine.
 
-They tolerate **those taints and no others**, a cordon's included, so a pod evicted by a drain never
+They tolerate **those taints and no others**, a cordon's included, so a `Pod` evicted by a drain never
 lands back on the node being drained. Where your nodes carry a taint of your own, add it to each
-component's `tolerations`.
+component's *`tolerations`*.
 
 Earlier releases let the Kueue controller manager, the NFD master and the NFD gc tolerate every taint;
 an install that relied on that must set their three lists before upgrading. Upgrade with
 `--reset-then-reuse-values`, not `--reuse-values`, or the new lists never reach the release; see
-[Upgrading the Chart](https://github.com/gpustack/gpustack-operator/blob/79c912a40ff94b99a0040f785dd427f087738b1a/deploy/gpustack-operator/chart/README.md#upgrading-the-chart).
+[Upgrading the Chart](https://github.com/gpustack/gpustack-operator/blob/0ffe734016c60d39a890150175cc1df5216195fc/deploy/gpustack-operator/chart/README.md#upgrading-the-chart).
 
-## Per-component settings
+## Configuration
 
-| Component | Replicas | PodDisruptionBudget | Node spread |
+| Component | Replicas | `PodDisruptionBudget` | `Node` spread |
 |---|---|---|---|
 | Worker (control plane) | `worker.replicas` | `worker.podDisruptionBudget.enabled` + `.minAvailable` | `worker.topologySpreadConstraints`, or `worker.affinity` |
 | Kueue controller manager | `kueue.controllerManager.replicas` | `kueue.controllerManager.podDisruptionBudget.enabled` + `.minAvailable` | `kueue.controllerManager.topologySpreadConstraints` |
@@ -107,9 +107,9 @@ helm upgrade gpustack-operator gpustack/gpustack-operator \
 The worker runs the aggregated extension API server and the scheduling-chain controllers in one
 process. Only one replica reconciles, because leader election is always on. Every replica serves the
 extension API and the admission webhooks, so with one, losing its node takes `kubectl get instancetypes`
-and Pod admission down until it reschedules.
+and `Pod` admission down until it reschedules.
 
-Node spread belongs in `worker.topologySpreadConstraints`. Its default `preferred` pod anti-affinity is
+`Node` spread belongs in `worker.topologySpreadConstraints`. Its default `preferred` `Pod` anti-affinity is
 deliberate: replicas stay off one node without any becoming unschedulable, so three still come up on two
 nodes. An entry omitting `labelSelector` gets the worker's own; `worker.affinity` **replaces** the
 default rather than adding to it.
@@ -117,12 +117,12 @@ default rather than adding to it.
 ### Kueue controller manager
 
 Kueue's `managerConfig` elects a leader, so standbys do not reconcile. Each replica still serves Kueue's
-admission webhook, whose `failurePolicy: Fail` means one replica losing its node **blocks Pod creation in
+admission webhook, whose `failurePolicy: Fail` means one replica losing its node **blocks `Pod` creation in
 every namespace Kueue manages** until it reschedules. HA buys the most here.
 
 - The spread constraints carry no selector of their own. Unlike the worker's, they render as given, so
   a `DoNotSchedule` spread needs `labelSelector` spelled out: `app.kubernetes.io/name: kueue` plus
-  `control-plane: controller-manager`, as in the example. Omit it and the spread counts every pod in
+  `control-plane: controller-manager`, as in the example. Omit it and the spread counts every `Pod` in
   the namespace.
 - The Kueue chart has no affinity key, so spread constraints are its only placement control.
 
@@ -142,35 +142,35 @@ chain stalls for new or changed nodes. Labelled nodes and admitted workloads are
 The garbage collector stays at one replica: a stalled GC only delays cleanup of a departed node's
 objects, which nothing reads.
 
-### The two CSI controllers
+### Two CSI controllers
 
 Losing a CSI controller delays volume provisioning, resizing and snapshotting; volumes already mounted
-keep working, because the mounting side is the node DaemonSet. These are the least urgent of the four,
+keep working, because the mounting side is the node `DaemonSet`. These are the least urgent of the four,
 with the weakest chart support.
 
-Both charts render no PodDisruptionBudget, and honour `controller.affinity` **only when it carries
-`nodeSelectorTerms`**: a pod anti-affinity is schema-valid, then silently dropped.
+Both charts render no `PodDisruptionBudget`, and honour `controller.affinity` **only when it carries
+*`nodeSelectorTerms`***: a `Pod` anti-affinity is schema-valid, then silently dropped.
 
 The S3 chart renders no topology spread at all, so two replicas may land on one node and a drain can
 take both. Raise its count for process-level failover; it gives no node-level redundancy.
 
 The NFS chart renders `controller.topologySpreadConstraints` through a vendored patch, and above one
-replica the spread is **required, not just prudent**: its pods run on the host network and bind the
-liveness health port there, so two pods on one node leave the second crash-looping on the bind and the
-Deployment never fully ready. As with Kueue, the example's `labelSelector` must be spelled out.
+replica the spread is **required, not just prudent**: its `Pod`s run on the host network and bind the
+liveness health port there, so two `Pod`s on one node leave the second crash-looping on the bind and the
+`Deployment` never fully ready. As with Kueue, the example's `labelSelector` must be spelled out.
 
 Also set `strategyType: RollingUpdate`: both default to `Recreate`, which takes every replica down
 before the new one starts and gives up, at every upgrade, the failover the replica was added for.
 
-## The non-redundant topology
+## Non-redundant topology
 
 When the worker runs **outside** the cluster it manages but near it (image mode, `!LoopbackKubeInside &&
-LoopbackKubeNearby`), its admission webhooks register against one node IP URL instead of a Service.
+LoopbackKubeNearby`), its admission webhooks register against one node IP URL instead of a `Service`.
 That URL is a single endpoint, so extra replicas receive no traffic; the source calls this "launch
 multiple instances, only one takes working". **Keep that topology at one replica.** Chart mode is
-unaffected: its webhooks are always in-cluster and Service-backed.
+unaffected: its webhooks are always in-cluster and `Service`-backed.
 
-## Verify
+## Verification
 
 ```bash
 NS=gpustack-system
@@ -201,7 +201,7 @@ kubectl uncordon <node>
 
 ---
 
-**See also** — [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) (these knobs need chart mode; image
+**See also** — [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) (these settings need chart mode; image
 mode has no user-values channel) ·
 [Internals](/gpustack-operator/main/docs/contribute/internals/index.md#worker-startup-order) · [Settings](/gpustack-operator/main/docs/reference/settings/index.md) ·
 [KV Cache Backend](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#high-availability) — a `KVCacheBackend`'s leader elects the

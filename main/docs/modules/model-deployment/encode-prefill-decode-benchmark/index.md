@@ -1,342 +1,358 @@
-# Model Deployment Encode, Prefill and Decode Benchmark
+# Encode, Prefill and Decode Benchmark
 
-A live run on 4 × NVIDIA L40S compared three serving shapes for `Qwen/Qwen2.5-VL-7B-Instruct`:
-aggregated, prefill/decode and encode/prefill/decode (EPD). Three workloads exercise them: a prompt
-sweep from `1k` to `8k` tokens, a mixed stream of heavy-vision and small requests, and one image
-queried repeatedly. [Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) describes the EPD topology.
+On one H100 SXM5 node, *Encode/Prefill/Decode (EPD)* reduced long-prompt generation stalls and
+repeated-image latency compared with aggregated serving and *Prefill/Decode (PD)*.
+Aggregated serving, *PD* and *EPD* used **one, two and three GPUs**, respectively.
+These results compare deployed configurations with unequal GPU budgets.
 
-EPD is not faster everywhere. At `1k` and `2k` tokens the aggregated arm has the lowest time to
-first token (TTFT), because two network hops cost more than a short vision pass. At `4k` and `8k`
-under concurrency the order reverses. At `8k` with four requests in flight, EPD has a TTFT p50 of
-`241.8 ms`, against `697.9 ms` for prefill/decode (`2.89×`) and `757.1 ms` for aggregated (`3.13×`).
+At `8k` and concurrency 8, *EPD* reduced *inter-token latency (ITL)* p99 from `296.710 ms` to
+**13.607 ms**, or **21.8× lower**, compared with aggregated serving.
+Its *time to first token (TTFT)* p50 was higher: `4,182.324 ms` against `3,963.085 ms`.
+[Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) describes the role contract.
 
-At that point EPD also reaches `128.24 tok/s`, `13.3%` above prefill/decode and `5.7%` above
-aggregated. At `8k` with eight in flight its inter-token latency (ITL) p99 is `52.72 ms`, while
-aggregated degrades to `199.34 ms`.
-
-Under mixed traffic the advantage depends on the stream. EPD protects the small requests
-(`226.5 ms` TTFT p50, against `315.1 ms` and `388.3 ms`) but is the slowest arm for the heavy-vision
-requests (`5017.0 ms`, against `2854.0 ms` for aggregated). On a repeated `4k` image EPD wins
-outright: `356.0 ms` TTFT p50 at four in flight (`2.22×` faster than prefill/decode) and `31.9%`
-higher output throughput at eight.
+The initial capture used cross-`Pod` TCP. The separate [InfiniBand RDMA comparison](#infiniband-rdma-comparison)
+adds matched follow-up measurements while retaining the TCP results and conclusions.
 
 ## Contents
 
-- [The three arms](#the-three-arms)
+- [Configurations](#configurations)
 - [Hardware, model and workload](#hardware-model-and-workload)
-- [Suite 1: k-context multimodal scaling](#suite-1-k-context-multimodal-scaling)
-- [Suite 2: mixed heavy-vision and concurrent decode](#suite-2-mixed-heavy-vision-and-concurrent-decode)
-- [Suite 3: repeated-image encoder-cache reuse](#suite-3-repeated-image-encoder-cache-reuse)
+- [Suite 1: Multimodal context scaling](#suite-1-multimodal-context-scaling)
+- [Suite 2: Mixed vision and decode](#suite-2-mixed-vision-and-decode)
+- [Suite 3: Encoder-cache reuse](#suite-3-encoder-cache-reuse)
 - [Stage execution verification](#stage-execution-verification)
-- [When EPD helps and when it does not](#when-epd-helps-and-when-it-does-not)
-- [What this run does not measure](#what-this-run-does-not-measure)
+- [Summary](#summary)
+- [InfiniBand RDMA comparison](#infiniband-rdma-comparison)
+- [Limitations](#limitations)
 
-## The three arms
+## Configurations
 
-Each arm is one `ModelDeployment` with one replica per role and one accelerator per replica. The
-arms differ in topology and in how many cards they use.
+Each configuration used one `ModelDeployment`, with one replica per role and one GPU per `Pod`.
+All serving roles ran on the same GPU node, `gpu-node-0`.
 
-| Arm | Roles | Cards | KV connector | Encoder connector |
-|---|---|---|---|---|
-| Aggregated | `server` | 1 | none | none |
-| Prefill/Decode | `prefill`, `decode` | 2 | `MooncakeConnector` over tcp | none |
-| EPD | `encode`, `prefill`, `decode` | 3 | `MooncakeConnector` over tcp | `ECCPUConnector` over NIXL |
+| Configuration | Roles | GPUs | KV connector | Encoder connector |
+|---|---|---:|---|---|
+| Aggregated | 1 *Server* | 1 | None | None |
+| *PD* | 1 *Prefill* + 1 *Decode* | 2 | `MooncakeConnector`, TCP | None |
+| *EPD* | 1 *Encode* + 1 *Prefill* + 1 *Decode* | 3 | `MooncakeConnector`, TCP | `ECCPUConnector`, NIXL |
 
-The aggregated arm needs no connector, because one instance holds the whole model. Prefill and
-decode hand KV blocks across two Pods, pinned to tcp because the nodes have no RDMA interface. EPD
-adds the encoder leg on top of the same KV transfer. See
-[Encoder-cache connectors](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#encoder-cache-connectors) for what each connector moves.
-
-The scheduler placed the roles on two nodes, `node-a` and `node-b`. In the EPD arm, encode and
-prefill shared `node-a` and decode ran on `node-b` — the weight-50 pair in
-[Scheduling co-location](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#scheduling-co-location). The other two arms landed as follows:
-
-| Arm | Role | Node |
-|---|---|---|
-| Prefill/Decode | `prefill` | `node-b` |
-| Prefill/Decode | `decode` | `node-a` |
-| Aggregated | `server` | `node-b` |
+Each `Pod` exposed only its assigned GPU, with a private `/dev/shm` and IPC namespace.
+*`hostIPC`* was disabled, and no remote direct memory access (*RDMA*) interface was attached.
+**All cross-`Pod` NIXL encoder-cache and Mooncake KV transfers used container TCP sockets over `eth0`.**
+The host's NVLink fabric was not used between roles.
 
 ## Hardware, model and workload
 
-| Property | Value |
+| Property | Captured value |
 |---|---|
-| Accelerators | 4 × NVIDIA L40S 48 GB, 2 per node |
-| Driver | 580.173.02, CUDA 13.0 |
-| Interconnect | none; no RDMA interface on either node |
-| Instance type | `gpustack--nvidia-l40s-linux-amd64` |
-| Runner image | `docker.io/gpustack/runner:cuda13.0-vllm0.30.0` |
-| Engine | vLLM 0.30.0 |
-| Router | `gpustack/llm-router:v0.3.1`, disaggregation sidecar v0.11.0 |
-| Model | `Qwen/Qwen2.5-VL-7B-Instruct` |
-| Engine arguments | `--max-model-len=16384`, `--gpu-memory-utilization=0.85`, `--enforce-eager` |
-| Parallelism | TP 1 per role |
+| Cluster | Kubernetes v1.35.7; one CPU node and one GPU node |
+| Hardware | 8 × NVIDIA H100 80 GB HBM3 SXM5 on one node |
+| GPUStack Operator | v0.9.1 |
+| Captured `InstanceType` | `bench-gpu`, selecting the H100 accelerator group |
+| Runner | `gpustack/runner:cuda13.0-vllm0.30.0` |
+| Router | `gpustack/llm-router:v0.3.1`; disaggregation sidecar v0.11.0 |
+| Model | `Qwen/Qwen2.5-VL-7B-Instruct`, revision `cc594898137f460bfe9f0759e9844b3ce807cfb5` |
+| Model delivery | `ModelArtifact` `qwen2-5-vl-7b-instruct`; node delivery mount `/var/lib/gpustack/model`, served as `/models` |
+| Engine limits | `--max-model-len 16384`, `--gpu-memory-utilization 0.85` |
+| Parallelism | *Tensor parallelism (TP)* = 1 per role |
 
-Every arm ran the same weights, so the comparison is per arm, not per card: the aggregated arm used
-one card and EPD used three. `--max-model-len` is `16384` so that the `8k` prompts are not truncated.
-The prefill/decode and aggregated arms also set `--enable-scale-out`, which their router needs to
-count tokens. EPD does not need it.
-
-All three suites ran on every arm, and every request succeeded.
+The operator added `--enforce-eager` and `--no-enable-prefix-caching` only to *Encode*.
+*Prefill* and *Decode* retained CUDA graphs.
+Aggregated serving and *PD* also set `--enable-scale-out` for router token rendering; *EPD* did not.
 
 ### Suite 1 workload
 
-Suite 1 holds the completion budget at `max_tokens=128` and varies only the prompt. Qwen2.5-VL turns
-an `S`-square image into `(S / 28)²` visual tokens.
+Suite 1 varied image and text length with a `128`-token completion limit.
+Image dimensions are pixels; text-token values are generator targets.
+Measured prompt lengths include the model's multimodal request formatting.
 
-| Context | Image | Visual tokens | Text tokens | Measured prompt tokens |
-|---|---|---|---|---|
-| `1k` | 560 × 560 | 400 | 624 | 1072 to 1073 |
-| `2k` | 840 × 840 | 900 | 1148 | 2101 to 2102 |
-| `4k` | 1260 × 1260 | 2025 | 2071 | 4157 to 4158 |
-| `8k` | 1792 × 1792 | 4096 | 4096 | 8281 to 8282 |
+| Context | Image | Text target | Measured prompt tokens |
+|---|---|---:|---|
+| `1k` | 560 × 560 | 624 | 1,047–1,050 |
+| `2k` | 840 × 840 | 1,148 | 2,071–2,074 |
+| `4k` | 1260 × 1260 | 2,071 | 4,119–4,122 |
+| `8k` | 1792 × 1792 | 4,096 | 8,215–8,219 |
 
-Each context runs at concurrency `1`, `4` and `8`, with `8`, `12` and `24` requests.
+Concurrency 1, 4 and 8 used 8, 12 and 24 measured requests per context, respectively.
 
 ### Suite 2 workload
 
-Suite 2 runs two streams against one arm at the same time. Four workers ask for `1k` requests
-(`560 × 560`, `1073` prompt tokens, `max_tokens=256`). Four other workers send `4k` heavy-vision
-bursts (a unique `1792 × 1792` PNG per request, `4523` prompt tokens, `max_tokens=64`).
-Each stream sends twelve requests, and no image repeats, so no cache can answer a burst.
+Two streams ran concurrently, with four workers and twelve requests each.
+The small stream used unique `560 × 560` images, a `624`-token text target and `max_tokens=256`.
+The heavy-vision stream used unique `1792 × 1792` images, a `400`-token text target and `max_tokens=64`.
+Measured prompt lengths were 1,048–1,051 and 4,520–4,523 tokens, respectively.
 
 ### Suite 3 workload
 
-Suite 3 sends one shared `1792 × 1792` PNG (`4527` prompt tokens, `max_tokens=64`) with a different
-question per request, at concurrency `4` and `8`. This is the multi-turn shape: the image is fixed
-and the encoder's output is worth keeping.
+Suite 3 reused one `1792 × 1792` image with a different question per request.
+It used a `400`-token text target and `max_tokens=64`; measured prompts contained 4,518–4,522 tokens.
+Concurrency 4 and 8 used 12 and 24 measured requests.
 
 ### Method
 
-Two warm-up requests preceded every Suite 1 and Suite 3 configuration and are excluded from the
-results. Each configuration ran once, so every number below is a single measurement. The arms ran
-one after another on a shared cluster, and the later arms had the warmer nodes. See
-[What this run does not measure](#what-this-run-does-not-measure).
+The load generator ran inside the cluster. Each configuration ran once, sequentially on the same node.
+Two warm-up requests preceded every Suite 1 and Suite 3 cell and were excluded from latency summaries.
+The 45 result files contain 36 Suite 1 cells, three mixed-load runs and six repeated-image cells.
+Each mixed-load file reports both streams separately.
 
-## Suite 1: k-context multimodal scaling
+**All 708 measured requests succeeded with zero errors**, 236 per configuration.
+Each configuration also issued 28 warm-up requests.
+*Time per output token (TPOT)* measures per-request generation time per token; *ITL* measures streamed-token gaps.
+Bold table values mark lower latency or higher throughput within each matched workload and concurrency.
 
-`Requests` is succeeded of issued. Every cell succeeded.
+## Suite 1: Multimodal context scaling
 
-| Workload | Prompt tokens | Concurrency | Arm | Requests | TTFT p50 (ms) | TTFT p95 (ms) | TPOT p50 (ms) | ITL p99 (ms) | Output (tok/s) | Throughput (req/s) |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `1k` | 1072 | 1 | Aggregated | 8/8 | 99.1 | 104.4 | 20.46 | 25.26 | 46.1 | 0.715 |
-| `1k` | 1072 | 1 | EPD | 8/8 | 180.4 | 183.9 | 20.29 | 23.16 | 44.09 | 0.651 |
-| `1k` | 1072 | 1 | Prefill/Decode | 8/8 | 198.6 | 205.4 | 20.3 | 23.69 | 43.53 | 0.642 |
-| `1k` | 1072 | 4 | Aggregated | 12/12 | 116.1 | 181.5 | 22.08 | 32.3 | 156.16 | 2.283 |
-| `1k` | 1072 | 4 | EPD | 12/12 | 172.9 | 421.8 | 21.94 | 44.58 | 148.54 | 2.148 |
-| `1k` | 1072 | 4 | Prefill/Decode | 12/12 | 122.1 | 332.8 | 22.1 | 46.89 | 152.3 | 2.089 |
-| `1k` | 1073 | 8 | Aggregated | 24/24 | 176.7 | 250.8 | 23.61 | 60.12 | 290.68 | 4.109 |
-| `1k` | 1073 | 8 | EPD | 24/24 | 227.8 | 501.2 | 22.69 | 53.39 | 272.9 | 3.68 |
-| `1k` | 1073 | 8 | Prefill/Decode | 24/24 | 214.4 | 423.4 | 23.25 | 65.57 | 275.98 | 3.898 |
-| `2k` | 2101 | 1 | Aggregated | 8/8 | 178.3 | 186.8 | 20.63 | 23.49 | 45.56 | 0.384 |
-| `2k` | 2101 | 1 | EPD | 8/8 | 268.0 | 272.3 | 20.52 | 23.71 | 44.15 | 0.378 |
-| `2k` | 2101 | 1 | Prefill/Decode | 8/8 | 321.7 | 326.4 | 20.54 | 23.79 | 43.5 | 0.354 |
-| `2k` | 2101 | 4 | Aggregated | 12/12 | 173.4 | 235.7 | 22.49 | 38.35 | 156.62 | 1.304 |
-| `2k` | 2101 | 4 | EPD | 12/12 | 178.7 | 489.5 | 22.22 | 45.91 | 157.15 | 1.281 |
-| `2k` | 2101 | 4 | Prefill/Decode | 12/12 | 168.3 | 362.2 | 22.37 | 45.23 | 154.26 | 1.288 |
-| `2k` | 2102 | 8 | Aggregated | 24/24 | 276.8 | 453.5 | 23.63 | 94.36 | 280.27 | 2.38 |
-| `2k` | 2102 | 8 | EPD | 24/24 | 260.8 | 932.3 | 23.85 | 47.46 | 265.62 | 2.26 |
-| `2k` | 2102 | 8 | Prefill/Decode | 24/24 | 347.5 | 869.6 | 23.27 | 47.18 | 270.52 | 2.233 |
-| `4k` | 4157 | 1 | Aggregated | 8/8 | 353.1 | 365.3 | 20.85 | 24.14 | 42.66 | 0.333 |
-| `4k` | 4157 | 1 | EPD | 8/8 | 467.2 | 478.3 | 20.75 | 23.75 | 41.27 | 0.322 |
-| `4k` | 4157 | 1 | Prefill/Decode | 8/8 | 583.8 | 587.9 | 20.75 | 23.84 | 39.79 | 0.311 |
-| `4k` | 4157 | 4 | EPD | 12/12 | 205.7 | 1343.1 | 22.52 | 26.85 | 148.12 | 1.157 |
-| `4k` | 4157 | 4 | Aggregated | 12/12 | 339.0 | 832.8 | 22.92 | 28.67 | 151.49 | 1.184 |
-| `4k` | 4157 | 4 | Prefill/Decode | 12/12 | 362.7 | 1280.6 | 22.56 | 27.99 | 144.84 | 1.132 |
-| `4k` | 4158 | 8 | Aggregated | 24/24 | 644.9 | 1732.6 | 24.21 | 167.79 | 249.34 | 1.948 |
-| `4k` | 4158 | 8 | EPD | 24/24 | 959.4 | 2410.1 | 23.67 | 49.23 | 239.73 | 1.873 |
-| `4k` | 4158 | 8 | Prefill/Decode | 24/24 | 860.7 | 1754.0 | 24.87 | 47.81 | 235.19 | 1.837 |
-| `8k` | 8281 | 1 | Aggregated | 8/8 | 705.4 | 747.4 | 21.29 | 24.16 | 37.24 | 0.299 |
-| `8k` | 8281 | 1 | EPD | 8/8 | 856.7 | 887.1 | 21.17 | 24.7 | 35.43 | 0.298 |
-| `8k` | 8281 | 1 | Prefill/Decode | 8/8 | 1129.0 | 1150.6 | 21.17 | 24.79 | 32.81 | 0.276 |
-| `8k` | 8281 | 4 | EPD | 12/12 | 241.8 | 2279.9 | 23.3 | 47.88 | 128.24 | 1.036 |
-| `8k` | 8281 | 4 | Aggregated | 12/12 | 757.1 | 1880.9 | 24.3 | 49.28 | 121.34 | 0.965 |
-| `8k` | 8281 | 4 | Prefill/Decode | 12/12 | 697.9 | 2853.0 | 23.34 | 48.36 | 113.15 | 0.947 |
-| `8k` | 8282 | 8 | EPD | 24/24 | 880.7 | 3394.3 | 26.72 | 52.72 | 187.1 | 1.5 |
-| `8k` | 8282 | 8 | Aggregated | 24/24 | 1243.5 | 2590.3 | 32.41 | 199.34 | 179.13 | 1.459 |
-| `8k` | 8282 | 8 | Prefill/Decode | 24/24 | 1513.9 | 3473.7 | 26.18 | 51.19 | 170.31 | 1.378 |
+| Workload | Concurrency | Configuration | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) | Throughput (req/s) |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| `1k` | 1 | Aggregated | 8/8 | **127.488** | **133.658** | **5.904** | **8.885** | **143.767** | 1.234 |
+| `1k` | 1 | *PD* | 8/8 | 193.346 | 202.953 | 6.014 | 9.089 | 130.569 | 1.140 |
+| `1k` | 1 | *EPD* | 8/8 | 157.290 | 172.886 | 5.926 | 9.168 | 135.864 | **1.259** |
+| `1k` | 4 | Aggregated | 12/12 | **132.585** | **317.836** | 6.810 | 40.568 | **429.372** | **4.179** |
+| `1k` | 4 | *PD* | 12/12 | 352.986 | 514.518 | **6.302** | **12.260** | 371.169 | 3.924 |
+| `1k` | 4 | *EPD* | 12/12 | 234.481 | 435.045 | 6.423 | 13.121 | 420.666 | 3.925 |
+| `1k` | 8 | Aggregated | 24/24 | **294.960** | **574.336** | 7.359 | 43.814 | **744.704** | **6.722** |
+| `1k` | 8 | *PD* | 24/24 | 397.371 | 929.204 | **6.956** | 16.274 | 646.274 | 5.925 |
+| `1k` | 8 | *EPD* | 24/24 | 343.176 | 725.719 | 6.987 | **14.933** | 715.225 | 6.592 |
+| `2k` | 1 | Aggregated | 8/8 | **221.341** | **228.913** | **5.922** | **8.879** | **126.909** | **1.146** |
+| `2k` | 1 | *PD* | 8/8 | 323.722 | 333.260 | 6.022 | 8.968 | 109.430 | 1.068 |
+| `2k` | 1 | *EPD* | 8/8 | 261.095 | 266.917 | 5.935 | 9.255 | 120.054 | 1.125 |
+| `2k` | 4 | Aggregated | 12/12 | **393.122** | **584.277** | 6.611 | 58.282 | **385.090** | **3.245** |
+| `2k` | 4 | *PD* | 12/12 | 583.651 | 1,008.471 | 6.589 | 12.813 | 300.633 | 2.752 |
+| `2k` | 4 | *EPD* | 12/12 | 581.520 | 794.935 | **6.365** | **12.136** | 326.686 | 3.025 |
+| `2k` | 8 | Aggregated | 24/24 | 772.251 | **1,137.334** | 7.751 | 72.554 | 528.024 | 4.771 |
+| `2k` | 8 | *PD* | 24/24 | 1,056.469 | 2,005.102 | **7.622** | 15.551 | 446.540 | 3.887 |
+| `2k` | 8 | *EPD* | 24/24 | **613.996** | 1,230.158 | 7.714 | **15.438** | **537.856** | **5.092** |
+| `4k` | 1 | Aggregated | 8/8 | 442.405 | **448.422** | **5.956** | **8.646** | **94.195** | 1.006 |
+| `4k` | 1 | *PD* | 8/8 | 633.100 | 649.480 | 6.054 | 9.639 | 68.685 | 0.931 |
+| `4k` | 1 | *EPD* | 8/8 | **440.770** | 451.024 | 5.959 | 9.268 | 88.808 | **1.080** |
+| `4k` | 4 | Aggregated | 12/12 | 1,151.042 | **1,229.450** | **6.301** | **10.512** | 179.650 | 2.255 |
+| `4k` | 4 | *PD* | 12/12 | 1,504.409 | 2,001.824 | 7.141 | 13.195 | 164.679 | 1.685 |
+| `4k` | 4 | *EPD* | 12/12 | **808.650** | 1,430.554 | 6.994 | 13.602 | **204.756** | **2.363** |
+| `4k` | 8 | Aggregated | 24/24 | 1,972.504 | **2,403.576** | 9.298 | 231.453 | 231.845 | 2.785 |
+| `4k` | 8 | *PD* | 24/24 | 2,055.500 | 4,379.420 | 8.578 | 15.481 | 216.193 | 2.333 |
+| `4k` | 8 | *EPD* | 24/24 | **1,690.166** | 2,715.341 | **8.469** | **15.352** | **255.080** | **2.985** |
+| `8k` | 1 | Aggregated | 8/8 | 868.512 | 893.580 | **6.039** | **8.905** | 64.577 | 0.705 |
+| `8k` | 1 | *PD* | 8/8 | 1,226.636 | 1,266.734 | 6.130 | 9.598 | 50.824 | 0.565 |
+| `8k` | 1 | *EPD* | 8/8 | **798.743** | **805.795** | 6.052 | 9.204 | **68.562** | **0.739** |
+| `8k` | 4 | Aggregated | 12/12 | 2,129.912 | **2,439.747** | 7.527 | 247.270 | **136.270** | 1.289 |
+| `8k` | 4 | *PD* | 12/12 | 2,867.606 | 4,361.361 | **6.991** | **12.842** | 104.379 | 1.004 |
+| `8k` | 4 | *EPD* | 12/12 | **1,572.574** | 3,156.539 | 8.386 | 15.283 | 134.224 | **1.393** |
+| `8k` | 8 | Aggregated | 24/24 | **3,963.085** | **4,794.768** | 16.081 | 296.710 | 143.211 | **1.460** |
+| `8k` | 8 | *PD* | 24/24 | 4,895.645 | 8,582.882 | **8.180** | 13.822 | 105.850 | 1.162 |
+| `8k` | 8 | *EPD* | 24/24 | 4,182.324 | 5,839.159 | 8.357 | **13.607** | **144.753** | 1.434 |
 
-Time per output token barely separates the arms. TPOT p50 stays between `20.29 ms` and `26.72 ms`
-in all thirty-six cells, and output throughput follows concurrency, not topology: `1k` climbs from
-about `45 tok/s` at one request in flight to `291 tok/s` at eight.
+At `4k` and concurrency 8, *EPD* reduced *ITL* p99 from `231.453 ms` to **15.352 ms**, or **15.1×**.
+*TTFT* p50 also fell from `1,972.504 ms` to `1,690.166 ms`.
+At `8k` and concurrency 8, *ITL* p99 improved **21.8×**, but *TTFT* p50 increased by `219.239 ms`.
+Separating generation from prompt processing improved token-gap tails without consistently improving first-token latency.
 
-Time to first token is where the topology shows.
+Aggregated serving had the lowest *TTFT* p50 for every `1k` cell and the lowest *TTFT* p95 for every `2k` cell.
+At `8k` and concurrency 4, *EPD* improved median *TTFT* but worsened its p95 against aggregated serving.
+The recorded medians and tails support different choices; *EPD* has no universal latency advantage.
 
-**One request in flight.** Aggregated is fastest at every context, and EPD beats prefill/decode at
-every one. A request pays a transfer hop for each connector before its first token, and at low
-concurrency nothing is waiting behind it. At `1k` the EPD penalty is `81.3 ms`, because the transfer
-costs more than a `400`-token vision pass.
+## Suite 2: Mixed vision and decode
 
-**Eight requests in flight.** The two disaggregated arms hold ITL p99 flat, while aggregated degrades
-with prompt length:
+| Workload | Concurrency | Configuration | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) | Throughput (req/s) |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| `concurrent_decode_1k` | 4 | Aggregated | 12/12 | 1,214.046 | 1,573.818 | 12.417 | 296.566 | 176.449 | 1.416 |
+| `concurrent_decode_1k` | 4 | *PD* | 12/12 | 1,487.862 | 1,828.701 | **6.432** | 16.708 | 158.198 | 1.249 |
+| `concurrent_decode_1k` | 4 | *EPD* | 12/12 | **647.387** | **1,001.308** | 8.551 | **16.130** | **241.119** | **2.300** |
+| `heavy_vision_4k` | 4 | Aggregated | 12/12 | 2,215.441 | 2,419.269 | **6.597** | 197.815 | 90.644 | 1.416 |
+| `heavy_vision_4k` | 4 | *PD* | 12/12 | 2,379.965 | 3,770.445 | 7.138 | **16.348** | 79.932 | 1.249 |
+| `heavy_vision_4k` | 4 | *EPD* | 12/12 | **959.134** | **1,971.796** | 8.625 | 16.845 | **147.201** | **2.300** |
 
-| Concurrency 8 | `1k` | `2k` | `4k` | `8k` |
-|---|---|---|---|---|
-| Aggregated | 60.12 | 94.36 | 167.79 | 199.34 |
-| EPD | 53.39 | 47.46 | 49.23 | 52.72 |
-| Prefill/Decode | 65.57 | 47.18 | 47.81 | 51.19 |
+The mixed windows lasted `8.473 s`, `9.608 s` and **5.217 s** for aggregated serving, *PD* and *EPD*.
+Each stream's output and request throughput uses its configuration's full mixed window as the denominator.
+Combined output throughput was `267.093 tok/s`, `238.130 tok/s` and **388.320 tok/s**, respectively.
 
-In the aggregated arm a long prefill shares a card with the requests already generating tokens. Its
-`4k` and `8k` ITL p99 is `3.4×` and `3.8×` EPD's. Prefill/Decode removes the same interference, so
-EPD and prefill/decode differ little on this metric.
+For small requests, *EPD* reduced *TTFT* p50 from `1,214.046 ms` to **647.387 ms** against aggregated serving.
+Their *ITL* p99 fell from `296.566 ms` to **16.130 ms**, or **18.4× lower**.
+For heavy-vision requests, *TTFT* p50 fell from `2,215.441 ms` to **959.134 ms**.
+The isolated roles improved these mixed-load outcomes while using three GPUs instead of one.
 
-TTFT p50 at eight in flight crosses over as the prompt grows. At `1k` and `2k` EPD is still behind
-aggregated. At `4k` it is behind on TTFT p50 (`959.4 ms` against `644.9 ms`) but well ahead on ITL
-p99 (`49.23 ms` against `167.79 ms`). At `8k` EPD wins both: TTFT p50 is `880.7 ms` against
-`1243.5 ms` (aggregated) and `1513.9 ms` (prefill/decode).
+## Suite 3: Encoder-cache reuse
 
-The `8k` cell at four in flight is the strongest result and the weakest measurement. EPD's TTFT p50
-of `241.8 ms` is the lowest of all thirty-six cells, but its p95 is `2279.9 ms`, worse than
-aggregated's `1880.9 ms`. With twelve requests, the p95 sits between the slowest two samples, so
-treat the median and the tail as separate readings.
+| Workload | Concurrency | Configuration | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) | Throughput (req/s) |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| `repeated_4k_c4` | 4 | Aggregated | 12/12 | 1,077.919 | 1,337.691 | 6.403 | 25.708 | 154.699 | 2.417 |
+| `repeated_4k_c4` | 4 | *PD* | 12/12 | 1,304.894 | 1,418.578 | 6.223 | 12.202 | 146.941 | 2.296 |
+| `repeated_4k_c4` | 4 | *EPD* | 12/12 | **298.825** | **322.128** | **6.144** | **9.712** | **367.278** | **5.739** |
+| `repeated_4k_c8` | 8 | Aggregated | 24/24 | 2,196.771 | 2,364.464 | 6.988 | 17.550 | 187.667 | 2.932 |
+| `repeated_4k_c8` | 8 | *PD* | 24/24 | 2,596.832 | 2,685.146 | **6.430** | **14.864** | 170.026 | 2.657 |
+| `repeated_4k_c8` | 8 | *EPD* | 24/24 | **371.850** | **753.291** | 7.272 | 15.744 | **536.280** | **8.379** |
 
-## Suite 2: mixed heavy-vision and concurrent decode
+At concurrency 8, *EPD* reduced *TTFT* p50 from `2,196.771 ms` to **371.850 ms**, or **5.9× lower**.
+Output throughput rose from `187.667 tok/s` to **536.280 tok/s**, or **2.86× higher**.
+*PD* retained the lowest *ITL* p99 in that cell: `14.864 ms` against *EPD*'s `15.744 ms`.
 
-Two streams share one arm: four workers ask for `1k` completions while four workers push `4k`
-unique-image bursts through the same GPU. This test shows how isolating the encoder changes what each
-arm is good at.
-
-| Workload | Arm | Requests | TTFT p50 (ms) | TTFT p95 (ms) | TPOT p50 (ms) | TPOT p95 (ms) | ITL p95 (ms) | ITL p99 (ms) | Output (tok/s) | Throughput (req/s) |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `concurrent_decode_1k` | Aggregated | 12/12 | 388.3 | 502.1 | 24.39 | 27.76 | 25.3 | 89.22 | 69.2 | 1.038 |
-| `concurrent_decode_1k` | EPD | 12/12 | 226.5 | 266.4 | 24.52 | 26.18 | 47.99 | 66.87 | 66.96 | 0.972 |
-| `concurrent_decode_1k` | Prefill/Decode | 12/12 | 315.1 | 380.2 | 24.37 | 25.58 | 46.02 | 55.66 | 63.12 | 0.879 |
-| `heavy_vision_4k` | Aggregated | 12/12 | 2854.0 | 5677.9 | 38.14 | 75.86 | 176.22 | 386.39 | 66.43 | 1.038 |
-| `heavy_vision_4k` | EPD | 12/12 | 5017.0 | 6964.2 | 27.33 | 39.96 | 50.39 | 53.42 | 62.19 | 0.972 |
-| `heavy_vision_4k` | Prefill/Decode | 12/12 | 6187.9 | 7977.2 | 28.57 | 38.55 | 50.15 | 63.61 | 56.23 | 0.879 |
-
-Every arm completed both streams. The two streams share one batch window: `11.561 s` for aggregated,
-`12.35 s` for EPD and `13.658 s` for prefill/decode. The per-stream throughput columns are two views
-of that one window.
-
-**The `1k` stream prefers EPD.** EPD's TTFT p50 is `226.5 ms`, against `315.1 ms` for prefill/decode
-and `388.3 ms` for aggregated, and its p95 is the lowest at `266.4 ms`. In prefill/decode the prefill
-engine runs the `1792 × 1792` vision pass inline, so small prefills queue behind it. In EPD the
-encoder absorbs those passes on its own GPU. In aggregated, the same prefill lands in the engine that
-is also decoding.
-
-**The `4k` stream prefers aggregated on first token and EPD on every token after it.**
-Aggregated's TTFT p50 of `2854.0 ms` is `1.76×` faster than EPD's `5017.0 ms` and `2.17×` faster than
-prefill/decode's `6187.9 ms`, because no embedding crosses a network. After the first token the order
-inverts. Aggregated's ITL p99 is `386.39 ms`, against `53.42 ms` for EPD (`7.23×` worse) and
-`63.61 ms` for prefill/decode. Its TPOT p95 is `75.86 ms`, against `39.96 ms` and `38.55 ms`.
-
-Combined throughput over the window is `135.63 tok/s` for aggregated, `129.15 tok/s` for EPD and
-`119.35 tok/s` for prefill/decode. EPD gives up about `4.8%` of aggregate throughput to make the `1k`
-stream's TTFT `1.39×` faster than prefill/decode and the `4k` stream's ITL p99 `7.23×` faster.
-
-## Suite 3: repeated-image encoder-cache reuse
-
-One shared `1792 × 1792` image, a different question per request, at two concurrencies. The image
-is `4096` visual tokens of encoder work that a cache could answer once.
-
-| Workload | Concurrency | Arm | Requests | TTFT p50 (ms) | TTFT p95 (ms) | TPOT p50 (ms) | ITL p99 (ms) | Output (tok/s) | Throughput (req/s) |
-|---|---|---|---|---|---|---|---|---|---|
-| `repeated_4k_c4` | 4 | Aggregated | 12/12 | 621.4 | 786.8 | 23.76 | 76.57 | 120.17 | 1.878 |
-| `repeated_4k_c4` | 4 | EPD | 12/12 | 356.0 | 422.7 | 22.24 | 37.17 | 143.16 | 2.237 |
-| `repeated_4k_c4` | 4 | Prefill/Decode | 12/12 | 790.6 | 848.9 | 22.25 | 28.61 | 116.51 | 1.82 |
-| `repeated_4k_c8` | 8 | Aggregated | 24/24 | 1131.3 | 1347.3 | 24.45 | 110.02 | 191.4 | 2.991 |
-| `repeated_4k_c8` | 8 | EPD | 24/24 | 570.2 | 693.6 | 22.5 | 46.38 | 251.92 | 3.936 |
-| `repeated_4k_c8` | 8 | Prefill/Decode | 24/24 | 1242.6 | 1437.3 | 22.44 | 49.76 | 191.01 | 2.985 |
-
-This is EPD's clearest result, and the only suite it wins outright. At concurrency 4 its TTFT p50
-of `356.0 ms` is `2.22×` faster than prefill/decode and `1.75×` faster than aggregated, with the
-lowest p95 (`422.7 ms`). At concurrency 8 it reaches `251.92 tok/s`, `31.9%` above prefill/decode
-and `31.6%` above aggregated, and TTFT p50 is about half (`570.2 ms` against `1242.6 ms` and
-`1131.3 ms`).
-
-The cause is the encoder cache. Suite 2's heavy-vision stream has the same `4096`-token encoder input
-with a unique image per request, and there EPD was the slowest arm on first token. Here the image
-repeats and EPD is the fastest. `ECCPUConnector` can answer later requests from a cached embedding,
-while prefill/decode re-runs the vision pass inline and aggregated re-runs it on the card that is also
-decoding.
-
-Prefill/decode has the lowest ITL p99 at concurrency 4 (`28.61 ms`). Once the embeddings are in hand,
-the extra encoder leg costs little.
+These results establish a repeated-image advantage for the captured *EPD* configuration.
+They do not isolate encoder-cache hits from prefix caching, batching or the extra GPU allocation.
+The captured metrics are cumulative across suites, without a per-suite encoder-cache hit-rate delta.
 
 ## Stage execution verification
 
-A `200` does not show which engines ran, because a router that answered every request from one
-replica would return the same status and similar latency. After the run, each arm's engines were
-read for the access line `POST /v1/chat/completions`. For the EPD decoder, the `routing-proxy`
-sidecar was read instead for `processing multimodal items`, because only the sidecar logs what
-arrived from the encoder.
+The stage capture separates completion access lines from token-render calls.
+It includes warm-up traffic and is broader than the 236 measured requests per configuration.
 
-| Arm | Stage | Requests |
-|---|---|---|
-| EPD | `encode` | 264 |
-| EPD | `prefill` | 264 |
-| EPD | `decode` | 264 |
-| EPD | `decode` sidecar | 264 multimodal items |
-| Prefill/Decode | `prefill` | 430 |
-| Prefill/Decode | `decode` | 264 |
-| Aggregated | `server` | 530 |
+| Configuration | Role | Completion lines | Render lines |
+|---|---|---:|---:|
+| Aggregated | *Server* | 264 | 266 |
+| *PD* | *Prefill* | 246 | 266 |
+| *PD* | *Decode* | 264 | 0 |
+| *EPD* | *Encode* | 264 | 0 |
+| *EPD* | *Prefill* | 264 | 0 |
+| *EPD* | *Decode* | 264 | 0 |
 
-The harness issued 264 requests across the three suites. EPD shows three equal counts, so every
-multimodal request was encoded once, prefilled once and pulled by the decoder once.
+The *EPD* *Decode* sidecar also logged **264 multimodal-item events**.
+Each configuration's router access capture contained 280 lines.
+These counts establish traffic at every *EPD* stage, but are not request-ID correlation or byte-transfer measurements.
+The *PD* *Prefill* count is eighteen below its *Decode* count; the capture does not establish the reason.
 
-The `430` and `530` counts exceed 264 because the marker also matches the router's token-render call,
-`POST /v1/chat/completions/render`. The prefill/decode and aggregated arms have no encoder role, so
-their router counts tokens by calling the engine. The EPD arm uses the router's built-in estimator,
-which makes no HTTP call. This is why only those two arms need `--enable-scale-out`.
+The aggregated and *PD* render counts are separate from completion counts.
+A successful response or matching aggregate counts alone cannot prove that every request traversed every intended stage.
+See [Counting engine tokens](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md#counting-engine-tokens) for the router's token-render requirement.
 
-The router's prefix-aware decision also needs a prompt of at least one 16-token KV block. A shorter
-prompt is scheduled to the decoder alone. Keep probe prompts past about twenty tokens when you
-check stage counts through this router.
+## Summary
 
-## When EPD helps and when it does not
+### Benefits
 
-**Use aggregated when prompts are short or concurrency is low.** It has the lowest TTFT in every
-cell at concurrency `1`, and at `1k` and `2k` under load, on one card instead of three. A vision pass
-of a few hundred tokens does not repay two extra network hops. Prefill/decode shows the same cost:
-its TTFT p50 at `1k` and concurrency `1` is `198.6 ms`, against `99.1 ms` for aggregated.
+- Long-prompt generation tails improved: *EPD* had **15.1×–21.8× lower ITL p99** at `4k`/`8k`, concurrency 8, than aggregated serving.
+- Repeated-image traffic reached **536.280 tok/s** at concurrency 8, with **5.9× lower TTFT p50** than aggregated serving.
+- Mixed traffic completed in **5.217 s**, against `8.473 s` for aggregated serving, with lower first-token and token-gap tails.
 
-**Use prefill/decode when decode streams must stay smooth and no image repeats.** It matches EPD on
-ITL p99 in Suite 1 at concurrency 8 and beats it in Suite 3 at concurrency 4, on two cards instead of
-three. Its weakness is first token on heavy vision: `6187.9 ms` on the `4k` stream, and `315.1 ms` on
-the `1k` stream that shares the arm with it. Both are worse than EPD.
+### Trade-offs
 
-**Use EPD for long-prompt multimodal traffic under concurrency, or when the same image repeats.** It
-is the only arm that wins on TTFT p50 and ITL p99 together, at `8k` with concurrency `4` and `8` and
-across Suite 3. The encoder cache pays whenever an image repeats, as in multi-turn chat, and needs
-no concurrency to show a benefit.
+- *EPD* used **three GPUs**, compared with one for aggregated serving and two for *PD*.
+- Small prompts often favored aggregated serving on first-token latency.
+- The `8k`, concurrency-8 *EPD* median *TTFT* remained higher than aggregated serving despite much lower *ITL* p99.
 
-**Avoid EPD when every request carries a unique large image and first-token latency matters most.**
-In Suite 2 it was `1.76×` slower than aggregated on the heavy-vision stream.
+Choose *EPD* for large-image generation isolation, repeated-image workloads or the measured mixed-traffic benefits when three GPUs are available.
+Small-prompt first-token latency can favor aggregated serving.
+The cross-role TCP transfers and unequal GPU budgets prevent a universal latency or equal-cost efficiency claim.
 
-Splitting vision onto its own card pays when the shared card would otherwise be busy: concurrency
-above one, and contexts of `4k` and above. Below those thresholds, with no repeated image, the third
-role only moves embeddings that a single engine would have produced in place.
+## InfiniBand RDMA comparison
 
-## What this run does not measure
+A follow-up on the same ConnectX-7 InfiniBand node setup described in
+[Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md#infiniband-rdma-comparison) ran the
+three-role `epd-arm3-epd` allocation with one GPU per role. **All 16 measured cells completed:
+236/236 requests, with zero errors.**
 
-- **Repetition.** One batch per configuration, 8 to 24 requests per cell. Treat tail differences
-  below roughly 10% as unmeasured. Read the `8k` TTFT p50 of `241.8 ms` at concurrency 4 together
-  with its `2279.9 ms` p95.
-- **Arm order.** The aggregated arm was resident and warm while the EPD benchmark ran, and it was
-  benchmarked while prefill/decode was still starting. Later arms had the warmer cluster.
-- **Interconnect.** Neither node has an RDMA interface, so the KV leg ran over tcp and the encoder leg
-  over NIXL on shared memory. A 100 GbE or RDMA fabric would shrink the transfer penalties that decide
-  the `1k` and `2k` columns.
-- **Parallelism.** TP 1 per role on one 7B model. A model that needs tensor parallelism changes what
-  each role holds and what separating them buys.
-- **Graph capture.** `--enforce-eager` was set on every role. This removes CUDA graphs and lowers
-  decode throughput relative to a default deployment.
-- **Model coverage.** One 7B vision-language model, on one engine (`vLLM`) and one platform
-  (`nvidia`). The `SGLang` `nvidia` rows are verified functionally in the
-  [EPD Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md#sglang-ep--d-behind-both-routers).
-  The `ascend` and `amd` rows of the [admitted matrix](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#the-admitted-matrix) are not verified
-  on hardware.
-- **Cache hit rate.** Suite 3 shows what a repeated image does, not how the hit rate is computed or
-  what invalidates an entry. The benefit assumes the same image arrives with the same preprocessed
-  token prefix.
+### Transport verification
+
+Update `epd-deployment.yaml` from the
+[TCP walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md#step-1-start-three-role-serving):
+
+```diff
+ spec:
++  kvTransfer:
++    protocol: RDMA
+   roles:
+     - name: encode
+       kind: Encode
+       resources:
+         accelerator: "1"
+     - name: prefill
+       kind: Prefill
+       resources:
+         accelerator: "1"
++        interface: "1"
+     - name: decode
+       kind: Decode
+       resources:
+         accelerator: "1"
++        interface: "1"
+```
+
+*Prefill* bound `mlx5_5` with LID `21818`; *Decode* bound `mlx5_3` with LID `21813`.
+Both Mooncake workers logged protocol `rdma` and registered their KV caches.
+The receive log recorded `Received RDMA ready ACK`; the captured logs contained no failed-transfer entries.
+
+This verifies **Mooncake KV transfer over InfiniBand RDMA** between *Prefill* and *Decode*.
+NIXL `ECCPUConnector` still carried multimodal features between *Encode* and *Prefill*.
+The capture does not establish RDMA for that separate encoder-cache path.
+Each role used one GPU, so these cross-role transfers did not use NVLink.
+
+### Context scaling
+
+The matched cells below retain the TCP baseline and add the RDMA follow-up.
+Both runs used the same context targets, concurrency and request counts.
+Bold values mark lower median first-token latency or higher output throughput within each pair.
+
+| Context | Concurrency | TCP *TTFT* p50 (ms) | RDMA *TTFT* p50 (ms) | *TTFT* reduction | TCP output (tok/s) | RDMA output (tok/s) |
+|---|---:|---:|---:|---:|---:|---:|
+| `1k` | 1 | 157.290 | **125.393** | **1.25×** | 135.864 | **140.079** |
+| `1k` | 4 | 234.481 | **176.407** | **1.33×** | 420.666 | **494.492** |
+| `1k` | 8 | 343.176 | **186.279** | **1.84×** | 715.225 | **916.405** |
+| `2k` | 1 | 261.095 | **187.077** | **1.40×** | 120.054 | **129.224** |
+| `2k` | 4 | 581.520 | **219.726** | **2.65×** | 326.686 | **443.715** |
+| `2k` | 8 | 613.996 | **379.328** | **1.62×** | 537.856 | **749.450** |
+| `4k` | 1 | 440.770 | **308.062** | **1.43×** | 88.808 | **104.528** |
+| `4k` | 4 | 808.650 | **342.357** | **2.36×** | 204.756 | **302.606** |
+| `4k` | 8 | 1,690.166 | **442.003** | **3.82×** | 255.080 | **531.323** |
+| `8k` | 1 | 798.743 | **553.685** | **1.44×** | 68.562 | **80.768** |
+| `8k` | 4 | 1,572.574 | **605.871** | **2.60×** | 134.224 | **226.206** |
+| `8k` | 8 | 4,182.324 | **1,207.904** | **3.46×** | 144.753 | **360.029** |
+
+At `4k`, concurrency 8, RDMA reduced *EPD* median *TTFT* **3.82×** and raised output throughput **2.08×**.
+At `8k`, concurrency 8, median *TTFT* fell **3.46×** while output throughput rose **2.49×**.
+The TCP *EPD* first-token regression against aggregated serving at `8k`, concurrency 8, reversed with RDMA.
+
+| Context, concurrency 8 | Aggregated *TTFT* p50 (ms) | RDMA EPD *TTFT* p50 (ms) | Aggregated output (tok/s) | RDMA EPD output (tok/s) |
+|---|---:|---:|---:|---:|
+| `4k` | 1,972.504 | **442.003** | 231.845 | **531.323** |
+| `8k` | 3,963.085 | **1,207.904** | 143.211 | **360.029** |
+
+Against the recorded aggregated configuration, RDMA *EPD* had **4.46× lower median TTFT** at `4k` and **3.28× lower** at `8k`.
+Output throughput was **2.29×** and **2.51× higher**, respectively.
+These comparisons still allocate three GPUs to *EPD* and one to aggregated serving.
+
+### Mixed traffic
+
+| Stream | TCP *TTFT* p50 (ms) | RDMA *TTFT* p50 (ms) | TCP *ITL* p99 (ms) | RDMA *ITL* p99 (ms) | TCP output (tok/s) | RDMA output (tok/s) |
+|---|---:|---:|---:|---:|---:|---:|
+| `concurrent_decode_1k` | 647.387 | **215.522** | 16.130 | **9.894** | 241.119 | **466.705** |
+| `heavy_vision_4k` | 959.134 | **474.237** | 16.845 | **10.119** | 147.201 | **208.875** |
+
+The concurrent decode stream had **3.00× lower median TTFT** and **1.94× higher output throughput**.
+Its *ITL* p99 fell to **9.894 ms**, against TCP *EPD* at 16.130 ms and aggregated serving at 296.566 ms.
+Heavy-vision median *TTFT* fell **2.02×**, with output throughput **1.42× higher**.
+Both streams shared the mixed window: 3.677 s with RDMA, against 5.217 s with TCP.
+
+### Encoder-cache reuse
+
+| Concurrency | TCP *TTFT* p50 (ms) | RDMA *TTFT* p50 (ms) | TCP output (tok/s) | RDMA output (tok/s) |
+|---:|---:|---:|---:|---:|
+| 4 | 298.825 | **246.151** | 367.278 | **390.899** |
+| 8 | 371.850 | **286.294** | 536.280 | **700.762** |
+
+The RDMA follow-up retained the repeated-image benefit and improved median *TTFT* in both measured cells.
+The captures still do not separate encoder-cache hits from prefix caching, batching or GPU allocation.
+
+### Scope and trade-offs
+
+RDMA reversed the `8k`, concurrency-8 first-token disadvantage while retaining separate generation resources.
+It required InfiniBand interfaces on both KV-transfer roles; declaring `RDMA` alone does not establish a working transport.
+The TCP and RDMA measurements are separate runs on the same GPU model, not repeated transport-only trials.
+
+Model, role counts and GPU budgets remained unchanged.
+Neither capture measures cross-node placement or RDMA encoder-cache transfer.
+
+Single-request *ITL* p99 rose slightly in all four context shapes, despite lower median *TTFT* and higher throughput.
+
+## Limitations
+
+- One run per configuration, with 8–24 requests per stream or cell. Tail percentiles have limited sample support.
+- Unequal GPU allocations prevent an equal-cost throughput or per-GPU efficiency conclusion.
+- All serving roles shared one GPU node. Cross-node placement and bandwidth were not measured.
+- The initial capture used cross-`Pod` TCP over `eth0`; the follow-up verified InfiniBand KV transfer. Neither establishes cross-`Pod` NVLink.
+- The configurations ran sequentially with warmed model weights. Cache state and execution order were not independently controlled.
+- Encoder-cache, prefix-cache and compute-isolation effects were not measured separately.
+- Completion limits were fixed, but early stopping produced different output-token totals. Output throughput uses actual generated tokens.
 
 ---
 
-**See also** — [Model Deployment Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) (the topology this run measures) ·
-[Model Deployment Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) (the two-role arm) ·
-[Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) (the roles each arm declares) ·
-[Model Deployment Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) (which replica the router picks) ·
-[EPD Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) (a recorded live run).
+**See also** — [Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) (role and connector contracts) ·
+[Encode, Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) (deployment manifest) ·
+[Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md) (equal-GPU text-model comparison)
 
-**Next** → [Model Deployment Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) — choose a routing policy and inspect candidate endpoints.
+**Next** → [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) — resize one serving instance's collective in place.

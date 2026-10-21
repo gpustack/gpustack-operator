@@ -1,6 +1,6 @@
 # RDMA Networking
 
-The Device Manager publishes usable RDMA endpoints as Kubernetes resources. Workloads request a
+The Device Manager publishes usable *remote direct memory access (RDMA)* endpoints as Kubernetes resources. `Workload`s request a
 count; kubelet decides which endpoints a container receives.
 
 ## Contents
@@ -13,8 +13,8 @@ count; kubelet decides which endpoints a container receives.
 [RDMA Operations](/gpustack-operator/main/docs/modules/rdma/operations/index.md) covers the resource keys, endpoint counts and kubelet
 TopologyManager policy. It also explains why Kueue admission alone does not reserve an interface.
 
-Follow [RDMA Network Endpoints Walkthrough](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md) to
-request and verify endpoints and NUMA alignment.
+Follow [RDMA Networking Walkthrough](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md) to
+request and verify endpoints and *non-uniform memory access (NUMA)* alignment.
 
 ## Interface discovery
 
@@ -23,7 +23,7 @@ checks and labels the Device Manager reports.
 
 ---
 
-**See also** — [Topology Management](/gpustack-operator/main/docs/modules/topology/index.md) (placing a workload within a domain) ·
+**See also** — [Topology](/gpustack-operator/main/docs/modules/topology/index.md) (placing a workload within a domain) ·
 [Heterogeneous Devices](/gpustack-operator/main/docs/modules/devices/index.md) (accelerator allocation)
 
 **Next** → [RDMA Operations](/gpustack-operator/main/docs/modules/rdma/operations/index.md) — request and verify an endpoint.

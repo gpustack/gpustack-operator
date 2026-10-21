@@ -1,0 +1,1712 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>External DP · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-deployment/external-dp/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">main</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">main</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/main/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling Chain</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Network Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod Injection</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-Heavy Nodes</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image Source</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node Store</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/" aria-current="page">External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">External DP</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="external-dp">External DP</h1>
+<p><em>External data parallelism (External DP)</em> runs one fixed group in which every rank exposes its own HTTP endpoint,
+and the Router balances requests across all of them. For captured commands and results, follow the
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
+.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#overview-and-selection">Overview and selection</a>
+</li>
+<li><a href="#load-balancing-derivation">Load-balancing derivation</a>
+</li>
+<li><a href="#per-rank-pod-identity">Per-rank Pod identity</a>
+</li>
+<li><a href="#port-allocation">Port allocation</a>
+</li>
+<li><a href="#endpoint-selection">Endpoint selection</a>
+</li>
+<li><a href="#admission-constraints">Admission constraints</a>
+</li>
+<li><a href="#results">Results</a>
+</li>
+</ul>
+<h2 id="overview-and-selection">Overview and selection</h2>
+<p>A <em>mixture of experts (MoE)</em> model with <em>multi-head latent attention (MLA)</em> or otherwise narrow
+attention heads spends most of a wide tensor-parallel group&rsquo;s bandwidth on the expert collective,
+not on attention. Splitting the group into ranks with <em>data parallelism (DP)</em> gives each rank a
+narrow <em>tensor parallelism (TP)</em> slice in one shared <em>DP</em> × <em>TP</em> collective with <em>expert parallelism (EP)</em>.
+Requests run against independent rank endpoints instead of queuing on one master process.</p>
+<p>Elastic serving uses <em>elastic expert parallelism (Elastic EP)</em> with <em>internal load balancing (Internal LB)</em>.</p>
+<p>The serving configurations compare as follows:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Configuration</th>
+          <th>Collective</th>
+          <th>HTTP ingress</th>
+          <th>Resize contract</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Monolithic <em>TP</em></td>
+          <td>one engine process group, one master</td>
+          <td>one endpoint (the master)</td>
+          <td>replica replacement, not in-place</td>
+      </tr>
+      <tr>
+          <td><em>Elastic EP</em></td>
+          <td>Ray <em>Internal LB</em>, one instance</td>
+          <td>one endpoint (the master)</td>
+          <td>online <em><code>elasticEp.width</code></em> scale-up</td>
+      </tr>
+      <tr>
+          <td><em>External DP</em></td>
+          <td>fixed ranks, <code>--data-parallel-rank</code> each</td>
+          <td>one endpoint <strong>per rank</strong>, Router-balanced</td>
+          <td>fixed; world-size changes recreate</td>
+      </tr>
+  </tbody>
+</table>
+<p>Choose <em>External DP</em> for fixed <em>MoE</em> groups that need per-rank HTTP ingress or lower median first-token
+latency under high concurrency. Its independent rank schedulers do not guarantee higher output throughput.
+Choose <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/">Elastic EP</a>
+ when the collective must grow online while retaining surviving <code>Pod</code>s.</p>
+<p>In the H100 recording, each <em>External DP</em> rank used intra-<code>Pod</code> NVLink for <em>TP</em> = 2.
+The four ranks shared one <em>EP</em> collective over <strong>cross-<code>Pod</code> TCP sockets on <code>eth0</code></strong>.
+The wide <em>TP</em> = 8 comparison kept all eight GPUs inside one NVLink-connected <code>Pod</code>.
+Separate GPU visibility, private IPC and <code>/dev/shm</code>, and no <em>remote direct memory access (RDMA)</em> interface
+bounded the measured transport; host NVLink did not carry cross-<code>Pod</code> traffic.</p>
+<h2 id="load-balancing-derivation">Load-balancing derivation</h2>
+<p>There is no <em>External DP</em> spec field. The operator reads each role&rsquo;s own <em><code>extraArgs</code></em> and <em><code>env</code></em> with
+the engine&rsquo;s flag table (<code>scanModelDeploymentParallelism</code>,
+<code>pkg/worker/controllers/worker/model_deployment_parallelism.go</code>) and derives a load-balancing mode:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Argument (vLLM spelling)</th>
+          <th>Vote</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--data-parallel-external-lb</code></td>
+          <td>External</td>
+      </tr>
+      <tr>
+          <td><code>--data-parallel-rank</code></td>
+          <td>External</td>
+      </tr>
+      <tr>
+          <td><code>--data-parallel-hybrid-lb</code></td>
+          <td>Hybrid</td>
+      </tr>
+      <tr>
+          <td><code>--data-parallel-multi-port-external-lb</code></td>
+          <td>MultiPort (refused on managed roles)</td>
+      </tr>
+  </tbody>
+</table>
+<p>Without an explicit load-balancing flag, degree-based derivation runs only when <code>--data-parallel-start-rank</code>
+is present and <code>--headless</code> is absent: <code>--data-parallel-size-local</code> below <code>--data-parallel-size</code>
+yields External (local size 1) or Hybrid, equal values yield Internal, and <code>--nnodes</code> above one
+without a local size is Unknown; otherwise the no-vote branch returns Internal.</p>
+<p>A Hybrid vote also normalizes to External at local size 1 and Internal when local size equals global
+<em>DP</em>, while contradicting flags yield Unknown and admission refuses the role with the named disagreement.</p>
+<p>The derived mode is reported per role as <code>.status.roles[].parallelism.loadBalance</code> (<code>External</code>,
+<code>Hybrid</code>, <code>Internal</code>, <code>MultiPort</code>, or <code>Unknown</code>), beside the declared degrees (<em><code>dataParallel</code></em>,
+<em><code>dataParallelLocal</code></em>, <em><code>expertParallel</code></em>) and modes (<em><code>expertParallel</code></em> from <code>--enable-expert-parallel</code>).
+SGLang declares the degrees through <code>--dp-size</code> and <code>--ep-size</code>, but the External load-balancing flags are
+vLLM&rsquo;s — an SGLang role resolves to Internal unless its engine accepts the same flags.</p>
+<h2 id="per-rank-pod-identity">Per-rank Pod identity</h2>
+<p>A <em>Server</em> role with <code>size: N</code> runs N member <code>Pod</code>s in one replica group; each member carries one <em>DP</em>
+rank and the whole group shares one collective. The operator injects two environment variables into every
+member and Kubernetes expands their references in the container arguments:</p>
+<ul>
+<li><code>GPUSTACK_MEMBER_INDEX</code> — the zero-based rank of this member; pass it to <code>--data-parallel-rank</code>.</li>
+<li><code>GPUSTACK_REPLICA_LEADER_ADDRESS</code> — the leader&rsquo;s DNS name; pass it to <code>--data-parallel-address</code>.</li>
+</ul>
+<p>The replica&rsquo;s headless <code>Service</code> <code>&lt;deployment&gt;-&lt;role&gt;-r&lt;replica&gt;</code> provides peer DNS; each member
+reaches the leader at
+<code>&lt;deployment&gt;-&lt;role&gt;-r&lt;replica&gt;-m0.&lt;deployment&gt;-&lt;role&gt;-r&lt;replica&gt;</code>. Narrowing that <code>Service</code> to the
+HTTP leader can prevent group startup.</p>
+<p>The <em>TP</em>, <em>DP</em>, rank and address arguments stay in <em><code>extraArgs</code></em>; the operator does not infer them from
+<em><code>size</code></em> or GPU requests. On the recorded vLLM run, these arguments could be omitted because the
+engine derives them from <code>--data-parallel-rank</code>:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Omitted argument</th>
+          <th>Why it is unnecessary</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--data-parallel-external-lb</code></td>
+          <td>An explicit <code>--data-parallel-rank</code> selects <em>external load balancing (External LB)</em></td>
+      </tr>
+      <tr>
+          <td><code>--data-parallel-size-local 1</code></td>
+          <td><em>External LB</em> runs one local <em>DP</em> rank per member</td>
+      </tr>
+      <tr>
+          <td><code>--api-server-count 1</code></td>
+          <td><em>External LB</em> defaults to one API server per rank</td>
+      </tr>
+      <tr>
+          <td><code>--data-parallel-backend mp</code></td>
+          <td><code>mp</code> is the default <em>DP</em> backend</td>
+      </tr>
+      <tr>
+          <td><code>--distributed-executor-backend mp</code></td>
+          <td>The local <em>TP</em> group fits inside one <code>Pod</code></td>
+      </tr>
+      <tr>
+          <td><code>--data-parallel-rpc-port</code></td>
+          <td>All four ranks used the default RPC port</td>
+      </tr>
+  </tbody>
+</table>
+<p><code>--data-parallel-backend</code> selects execution placement; it does not select the <em>load balancing (LB)</em> mode.</p>
+<h2 id="port-allocation">Port allocation</h2>
+<p>For the recorded ephemeral source-port range <code>32768–60999</code>, set <strong><code>1024 &lt;= VLLM_PORT &lt; 32768</code></strong>, such as <code>19500</code>, on every rank.
+Keep the full candidate range below <code>32768</code> and clear of HTTP <code>8000</code>, <em>DP</em> <code>29500</code> / <code>29550</code>, and other listeners.
+Check <code>net.ipv4.ip_local_port_range</code> if customized. This prevents ephemeral-source collisions within that range;
+other listeners and allocation races still require checks.</p>
+<h3 id="allocation-and-coordination">Allocation and coordination</h3>
+<p>In vLLM v0.30.0, <a href="https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/utils/network_utils.py"><code>get_open_ports_list</code></a>
+
+probes five free ports, then closes the probe sockets. With <code>VLLM_PORT</code> unset, it binds port <code>0</code> for kernel allocation.
+With a base set, it scans upward, skips occupied ports, and advances after each find.
+The probe sockets close immediately; another connection can take a candidate before initialization.</p>
+<p>The <em>MoE</em> <a href="https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/v1/engine/utils.py">startup handshake</a>
+
+distributes the leader&rsquo;s initial master port and candidate list to the engine ranks.
+Unrelated initial kernel selections therefore do not inherently cause a mismatch.
+A candidate can still become occupied after probing and before group initialization.</p>
+<p>Fixed multiprocessing <em>External DP</em> does not enable the <em>Elastic EP</em> coordination-store path, so
+<em><code>_coord_store_port</code></em> stays at its default <code>0</code>. The <em>MoE</em> <code>DPCoordinator</code> handles wave coordination;
+it is separate from the store that broadcasts replacement group-init ports.
+In <a href="https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/config/parallel.py"><code>parallel.py</code></a>
+,
+<code>_pick_stateless_dp_port</code> therefore consumes the local candidate list through <code>get_next_dp_init_port</code>.</p>
+<p><code>stateless_init_dp_group</code> makes at most <strong>five attempts</strong>, retrying <code>DistNetworkError</code> only when it contains <code>EADDRINUSE</code>.
+Each retry consumes the next local candidate; after list exhaustion, the master-port fallback increments.
+With <em><code>_coord_store_port</code></em> = <code>0</code>, the leader does not broadcast its retry port to peers.</p>
+<h3 id="conflict-boundaries">Conflict boundaries</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Conflict</th>
+          <th>Behavior</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Symmetric during allocation</td>
+          <td>If every <code>Pod</code> finds <code>19500</code> occupied and the next five ports free, each scan shifts to <code>19501</code>–<code>19505</code>. The shared candidate sequence stays aligned, so initialization can succeed.</td>
+      </tr>
+      <tr>
+          <td>Asymmetric after probing</td>
+          <td>If only leader <code>m0</code> loses its selected port, it retries the next candidate. <code>m1</code>–<code>m3</code> still connect to the old leader port; their connects do not raise local <code>EADDRINUSE</code> or synchronize the retry.</td>
+      </tr>
+  </tbody>
+</table>
+<p>The symmetric case describes <strong>allocation-time scanning</strong>, not a guarantee of coordinated recovery from a later bind failure.
+In the captured asymmetric failure, an outgoing connection occupied leader source port <code>36558</code> in the ephemeral range.
+Leader <code>m0</code> hit <code>EADDRINUSE</code> and switched to <code>36557</code>; peers kept waiting on <code>36558</code>.</p>
+<p>With <code>VLLM_PORT=19500</code>, the group became ready and the logs showed collective initialization at <code>19502</code>.
+That port is an observation, not a fixed base-plus-two contract: candidate consumption and conflicts affect port selection.
+The <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/#step-1-start-the-fixed-group">walkthrough</a>
+ supplies the reusable manifest.</p>
+<h2 id="endpoint-selection">Endpoint selection</h2>
+<p>An ordinary Internal deployment with <code>size &gt; 1</code> exposes one serving instance through its leader:
+the role&rsquo;s <code>Service</code> and Router selectors carry a <code>member-index=0</code> term, because subordinate members
+expose no HTTP endpoint. An External role is the opposite — every member answers — so both selectors
+must cover all ranks.</p>
+<p>The endpoint-eligibility gate makes that switch observable. While the gate is inactive, the selectors
+keep the leader term. Once it activates, <code>modelDeploymentSelectEligibleEndpoints</code>
+(<code>pkg/worker/controllers/worker/model_deployment_service.go</code>) deletes the leader term from the
+role&rsquo;s <code>Service</code> selector, and the Router role selector does the same
+(<code>model_deployment_router.go</code>), so <code>gpustack/llm-router</code> discovers and balances across every qualified rank <code>Pod</code>.</p>
+<p>The answering side agrees: an External role&rsquo;s endpoint-selection mode is <code>modelDeploymentAnsweringAll</code>, read
+from the members&rsquo; running arguments rather than the current spec, so a role edited mid-flight keeps
+serving on its original ranks.</p>
+<p>Status carries both sides of the gate. <em><code>endpoints.eligible</code></em> counts the endpoints the operator
+qualified, and <em><code>endpoints.serving</code></em> is a separate confirmation taken over the role&rsquo;s endpoints — in
+the recorded single-replica, four-rank configuration, <code>eligible</code> read <code>1</code> (one replica group) while
+<code>serving</code> confirmed <code>4</code> HTTP endpoints.</p>
+<p>The Router&rsquo;s registry and per-worker counters are the end-to-end evidence; a successful response
+through the Router alone does not prove all ranks are selected.
+See <a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Status</a>
+ and <a href="/gpustack-operator/main/docs/modules/model-deployment/routing/">Routing</a>
+.</p>
+<h2 id="admission-constraints">Admission constraints</h2>
+<p>Admission enforces these boundaries on managed roles:</p>
+<ul>
+<li><code>MultiPort</code> (<code>--data-parallel-multi-port-external-lb</code>) is refused: managed roles require one HTTP
+endpoint per <code>Pod</code>.</li>
+<li>An unreadable balance (<code>Unknown</code>) is refused with the parse&rsquo;s stated reason.</li>
+<li>The <em>Encode</em> role is refused beside External and Hybrid load balance: an encoder has one producer
+and one output key, so there is no per-member endpoint to balance across.</li>
+<li><em>Prefill</em> and <em>Decode</em> roles beside <em>External DP</em> are not refused, but the combination is unvalidated
+and tracked in <a href="https://github.com/gpustack/gpustack-operator/issues/754">issue #754</a>
+.</li>
+<li><em>Elastic EP</em> and <em>External DP</em> are mutually exclusive configurations: the engine rejects its native <em>Elastic EP</em>
+mode combined with External or <em>hybrid load balancing (Hybrid LB)</em>, and the <em><code>elasticEp</code></em> profile admits exactly one <em>Server</em>
+role with <code>size: 1</code> — its <em><code>width</code></em>, not <em>DP</em> ranks, sizes the collective.</li>
+</ul>
+<p><em><code>size</code></em> is a fate-sharing group, not a resize control: changing it replaces whole replicas instead of
+resizing a running <em>DP</em> group (see <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">Rollout behavior</a>
+). Growing or
+shrinking the <em>DP</em> world means recreating the deployment — or using <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/">Elastic EP</a>
+ for
+width-only growth of a Ray <em>Internal LB</em> group.</p>
+<h2 id="results">Results</h2>
+<p>The H100 SXM5 recording served <code>DeepSeek-V2-Lite-Chat</code> under vLLM v0.30.0 with <em>TP</em> = 2, <em>DP</em> = 4
+and <em>EP</em> world size = 8. All four rank endpoints were healthy behind the <code>round_robin</code> Router.
+Router counters matched engine completion counts: <strong>285 + 284 × 3 requests</strong> (1,137 total: 1,088
+measured requests plus 48 warm-ups and 1 calibration probe). Both configurations completed
+<strong>1,088/1,088 measured requests with zero errors</strong>.</p>
+<p>In the initial TCP recording at concurrency 64, <em>time to first token (TTFT)</em> p50 crossed in favor of <em>External DP</em>:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Prompt/output target</th>
+          <th style="text-align: right">Wide <em>TP</em> = 8 (ms)</th>
+          <th style="text-align: right"><em>DP</em> = 4, <em>TP</em> = 2 (ms)</th>
+          <th style="text-align: right">Median reduction</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>1024/256</code></td>
+          <td style="text-align: right">4,798.411</td>
+          <td style="text-align: right"><strong>1,863.100</strong></td>
+          <td style="text-align: right"><strong>2.58×</strong></td>
+      </tr>
+      <tr>
+          <td><code>4096/128</code></td>
+          <td style="text-align: right">3,814.139</td>
+          <td style="text-align: right"><strong>3,094.017</strong></td>
+          <td style="text-align: right"><strong>1.23×</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>Over TCP, wide <em>TP</em> still delivered <strong>2.27×–6.99× higher output throughput</strong> across all twelve matched cells,
+and at <code>4096/128</code>, concurrency 64, TCP <em>External DP</em> had much worse first-token and token-gap tails.</p>
+<p>With ConnectX-7 InfiniBand <em>RDMA</em> enabled (<code>resources.interface: &quot;2&quot;</code>), four-rank <em>External DP</em>
+reduced median <em>TTFT</em> by <strong>6.26×–8.47×</strong> and increased output throughput by <strong>3.85×–7.01×</strong> over TCP,
+exceeding the wide-<em>TP</em> output throughput at concurrency 64; see
+<a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/#infiniband-rdma-comparison">InfiniBand RDMA comparison</a>
+. Cross-node
+placement remains unmeasured.</p>
+<p><a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/">External DP Benchmark</a>
+ compares a four-rank <em>TP</em> = 2, <em>DP</em> = 4
+<em>External DP</em> group against a monolithic <em>TP</em> = 8 group on the same eight GPUs; the
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
+ holds the per-step
+commands, the native group measurements, and the troubleshooting rows.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
+ (role fields, rollout)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/">Elastic EP</a>
+ (online width growth)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/">Routing</a>
+ (router engines and policies)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/">External DP Benchmark</a>
+ (the measured crossover against a
+monolithic wide tensor-parallel group)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Model Deployment Status</a>
+ — read <em><code>parallelism.loadBalance</code></em> and the endpoint gate.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0ffe734016c60d39a890150175cc1df5216195fc/docs/modules/model-deployment/external-dp.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/external-dp.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#overview-and-selection">Overview and selection</a></li>
+    <li><a href="#load-balancing-derivation">Load-balancing derivation</a></li>
+    <li><a href="#per-rank-pod-identity">Per-rank Pod identity</a></li>
+    <li><a href="#port-allocation">Port allocation</a>
+      <ul>
+        <li><a href="#allocation-and-coordination">Allocation and coordination</a></li>
+        <li><a href="#conflict-boundaries">Conflict boundaries</a></li>
+      </ul>
+    </li>
+    <li><a href="#endpoint-selection">Endpoint selection</a></li>
+    <li><a href="#admission-constraints">Admission constraints</a></li>
+    <li><a href="#results">Results</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

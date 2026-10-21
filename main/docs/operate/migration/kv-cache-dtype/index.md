@@ -1,6 +1,6 @@
 # Upgrading to an Enforced Binding Dtype
 
-From this release, a Binding's `spec.domain.dtype` stops being a declaration and becomes the engine's
+From this release, a Binding's *`spec.domain.dtype`* stops being a declaration and becomes the engine's
 `--kv-cache-dtype`, changing objects a running cluster already holds. The rule itself is stated once,
 under
 [The dtype is handed to the engine](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#engine-dtype).
@@ -8,26 +8,26 @@ under
 ## Contents
 
 - [Changes on upgrade](#changes-on-upgrade)
-- [Check every Binding first](#check-every-binding-first)
-- [Find roles that pass the flag themselves](#find-roles-that-pass-the-flag-themselves)
-- [If new Pods fail argument parsing](#if-new-pods-fail-argument-parsing)
-- [Verify](#verify)
+- [Step 1: Check every Binding](#step-1-check-every-binding)
+- [Step 2: Find roles with flags](#step-2-find-roles-with-flags)
+- [Troubleshooting](#troubleshooting)
+- [Verification](#verification)
 
 ## Changes on upgrade
 
 - Every pool-attached `ModelDeployment` rolls once. Its replicas gain an argument, which moves
   their spec hash, so each is replaced at the deployment's first reconcile after the upgrade.
 - The `dtype` reaches the engine verbatim. A spelling that engine rejects (`bf16` on vLLM,
-  `fp8` or `float16` on SGLang) makes every new Pod fail argument parsing, so each replica the
+  `fp8` or `float16` on SGLang) makes every new `Pod` fail argument parsing, so each replica the
   rollout replaces stops serving.
 - A role's own `--kv-cache-dtype` is refused while it attaches a pool. A deployment already
   stored with one keeps running on its own value, which wins because it comes later on the command
   line, until its next update is refused.
-- A Pod opting into injection is refused when its container passes the flag itself, so its
+- A `Pod` opting into injection is refused when its container passes the flag itself, so its
   owner reports `FailedCreate` until the flag is removed.
 - A new Binding may not declare `auto`. One stored with it keeps working and stays updatable.
 
-## Check every Binding first
+## Step 1: Check every Binding
 
 List every Binding's dtype, then compare each with the engines of the deployments that name it:
 
@@ -42,10 +42,10 @@ Binding whose deployments run both engines needs a value in both rows there. A s
 does not accept is what the next two sections recover from, and fixing it before upgrading is
 cheaper.
 
-## Find roles that pass the flag themselves
+## Step 2: Find roles with flags
 
 These deployments keep their own value after the upgrade, and their next edit is refused until the
-flag is gone from `extraArgs`:
+flag is gone from *`extraArgs`*:
 
 ```bash
 kubectl get modeldeployments -A -o json | jq -r '.items[]
@@ -56,31 +56,32 @@ kubectl get modeldeployments -A -o json | jq -r '.items[]
 
 Remove the flag once the Binding's dtype is the one the role should run.
 
-## If new Pods fail argument parsing
+## Troubleshooting
 
-The dtype is immutable, so the Binding cannot be corrected in place. Turn the Setting off first,
-which renders and refuses nothing and recreates the replicas without the flag:
+When new `Pod`s fail argument parsing, the dtype is immutable, so the Binding cannot be corrected in
+place. Turn the `Setting` off first, which renders and refuses nothing and recreates the replicas
+without the flag:
 
 ```bash
 kubectl -n gpustack-system patch setting model-deployment-kv-cache-dtype-owned \
   --type merge -p '{"spec":{"value":"false"}}'
 ```
 
-Then move the workloads to a Binding with a spelling the engine accepts, and turn the Setting back on:
+Then move the workloads to a Binding with a spelling the engine accepts, and turn the `Setting` back on:
 
-1. Create a new Binding on the same pool with the corrected `dtype` and a new `domain.name`; the old
+1. Create a new Binding on the same pool with the corrected `dtype` and a new *`domain.name`*; the old
    name stays claimed until the old Binding is gone.
-2. Recreate each deployment with `spec.kvCache.poolRef.name` naming the new Binding. `kvCache` is an
+2. Recreate each deployment with *`spec.kvCache.poolRef.name`* naming the new Binding. *`kvCache`* is an
    identity field, so it is a new deployment rather than an edit.
 3. Delete the old deployments; the old Binding's deletion completes once none of them holds it.
-4. Patch the Setting back to `"true"`.
+4. Patch the `Setting` back to `"true"`.
 
 The cache under the old domain is not carried over. It was written without a binding dtype, so it
 is not worth keeping.
 
-## Verify
+## Verification
 
-Every replica of a pool-attached role carries the Binding's value as two entries of its `command`,
+Every replica of a pool-attached role carries the Binding's value as two entries of its *`command`*,
 because the operator owns that role's whole argv and folds every argument into it:
 
 ```bash
@@ -89,13 +90,13 @@ kubectl -n <namespace> get pods -l app.kubernetes.io/instance=<deployment> \
   | grep -o -- '--kv-cache-dtype","[^"]*'
 ```
 
-An injected Pod carries the same two entries at the end of its `args`, where the webhook appends.
+An injected `Pod` carries the same two entries at the end of its `args`, where the webhook appends.
 
 ---
 
-**See also** — [KV Cache Pool](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md) (the dtype rule) ·
+**See also** — [KV Cache Pools and Bindings](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md) (the dtype rule) ·
 [ModelDeployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#operator-owned-keys) (what the operator owns) ·
-[KV Cache Injection](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md) (the Pod path) ·
+[KV Cache Injection](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md) (the `Pod` path) ·
 [Settings](/gpustack-operator/main/docs/reference/settings/index.md) (the escape switch)
 
 **Next** → [Migration Troubleshooting](/gpustack-operator/main/docs/operate/migration/troubleshooting/index.md) — when an upgrade wedges for another reason.

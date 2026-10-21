@@ -1,29 +1,29 @@
 # Model Deployment Shutdown
 
-A `ModelDeployment` replica drains during the interval between Pod deletion and engine exit.
+A `ModelDeployment` replica drains during the interval between `Pod` deletion and engine exit.
 The grace period bounds how long it can wait for running requests and engine shutdown.
 
 ## Contents
 
-- [The drain window](#the-drain-window)
-- [The retirement protocol](#the-retirement-protocol)
-- [Coverage limits](#coverage-limits)
+- [Drain window](#drain-window)
+- [Retirement protocol](#retirement-protocol)
+- [Limitations](#limitations)
 
-## The drain window
+## Drain window
 
 A replica whose command line the operator builds drains before its engine stops, whatever deleted
-its Pod: a rollout, a node drain, a preemption or `kubectl delete pod`. A removal the spec makes —
-a `replicas` reduction, a surplus shed, a dropped role — goes through
-[the retirement protocol](#the-retirement-protocol) first, and its Pod is deleted when that
+its `Pod`: a rollout, a node drain, a preemption or `kubectl delete pod`. A removal the spec makes —
+a *`replicas`* reduction, a surplus shed, a dropped role — goes through
+[the retirement protocol](#retirement-protocol) first, and its `Pod` is deleted when that
 finishes.
 
 An edit that replaces a role's configuration deletes that role's old replicas one at a time, and
 each deleted replica drains exactly as below. The protocol reads a leaving replica as it is
 deployed — the size and command it was created with — so an edit elsewhere does not change how it
-is classified: a take-over replica is still held, a prefill or decode replica still refused.
+is classified: a take-over replica is still held, a *prefill* or *decode* replica still refused.
 
-`G` below is the role's grace: `roles[].terminationGracePeriodSeconds`, 30 when unset, written to
-the Pod's field of the same name.
+`G` below is the role's grace: *`roles[].terminationGracePeriodSeconds`*, 30 when unset, written to
+the `Pod`'s field of the same name.
 
 | From the delete | At the default | Action |
 |---|---|---|
@@ -48,8 +48,8 @@ delete, and a rollout waits each departing replica out one at a time per role, s
 into every rollout. What it buys is a longer wait for running requests, and a clean exit for an
 engine slow to stop after SIGTERM.
 
-**An SGLang prefill or decode role needs up to about 20 s after SIGTERM, even idle, so set its
-`terminationGracePeriodSeconds` to about 45.** Measured idle, a decoder left 26 s and a prefiller
+**An SGLang *prefill* or *decode* role needs up to about 20 s after SIGTERM, even idle, so set its
+*`terminationGracePeriodSeconds`* to about 45.** Measured idle, a decoder left 26 s and a prefiller
 28 s after its delete, 2 s short of the kill at the default 30 s. From SGLang 0.5.14 on, its
 split-role scheduler ignores the shutdown request SIGTERM leads to, and the engine waits a fixed 15 s
 for that scheduler before killing it.
@@ -58,9 +58,9 @@ for that scheduler before killing it.
 > A grace of 45 buys a clean exit rather than a kill, since the engine kills its scheduler itself
 > either way. The replica is idle by then, so the kill at 30 s cuts no request.
 
-The hook sums these gauges from the listener the Pod's
+The hook sums these gauges from the listener the `Pod`'s
 [scrape annotations](/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md#scraping-the-pods) name. On a direct decoder that is
-the engine behind the routing proxy, not the port the Service fronts.
+the engine behind the routing proxy, not the port the `Service` fronts.
 
 | Engine | Gauges summed |
 |---|---|
@@ -71,18 +71,18 @@ A listener that refuses the read, answers an HTTP error or fails the TLS handsha
 once, since there is nothing it can measure. A read that times out counts as busy, and so does a
 sample the hook cannot parse.
 
-Adding the hook and the grace changed every replica's Pod spec, so upgrading to the release that
+Adding the hook and the grace changed every replica's `Pod` spec, so upgrading to the release that
 carries them turns each existing replica over once; see
 [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior).
 
-Changing a role's `terminationGracePeriodSeconds` turns its replicas over the same way, and each
+Changing a role's *`terminationGracePeriodSeconds`* turns its replicas over the same way, and each
 replica that leaves in that rollout leaves with the grace it was created with. Writing 30 onto a
-role that set none renders the same Pods, so it turns nothing over.
+role that set none renders the same `Pod`s, so it turns nothing over.
 
-## The retirement protocol
+## Retirement protocol
 
 **A replica the spec takes capacity away from is withdrawn and drained before it is deleted, and
-the deletion waits for that to finish.** The protocol covers a `replicas` reduction, a shed of
+the deletion waits for that to finish.** The protocol covers a *`replicas`* reduction, a shed of
 surplus replicas, and a replica of a role the spec has dropped. Its progress is the
 [`status.retirement` field](/gpustack-operator/main/docs/modules/model-deployment/status/index.md#status), and the replica stays in place, still counted,
 for as long as the protocol holds it.
@@ -91,23 +91,23 @@ For `llm-d-router`, withdrawal also waits for recent dispatches reported for a t
 This applies after the Router removes that member from selection. These records do not increase
 the serving count. A dispatch to an unrelated survivor does not hold the target.
 
-Without `spec.router`, withdrawal cannot observe established connections made directly through the
-role's Service. An admitted, running replica stays held during scale-down or surplus removal.
-The withdrawal budget expires after 30 seconds and retirement ends as `Aborted`, retaining its Pods,
-Workload and capacity. Removing the Service endpoint does not prove those connections have ended.
+Without *`spec.router`*, withdrawal cannot observe established connections made directly through the
+role's `Service`. An admitted, running replica stays held during scale-down or surplus removal.
+The withdrawal budget expires after 30 seconds and retirement ends as `Aborted`, retaining its `Pod`s,
+`Workload` and capacity. Removing the `Service` endpoint does not prove those connections have ended.
 Groups that never executed or received admission follow their separate cleanup path.
 
 Two mechanisms are involved and they answer different questions. The protocol decides **whether the
-Pod may be deleted**; the [drain window](#the-drain-window) above decides **how long the engine
+`Pod` may be deleted**; the [drain window](#drain-window) above decides **how long the engine
 takes to exit once it is**, on the kubelet's grace clock after the delete. A replica passes the
 first and still spends the second.
 
-### Reading a member's work
+### Reading member work
 
 The read is one bounded, read-only `pods/exec` into the member's own `main` container, which
 fetches that engine's `/metrics` over loopback on the port the member's own
 [scrape annotations](/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md#scraping-the-pods) name. Reading it from inside the member is what
-makes the answer per-member: a scrape through the Service would land on whichever replica answered
+makes the answer per-member: a scrape through the `Service` would land on whichever replica answered
 and could not say which one was idle.
 
 | Bound | Value |
@@ -125,18 +125,18 @@ member that is still working. A second read that finds work holds the operation.
 
 **Not every member of a replica is read, because not every member can answer.** The protocol works
 out which members of the target can speak for it as a whole, and reads only those: a replica of one
-Pod answers through itself, and a leader-served replica of several answers through the member
+`Pod` answers through itself, and a leader-served replica of several answers through the member
 carrying rank 0.
 
 Selecting them does not narrow the deletion, which still covers every member the reservation bound,
 so a replica is only held when the operator cannot tell which member its answer comes from. See
-[Coverage limits](#coverage-limits) for what a hold there means.
+[Limitations](#limitations) for what a hold there means.
 
-### What the drain read refuses
+### Drain read refusals
 
-Every one of these holds the replica in place, and the `reason` on the reservation names which one
-applied. They are the ordinary outcomes of a replica that is busy, loading, or not
-the shape the protocol knows how to measure.
+Every one of these holds the replica in place, and the *`reason`* on the reservation names which one
+applied. They are the ordinary outcomes of a replica that is busy, loading, or outside
+the configurations the protocol can measure.
 
 | The member | Verdict | Why |
 |---|---|---|
@@ -144,7 +144,7 @@ the shape the protocol knows how to measure.
 | answers with some gauges missing | held | a partial envelope is not evidence of an empty queue, and a reader cannot sum what it did not find |
 | the exec fails, times out, or returns a body that is not metrics | held | nothing was measured, and an absence of measurement is not a measurement of absence |
 | the container has restarted | held | the gauges now served come from an engine that did not exist when the protocol began watching |
-| a prefill or decode replica | refused | see below |
+| a *prefill* or *decode* replica | refused | see below |
 | a take-over role | held | the operator renders no endpoint for it, so there is nothing to read |
 | an engine with no gauge list | refused | no such measurement exists for it |
 
@@ -157,48 +157,48 @@ keeps crash-looping ends as `Aborted` with its capacity retained, and never bloc
 > less for it. The protocol cannot tell whether a restarted engine is a replacement it should wait
 > for or a crash loop it should give up on, and the budget is what resolves that question.
 
-**A prefill or decode replica is refused outright.** Its queues are visible from both engines, so
+**A *prefill* or *decode* replica is refused outright.** Its queues are visible from both engines, so
 this is not a case of unmeasured work.
 
-What is not verifiable is the release. A decode replica reading zero is an engine about to be
-handed work, and nothing in either engine's metrics proves it will not be. The shape stays refused
-until a decoder-side release can be verified, because the other answer deletes a decode replica in
-the middle of a prefill.
+What is not verifiable is the release. A *decode* replica reading zero is an engine about to be
+handed work, and nothing in either engine's metrics proves it will not be. This configuration stays refused
+until a decoder-side release can be verified, because the other answer deletes a *decode* replica in
+the middle of a *prefill*.
 
-Both engines report a decoder's work while it waits to receive its KV: a prefill half holds it in
-its transfer queue, and a decode half holds it in its own prealloc and transfer queues.
+Both engines report a decoder's work while it waits to receive its KV: a *prefill* half holds it in
+its transfer queue, and a *decode* half holds it in its own prealloc and transfer queues.
 
-The refusal is read from the member Pod's own rendered command, so it still applies to a replica
+The refusal is read from the member `Pod`'s own rendered command, so it still applies to a replica
 whose role the spec has already dropped. Both engines are covered: a vLLM
 member is recognized by its data-parallel balance flags, and an SGLang member by its
 `--disaggregation-mode prefill` or `decode`.
 
-## Coverage limits
+## Limitations
 
 - **A request still running at `G` − 5 is cut**, 25 s after the delete at the default. vLLM aborts it
   when SIGTERM arrives; SGLang keeps draining it on its own until the kill at `G`. No supported
   router moves a running request to another replica: the SGLang gateway retries only while the
   response has not started, and the other two routers do not retry.
-- **An SGLang prefill or decode replica whose hook returns later than `G` − 20 is killed at `G`**,
+- **An SGLang *prefill* or *decode* replica whose hook returns later than `G` − 20 is killed at `G`**,
   since its engine then has less than the 20 s it takes to exit: 10 s after the delete at the
   default, 25 s at 45. The replica is idle by that point, or its hook gave up on it, so the kill cuts
   no request the deadline would not.
-- **A take-over role** (one that sets `command`) gets no hook, because the operator cannot claim
-  that container serves the gauges. Its Pod gets the role's `terminationGracePeriodSeconds` as given,
+- **A take-over role** (one that sets *`command`*) gets no hook, because the operator cannot claim
+  that container serves the gauges. Its `Pod` gets the role's *`terminationGracePeriodSeconds`* as given,
   and keeps the Kubernetes default when the role sets none.
 - **A role that moves the engine with its own `--port`** gets only the first 5 s: nothing answers the
   hook on the port the operator rendered.
-- **A replica of several Pods drains through its leader, and every member is still deleted.** The
+- **A replica of several `Pod`s drains through its leader, and every member is still deleted.** The
   other members serve no metrics, so their hooks return after the first 5 s, and they receive SIGTERM
   while the leader is still draining. The protocol reads the members whose answer stands for the whole
   replica, which on a leader-served replica is the leader alone.
 - **A replica whose answering member cannot be named is held** — none of its members carries the
-  leader index, more than one does, its members disagree on the shape, or its role says a size the
-  replica does not have — and the `reason` names which. Selecting the leader does not narrow the
-  deletion: as [the protocol above](#the-retirement-protocol) states, it still covers every member
+  leader index, more than one does, its members disagree on the configuration, or its role says a size the
+  replica does not have — and the *`reason`* names which. Selecting the leader does not narrow the
+  deletion: as [the protocol above](#retirement-protocol) states, it still covers every member
   the reservation bound.
-- **A prefill or decode replica is refused by the protocol**, so it is never deleted through one.
-  The [drain window](#the-drain-window) still applies to it once something else deletes its Pod.
+- **A *prefill* or *decode* replica is refused by the protocol**, so it is never deleted through one.
+  The [drain window](#drain-window) still applies to it once something else deletes its `Pod`.
 - **A direct decoder on a cluster below Kubernetes 1.29** runs its routing proxy as a classic
   container, which stops at the delete while the engine behind it drains, so a request in flight
   through the proxy still resets. The proxy's image has no shell to run a hook of its own.

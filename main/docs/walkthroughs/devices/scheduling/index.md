@@ -1,49 +1,50 @@
-# Scheduling Walkthrough
+# Heterogeneous Devices Walkthrough
 
-This page records a real session: every `kubectl` invocation and its real output, objects as YAML
-trimmed to `metadata.labels` / `spec` / `status`, and a before / after `kubectl get instancetypes`
-per operation. Node names are genericized (`node-cpu`, `node-a10g`, `node-t4-a`, `node-t4-b`).
+Inspect accelerator scheduling on a four-node cluster through captured `kubectl` commands and output.
+Object YAML retains *`metadata.labels`*, *`spec`* and *`status`*. Each operation includes before-and-after
+`kubectl get instancetypes` output. `Node` names are genericized as `node-cpu`, `node-a10g`,
+`node-t4-a` and `node-t4-b`.
 
-The run uses the defaults: `instance-type-derived-from-node=true` auto-derives the pool objects,
-`instance-type-aware-cpu-manufacturer=false` keeps the CPU manufacturer out of the aggregation layer
-until section 5 flips it on.
+The run uses the defaults: `instance-type-derived-from-node=true` auto-derives the pool objects, and
+`instance-type-aware-cpu-manufacturer=false` keeps the CPU manufacturer out of the aggregation layer until Step 5 flips it on.
 
-Watch three columns: **UNIT(CPU/RAM)/STORAGE**, the per-unit request the InstanceType charges; **CPU**,
-the collapsed CPU pool's `remaining/capacity` cores; **ACCELERATOR(EX/SH/SL/PT)**, the
-`onceMaxRequest/remaining` of each [four-view](/gpustack-operator/main/docs/modules/devices/admission/index.md#four-view-status)
-projection. This run predates the shared card-count reading, so its `SH` once-max figures are
-shares, not accelerators ([Pre-release breaks](/gpustack-operator/main/docs/modules/devices/requests/index.md#pre-release-breaks)).
+Watch three columns: **UNIT(CPU/RAM)/STORAGE**, the per-unit request the `InstanceType` charges; **CPU**, the collapsed
+CPU pool's `remaining/capacity` cores; **ACCELERATOR(EX/SH/SL/PT)**, the `onceMaxRequest/remaining` of each
+[four-view](/gpustack-operator/main/docs/modules/devices/admission/index.md#four-view-status) projection. This run predates the shared card-count
+reading, so its `SH` once-max figures are shares, not accelerators ([Pre-release breaks](/gpustack-operator/main/docs/modules/devices/requests/index.md#pre-release-breaks)).
 
-Each accelerator counts in exactly one of `EX`/`SH`/`SL` (unpartitioned) or `PT` (partitioned), so
-`0/0` under `PT` throughout means none is in a partitioning mode. For the all-partitioned and **mixed**
-configurations see the [three-configuration
-walkthrough](../../modules/devices/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node).
+Each accelerator counts in exactly one of `EX`/`SH`/`SL` (unpartitioned) or `PT` (partitioned), so `0/0`
+under `PT` throughout means none is in a partitioning mode. For the all-partitioned and **mixed** configurations see the
+[three-configuration walkthrough](/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md#three-mig-configurations).
 
 ## Contents
 
-- [The cluster](#the-cluster)
-- [1. Initial state](#1-initial-state)
-- [2. Removing a node from management](#2-removing-a-node-from-management)
-- [3. Requesting a logical sliced GPU](#3-requesting-a-logical-sliced-gpu)
-- [4. Managing a custom InstanceType](#4-managing-a-custom-instancetype)
-- [5. Enabling CPU-manufacturer awareness](#5-enabling-cpu-manufacturer-awareness)
-- [6. Pinning an Instance to a node and adding volumes](#6-pinning-an-instance-to-a-node-and-adding-volumes)
+- [Summary](#summary)
+- [Step 1: Read the initial pools](#step-1-read-the-initial-pools)
+- [Step 2: Remove a managed node](#step-2-remove-a-managed-node)
+- [Step 3: Request a logical slice](#step-3-request-a-logical-slice)
+- [Step 4: Manage a custom InstanceType](#step-4-manage-a-custom-instancetype)
+- [Step 5: Enable CPU awareness](#step-5-enable-cpu-awareness)
+- [Step 6: Instance pinning and volumes](#step-6-instance-pinning-and-volumes)
+- [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
-## The cluster
+## Summary
+
+NFD labels the nodes, and the Device Manager updates each `Devices` ledger. The worker derives Kueue
+`ResourceFlavor`s. The operator creates the aggregated `InstanceType` and `ClusterQueue` pools that
+admit `Instance` `Pod`s.
 
 Four `linux/amd64` nodes, all operator-managed:
 
-| Node | CPU (`gKey`) | Cores | Accelerator (`aKey`) |
+| `Node` | CPU (`gKey`) | Cores | Accelerator (`aKey`) |
 |---|---|---|---|
 | `node-cpu` | `amd-epyc-7r13` | 16 | — |
 | `node-a10g` | `amd-epyc-7r32` | 4 | 1 × NVIDIA A10G (`nvidia-a10g`) |
 | `node-t4-a` | `intel-xeon-platinum-8259cl` | 4 | 1 × NVIDIA Tesla T4 (`nvidia-tesla-t4`) |
 | `node-t4-b` | `intel-xeon-platinum-8259cl` | 48 | 4 × NVIDIA Tesla T4 (`nvidia-tesla-t4`) |
 
----
-
-## 1. Initial state
+## Step 1: Read the initial pools
 
 With `instance-type-derived-from-node` on, the operator materializes the finest-grain `ResourceFlavor`s
 and one collapsed pool per accelerator plus a generic CPU pool:
@@ -84,9 +85,9 @@ node-a10g
 node-t4-b
 ```
 
-- **7 ResourceFlavors**, one per `(gKey, [aKey,] os, arch, count)` — `node-t4-b` (48 cores, 4×T4)
+- **7 `ResourceFlavor`s**, one per `(gKey, [aKey,] os, arch, count)` — `node-t4-b` (48 cores, 4×T4)
   yields both `…-48c` and `…--nvidia-tesla-t4-…-4d`.
-- **3 ClusterQueues / InstanceTypes**, collapsed — **A10G** `1/1 10/10 100/100 0/0` (1 accelerator),
+- **3 `ClusterQueue`s / `InstanceType`s**, collapsed — **A10G** `1/1 10/10 100/100 0/0` (1 accelerator),
   **T4** `4/5 40/50 100/500 0/0` (5 = `node-t4-a`'s 1 + `node-t4-b`'s 4, none partitioned).
 - **No `Devices` for `node-cpu`** — it carries no accelerator.
 
@@ -94,7 +95,7 @@ One of each kind, from the A10G node:
 
 ### Node
 
-Labeled by two NodeFeatures: `node-a10g-gpustack-worker` (the `general.*` CPU keys + `managed`) and
+Labeled by two `NodeFeature`s: `node-a10g-gpustack-worker` (the `general.*` CPU keys + `managed`) and
 `node-a10g-gpustack-device-manager` (the `acceleratable.*` device keys):
 
 ```yaml
@@ -145,14 +146,14 @@ status:
         - id: GPU-e0587d2e-127c-4fb8-e2c1-6e517529f575
           index: 0
           mode: 0
-          remaining: 1600000        # per-accelerator credit ledger the AdmissionCheck reads
+          remaining: 1600000  # per-accelerator credit ledger the AdmissionCheck reads
 ```
 
 ### ResourceFlavor
 
 The finest, setting-independent grain, `gpustack--${gKey}[--${aKey}]-${os}-${arch}-${count}{c|d}`. An
 **accelerated** one carries `feature.gpustack.ai/acceleratable=true`, both the CPU (`general.`) and
-device (`acceleratable.`) keys, and pins nodes via `spec.nodeLabels`:
+device (`acceleratable.`) keys, and pins nodes via *`spec.nodeLabels`*:
 
 ```yaml
 apiVersion: kueue.x-k8s.io/v1beta2
@@ -165,9 +166,9 @@ metadata:
     feature.gpustack.ai/acceleratable: "true"
     general.feature.gpustack.ai/amd-epyc-7r32: "true"
     acceleratable.feature.gpustack.ai/nvidia-a10g: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g.count: "1"       # per-node accelerator count
-    acceleratable.feature.gpustack.ai/nvidia-a10g.capacity: "1"    # pooled capacity (nodes × count)
-    resource.gpustack.ai/type: nodes                               # operator-owned marker
+    acceleratable.feature.gpustack.ai/nvidia-a10g.count: "1"     # per-node accelerator count
+    acceleratable.feature.gpustack.ai/nvidia-a10g.capacity: "1"  # pooled capacity (nodes × count)
+    resource.gpustack.ai/type: nodes  # operator-owned marker
 spec:
   nodeLabels:
     kubernetes.io/os: linux
@@ -237,7 +238,7 @@ spec:
 ### InstanceType
 
 The schedulable pool: webhook-stamped labels (schedule discriminators, `derived-from-node` provenance,
-the fronting `queue-entrance`), `spec` enriched from the matching flavor, `status` the reconciled
+the fronting `queue-entrance`), *`spec`* enriched from the matching flavor, *`status`* the reconciled
 four-view:
 
 ```yaml
@@ -255,7 +256,7 @@ metadata:
 spec:
   acceleratable: true
   acceleratorGroup: nvidia-a10g
-  generalGroup: generic          # collapsed — awareness is off
+  generalGroup: generic  # aggregated because CPU awareness is disabled
   os: linux
   arch: amd64
   manufacturer: nvidia
@@ -270,7 +271,7 @@ spec:
       memoryPercentageStep: 1
     physicalSliced:
       maxSize: 0
-  unitResources:            # the nvidia-a10g preset, not a fixed default
+  unitResources:  # the nvidia-a10g preset, not a fixed default
     cpu: "8"
     ram: 64Gi
   localStorage: 100Gi
@@ -288,7 +289,7 @@ status:
     capacity: "100"
     onceMaxRequest: "100"
     remaining: "100"
-  acceleratorPartitioned:          # no accelerator here is in a partitioning mode
+  acceleratorPartitioned:  # no accelerator here is in a partitioning mode
     capacity: "0"
     onceMaxRequest: "0"
     remaining: "0"
@@ -298,7 +299,7 @@ status:
 ### InstanceTypeFlavor
 
 An os/arch-agnostic catalog view aggregated read-only from the flavors, with **no
-`metadata.labels`** — its grouping identity lives in `spec`:
+*`metadata.labels`*** — its grouping identity lives in *`spec`*:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -315,12 +316,10 @@ spec:
   sliceable: true
 ```
 
----
-
-## 2. Removing a node from management
+## Step 2: Remove a managed node
 
 A node stays in a pool only while it carries `gpustack.ai/managed=true`, required by the flavor's
-`spec.nodeLabels` and stamped through the node's worker NodeFeature.
+*`spec.nodeLabels`* and stamped through the node's worker `NodeFeature`.
 
 **Before** — `node-a10g` managed:
 
@@ -332,9 +331,9 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-The worker writes one NodeFeature per node, in `gpustack-system`, named `<node>-gpustack-worker`
-(see [Device Scheduling](/gpustack-operator/main/docs/modules/devices/scheduling/index.md)).
-This is the one for `node-a10g`, which carries the managed label and the CPU keys from the Node above:
+The worker writes one `NodeFeature` per node, in `gpustack-system`, named `<node>-gpustack-worker`
+(see [Device Scheduling](/gpustack-operator/main/docs/modules/devices/scheduling/index.md)). This is the one for `node-a10g`,
+which carries the managed label and the CPU keys from the `Node` above:
 
 ```yaml
 apiVersion: nfd.k8s-sigs.io/v1alpha1
@@ -389,7 +388,7 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-Two rows move: the A10G to `0/0 0/0 0/0` (its ResourceFlavor is deleted), and the generic **CPU**
+Two rows move: the A10G to `0/0 0/0 0/0` (its `ResourceFlavor` is deleted), and the generic **CPU**
 `48/72` → `48/68`, as `node-a10g`'s 4 cores leave the pool.
 
 Re-admit it and one reconcile rebuilds the flavor and restores the counts:
@@ -423,13 +422,11 @@ gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi
      general.feature.gpustack.ai/amd-epyc-7r32.count: "4"
 ```
 
----
+## Step 3: Request a logical slice
 
-## 3. Requesting a logical sliced GPU
-
-A sliceable InstanceType — the A10G reports logical slicing in its status detail — admits
-fractional-accelerator workloads. Request 20 % of an accelerator's VRAM with
-`acceleratorSlicedMemoryPercentage`:
+A sliceable `InstanceType` — the A10G reports logical slicing in its status detail — admits
+fractional-accelerator workloads. Request 20% of an accelerator's VRAM with
+*`acceleratorSlicedMemoryPercentage`*:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -445,7 +442,7 @@ spec:
     - "86400"
   resources:
     accelerator: "1"
-    acceleratorSlicedMemoryPercentage: 20      # 20% of the accelerator's VRAM
+    acceleratorSlicedMemoryPercentage: 20  # 20% of the accelerator's VRAM
     acceleratorSlicedCoresPercentage: 100
   volume:
     ephemeral:
@@ -463,18 +460,18 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-The A10G row moves `1/1 10/10 100/100 0/0` → `0/0 0/0 80/80 0/0`: **SL** gives up the 20 % slice;
+The A10G row moves `1/1 10/10 100/100 0/0` → `0/0 0/0 80/80 0/0`: **SL** gives up the 20% slice;
 **EX** and **SH** fall to `0/0` because a partly-sliced accelerator is neither whole nor a shared
 unit; **PT** stays `0/0`, since no partitioning mode means no hardware partition.
 
-Inside the Instance, the logical-slicing runtime caps visible VRAM to the slice, ≈ 20 % of 24 GiB:
+Inside the `Instance`, the logical-slicing runtime caps visible VRAM to the slice, ≈ 20% of 24 GiB:
 
 ```console
 $ kubectl exec sliced-demo -- nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 NVIDIA A10G, 4912 MiB
 ```
 
-Deleting the Instance releases the slice: the row returns to `1/1 10/10 100/100 0/0`.
+Deleting the `Instance` releases the slice: the row returns to `1/1 10/10 100/100 0/0`.
 
 > **Physical partitioning (MIG).** The A10G slices logically: a runtime caps a shared accelerator, and
 > the `SL` view above tracks the per-accelerator credit budget. A MIG-capable accelerator (A100 / H100)
@@ -486,13 +483,11 @@ Deleting the Instance releases the slice: the row returns to `1/1 10/10 100/100 
 >   enable → request → reclaim → disable walkthrough in
 >   [NVIDIA MIG Operations](/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md).
 
----
-
-## 4. Managing a custom InstanceType
+## Step 4: Manage a custom InstanceType
 
 A derived pool is sized from a **per-product preset**: 8 CPU / 64 GiB for this A10G, 4 CPU / 16 GiB for
 an unrecognised accelerator ([preset reference](/gpustack-operator/main/docs/reference/instance-type-unit-resources/index.md)). For
-another size, an admin authors an InstanceType referencing a catalog flavor by its `acceleratorGroup`,
+another size, an admin authors an `InstanceType` referencing a catalog flavor by its *`acceleratorGroup`*,
 with a unit spec of its own:
 
 ```yaml
@@ -502,7 +497,7 @@ metadata:
   name: a10g-12c128g
 spec:
   acceleratable: true
-  acceleratorGroup: nvidia-a10g          # references the gpustack--nvidia-a10g catalog flavor
+  acceleratorGroup: nvidia-a10g  # references the gpustack--nvidia-a10g catalog flavor
   os: linux
   arch: amd64
   unitResources:
@@ -527,7 +522,7 @@ gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi
 The new row shows `12/128Gi/200Gi` against the derived `8/64Gi/100Gi`, and both siblings `1/1`: one
 accelerator, two views of it.
 
-Deploy an Instance onto the custom type, whole accelerator:
+Deploy an `Instance` onto the custom type, whole accelerator:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -561,8 +556,8 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-Deleting it retires in order: the operator drains the Instance (`HoldAndDrain`), the Instance stops,
-and the type plus its ClusterQueue go:
+Deleting it retires in order: the operator drains the `Instance` (`HoldAndDrain`), the `Instance` stops,
+and the type plus its `ClusterQueue` go:
 
 ```console
 $ kubectl delete instancetype a10g-12c128g
@@ -578,12 +573,9 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-`a10g-12c128g` is gone, `custom-demo` is `Stopped` (kept for section 5), and the released accelerator
-returns the derived pool to `1/1 10/10 100/100`.
+`a10g-12c128g` is gone, `custom-demo` is `Stopped` (kept for Step 5), and the released accelerator returns the derived pool to `1/1 10/10 100/100`.
 
----
-
-## 5. Enabling CPU-manufacturer awareness
+## Step 5: Enable CPU awareness
 
 Flipping `instance-type-aware-cpu-manufacturer` on makes the aggregation layer split every pool by
 the CPU key. `ResourceFlavor`s are never rewritten; only queues, types and catalog re-group.
@@ -594,7 +586,7 @@ $ kubectl -n gpustack-system patch secret gpustack-settings --type=merge \
 $ kubectl -n gpustack-system rollout restart deploy/gpustack-operator-worker
 ```
 
-**Before**, 3 InstanceTypes; **after** the re-derive, CPU-aware types appear (create-only)
+**Before**, 3 `InstanceType`s; **after** the re-derive, CPU-aware types appear (create-only)
 **alongside** the old collapsed ones:
 
 ```console
@@ -616,10 +608,9 @@ gpustack--nvidia-tesla-t4-linux-amd64                               gpustack-fnv
   `…intel-xeon-platinum-8259cl--nvidia-tesla-t4…`.
 - The old collapsed rows remain, create-only and not garbage-collected.
 
-> **Cleanup hint.** An admin may delete the stale ones:
-> `kubectl delete instancetype gpustack--generic-linux-amd64 gpustack--nvidia-a10g-linux-amd64 gpustack--nvidia-tesla-t4-linux-amd64`.
+> **Cleanup hint.** An admin may delete the stale ones: `kubectl delete instancetype gpustack--generic-linux-amd64 gpustack--nvidia-a10g-linux-amd64 gpustack--nvidia-tesla-t4-linux-amd64`.
 
-Re-purpose the `custom-demo` Instance stopped in section 4: a drained Instance carries operator-set
+Re-purpose the `custom-demo` `Instance` stopped in Step 4: a drained `Instance` carries operator-set
 `spec.stop: true`, so repoint its `type` at a CPU-aware pool and clear the stop:
 
 ```console
@@ -650,8 +641,8 @@ gpustack--nvidia-a10g-linux-amd64                  gpustack-fnv64-c4680bb149644f
 `custom-demo` goes `Ready` on the aware pool, which drops to `0/0 0/0 0/0`, and the collapsed
 `gpustack--nvidia-a10g-linux-amd64` also drops: one accelerator, two consistent views.
 
-The re-derive also creates an aware ClusterQueue. It is a second object beside the collapsed
-`gpustack--nvidia-a10g-linux-amd64` queue from section 1, and its labels **carry the CPU key**:
+The re-derive also creates an aware `ClusterQueue`. It is a second object beside the collapsed
+`gpustack--nvidia-a10g-linux-amd64` queue from Step 1, and its labels **carry the CPU key**:
 
 ```yaml
 apiVersion: kueue.x-k8s.io/v1beta2
@@ -663,11 +654,11 @@ metadata:
     kubernetes.io/arch: amd64
     feature.gpustack.ai/acceleratable: "true"
     acceleratable.feature.gpustack.ai/nvidia-a10g: "true"
-    general.feature.gpustack.ai/amd-epyc-7r32: "true"     # <-- CPU key added when aware
+    general.feature.gpustack.ai/amd-epyc-7r32: "true"  # CPU key added when CPU awareness is enabled
     resource.gpustack.ai/type: instancetypes
 ```
 
-The InstanceTypeFlavor catalog re-groups to per-`(gKey,aKey)` + per-`gKey`, replacing the collapsed
+The `InstanceTypeFlavor` catalog re-groups to per-`(gKey,aKey)` + per-`gKey`, replacing the collapsed
 rows:
 
 ```console
@@ -680,7 +671,7 @@ gpustack--amd-epyc-7r32--nvidia-a10g                    amd-epyc-7r32           
 gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4   intel-xeon-platinum-8259cl   nvidia-tesla-t4    true            nvidia         Tesla-T4                                         16Gi     2560    true
 ```
 
-The `ResourceFlavor` set is byte-for-byte unchanged, the same 7 as section 1: the flip re-grouped
+The `ResourceFlavor` set is byte-for-byte unchanged, the same 7 as Step 1: the flip re-grouped
 only the aggregation layer.
 
 ```console
@@ -690,12 +681,10 @@ $ kubectl get resourceflavor --no-headers | wc -l
 
 Turning it back off collapses the layer again, still without touching a flavor.
 
----
+## Step 6: Instance pinning and volumes
 
-## 6. Pinning an Instance to a node and adding volumes
-
-An Instance normally lets the scheduler pick any node its pool covers. `spec.nodeName` narrows that to
-one, and `spec.additionalVolumes` mounts paths beside the workspace — a shared dataset, one ConfigMap
+An `Instance` normally lets the scheduler pick any node its pool covers. *`spec.nodeName`* narrows that to
+one, and *`spec.additionalVolumes`* mounts paths beside the workspace — a shared dataset, one `ConfigMap`
 key, a directory on the node itself:
 
 ```yaml
@@ -706,7 +695,7 @@ metadata:
   namespace: default
 spec:
   type: gpustack--nvidia-tesla-t4-linux-amd64
-  nodeName: node-t4-b                          # pin to this node
+  nodeName: node-t4-b  # pin to this node
   image: ubuntu:24.04
   command:
     - sleep
@@ -716,80 +705,89 @@ spec:
   volume:
     ephemeral:
       capacity: 1Gi
-  volumeMount: /workspace                      # the workspace, as always
+  volumeMount: /workspace  # container workspace
   additionalVolumes:
-    - mountPath: /mnt/datasets                 # a shared dataset, read-write
+    - mountPath: /mnt/datasets  # a shared dataset, read-write
       persistent:
         name: datasets
-    - mountPath: /etc/model/config.json        # one ConfigMap key, as a file
+    - mountPath: /etc/model/config.json  # one ConfigMap key, as a file
       subPath: config.json
       readOnly: true
       configMap:
         name: model-config
-    - mountPath: /mnt/host-cache               # a directory on node-t4-b itself
+    - mountPath: /mnt/host-cache  # a directory on node-t4-b itself
       readOnly: true
       hostPath:
         path: /var/lib/gpustack-cache
         type: DirectoryOrCreate
 ```
 
-- **The pin is a `nodeSelector`, never a direct assignment.** The Pod gets one selector entry,
-  `kubernetes.io/hostname: <the node's own hostname label>`, read from the Node because a provider may
-  set it to something other than the Node's name. `pod.spec.nodeName` stays with the scheduler, so the
-  Pod still queues through Kueue's `ClusterQueue` quota and the `node-devices` AdmissionCheck's
+- **The pin is a *`nodeSelector`*, never a direct assignment.** The `Pod` gets one selector entry,
+  `kubernetes.io/hostname: <the node's own hostname label>`, read from the `Node` because a provider may
+  set it to something other than the `Node`'s name. *`pod.spec.nodeName`* stays with the scheduler, so the
+  `Pod` still queues through Kueue's `ClusterQueue` quota and the `node-devices` `AdmissionCheck`'s
   per-accelerator feasibility gate; an unsatisfiable pin goes Pending with the scheduler's own reason
   instead of running elsewhere.
 - **The node only has to exist**, checked at *creation*. It need not be managed by the operator nor
-  belong to the pinned type's pool: an accelerator-less Instance that only downloads a model must
+  belong to the pinned type's pool: an accelerator-less `Instance` that only downloads a model must
   still land on a specific accelerated node.
 - **Pool membership stays the scheduler's business.** A `type`'s pool and a pin's node are decided
   independently, so a pin into a heterogeneous pool can be admitted by Kueue and then stay Pending
   because the chosen flavor's labels do not match that node.
-- **Each additional volume needs an absolute, canonical `mountPath`** duplicating neither another
-  entry's path nor `spec.volumeMount`, and **exactly one** source: `persistent` (an
-  `InstancePersistentVolume` in the same namespace), `configMap`, `secret` or `hostPath`. `readOnly`
-  and `subPath` behave as on any Pod volume mount.
+- **Each additional volume needs an absolute, canonical *`mountPath`*** duplicating neither another
+  entry's path nor *`spec.volumeMount`*, and **exactly one** source: `persistent` (an
+  `InstancePersistentVolume` in the same namespace), *`configMap`*, `secret` or *`hostPath`*. *`readOnly`*
+  and *`subPath`* behave as on any `Pod` volume mount.
 - **They mount into the workload container only.** The SSH sidecar needs no change: it enters that
   container's mount namespace per session, so every mount is visible over SSH too.
-- **A persistent claim places the Instance where it can attach.** The workspace claim and every
+- **A persistent claim places the `Instance` where it can attach.** The workspace claim and every
   `persistent` entry follow the [claim placement rules](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#claim-delivery-and-placement):
-  a node-local volume pins the Instance to its node and that node's capacity; network or `ReadWriteMany`
-  storage avoids the pin. A claim nothing binds creates no Pod and says why in `status.phaseMessage`;
+  a node-local volume pins the `Instance` to its node and that node's capacity; network or `ReadWriteMany`
+  storage avoids the pin. A claim nothing binds creates no `Pod` and says why in *`status.phaseMessage`*;
   [`instance-persistent-volume-placement`](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) turns this off.
-- **Both new fields are immutable while the Instance runs**, editable while stopped — the rule the rest
-  of `spec` follows.
+- **Both new fields are immutable while the `Instance` runs**, editable while stopped — the rule the rest
+  of *`spec`* follows.
 
-Two cross the host boundary, so each has its own administrator Setting, both `false` by default and
+Two cross the host boundary, so each has its own administrator `Setting`, both `false` by default and
 kept separate so node-path mounts can be allowed without a container escape:
 
-| Setting | Gates |
+| `Setting` | Gates |
 |---|---|
-| `instance-privileged-allowed` | `spec.privileged` — escapes the container boundary, exposing the node's devices and kernel surface. |
-| `instance-host-path-volume-allowed` | `spec.additionalVolumes[*].hostPath` — reaches the node's filesystem, but not its devices or kernel. |
+| `instance-privileged-allowed` | *`spec.privileged`* — escapes the container boundary, exposing the node's devices and kernel surface. |
+| `instance-host-path-volume-allowed` | *`spec.additionalVolumes[*].hostPath`* — reaches the node's filesystem, but not its devices or kernel. |
 
-Each gates taking its escape, so turning one off stops new grants without stranding an Instance
+Each gates taking its escape, so turning one off stops new grants without stranding an `Instance`
 that already holds one; [Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) has the exact terms.
 
-Both govern the **node** boundary, not the namespace one: a `persistent`, `configMap` or `secret`
-source names an object in the Instance's own namespace and may always be mounted, the same reach a Pod
-there has. Namespaces stay the tenancy boundary: put Instances whose authors should not read each
-other's Secrets in their own.
+Both govern the **node** boundary, not the namespace one: a `persistent`, *`configMap`* or `secret`
+source names an object in the `Instance`'s own namespace and may always be mounted, the same reach a `Pod`
+there has. `Namespace`s stay the tenancy boundary: put `Instance`s whose authors should not read each
+other's `Secret`s in their own.
+
+## Limitations
+
+This recorded session uses four unpartitioned nodes (`PT` reads `0/0` throughout); see the
+[three-configuration walkthrough](/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md#three-mig-configurations)
+for hardware partitioning.
+
+Pool isolation (`ClusterQueue` without cross-pool borrowing), flavor grouping, and per-card view
+exclusion are covered in [Stage 4: Kueue chain](/gpustack-operator/main/docs/modules/devices/scheduling/index.md#stage-4-kueue-chain),
+[Naming and grouping](/gpustack-operator/main/docs/modules/devices/scheduling/index.md#naming-and-grouping), and
+[Four-view status](/gpustack-operator/main/docs/modules/devices/admission/index.md#four-view-status).
 
 ## Troubleshooting
 
 | Symptom | Root cause / Condition | Check & Mitigation |
 |---|---|---|
-| An Instance does not become Ready and its Workload stays pending | Quota, flavor labels or a node pin the scheduler cannot satisfy | Read `kubectl -n <namespace> get instance <name> -o jsonpath='{.status.phaseMessage}'`, then `kubectl -n <namespace> get workloads`. Compare the type's remaining counts in `kubectl get instancetypes`. See [section 6](#6-pinning-an-instance-to-a-node-and-adding-volumes) for pins |
-| Pod rejected: `a Pod may request only one accelerator family, found [...]` | Two accelerator families in one Pod | Request one family. See [rule 1](/gpustack-operator/main/docs/modules/devices/requests/index.md#rule-1--one-family-in-exactly-one-container-group) |
-| Pod rejected: `at most one container may request a slicing family, found N` | More than one container requests a slice or a partition | Keep one claiming container. See [rule 6](/gpustack-operator/main/docs/modules/devices/requests/index.md#rule-6--at-most-one-container-may-request-a-slicing-family) |
-| Pod rejected: `a restartable init container (a native sidecar) may not request an accelerator` | A native sidecar carries the accelerator request | Move the request to an app container. See [rule 7](/gpustack-operator/main/docs/modules/devices/requests/index.md#rule-7--a-restartable-init-container-may-not-request-an-accelerator) |
-| A node's accelerators are missing from the `InstanceType` pool | The node's NodeFeature carries `gpustack.ai/managed: "false"`, or `node-management-manual` is `true` and no one labeled the node | Run `kubectl -n gpustack-system get nodefeature <node>-gpustack-worker -o yaml` and read `spec.labels`. See [section 2](#2-removing-a-node-from-management) |
-| Instance rejected: `privileged mode is not allowed: enable the "instance-privileged-allowed" setting to allow it` | The `instance-privileged-allowed` setting is `false` | Allow it only if the node boundary is acceptable: `kubectl -n gpustack-system patch setting instance-privileged-allowed --type merge -p '{"spec":{"value":"true"}}'`. See [Settings](/gpustack-operator/main/docs/reference/settings/index.md) |
+| An `Instance` does not become Ready and its `Workload` stays pending | Quota, flavor labels or a node pin the scheduler cannot satisfy | Read `kubectl -n <namespace> get instance <name> -o jsonpath='{.status.phaseMessage}'`, then `kubectl -n <namespace> get workloads`. Compare the type's remaining counts in `kubectl get instancetypes`. See [Step 6](#step-6-instance-pinning-and-volumes) for pins |
+| `Pod` rejected: `a Pod may request only one accelerator family, found [...]` | Two accelerator families in one `Pod` | Request one family. See [rule 1](/gpustack-operator/main/docs/modules/devices/requests/index.md#rule-1-family-and-container-group) |
+| `Pod` rejected: `at most one container may request a slicing family, found N` | More than one container requests a slice or a partition | Keep one claiming container. See [rule 6](/gpustack-operator/main/docs/modules/devices/requests/index.md#rule-6-slicing-container-count) |
+| `Pod` rejected: `a restartable init container (a native sidecar) may not request an accelerator` | A native sidecar carries the accelerator request | Move the request to an app container. See [rule 7](/gpustack-operator/main/docs/modules/devices/requests/index.md#rule-7-native-sidecar-requests) |
+| A node's accelerators are missing from the `InstanceType` pool | The node's `NodeFeature` carries `gpustack.ai/managed: "false"`, or `node-management-manual` is `true` and no one labeled the node | Run `kubectl -n gpustack-system get nodefeature <node>-gpustack-worker -o yaml` and read *`spec.labels`*. See [Step 2](#step-2-remove-a-managed-node) |
+| `Instance` rejected: `privileged mode is not allowed: enable the "instance-privileged-allowed" setting to allow it` | The `instance-privileged-allowed` setting is `false` | Allow it only if the node boundary is acceptable: `kubectl -n gpustack-system patch setting instance-privileged-allowed --type merge -p '{"spec":{"value":"true"}}'`. See [Settings](/gpustack-operator/main/docs/reference/settings/index.md) |
 
 ---
 
-**See also** — [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) (the contract behind step 3) ·
-[NVIDIA MIG Operations](/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md#walkthrough-three-mig-configurations-on-one-node)
-(hardware partitioning) · [Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) (the two gates)
+**See also** — [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) (the contract behind Step 3) · [NVIDIA MIG Operations](/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md#three-mig-configurations) (hardware partitioning) · [Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) (the two gates)
 
-**Next** → [RDMA Network Endpoints Walkthrough](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md) — request and verify RDMA endpoints with NUMA alignment.
+**Next** → [RDMA Networking Walkthrough](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md) — request and verify RDMA endpoints with NUMA alignment.
