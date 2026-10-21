@@ -2,7 +2,6 @@ package modelartifact
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 const modelScopeCommit = "186d8559ad54c32cf47dc3a8225f993742c507b8"

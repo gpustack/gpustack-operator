@@ -24,7 +24,7 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -41,6 +41,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // RouterObservedWorker is one worker entry of the observer payload. The observer's
@@ -152,7 +153,7 @@ func parseRouterObservationView(data []byte) (RouterServingView, error) {
 
 	// A document with a second JSON value after the payload is not the payload. The decoder reads
 	// the first one and would otherwise ignore whatever followed.
-	if err := decoder.Decode(new(json.RawMessage)); err != io.EOF {
+	if err := decoder.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
 		return RouterServingView{}, fmt.Errorf("observer payload carries a trailing JSON value")
 	}
 

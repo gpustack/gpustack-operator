@@ -29,7 +29,6 @@ package elasticengine
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -37,6 +36,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 const (
@@ -391,7 +392,7 @@ func decodeObject(op string, raw []byte) (map[string]json.RawMessage, *Error) {
 
 	// A second value after the answer is refused. The decoder reads the first and would otherwise
 	// ignore whatever followed it.
-	if err := decoder.Decode(new(json.RawMessage)); err != io.EOF {
+	if err := decoder.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
 		return nil, &Error{
 			Kind: KindMalformed, Op: op, Detail: "the answer carries a trailing JSON value",
 		}

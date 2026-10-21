@@ -1,9 +1,6 @@
 package download
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,15 +8,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 const streamContent = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 func streamDigest(t *testing.T, content string) string {
 	t.Helper()
-	sum := sha256.Sum256([]byte(content))
-
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return "sha256:" + stringx.SumBySHA256(content)
 }
 
 // appendTo lands bytes on disk at their offset, the invariant a checkpoint promises: the hashed

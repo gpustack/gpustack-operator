@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // probeMember is one replica member as the probe needs it: an address to ask, the serving port and

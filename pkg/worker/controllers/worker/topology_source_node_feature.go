@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
 	"maps"
 
 	core "k8s.io/api/core/v1"
@@ -15,17 +14,14 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
 const topologySourceUIDLabel = "topology.gpustack.ai/source-uid"
 
 func topologySourceNodeFeatureName(sourceUID types.UID, nodeName string) string {
-	hash := fnv.New64a()
-	_, _ = hash.Write([]byte(sourceUID))
-	_, _ = hash.Write([]byte{0})
-	_, _ = hash.Write([]byte(nodeName))
-	return fmt.Sprintf("gpustack-topology-%016x", hash.Sum64())
+	return "gpustack-topology-" + stringx.SumByFNV64a(string(sourceUID), "\x00", nodeName)
 }
 
 func topologySourcePublishedLabels(node *core.Node, labels map[string]string) (map[string]string, error) {

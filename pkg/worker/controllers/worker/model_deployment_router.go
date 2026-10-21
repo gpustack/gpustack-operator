@@ -2,9 +2,6 @@ package worker
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -21,7 +18,9 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
@@ -819,8 +818,7 @@ func hashRouterConfig(data map[string]string) string {
 	if err != nil {
 		return "unhashable-" + err.Error()
 	}
-	sum := sha256.Sum256(encoded)
-	return hex.EncodeToString(sum[:])
+	return stringx.SumBytesBySHA256(encoded)
 }
 
 const (

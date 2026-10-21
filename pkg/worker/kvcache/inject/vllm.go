@@ -4,10 +4,11 @@
 package inject
 
 import (
-	"encoding/json"
 	"fmt"
 
 	core "k8s.io/api/core/v1"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 const (

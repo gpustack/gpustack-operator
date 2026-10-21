@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"hash"
@@ -16,6 +15,7 @@ import (
 	"strings"
 
 	"gpustack.ai/gpustack/pkg/modelartifact"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // verifier hashes one file in byte order and says whether it matches its manifest line.

@@ -5,12 +5,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"io"
 	"math/big"
@@ -30,6 +27,8 @@ import (
 
 	"gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
+	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 // writableAgain undoes Publish's read-only sealing, so the test's temp dir can be removed.
@@ -61,9 +60,8 @@ func publishTree(t *testing.T, s *store.Store, files map[string]string) string {
 	entries := make([]modelartifact.ManifestEntry, 0, len(files))
 	for _, name := range names {
 		body := files[name]
-		fileSum := sha256.Sum256([]byte(body))
 		entries = append(entries, modelartifact.ManifestEntry{
-			Path: name, Size: int64(len(body)), Digest: "sha256:" + hex.EncodeToString(fileSum[:]),
+			Path: name, Size: int64(len(body)), Digest: "sha256:" + stringx.SumBySHA256(body),
 		})
 	}
 	manifest, err := modelartifact.NewManifest(entries)

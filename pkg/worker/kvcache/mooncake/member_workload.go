@@ -1,8 +1,6 @@
 package mooncake
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -21,6 +19,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/kvcache"
 )
@@ -1343,6 +1342,5 @@ func MemberPodSpecHash(template core.PodTemplateSpec) string {
 		return "unhashable-" + err.Error()
 	}
 
-	sum := sha256.Sum256(encoded)
-	return hex.EncodeToString(sum[:])
+	return stringx.SumBytesBySHA256(encoded)
 }

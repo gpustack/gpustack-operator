@@ -2,9 +2,6 @@ package peer
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +15,8 @@ import (
 	modelartifact "gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/modelmanager/download"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
+	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 // peerServer is one peer under test: its store, its published tree, and the HTTP server over them.
@@ -36,9 +35,8 @@ func newPeerServer(t *testing.T, content string) *peerServer {
 
 	// The tree's digest is what the canonical manifest of its files hashes to, the way a
 	// publish derives the marker's.
-	fileSum := sha256.Sum256([]byte(content))
 	manifest, err := modelartifact.NewManifest([]modelartifact.ManifestEntry{{
-		Path: "weights.bin", Size: int64(len(content)), Digest: "sha256:" + hex.EncodeToString(fileSum[:]),
+		Path: "weights.bin", Size: int64(len(content)), Digest: "sha256:" + stringx.SumBySHA256(content),
 	}})
 	require.NoError(t, err)
 	treeHex := strings.TrimPrefix(manifest.Digest, "sha256:")
@@ -76,11 +74,10 @@ func (p *Puller) fetchFile(t *testing.T, ps *peerServer, digest string, sources 
 	t.Helper()
 	p.Discover = func(context.Context, string) ([]*Source, error) { return sources, nil }
 	dir := t.TempDir()
-	fileSum := sha256.Sum256([]byte(ps.content))
 	file := download.File{
 		Path:       "weights.bin",
 		Size:       int64(len(ps.content)),
-		Digest:     "sha256:" + hex.EncodeToString(fileSum[:]),
+		Digest:     "sha256:" + stringx.SumBySHA256(ps.content),
 		Dest:       filepath.Join(dir, "dest.bin"),
 		Checkpoint: filepath.Join(dir, "dest.checkpoint"),
 	}
@@ -103,8 +100,7 @@ func TestPullerRefusesAForgedListing(t *testing.T) {
 	// A peer whose tree answers under another content's digest: the reassembled manifest
 	// rebinds to the wrong root and is refused before a byte is pulled.
 	good := newPeerServer(t, strings.Repeat("abcdef", 100))
-	wrongSum := sha256.Sum256([]byte(strings.Repeat("X", len(good.content))))
-	wrongHex := hex.EncodeToString(wrongSum[:])
+	wrongHex := stringx.SumBySHA256(strings.Repeat("X", len(good.content)))
 
 	inner := (&Server{Store: good.store}).Handler()
 	dishonest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

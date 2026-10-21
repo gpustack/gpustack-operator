@@ -2,8 +2,6 @@ package worker
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -26,6 +24,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
@@ -2907,8 +2906,7 @@ func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t 
 
 			encoded, err := json.Marshal(pod)
 			require.NoError(t, err)
-			sum := sha256.Sum256(encoded)
-			digest := hex.EncodeToString(sum[:])
+			digest := stringx.SumBytesBySHA256(encoded)
 
 			want, ok := pinned[tc.name]
 			if !ok {

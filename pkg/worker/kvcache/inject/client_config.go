@@ -10,10 +10,10 @@
 package inject
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"gpustack.ai/gpustack/pkg/systemname"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 const (

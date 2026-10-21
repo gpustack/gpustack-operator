@@ -1,8 +1,6 @@
 package worker
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -15,6 +13,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 const (
@@ -81,9 +80,7 @@ func newCompileCacheInput(mutate ...func(*ModelDeploymentCompileCacheInput)) Mod
 // testCompileCacheSHA256Hex states the identity formula of the cache path in the test itself, so
 // a case asserts the documented rule rather than agreeing with whatever the code happens to do.
 func testCompileCacheSHA256Hex(s string) string {
-	sum := sha256.Sum256([]byte(s))
-
-	return hex.EncodeToString(sum[:])[:32]
+	return stringx.SumBySHA256(s)[:32]
 }
 
 // testCompileCacheIdentity builds the "m-" segment the path carries for an address, trimming it

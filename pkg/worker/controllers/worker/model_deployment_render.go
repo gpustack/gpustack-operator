@@ -2,9 +2,6 @@ package worker
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -23,8 +20,10 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -1812,9 +1811,7 @@ func modelDeploymentBindingHash(
 		return "unhashable-binding-" + err.Error()
 	}
 
-	sum := sha256.Sum256(encoded)
-
-	return hex.EncodeToString(sum[:])
+	return stringx.SumBytesBySHA256(encoded)
 }
 
 // modelDeploymentExplicitSpecHash fingerprints the explicit user-configured ModelDeployment and
@@ -1885,9 +1882,7 @@ func modelDeploymentExplicitSpecHash(
 		return "unhashable-" + err.Error()
 	}
 
-	sum := sha256.Sum256(encoded)
-
-	return hex.EncodeToString(sum[:])
+	return stringx.SumBytesBySHA256(encoded)
 }
 
 // modelDeploymentEffectiveMinRenderVersion computes the minimum acceptable render version for a

@@ -2,7 +2,6 @@ package modelartifact
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"strings"
 
 	"gpustack.ai/gpustack/pkg/utils/httpx"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // ModelScope resolves ModelScope repositories.

@@ -2,8 +2,6 @@ package worker
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"maps"
 	"slices"
@@ -35,6 +33,7 @@ import (
 	"gpustack.ai/gpustack/pkg/setting"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -753,8 +752,7 @@ func prefetchPodName(pf, node string) string {
 	if len(name) <= 247 {
 		return name
 	}
-	sum := sha256.Sum256([]byte(pf + "/" + node))
-	tag := hex.EncodeToString(sum[:])[:8]
+	tag := stringx.SumBySHA256(pf + "/" + node)[:8]
 	room := 247 - len(tag) - 1
 	base := (pf + "-warmup-" + node)[:room]
 

@@ -3,8 +3,6 @@ package worker
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"os"
@@ -24,6 +22,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/setting/settingtest"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 // Every fixture below freezes the COMPLETE rendered Pods of a deployment that declares no Encode
@@ -185,10 +184,9 @@ func legacyRenderEntryForPods(pods []*core.Pod, rendered string) legacyRenderFix
 	for i := range pods {
 		hashes = append(hashes, pods[i].Annotations[modelDeploymentPodSpecHashAnnotation])
 	}
-	sum := sha256.Sum256([]byte(rendered))
 	return legacyRenderFixtureEntry{
 		PodSpecHashes: hashes,
-		Digest:        hex.EncodeToString(sum[:]),
+		Digest:        stringx.SumBySHA256(rendered),
 	}
 }
 

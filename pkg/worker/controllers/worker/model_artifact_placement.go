@@ -2,8 +2,6 @@ package worker
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"slices"
 	"strings"
@@ -26,6 +24,7 @@ import (
 	"gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -737,8 +736,7 @@ const modelArtifactKVIdentityDigits = 32
 func modelArtifactKVIdentity(ma *workercore.ModelArtifact) string {
 	hexDigits := strings.TrimPrefix(ma.Status.Resolved.ManifestDigest, modelartifact.DigestSHA256+":")
 	if ma.Status.Resolved.ManifestDigest == "" {
-		sum := sha256.Sum256([]byte(ma.UID))
-		hexDigits = hex.EncodeToString(sum[:])
+		hexDigits = stringx.SumBySHA256(string(ma.UID))
 	}
 	if len(hexDigits) > modelArtifactKVIdentityDigits {
 		hexDigits = hexDigits[:modelArtifactKVIdentityDigits]

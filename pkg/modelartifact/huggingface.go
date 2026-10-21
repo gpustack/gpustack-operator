@@ -2,7 +2,6 @@ package modelartifact
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"strings"
 
 	"gpustack.ai/gpustack/pkg/utils/httpx"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // DefaultHuggingFaceMaxEntries bounds the tree entries, files and directories together, one

@@ -5,9 +5,6 @@ package materialize
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -28,6 +25,8 @@ import (
 	"gpustack.ai/gpustack/pkg/modelmanager/metrics"
 	"gpustack.ai/gpustack/pkg/modelmanager/peer"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
+	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 // Defaults of the materializer's timing.
@@ -474,8 +473,7 @@ func (m *Materializer) fetchTree(
 			return &download.Error{Reason: download.ReasonIntegrityMismatch, Message: err.Error()}
 		}
 		dests[i] = dest
-		sum := sha256.Sum256([]byte(e.Path))
-		checkpoints[i] = filepath.Join(stateDir, hex.EncodeToString(sum[:]))
+		checkpoints[i] = filepath.Join(stateDir, stringx.SumBySHA256(e.Path))
 	}
 
 	// What the attempt already holds of the content is counted once here, and the downloads keep

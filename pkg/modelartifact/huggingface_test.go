@@ -2,7 +2,6 @@ package modelartifact
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 const (

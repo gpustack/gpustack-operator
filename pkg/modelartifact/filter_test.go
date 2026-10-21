@@ -1,13 +1,14 @@
 package modelartifact
 
 import (
-	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // TestFilterMatchesPythonFnmatch checks MatchPattern against CPython itself:

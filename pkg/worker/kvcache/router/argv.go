@@ -12,12 +12,13 @@
 package router
 
 import (
-	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
 	"strconv"
 	"strings"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 const (

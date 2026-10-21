@@ -1,13 +1,13 @@
 package ascend
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"gpustack.ai/gpustack/pkg/device"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // rankTableCapability names the host ranktable in a preflight row, in HCCL's own vocabulary: the

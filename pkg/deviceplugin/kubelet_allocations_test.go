@@ -2,7 +2,6 @@ package deviceplugin
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -20,6 +19,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 func TestDevicesReconciler_KubeletConflictRefusesRebuildAndAllocate(t *testing.T) {
