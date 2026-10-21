@@ -1582,7 +1582,15 @@ func startingInstanceUnderDrain(typeName string) []ctrlcli.Object {
 	inst.Status.Phase = workerctrl.InstancePhaseStarting
 	return []ctrlcli.Object{
 		inst,
-		&core.Pod{ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"}},
+		&core.Pod{ObjectMeta: meta.ObjectMeta{
+			Namespace: "default", Name: "inst",
+			OwnerReferences: []meta.OwnerReference{{
+				APIVersion: "worker.gpustack.ai/v1alpha1",
+				Kind:       "Instance",
+				Name:       "inst",
+				Controller: ptr.To(true),
+			}},
+		}},
 		&worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: typeName}},
 		&kueue.ClusterQueue{
 			ObjectMeta: meta.ObjectMeta{Name: typeName},
@@ -1644,7 +1652,15 @@ func TestInstanceWebhook_AdmitsAUserStopOfACrashLoopingInstance(t *testing.T) {
 	cli := admittingInstanceClient(
 		webhookInstance("inst", typeName),
 		&core.Pod{
-			ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: "default", Name: "inst",
+				OwnerReferences: []meta.OwnerReference{{
+					APIVersion: "worker.gpustack.ai/v1alpha1",
+					Kind:       "Instance",
+					Name:       "inst",
+					Controller: ptr.To(true),
+				}},
+			},
 			Spec:       core.PodSpec{NodeName: "node-1"},
 			Status: core.PodStatus{
 				Phase: core.PodRunning,
