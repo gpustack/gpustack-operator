@@ -7,6 +7,7 @@ and the Router balances requests across all of them. For captured commands and r
 ## Contents
 
 - [Overview and selection](#overview-and-selection)
+- [Configuration](#configuration)
 - [Load-balancing derivation](#load-balancing-derivation)
 - [Per-rank Pod identity](#per-rank-pod-identity)
 - [Port allocation](#port-allocation)
@@ -41,6 +42,56 @@ The four ranks shared one *EP* collective over **cross-`Pod` TCP sockets on `eth
 The wide *TP* = 8 comparison kept all eight GPUs inside one NVLink-connected `Pod`.
 Separate GPU visibility, private IPC and `/dev/shm`, and no *remote direct memory access (RDMA)* interface
 bounded the measured transport; host NVLink did not carry cross-`Pod` traffic.
+
+## Configuration
+
+A four-rank *External DP* group runs one *Server* role with `size: 4` and *TP* = 2 per member behind
+`vllm-router`:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: deepseek-external-dp
+  namespace: team-a
+spec:
+  model:
+    name: deepseek-ai/DeepSeek-V2-Lite-Chat
+  engine:
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0
+  router:
+    name: vllm-router  # balances requests across all rank endpoints
+    extraArgs:
+      - --policy
+      - round_robin
+  roles:
+    - name: server
+      kind: Server
+      replicas: 1
+      size: 4  # four member Pods in one fate-sharing DP group
+      instanceType: gpustack-nvidia-h100-80gb-hbm3-linux-amd64
+      resources:
+        accelerator: "2"  # matches local --tensor-parallel-size per member
+      extraArgs:
+        - --tensor-parallel-size
+        - "2"
+        - --data-parallel-size
+        - "4"
+        - --data-parallel-rank
+        - $(GPUSTACK_MEMBER_INDEX)  # zero-based member index injected by the operator
+        - --data-parallel-address
+        - $(GPUSTACK_REPLICA_LEADER_ADDRESS)  # leader DNS name injected by the operator
+        - --enable-expert-parallel
+        - --all2all-backend
+        - allgather_reducescatter
+      env:
+        - name: VLLM_PORT
+          value: "19500"  # keeps candidate ports below the ephemeral source-port range
+```
+
+When the cluster provides an *RDMA* fabric, add `interface: "2"` under *`resources`* so cross-`Pod`
+expert collectives run over InfiniBand or RoCE instead of TCP.
 
 ## Load-balancing derivation
 
