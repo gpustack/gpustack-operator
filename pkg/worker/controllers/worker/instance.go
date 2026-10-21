@@ -717,8 +717,9 @@ func (r *InstanceReconciler) convertPodFromInstance(
 				// created under the InstanceType's own name and both sides spell the result with
 				// FormatLocalQueueName -- neither of which this package states or owns. The caller
 				// guarantees it is non-empty; see the entrance guard in Reconcile.
-				kueuectrlconst.QueueLabel:           instType.Status.Entrance, // Scheduling.
-				deviceplugin.InstancePartOfLabelKey: string(inst.UID),         // Accessing.
+				kueuectrlconst.QueueLabel:           instType.Status.Entrance,       // Scheduling.
+				deviceplugin.InstancePartOfLabelKey: string(inst.UID),               // Accessing.
+				deviceplugin.ComponentLabelKey:      deviceplugin.InstanceComponent, // Isolating.
 			},
 		},
 		Spec: core.PodSpec{

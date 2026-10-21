@@ -1172,6 +1172,38 @@ func TestConvertPodFromInstance_QueueLabelIsThePublishedEntrance(t *testing.T) {
 		"the fixture spells the two differently so this test can discriminate")
 }
 
+func TestConvertPodFromInstance_InstanceComponentLabel(t *testing.T) {
+	inst := &workercore.Instance{
+		ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
+		Spec: workercore.InstanceSpec{
+			Type: "generic",
+			InstanceTemplate: workercore.InstanceTemplate{
+				Image: "img",
+				Resources: &workercore.InstanceResources{
+					CPU:          qty("1"),
+					RAM:          qty("2Gi"),
+					LocalStorage: qty("10Gi"),
+				},
+			},
+			Volume: workercore.InstanceVolume{
+				Ephemeral: &workercore.InstanceEphemeralVolume{Capacity: qty("10Gi")},
+			},
+		},
+	}
+	it := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: "generic"},
+		Status:     workercore.InstanceTypeStatus{Entrance: "queue-for-generic"},
+	}
+
+	cli := buildInstanceClient(inst, it)
+	r := &InstanceReconciler{Client: cli, APIReader: cli}
+	pod := r.convertPodFromInstance(context.Background(), inst, it, nil)
+
+	require.NotNil(t, pod)
+	assert.Equal(t, deviceplugin.InstanceComponent, pod.Labels[deviceplugin.ComponentLabelKey],
+		"the tenant-isolation NetworkPolicy selects Instance Pods by this stable label")
+}
+
 // TestInstanceReconciler_RebuildsAdmissionRejectedPod covers the admission-rejection rebuild
 // loop: a backing Pod kubelet rejected with UnexpectedAdmissionError (the device-plugin's
 // Allocate failing, e.g. the cross-mode FailedPrecondition) is deleted and recreated while
