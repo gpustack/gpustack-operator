@@ -1364,9 +1364,11 @@ the user enter the workload container.</p>
 </li>
 <li><a href="#service-lifecycle">Service lifecycle</a>
 </li>
+<li><a href="#network-isolation">Network isolation</a>
+</li>
 </ul>
 <h2 id="instance-configuration">Instance configuration</h2>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/fe455ea00730beadff87fdcbc1d0ee105ee2cfff/README.md#usage">Usage</a>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/25c6524fc31e93cd924f83ce4da57c5ae0243103/README.md#usage">Usage</a>
  example creates a sliced <code>Instance</code>. <a href="/gpustack-operator/main/docs/modules/devices/requests/#instance-api-requests">Accelerator
 Requests</a>
  explains how
@@ -1391,6 +1393,33 @@ when the <code>Instance</code> starts again: ports left unchanged keep their all
 <em><code>spec.ports</code></em> is allocated a new one, a port removed from <em><code>spec.ports</code></em> is dropped from the <code>Service</code>,
 and clearing <em><code>spec.ports</code></em> deletes the <code>Service</code> along with its allocations. Deleting the <code>Instance</code>
 itself also deletes the <code>Service</code>.</p>
+<h2 id="network-isolation">Network isolation</h2>
+<p>The operator isolates <code>Instance</code>s of different tenants at the namespace boundary. The behavior is
+opt-in: with the <code>instance-isolation-pod-cidrs</code> Setting blank — the default — no policy is
+rendered and <code>Instance</code> networking stays untouched.</p>
+<p>When the Setting names the cluster&rsquo;s pod CIDRs, the operator renders one <code>NetworkPolicy</code> named
+<code>gpustack-instance-isolation</code> in every namespace that holds an <code>Instance</code>, selecting the
+instance <code>Pod</code>s by their <code>resource.gpustack.ai/type: instances</code> label.</p>
+<p>The policy allows traffic to and from <code>Pod</code>s of the same namespace, and to and from anywhere
+outside the pod CIDRs the Setting names, which is how external clients arrive through the NodePort
+<code>Service</code>. It blocks traffic to and from <code>Pod</code>s of every other namespace in both directions, so a
+shell inside one <code>Instance</code> cannot scan or reach another tenant&rsquo;s <code>Instance</code>s. DNS (port 53) stays
+open.</p>
+<p>The pod CIDRs cannot be learned reliably for every CNI — a node&rsquo;s pod CIDR and what the CNI&rsquo;s own
+IPAM allocates routinely disagree — so the Setting is the one source. Find the values with
+<code>kubectl get ippools.crd.projectcalico.org</code> on a Calico-IPAM cluster, or
+<code>kubectl get nodes -o jsonpath='{.items[*].spec.podCIDRs}'</code> where the nodes carve the pod
+addresses.</p>
+<p>The chart carries the same value as <code>worker.instanceIsolationPodCIDRs</code>; the Setting can also
+be edited at runtime through the Settings API.</p>
+<p>The object belongs to the namespace rather than to one <code>Instance</code>: deleting the last <code>Instance</code> of
+a namespace does not remove it, and the reconcile rewrites any manual edit back to the rendered
+shape. Emptying the Setting collects the policy again — but only the object the operator rendered
+itself, never a same-named one written by hand.</p>
+<p>Enforcing the policy takes a CNI that implements <code>NetworkPolicy</code>, such as Calico or Cilium; with a
+non-enforcing CNI the object renders but filters nothing. The Kubernetes policy contract always
+allows traffic from the node hosting a <code>Pod</code>, so a client inside one <code>Instance</code> can still reach
+another tenant&rsquo;s <code>Service</code> through the hosting node&rsquo;s address and node port.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
@@ -1399,7 +1428,7 @@ itself also deletes the <code>Service</code>.</p>
  (mounting model weights)</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
-        <div><a href="https://github.com/gpustack/gpustack-operator/blob/fe455ea00730beadff87fdcbc1d0ee105ee2cfff/README.md#usage">Usage</a>
+        <div><a href="https://github.com/gpustack/gpustack-operator/blob/25c6524fc31e93cd924f83ce4da57c5ae0243103/README.md#usage">Usage</a>
  — launch a sliced <code>Instance</code>.</div>
       </section></nav>
   
@@ -1413,7 +1442,7 @@ itself also deletes the <code>Service</code>.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/fe455ea00730beadff87fdcbc1d0ee105ee2cfff/docs/modules/instances/_index.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/25c6524fc31e93cd924f83ce4da57c5ae0243103/docs/modules/instances/_index.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/instances/_index.md">Edit this page</a>
             
@@ -1427,6 +1456,7 @@ itself also deletes the <code>Service</code>.</p>
     <li><a href="#instance-configuration">Instance configuration</a></li>
     <li><a href="#device-access">Device access</a></li>
     <li><a href="#service-lifecycle">Service lifecycle</a></li>
+    <li><a href="#network-isolation">Network isolation</a></li>
   </ul>
 </nav>
         

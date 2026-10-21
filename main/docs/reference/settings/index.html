@@ -1468,7 +1468,12 @@ and every upgrade.</p>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system get setting node-management-manual -o yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system edit setting node-management-manual
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system patch setting instance-type-derived-from-node --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;false&#34;}}&#39;</span></span></span></code></pre></div>
-</div><table>
+</div><p><strong>Effect windows</strong> — a <code>Setting</code> is either <strong>Immediate</strong>: its change is pushed to the thing that
+consumes it (the consuming controller watches the delegated settings Secret — a <code>Setting</code> never
+watches itself), or <strong>next trigger</strong>: applied when the next natural event named in its Effect text
+arrives — a <code>Pod</code> render, an admission call, a reconcile. Rows marked <strong>Immediate</strong> are the ones
+whose window the text does not already make obvious.</p>
+<table>
   <thead>
       <tr>
           <th><code>Setting</code></th>
@@ -1525,7 +1530,7 @@ and every upgrade.</p>
           <td><code>instance-host-path-volume-allowed</code></td>
           <td><code>GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED</code></td>
           <td><code>false</code></td>
-          <td>Whether an <code>Instance</code> may mount a hostPath volume (<em><code>spec.additionalVolumes[*].hostPath</code></em>), which reaches the node&rsquo;s filesystem. Kept separate from <code>instance-privileged-allowed</code> because it grants strictly less — the filesystem, but not the node&rsquo;s devices or kernel — so an admin can allow node-path mounts without allowing a container escape. Enforced whenever an <code>Instance</code> <strong>takes</strong> a hostPath mount, on the same terms; a mount it already has is matched by value, so reordering the list is not a new grant while repointing an entry at a different node path is.</td>
+          <td><strong>Immediate.</strong> Whether an <code>Instance</code> may mount a hostPath volume (<em><code>spec.additionalVolumes[*].hostPath</code></em>), which reaches the node&rsquo;s filesystem. Kept separate from <code>instance-privileged-allowed</code> because it grants strictly less — the filesystem, but not the node&rsquo;s devices or kernel — so an admin can allow node-path mounts without allowing a container escape. Enforced whenever an <code>Instance</code> <strong>takes</strong> a hostPath mount, on the same terms; a mount it already has is matched by value, so reordering the list is not a new grant while repointing an entry at a different node path is.</td>
       </tr>
       <tr>
           <td><code>instance-persistent-volume-placement</code></td>
@@ -1538,13 +1543,20 @@ and every upgrade.</p>
           <td><code>instance-privileged-allowed</code></td>
           <td><code>GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED</code></td>
           <td><code>false</code></td>
-          <td>Whether an <code>Instance</code> may request privileged mode (<em><code>spec.privileged</code></em>), which escapes the container boundary and exposes the node&rsquo;s devices and kernel surface. Enforced by the <code>Instance</code> admission webhook whenever an <code>Instance</code> <strong>takes</strong> privileged mode — at creation, or through a later change, including one made while it is stopped. An <code>Instance</code> that already runs privileged keeps it: with this off it stays updatable, editable while stopped, and restartable. Like every setting here, a change takes up to 30s to reach the webhook, so an <code>Instance</code> created in that window is judged against the previous value.</td>
+          <td><strong>Immediate.</strong> Whether an <code>Instance</code> may request privileged mode (<em><code>spec.privileged</code></em>), which escapes the container boundary and exposes the node&rsquo;s devices and kernel surface. Enforced by the <code>Instance</code> admission webhook whenever an <code>Instance</code> <strong>takes</strong> privileged mode — at creation, or through a later change, including one made while it is stopped. An <code>Instance</code> that already runs privileged keeps it: with this off it stays updatable, editable while stopped, and restartable. Like every setting here, a change takes up to 30s to reach the webhook, so an <code>Instance</code> created in that window is judged against the previous value.</td>
       </tr>
       <tr>
           <td><code>instance-ssh-server-image</code></td>
           <td><code>GPUSTACK_INSTANCE_SSH_SERVER_IMAGE</code></td>
           <td><code>gpustack/ssh-server:v1.3.0</code></td>
           <td>Image of the SSH server used when deploying <code>Instance</code>s.</td>
+      </tr>
+      <tr>
+          <td><code>instance-isolation-pod-cidrs</code></td>
+          <td><code>GPUSTACK_INSTANCE_ISOLATION_POD_CIDRS</code></td>
+          <td><em>(blank)</em></td>
+          <td>The IPv4 pod CIDRs the Instance tenant-isolation <code>NetworkPolicy</code> carves out of its 0.0.0.0/0 external rule: <code>Instance</code> <code>Pod</code>s stay reachable from their own namespace and from outside the cluster, and never from another namespace&rsquo;s <code>Pod</code>s — see <a href="/gpustack-operator/main/docs/modules/instances/#network-isolation">Network isolation</a>
+. <strong>Blank (default) renders no policy at all</strong>: isolation is opt-in, and emptying the list collects the rendered policy again, never a same-named one written by hand. Needs a CNI that enforces <code>NetworkPolicy</code>; find the values with <code>kubectl get ippools.crd.projectcalico.org</code> on a Calico-IPAM cluster, or <code>kubectl get nodes -o jsonpath='{.items[*].spec.podCIDRs}'</code> where the nodes carve the pod addresses. Read by the namespace-isolation controller, which watches the delegated settings Secret: a change reconciles every non-reserved namespace within seconds. The chart carries the same value as <code>worker.instanceIsolationPodCIDRs</code>.</td>
       </tr>
       <tr>
           <td><code>instance-type-aware-cpu-manufacturer</code></td>
@@ -1570,6 +1582,12 @@ and every upgrade.</p>
           <td><code>GPUSTACK_INSTANCE_TYPE_MIXED_ON_NODE</code></td>
           <td><code>true</code></td>
           <td>Whether one node may surface both a GPU and a CPU-only <code>InstanceType</code>. When <code>true</code>, a node is summarized into every type it can serve; when <code>false</code>, a node with accelerators yields only a GPU <code>InstanceType</code> and a CPU-only node only a general one. Read per-reconcile.</td>
+      </tr>
+      <tr>
+          <td><code>node-management-manual</code></td>
+          <td><code>GPUSTACK_NODE_MANAGEMENT_MANUAL</code></td>
+          <td><code>false</code></td>
+          <td>Skip auto-managing nodes. When <code>false</code>, the operator auto-onboards discovered nodes by injecting the <code>gpustack.ai/managed=true</code> label; when <code>true</code>, an administrator must opt nodes in manually. Read per-reconcile.</td>
       </tr>
       <tr>
           <td><code>kv-cache-backend-image</code></td>
@@ -1703,12 +1721,6 @@ and every upgrade.</p>
           <td>Whether a node&rsquo;s plugin may pull a model&rsquo;s content from the plugins of other nodes that hold it published, instead of the hub.</td>
       </tr>
       <tr>
-          <td><code>node-management-manual</code></td>
-          <td><code>GPUSTACK_NODE_MANAGEMENT_MANUAL</code></td>
-          <td><code>false</code></td>
-          <td>Skip auto-managing nodes. When <code>false</code>, the operator auto-onboards discovered nodes by injecting the <code>gpustack.ai/managed=true</code> label; when <code>true</code>, an administrator must opt nodes in manually. Read per-reconcile.</td>
-      </tr>
-      <tr>
           <td><code>settings-default-tracking</code></td>
           <td><em>(none)</em></td>
           <td><code>instance-ssh-server-image</code>, <code>kv-cache-backend-image</code>, <code>model-deployment-router-image</code>, <code>model-deployment-router-proxy-image</code>, <code>model-deployment-routing-sidecar-image</code>, <code>model-prefetch-warmup-image</code></td>
@@ -1721,7 +1733,7 @@ and every upgrade.</p>
           <td><code>workload-fit-affinity</code></td>
           <td><code>GPUSTACK_WORKLOAD_FIT_AFFINITY</code></td>
           <td><code>true</code></td>
-          <td>Whether the <code>Workload</code> webhook pins a logical slice, or a shared request of two or more accelerators, on an operator queue to nodes whose <a href="/gpustack-operator/main/docs/modules/devices/scheduling/#per-card-fit-labels">fit labels</a>
+          <td><strong>Immediate.</strong> Whether the <code>Workload</code> webhook pins a logical slice, or a shared request of two or more accelerators, on an operator queue to nodes whose <a href="/gpustack-operator/main/docs/modules/devices/scheduling/#per-card-fit-labels">fit labels</a>
  show that one accelerator can still host it. When <code>true</code>, Kueue&rsquo;s topology-aware scheduling skips a fragmented node; when <code>false</code>, <code>Workload</code>s pass unchanged while the fit labels are still published, so the pin can be switched off on its own. Read on every webhook call, so a change takes up to 30s to reach it, and it applies to <code>Workload</code>s created or updated after that.</td>
       </tr>
   </tbody>
@@ -2366,7 +2378,7 @@ user-facing settings, listed for completeness.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/fe455ea00730beadff87fdcbc1d0ee105ee2cfff/docs/reference/settings.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/25c6524fc31e93cd924f83ce4da57c5ae0243103/docs/reference/settings.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/settings.md">Edit this page</a>
             
