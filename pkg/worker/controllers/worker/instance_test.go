@@ -1219,6 +1219,13 @@ func TestInstanceReconciler_PatchesResourceTypeLabelOnRunningPod(t *testing.T) {
 		ObjectMeta: meta.ObjectMeta{
 			Namespace: ns,
 			Name:      name,
+			OwnerReferences: []meta.OwnerReference{{
+				APIVersion: "worker.gpustack.ai/v1alpha1",
+				Kind:       "Instance",
+				Name:       inst.Name,
+				UID:        inst.UID,
+				Controller: ptr.To(true),
+			}},
 			Labels: map[string]string{
 				deviceplugin.InstancePartOfLabelKey: string(inst.UID),
 			},

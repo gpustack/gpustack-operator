@@ -223,7 +223,9 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// Pods that predate the resource-type label — rendered by an earlier operator before the
 	// namespace-isolation policy existed — carry nothing for that policy to select them by.
 	// Labels are mutable metadata, so patch the drifted one in place; no restart involved.
-	if pod != nil && pod.Labels[systemmeta.ResourceTypeLabel] != "instances" {
+	// A same-named Pod this Instance does not own belongs to something else, and is left alone:
+	// stamping it would place a stranger's workload under this policy.
+	if pod != nil && kubemeta.IsControlledBy(pod, inst) && pod.Labels[systemmeta.ResourceTypeLabel] != "instances" {
 		if pod.Labels == nil {
 			pod.Labels = map[string]string{}
 		}
