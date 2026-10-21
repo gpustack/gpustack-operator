@@ -1,7 +1,6 @@
 package inject
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 

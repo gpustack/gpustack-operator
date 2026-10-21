@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -24,6 +23,7 @@ import (
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
 	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )

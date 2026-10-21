@@ -2,9 +2,6 @@ package worker
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +27,8 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/modelartifact"
+	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 const (
@@ -1158,8 +1157,7 @@ func TestModelArtifactKVIdentity(t *testing.T) {
 		"an Expected identity keys on the digest it carries")
 
 	claim := artifactFixture("models", true, true)
-	sum := sha256.Sum256([]byte(claim.UID))
-	assert.Equal(t, "m-"+hex.EncodeToString(sum[:])[:32], modelArtifactKVIdentity(claim),
+	assert.Equal(t, "m-"+stringx.SumBySHA256(string(claim.UID))[:32], modelArtifactKVIdentity(claim),
 		"a claim's identity is the artifact, not its content")
 }
 

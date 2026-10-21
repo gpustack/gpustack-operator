@@ -17,7 +17,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -39,6 +38,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
 

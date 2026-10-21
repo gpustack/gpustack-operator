@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,6 +13,9 @@ import (
 	authentication "k8s.io/api/authentication/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klog "k8s.io/klog/v2"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 // AuthMode names how two plugins authenticate each other.
@@ -49,14 +50,14 @@ func tokenExpiry(token string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	payload, _, _ := strings.Cut(rest, ".")
-	claims, err := base64.RawURLEncoding.DecodeString(payload)
+	claims, err := stringx.DecodeBase64(payload)
 	if err != nil {
 		return time.Time{}, false
 	}
 	var parsed struct {
 		Exp int64 `json:"exp"`
 	}
-	if json.Unmarshal(claims, &parsed) != nil || parsed.Exp <= 0 {
+	if json.Unmarshal([]byte(claims), &parsed) != nil || parsed.Exp <= 0 {
 		return time.Time{}, false
 	}
 

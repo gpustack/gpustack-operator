@@ -1,7 +1,6 @@
 package cambricon
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 const (

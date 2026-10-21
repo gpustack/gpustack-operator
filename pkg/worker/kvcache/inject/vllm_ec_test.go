@@ -1,13 +1,14 @@
 package inject
 
 import (
-	"encoding/json"
 	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // The encoder-cache leg is exercised through renderVLLMWithEncoderCache rather than Render, because

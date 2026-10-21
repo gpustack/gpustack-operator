@@ -25,7 +25,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +35,7 @@ import (
 	core "k8s.io/api/core/v1"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // modelDeploymentQualifyRIDPrefix marks every request this operator makes on an engine's serving

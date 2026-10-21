@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"testing"
@@ -22,6 +21,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // retirementSchemaValidator is the REAL generated CRD validator, not a stand-in. The point of these

@@ -1,12 +1,13 @@
 package inject
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // vllmReadableKeys is every key vLLM's own file reader takes, transcribed from

@@ -3,13 +3,14 @@ package mooncake
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // adminPathTenantQuotas is the tenant ledger's one route. Every operation is that path with a

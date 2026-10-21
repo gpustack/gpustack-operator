@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
 

@@ -1,13 +1,14 @@
 package thead
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // legacyMarkerKeys is the complete on-disk key set of the ownership marker, as records written by

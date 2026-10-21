@@ -2,7 +2,6 @@ package peer
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +16,7 @@ import (
 
 	modelartifact "gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/modelmanager/download"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // Defaults of a Fetcher and a Puller.

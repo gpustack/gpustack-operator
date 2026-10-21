@@ -3,7 +3,6 @@ package worker
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"math"
 	"testing"
@@ -21,6 +20,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 type retirementGPUProtocolFixture struct {

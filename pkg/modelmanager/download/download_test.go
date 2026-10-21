@@ -3,7 +3,6 @@ package download
 import (
 	"context"
 	"crypto/sha1" // nolint: gosec // git blob ids are SHA-1.
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -23,6 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 const testToken = "hf_test-token-value-never-in-errors"
@@ -141,8 +142,7 @@ func (h *testHub) recorded() []testRequest {
 }
 
 func sha256Digest(b []byte) string {
-	sum := sha256.Sum256(b)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return "sha256:" + stringx.SumBytesBySHA256(b)
 }
 
 func gitsha1Digest(b []byte) string {

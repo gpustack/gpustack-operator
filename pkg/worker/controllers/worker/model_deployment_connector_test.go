@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -17,6 +16,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 

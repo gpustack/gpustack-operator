@@ -2,8 +2,6 @@ package worker
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"maps"
 	"slices"
@@ -29,6 +27,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
 )
 
@@ -1568,8 +1567,7 @@ func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSpli
 
 			encoded, err := json.Marshal(objects)
 			require.NoError(t, err)
-			sum := sha256.Sum256(encoded)
-			digest := hex.EncodeToString(sum[:])
+			digest := stringx.SumBytesBySHA256(encoded)
 
 			want, ok := pinned[tc.name]
 			if !ok {

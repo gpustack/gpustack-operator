@@ -1,13 +1,14 @@
 package inject
 
 import (
-	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 const testCachePrefix = "m-0123456789abcdef0123456789abcdef"

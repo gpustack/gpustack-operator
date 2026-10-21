@@ -2,7 +2,6 @@ package deviceplugin
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -36,6 +35,7 @@ import (
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 func TestResourceServer_ResourceName(t *testing.T) {

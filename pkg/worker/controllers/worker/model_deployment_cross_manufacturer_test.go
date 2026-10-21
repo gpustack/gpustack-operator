@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"encoding/json"
 	"slices"
 	"testing"
 
@@ -15,6 +14,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // These cases answer what this operator WRITES for a deployment whose two roles sit on two

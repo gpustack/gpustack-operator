@@ -1,7 +1,6 @@
 package metax
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -14,6 +13,7 @@ import (
 	klog "k8s.io/klog/v2"
 
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 

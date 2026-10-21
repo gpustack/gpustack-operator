@@ -3,9 +3,6 @@ package materialize
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +25,8 @@ import (
 	"gpustack.ai/gpustack/pkg/modelmanager/driver"
 	"gpustack.ai/gpustack/pkg/modelmanager/peer"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
+	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 const testCommit = "0123456789abcdef0123456789abcdef01234567"
@@ -112,8 +111,7 @@ func (h *testHub) locate(urlPath string) (repo, path string, ok bool) {
 func (h *testHub) manifest(repo string) modelartifact.Manifest {
 	entries := make([]modelartifact.ManifestEntry, 0, len(h.files[repo]))
 	for p, b := range h.files[repo] {
-		sum := sha256.Sum256(b)
-		entries = append(entries, modelartifact.ManifestEntry{Path: p, Size: int64(len(b)), Digest: "sha256:" + hex.EncodeToString(sum[:])})
+		entries = append(entries, modelartifact.ManifestEntry{Path: p, Size: int64(len(b)), Digest: "sha256:" + stringx.SumBytesBySHA256(b)})
 	}
 	m, err := modelartifact.NewManifest(entries)
 	if err != nil {
@@ -624,11 +622,10 @@ func TestEnsureReservesOnlyTheMissingBytes(t *testing.T) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(partial), 0o755))
 			require.NoError(t, os.WriteFile(partial, bytes.Repeat([]byte("w"), 1000), 0o644))
 			if c.carried > 0 {
-				sum := sha256.Sum256([]byte("sub/model.safetensors"))
 				state := filepath.Join(a.Dir(), "state")
 				require.NoError(t, os.MkdirAll(state, 0o755))
 				cp := fmt.Sprintf(`{"offset":%d,"state":""}`, c.carried)
-				require.NoError(t, os.WriteFile(filepath.Join(state, hex.EncodeToString(sum[:])), []byte(cp), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(state, stringx.SumBySHA256("sub/model.safetensors")), []byte(cp), 0o600))
 			}
 
 			var (

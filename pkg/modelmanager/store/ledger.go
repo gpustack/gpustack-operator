@@ -1,8 +1,6 @@
 package store
 
 import (
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,6 +11,9 @@ import (
 	"time"
 
 	klog "k8s.io/klog/v2"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 // The ledger lives on the node's disk only. It is the node's own record, never an API object, so it
@@ -248,5 +249,5 @@ func (s *Store) RemoveDigest(hex string) error {
 // contract, so it is used only to name a reference adopted from a mount the ledger lost; nothing
 // depends on recomputing it.
 func EphemeralVolumeID(podUID, volumeName string) string {
-	return fmt.Sprintf("csi-%x", sha256.Sum256([]byte(podUID+volumeName)))
+	return fmt.Sprintf("csi-%s", stringx.SumBySHA256(podUID+volumeName))
 }

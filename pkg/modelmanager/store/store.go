@@ -18,7 +18,6 @@
 package store
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -30,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // Layout is the content of the layout file. A later layout changes it, so a root written by one

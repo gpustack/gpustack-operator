@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -13,6 +12,7 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 

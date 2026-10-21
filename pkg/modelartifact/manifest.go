@@ -6,14 +6,14 @@
 package modelartifact
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 // ManifestHeader is the first line of every canonical manifest. Any change to the format changes
@@ -100,11 +100,10 @@ func NewManifest(entries []ManifestEntry) (Manifest, error) {
 	}
 
 	encoded := []byte(b.String())
-	sum := sha256.Sum256(encoded)
 
 	return Manifest{
 		Encoded:   encoded,
-		Digest:    DigestSHA256 + ":" + hex.EncodeToString(sum[:]),
+		Digest:    DigestSHA256 + ":" + stringx.SumBytesBySHA256(encoded),
 		FileCount: int64(len(sorted)),
 		SizeBytes: size,
 		Entries:   sorted,

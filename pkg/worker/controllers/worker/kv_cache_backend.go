@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -39,6 +38,7 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/kvcache"

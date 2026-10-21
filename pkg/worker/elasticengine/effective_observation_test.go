@@ -2,7 +2,6 @@ package elasticengine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
 )
 

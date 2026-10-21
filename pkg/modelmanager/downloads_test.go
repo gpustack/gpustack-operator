@@ -1,7 +1,6 @@
 package modelmanager
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/modelmanager/materialize"
 	"gpustack.ai/gpustack/pkg/modelstore"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 func TestDownloadsHandler(t *testing.T) {

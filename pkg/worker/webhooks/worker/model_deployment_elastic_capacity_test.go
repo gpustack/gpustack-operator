@@ -2,13 +2,13 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 func TestElasticMaxDPCapacityAdmission(t *testing.T) {

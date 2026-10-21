@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/settings"

@@ -1,7 +1,6 @@
 package metax
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 const (

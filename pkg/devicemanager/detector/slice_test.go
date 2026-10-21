@@ -2,7 +2,6 @@ package detector
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/devicemanager/procattr"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 const (

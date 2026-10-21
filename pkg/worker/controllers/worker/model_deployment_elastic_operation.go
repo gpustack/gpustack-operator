@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +16,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // The elastic resize operation is a durable record plus a pure decision function over it. The record
@@ -194,7 +194,7 @@ func elasticOperationFromData(body string) (*elasticOperation, error) {
 	if err := decoder.Decode(op); err != nil {
 		return nil, fmt.Errorf("%w: %w", errElasticOperation, err)
 	}
-	if err := decoder.Decode(new(json.RawMessage)); err != io.EOF {
+	if err := decoder.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("%w: the stored record carries a trailing JSON value", errElasticOperation)
 	}
 
@@ -402,7 +402,7 @@ func (s *elasticOperationStore) Read(
 	if err := decoder.Decode(op); err != nil {
 		return nil, fmt.Errorf("%w: %w", errElasticOperation, err)
 	}
-	if err := decoder.Decode(new(json.RawMessage)); err != io.EOF {
+	if err := decoder.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("%w: the stored record carries a trailing JSON value", errElasticOperation)
 	}
 

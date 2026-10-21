@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +24,7 @@ import (
 	"gpustack.ai/gpustack/pkg/extensionapi"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/modelstore"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )

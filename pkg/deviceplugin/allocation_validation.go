@@ -1,7 +1,6 @@
 package deviceplugin
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -11,6 +10,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // The strict rebuild exists because the ordinary one is a best-effort answer and a retirement needs

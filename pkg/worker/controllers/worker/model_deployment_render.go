@@ -2,9 +2,6 @@ package worker
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -23,8 +20,10 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -237,6 +236,11 @@ const (
 	modelDeploymentEncoderProbeTimeoutSeconds       int32 = 5
 	modelDeploymentEncoderReadinessFailureThreshold int32 = 6
 	modelDeploymentEncoderLivenessFailureThreshold  int32 = 12
+
+	// modelDeploymentVLLMEngramConfigArg and modelDeploymentSGLangEngramHostTableEnv are the
+	// engine settings that place an Engram lookup table in pinned host DRAM.
+	modelDeploymentVLLMEngramConfigArg      = "--engram-config"
+	modelDeploymentSGLangEngramHostTableEnv = "SGLANG_ENABLE_DSV41_ENGRAM_HOST_TABLE"
 )
 
 // modelDeploymentListenArgs are the listen and TLS flags each engine registers: the set the render
@@ -602,6 +606,14 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	}
 	if role.Privileged {
 		mainC.SecurityContext = &core.SecurityContext{Privileged: ptr.To(true)}
+	} else if modelDeploymentRoleNeedsEngramCapabilities(md.Spec.Engine.Name, role, command) {
+		mainC.SecurityContext = &core.SecurityContext{
+			Capabilities: &core.Capabilities{
+				// IPC_LOCK pins the host memory the Engram table registers for UVA access, and
+				// SYS_RESOURCE lets the runtime raise the locked-memory limit when needed.
+				Add: []core.Capability{"IPC_LOCK", "SYS_RESOURCE"},
+			},
+		}
 	}
 	// A take-over role gets no drain, for the reason it gets no probes: the operator did not build
 	// that command line, so it cannot claim the container serves the metrics the hook reads.
@@ -1581,6 +1593,134 @@ func modelDeploymentDefaultedArgs(groups [][]string, userArgs []string) []string
 	return out
 }
 
+// modelDeploymentRoleNeedsEngramCapabilities reports whether the role configures an Engram host
+// memory lookup table that requires IPC_LOCK and SYS_RESOURCE to pin host DRAM.
+func modelDeploymentRoleNeedsEngramCapabilities(
+	engine string, role *workercore.ModelDeploymentRole, command []string,
+) bool {
+	if role == nil {
+		return false
+	}
+
+	switch engine {
+	case workercore.ModelDeploymentEngineVLLM:
+		return modelDeploymentVLLMNeedsEngramCapabilities(command)
+	case workercore.ModelDeploymentEngineSGLang:
+		return modelDeploymentSGLangNeedsEngramCapabilities(role.Env)
+	default:
+		return false
+	}
+}
+
+// modelDeploymentVLLMNeedsEngramCapabilities scans a vLLM argument stream for --engram-config or
+// its dotted field overrides and reports whether host CPU offload remains enabled.
+func modelDeploymentVLLMNeedsEngramCapabilities(args []string) bool {
+	seen := false
+	cpuOffload := true
+
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			break
+		}
+		if !strings.HasPrefix(args[i], "--") {
+			continue
+		}
+
+		rawKey, val, hasVal := strings.Cut(args[i], "=")
+		normKey := modelDeploymentVLLMFlagKey(rawKey)
+		head, tail, dotted := strings.Cut(normKey, ".")
+		if head != modelDeploymentVLLMEngramConfigArg {
+			continue
+		}
+
+		if !hasVal && i+1 < len(args) && modelDeploymentConsumableValue(args[i+1]) {
+			val = args[i+1]
+			hasVal = true
+			i++
+		}
+
+		seen = true
+		if !dotted {
+			cpuOffload = modelDeploymentVLLMEngramJSONCPUOffload(val)
+			continue
+		}
+
+		if strings.ReplaceAll(tail, "-", "_") == "cpu_offload" {
+			if !hasVal {
+				cpuOffload = true
+			} else {
+				cpuOffload = !modelDeploymentFalsyString(val)
+			}
+		}
+	}
+
+	return seen && cpuOffload
+}
+
+// modelDeploymentVLLMEngramJSONCPUOffload reads cpu_offload from a --engram-config JSON payload.
+// When the field is absent or the payload cannot be parsed as a JSON object, it defaults to true
+// to match vLLM's EngramConfig.cpu_offload default.
+func modelDeploymentVLLMEngramJSONCPUOffload(raw string) bool {
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &cfg); err != nil || cfg == nil {
+		return true
+	}
+
+	val, exists := cfg["cpu_offload"]
+	if !exists {
+		val, exists = cfg["cpu-offload"]
+	}
+	if !exists {
+		return true
+	}
+
+	switch v := val.(type) {
+	case bool:
+		return v
+	case float64:
+		return v != 0
+	case string:
+		return !modelDeploymentFalsyString(v)
+	default:
+		return true
+	}
+}
+
+// modelDeploymentSGLangNeedsEngramCapabilities reports whether SGLang's Engram host table offload
+// environment variable is enabled.
+func modelDeploymentSGLangNeedsEngramCapabilities(env []workercore.ModelDeploymentEnvVar) bool {
+	val, ok := modelDeploymentEnvValue(env, modelDeploymentSGLangEngramHostTableEnv)
+	if !ok {
+		return false
+	}
+
+	s := strings.ToLower(strings.TrimSpace(val))
+	if b, err := strconv.ParseBool(s); err == nil {
+		return b
+	}
+
+	switch s {
+	case "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func modelDeploymentFalsyString(raw string) bool {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if b, err := strconv.ParseBool(s); err == nil {
+		return !b
+	}
+
+	switch s {
+	case "no", "n", "off":
+		return true
+	default:
+		return false
+	}
+}
+
 // deriveModelDeploymentResources turns a role's accelerator request into the full resource request
 // one replica makes.
 //
@@ -1812,9 +1952,7 @@ func modelDeploymentBindingHash(
 		return "unhashable-binding-" + err.Error()
 	}
 
-	sum := sha256.Sum256(encoded)
-
-	return hex.EncodeToString(sum[:])
+	return stringx.SumBytesBySHA256(encoded)
 }
 
 // modelDeploymentExplicitSpecHash fingerprints the explicit user-configured ModelDeployment and
@@ -1885,9 +2023,7 @@ func modelDeploymentExplicitSpecHash(
 		return "unhashable-" + err.Error()
 	}
 
-	sum := sha256.Sum256(encoded)
-
-	return hex.EncodeToString(sum[:])
+	return stringx.SumBytesBySHA256(encoded)
 }
 
 // modelDeploymentEffectiveMinRenderVersion computes the minimum acceptable render version for a

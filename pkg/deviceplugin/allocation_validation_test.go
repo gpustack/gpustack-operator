@@ -1,7 +1,6 @@
 package deviceplugin
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -12,6 +11,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // The strict rebuild exists so a retirement predicate can be told "I could not read this" instead of

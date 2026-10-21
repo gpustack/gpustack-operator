@@ -1,7 +1,6 @@
 package modelartifact
 
 import (
-	"encoding/json"
 	rand "math/rand/v2"
 	"os"
 	"slices"
@@ -10,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 var (

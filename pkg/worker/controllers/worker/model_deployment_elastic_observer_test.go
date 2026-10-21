@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,6 +18,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 // THE ANCHOR NEGATIVE: a document whose tables parse but whose rank proof is not
