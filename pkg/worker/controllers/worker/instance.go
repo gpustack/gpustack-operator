@@ -208,6 +208,14 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
+	// Ensure the namespace's tenant-isolation NetworkPolicy before anything else in the
+	// namespace's lifecycle: it is what keeps one tenant's Pods from reaching another's, so a
+	// failure here fails the reconcile loudly rather than letting an Instance run unisolated.
+	if err = r.ensureTenantNetworkPolicy(ctx, inst); err != nil {
+		logger.Error(err, "ensure tenant network policy")
+		return ctrl.Result{}, err
+	}
+
 	// Fetch the backing Pod.
 	pod := new(core.Pod)
 	err = r.Client.Get(ctx, req.NamespacedName, pod,

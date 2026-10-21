@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	networking "k8s.io/api/networking/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -2043,4 +2044,85 @@ func TestInstanceReconciler_RefusesAServiceItDoesNotOwn(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestInstanceReconciler_EnsuresTenantNetworkPolicy pins the isolation contract every Instance
+// namespace gets: Instance Pods may be reached from their own namespace and from outside the
+// cluster (the NodePort path), never from another namespace's Pods — and may dial out under the
+// same rule, so a shell inside one Instance cannot scan or reach a neighbor tenant's.
+//
+// The policy is one object per namespace rather than one per Instance: it selects the stable
+// component label every Instance Pod carries, so it outlives any single Instance and never
+// churns on a stop/start. The pod CIDRs in the ipBlock exceptions are learned from the Nodes,
+// which is the only place the cluster's pod address space is written down.
+func TestInstanceReconciler_EnsuresTenantNetworkPolicy(t *testing.T) {
+	ctx := context.Background()
+	inst, instType, cq := newInstanceServiceFixture()
+	nodeA := &core.Node{
+		ObjectMeta: meta.ObjectMeta{Name: "node-a"},
+		Spec:       core.NodeSpec{PodCIDRs: []string{"10.42.1.0/24"}},
+	}
+	nodeB := &core.Node{
+		ObjectMeta: meta.ObjectMeta{Name: "node-b"},
+		Spec:       core.NodeSpec{PodCIDRs: []string{"10.42.0.0/24", "fd00:10:42:2::/64"}},
+	}
+	cli := buildInstanceServiceClient(inst, instType, cq, nodeA, nodeB)
+
+	reconcileInstanceUntilSettled(t, cli)
+
+	np := new(networking.NetworkPolicy)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: "default", Name: instanceTenantNetworkPolicyName,
+	}, np),
+		"reconciling an Instance ensures the tenant-isolation policy in its namespace")
+
+	assert.Equal(t, map[string]string{
+		deviceplugin.ComponentLabelKey: deviceplugin.InstanceComponent,
+	}, np.Spec.PodSelector.MatchLabels, "the policy selects Instance Pods by their stable label")
+	assert.ElementsMatch(t,
+		[]networking.PolicyType{networking.PolicyTypeIngress, networking.PolicyTypeEgress},
+		np.Spec.PolicyTypes, "isolation holds in both directions")
+
+	// The pod CIDR exceptions are learned from the Nodes, sorted, deduplicated, and IPv4-only:
+	// an ipBlock's except list must stay within its cidr, so an IPv6 node podCIDR cannot ride
+	// the 0.0.0.0/0 rule.
+	wantExcept := []string{"10.42.0.0/24", "10.42.1.0/24"}
+
+	require.Len(t, np.Spec.Ingress, 1, "one ingress rule carries both allowed peer kinds")
+	ingressPeers := np.Spec.Ingress[0].From
+	require.Len(t, ingressPeers, 2)
+	assert.NotNil(t, ingressPeers[0].PodSelector, "same-namespace pods are allowed in")
+	assert.Empty(t, ingressPeers[0].PodSelector.MatchLabels)
+	assert.Empty(t, ingressPeers[0].PodSelector.MatchExpressions)
+	require.NotNil(t, ingressPeers[1].IPBlock, "and so is everything outside the pod network")
+	assert.Equal(t, "0.0.0.0/0", ingressPeers[1].IPBlock.CIDR)
+	assert.Equal(t, wantExcept, ingressPeers[1].IPBlock.Except,
+		"pod addresses of every namespace are the one thing not let in by the external rule")
+
+	require.Len(t, np.Spec.Egress, 3, "same-namespace, external, and DNS each get an egress rule")
+	assert.NotNil(t, np.Spec.Egress[0].To[0].PodSelector, "same-namespace pods stay reachable")
+	require.NotNil(t, np.Spec.Egress[1].To[0].IPBlock)
+	assert.Equal(t, "0.0.0.0/0", np.Spec.Egress[1].To[0].IPBlock.CIDR)
+	assert.Equal(t, wantExcept, np.Spec.Egress[1].To[0].IPBlock.Except,
+		"dialing another namespace's pod is blocked at the source too")
+	assert.Empty(t, np.Spec.Egress[2].To, "DNS is port-scoped to survive ClusterIP DNAT ordering")
+	assert.ElementsMatch(t, []networking.NetworkPolicyPort{
+		{Protocol: ptr.To(core.ProtocolUDP), Port: ptr.To(intstr.FromInt32(53))},
+		{Protocol: ptr.To(core.ProtocolTCP), Port: ptr.To(intstr.FromInt32(53))},
+	}, np.Spec.Egress[2].Ports)
+
+	// The policy names no owner: it is shared per namespace and must outlive the Instance that
+	// first rendered it.
+	assert.Empty(t, np.OwnerReferences, "a namespace-shared policy is never collected with an Instance")
+
+	// A second settled reconcile renders the identical object: the align is a no-op, which the
+	// untouched resource version pins.
+	firstRV := np.ResourceVersion
+	reconcileInstanceUntilSettled(t, cli)
+	again := new(networking.NetworkPolicy)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: "default", Name: instanceTenantNetworkPolicyName,
+	}, again))
+	assert.Equal(t, firstRV, again.ResourceVersion,
+		"an unchanged desired state must not rewrite the policy")
 }
