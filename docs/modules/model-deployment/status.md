@@ -1,6 +1,6 @@
 # Model Deployment Status
 
-A `ModelDeployment` reports its phase, ready replicas and serving endpoint in `status`. Use these
+A `ModelDeployment` reports its phase, ready replicas and serving endpoint in *`status`*. Use these
 fields and its conditions to diagnose a deployment that is still starting or has lost capacity.
 
 ## Contents
@@ -9,60 +9,60 @@ fields and its conditions to diagnose a deployment that is still starting or has
 
 ## Status
 
-`status.phase` is the field to read first: `Starting`, `Ready`, `Degraded` or `Deleting`. `Degraded`
+*`status.phase`* is the field to read first: `Starting`, `Ready`, `Degraded` or `Deleting`. `Degraded`
 means some required serving capacity is ready and some is not: either some role replicas are down, or
 all role replicas are ready but a declared router has no ready replica.
-`status.roles[]` carries `name`, `kind`, `desired`, `ready`, `quotaReserved`, `unmanaged`,
-`assignedFlavors`, `parallelism` and `endpoints` per role.
+*`status.roles[]`* carries `name`, *`kind`*, `desired`, `ready`, *`quotaReserved`*, `unmanaged`,
+*`assignedFlavors`*, *`parallelism`* and `endpoints` per role.
 
-`kubectl get modeldeployments` shows `status.roleSummary` in its `ROLES` column. It counts current
-Ready instances by kind: `R` is managed router Pods, `S` is ordinary servers, `E` is encoders,
+`kubectl get modeldeployments` shows *`status.roleSummary`* in its `ROLES` column. It counts current
+Ready instances by kind: `R` is managed router `Pod`s, `S` is ordinary servers, `E` is encoders,
 `P` is prefillers, and `D` is decoders. For example, `1R2S` means one Ready router and two Ready
 servers; `1R1E1P1D` means one Ready router, one Ready encoder, one Ready prefiller and one Ready decoder.
 
 **During a replacement, status combines desired and observed fields.** See
-[Rollout behavior](deployment.md#rollout-behavior). `desired` and `parallelism` describe the current
+[Rollout behavior](deployment.md#rollout-behavior). `desired` and *`parallelism`* describe the current
 spec; they can differ from running replicas while replacement waits. `ready` counts replicas still
 serving their deployed configuration. `unmanaged` and cache conditions read deployed command mode.
 
 Without a router, the `R` part is absent; a declared kind with nothing Ready shows zero. Several
-roles of the same kind are summed. A serving instance made of several Pods still counts once; use
-`status.roles[].desired` to see the requested count.
+roles of the same kind are summed. A serving instance made of several `Pod`s still counts once; use
+*`status.roles[].desired`* to see the requested count.
 
-Without a router, `status.endpoint` is the address the deployment-wide Service serves on, in the form
+Without a router, *`status.endpoint`* is the address the deployment-wide `Service` serves on, in the form
 `<scheme>://<name>.<namespace>.svc:<port>`. The scheme and port come from the first role that is not
-`Encode`, and the scheme is `https` only when that role passes `--ssl-certfile` or `--ssl-keyfile`.
-With a router, it is absent until the router is ready, then uses the router Service's `http` transport.
-Each role, including `Encode`, also gets its own `<deployment>-<role>` Service.
+*Encode*, and the scheme is `https` only when that role passes `--ssl-certfile` or `--ssl-keyfile`.
+With a router, it is absent until the router is ready, then uses the router `Service`'s `http` transport.
+Each role, including *Encode*, also gets its own `<deployment>-<role>` `Service`.
 
-`status.router` publishes the contract used to render the router: its implementation and address,
+*`status.router`* publishes the contract used to render the router: its implementation and address,
 the cache pool's client endpoint, the metrics names and port, and one entry for every role containing
 the effective kind, selector, direct endpoint and any dialable KV-event endpoints. The event entries
-are absent when the corresponding rendered Pods do not carry publisher configuration.
+are absent when the corresponding rendered `Pod`s do not carry publisher configuration.
 
 This router contract names metrics sources for routing; it is not a live utilization sample.
 The separate [Model Deployment Metrics](metrics.md) subresource reads the current
-router and engine Pod endpoints and reports partial coverage explicitly.
+router and engine `Pod` endpoints and reports partial coverage explicitly.
 
 Only `--ssl-certfile` or `--ssl-keyfile` turn the scheme to `https`. The rest of the `--ssl-*`
 family does not: both engines enable TLS for those two alone, so any other ssl argument passed by
 itself leaves an ordinary HTTP server.
 
 **`ready` counts replicas whose engine answered, not replicas whose process started**, except on the
-three shapes listed below, which carry no gates and keep the weaker meaning. One still loading its
+three configurations listed below, which carry no gates and keep the weaker meaning. One still loading its
 model counts as not ready for as long as that takes.
 
-**Both figures count replicas, which is the same as counting Pods only while a replica is one Pod.**
-A role at `size: 2` with `replicas: 2` runs four Pods and reports `desired: 2`. A replica of several
-Pods is ready only when **every** member it declares is, so a role showing `1/2` with three of its
-four Pods running is reporting one whole instance, not three quarters of the role.
+**Both figures count replicas, which is the same as counting `Pod`s only while a replica is one `Pod`.**
+A role at `size: 2` with `replicas: 2` runs four `Pod`s and reports `desired: 2`. A replica of several
+`Pod`s is ready only when **every** member it declares is, so a role showing `1/2` with three of its
+four `Pod`s running is reporting one whole instance, not three quarters of the role.
 
 A gated replica carries a startup gate, a readiness gate and a liveness gate, all reading the
-engine's own `GET /health` on the port the Service targets, so `ready == desired` and "the endpoint
+engine's own `GET /health` on the port the `Service` targets, so `ready == desired` and "the endpoint
 answers" are one fact rather than two.
 
 The KV cache store's leader answers a route of the same name that is deliberately **not** a readiness
-signal; see [KV Cache Leader](../kv-cache/leader.md). They are different programs, and only the
+signal; see [KV Cache Election and Failover](../kv-cache/leader.md). They are different programs, and only the
 engine's route is read here.
 
 **The startup gate allows thirty minutes per attempt, not in total.** A replica that has not
@@ -75,7 +75,7 @@ alike until the startup gate succeeds.
 **A replica that stops answering loses readiness first, and is restarted only if it stays quiet
 for longer.** The liveness gate's failure threshold is wider than the readiness gate's.
 
-> Readiness withdraws a replica from the Service and is undone by answering again; a restart throws
+> Readiness withdraws a replica from the `Service` and is undone by answering again; a restart throws
 > away a model that took the startup budget to load. Different thresholds keep those two events
 > different, and the liveness gate is what gives a quiet replica a way back, since this operator
 > deletes a replica only to shed one the spec no longer declares or to turn over an outdated one.
@@ -86,15 +86,15 @@ address the engine opens are one decision. The two engines do not agree on a def
 every interface on 8000, SGLang opens `127.0.0.1:30000`), and an engine left on its own would be
 unreachable on one of them.
 
-**Both flags are filled when missing.** A role that passes either through `extraArgs` keeps its own
+**Both flags are filled when missing.** A role that passes either through *`extraArgs`* keeps its own
 value, and the operator adds only the one that is absent.
 
 **A role that enables TLS is still gated**, over HTTPS, on the criterion above. Only the transport
 moved (the address is still the operator's own), and the kubelet does not verify the server
 certificate on a probe, so a self-signed pair is graded like any other.
 
-**Three shapes carry no gates at all**: a role that replaces the command through
-`roles[].command`; a role that moves where its engine listens, with `--host` or `--port`, or that
+**Three configurations carry no gates at all**: a role that replaces the command through
+*`roles[].command`*; a role that moves where its engine listens, with `--host` or `--port`, or that
 demands a client certificate a probe has none to present, with `--ssl-cert-reqs` set to anything but
 `0` or `1` **alongside a certificate or key**; and a role declaring its port as `UDP` or `SCTP`.
 
@@ -109,35 +109,35 @@ would restart a replica answering every request; an HTTP engine speaks TCP whate
 says, so a gate would **pass** while the published endpoint forwards a protocol nothing answers.
 Replicas of all three are Ready as soon as their process starts.
 
-`quotaReserved` is how many of the role's replicas hold a quota reservation. Each replica is its own
-Workload and reserves on its own, so a role sits anywhere between zero and `desired` while capacity
-arrives; a role that shared one Workload passed all-or-nothing, and this figure could not exist.
+*`quotaReserved`* is how many of the role's replicas hold a quota reservation. Each replica is its own
+`Workload` and reserves on its own, so a role sits anywhere between zero and `desired` while capacity
+arrives; a role that shared one `Workload` passed all-or-nothing, and this figure could not exist.
 
-The field is always present once written, and its zero is an observed zero: it is counted from Pod
-and Workload lists that succeeded, and a failed list writes no status at all rather than a zero. The
+The field is always present once written, and its zero is an observed zero: it is counted from `Pod`
+and `Workload` lists that succeeded, and a failed list writes no status at all rather than a zero. The
 two readings call for opposite actions: a visible 0 means the pass read everything and no replica
 holds quota, so investigate capacity; a field that is not there means the pass could not see, so wait,
 or look at the operator rather than the pool.
 
-`assignedFlavors` answers *which accelerator models did this role's replicas actually get*, read from
-each replica's own Workload's per-PodSet assignment. It is a **deduplicated, sorted** list, because
-each replica is its own Workload and Kueue assigns a flavor per Workload, so two replicas of one role
+*`assignedFlavors`* answers *which accelerator models did this role's replicas actually get*, read from
+each replica's own `Workload`'s per-PodSet assignment. It is a **deduplicated, sorted** list, because
+each replica is its own `Workload` and Kueue assigns a flavor per `Workload`, so two replicas of one role
 can land on different flavors.
 
 It is **absent** rather than empty while no assignment exists, and absent does not only mean "not
 admitted yet". The field reports the flavor of a replica's *accelerator* credits: a role admitted onto
 a pool carrying no accelerator at all reports nothing here while being perfectly healthy: its
-Workloads hold assignments, naming a flavor for `cpu`.
+`Workload`s hold assignments, naming a flavor for `cpu`.
 
 One entry means every assigned replica of the role names it. Several entries mean the replicas were
 assigned different flavors, the signal to investigate and not a degraded form of one answer.
 
 Which replica carries which flavor is deliberately not here: the ordinal such an answer would key
 on is the converger's internal slotting rather than a promise this API makes, and a reader who
-needs the mapping reads the replicas' own Pods. A flavor reported here is read through the same
+needs the mapping reads the replicas' own `Pod`s. A flavor reported here is read through the same
 lens the per-accelerator admission gate uses, so the two cannot disagree.
 
-`parallelism` reports the parallelism the role's own arguments declare, with the provenance of
+*`parallelism`* reports the parallelism the role's own arguments declare, with the provenance of
 the reading. Every pass reads each managed role's own argument stream — its extra arguments,
 under the engine's own parser rules: registered spellings and their abbreviations, a repeated
 flag resolved last-wins, everything past a bare `--` ignored, and the environment read only
@@ -147,16 +147,16 @@ Nothing is defaulted into the read: a degree the role does not declare is `null`
 `1` and an explicit local `0` are preserved as written, and an observed mode carries its
 explicit boolean — the absence of a mode key is not `false`.
 
-`parallelism.loadBalance` derives the balance shape from the stream's wiring: the vLLM
+*`parallelism.loadBalance`* derives the load-balancing mode from the role's arguments: the vLLM
 external-balance flag or an assigned data-parallel rank derives `External`, the hybrid and
 multi-port flags derive `Hybrid` and `MultiPort`, flags that disagree leave it `Unknown` with
-the flags named in `parallelism.source.unreadableReason`, and anything else balances
+the flags named in *`parallelism.source.unreadableReason`*, and anything else balances
 `Internal`.
 
-`parallelism.source` says where the reading came from: `kind` (`ExtraArgs`, `Command`,
-`UnmanagedCommand`), whether the reading itself was `complete`, and an `unreadableReason`
+*`parallelism.source`* says where the reading came from: *`kind`* (`ExtraArgs`, `Command`,
+`UnmanagedCommand`), whether the reading itself was `complete`, and an *`unreadableReason`*
 naming what could not be established — the source when `complete` is false, or a derived fact
-such as the balance shape when the declared flags disagree, which a complete reading can
+such as the load-balancing mode when the declared flags disagree, which a complete reading can
 still carry.
 
 A role that replaced its command line is not read at all — the replaced argv is the role's
@@ -170,33 +170,33 @@ degree.
 `endpoints` separates what the operator qualified from what Routers were actually observed to
 select, and the two never collapse into one number:
 
-- `endpoints.eligible` is how many endpoints the qualification list holds, written only when
+- *`endpoints.eligible`* is how many endpoints the qualification list holds, written only when
   that list is complete. `null` means the set was never observed; an explicit `0` means it was
   observed and is empty. It is named for eligibility and never presents itself as serving.
-- `endpoints.serving.state` is the actual per-Router confirmation: `Confirmed` means complete,
+- *`endpoints.serving.state`* is the actual per-Router confirmation: `Confirmed` means complete,
   fresh, identity-bound Router views agree; `NotConverged` means complete views disagree;
   `Unknown` means a required view is missing, stale or indeterminate; `NotConfigured` means the
   deployment declares no router at all, so there is no Router process whose answer could be
-  missing. Only `Confirmed` carries `endpoints.serving.value`, and its zero is as real as any
+  missing. Only `Confirmed` carries *`endpoints.serving.value`*, and its zero is as real as any
   other number.
 
-**A replica qualifies on five named legs, and a leg this operator cannot evaluate holds.** `MemberSetComplete` (every member the role declares exists), `MembersReady` (each
+**Replica eligibility depends on five criteria. An unknown result preserves the previous eligibility decision.** `MemberSetComplete` (every member the role declares exists), `MembersReady` (each
 answered its engine's health route), `GroupForward` (each member's forward path was observed to
 carry a request), `NoPlannedRetirement` (no retirement operation holds the replica) and
 `NoPendingReplacement` (nothing is already on its way to replace it).
 
-| Leg verdict | What it does |
+| Criterion result | What it does |
 |---|---|
-| verified | passes; the replica contributes to `endpoints.eligible` |
-| failed | revokes the replica from the list immediately, whether or not the other legs agreed |
+| verified | passes; the replica contributes to *`endpoints.eligible`* |
+| failed | revokes the replica from the list immediately, whether or not the other criteria passed |
 | unknown | **holds**: it never revokes on its own and never restores |
 
-> A leg that cannot be evaluated is not evidence of a fault. An engine that is still loading, a
+> A criterion that cannot be evaluated is not evidence of a fault. An engine that is still loading, a
 > Router view that has gone stale and a replica whose group was not observed are all cases where
-> the operator cannot tell. `endpoints.eligible` stays `null` in each, because a short list here
+> the operator cannot tell. *`endpoints.eligible`* stays `null` in each, because a short list here
 > would be contradicted by a later pass.
 
-A replica that was qualifying and stops is restored only when the legs pass again **and** the group
+A replica that was qualifying and stops is restored only when all criteria pass again **and** the group
 still holds the same members. A replica replaced in the meantime is a different group, and the
 answer that held for the old one does not carry over to it.
 
@@ -205,19 +205,19 @@ qualification observation exists it is `Unknown` with reason `NotObserved` — n
 which would say the operator disqualified endpoints it saw. A pass that has qualified nothing
 reports the condition and leaves the per-role counts `null`.
 
-`status.retirement` is present only while a retirement operation is running, at most one at a
+*`status.retirement`* is present only while a retirement operation is running, at most one at a
 time; absent means no operation. It names the role and replica ordinal it retires (ordinal
-`0` is a real position and is always encoded), the `metadata.generation` it was admitted
-against, and the target member Pod and Workload UIDs its deletions carry as preconditions.
+`0` is a real position and is always encoded), the *`metadata.generation`* it was admitted
+against, and the target member `Pod` and `Workload` UIDs its deletions carry as preconditions.
 
 `state` is the protocol step (`Admitted`, `Disqualified`, `Withdrawing`, `Draining`,
-`Deleting`, `Settling`, `Aborted`, `Completed`), `reason` names what put it there, and
-`startedAt`/`deadline`/`phaseStartedAt` carry the budgets across a controller restart.
-`lastConsumedRetryToken` is the retry directive token already consumed, persisted before the
+`Deleting`, `Settling`, `Aborted`, `Completed`), *`reason`* names what put it there, and
+*`startedAt`*/`deadline`/*`phaseStartedAt`* carry the budgets across a controller restart.
+*`lastConsumedRetryToken`* is the retry directive token already consumed, persisted before the
 annotation that carried it is cleared.
 
 **Three kinds of removal start an operation, and they are the ones that take capacity away from a
-role the spec still declares.** A `replicas` reduction starts one for the ordinals it no longer
+role the spec still declares.** A *`replicas`* reduction starts one for the ordinals it no longer
 declares, a shed of surplus replicas starts one for the whole set at once, and a replica of a role
 the spec has dropped — by a scale-away or a role rename — starts one.
 
@@ -230,7 +230,7 @@ turns an outdated replica over.
 
 **A second removal arriving mid-operation is refused, and the replica is held.** At most one
 operation runs at a time, and the replica a second intent named stays where it is, so it is not
-taken out from under the first. Look for `reason` naming the refusal when a scale-down appears to
+taken out from under the first. Look for *`reason`* naming the refusal when a scale-down appears to
 stall behind another removal.
 
 **Each step has its own budget, and the operation has a total.** A phase that runs out ends the
@@ -244,14 +244,14 @@ operation, and the total is the earlier of the two:
 | whole operation | 300 s |
 
 `Aborted` is retained capacity, not a rollback: a budget exhausted before deletion leaves every
-member and the Workload in place, and the reason names the step that ran out. `Completed` is the
+member and the `Workload` in place, and the reason names the step that ran out. `Completed` is the
 one state that clears the field, because a reservation left behind would keep holding a slot no
 operation occupies.
 
 The drain step is where a replica still holding requests is caught before anything is cut; it is
-described in [Model Deployment Shutdown](shutdown.md#the-retirement-protocol).
+described in [Model Deployment Shutdown](shutdown.md#retirement-protocol).
 
-Ten conditions carry the axes a single phase cannot. They are independent: "quota reserved but
+Ten conditions describe states that a single phase cannot represent. They are independent: "quota reserved but
 cache not attached" is a real and actionable state. Nine are described below; `WeightsReady` is
 described with the artifact it reports on, in [Model Artifact](../model-delivery/artifact.md#status).
 
@@ -259,40 +259,40 @@ described with the artifact it reports on, in [Model Artifact](../model-delivery
 
 | Value | Reason | Action |
 |---|---|---|
-| `True` | `Registered` | nowhere; the domain in `status.kvCache` is current |
-| `True` | `NotApplicable` | nowhere; the deployment declares no `kvCache`, so there is no Binding to resolve |
+| `True` | `Registered` | nowhere; the domain in *`status.kvCache`* is current |
+| `True` | `NotApplicable` | nowhere; the deployment declares no *`kvCache`*, so there is no Binding to resolve |
 | `False` | `BindingNotFound` | create the Binding — an admin doing so is what grants access |
 | `False` | `BindingNotReady` | wait for it, or look at the pool it points at |
 | `False` | `BindingDeleting` | find who deleted it; the replicas keep writing to the domain they attached to |
 
-**`QuotaReserved`** — whether **every one of** the deployment's Workloads holds Kueue quota. Every
-replica is its own group with its own Workload, so a deployment of N replicas is N Workloads. `True`
-is therefore an answer about the whole set and not about whichever Workload sorts first, because half
+**`QuotaReserved`** — whether **every one of** the deployment's `Workload`s holds Kueue quota. Every
+replica is its own group with its own `Workload`, so a deployment of N replicas is N `Workload`s. `True`
+is therefore an answer about the whole set and not about whichever `Workload` sorts first, because half
 a deployment holding quota is not the deployment holding quota.
 
-A message that names groups names them **by role**, never by `instanceType`: two roles can name one
+A message that names groups names them **by role**, never by *`instanceType`*: two roles can name one
 type, so a type would point at two roles' groups at once while a role names exactly the set that
-waits. The queue an operator has to free follows from the named role's own `instanceType`.
+waits. The queue an operator has to free follows from the named role's own *`instanceType`*.
 
-It mirrors the Workloads' own conditions, so it stays current after admission rather than
-reporting only the moment a Workload was admitted.
+It mirrors the `Workload`s' own conditions, so it stays current after admission rather than
+reporting only the moment a `Workload` was admitted.
 
 | Value | Reason | Meaning |
 |---|---|---|
 | `True` | `Reserved` | every replica has quota reserved; with one role the message names its cluster queue |
 | `False` | `Pending` | at least one replica is waiting for quota; the message names how many, and where they wait |
-| `False` | `PodGroupIncomplete` | fewer replicas exist than a role declares, so Kueue composes **no Workload at all** for the missing ones; the message carries `<have>/<want>` and the role's cluster queue |
+| `False` | `PodGroupIncomplete` | fewer replicas exist than a role declares, so Kueue composes **no `Workload` at all** for the missing ones; the message carries `<have>/<want>` and the role's cluster queue |
 | `False` | `PreemptedInPart` | a higher-priority workload reclaimed some replicas' quota while others are still admitted; the message says whether any role kind has no admitted replica left, and so whether the loss is of capacity or of a whole role |
-| `False` | `Parked` | the set failed to assemble for long enough that the joint check deactivated its Workloads; an identical re-apply does not clear it |
-| `False` | `NoQueueInReservedNamespace` | the deployment is in a reserved namespace, which has no LocalQueue, so it will never be scheduled |
-| `Unknown` | `AdmissionInFlight` | a group is complete and has no Workload yet — Kueue composes it asynchronously, so absence is admission in flight, not refusal |
+| `False` | `Parked` | the set failed to assemble for long enough that the joint check deactivated its `Workload`s; an identical re-apply does not clear it |
+| `False` | `NoQueueInReservedNamespace` | the deployment is in a reserved namespace, which has no `LocalQueue`, so it will never be scheduled |
+| `Unknown` | `AdmissionInFlight` | a group is complete and has no `Workload` yet — Kueue composes it asynchronously, so absence is admission in flight, not refusal |
 | `Unknown` | `NoReplicas` | no replica has been created yet |
 | `Unknown` | `AllReplicasTerminating` | every replica is on its way out, so none holds quota to report on |
 
-`PodGroupIncomplete`, `NoQueueInReservedNamespace` and `AdmissionInFlight` all observe no Workload
+`PodGroupIncomplete`, `NoQueueInReservedNamespace` and `AdmissionInFlight` all observe no `Workload`
 but mean different things. The first clears when the missing replica exists; the second is permanent
-because reserved namespaces deliberately have no LocalQueue; the third clears when Kueue composes the
-Workload. Telling them apart is why the reason exists.
+because reserved namespaces deliberately have no `LocalQueue`; the third clears when Kueue composes the
+`Workload`. Telling them apart is why the reason exists.
 
 `Pending`, `PreemptedInPart` and `Parked` all say the set does not hold quota, and they are separate
 because the action differs. `Pending` resolves itself when capacity appears. `Parked` is over already:
@@ -305,7 +305,7 @@ admitted again or the deployment is deleted.
 
 The cost of the wait lands on the queue, not on this deployment. The replicas that kept their quota
 hold accelerators while the set cannot serve in full, and Kueue accounts that quota as used: the
-next workload drawing from the same ClusterQueue is refused with `insufficient unused quota`. A
+next workload drawing from the same `ClusterQueue` is refused with `insufficient unused quota`. A
 deployment preempted in part starves whatever is queued behind it.
 
 What to do about it:
@@ -315,7 +315,7 @@ What to do about it:
   capacity that never comes back leaves it standing.
 - **Delete and recreate the deployment.** Deleting is the other release for the quota the kept
   replicas hold.
-- **Move the roles apart.** Each role draws from the ClusterQueue its own `instanceType` resolves
+- **Move the roles apart.** Each role draws from the `ClusterQueue` its own *`instanceType`* resolves
   to; giving the roles different types keeps one preemption from reclaiming both halves out of the
   same queue.
 
@@ -325,7 +325,7 @@ or a log line.
 
 | Value | Reason | Meaning |
 |---|---|---|
-| `True` | `NotApplicable` | the deployment declares no `kvCache`, so there is no cache to attach |
+| `True` | `NotApplicable` | the deployment declares no *`kvCache`*, so there is no cache to attach |
 | `True` | `CacheActive` | a ready replica reports succeeding store operations |
 | `True` | `CacheActive` | no replica gave an account, and the reuse domain holds data — this attributes to the domain, which is shared by every deployment on its Binding |
 | `False` | `CacheOperationsFailing` | a ready replica reports store operations of which **none** succeeded; the engine is serving without the cache |
@@ -340,7 +340,7 @@ cannot come up keeps its replica from ever becoming Ready, which is reported the
 
 **`ReplicasUpToDate`** — whether the running replicas match the desired explicit spec hash and meet
 the deployment's minimum `modeldeployment.gpustack.ai/render-version`. The explicit spec hash
-includes the resolved KV cache binding, so a replica carrying the current `spec` still differs from
+includes the resolved KV cache binding, so a replica carrying the current *`spec`* still differs from
 the desired hash once that connector stops resolving — the state behind `RolloutHeldByCache`.
 
 | Value | Reason | Meaning |
@@ -358,8 +358,8 @@ date". This happens in ordinary operation — a teardown, and the pass between a
 the create that answers it, both write status this way.
 
 `ReplacementInProgress` and `RolloutInProgress` answer opposite questions — whether an edit landed,
-and why capacity moved when nothing was edited. While a replacement waits, watch the departed Pod:
-the replacement is created once no Pod for that ordinal reads on the API server.
+and why capacity moved when nothing was edited. While a replacement waits, watch the departed `Pod`:
+the replacement is created once no `Pod` for that ordinal reads on the API server.
 
 > The answer is not left standing between passes. After a steady deployment it would keep reporting
 > `True` while every replica is on its way out, because a pass that finds every replica departing
@@ -373,9 +373,9 @@ condition on the object that names a held rollout.
 > ordinary store blink puts every deployment on the pool into this state. The message names what
 > *would* be delayed, never that something is.
 >
-> Not every change waits: a `replicas` change proceeds during an outage — the ordinals it adds do
+> Not every change waits: a *`replicas`* change proceeds during an outage — the ordinals it adds do
 > not exist yet and are created without a connector, and the ordinals it sheds leave on the ordinary
-> path. An edit that changes a running replica's rendered Pod is what waits. Scaling out does not
+> path. An edit that changes a running replica's rendered `Pod` is what waits. Scaling out does not
 > release it: replicas added during the outage turn over once more when the store returns, and the
 > running replicas still wait. The store's own recovery bounds the wait.
 >
@@ -385,7 +385,7 @@ condition on the object that names a held rollout.
 
 **`RoleKindsReady`** — whether every role **kind** the deployment declares has at least one ready
 replica. It is deliberately **not** replica completeness: "every role has all the replicas it asked
-for" is what `phase` answers, by summing every role's counts before judging.
+for" is what *`phase`* answers, by summing every role's counts before judging.
 
 | Value | Reason | Meaning |
 |---|---|---|
@@ -393,33 +393,33 @@ for" is what `phase` answers, by summing every role's counts before judging.
 | `False` | `KindsNotReady` | at least one kind has none; the message names the kinds |
 | `Unknown` | `NoRoleStatuses` | the pass accounted for no role at all, so there is nothing to judge |
 
-A deployment whose roles all share one kind (the shape you get when no role names a `kind`, since it
-defaults to `Server`) reports `True` as soon as any replica is ready. That is not a blind spot. The
-degradation is real and `phase` reports it as `Degraded`; this condition answers a different question
-and is silent on that shape by design.
+A deployment whose roles all share one kind (the configuration used when no role names a *`kind`*, since it
+defaults to *Server*) reports `True` as soon as any replica is ready. That is not a blind spot. The
+degradation is real and *`phase`* reports it as `Degraded`; this condition answers a different question
+and is silent on that configuration by design.
 
-On an encode, prefill and decode deployment, `RoleKindsReady` is `True` only when `Encode`,
-`Prefill` and `Decode` each have at least one ready replica.
+On an *encode*, *prefill* and *decode* deployment, `RoleKindsReady` is `True` only when *Encode*,
+*Prefill* and *Decode* each have at least one ready replica.
 
 A role that took over its command line counts toward its kind like any other. Such a role gets no
 readiness probe, so its `Ready` says its containers started rather than that anything answered on the
-serving path. `status.roles[].unmanaged` is published per role for a reader who needs the stronger
+serving path. *`status.roles[].unmanaged`* is published per role for a reader who needs the stronger
 reading.
 
-Read this condition alongside `phase`: it reports readiness by role kind, while `phase` reports
+Read this condition alongside *`phase`*: it reports readiness by role kind, while *`phase`* reports
 replica completeness. Neither guarantees that an inference request succeeds; that also depends on
-the engine and Service connectivity.
+the engine and `Service` connectivity.
 
 **`KVEventsPublishing`** — whether every role that produces cache blocks has publisher configuration
-in its rendered Pods. It reports configuration, not live traffic: a configured publisher that later
-crashes remains `True`. `Encode` holds no KV cache and produces no cache blocks, so it is excluded.
+in its rendered `Pod`s. It reports configuration, not live traffic: a configured publisher that later
+crashes remains `True`. *Encode* holds no KV cache and produces no cache blocks, so it is excluded.
 
 | Value | Reason | Meaning |
 |---|---|---|
 | `True` | `Publishing` | every producing role is configured to publish |
-| `True` | `NotApplicable` | an unrouted deployment declares only `Server` roles |
-| `False` | `PublisherDisabled` | a producing role's rendered Pods do not enable publishing |
-| `False` | `NoRouter` | a prefill/decode pair has no router to consume events |
+| `True` | `NotApplicable` | an unrouted deployment declares only *Server* roles |
+| `False` | `PublisherDisabled` | a producing role's rendered `Pod`s do not enable publishing |
+| `False` | `NoRouter` | a *prefill/decode* pair has no router to consume events |
 | `Unknown` | `RoleUnmanaged` | a producing role replaced its command line, so the operator cannot inspect what it does |
 
 **`RouterReady`** — whether the managed router rendered and has a ready replica. A render refusal is
@@ -428,11 +428,11 @@ conditions, the role counts) keeps computing with the cause named.
 
 | Value | Reason | Meaning |
 |---|---|---|
-| `True` | `Ready` | the router's Deployment has ready replicas |
-| `True` | `NotApplicable` | the deployment declares no `spec.router` |
+| `True` | `Ready` | the router's `Deployment` has ready replicas |
+| `True` | `NotApplicable` | the deployment declares no *`spec.router`* |
 | `False` | `RenderFailed` | the router's object set could not be rendered; the message carries the refusal |
-| `False` | `NoReadyReplicas` | the router's Deployment exists but no replica is ready |
-| `Unknown` | `NotDeployed` | the router's Deployment has not been created yet |
+| `False` | `NoReadyReplicas` | the router's `Deployment` exists but no replica is ready |
+| `Unknown` | `NotDeployed` | the router's `Deployment` has not been created yet |
 
 **`EndpointEligibility`** — whether the deployment's endpoints have been qualified at all. It
 answers for the reading, not for the endpoints: until endpoint qualification exists it is
@@ -441,10 +441,10 @@ saw, and no pass that reports this has seen any.
 
 | Value | Reason | Meaning |
 |---|---|---|
-| `Unknown` | `NotObserved` | no endpoint qualification has been observed for any role yet; the per-role `endpoints.eligible` counts are `null`, not zero |
+| `Unknown` | `NotObserved` | no endpoint qualification has been observed for any role yet; the per-role *`endpoints.eligible`* counts are `null`, not zero |
 
 **`ElasticResize`** — whether an elastic scale stands blocked or terminally refused. It is
-written only for a deployment with an `elasticEp` role; [Elastic EP](elastic-ep.md) owns the
+written only for a deployment with an *`elasticEp`* role; [Elastic EP](elastic-ep.md) owns the
 resize lifecycle it reports on.
 
 | Value | Reason | Meaning |
@@ -459,8 +459,8 @@ levels back to `True` on its own once a later pass proves the live world again.
 ---
 
 **See also** — [Model Deployment Configuration](deployment.md) (the contract this status reports on) ·
-[Model Deployment Prefill and Decode](prefill-decode.md) (pairing prefill and decode roles) ·
-[Model Deployment Encode, Prefill and Decode](encode-prefill-decode.md) (encode, prefill and decode disaggregation) ·
-[KV Cache Leader](../kv-cache/leader.md) (the leader process the conditions distinguish from the operator's own).
+[Prefill and Decode](prefill-decode.md) (pairing *prefill* and *decode* roles) ·
+[Encode, Prefill and Decode](encode-prefill-decode.md) (*encode*, *prefill* and *decode* disaggregation) ·
+[KV Cache Election and Failover](../kv-cache/leader.md) (the leader process the conditions distinguish from the operator's own).
 
 **Next** → [Model Deployment Configuration](deployment.md)

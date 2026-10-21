@@ -6,8 +6,8 @@ between them.
 
 ## Contents
 
-- [Command summary](#command-summary)
-- [Choosing a one-shot command](#choosing-a-one-shot-command)
+- [Summary](#summary)
+- [One-shot command selection](#one-shot-command-selection)
 - [Global flags](#global-flags)
 - [worker](#worker)
 - [worker-gateway](#worker-gateway)
@@ -17,23 +17,23 @@ between them.
 - [device-manager monitor](#device-manager-monitor)
 - [device-manager preflight](#device-manager-preflight)
 
-## Command summary
+## Summary
 
 | Command | Alias | Shape | Who runs it |
 |---|---|---|---|
-| `worker` | `w` | service | the operator Deployment, one per cluster |
+| `worker` | `w` | service | the operator `Deployment`, one per cluster |
 | `worker-gateway` | `wg` | service | a sidecar beside `worker` |
-| `device-manager serve` | `dm serve` | service | the Device Manager DaemonSet, one per node |
-| `model-manager` | `mm` | service | the Model Manager DaemonSet, one per node |
+| `device-manager serve` | `dm serve` | service | the Device Manager `DaemonSet`, one per node |
+| `model-manager` | `mm` | service | the Model Manager `DaemonSet`, one per node |
 | `device-manager detect` | `dm detect` | one-shot | a person, on a node |
 | `device-manager monitor` | `dm monitor` | one-shot | a person, on a node |
 | `device-manager preflight` | `dm preflight` | one-shot | a person, on a node |
 
-## Choosing a one-shot command
+## One-shot command selection
 
 The one-shot commands answer different questions; only `preflight` changes node state.
 
-| Question | Command | Node effect |
+| Question | Command | `Node` effect |
 |---|---|---|
 | What accelerators are here, in full? | `detect` | nothing — a pure read |
 | What are they doing right now? | `monitor` | nothing — a pure read |
@@ -48,7 +48,7 @@ The probe containers it starts are themselves **not** privileged: they get the a
 and nothing more, because the isolation that injection establishes is the thing being measured.
 
 > **Why `detect` is not folded into `preflight`** — `detect` emits the whole ledger, typed as the
-> `Devices` CRD's own `spec.groups`, so it can be diffed against what the cluster recorded.
+> `Devices` CRD's own *`spec.groups`*, so it can be diffed against what the cluster recorded.
 > `preflight`'s detection block is a verdict and a count, deliberately not a second ledger. A reader
 > who wants both runs both.
 
@@ -58,7 +58,7 @@ Every command accepts these. They come from klog and are omitted from the per-co
 
 | Flag | Effect |
 |---|---|
-| `-v` | log verbosity, `0` unless you pass one. The DaemonSet runs at `-v=2`; `-v=3` adds the per-decision lines, including why a container runtime did or did not resolve |
+| `-v` | log verbosity, `0` unless you pass one. The `DaemonSet` runs at `-v=2`; `-v=3` adds the per-decision lines, including why a container runtime did or did not resolve |
 | `--vmodule` | per-file verbosity, `pattern=N` comma separated |
 | `--logtostderr` | log to standard error rather than files (default true) |
 | `--add_dir_header`, `--skip_headers`, `--log_backtrace_at` | log line shape |
@@ -71,7 +71,7 @@ It is the control plane: it profiles node capacity, runs the controllers that ma
 Kueue scheduling chain, serves the aggregated extension APIs and the admission webhooks, and installs
 the applications a cluster needs.
 
-Runs as the operator Deployment. Flags below are the ones that change behaviour rather than tune a
+Runs as the operator `Deployment`. Flags below are the ones that change behaviour rather than tune a
 connection; see [Settings](settings.md) for what is configured through the `Setting` CR instead.
 
 | Flag | Default | Effect |
@@ -90,7 +90,7 @@ connection; see [Settings](settings.md) for what is configured through the `Sett
 | `--gopool-worker-factor` | `100` | goroutine pool size, per CPU core |
 | `--audit-log-path`, `--audit-policy-file`, `--audit-webhook-config-file` | — | request auditing |
 | `--cors-allowed-origins` | all | allowed cross-domain origins, as anchored regular expressions |
-| `--model-manager-service-account` | `gpustack-operator-model-manager` | the ServiceAccount, in the operator namespace, the model-manager plugin runs as; only it may write a `NodeModelStore`'s status |
+| `--model-manager-service-account` | `gpustack-operator-model-manager` | the `ServiceAccount`, in the operator namespace, the Model Manager plugin runs as; only it may write a `NodeModelStore`'s status |
 
 ```bash
 gpustack-operator worker --secure-port=31443 --disable-applications=kueue
@@ -121,7 +121,7 @@ It is the per-node agent: it detects accelerators, keeps the `Devices` ledger cu
 utilization, registers with the kubelet as a device plugin and injects the vendor runtime into
 allocated containers.
 
-Runs as the Device Manager DaemonSet. The `--no-*` mode flags are how a node is restricted to a
+Runs as the Device Manager `DaemonSet`. The `--no-*` mode flags are how a node is restricted to a
 subset of the allocation modes its hardware would otherwise offer.
 
 | Flag | Default | Effect |
@@ -144,17 +144,17 @@ gpustack-operator device-manager serve --manufacturer=nvidia --no-partitioned
 ## model-manager
 
 The per-node model cache. A CSI node plugin serving inline ephemeral volumes of the driver
-`model.csi.gpustack.ai`: it authorizes each mount against the Pod's namespace, downloads and
+`model.csi.gpustack.ai`: it authorizes each mount against the `Pod`'s namespace, downloads and
 verifies a Hugging Face artifact's files once per node, and writes that node's `NodeModelStore`
 status. See [Node Model Store](../modules/model-delivery/node-store.md).
 
-Runs as the Model Manager DaemonSet beside the `node-driver-registrar` sidecar. Its configuration
+Runs as the Model Manager `DaemonSet` beside the `node-driver-registrar` sidecar. Its configuration
 comes from its node's `NodeModelStore.spec`, not from flags.
 
 | Flag | Default | Effect |
 |---|---|---|
 | `--node-name` | — | the node it runs on, also its `NodeModelStore`'s name |
-| `--kubelet-dir` | `/var/lib/kubelet` | kubelet's root directory, whose pods directory holds the mount targets |
+| `--kubelet-dir` | `/var/lib/kubelet` | kubelet's root directory, whose `pods` directory holds the mount targets |
 | `--cache-root` | `/var/lib/gpustack/models` | the node's cache directory |
 | `--csi-socket` | `<kubelet-dir>/plugins/model.csi.gpustack.ai/csi.sock` | the Unix socket the CSI services listen on |
 | `--secure-port` | `32444` | the HTTPS port: metrics, readiness and liveness |
@@ -169,7 +169,7 @@ gpustack-operator model-manager --node-name="$(hostname)" --cache-root=/mnt/mode
 Runs one detect pass and prints the result. It is a pure read: nothing is written, nothing is
 started, and no flag changes that.
 
-The output is the `Devices` CRD's own `spec.groups`, so it can be compared directly against what the
+The output is the `Devices` CRD's own *`spec.groups`*, so it can be compared directly against what the
 cluster recorded; `kubectl get devices <node> -o yaml` beside it is a diff.
 
 | Flag | Default | Effect |
@@ -241,7 +241,7 @@ docker run --rm --privileged -v /dev:/dev -v /sys:/sys \
       unhealthy: false
 ```
 
-The same figures reach a cluster through the Instance metrics surfaces; see [Instance
+The same figures reach a cluster through the `Instance` metrics surfaces; see [Instance
 Metrics](instance-metrics.md).
 
 ## device-manager preflight

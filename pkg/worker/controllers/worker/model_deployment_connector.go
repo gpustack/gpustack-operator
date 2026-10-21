@@ -607,6 +607,11 @@ func ModelDeploymentServedModelNames(engine string, args []string) ([]string, bo
 // cannot strip a store in the same process of its fabric. The transfer engine reads it for presence alone, so a user's own
 // entry, whatever its value, asks for the same thing and is left in place.
 //
+// MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER, MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER, MC_TCP_LANES_PER_PEER
+// and MC_TCP_ADMISSION_TIMEOUT_MS raise the Mooncake C++ Transfer Engine's per-peer TCP queue
+// limits, socket lane count, and admission timeout whenever the shared store or point-to-point leg
+// runs over TCP. They are defaulted so a workload may override any of them in role.Env.
+//
 // VLLM_CACHE_ROOT and SGLANG_CACHE_DIR are where each engine keeps its compiled graphs and
 // kernels, which the renderer points at ModelDeploymentCompileCacheMountPath. They are defaulted
 // rather than owned for one reason: a user who mounts the cache somewhere else, or who runs an
@@ -616,6 +621,10 @@ func ModelDeploymentServedModelNames(engine string, args []string) ([]string, bo
 var modelDeploymentDefaultedEnvNames = []string{
 	"MC_TE_METRIC",
 	inject.MooncakeForceTCPEnv,
+	inject.MooncakeTCPMaxQueuedTransfersPerPeerEnv,
+	inject.MooncakeTCPMaxPendingAdmissionsPerPeerEnv,
+	inject.MooncakeTCPLanesPerPeerEnv,
+	inject.MooncakeTCPAdmissionTimeoutMsEnv,
 	"VLLM_CACHE_ROOT",
 	"SGLANG_CACHE_DIR",
 }

@@ -1,14 +1,13 @@
-# Preflight Operations
+# Preflight Checks
 
 Run preflight on a bare host to check which accelerators the node can serve and what an allocation
-would require. It needs no cluster, CRDs, NFD labels or running Device Manager. This page covers
-the command, host mounts and result fields; [Discovery](discovery.md#preflight-checks)
-explains the states, depths and how preflight reuses the allocator checks.
+would require. It needs no cluster, CRDs, NFD labels or running Device Manager.
+[Discovery](discovery.md#preflight-checks) explains the states, depths and reuse of allocator checks.
 
 ## Contents
 
-- [Before you run it](#before-you-run-it)
-- [The command line](#the-command-line)
+- [Prerequisites](#prerequisites)
+- [Command line](#command-line)
 - [Mounts](#mounts)
 - [Flags](#flags)
 - [Side effects](#side-effects)
@@ -16,9 +15,9 @@ explains the states, depths and how preflight reuses the allocator checks.
 - [Output by manufacturer](#output-by-manufacturer)
 - [Reading the result](#reading-the-result)
 
-## Before you run it
+## Prerequisites
 
-**There is one mode: the run reproduces what the device-manager does in production.** These steps
+**There is one mode: the run reproduces what the Device Manager does in production.** These steps
 touch the node while it does, so decide them before running where live workloads are:
 
 - the probe containers, which hold an accelerator for as long as they run;
@@ -39,13 +38,13 @@ establishes; a privileged container would be handed every device on the host ins
 Preflight needs `CAP_SYS_CHROOT` to enter the host root, which the default container capability set
 already carries. `--privileged` is for the driver reads and the device nodes, not for the `chroot`.
 
-## The command line
+## Command line
 
 **Find your manufacturer below and run the block as it stands.** Each one is complete and needs
 nothing filled in. Add `--dry-run` to any of them to see every step without taking one.
 
 The blocks differ only in their last vendor argument, which is what that manufacturer's library
-loads from: the same host path the device-manager DaemonSet mounts for it, at the same access. That
+loads from: the same host path the Device Manager `DaemonSet` mounts for it, at the same access. That
 is what makes this run reproduce production rather than resemble it.
 
 **On containerd**, swap `docker run` for `nerdctl run`; it resolves its own socket and namespace on
@@ -74,7 +73,7 @@ the container. Naming the library directory as its own source has the host resol
 
 > **Both shapes are ordinary.** On a single-version host `/opt/rocm` is itself the link. On one
 > carrying two ROCm versions, `/opt/rocm/lib` is — and mounting `/opt/rocm` alone then loads no ROCm
-> library at all, so a node with an accelerator reports as having none. The device-manager DaemonSet
+> library at all, so a node with an accelerator reports as having none. The Device Manager `DaemonSet`
 > mounts both for the same reason.
 
 > **To pin one ROCm version on a host carrying two**, mount the versioned tree in place of both
@@ -117,11 +116,11 @@ docker run --rm --privileged --network=host \
     gpustack-operator device-manager preflight --manufacturer=hygon
 ```
 
-The third mount is the only writable one on this page: the vendor library materializes a partition by
-writing that registry, and the DaemonSet mounts it writable for the same reason. Add
+The third mount is the only writable one in the command: the vendor library materializes a partition by
+writing that registry, and the `DaemonSet` mounts it writable for the same reason. Add
 `--probe-image <image>` to measure the two slice rows; no default is claimed for a Hygon family, and
 what the image has to carry is in [The container-probe
-tier](#the-container-probe-tier).
+tier](#container-probe-tier).
 
 ### Iluvatar
 
@@ -157,7 +156,7 @@ docker run --rm --privileged --network=host --runtime mthreads \
 
 Nothing to mount, and a `--runtime` instead: the user-space driver here is injected by the vendor
 container runtime rather than installed at a path you can bind-mount. `mthreads` is the handler that
-runtime registered with your container engine, and the same name the chart's RuntimeClass carries.
+runtime registered with your container engine, and the same name the chart's `RuntimeClass` carries.
 Under `nerdctl`, whose `--runtime` names an OCI shim, that flag does not reach the handler.
 
 ### NVIDIA
@@ -209,10 +208,10 @@ host's; the Host cross-check column below says which is which.
 | `-v /:/host` | the host's own root. Preflight enters it with `chroot` to run the host's container CLI and the host's vendor CLI, and stages the preload libraries through it. Move it with `--host-root` |
 | `--network=host` | `chroot` changes the root and not the network namespace, so a host CLI entered through it reads the host's `/etc/resolv.conf` inside this container's namespace. Without it, any host CLI asked to pull an image fails on DNS |
 | `-v /dev:/dev`, `-v /sys:/sys` | what preflight's own in-process detect pass and driver reads need. They stay in container context — only the host's executables go through the `chroot` |
-| the vendor arguments for your manufacturer | what the manufacturer's library needs in order to load in this container — a host path to bind-mount, or a `--runtime` for the two whose driver is injected rather than installed. Without them the detect pass finds nothing while the host's CLI finds cards, which is exactly the discrepancy the result reports. Yours is in [The command line](#the-command-line) |
+| the vendor arguments for your manufacturer | what the manufacturer's library needs in order to load in this container — a host path to bind-mount, or a `--runtime` for the two whose driver is injected rather than installed. Without them the detect pass finds nothing while the host's CLI finds cards, which is exactly the discrepancy the result reports. Yours is in [Command line](#command-line) |
 
 > **Why the host root rather than a mounted runtime socket** — mounting a runtime socket already
-> grants host root, and needs one mount per runtime plus a CLI of ours in the image whose version
+> grants host root, and needs one mount per runtime plus a CLI in the preflight image whose version
 > need not match the daemon it talks to. Entering the host root costs one mount and gives the host's
 > own CLIs, at their own versions.
 
@@ -238,7 +237,7 @@ overrides both.
 A host with no kubelet running — a machine before it joins a cluster, or a distribution that embeds
 the kubelet in its agent process — has no such command line. Then
 `/var/lib/kubelet/kubeadm-flags.env`, `/var/lib/kubelet/config.yaml` and the distribution's own
-`kubelet.conf.d` tree are read instead, in that order.
+*`kubelet.conf.d`* tree are read instead, in that order.
 
 > **Why not simply probe** — a host carrying both `docker` and `containerd`, with a kubelet talking
 > to `containerd`, would be probed `docker`-first and every container answer would then describe a
@@ -278,26 +277,26 @@ and the CLI is pointed at the socket that was resolved rather than at its own de
 
 | Write | Where | Removed when |
 |---|---|---|
-| the manufacturer's preload-library tree, copied out of this image | `/var/lib/gpustack/operator/lib/<manufacturer>` | **never** — it is what a device-manager init container normally stages, and a probe container has none |
+| the manufacturer's preload-library tree, copied out of this image | `/var/lib/gpustack/operator/lib/<manufacturer>` | **never** — it is what a Device Manager init container normally stages, and a probe container has none |
 | whatever the allocator's own responder rendered for a container | `/var/lib/gpustack/operator/preflight/` | at the end of the pass. What lands here is the responder's own business: Ascend writes an `npu_info.config`, Hygon a `vdev.conf`, and a manufacturer whose responder renders nothing writes nothing |
 | a lock, so two runs cannot sweep each other's probes | `/var/lib/gpustack/operator/preflight/lock` | **never** — the file stays; the lock on it is held by the running process and released by the kernel when that process ends, whatever ended it |
 | a driver mode asked on, to tell "off" from "cannot be turned on" | the host's driver state | immediately, in the same breath — unless the restore itself fails, which the row then says |
 
 > **Run it before the node serves workloads.** The mode above is put back within the same call, but
-> nothing serialises that against a device-manager allocating on the same card: an allocation landing
+> nothing serialises that against a Device Manager allocating on the same card: an allocation landing
 > in that window can be switched off under. Ascend and Cambricon write to the driver.
 
-> **Run the image that matches the installed device-manager.** The library tree in the first row is
+> **Run the image that matches the installed Device Manager.** The library tree in the first row is
 > the one real allocations mount, not a copy of it, and staging replaces the files already there. On a
-> node with a device-manager installed, running preflight from a different image version therefore
+> node with a Device Manager installed, running preflight from a different image version therefore
 > leaves that version's preload libraries behind for every allocation afterwards: a working node,
 > silently changed by a command that reads. On a node being brought up there is nothing there yet and
 > nothing to disturb, which is what this command is for. If you must run it against an installed
-> node, use the same tag the device-manager runs, and treat any other tag as an operation that
+> node, use the same tag the Device Manager runs, and treat any other tag as an operation that
 > changes the node.
 
 > **Why they go in a directory of their own** — the neighbouring `.../operator/pods` is what an
-> allocator reads as its record of what other Pods hold, and an entry there under a Pod UID no
+> allocator reads as its record of what other `Pod`s hold, and an entry there under a `Pod` UID no
 > kubelet scheduled would be counted as occupancy. Preflight never writes into it, so a run killed
 > before it can clean up costs a later allocation nothing.
 
@@ -354,7 +353,7 @@ read a driver and start no container; Hygon starts a container and reads no driv
 the owner container still running when the sidecar starts, and the probe containers are one-shots that
 exit as soon as they have printed their evidence.
 
-### The injection-only tier
+### Injection-only tier
 
 **Your rows stop one step short of the full tier's, and the missing step is the driver read.** Your
 allocator consults no driver when it serves an allocation: the memory cap and compute weight come from
@@ -381,7 +380,7 @@ What you do get:
 If a slice does not work on your node, the place to look is the vendor container runtime and the
 resource request, not a driver flag.
 
-### The container-probe tier
+### Container-probe tier
 
 **Hygon is here, and it is the tier where the two sliced rows mean the most.** Its allocator reads no
 driver (the paragraph above applies to the `note` on your group unchanged), but a container is
@@ -406,7 +405,7 @@ Before reading those rows, check the following:
   not a broken slice; the cap binds the HSA/HIP runtime a workload uses. To see a slice by hand, ask
   a HIP client.
 
-### The full table
+### Full table
 
 | Manufacturer | Detection reads | Host cross-check | Driver-read row | For which mode | Container probe |
 |---|---|---|---|---|---|
@@ -422,7 +421,7 @@ Before reading those rows, check the following:
 
 **An empty cell is "this manufacturer has none"**, not a value left out. Ascend files two more rows on
 an A5 accelerator, which are neither a driver read nor a probe — see [The A5 host-state
-rows](#the-a5-host-state-rows).
+rows](#a5-host-state-rows).
 
 > **Read the `mode` column, not the capability name.** Every row in a report carries a `mode`, and it
 > is what makes two manufacturers comparable: `container-share` and `cu-mask-topology` are different
@@ -435,7 +434,10 @@ whose output shape this command has established, and the column says so rather t
 match counts zero, and a zero reads as "the host sees nothing either", the one answer that sends an
 operator to debug the wrong layer.
 
-### What the driver-read row means, per manufacturer
+### Driver-read rows
+
+Each manufacturer answers with the rows its own driver can read, and the columns say what each verdict
+means:
 
 | Row | `ok` means | `not-declared` means | `unavailable` means |
 |---|---|---|---|
@@ -453,7 +455,7 @@ Under `--dry-run` the ask is withheld, because asking is a write however briefly
 The row then reports the mode as read and says it was not established — which is a different answer
 from a capability that was checked and found working.
 
-### The A5 host-state rows
+### A5 host-state rows
 
 **Ascend files two more rows on an Atlas A5 (950) accelerator and on no other.** Neither reads a
 driver and neither starts a container: each reads one file the host either carries or does not, so
@@ -468,7 +470,7 @@ and a report filtered by either still carries it.
 
 **Why each of those fails, and how to correct it, is in [Vendor
 Prerequisites](../../getting-started/vendor-prerequisites.md#ascend)** — the mechanism is stated there once, and the
-`reason` on the row itself carries it verbatim, so a report is readable without this page.
+*`reason`* on the row repeats the mechanism, so the report includes the explanation beside the result.
 
 Read the following from the table rather than inferring them:
 
@@ -485,10 +487,10 @@ Read the following from the table rather than inferring them:
   the container while the vendor runtime follows the same link on the host. The row names the target
   instead; read it there.
 
-### The slice rows, and what the probe needs
+### Slice rows and probes
 
-Manufacturers with a container probe start one container per sliceable accelerator. The table below
-lists their probe images and requirements.
+Manufacturers with a container probe start one container per sliceable accelerator.
+Use the probe image and runtime that match the manufacturer:
 
 | Manufacturer | Probe image | Vendor runtime | Reader inside | Where the cap is |
 |---|---|---|---|---|
@@ -502,12 +504,12 @@ The rows themselves are the same four everywhere:
 
 | Row | Establishes |
 |---|---|
-| `sliced-runtime-loaded` | every shared object the injection mounts is in the container's own address space — or, where the injection mounts none, that the driver recorded a slicing instance for the container. `unavailable` means the slice was **not** established: usually a container that got the whole accelerator and no cap at all, and for a driver-record manufacturer also a probe whose client could not run. The row's `reason` and `evidence` say which |
+| `sliced-runtime-loaded` | every shared object the injection mounts is in the container's own address space — or, where the injection mounts none, that the driver recorded a slicing instance for the container. `unavailable` means the slice was **not** established: usually a container that got the whole accelerator and no cap at all, and for a driver-record manufacturer also a probe whose client could not run. The row's *`reason`* and `evidence` say which |
 | `sliced-quota-in-force` | the container reported back the cap the injection set, rather than the accelerator's own figure |
 | `sidecar-visibility` | the `sshd` sidecar's allocation names what the owner was granted, and nothing the owner was not |
 | `co-tenancy` | two independent slices were placed on one accelerator, each with its own geometry |
 
-Hygon is the row that mounts no shared object of ours, so its `sliced-runtime-loaded` is answered by
+The Hygon probe mounts no GPUStack shared library, so its `sliced-runtime-loaded` is answered by
 the driver's own per-slice record rather than by the container's address space — the tier above
 describes what that costs and what the probe image has to carry.
 
@@ -521,7 +523,7 @@ One YAML document goes to stdout, with **three sections**. This outline uses `..
 values and rows:
 
 ```yaml
-accelerators:            # one group per manufacturer asked about
+accelerators:  # one group per requested manufacturer
   - manufacturer: nvidia
     detection:
       state: ...
@@ -529,11 +531,11 @@ accelerators:            # one group per manufacturer asked about
       accelerators: ...
     checks:
       - ...
-network:                 # the node's RDMA links — belongs to no manufacturer
+network:  # node RDMA links, independent of accelerator manufacturer
   timestamp: ...
   checks:
     - ...
-topology:                # what this node's kubelet does with a NUMA hint
+topology:  # what this node's kubelet does with a NUMA hint
   timestamp: ...
   policy: single-numa-node
   depth: declared
@@ -548,28 +550,27 @@ involved.
 The `network` section carries one row per RDMA-capable interface — and per RDMA-capable virtual
 function, named `<interface>/<vf bus id>`, since on an SR-IOV node those are every RDMA device there
 is. Each row gives the name, the RDMA device and the
-[link verdict](../rdma/network-topology.md#the-rdma-link-check).
+[link verdict](../rdma/network-topology.md#rdma-link-check).
 
 The rows come from the same pass that produces the node's published record, so the two judge a link
-the same way. They need not say the same thing: this section is a fresh read taken when you invoke
-it, so a link that changed since the last detect pass shows here first.
+the same way. Preflight reads the links when invoked, so its network results can reflect changes
+since the last detect pass.
 
-An entry with no RDMA device **and no link verdict** gets no row: `rdma: false` on its own settles
-the question, while a verdict without a device is the unreadable-tree case this section exists to
-surface. A section with no rows carries a `note` saying which of the two reasons applies: the
-enumeration failed, or the node has no RDMA hardware.
+An entry with no RDMA device **and no link verdict** gets no row. `rdma: false` alone means no RDMA
+device was found; a verdict without a device reports an unreadable device tree.
+A section with no rows carries a `note`: enumeration failed, or the node has no RDMA hardware.
 
-The `topology` section names the TopologyManager policy this node's kubelet is configured with,
+The *`topology`* section names the TopologyManager policy this node's kubelet is configured with,
 read off the same command line and out of the same configuration the CRI endpoint is read from.
 
 It matters because the policy decides what the kubelet does with the NUMA hint a device plugin
 publishes: `single-numa-node` and `restricted` gate admission on it, `best-effort` admits a
 misaligned placement anyway, and `none` discards it. So a request pairing an accelerator with an
-[RDMA interface](../rdma/network-topology.md#the-rdma-resource-keys)
+[RDMA interface](../rdma/network-topology.md#rdma-resource-keys)
 lands them on one NUMA node only where the policy enforces it.
 
 A node nobody configured runs `none` — [how to set a policy, and how to confirm the kubelet took
-it](../rdma/operations.md#enabling-numa-alignment-on-the-kubelet).
+it](../rdma/operations.md#enabling-numa-alignment).
 
 **A policy that no readable configuration names is reported as `unknown`, never as the kubelet's
 default.** Reporting `none` because nothing was found would publish a value nobody read. An
@@ -609,7 +610,7 @@ sweeps anything, reports every manufacturer `unavailable` naming the lock, and e
 **A failed detection stops that manufacturer's other two questions.** Detection is the floor the rest
 stands on, so when it reads `unavailable` (the container cannot see hardware the host reports, or the
 accelerators answered but could not be named) the group carries its detection block, no rows, and a
-`note` saying the remaining questions are unanswerable. Fix what the detection `reason` names and run
+`note` saying the remaining questions are unanswerable. Fix what the detection *`reason`* names and run
 it again; rows about accelerators the report cannot identify would not have helped.
 
 **One manufacturer's crash does not take the others down.** Everything reached for a manufacturer is

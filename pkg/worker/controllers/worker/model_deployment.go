@@ -1974,6 +1974,13 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	if ModelDeploymentElasticRole(md) != nil {
 		return r.renderModelDeploymentElasticPods(ctx, md, connection, interfaceProtocols, weights)
 	}
+	return r.renderModelDeploymentRolePods(ctx, md, connection, interfaceProtocols, weights)
+}
+
+func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
+	ctx context.Context, md *workercore.ModelDeployment,
+	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
+) (map[string]map[int][]*core.Pod, error) {
 	// The overcommit setting is the Instance path's, deliberately: it decides how a declared
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
 	// does. A second knob for one translation would let the two disagree on one cluster.

@@ -48,13 +48,13 @@ happens to my request" from this page alone, in under 10 minutes.
 
 ## `docs/modules/devices/discovery.md` (stages 1–2)
 
-**Owns** — NFD's three jobs, the general(CPU) node key, the `gpustack-cpu-info` rule and the
+**Owns** — NFD's three jobs, the general (CPU) node key, the `gpustack-cpu-info` rule and the
 manufacturer map, the Device Manager DaemonSets, the accelerator label table, the `Devices` ledger, the
 device-plugin allocator (per-family injection, vendor quirks), SSH-sidecar visibility, cross-mode
 exclusion, `GetPreferredAllocation` placement, the partitioned family's fungible tokens, the
 one-driver-stack-per-node guard.
 
-**Never** — how those labels become Kueue objects (that is `scheduling-chain.md`), or whether a request
+**Never** — how those labels become Kueue objects (that is `docs/modules/devices/scheduling.md`), or whether a request
 is *allowed* (that is `admission.md`).
 
 ## `docs/modules/rdma/network-topology.md` (the NIC side of stage 2)
@@ -66,9 +66,9 @@ three RDMA link states and why an unreadable file is never `failed`, the existen
 the RDMA extended resources — the three keys and what a quantity means, the mode judgment, the link
 gate into health, the NUMA hint, and what an allocation hands over.
 
-**Never** — the accelerator side of the ledger (`device-discovery.md`), how a node label reaches a
-flavor selector (`scheduling-chain.md`), or the request rules an RDMA key obeys
-(`accelerator-requests.md`). Cross-link all three.
+**Never** — the accelerator side of the ledger (`docs/modules/devices/discovery.md`), how a node label reaches a
+flavor selector (`docs/modules/devices/scheduling.md`), or the request rules an RDMA key obeys
+(`docs/modules/devices/requests.md`). Cross-link all three.
 
 ## `docs/modules/devices/scheduling.md` (stages 3–4)
 
@@ -76,7 +76,7 @@ flavor selector (`scheduling-chain.md`), or the request rules an RDMA key obeys
 capacity tables, per-vendor slice counts, presence-gating, the unit-spec default, the naming/grouping
 scheme, the controller diagram, and the scheduling controllers' ownership split.
 
-**Never** — the ledger's internals (`device-discovery.md`) or gate behavior (`admission.md`). Cross-link both.
+**Never** — the ledger's internals (`docs/modules/devices/discovery.md`) or gate behavior (`admission.md`). Cross-link both.
 
 ## `docs/modules/topology/scheduling.md`
 
@@ -84,8 +84,8 @@ scheme, the controller diagram, and the scheduling controllers' ownership split.
 profiles, generated Kueue Topologies, TAS flavor and queue semantics, per-replica requests, the
 64-flavor limit, and the fresh-queue and live-profile lifecycle boundaries.
 
-**Never** — the commands and manifests an operator follows (`operation/topology-aware-scheduling.md`)
-or the full `ModelDeployment` field contract (`model-deployment/deployment.md`). Link both.
+**Never** — the commands and manifests an operator follows (`docs/modules/topology/operations.md`)
+or the full `ModelDeployment` field contract (`docs/modules/model-deployment/deployment.md`). Link both.
 
 ## `docs/modules/devices/admission.md`
 
@@ -93,7 +93,7 @@ or the full `ModelDeployment` field contract (`model-deployment/deployment.md`).
 versus availability, the InstanceType / Instance / Pod webhook rules, running-instance stop, and the
 deployed Kueue Configuration's known behaviors.
 
-**Never** — the normative request contract itself. That is `accelerator-requests.md`; this page says
+**Never** — the normative request contract itself. That is `docs/modules/devices/requests.md`; this page says
 where each rule is *enforced*.
 
 ## `docs/operate/installation-modes.md`
@@ -117,15 +117,15 @@ per-manufacturer package split, the CGO bindings, the 63-character rule.
 
 **Owns** — choosing and enabling Topograph or a generic source, snapshot and credential examples,
 webhook trust/RBAC/egress, AWS identity and IMDS requirements, requesting a level, live hierarchy
-changes, inspection order, Pending diagnosis, and the temporary EKS validation shape and ownership
+changes, inspection order, Pending diagnosis, and the temporary EKS validation environment and ownership
 handoff or cleanup warning.
 
 **Never** — re-explain why profiles split capacity or how each reconciler owns the Kueue chain; that
-is `architecture/topology-aware-scheduling.md`. Do not turn the temporary EKS shape into a benchmark.
+is `docs/modules/topology/scheduling.md`. Do not turn the temporary EKS environment into a benchmark.
 
 ## `docs/modules/kv-cache/backend.md`
 
-**Owns** — the `KVCacheBackend` chain: the managed/external and leader/member axes, the rendered
+**Owns** — the `KVCacheBackend` chain: managed and external deployment modes, leader and member responsibilities, the rendered
 leader and member workloads, the admin surface the status is read from, the phase and condition
 algebra, and the two operator surprises (capacity is observed rather than summed; shrinking a member
 group discards that member's cache).
@@ -195,7 +195,7 @@ its patterns, how a `ModelDeployment` or an `Instance` consumes it under each de
 placement, and the weight identity in KV keys.
 
 **Never** — anything about the deployment that mounts the artifact (that is
-`model-deployment/deployment.md`, which keeps one pointer here and states nothing about the artifact
+`docs/modules/model-deployment/deployment.md`, which keeps one pointer here and states nothing about the artifact
 itself), or the node plugin's internals (`node-store.md`).
 
 ## `docs/modules/model-delivery/image-source.md`
@@ -210,11 +210,11 @@ is the deep dive on one source.
 ## `docs/modules/model-delivery/prefetch.md`
 
 **Owns** — the prefetch family: `ModelStore` (pool policy, selector overlap), `ModelStoreBinding`
-(budget grant, allowPinned, immutability), `ModelPrefetch` (placement, warm-up pod shape, the
+(budget grant, allowPinned, immutability), `ModelPrefetch` (placement, warm-up `Pod` configuration, the
 queue-name-label fact, budget projection and accounting, pin union, TTL).
 
 **Never** — the node plugin's field reference (`node-store.md`), the artifact sources
-(`artifact.md`), or the pool layer's operational knobs (`operations.md`).
+(`artifact.md`), or the pool layer's operational settings (`operations.md`).
 
 ## `docs/modules/model-delivery/node-store.md`
 
@@ -232,7 +232,7 @@ NetworkPolicy that bound it, how a cold node pulls with in-stream checkpoints, a
 and metrics that tell peer bytes from hub bytes.
 
 **Never** — how a tree is materialized or verified in the first place (`node-store.md`); this page
-owns the node-to-node leg only.
+owns the node-to-node path only.
 
 ## `docs/modules/model-delivery/views.md`
 
@@ -268,8 +268,18 @@ contract, and what turns a replica over.
 renders, the router block and its fields, the direct transfer's transport, roles on different
 hardware, and a role's own Service.
 
-**Never** — the deployment-level contract around the pair (`deployment.md`) or the KV cache leg's
-transport (`../kv-cache/backend.md`); this page owns the P/D leg.
+**Never** — the deployment-level contract around the pair (`deployment.md`), the KV cache path's
+transport (`../kv-cache/backend.md`), or the measured disaggregated-versus-aggregated numbers
+(`prefill-decode-benchmark.md`); this page owns the P/D path.
+
+## `docs/modules/model-deployment/prefill-decode-benchmark.md`
+
+**Owns** — the measured comparison of disaggregated prefill/decode serving against an equal-GPU
+aggregated group across uniform prompt/decode cells and mixed short-chat plus long-prompt burst
+traffic: TTFT, TPOT, ITL tail jitter, throughput, and the conditions under which P/D disaggregation
+helps or hurts.
+
+**Never** — the connector or router configuration contract (`prefill-decode.md` owns that).
 
 ## `docs/modules/model-deployment/encode-prefill-decode.md`
 
@@ -279,7 +289,7 @@ platform/engine/router matrix, encoder-cache connectors (`ECCPUConnector` over N
 pairing rules, soft co-location affinity (`Prefill`↔`Decode` weight 100, `Encode`↔`Prefill` weight 50),
 and the bounded 240s encoder drain window.
 
-**Never** — the two-role KV cache leg (`prefill-decode.md` owns that), the measured three-arm
+**Never** — the two-role KV cache path (`prefill-decode.md` owns that), the measured comparison of three configurations
 latency and throughput numbers (`encode-prefill-decode-benchmark.md` owns those), or the live walkthrough sequence
 (`../../walkthroughs/model-deployment/encode-prefill-decode.md`).
 
@@ -291,8 +301,42 @@ model and workload behind the numbers, the conditions under which EPD helps, and
 run that produced them.
 
 **Never** — the connector each topology renders (`encode-prefill-decode.md` and `prefill-decode.md` own those), or the
-admission rules that admit a shape. A number stated here as a measurement must not restate as a
+admission rules that admit a configuration. A number stated here as a measurement must not restate as a
 guarantee, and a row the run did not exercise stays unverified wherever it is already marked so.
+
+## `docs/modules/model-deployment/elastic-ep.md`
+
+**Owns** — the `elasticEp` profile contract: how an expert-parallel collective resizes its data-parallel
+width in place, the master/worker Ray topology, status conditions during resize, and when a spec change
+falls back to a rolling replacement.
+
+**Never** — the live walkthrough sequence (`../../walkthroughs/model-deployment/elastic-ep.md`) or the
+measured pre/during/post-resize latency and throughput tables (`elastic-ep-benchmark.md`).
+
+## `docs/modules/model-deployment/elastic-ep-benchmark.md`
+
+**Owns** — the measured pre-resize (`width=2`), live-resize window (`2 -> 4`), and post-resize
+(`width=4`) performance of an expert-parallel collective, including resize phase durations, surviving
+pod stability, and the interconnect conditions under which widening EP helps or hurts.
+
+**Never** — the `elasticEp` field contract (`elastic-ep.md` owns that).
+
+## `docs/modules/model-deployment/external-dp.md`
+
+**Owns** — the External DP deployment pattern (`replicas[].size >= 2` with `--data-parallel-size` /
+`--dp-size` and `--enable-expert-parallel` / `--ep-size`): per-rank HTTP endpoints, router fan-out,
+status reporting (`loadBalance: External`), and failure domain boundaries.
+
+**Never** — the live walkthrough sequence (`../../walkthroughs/model-deployment/external-dp.md`) or the
+measured External DP versus wide TP comparison (`external-dp-benchmark.md`).
+
+## `docs/modules/model-deployment/external-dp-benchmark.md`
+
+**Owns** — the measured comparison of External DP per-rank serving against a monolithic wide
+tensor-parallel group on the same total GPU budget, including per-rank router distribution, KV cache
+capacity, and the interconnect/KV-pressure crossover.
+
+**Never** — the External DP configuration contract (`external-dp.md` owns that).
 
 ## `docs/modules/model-deployment/routing.md`
 
@@ -306,7 +350,7 @@ guarantee, and a row the run did not exercise stays unverified wherever it is al
 **Owns** — the structured metrics subresource: which series each field reads per engine, role and
 router, windowed cache hits, and the Pod scrape annotations.
 
-**Never** — the exporter's own gauges (`../reference/instance-metrics.md` owns the exporter side).
+**Never** — the exporter's own gauges (`docs/reference/instance-metrics.md` owns the exporter side).
 
 ## `docs/modules/model-deployment/status.md`
 
@@ -325,8 +369,8 @@ here.
 
 ## `docs/modules/model-deployment/engine-versions.md`
 
-**Owns** — the lowest engine release each deployment shape has been run with, the Mooncake client its
-runner image carries, the store line it needs, and which transport each engine can use on each leg.
+**Owns** — the lowest engine release each deployment configuration has been run with, the Mooncake client its
+runner image carries, the store line it needs, and which transport each engine can use on each path.
 
 **Rule** — the one place an engine's minimum is stated. A paragraph elsewhere that explains why a
 release below it fails is collapsed into a link to it, not kept beside it.
@@ -370,10 +414,10 @@ per-manufacturer overrides and vendor toolkit paths.
 ## `docs/getting-started/vendor-prerequisites.md`
 
 **Owns** — what to install on a node before GPUStack, per manufacturer; which of a vendor GPU
-Operator's components conflict with ours and the switch that turns each off; what to change when one
+Operator's components conflict with GPUStack's components and the switch that turns each off; what to change when one
 is already installed.
 
-**Never** — how our own allocator picks or renders a channel (device discovery owns that), the
+**Never** — how GPUStack's allocator picks or renders a channel (device discovery owns that), the
 `GPUSTACK_*` variable that names one (settings owns it), or a vendor's own install procedure beyond
 the values this operator needs changed. Link, do not restate a vendor's chart.
 
@@ -394,10 +438,10 @@ dependencies, local site commands, Pages publication, version retention and tran
 availability, `preflight.md` — the one-container run that says what a bare node can detect, slice and
 manage — the NVIDIA MIG runbook, and `thead-mig.md` — MIG is T-Head's own word for its
 partitioning, as `hgml.GetMigMode()` and the `alibabacloud.com/ppu.partitioned.mig-<profile>` key both
-show, so the page is named for it too. And `rdma.md`, which is a how-to on both sides of one
+show, so the page is named for it too. And `docs/modules/rdma/operations.md`, which is a how-to on both sides of one
 workflow: the request a workload writes, and the kubelet policy an administrator sets so that
 request aligns — split apart, each half reads as a guarantee the other half withholds. The model
-cache's runbook lives with its domain, at `model-store/operations.md`.
+cache's runbook lives with its domain, at `docs/modules/model-delivery/operations.md`.
 
 **Rule** — a page with a `## Verify` block states the expected output of every command in it. These
 pages are exempt from the line cap: a runbook is as long as the hardware makes it.

@@ -9,7 +9,7 @@ It is injected into a **workload** container by the GPUStack device-plugin alloc
 `/etc/ld.so.preload`; the tools are mounted alongside and run by hand or by the detector. Nothing
 here runs on the host, and nothing here is loaded into the operator itself.
 
-## What this enforces, and what it does not
+## Enforcement scope
 
 **Memory is enforced here. Compute is not, and cannot be.**
 
@@ -18,9 +18,10 @@ ROCm enforces a compute quota in hardware, through a CU mask the runtime reads o
 entry point worth throttling and no reason to put one on the hot path. So what this tree ships for
 compute is not enforcement but **detection**.
 
-### Computing a mask, injecting it, and checking it are three different jobs
+### Mask calculation and checking
 
-Worth naming, because they are easy to read as one and only the last lives here:
+Worth naming, because they are easy to read as one and only the last lives here. The operator
+calculates the mask, the device-plugin injects it, ROCr enforces it and the probe checks it:
 
 | | job | who | when |
 | --- | --- | --- | --- |
@@ -47,7 +48,7 @@ itself with. That is a **reference implementation, not the production path**: th
 `references/amd-cumask-conformance.md` are the single source of truth, this copy is the one measured
 against real silicon, and the Go one is unit-tested against the same tables.
 
-## Why a preload, and why the HIP layer
+## Why the HIP layer
 
 ROCm is deployed container-side: the **container** brings `libamdhip64.so` (the HIP runtime),
 `libhsa-runtime64.so` (ROCr) and the rest, and the host passes through only `/dev/kfd` and the DRM
@@ -101,10 +102,10 @@ the product's ceiling is `GLIBC_2.4`. In-process exclusion is a compiler-atomic 
 cross-process exclusion is an `fcntl()` record lock, both of which predate it.
 
 > **Landed:** the whole tree — `build.sh`, `common/`, `hip/`, `device/`, `tools/` and `testing/` —
-> together with the verification skill's `xbuild-amd-rocm` arm and the seven `amd-case-*.sh`
+> together with the verification skill's `xbuild-amd-rocm` verification target and the seven `amd-case-*.sh`
 > scripts that drive these artifacts on a card.
 
-## Settings, and how they line up with the THead shim
+## Settings and THead shim
 
 Everything this library reads is an environment variable, and the allocator emits all of them
 together. The THead shim (`csrc/thead/ppu-slicing-shim/`) is the closest precedent in the repo, so
@@ -142,7 +143,7 @@ Three differences are deliberate rather than incidental:
   pod work dir that it also garbage-collects. THead carries the same exposure for the same reason
   and is documented alongside.
 - **There is no compute variable.** THead throttles compute in its own shim, so it takes a
-  percentage and six tuning knobs. On AMD the platform does it: `HSA_CU_MASK` is read by ROCr and
+  percentage and six tuning parameters. On AMD the platform does it: `HSA_CU_MASK` is read by ROCr and
   enforced below anything this library can see, so a figure here would be a number it could not
   enforce and could not verify. The allocator emits `HSA_CU_MASK` directly, and
   `rocm-cumask-check` is what answers whether the hardware honoured it.
@@ -185,13 +186,13 @@ compiler, `OFFLOAD_ARCH` the GPU architectures the artifacts with device code ar
 `V=1` traces every command.
 
 `lib`, `test` and the mask probe need HIP or HSA headers, so **the caller decides where they
-run** — the verification skill's `xbuild-amd-rocm` arm runs this inside a ROCm devel image, and on
+run** — the verification skill's `xbuild-amd-rocm` verification target runs this inside a ROCm devel image, and on
 a host with ROCm installed it runs directly. `unit` and `rocm-monitor` need neither, by design.
 Nothing here needs a card at build time, including the probe: its architectures are named rather
 than detected, because detection would target the build host's card and there is nothing to detect
 on a build host with none.
 
-### The four linkage assertions
+### Four linkage assertions
 
 `build.sh check` is the product's entire external contract, and each line of it has a failure
 behind it:
@@ -206,7 +207,7 @@ behind it:
 4. **Zero undefined `hip*`/`hsa*` symbols.** This is what makes one build serve every ROCm
    version; a link-time dependency would tie the artifact to the version it was built against.
 
-### The mutation checks
+### Mutation checks
 
 `build.sh unit mutants` re-runs `common/`'s tests against four builds, each broken in exactly the
 way one of the ledger's behavioural properties forbids: the quota frozen at region creation, the
@@ -219,7 +220,7 @@ passes against the broken build is decoration and is rewritten rather than kept.
 Both are commands someone types, so they are installed with hyphens where their sources are named
 with underscores. Neither is preloaded into anything, and neither links the library.
 
-### `rocm-monitor` — what the slice was given, and what it is spending
+### rocm-monitor
 
 ```bash
 rocm-monitor                       # reads the region named by VROCM_LEDGER_PATH
@@ -259,7 +260,7 @@ library never sees, and whether the hardware honoured it is the next tool's ques
 the container holds but has never allocated on**: a card appears the first time an admission touches
 it, so an untouched card is indistinguishable here from one the container does not hold.
 
-#### The region is a layout, not an API
+#### Region layout
 
 `rocm-monitor` links none of `common/`: it takes the struct definitions from the header and does
 its own read-only `mmap`. That is the point rather than an inconvenience — a metrics scraper cannot
@@ -307,7 +308,7 @@ the breakdown agrees with it. And `lock_holder_pid` is a diagnostic, not a lease
 process inside the card's critical section at the instant of the read, and is 0 the rest of the
 time.
 
-### `rocm-cumask-check` — did the compute mask actually take effect?
+### rocm-cumask-check
 
 ```bash
 rocm-cumask-check                        # derive a 50 % mask for device 0, then verify it
@@ -353,16 +354,16 @@ and they are checked in as
 `.claude/skills/gpustack-operator-xbuild-and-verify/references/amd-cumask-conformance.md` — the same
 fixture the operator's Go-side derivation is tested against.
 
-## Verifying
+## Verification
 
 The tests here are unit tests; the ones that need a card are the `amd-case-*.sh` scripts in the
 `gpustack-operator-xbuild-and-verify` skill. Case 1 needs no GPU and re-runs the four linkage
 assertions above; the rest need a real AMD host, and the compute cases assert a different
 conformance table depending on whether the card reports one XCC or several.
 
-## This is not a security boundary
+## Limitations
 
-Say so wherever it is described. Removing the preload restores the whole card's memory; `env -u
+The shim is not a security boundary. Removing the preload restores the whole card's memory; `env -u
 HSA_CU_MASK` restores the whole card's compute; `HSA_CU_MASK_SKIP_INIT=1` does the latter without
 removing anything; and `rocm-smi` reads sysfs and the DRM nodes rather than HIP, so it reports the
 physical card under any quota. The mechanism keeps a cooperative workload inside its slice. It

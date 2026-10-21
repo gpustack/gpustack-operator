@@ -1,4 +1,4 @@
-# KV Cache Pool
+# KV Cache Pools and Bindings
 
 A `KVCacheBackend` runs a store. A `KVCachePool` publishes one, and a `KVCachePoolBinding` gives a
 namespace a quota on it under one reuse domain.
@@ -11,41 +11,41 @@ Two vocabularies meet here, as on the backend page. This API says **reuse domain
 
 ## Contents
 
-- [Two kinds, split by scope](#two-kinds-split-by-scope)
+- [Two kinds by scope](#two-kinds-by-scope)
 - [Capacity grants](#capacity-grants)
-- [One Binding, one reuse domain](#one-binding-one-reuse-domain)
-- [The domain is immutable](#the-domain-is-immutable)
+- [One Binding, one domain](#one-binding-one-domain)
+- [Domain immutability](#domain-immutability)
 - [Ceiling and grant](#ceiling-and-grant)
 - [Full-quota behavior](#full-quota-behavior)
-- [The quota policy file](#the-quota-policy-file)
+- [Quota policy file](#quota-policy-file)
 - [Zero grants](#zero-grants)
 - [Operating notes](#operating-notes)
 
-## Two kinds, split by scope
+## Two kinds by scope
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
-kind: KVCachePool                      # cluster-scoped, short name kvcp
+kind: KVCachePool  # cluster-scoped, short name kvcp
 metadata:
   name: shared-dram
 spec:
-  backends: # exactly one
+  backends:  # exactly one
     - mooncake-dram
   quota:
     total: 900Gi
 ---
 apiVersion: worker.gpustack.ai/v1
-kind: KVCachePoolBinding               # namespaced, short name kvcpb
+kind: KVCachePoolBinding  # namespaced, short name kvcpb
 metadata:
   name: team-a
   namespace: team-a
 spec:
   poolRef:
     name: shared-dram
-  quota:                                # required
+  quota:  # required
     ceiling: 600Gi
-  domain:                              # required, exactly one, every field immutable
-    name: qwen-72b-v2                   # optional; left out, it is "default"
+  domain:  # required; all fields are immutable
+    name: qwen-72b-v2  # optional; defaults to "default"
     blockSize: 64
     dtype: fp8_e4m3
 ```
@@ -54,7 +54,7 @@ The object split mirrors the scheduling chain: **`ClusterQueue` : `LocalQueue`**
 A cluster-scoped object owns the capacity and an administrator manages it; a namespaced object is how
 a namespace draws on that capacity, and it is the object RBAC can be written against.
 
-`spec.backends` is validated as **length exactly 1**. Quota lands on a single store's per-tenant
+*`spec.backends`* is validated as **length exactly 1**. Quota lands on a single store's per-tenant
 ledger, and one store cannot account for bytes held in another. A pool spanning two backends could
 not answer the question the pool exists to answer.
 
@@ -76,7 +76,7 @@ accounts for it.
 ### Limitations
 
 **It is not an isolation boundary, and nothing here enforces one.** The store is reached over a
-Service any pod in the cluster can dial, no credential is derived from this object, and nothing ties
+`Service` any `Pod` in the cluster can dial, no credential is derived from this object, and nothing ties
 a tenant id to the identity of whoever sent it. A workload that knows another namespace's domain name
 **can read and write that domain's cache today**, whether a Binding covers it or not.
 
@@ -85,7 +85,7 @@ Binding is what puts one there (see the next section). That constrains which nam
 who may use one.
 
 A managed backend keeps a ledger unless it declares `leader.multiTenancy: false`, which a store image
-older than Mooncake 0.3.12 has to. See [KV Cache Backend](backend.md#the-projects-own-build-variants).
+older than Mooncake 0.3.12 has to. See [KV Cache Backend](backend.md#gpustack-build-variants).
 An external backend keeps one only if its master was started with multi-tenancy on.
 
 A backend running without multi-tenancy has no ledger and makes no such check. A `KVCachePool` over a
@@ -98,14 +98,14 @@ Real enforcement needs an authenticated proxy or network isolation between workl
 and neither exists yet. Do not place two mutually distrusting tenants on one backend and treat their
 separate Bindings as the thing keeping them apart.
 
-## One Binding, one reuse domain
+## One Binding, one domain
 
-`spec.domain` declares exactly one reuse domain, and the domain **is** the store's tenant id.
+*`spec.domain`* declares exactly one reuse domain, and the domain **is** the store's tenant id.
 Everything below is about *registering* a name; using one somebody else registered is a separate
 question, answered in
 [Limitations](#limitations).
 
-- **Leaving `name` out registers `default`.** The API server stores an omitted `spec.domain.name`
+- **Leaving `name` out registers `default`.** The API server stores an omitted *`spec.domain.name`*
   as `default`, the store's own tenant for a writer that names none. On a multi-tenant master, the
   default for a managed backend, `default` is the tenant the engines are handed, so name each domain
   once a second Binding shares the master. On a master without multi-tenancy no tenant is forwarded,
@@ -132,27 +132,27 @@ question, answered in
   the ordinary case. Two Bindings on one domain over one master would share cache, which is
   sometimes the intent, but collide on one ledger, which never is.
 
-`status.domains` on the pool lists the domains its Bindings registered. `DomainExclusive` on the
+*`status.domains`* on the pool lists the domains its Bindings registered. `DomainExclusive` on the
 Binding reports whether this Binding still holds its own name; `QuotaGranted` reports whether the
 grant it observed can serve a write at all.
 
-## The domain is immutable
+## Domain immutability
 
-Every field of `spec.domain` is rejected on update, and so is `spec.poolRef`:
+Every field of *`spec.domain`* is rejected on update, and so is *`spec.poolRef`*:
 
 | Field | Reason |
 |---|---|
-| `domain.name` | the tenant id; changing it abandons the ledger entry and its bytes under the old name |
-| `domain.blockSize` | a warm cache is read back at the block size it was written at |
-| `domain.dtype` | same, one level down — reading fp8 blocks as bf16 is silent tensor corruption |
-| `poolRef` | re-pointing moves a namespace's grant without moving its bytes, which stay on the old store |
+| *`domain.name`* | the tenant id; changing it abandons the ledger entry and its bytes under the old name |
+| *`domain.blockSize`* | a warm cache is read back at the block size it was written at |
+| *`domain.dtype`* | same, one level down — reading fp8 blocks as bf16 is silent tensor corruption |
+| *`poolRef`* | re-pointing moves a namespace's grant without moving its bytes, which stay on the old store |
 
 To change any of them, delete the Binding and create a new one; the cache under the old domain is
 not carried over.
 
 ### Engine dtype
 
-`domain.dtype` is rendered as `--kv-cache-dtype <dtype>`, **verbatim**, on every engine attached
+*`domain.dtype`* is rendered as `--kv-cache-dtype <dtype>`, **verbatim**, on every engine attached
 through the Binding: each `ModelDeployment` role the operator builds the command line of, and each
 [injected Pod](injection.md). Neither engine's store key carries the dtype, so
 without this two engines on one domain can write two element types under one key.
@@ -164,7 +164,7 @@ without this two engines on one domain can write two element types under one key
 
 - **The spelling is the engine's.** A Binding serving both engines needs a
   spelling both accept: `bfloat16`, `fp8_e4m3`, `fp8_e5m2` or `nvfp4`.
-- **A spelling the engine rejects stops every new Pod** at argument parsing, and the dtype is
+- **A spelling the engine rejects stops every new `Pod`** at argument parsing, and the dtype is
   immutable. The recovery is under
   [Upgrading to an enforced Binding dtype](../../operate/migration/kv-cache-dtype.md).
 - **`auto` is refused on a new Binding.** Both engines accept it and resolve it from the model they
@@ -173,7 +173,7 @@ without this two engines on one domain can write two element types under one key
   rule and its exceptions are under
   [Operator-owned keys](../model-deployment/deployment.md#operator-owned-keys).
 
-All of it follows the Setting `model-deployment-kv-cache-dtype-owned`, on by default; turning it
+All of it follows the `Setting` `model-deployment-kv-cache-dtype-owned`, on by default; turning it
 off renders and refuses nothing, as before. See [Settings](../../reference/settings.md).
 
 | Engine | Accepts |
@@ -185,7 +185,7 @@ The lists are read from vLLM v0.29.0 and SGLang v0.5.18; the engine image in use
 
 ## Ceiling and grant
 
-`spec.quota.ceiling` is what this namespace **asks for**. `status.effectiveQuota` is what the pool
+*`spec.quota.ceiling`* is what this namespace **asks for**. *`status.effectiveQuota`* is what the pool
 **granted**, and the two differ whenever the pool is oversubscribed.
 
 - When every ceiling fits inside the pool's allocatable capacity, the grant equals the ceiling.
@@ -197,14 +197,14 @@ The lists are read from vLLM v0.29.0 and SGLang v0.5.18; the engine image in use
 The pool's verdict on the sum is a Condition, not a refusal: `QuotaWithinTotal` on the pool is
 `True` while the ceilings fit within the pool's declared `total`, and turns `False` with reason
 `Oversubscribed` (naming the sum and the `total`) the moment the ceilings pass it. Nothing is
-refused; the store keeps serving, and each Binding's `status.effectiveQuota` is the proportional
+refused; the store keeps serving, and each Binding's *`status.effectiveQuota`* is the proportional
 share already described.
 
 **`QuotaWithinTotal=True` does not promise a full grant.** It compares the ceilings with the declared
 `total`, not with the master's allocatable capacity, so the grants still fall below the ceilings
 whenever the ceilings sum past what the members have mounted.
 
-`status.usage` is what the master reports the domain as holding, republished as read. The operator
+*`status.usage`* is what the master reports the domain as holding, republished as read. The operator
 caps nothing. What is bounded is the **store's charge**: it refuses a charge that would overshoot the
 grant, discarding the domain's own objects instead, so usage normally settles *at* the grant rather
 than above it. It genuinely exceeds the grant in the one case the next section describes, a grant
@@ -226,16 +226,16 @@ domain's own objects to make room for the next write.**
   dashboard watching evictions sees nothing happen.
 - A write **is** refused, with `TENANT_QUOTA_EXCEEDED`, when nothing can be discarded: reading an
   object puts it under a lease (five minutes as this operator renders the store, adjustable per
-  backend through `extraArgs`; see [The leader](leader.md)), and a write while every object in a
+  backend through *`extraArgs`*; see [The leader](leader.md)), and a write while every object in a
   filled grant holds one fails.
 
-**`status.overQuota` does not report this, and cannot.** The store computes it as *charge exceeds
+***`status.overQuota`* does not report this, and cannot.** The store computes it as *charge exceeds
 grant* while refusing any charge that would overshoot, so writing past a grant leaves it `false`
 forever. It reports one situation: **the grant was recut below what the domain already holds**, which
 is what a proportional recomputation does when a pool's members shrink or another Binding joins.
 
-**So: do not wait on `overQuota` to learn that writes are being refused.** Watch `usage` against
-`effectiveQuota` instead, and treat a domain sitting at its grant as one already discarding objects to
+**So: do not wait on *`overQuota`* to learn that writes are being refused.** Watch `usage` against
+*`effectiveQuota`* instead, and treat a domain sitting at its grant as one already discarding objects to
 admit new ones. The order is not predictable: the store scans from an arbitrary shard and
 stops as soon as it has freed enough, so a recently written object can go before an older one, and a
 hit rate cannot be reasoned about from age.
@@ -251,11 +251,11 @@ counter at all), and it is process-global, so a per-pool figure would charge a c
 here.
 
 Eviction is reached where it lives: the store's own process-level startup flags, which reach it
-through the backend's `spec.connection.managed.leader.extraArgs`. See
+through the backend's *`spec.connection.managed.leader.extraArgs`*. See
 [The leader](leader.md) for how that container is assembled. The flag names are the
 store's to document, and are deliberately not restated here.
 
-## The quota policy file
+## Quota policy file
 
 The store reads tenant ceilings from a file, and this operator renders that file **whole** from the
 Bindings of every pool on that backend. A partial write is never emitted: a refused render leaves the
@@ -268,12 +268,12 @@ The file lives on a **writable** volume, and that is deliberate rather than an o
   failure and the ledger stops accepting policy updates.
 
 A `ConfigMap` is mounted read-only alongside it as a **seed**, copied into place by an init container
-before the store starts. The pool reconciler renders the ConfigMap. On a backend whose multi-tenancy
+before the store starts. The pool reconciler renders the `ConfigMap`. On a backend whose multi-tenancy
 is on but that no pool has bound yet, no pool exists to render one, so the mount is optional and the
 init container then writes an **empty policy document** in its place.
 
 **The file itself is never optional**: the store is started with a flag naming it and fails
-without it. What varies is only whether its contents came from a ConfigMap or from that empty
+without it. What varies is only whether its contents came from a `ConfigMap` or from that empty
 fallback.
 
 `QuotaPolicyWritable` on the pool reports whether the operator can still write that file. False means
@@ -301,9 +301,9 @@ The restart case is the one that surprises. A restarted master answers its admin
 seconds and passes its readiness probe there (the probe reads the segment list, not the ledger),
 then reports a **zero** effective quota until its segments have remounted.
 
-**How long depends on where the replacement Pod lands, and the slow case is the ordinary one.**
+**How long depends on where the replacement `Pod` lands, and the slow case is the ordinary one.**
 When the master keeps its address or returns to the node its member is on, the window is a few
-seconds. When it changes address *and* lands elsewhere, which is what a deleted Pod does in any
+seconds. When it changes address *and* lands elsewhere, which is what a deleted `Pod` does in any
 deployment whose leader and member are on separate nodes, it is around half a minute.
 
 **So expect the pool and every Binding on it to report `Error` for around half a minute after a
@@ -330,7 +330,7 @@ at all, which is a declared single-tenant topology rather than a fault: `QuotaLe
 reason on `Releasable=False` before acting. They need different remedies:
 
 - `HeldByWorkloads` — a workload in the namespace still references the Binding (it is in
-  `status.usedBy`). The message names the **workloads**. Remove them; nothing needs draining.
+  *`status.usedBy`*). The message names the **workloads**. Remove them; nothing needs draining.
 - `LedgerNotReleased` — the store refuses to drop the tenant while its domain is non-empty. The
   message names the **domain**; drain it and the release completes on the next pass.
 - `LedgerRequestFailed` — a ledger request failed, leaving whether the tenant is gone unknown.
@@ -389,9 +389,9 @@ zero is the [Zero grants](#zero-grants) case.
 ---
 
 **See also** — [KV Cache Backend](backend.md) (the store this pool publishes, and where eviction is
-configured) · [KV Cache Injection](injection.md) (how a Pod consumes the grant
-this page describes) · [Model Deployment](../model-deployment/deployment.md) (the other half of the
-worked pair: a rendered engine names this Binding through `spec.kvCache.poolRef`) ·
+configured) · [KV Cache Injection](injection.md) (how a `Pod` consumes a namespace grant) ·
+[Model Deployment](../model-deployment/deployment.md) (the other half of the
+worked pair: a rendered engine names this Binding through *`spec.kvCache.poolRef`*) ·
 [Admission](../devices/admission.md) (the gates and the four-view status
 pattern) · [Settings & Environment Variables](../../reference/settings.md)
 

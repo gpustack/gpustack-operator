@@ -9,7 +9,7 @@ They are injected into a **workload** container by the GPUStack device-plugin al
 `/etc/ld.so.preload`; the reader is mounted alongside and run by hand. Nothing here runs on the
 host, and nothing here is loaded into the operator itself.
 
-## Why a preload, and why these libraries
+## Preloading and two libraries
 
 THead's SDK is deployed ROCm-style: the **container** brings `libhggc.so` (driver layer),
 `libhggcrt*.so` (runtime layer) and `libhgml.so` (management), and the host passes through only
@@ -192,11 +192,12 @@ definition — so whoever the loader reaches first owns the symbol and the other
 initialised and never entered. Behind a peer, this shim is inert and `ppu-smi` reports the
 physical card. `cases/thead-case-2.sh` pins both directions.
 
-### The compute cap, and the five knobs behind it
+### Compute cap and parameters
 
 The cap is enforced by gating launches: per card the shim keeps a repeating window
 (`HGGC_SM_CONTROL_PERIOD_MS`), lets launches through while the window is open, and makes later
-ones wait for the next one. How far it opens the window is decided by a **PID controller** — a
+ones wait for the next one. Five environment variables shape it — the window period, the three PID
+gains and the step. How far it opens the window is decided by a **PID controller** — a
 feedback loop that adds up three terms computed from the error between the cap you asked for and
 the utilisation actually measured: the present error (**P**), the accumulated past error (**I**),
 and its rate of change (**D**), each scaled by a gain. It is the standard way to hold a measured
@@ -221,14 +222,14 @@ real workload at the cap and watch either stream:
 # or, without the log noise, the same figures out of the region while it runs — see below
 ```
 
-| What you see | Knob | Why |
+| What you see | Parameter | Why |
 | --- | --- | --- |
 | `measured` settles a few points **under** `target` and stays there | raise `_KI` | the accumulated error is what closes a steady offset; `_KP` alone cannot |
 | `measured` **swings** across the range, `allow_us` slamming between its floor and the whole window | raise `_STEP_MS` first, then lower `_KP` | acting faster than the sensor settles is the usual cause, not too little gain |
 | `measured` takes many seconds to reach `target` after a burst starts | raise `_KP` | the present error is the term that reacts to a change |
 | `measured` is noisy but centred | leave `_KD` at 0 | the feedback is a sampled figure, so differentiating it mostly amplifies sampling noise |
 
-Change one knob at a time and re-read the same two figures; `target` versus `measured` in a steady
+Change one parameter at a time and re-read the same two figures; `target` versus `measured` in a steady
 state is the whole verdict. `cases/thead-case-7.sh` is the same measurement automated, with bands
 instead of a human eye.
 
@@ -248,7 +249,7 @@ At `LIBHGGC_LOG_LEVEL=2` every line is tagged `[vppu]`:
 - the counter dump at exit names every interposed entry even at zero, so "the call reached
   `libhggc.so`" is decided by counting rather than inferred from linkage.
 
-### Reading the usage region (`HGGC_LEDGER_PATH`)
+### Reading the usage region
 
 `HGGC_LEDGER_PATH` names an ordinary file — `/dev/shm/vppu-ledger` by default — that every process
 in the container maps. It is the cross-process ledger *and* the usage surface: a slice's quota, what
@@ -297,7 +298,7 @@ od -A d -t d4 -j 160 -N 8  /dev/shm/vppu-ledger         # card 0: first charged 
 each window the card is currently open for. A card the container never touched is all zeros, and
 zero quota with a non-zero `accounted` cannot happen — both are written under the card's lock.
 
-### `ppu-monitor`, which reads it for you
+### ppu-monitor
 
 `tools/ppu-monitor` prints the same figures per card, so nobody has to keep the offsets in their head:
 
@@ -329,7 +330,7 @@ first time an admission touches it. The full contract, for anything reading this
 `ppu-monitor`, is
 `.claude/skills/gpustack-operator-xbuild-and-verify/references/thead-usage-region.md`.
 
-## Verifying
+## Verification
 
 The assertions live with the verification skill, not here:
 `.claude/skills/gpustack-operator-xbuild-and-verify` — build the artifacts once, then run the

@@ -38,10 +38,13 @@ node groups, and point your local kubeconfig at it.
 - Buys a GPU node group from **preemptible** capacity when its
   `gpu_instance_types` entry sets `preemptible = true`. See
   [Preemptible nodes](#preemptible-nodes).
-- Attaches a GPU node group to an **InfiniBand fabric** when its
-  `gpu_instance_types` entry names one in `infiniband_fabric`, creating a
-  `nebius_compute_v1_gpu_cluster` per such group. This is what puts RDMA devices
-  on the node. See [InfiniBand fabrics](#infiniband-fabrics).
+- Attaches a GPU node group to an **InfiniBand fabric** when its `gpu_instance_types`
+  entry asks for one — by `infiniband_fabric` (creating a
+  `nebius_compute_v1_gpu_cluster` for the group, or reusing an existing project
+  cluster already on that fabric when `reuse_gpu_cluster` is true, the default) or
+  by `gpu_cluster_id` (attaching to a named, already-existing cluster). This is
+  what puts RDMA devices on the node. See
+  [InfiniBand fabrics](#infiniband-fabrics).
 - After apply, runs `nebius mk8s cluster get-credentials` to merge the cluster
   into `~/.kube/config` as a new context, which becomes the current one (unless
   `switch_kube_context=false`); on destroy it removes that
@@ -146,6 +149,69 @@ That refusal is the useful case: a typo fails the apply instead of quietly
 producing a group without RDMA. Clusters are quota'd per region by
 `compute.gpucluster.count`, which counts clusters rather than nodes; read it the
 same way as the address quota in [Public addresses](#public-addresses).
+
+### Creating a new fabric cluster
+
+The default shape: name the fabric and the module creates one
+`nebius_compute_v1_gpu_cluster` for the group, spending one
+`compute.gpucluster.count` unit:
+
+```bash
+terraform apply \
+  -var="project_id=$NEBIUS_PROJECT_ID" \
+  -var='gpu_instance_types={
+          gpu-sxm = { platform = "gpu-h100-sxm", preset = "8gpu-128vcpu-1600gb",
+                      infiniband_fabric = "fabric-5", boot_disk_size_gb = 400, node_count = 1 }
+        }'
+```
+
+Set `reuse_gpu_cluster = false` on the group to keep that behavior when a
+matching cluster already exists — the historical mode, and the one to pick when
+the cluster must be the module's own (created and destroyed with it).
+
+### Reusing an existing GPU cluster
+
+A project already at its `compute.gpucluster.count` limit can still put a new
+group on a fabric it has a cluster for. Two ways, both of which attach without
+creating anything:
+
+**By fabric, automatically** (the default). With `infiniband_fabric` named and
+`reuse_gpu_cluster` left at `true`, the module lists the project's existing GPU
+clusters (`nebius compute gpu-cluster list`) and attaches to one whose fabric
+matches; it creates a cluster only when no match exists. When several clusters
+share the fabric, the lowest cluster ID wins, so the pick is stable across runs.
+The lookup is a `data.external`: it adds one CLI round trip to every `plan`,
+`apply` **and `destroy`** of a run that uses it (the same bargain the
+os/driver resolution makes), and it is skipped entirely when no group asks for a
+fabric — set `reuse_gpu_cluster = false` on the group to skip it there too.
+
+**By ID, explicitly.** Name the cluster instead of the fabric — the two are
+mutually exclusive on one group, because the cluster already carries its fabric:
+
+```bash
+terraform apply \
+  -var="project_id=$NEBIUS_PROJECT_ID" \
+  -var='gpu_instance_types={
+          gpu-sxm = { platform = "gpu-h100-sxm", preset = "8gpu-128vcpu-1600gb",
+                      gpu_cluster_id = "computegpucluster-...", boot_disk_size_gb = 400, node_count = 1 }
+        }'
+```
+
+`reuse_gpu_cluster` is ignored on this path. Find the ID with
+`nebius compute gpu-cluster list --parent-id <project-id> --format json`.
+
+**Both reuse modes fail fast on a preset that cannot join.** Attachment is
+allowed by the preset (`allow_gpu_clustering = true`), not by the platform, so a
+group that asks for a fabric *or* a `gpu_cluster_id` on a preset without it
+fails at **plan** — the os/driver data source reads the platform list too and
+names the presets of that platform which do allow clustering — instead of at
+apply with a provider error that names none of them. A group that asks for no
+GPU cluster skips that check entirely: a preset that cannot join a fabric is
+perfectly fine on its own.
+
+As with the fabric itself, a node joins an existing GPU cluster only when it is
+created — there is no attaching one afterwards — so adding either field to a
+live group replaces the group.
 
 ## Preemptible nodes
 
@@ -426,7 +492,7 @@ establish complete cleanup. Report any surviving ID and its deletion error.
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group (per-group override: `boot_disk_size_gb` in `gpu_instance_types`) | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `cpu_instance_types` | CPU node groups as a `map(object)` keyed by node group name (the key IS the name; no prefix is added): `{platform, preset, os, public_ip (optional), node_count}`. `public_ip` defaults to `false`; `true` gives each node an SSH-reachable public IPv4 at one public-address quota unit ([public addresses](#public-addresses)). `node_count` sizes the group — and unlike `clusters/eks`, an edit DOES resize a group that already exists. A group that should not exist is an absent key, not a zero count (the spelling a region holding `compute.instance.non-gpu.vcpu` at zero needs) | `{ cpu = { platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04", node_count = 1 } }` |
-| `gpu_instance_types` | GPU node groups as a `map(object)` keyed by node group name (the key IS the name; no prefix is added): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional), public_ip (optional), boot_disk_size_gb (optional), infiniband_fabric (optional), node_count}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)); `public_ip` defaults to `true`, so the node is SSH-reachable, at one public-address quota unit per node ([public addresses](#public-addresses)); `boot_disk_size_gb` overrides `node_boot_disk_size_gb` for the group — set it (e.g. `400`) on groups that pull inference-engine images, which overflow the 100 GiB default into kubelet disk pressure; `infiniband_fabric` attaches the group to that fabric, which is what gives its nodes RDMA devices, and requires a preset whose `allow_gpu_clustering` is true ([InfiniBand fabrics](#infiniband-fabrics)); `node_count` sizes the group — a key buys a group with its own platform and preset, a count buys more nodes of a shape a group already names, and accelerator quota is granted per platform and preset, so a count above one can be refused where a second key would not be. Unlike `clusters/eks`, an edit DOES resize a group that already exists; a group that should not exist is an absent key | `{ gpu-h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb", node_count = 1 } }` |
+| `gpu_instance_types` | GPU node groups as a `map(object)` keyed by node group name (the key IS the name; no prefix is added): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional), public_ip (optional), boot_disk_size_gb (optional), infiniband_fabric (optional), gpu_cluster_id (optional), reuse_gpu_cluster (optional), node_count}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)); `public_ip` defaults to `true`, so the node is SSH-reachable, at one public-address quota unit per node ([public addresses](#public-addresses)); `boot_disk_size_gb` overrides `node_boot_disk_size_gb` for the group — set it (e.g. `400`) on groups that pull inference-engine images, which overflow the 100 GiB default into kubelet disk pressure; `infiniband_fabric` attaches the group to that fabric, which is what gives its nodes RDMA devices, and requires a preset whose `allow_gpu_clustering` is true ([InfiniBand fabrics](#infiniband-fabrics)); `gpu_cluster_id` attaches the group to an already-existing GPU cluster instead, mutually exclusive with `infiniband_fabric`; with a fabric named and no `gpu_cluster_id`, `reuse_gpu_cluster` (default `true`) reuses an existing project cluster on that fabric before creating one ([InfiniBand fabrics](#infiniband-fabrics)); `node_count` sizes the group — a key buys a group with its own platform and preset, a count buys more nodes of a shape a group already names, and accelerator quota is granted per platform and preset, so a count above one can be refused where a second key would not be. Unlike `clusters/eks`, an edit DOES resize a group that already exists; a group that should not exist is an absent key | `{ gpu-h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb", node_count = 1 } }` |
 | `switch_kube_context` | Let `get-credentials` leave this cluster current; `false` restores the previous context | `true` |
 
 ## Outputs

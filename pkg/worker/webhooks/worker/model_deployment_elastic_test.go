@@ -251,7 +251,7 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 		},
 		wantErr: []string{"acceleratorPartitionedProfile"},
 	}, {
-		name: "fabric interface request refused",
+		name: "fabric interface request admitted",
 		md: func() *workercore.ModelDeployment {
 			return elasticMD(elasticRole(func(r *workercore.ModelDeploymentRole) {
 				r.Resources = &workercore.ModelDeploymentRoleResources{
@@ -259,7 +259,6 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 				}
 			}))
 		},
-		wantErr: []string{"interface"},
 	}, {
 		name: "operator-owned native flag refused",
 		md: func() *workercore.ModelDeployment {

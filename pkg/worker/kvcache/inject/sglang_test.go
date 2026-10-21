@@ -63,7 +63,10 @@ func TestRender_SGLangEncoderLeg(t *testing.T) {
 				"http://qwen-epd-encode:8000",
 				"http://qwen-epd-encode-2:8000",
 			},
-			wantDefaultedArgs: [][]string{{"--enable-hierarchical-cache"}},
+			wantDefaultedArgs: [][]string{
+				{"--enable-hierarchical-cache"},
+				{"--page-size", "64"},
+			},
 			wantPorts: []core.ContainerPort{
 				{Name: "enc-bootstrap", Protocol: core.ProtocolTCP, ContainerPort: 8997},
 			},
@@ -87,7 +90,10 @@ func TestRender_SGLangEncoderLeg(t *testing.T) {
 				"http://qwen-epd-encode:8000",
 				"http://qwen-epd-encode-2:8000",
 			},
-			wantDefaultedArgs: [][]string{{"--enable-hierarchical-cache"}},
+			wantDefaultedArgs: [][]string{
+				{"--enable-hierarchical-cache"},
+				{"--page-size", "64"},
+			},
 			wantPorts: []core.ContainerPort{
 				{Name: "bootstrap", Protocol: core.ProtocolTCP, ContainerPort: 8998},
 				{Name: "enc-bootstrap", Protocol: core.ProtocolTCP, ContainerPort: 8997},
@@ -110,6 +116,7 @@ func TestRender_SGLangEncoderLeg(t *testing.T) {
 			},
 			wantDefaultedArgs: [][]string{
 				{"--disaggregation-decode-retraction-backup", "cpu_tensor"},
+				{"--page-size", "64"},
 			},
 		},
 	}
@@ -376,6 +383,7 @@ func TestRender_SGLangWithoutAnEncoderIsUnchanged(t *testing.T) {
 			wantArgs:   []string{"--hicache-storage-backend", "mooncake"},
 			wantDefaultedArgs: [][]string{
 				{"--enable-hierarchical-cache"},
+				{"--page-size", "64"},
 			},
 		},
 		{
@@ -390,7 +398,10 @@ func TestRender_SGLangWithoutAnEncoderIsUnchanged(t *testing.T) {
 				"--disaggregation-transfer-backend", "mooncake_tcp",
 				"--disaggregation-bootstrap-port", "8998",
 			},
-			wantDefaultedArgs: [][]string{{"--enable-hierarchical-cache"}},
+			wantDefaultedArgs: [][]string{
+				{"--enable-hierarchical-cache"},
+				{"--page-size", "64"},
+			},
 			wantPorts: []core.ContainerPort{
 				{Name: "bootstrap", Protocol: core.ProtocolTCP, ContainerPort: 8998},
 			},
@@ -409,6 +420,7 @@ func TestRender_SGLangWithoutAnEncoderIsUnchanged(t *testing.T) {
 			},
 			wantDefaultedArgs: [][]string{
 				{"--disaggregation-decode-retraction-backup", "cpu_tensor"},
+				{"--page-size", "64"},
 			},
 		},
 		{
@@ -418,6 +430,7 @@ func TestRender_SGLangWithoutAnEncoderIsUnchanged(t *testing.T) {
 			wantArgs:   []string{"--hicache-storage-backend", "mooncake"},
 			wantDefaultedArgs: [][]string{
 				{"--enable-hierarchical-cache"},
+				{"--page-size", "64"},
 			},
 		},
 	}

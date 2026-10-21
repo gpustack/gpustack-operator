@@ -1,0 +1,53 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: b2-elastic-ep
+  namespace: gpustack-bench
+spec:
+  model:
+    name: /models
+    artifactRef:
+      name: deepseek-v2-lite-chat
+  engine:
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0
+  roles:
+    - name: server
+      kind: Server
+      replicas: 1
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda13.0-vllm0.30.0
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "2"
+      elasticEp:
+        width: 2
+      extraArgs:
+        - --tensor-parallel-size
+        - "2"
+        - --max-model-len
+        - "8192"
+        - --max-num-seqs
+        - "16"
+        - --gpu-memory-utilization
+        - "0.90"
+        - --elastic-ep-max-dp-size
+        - "4"
+        - --all2all-backend
+        - allgather_reducescatter
+        - --api-server-count
+        - "1"
+      env:
+        - name: VLLM_USE_RAY_V2_EXECUTOR_BACKEND
+          value: "1"
+        - name: OTEL_METRICS_EXPORTER
+          value: none
+        - name: OTEL_TRACES_EXPORTER
+          value: none
+        - name: RAY_LOGGER_LEVEL
+          value: info
+        - name: RAY_BACKEND_LOG_LEVEL
+          value: info
+        - name: RAY_DEDUP_LOGS
+          value: "0"

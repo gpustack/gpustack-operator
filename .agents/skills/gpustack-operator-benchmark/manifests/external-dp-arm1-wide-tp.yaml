@@ -1,0 +1,37 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: external-dp-arm1-wide-tp
+  namespace: gpustack-bench
+spec:
+  model:
+    name: /models
+    artifactRef:
+      name: deepseek-v2-lite-chat
+  engine:
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0
+  roles:
+    - name: server
+      kind: Server
+      replicas: 1
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda13.0-vllm0.30.0
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "8"
+      extraArgs:
+        - --tensor-parallel-size
+        - "8"
+        - --max-model-len
+        - "8192"
+        - --max-num-seqs
+        - "16"
+        - --gpu-memory-utilization
+        - "0.90"
+      env:
+        - name: OTEL_METRICS_EXPORTER
+          value: none
+        - name: OTEL_TRACES_EXPORTER
+          value: none

@@ -20,6 +20,16 @@ const (
 	// without appending an argument.
 	vllmTransferConfigArg = "--kv-transfer-config"
 	vllmKVEventsConfigArg = "--kv-events-config"
+	// vllmBlockSizeArg sets vLLM's KV cache block granularity (`vllm/config/cache.py:72-76`,
+	// `CacheConfig.block_size: int = Field(default=None, gt=0)` at v0.29.0/v0.30.0, where the V1
+	// engine lifted the legacy V0 32-token CUDA cap and V1 CUDA FlashAttention/FlashInfer backends
+	// accept multiples of 16 including 128). Over Mooncake TCP, defaulting it to 128 tokens reduces
+	// the number of KV transfer and store descriptors per prompt by 8x (for example from 16,448 to
+	// 2,056 descriptors on an 8K prompt across 64 layers) and amortizes per-descriptor TCP framing
+	// overhead. Emitted in DefaultedArgs so any workload whose model or attention backend requires
+	// another granularity overrides the default by declaring `--block-size` in its own arguments.
+	vllmBlockSizeArg        = "--block-size"
+	defaultVLLMTCPBlockSize = "128"
 	// VLLMKVEventsPort is the ZMQ publisher port consumed by managed routers.
 	VLLMKVEventsPort int32 = 5557
 	// VLLMKVEventsReplayPort is the publisher's replay port.
@@ -451,6 +461,10 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 		// Defaulted rather than owned: the transfer engine only checks that the variable is
 		// present, and a user who already sets it -- to any value -- has asked for the same thing.
 		result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{Name: MooncakeForceTCPEnv, Value: "1"})
+	}
+	if in.Engine == EngineVLLM && ((hasStore && in.Connection.Protocol == "tcp") || forceTCP) {
+		result.DefaultedEnv = append(result.DefaultedEnv, mooncakeTCPDefaultedEnv()...)
+		result.DefaultedArgs = append(result.DefaultedArgs, []string{vllmBlockSizeArg, defaultVLLMTCPBlockSize})
 	}
 	if !in.PublishKVEvents {
 		return result, nil

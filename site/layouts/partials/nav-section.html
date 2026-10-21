@@ -1,18 +1,53 @@
 {{ $page := .page }}
 {{ $current := .current }}
 {{ $active := hasPrefix $current.RelPermalink $page.RelPermalink }}
+{{ $childrenMap := site.Data.navigation.children | default dict }}
+{{ $pagesBySlug := dict }}
+{{ range $page.Pages }}
+  {{ $slug := path.Base (strings.TrimSuffix "/" .RelPermalink) }}
+  {{ $pagesBySlug = merge $pagesBySlug (dict $slug .) }}
+{{ end }}
+{{ $sectionChildKeys := slice }}
+{{ range $page.Pages }}
+  {{ with index $childrenMap (partial "page-key.html" .) }}
+    {{ range . }}
+      {{ $childSlug := . }}
+      {{ with index $pagesBySlug $childSlug }}
+        {{ $sectionChildKeys = $sectionChildKeys | append $childSlug }}
+        {{ if eq $current.RelPermalink .RelPermalink }}
+          {{ $active = true }}
+        {{ end }}
+      {{ end }}
+    {{ end }}
+  {{ end }}
+{{ end }}
 <details class="nav-section" {{ if or $active (and $current.IsHome (eq (partial "page-key.html" $page) "/docs/getting-started/")) }}open{{ end }}>
   <summary title="{{ partial "page-title.html" $page }}">{{ .name }}</summary>
   <div class="nav-children">
     {{ if $page.Content }}
-      <a href="{{ $page.RelPermalink }}" {{ if eq $current.RelPermalink $page.RelPermalink }}aria-current="page"{{ end }}>Overview</a>
+      {{ $overviewLabels := site.Data.navigation.overview_labels | default dict }}
+      {{ $overviewLabel := index $overviewLabels (partial "page-key.html" $page) | default "Overview" }}
+      <a title="{{ partial "page-title.html" $page }}" href="{{ $page.RelPermalink }}" {{ if eq $current.RelPermalink $page.RelPermalink }}aria-current="page"{{ end }}>{{ $overviewLabel }}</a>
     {{ end }}
     {{ range partial "ordered-pages.html" $page }}
-      {{ $name := partial "nav-label.html" . }}
-      {{ if .IsSection }}
-        {{ partial "nav-section.html" (dict "page" . "name" $name "current" $current) }}
-      {{ else }}
-        <a title="{{ partial "page-title.html" . }}" href="{{ .RelPermalink }}" {{ if eq $current.RelPermalink .RelPermalink }}aria-current="page"{{ end }}>{{ $name }}</a>
+      {{ $slug := path.Base (strings.TrimSuffix "/" .RelPermalink) }}
+      {{ if not (in $sectionChildKeys $slug) }}
+        {{ $name := partial "nav-label.html" . }}
+        {{ if .IsSection }}
+          {{ partial "nav-section.html" (dict "page" . "name" $name "current" $current) }}
+        {{ else }}
+          <a title="{{ partial "page-title.html" . }}" href="{{ .RelPermalink }}" {{ if eq $current.RelPermalink .RelPermalink }}aria-current="page"{{ end }}>{{ $name }}</a>
+          {{ $childKeys := index $childrenMap (partial "page-key.html" .) | default slice }}
+          {{ if $childKeys }}
+            <div class="nav-children">
+              {{ range $childKeys }}
+                {{ with index $pagesBySlug . }}
+                  <a title="{{ partial "page-title.html" . }}" href="{{ .RelPermalink }}" {{ if eq $current.RelPermalink .RelPermalink }}aria-current="page"{{ end }}>{{ partial "nav-label.html" . }}</a>
+                {{ end }}
+              {{ end }}
+            </div>
+          {{ end }}
+        {{ end }}
       {{ end }}
     {{ end }}
   </div>

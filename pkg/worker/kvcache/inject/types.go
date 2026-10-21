@@ -12,6 +12,8 @@ package inject
 import (
 	"fmt"
 	"slices"
+
+	core "k8s.io/api/core/v1"
 )
 
 // Engine names the inference engine whose configuration is being rendered.
@@ -329,6 +331,38 @@ func directLegProtocol(in Input) string {
 // MooncakeForceTCPEnv is the variable that makes the Mooncake transfer engine install TCP alone. It
 // is read by the transfer engine rather than by any engine's config class, and only for presence.
 const MooncakeForceTCPEnv = "MC_FORCE_TCP"
+
+// Mooncake TCP transport tuning variables read by the in-process C++ Mooncake Transfer Engine
+// (`from mooncake.engine import TransferEngine`) on both vLLM and SGLang when its transport is TCP.
+//
+// Mooncake's default per-peer queued-transfer ceiling (1024) and single-lane admission budget
+// overflow on multi-layer long-prompt KV transfers, causing Transport::submitTransfer and
+// TcpTransport::allocateLocalBuffer to fail with ret=-1 and strand prefill KV blocks. Raising the
+// per-peer transfer and pending-admission queues to 65535, opening 16 parallel TCP socket lanes per
+// peer, and extending the admission timeout to 60000 ms prevent descriptor-queue overflow and smooth
+// multi-stream TCP throughput. All four variables are emitted in DefaultedEnv so a workload's own
+// declaration overrides the operator default.
+const (
+	MooncakeTCPMaxQueuedTransfersPerPeerEnv   = "MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER"
+	MooncakeTCPMaxPendingAdmissionsPerPeerEnv = "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER"
+	MooncakeTCPLanesPerPeerEnv                = "MC_TCP_LANES_PER_PEER"
+	MooncakeTCPAdmissionTimeoutMsEnv          = "MC_TCP_ADMISSION_TIMEOUT_MS"
+
+	defaultMooncakeTCPMaxQueuedTransfersPerPeer   = "65535"
+	defaultMooncakeTCPMaxPendingAdmissionsPerPeer = "65535"
+	defaultMooncakeTCPLanesPerPeer                = "16"
+	defaultMooncakeTCPAdmissionTimeoutMs          = "60000"
+)
+
+// mooncakeTCPDefaultedEnv returns the defaulted C++ Mooncake Transfer Engine TCP tuning variables.
+func mooncakeTCPDefaultedEnv() []core.EnvVar {
+	return []core.EnvVar{
+		{Name: MooncakeTCPMaxQueuedTransfersPerPeerEnv, Value: defaultMooncakeTCPMaxQueuedTransfersPerPeer},
+		{Name: MooncakeTCPMaxPendingAdmissionsPerPeerEnv, Value: defaultMooncakeTCPMaxPendingAdmissionsPerPeer},
+		{Name: MooncakeTCPLanesPerPeerEnv, Value: defaultMooncakeTCPLanesPerPeer},
+		{Name: MooncakeTCPAdmissionTimeoutMsEnv, Value: defaultMooncakeTCPAdmissionTimeoutMs},
+	}
+}
 
 // KVCacheDtypeArg is the flag both engine families read the KV cache element type from: vLLM
 // v0.29.0 `vllm/config/cache.py` CacheDType and SGLang v0.5.18 `server_args.py` kv_cache_dtype.

@@ -147,7 +147,7 @@ variable "cpu_instance_types" {
 # group resource declares no ignore_changes on its size, so an edit is applied rather
 # than silently dropped. That difference is upstream, not a choice made here.
 variable "gpu_instance_types" {
-  description = "GPU node groups, keyed by node group name (the key IS the name; no prefix is added). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG; public_ip defaults to true, giving the nodes an SSH-reachable public IPv4 at the cost of one public-address quota unit each; boot_disk_size_gb overrides var.node_boot_disk_size_gb for the group -- set it (e.g. 400) on groups that pull inference-engine images, which overflow the 100 GiB module default into kubelet disk pressure; infiniband_fabric attaches the group to an InfiniBand fabric, which is what gives its nodes RDMA devices, and requires a preset whose allow_gpu_clustering is true; node_count sizes the group (an edit resizes a live group, unlike clusters/eks)."
+  description = "GPU node groups, keyed by node group name (the key IS the name; no prefix is added). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG; public_ip defaults to true, giving the nodes an SSH-reachable public IPv4 at the cost of one public-address quota unit each; boot_disk_size_gb overrides var.node_boot_disk_size_gb for the group -- set it (e.g. 400) on groups that pull inference-engine images, which overflow the 100 GiB module default into kubelet disk pressure; infiniband_fabric attaches the group to an InfiniBand fabric, which is what gives its nodes RDMA devices, and requires a preset whose allow_gpu_clustering is true; gpu_cluster_id attaches the group to an already-existing GPU cluster instead (mutually exclusive with infiniband_fabric); with a fabric named and no gpu_cluster_id, reuse_gpu_cluster (default true) reuses an existing project cluster on that fabric before creating one; node_count sizes the group (an edit resizes a live group, unlike clusters/eks)."
   type = map(object({
     platform       = string
     preset         = string
@@ -171,6 +171,22 @@ variable "gpu_instance_types" {
     # Fabric names are region-scoped, and a node can only join a fabric when it is created -- there
     # is no adding one afterwards -- so a group that needs RDMA must be created with it set.
     infiniband_fabric = optional(string)
+    # ID of an already-existing GPU cluster in the project (a "computegpucluster-..." resource) to
+    # attach the group's nodes to instead of creating one. The cluster owns a fabric, so naming its
+    # ID joins the group to that fabric while leaving the compute.gpucluster.count quota untouched;
+    # naming it and naming a fabric are two ways to answer "which interconnect", so they are mutually
+    # exclusive (validated below). Like the fabric itself, a node joins only at creation.
+    gpu_cluster_id = optional(string)
+    # When a fabric is named and no gpu_cluster_id is, first look for a GPU cluster already present
+    # in the project whose fabric matches and attach to that, creating one only when there is none;
+    # set false to always create (the historical behavior). The lookup is what keeps a project
+    # pinned at compute.gpucluster.count 5/5 from refusing an apply that only wanted RDMA on a new
+    # group. Assumes no concurrent out-of-band creation or deletion of lower-ID clusters on the
+    # same fabric, and excludes clusters already recorded in this root module's Terraform state
+    # (${path.root}/terraform.tfstate or `terraform state pull`); pin gpu_cluster_id explicitly
+    # when sharing a project with concurrent writers, since changing a node group's gpu_cluster
+    # forces replacement. Ignored when gpu_cluster_id names a cluster explicitly.
+    reuse_gpu_cluster = optional(bool, true)
     # Per-group override of var.node_boot_disk_size_gb. GPU nodes that pull inference-engine
     # images need far more than the 100 GiB module default -- one such image is tens of GiB,
     # and it shares the boot disk with the container runtime's layers, so a disk that is big
@@ -190,6 +206,22 @@ variable "gpu_instance_types" {
       cfg.boot_disk_size_gb == null || (cfg.boot_disk_size_gb > 0 && cfg.boot_disk_size_gb == floor(cfg.boot_disk_size_gb))
     ])
     error_message = "boot_disk_size_gb must be a positive whole number when set."
+  }
+
+  validation {
+    condition = alltrue([
+      for cfg in values(var.gpu_instance_types) :
+      cfg.gpu_cluster_id == null || can(regex("^computegpucluster-", cfg.gpu_cluster_id))
+    ])
+    error_message = "gpu_cluster_id must be a Nebius GPU cluster ID, e.g. 'computegpucluster-...'."
+  }
+
+  validation {
+    condition = alltrue([
+      for cfg in values(var.gpu_instance_types) :
+      cfg.gpu_cluster_id == null || cfg.infiniband_fabric == null
+    ])
+    error_message = "gpu_cluster_id and infiniband_fabric are mutually exclusive on one group: the cluster named by its ID already carries a fabric, so naming a fabric as well has no second meaning. Name one or the other."
   }
 
   validation {

@@ -28,9 +28,9 @@ one-page version: the scheduling chain, the life of a sliced-GPU request, and th
 
 Load [the module map](../../../docs/README.md#module-map) and read the entry that owns the task;
 each entry lists its guides, owning specs, code entry points, related modules and skills.
-Capability entries: [Devices Manager](../../../docs/README.md#devices-manager),
-[RDMA Manager](../../../docs/README.md#rdma-manager),
-[Topology Aware](../../../docs/README.md#topology-aware),
+Capability entries: [Heterogeneous Devices](../../../docs/README.md#heterogeneous-devices),
+[RDMA Networking](../../../docs/README.md#rdma-networking),
+[Topology](../../../docs/README.md#topology),
 [KV Cache](../../../docs/README.md#kv-cache),
 [Model Delivery](../../../docs/README.md#model-delivery),
 [Model Deployment](../../../docs/README.md#model-deployment) and

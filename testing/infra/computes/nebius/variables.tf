@@ -49,11 +49,17 @@ variable "instance_type" {
   # module resolves it from the platform against Nebius' live public-image catalogue, which is the only
   # place that mapping is actually true. Pinning it skips the lookup entirely -- see the README for
   # what that opts out of.
-  description = "Nebius instance type. platform/preset are required; image_family is optional and resolved from the live image catalogue when null."
+  description = "Nebius instance type. platform/preset are required; image_family is optional and resolved from the live image catalogue when null; gpu_cluster_id is optional and joins the VM to an already-existing GPU cluster's InfiniBand fabric."
   type = object({
     platform     = string
     preset       = string
     image_family = optional(string)
+    # ID of an already-existing GPU cluster in the project (a "computegpucluster-..." resource)
+    # whose InfiniBand fabric the VM joins at creation -- the thing that puts RDMA devices on it.
+    # The API accepts this only when the VM is created (never afterwards), and only for a preset
+    # whose allow_gpu_clustering is true; that flag is checked at plan on the unpinned path, where
+    # the module asks the platform list anyway. Pinning image_family skips every live check.
+    gpu_cluster_id = optional(string)
   })
   default = {
     platform = "gpu-h100-sxm"
@@ -70,6 +76,11 @@ variable "instance_type" {
   validation {
     condition     = var.instance_type.platform != "" && var.instance_type.preset != ""
     error_message = "instance_type.platform and instance_type.preset must both be set; they are what the image family and the machine shape are resolved from."
+  }
+
+  validation {
+    condition     = var.instance_type.gpu_cluster_id == null || can(regex("^computegpucluster-", var.instance_type.gpu_cluster_id))
+    error_message = "instance_type.gpu_cluster_id must be a Nebius GPU cluster ID, e.g. 'computegpucluster-...'."
   }
 }
 

@@ -1,0 +1,54 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: pd-arm2-pd
+  namespace: gpustack-bench
+spec:
+  model:
+    name: /models
+    artifactRef:
+      name: qwen3-32b
+  engine:
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0
+  router:
+    name: llm-d-router
+  roles:
+    - name: prefill
+      kind: Prefill
+      replicas: 1
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda13.0-vllm0.30.0
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "2"
+      extraArgs:
+        - --tensor-parallel-size
+        - "2"
+        - --max-model-len
+        - "16384"
+        - --max-num-seqs
+        - "64"
+        - --gpu-memory-utilization
+        - "0.90"
+        - --enable-scale-out
+    - name: decode
+      kind: Decode
+      replicas: 2
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda13.0-vllm0.30.0
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "2"
+      extraArgs:
+        - --tensor-parallel-size
+        - "2"
+        - --max-model-len
+        - "16384"
+        - --max-num-seqs
+        - "64"
+        - --gpu-memory-utilization
+        - "0.90"
+        - --enable-scale-out

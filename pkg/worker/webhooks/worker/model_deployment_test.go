@@ -287,6 +287,39 @@ func TestModelDeploymentWebhook_InterfaceCreate(t *testing.T) {
 	_, err = w.ValidateCreate(context.Background(), md)
 	require.ErrorContains(t, err, "spec.roles[0].resources.interface")
 	require.ErrorContains(t, err, "no effective RDMA or EFA")
+
+	serverMulti := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name = "server"
+			r.Kind = workercore.ModelDeploymentRoleKindServer
+			r.ReplicaSize = 2
+			r.Resources = &workercore.ModelDeploymentRoleResources{
+				Accelerator: ptr.To(resource.MustParse("2")),
+				Interface:   ptr.To(resource.MustParse("2")),
+			}
+		}),
+	)
+	serverMulti.Spec.KVCache = nil
+	_, err = w.ValidateCreate(context.Background(), serverMulti)
+	require.NoError(t, err, "multi-member Server role can request RDMA interfaces without a KV transfer leg")
+
+	serverElastic := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name = "server"
+			r.Kind = workercore.ModelDeploymentRoleKindServer
+			r.Replicas = 1
+			r.ReplicaSize = 1
+			r.ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+			r.ExtraArgs = []string{"--tensor-parallel-size", "2"}
+			r.Resources = &workercore.ModelDeploymentRoleResources{
+				Accelerator: ptr.To(resource.MustParse("2")),
+				Interface:   ptr.To(resource.MustParse("2")),
+			}
+		}),
+	)
+	serverElastic.Spec.KVCache = nil
+	_, err = w.ValidateCreate(context.Background(), serverElastic)
+	require.NoError(t, err, "elastic-EP Server role can request RDMA interfaces without a KV transfer leg")
 }
 
 func TestModelDeploymentWebhook_InterfaceUpdateRejectsProtocolChange(t *testing.T) {

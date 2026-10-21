@@ -11,12 +11,12 @@ capacity they receive.
 ## Quick start
 
 [Shared Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md) creates the backend, pool, binding and
-deployment in order. A plain Pod can also use a binding through [KV Cache
+deployment in order. A plain `Pod` can also use a binding through [KV Cache
 Injection](injection.md).
 
 ## Cache configuration
 
-Read [KV Cache Backend](backend.md) for the store and [KV Cache Pool](pool.md)
+Read [KV Cache Backend](backend.md) for the store and [KV Cache Pools and Bindings](pool.md)
 for grants and quotas. The [leader](leader.md) and [local disk
 tier](local-disk-tier.md) have separate operating details.
 [Disk-Heavy Nodes](disk-heavy-nodes.md) covers cache placement on storage nodes.

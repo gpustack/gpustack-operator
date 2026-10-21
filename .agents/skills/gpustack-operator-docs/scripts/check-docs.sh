@@ -14,12 +14,14 @@
 #   6. a page longer than the line cap;
 #   7. a page with more "##" sections than the cap;
 #   8. an index label in docs/README.md that differs from the page's own H1;
-#   9. a docs path named in a skill that no longer exists.
+#   9. a docs path named in a skill that no longer exists;
+#  10. an authored H2-H6 heading over four words or 32 visible characters, or a lowercase first
+#      word after a numbered heading prefix.
 #
 # Usage: bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh [--report] [repo-root]
 #
 # --report downgrades rules 5-8 to warnings and prints the per-page metrics, so one page can be
-# measured while the rest of the corpus is still unrefined. Rules 1-4 are fatal in both modes.
+# measured while the rest of the corpus is still unrefined. Rules 1-4 and 10 are fatal in both modes.
 set -euo pipefail
 
 REPORT=0
@@ -52,6 +54,12 @@ shape_err() {
 
 # Pages whose structure is under contract.
 PAGES=$(find docs -name '*.md' | sort)
+HEADING_PAGES=$( {
+  find docs site/content -name '*.md' -print
+  printf '%s\n' README.md ADOPTERS.md \
+    csrc/amd/rocm-slicing-shim/README.md \
+    csrc/thead/ppu-slicing-shim/README.md
+} | sort -u )
 # Everything whose links are checked. AGENTS.md is included because it names the build, lint and
 # test entry points, which can go stale. Its bare backtick paths are outside this link check.
 #
@@ -75,6 +83,8 @@ PARA_LINE_CAP=5     # source lines in one prose paragraph
 PARA_CHAR_CAP=500   # characters of rendered text in one prose paragraph
 PAGE_LINE_CAP=1000  # lines in one page — a backstop against a page nobody split, not a budget
 H2_CAP=10           # "##" sections in one page
+HEADING_WORD_CAP=4  # visible words after a numbered prefix, if any
+HEADING_CHAR_CAP=32 # visible characters after a numbered prefix, if any
 
 # Cap exemptions, declared here rather than escaped inline. Each is a space-separated glob list.
 # A recording and a runbook are as long as the hardware makes them.
@@ -255,6 +265,53 @@ long_paragraphs_of() {
   ' "$1"
 }
 
+# H2-H6 headings in authored reader Markdown, as actionable style findings. The numbered prefix
+# is stable navigation structure, so only its topic text counts toward the length caps. Word counts
+# split hyphenated terms. Numbered headings use an initial capital after the colon, except for
+# official names whose canonical spelling begins with a lowercase letter.
+heading_issues_of() {
+  awk -v wcap="$HEADING_WORD_CAP" -v ccap="$HEADING_CHAR_CAP" "$AWK_LIB"'
+    function trim(t) {
+      sub(/^[[:space:]]+/, "", t)
+      sub(/[[:space:]]+$/, "", t)
+      return t
+    }
+    function word_count(t,   n, rest) {
+      n = 0
+      rest = t
+      while (match(rest, /[[:alnum:]]+/)) {
+        n++
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+      return n
+    }
+    { fl = fence_line($0)
+      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
+    fence { next }
+    /^#{2,6} / {
+      raw = $0
+      sub(/^#+ +/, "", raw)
+      sub(/[[:space:]]+#+[[:space:]]*$/, "", raw)
+      visible = strip_links(raw)
+      gsub(/`|\*|~/, "", visible)
+      sub(/^__/, "", visible); sub(/__$/, "", visible)
+      visible = trim(visible)
+      topic = visible
+      if (sub(/^(Step|Stage|Gate|Rule|Suite|State|Path)[[:space:]]+[[:alnum:].-]+:[[:space:]]*/, "", topic)) {
+        topic = trim(topic)
+        first = topic
+        sub(/[[:space:]].*$/, "", first)
+        if (topic ~ /^[[:lower:]]/ && first !~ /^(vLLM|llm-d-router|eBPF)$/)
+          printf "%d\tcase\t\t%s\n", FNR, visible
+      }
+      words = word_count(topic)
+      chars = length(topic)
+      if (words > wcap || chars > ccap)
+        printf "%d\tlength\t%d words / %d characters\t%s\n", FNR, words, chars, visible
+    }
+  ' "$1"
+}
+
 # The "## All pages" rows of the index, as "path<TAB>label".
 index_labels() {
   awk '
@@ -390,6 +447,18 @@ echo "==> skill document paths"
 while IFS= read -r path; do
   [ -f "$path" ] || err "$path: named in a skill but no longer exists"
 done < <(grep -RhoE 'docs/[[:alnum:]_./-]+\.md' .agents/skills --include='*.md' | sort -u)
+
+# --- 10. authored heading limits and numbered heading case -----------------
+echo "==> heading limits and numbered heading case"
+for f in $HEADING_PAGES; do
+  [ -f "$f" ] || continue
+  while IFS="$(printf '\t')" read -r at kind detail title; do
+    case "$kind" in
+      case) err "$f:$at: capitalize the first word after the numbered prefix: '$title'" ;;
+      length) err "$f:$at: heading topic is $detail; cap is ${HEADING_WORD_CAP} words / ${HEADING_CHAR_CAP} characters: '$title'" ;;
+    esac
+  done < <(heading_issues_of "$f")
+done
 
 if [ "$REPORT" -eq 1 ]; then
   echo

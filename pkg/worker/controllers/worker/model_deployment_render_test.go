@@ -995,6 +995,7 @@ func TestRenderModelDeploymentPod_TCPPinYieldsToTheRole(t *testing.T) {
 func TestRenderModelDeploymentPod_DefaultedArgsYieldToTheRole(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
+		engine    string
 		kind      workercore.ModelDeploymentRoleKind
 		store     bool
 		extraArgs []string
@@ -1028,15 +1029,40 @@ func TestRenderModelDeploymentPod_DefaultedArgsYieldToTheRole(t *testing.T) {
 			store: true, extraArgs: []string{"--enable-hierarchical-cache"}, flag: "--enable-hierarchical-cache",
 			want: []string{"--enable-hierarchical-cache"},
 		},
+		{
+			name: "sglang over tcp gets defaulted page size", kind: workercore.ModelDeploymentRoleKindPrefill,
+			store: true, flag: "--page-size",
+			want: []string{"--page-size", "64"},
+		},
+		{
+			name: "sglang role's own page size overrides the default", kind: workercore.ModelDeploymentRoleKindPrefill,
+			store: true, extraArgs: []string{"--page-size", "16"}, flag: "--page-size",
+			want: []string{"--page-size", "16"},
+		},
+		{
+			name: "vllm over tcp gets defaulted block size", engine: workercore.ModelDeploymentEngineVLLM,
+			kind: workercore.ModelDeploymentRoleKindPrefill, store: true, flag: "--block-size",
+			want: []string{"--block-size", "128"},
+		},
+		{
+			name: "vllm role's own block size overrides the default", engine: workercore.ModelDeploymentEngineVLLM,
+			kind: workercore.ModelDeploymentRoleKindPrefill, store: true,
+			extraArgs: []string{"--block-size", "64"}, flag: "--block-size",
+			want: []string{"--block-size", "64"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			engine := tc.engine
+			if engine == "" {
+				engine = workercore.ModelDeploymentEngineSGLang
+			}
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Engine.Name = engine
 				md.Spec.Roles[0].Kind = tc.kind
 				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
 			})
 			in := ModelDeploymentConnectorInput{
-				Engine: workercore.ModelDeploymentEngineSGLang, Kind: tc.kind,
+				Engine: engine, Kind: tc.kind,
 				Disaggregated: true, KVTransfer: true,
 			}
 			if tc.store {
@@ -1363,6 +1389,8 @@ func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
 		engine       string
 		manufacturer string
 		command      []string
+		serverSize   int32
+		elasticEP    *workercore.ModelDeploymentRoleElasticEP
 		want         string
 	}{
 		{name: "native vLLM", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, want: "efa"},
@@ -1370,12 +1398,21 @@ func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
 		{name: "unobserved manufacturer cannot select device", engine: workercore.ModelDeploymentEngineVLLM},
 		{name: "SGLang ignores declaration", engine: workercore.ModelDeploymentEngineSGLang, manufacturer: nodefeature.ManufacturerNVIDIA},
 		{name: "user command owns transfer", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, command: []string{"custom"}},
+		{name: "multi-member Server role selects RDMA", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, serverSize: 2, want: "rdma"},
+		{name: "elastic EP Server role selects RDMA", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, serverSize: 1, elasticEP: &workercore.ModelDeploymentRoleElasticEP{Width: 2}, want: "rdma"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Engine.Name = tc.engine
 				md.Spec.KVCache = nil
+				if tc.serverSize > 0 {
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+					md.Spec.Roles[0].ReplicaSize = tc.serverSize
+					md.Spec.Roles[0].ElasticEP = tc.elasticEP
+					md.Spec.Roles[0].Command = tc.command
+					return
+				}
 				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
@@ -2720,7 +2757,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
 		"a sole server role": "6e2178d73a9d589fa70dfdc3cecd33651946f0838d15b7357d31544079aac765",
-		"a sole server role with a synthesized cache connector":                              "57b7772f67dc741e5e12b7ac5f4abc3c5904625e8e4e7e272192799dbdf8eb06",
+		"a sole server role with a synthesized cache connector":                              "bd54141fa2e3f3bf6344b22f6edcd301933c5b18c8aa29a9a671eb9b6a93fcc9",
 		"a take-over role carrying a connector it must be given no part of":                  "951e69e8ca2b9eaf7be4e2d413296a86f6948f91f5cd2811a8ea9b39fb495177",
 		"a direct decoder with a native routing sidecar":                                     "f2ca7ac882a09b402f2fb666e5396e9f9925966426fac2af43a86ad1827804a2",
 		"a direct decoder with a classic routing sidecar":                                    "1e4511f8b0dfa320b8a715995c136f9545c140d5f2ebb056e8d83d0638807698",

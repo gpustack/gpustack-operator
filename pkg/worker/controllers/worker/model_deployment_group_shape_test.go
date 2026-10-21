@@ -15,6 +15,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
 
@@ -476,6 +477,7 @@ func TestActualElasticRenderCarriesExecutionFacts(t *testing.T) {
 	md.Spec.Roles[0].Replicas = 1
 	md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
 		Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+		Interface:   resource.NewQuantity(2, resource.DecimalSI),
 	}
 	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
 	md.ResourceVersion = "1"
@@ -521,6 +523,8 @@ func TestActualElasticRenderCarriesExecutionFacts(t *testing.T) {
 			"member %s is an operator-built replica and must not read as a takeover", member.Name)
 		assert.Equal(t, modelDeploymentReplicaShapeComplete,
 			modelDeploymentDeployedReplicaShape(view).State, "member %s", member.Name)
+		rdmaLimit := member.Spec.Containers[0].Resources.Limits[nodefeature.GetRDMAResourceName(workercore.DeviceAllocationModeExclusive)]
+		assert.Equal(t, int64(2), rdmaLimit.Value(), "member %s should carry the RDMA interface limit", member.Name)
 	}
 	assert.GreaterOrEqual(t, workers, 2, "the elastic render produced a master and at least one Ray worker")
 

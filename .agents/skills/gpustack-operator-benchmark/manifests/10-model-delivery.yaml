@@ -1,0 +1,165 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gpustack-bench
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelArtifact
+metadata:
+  name: qwen2-5-vl-7b-instruct
+  namespace: gpustack-bench
+spec:
+  source:
+    huggingFace:
+      repository: Qwen/Qwen2.5-VL-7B-Instruct
+      revision: cc594898137f460bfe9f0759e9844b3ce807cfb5
+  allowPatterns:
+    - model-00001-of-00005.safetensors
+    - model-00002-of-00005.safetensors
+    - model-00003-of-00005.safetensors
+    - model-00004-of-00005.safetensors
+    - model-00005-of-00005.safetensors
+    - chat_template.json
+    - config.json
+    - generation_config.json
+    - merges.txt
+    - model.safetensors.index.json
+    - preprocessor_config.json
+    - tokenizer.json
+    - tokenizer_config.json
+    - vocab.json
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelArtifact
+metadata:
+  name: qwen3-32b
+  namespace: gpustack-bench
+spec:
+  source:
+    huggingFace:
+      repository: Qwen/Qwen3-32B
+      revision: 9216db5781bf21249d130ec9da846c4624c16137
+  allowPatterns:
+    - model-00001-of-00017.safetensors
+    - model-00002-of-00017.safetensors
+    - model-00003-of-00017.safetensors
+    - model-00004-of-00017.safetensors
+    - model-00005-of-00017.safetensors
+    - model-00006-of-00017.safetensors
+    - model-00007-of-00017.safetensors
+    - model-00008-of-00017.safetensors
+    - model-00009-of-00017.safetensors
+    - model-00010-of-00017.safetensors
+    - model-00011-of-00017.safetensors
+    - model-00012-of-00017.safetensors
+    - model-00013-of-00017.safetensors
+    - model-00014-of-00017.safetensors
+    - model-00015-of-00017.safetensors
+    - model-00016-of-00017.safetensors
+    - model-00017-of-00017.safetensors
+    - config.json
+    - generation_config.json
+    - merges.txt
+    - model.safetensors.index.json
+    - tokenizer.json
+    - tokenizer_config.json
+    - vocab.json
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelArtifact
+metadata:
+  name: deepseek-v2-lite-chat
+  namespace: gpustack-bench
+spec:
+  source:
+    huggingFace:
+      repository: deepseek-ai/DeepSeek-V2-Lite-Chat
+      revision: 85864749cd611b4353ce1decdb286193298f64c7
+  allowPatterns:
+    - model-00001-of-000004.safetensors
+    - model-00002-of-000004.safetensors
+    - model-00003-of-000004.safetensors
+    - model-00004-of-000004.safetensors
+    - config.json
+    - configuration_deepseek.py
+    - generation_config.json
+    - model.safetensors.index.json
+    - modeling_deepseek.py
+    - tokenization_deepseek_fast.py
+    - tokenizer.json
+    - tokenizer_config.json
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelStore
+metadata:
+  name: bench-models
+spec:
+  nodeSelector:
+    matchLabels:
+      feature.gpustack.ai/acceleratable: "true"
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelStoreBinding
+metadata:
+  name: bench-models
+  namespace: gpustack-bench
+spec:
+  storeRefs:
+    - name: bench-models
+  quota:
+    bytes: 220Gi
+  allowPinned: true
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelPrefetch
+metadata:
+  name: qwen2-5-vl-7b-instruct
+  namespace: gpustack-bench
+spec:
+  artifactRef:
+    name: qwen2-5-vl-7b-instruct
+  bindingRef:
+    name: bench-models
+  placement:
+    nodeSelector:
+      matchLabels:
+        kubernetes.io/hostname: computeinstance-e00v6dnves0rw6f2j2
+  minReady: 1
+  retention:
+    pinned: true
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelPrefetch
+metadata:
+  name: qwen3-32b
+  namespace: gpustack-bench
+spec:
+  artifactRef:
+    name: qwen3-32b
+  bindingRef:
+    name: bench-models
+  placement:
+    nodeSelector:
+      matchLabels:
+        kubernetes.io/hostname: computeinstance-e00v6dnves0rw6f2j2
+  minReady: 1
+  retention:
+    pinned: true
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelPrefetch
+metadata:
+  name: deepseek-v2-lite-chat
+  namespace: gpustack-bench
+spec:
+  artifactRef:
+    name: deepseek-v2-lite-chat
+  bindingRef:
+    name: bench-models
+  placement:
+    nodeSelector:
+      matchLabels:
+        kubernetes.io/hostname: computeinstance-e00v6dnves0rw6f2j2
+  minReady: 1
+  retention:
+    pinned: true

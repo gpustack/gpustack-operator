@@ -1,0 +1,62 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: epd-arm3-epd
+  namespace: gpustack-bench
+spec:
+  model:
+    name: /models
+    artifactRef:
+      name: qwen2-5-vl-7b-instruct
+  engine:
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0
+  router:
+    name: llm-d-router
+  roles:
+    - name: encode
+      kind: Encode
+      replicas: 1
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda13.0-vllm0.30.0
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "1"
+      extraArgs:
+        - --max-model-len
+        - "16384"
+        - --gpu-memory-utilization
+        - "0.85"
+    - name: prefill
+      kind: Prefill
+      replicas: 1
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda13.0-vllm0.30.0
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "1"
+      extraArgs:
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "16384"
+        - --gpu-memory-utilization
+        - "0.85"
+    - name: decode
+      kind: Decode
+      replicas: 1
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda13.0-vllm0.30.0
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "1"
+      extraArgs:
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "16384"
+        - --gpu-memory-utilization
+        - "0.85"

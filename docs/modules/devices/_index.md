@@ -14,18 +14,18 @@ runtime isolation method depend on the manufacturer.
 physically partitioned requests. [Device Discovery](discovery.md) explains
 how the per-node `Devices` record connects discovery to allocation.
 
-Follow [Scheduling Walkthrough](../../walkthroughs/devices/scheduling.md) for
+Follow [Heterogeneous Devices Walkthrough](../../walkthroughs/devices/scheduling.md) for
 end-to-end device allocation and Kueue queuing.
 
 ## Device operations
 
-Check a node before installation with [Preflight Operations](preflight.md). If you
+Check a node before installation with [Preflight Checks](preflight.md). If you
 use hardware partitioning, follow the runbook for [NVIDIA](nvidia-mig.md),
 [T-Head](thead-mig.md) or [Hygon](hygon-mig.md).
 
 ---
 
-**See also** — [Accelerated Instances](../instances/_index.md) (a container workspace using an
+**See also** — [GPU Instances](../instances/_index.md) (a container workspace using an
 accelerator) · [Architecture](../../getting-started/architecture.md) (the scheduling chain)
 
 **Next** → [Accelerator Requests](requests.md) — choose a request shape.

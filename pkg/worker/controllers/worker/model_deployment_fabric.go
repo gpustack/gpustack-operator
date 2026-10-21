@@ -21,15 +21,25 @@ func modelDeploymentRequestsInterfaces(md *workercore.ModelDeployment) bool {
 	return false
 }
 
-// ModelDeploymentDirectInterfaceProtocol returns the protocol a managed direct-transfer leg
-// actually renders. A role with a user-owned command, an absent pair, or an engine that ignores
-// the declared protocol cannot use that declaration to select a device grant.
+// ModelDeploymentDirectInterfaceProtocol returns the protocol a managed direct-transfer or
+// multi-member Server collective leg actually renders. A role with a user-owned command, an absent
+// pair or collective, or an engine that ignores the declared protocol cannot use that declaration to
+// select a device grant.
 func ModelDeploymentDirectInterfaceProtocol(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) string {
-	if len(role.Command) > 0 || !modelDeploymentUsesKVTransfer(md, role, manufacturer) ||
+	if len(role.Command) > 0 ||
 		md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM ||
 		manufacturer == "" || manufacturer == nodefeature.ManufacturerAscend {
+		return ""
+	}
+	// Managed multi-Pod Server collective legs (size > 1 or elasticEp) select the operator's
+	// RDMA device key ("rdma"); spec.kvTransfer applies only to routed prefill/decode pairs.
+	if ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindServer &&
+		(modelDeploymentRoleSize(role) > 1 || role.ElasticEP != nil) {
+		return "rdma"
+	}
+	if !modelDeploymentUsesKVTransfer(md, role, manufacturer) {
 		return ""
 	}
 	if md.Spec.KVTransfer != nil && md.Spec.KVTransfer.Protocol != "" {

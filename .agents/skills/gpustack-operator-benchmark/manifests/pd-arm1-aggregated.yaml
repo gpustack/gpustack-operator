@@ -1,0 +1,35 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: pd-arm1-aggregated
+  namespace: gpustack-bench
+spec:
+  model:
+    name: /models
+    artifactRef:
+      name: qwen3-32b
+  engine:
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0
+  router:
+    name: llm-d-router
+  roles:
+    - name: server
+      kind: Server
+      replicas: 3
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda13.0-vllm0.30.0
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "2"
+      extraArgs:
+        - --tensor-parallel-size
+        - "2"
+        - --max-model-len
+        - "16384"
+        - --max-num-seqs
+        - "64"
+        - --gpu-memory-utilization
+        - "0.90"
+        - --enable-scale-out

@@ -21,18 +21,19 @@ function docs_lint() {
   local scripts="${ROOT_DIR}/.claude/skills/gpustack-operator-docs/scripts"
   local failed=()
 
-  # The two self-tests run FIRST and are part of the gate. Each builds a throwaway tree, breaks one
+  # The repository self-tests run FIRST and are part of the gate. Each builds a throwaway tree, breaks one
   # thing, and asserts the checker names it — because a checker that has only ever been seen to
   # pass cannot be told apart from one that cannot fail, which is the defect half of these rules
   # exist to catch.
   #
   # Then the three contracts, all of them, before the verdict: links and anchors, each page's
-  # Contents/header/footer, the docs/README.md index and the size caps (check-docs); the spec
+  # Contents/header/footer, the docs/README.md index and the size caps (check-docs); the heading
+  # limit and numbered-heading case self-test; the spec
   # Status word and every `go test -run` that names a test (check-specs); and cross-references
   # (check-crossrefs). Every one is bash and awk over the corpus — no cluster, no golangci-lint
   # pass — so running all five costs a few seconds.
   #
-  # The five run concurrently: each is self-contained (its own throwaway tree, its own reads of
+  # The checks run concurrently: each is self-contained (its own throwaway tree, its own reads of
   # the corpus, nothing written in common), and together they are the whole wall of this target —
   # measured 14 s serial, 7 s concurrent, the longest single check being check-docs at 6 s.
   # Output is buffered per check and replayed in list order, so a failed run prints the same
@@ -44,7 +45,7 @@ function docs_lint() {
   docs_tmp="$(mktemp -d)"
   local check
   local pids=() names=()
-  for check in check-specs-selftest check-crossrefs-selftest check-docs check-specs check-crossrefs; do
+  for check in check-specs-selftest check-crossrefs-selftest check-docs-selftest check-docs check-specs check-crossrefs; do
     bash "${scripts}/${check}.sh" "${ROOT_DIR}" >"${docs_tmp}/${check}.out" 2>&1 &
     pids+=("$!")
     names+=("${check}")

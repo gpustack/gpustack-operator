@@ -1835,6 +1835,7 @@ func modelDeploymentExplicitSpecHash(
 		canonicalRole.ExtraArgs = nil
 	}
 	canonicalRole.Replicas = 0
+	canonicalRole.ElasticEP = nil
 
 	siblings := make([]modelDeploymentRoleSiblingHashInput, 0, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {

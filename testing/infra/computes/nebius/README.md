@@ -51,7 +51,7 @@ VM only accepts key-based auth via `ssh_public_key`.
 | `project_id` | Nebius project ID (required); its region fixes VM placement & platform availability | *(required)* |
 | `name_prefix` | Prefix for the VM and its network/subnet/security-group names (a random suffix is appended) | `gpustack-nebius` |
 | `ssh_public_key` | Path to the SSH public key injected into the VM via cloud-init | `~/.ssh/id_ed25519.pub` |
-| `instance_type` | `platform` and `preset` are required; `image_family` is optional and resolved from the live catalogue when omitted | `{ platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }` |
+| `instance_type` | `platform` and `preset` are required; `image_family` is optional and resolved from the live catalogue when omitted; `gpu_cluster_id` is optional and joins the VM to an already-existing GPU cluster's InfiniBand fabric | `{ platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }` |
 | `boot_disk_type` | Boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `boot_disk_size_gb` | Boot disk size, in GiB | `100` |
 
@@ -112,8 +112,31 @@ terraform apply -var='project_id=project-...' \
 ```
 
 Pinning skips the lookup **entirely** -- no `nebius` CLI and no `jq` are needed
-on plan, apply or destroy. It also skips the platform/preset check and the
-boot-disk minimum check, since both come from the same call.
+on plan, apply or destroy. It also skips the platform/preset check, the
+`allow_gpu_clustering` check that guards `gpu_cluster_id`, and the boot-disk
+minimum check, since all of them come from the same call.
+
+### Joining an InfiniBand GPU cluster
+
+```bash
+terraform apply -var='project_id=project-...' \
+  -var='instance_type={platform="gpu-h100-sxm",preset="8gpu-128vcpu-1600gb",gpu_cluster_id="computegpucluster-..."}'
+```
+
+A VM has no RDMA devices unless it joins a GPU cluster's InfiniBand fabric, and
+it can join only when it is created -- adding `gpu_cluster_id` afterwards
+replaces the VM. Find the ID with
+`nebius compute gpu-cluster list --parent-id <project-id> --format json`.
+
+The module checks at **plan** that the preset can join at all
+(`allow_gpu_clustering` is a property of the preset, not the platform -- on the
+same accelerator the whole-node preset permits it and the single-card preset
+does not) and fails naming the presets of that platform which do; the check
+rides the same platform-list call that resolves the image family, so pinning
+`image_family` skips it. Reusing an existing cluster is the point: a project at
+its `compute.gpucluster.count` limit cannot create a new one, and this module
+never does -- it only attaches to the cluster the ID names. To create one for a
+Kubernetes node group instead, see `clusters/nebius`.
 
 Two consequences worth knowing before you pin:
 
