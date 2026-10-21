@@ -44,11 +44,11 @@ itself also deletes the `Service`.
 ## Network isolation
 
 The operator isolates `Instance`s of different tenants at the namespace boundary. The behavior is
-opt-in: with the `instance-tenant-isolation-pod-cidrs` Setting blank — the default — no policy is
+opt-in: with the `instance-isolation-pod-cidrs` Setting blank — the default — no policy is
 rendered and `Instance` networking stays untouched.
 
 When the Setting names the cluster's pod CIDRs, the operator renders one `NetworkPolicy` named
-`gpustack-instance-tenant-isolation` in every namespace that holds an `Instance`, selecting the
+`gpustack-instance-isolation` in every namespace that holds an `Instance`, selecting the
 instance `Pod`s by their `resource.gpustack.ai/type: instances` label.
 
 The policy allows traffic to and from `Pod`s of the same namespace, and to and from anywhere
@@ -63,7 +63,7 @@ IPAM allocates routinely disagree — so the Setting is the one source. Find the
 `kubectl get nodes -o jsonpath='{.items[*].spec.podCIDRs}'` where the nodes carve the pod
 addresses.
 
-The chart carries the same value as `worker.instanceTenantIsolationPodCIDRs`; the Setting can also
+The chart carries the same value as `worker.instanceIsolationPodCIDRs`; the Setting can also
 be edited at runtime through the Settings API.
 
 The object belongs to the namespace rather than to one `Instance`: deleting the last `Instance` of
