@@ -1173,7 +1173,7 @@ func TestConvertPodFromInstance_QueueLabelIsThePublishedEntrance(t *testing.T) {
 		"the fixture spells the two differently so this test can discriminate")
 }
 
-func TestConvertPodFromInstance_InstanceComponentLabel(t *testing.T) {
+func TestConvertPodFromInstance_InstanceResourceTypeLabel(t *testing.T) {
 	inst := &workercore.Instance{
 		ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
 		Spec: workercore.InstanceSpec{
@@ -1201,7 +1201,7 @@ func TestConvertPodFromInstance_InstanceComponentLabel(t *testing.T) {
 	pod := r.convertPodFromInstance(context.Background(), inst, it, nil)
 
 	require.NotNil(t, pod)
-	assert.Equal(t, deviceplugin.InstanceComponent, pod.Labels[deviceplugin.ComponentLabelKey],
+	assert.Equal(t, deviceplugin.InstanceResourceType, pod.Labels[systemmeta.ResourceTypeLabel],
 		"the tenant-isolation NetworkPolicy selects Instance Pods by this stable label")
 }
 
@@ -2047,26 +2047,23 @@ func TestInstanceReconciler_RefusesAServiceItDoesNotOwn(t *testing.T) {
 }
 
 // TestInstanceReconciler_EnsuresTenantNetworkPolicy pins the isolation contract every Instance
-// namespace gets: Instance Pods may be reached from their own namespace and from outside the
-// cluster (the NodePort path), never from another namespace's Pods — and may dial out under the
-// same rule, so a shell inside one Instance cannot scan or reach a neighbor tenant's.
+// namespace gets once the administrator opts in: Instance Pods may be reached from their own
+// namespace and from outside the cluster (the NodePort path), never from another namespace's
+// Pods — and may dial out under the same rule, so a shell inside one Instance cannot scan or
+// reach a neighbor tenant's.
 //
 // The policy is one object per namespace rather than one per Instance: it selects the stable
-// component label every Instance Pod carries, so it outlives any single Instance and never
-// churns on a stop/start. The pod CIDRs in the ipBlock exceptions are learned from the Nodes,
-// which is the only place the cluster's pod address space is written down.
+// resource-type label every Instance Pod carries, so it outlives any single Instance and never
+// churns on a stop/start. The pod CIDRs in the ipBlock exceptions come from the administrator's
+// Setting — the one source that can see what a CNI's IPAM really allocates — and the render
+// carries exactly what was configured, sorted and deduplicated.
 func TestInstanceReconciler_EnsuresTenantNetworkPolicy(t *testing.T) {
 	ctx := context.Background()
 	inst, instType, cq := newInstanceServiceFixture()
-	nodeA := &core.Node{
-		ObjectMeta: meta.ObjectMeta{Name: "node-a"},
-		Spec:       core.NodeSpec{PodCIDRs: []string{"10.42.1.0/24"}},
-	}
-	nodeB := &core.Node{
-		ObjectMeta: meta.ObjectMeta{Name: "node-b"},
-		Spec:       core.NodeSpec{PodCIDRs: []string{"10.42.0.0/24", "fd00:10:42:2::/64"}},
-	}
-	cli := buildInstanceServiceClient(inst, instType, cq, nodeA, nodeB)
+	settingtest.MergeDelegatedSettings(t, map[string]string{
+		"instance-tenant-isolation-pod-cidrs": "10.42.1.0/24,10.42.0.0/24",
+	})
+	cli := buildInstanceServiceClient(inst, instType, cq)
 
 	reconcileInstanceUntilSettled(t, cli)
 
@@ -2077,15 +2074,14 @@ func TestInstanceReconciler_EnsuresTenantNetworkPolicy(t *testing.T) {
 		"reconciling an Instance ensures the tenant-isolation policy in its namespace")
 
 	assert.Equal(t, map[string]string{
-		deviceplugin.ComponentLabelKey: deviceplugin.InstanceComponent,
+		systemmeta.ResourceTypeLabel: deviceplugin.InstanceResourceType,
 	}, np.Spec.PodSelector.MatchLabels, "the policy selects Instance Pods by their stable label")
 	assert.ElementsMatch(t,
 		[]networking.PolicyType{networking.PolicyTypeIngress, networking.PolicyTypeEgress},
 		np.Spec.PolicyTypes, "isolation holds in both directions")
 
-	// The pod CIDR exceptions are learned from the Nodes, sorted, deduplicated, and IPv4-only:
-	// an ipBlock's except list must stay within its cidr, so an IPv6 node podCIDR cannot ride
-	// the 0.0.0.0/0 rule.
+	// The Setting's value lands sorted and deduplicated, so the render is byte-stable across
+	// reconciles whatever order the entries were typed in.
 	wantExcept := []string{"10.42.0.0/24", "10.42.1.0/24"}
 
 	require.Len(t, np.Spec.Ingress, 1, "one ingress rule carries both allowed peer kinds")
@@ -2125,4 +2121,118 @@ func TestInstanceReconciler_EnsuresTenantNetworkPolicy(t *testing.T) {
 	}, again))
 	assert.Equal(t, firstRV, again.ResourceVersion,
 		"an unchanged desired state must not rewrite the policy")
+}
+
+// TestInstanceReconciler_TenantNetworkPolicyFollowsTheSetting pins the opt-in contract around the
+// isolation policy. A blank Setting renders nothing and, going the other way, collects only the
+// object this operator noted as its own — the fixed name is a public contract, so a same-named
+// policy nobody here rendered belongs to whoever wrote it, and a Setting edit never deletes their
+// networking. A configured Setting pulls a hand-touched policy back to the rendered shape.
+func TestInstanceReconciler_TenantNetworkPolicyFollowsTheSetting(t *testing.T) {
+	ownedPolicy := func() *networking.NetworkPolicy {
+		return &networking.NetworkPolicy{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: "default",
+				Name:      instanceTenantNetworkPolicyName,
+				Labels: map[string]string{
+					systemmeta.ResourceTypeLabel: deviceplugin.InstanceResourceType,
+				},
+			},
+			Spec: convertTenantNetworkPolicy([]string{"10.42.0.0/16"}).Spec,
+		}
+	}
+
+	cases := []struct {
+		name        string
+		setting     string
+		seed        *networking.NetworkPolicy
+		wantPresent bool
+		want        func(t *testing.T, np *networking.NetworkPolicy)
+	}{
+		{
+			name:    "blank setting, nothing seeded — nothing appears",
+			setting: "",
+		},
+		{
+			name:        "configured setting renders the policy with the configured CIDRs",
+			setting:     "10.42.0.0/16",
+			wantPresent: true,
+			want: func(t *testing.T, np *networking.NetworkPolicy) {
+				assert.Equal(t, convertTenantNetworkPolicy([]string{"10.42.0.0/16"}).Spec, np.Spec,
+					"the render carries exactly what the Setting configured")
+			},
+		},
+		{
+			name:    "blank setting collects the policy this operator rendered",
+			setting: "",
+			seed:    ownedPolicy(),
+		},
+		{
+			name:    "blank setting leaves a same-named stranger exactly as found",
+			setting: "",
+			seed: &networking.NetworkPolicy{
+				ObjectMeta: meta.ObjectMeta{
+					Namespace: "default",
+					Name:      instanceTenantNetworkPolicyName,
+				},
+				Spec: networking.NetworkPolicySpec{
+					PodSelector: meta.LabelSelector{
+						MatchLabels: map[string]string{"hand-written": "true"},
+					},
+					PolicyTypes: []networking.PolicyType{networking.PolicyTypeIngress},
+				},
+			},
+			wantPresent: true,
+			want: func(t *testing.T, np *networking.NetworkPolicy) {
+				assert.Equal(t, map[string]string{"hand-written": "true"},
+					np.Spec.PodSelector.MatchLabels,
+					"a policy this operator never rendered is never rewritten either")
+				assert.Equal(t, []networking.PolicyType{networking.PolicyTypeIngress},
+					np.Spec.PolicyTypes, "the stranger's own shape survives untouched")
+			},
+		},
+		{
+			name:    "a hand-widened policy converges back to the configured render",
+			setting: "10.42.0.0/16",
+			seed: func() *networking.NetworkPolicy {
+				np := ownedPolicy()
+				np.Spec.Ingress[0].From[1].IPBlock.Except = nil
+				return np
+			}(),
+			wantPresent: true,
+			want: func(t *testing.T, np *networking.NetworkPolicy) {
+				assert.Equal(t, []string{"10.42.0.0/16"},
+					np.Spec.Ingress[0].From[1].IPBlock.Except,
+					"the configured Setting pulls a drifted policy back")
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			settingtest.MergeDelegatedSettings(t, map[string]string{
+				"instance-tenant-isolation-pod-cidrs": c.setting,
+			})
+			inst, instType, cq := newInstanceServiceFixture()
+			objs := []ctrlcli.Object{inst, instType, cq}
+			if c.seed != nil {
+				objs = append(objs, c.seed)
+			}
+			cli := buildInstanceServiceClient(objs...)
+
+			reconcileInstanceUntilSettled(t, cli)
+
+			np := new(networking.NetworkPolicy)
+			err := cli.Get(context.Background(), ctrlcli.ObjectKey{
+				Namespace: "default", Name: instanceTenantNetworkPolicyName,
+			}, np)
+			if !c.wantPresent {
+				require.True(t, kerrors.IsNotFound(err),
+					"an opted-out namespace must not keep a tenant-isolation policy")
+				return
+			}
+			require.NoError(t, err)
+			c.want(t, np)
+		})
+	}
 }

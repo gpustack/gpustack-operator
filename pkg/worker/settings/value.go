@@ -3,6 +3,7 @@ package settings
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -306,6 +307,30 @@ var (
 		setting.AllowBool(),
 	)
 
+	// InstanceTenantIsolationPodCIDRs carries the cluster's pod address space the Instance
+	// tenant-isolation NetworkPolicy carves out of its external allow. The policy is opt-in:
+	// a blank value (the default) renders no policy at all, so turning it on is the
+	// administrator's decision and no cluster ever has its Instance networking tightened
+	// under it silently. The values cannot be learned reliably for every CNI — a node's
+	// podCIDR and what a CNI's own IPAM actually allocates routinely disagree — so the one
+	// source is whoever can see the real addresses. Every entry must be an IPv4 CIDR an
+	// ipBlock except list can carry; admission refuses anything else rather than letting a
+	// dropped entry widen the allow back open.
+	InstanceTenantIsolationPodCIDRs = settings.NewEditable(
+		"instance-tenant-isolation-pod-cidrs",
+		"Indicates the comma-separated IPv4 pod CIDRs the Instance tenant-isolation "+
+			"NetworkPolicy carves out of its 0.0.0.0/0 external rule: Instance Pods stay "+
+			"reachable from their own namespace and from outside the cluster, and never from "+
+			"another namespace's Pods. Needs a CNI that enforces NetworkPolicy; Calico is the "+
+			"documented one. Find the values with `kubectl get ippools.crd.projectcalico.org` "+
+			"on a Calico-IPAM cluster, or `kubectl get nodes "+
+			"-o jsonpath='{.items[*].spec.podCIDRs}'` where the nodes carve the pod addresses. "+
+			"Blank (default) renders no policy: cross-namespace isolation is off.",
+		setting.InitializeFromEnv(),
+		setting.AllowBlank(),
+		admitIPv4CIDRList,
+	)
+
 	// InstanceType.
 
 	// NodeManagementManual indicates to skip auto-managing nodes.
@@ -502,6 +527,27 @@ func admitNoSelfTracking(_ context.Context, _, newVal string) error {
 		if strings.TrimSpace(segment) == setting.DefaultTrackingName {
 			return fmt.Errorf("setting %s cannot name itself, remove it to track the other Settings",
 				setting.DefaultTrackingName)
+		}
+	}
+	return nil
+}
+
+// admitIPv4CIDRList admits a comma-separated list of IPv4 CIDRs, blank included. IPv6 prefixes are
+// refused at the write rather than dropped at the render: an ipBlock's except list rides an IPv4
+// 0.0.0.0/0 rule, and a silently swallowed entry would render an allow that admits the very
+// traffic the Setting exists to block. Blank means the feature is off, not an empty carve-out.
+func admitIPv4CIDRList(_ context.Context, _, newVal string) error {
+	for _, segment := range strings.Split(newVal, ",") {
+		cidr := strings.TrimSpace(segment)
+		if cidr == "" {
+			continue
+		}
+		ip, _, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return fmt.Errorf("invalid CIDR %q: %w", cidr, err)
+		}
+		if ip.To4() == nil {
+			return fmt.Errorf("invalid CIDR %q: only IPv4 prefixes can ride an IPv4 rule's except list", cidr)
 		}
 	}
 	return nil

@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"reflect"
 	"slices"
 	"strings"
 
 	core "k8s.io/api/core/v1"
 	networking "k8s.io/api/networking/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -20,11 +20,12 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 // instanceTenantNetworkPolicyName is the fixed name of the NetworkPolicy every namespace holding
 // Instances gets. It is one object per namespace, shared by every Instance there: the selector is
-// the stable component label, so a stop/start or a new Instance changes nothing about it.
+// the stable resource-type label, so a stop/start or a new Instance changes nothing about it.
 const instanceTenantNetworkPolicyName = "gpustack-instance-tenant-isolation"
 
 // convertTenantNetworkPolicy renders the isolation contract for one namespace: Instance Pods may
@@ -34,9 +35,10 @@ const instanceTenantNetworkPolicyName = "gpustack-instance-tenant-isolation"
 // Instance cannot scan or reach a neighbor tenant's Pods either; DNS stays open port-scoped,
 // because a CNI may hand the policy engine the translated pod address of a DNS server.
 //
-// The ipBlock exceptions carry the cluster's pod CIDRs: every address inside them is a Pod of
-// some namespace, and the same-namespace rule already covers the friendly ones. Only IPv4 CIDRs
-// may ride a 0.0.0.0/0 rule's except list, so the caller filters the Nodes' dual-stack entries.
+// The ipBlock exceptions carry the pod CIDRs the administrator's Setting names: every address
+// inside them is a Pod of some namespace, and the same-namespace rule already covers the friendly
+// ones. Only IPv4 CIDRs may ride a 0.0.0.0/0 rule's except list, and the Setting's admission
+// already refuses anything else.
 func convertTenantNetworkPolicy(podCIDRs []string) *networking.NetworkPolicy {
 	external := networking.IPBlock{CIDR: "0.0.0.0/0", Except: podCIDRs}
 	sameNamespace := networking.NetworkPolicyPeer{PodSelector: &meta.LabelSelector{}}
@@ -47,7 +49,7 @@ func convertTenantNetworkPolicy(podCIDRs []string) *networking.NetworkPolicy {
 		Spec: networking.NetworkPolicySpec{
 			PodSelector: meta.LabelSelector{
 				MatchLabels: map[string]string{
-					deviceplugin.ComponentLabelKey: deviceplugin.InstanceComponent,
+					systemmeta.ResourceTypeLabel: deviceplugin.InstanceResourceType,
 				},
 			},
 			PolicyTypes: []networking.PolicyType{
@@ -72,61 +74,41 @@ func convertTenantNetworkPolicy(podCIDRs []string) *networking.NetworkPolicy {
 	}
 }
 
-// clusterPodCIDRs learns the cluster's pod address space from the only place it is written down:
-// the per-node podCIDRs. IPv6 entries are dropped because they cannot sit in the except list of
-// an IPv4 cidr rule. An empty answer is NOT an error: it means no node has reported yet, and the
-// caller skips the ensure rather than render a policy whose empty except list would allow the
-// cross-namespace traffic this policy exists to block.
-func (r *InstanceReconciler) clusterPodCIDRs(ctx context.Context) ([]string, error) {
-	nodes := new(core.NodeList)
-	if err := r.Client.List(ctx, nodes); err != nil {
-		return nil, fmt.Errorf("list nodes for pod CIDRs: %w", err)
-	}
-	set := make(map[string]struct{})
-	for i := range nodes.Items {
-		for _, cidr := range nodes.Items[i].Spec.PodCIDRs {
-			if strings.Contains(cidr, ":") {
-				continue
-			}
-			set[cidr] = struct{}{}
-		}
-	}
-	return slices.Sorted(maps.Keys(set)), nil
-}
-
-// ensureTenantNetworkPolicy brings the namespace's tenant-isolation policy to the rendered shape,
-// creating it on first sight and rewriting it only when the render drifted. The object names no
-// owner: it belongs to the namespace, not to whichever Instance reconciled first, so deleting an
-// Instance never collects it. With no pod CIDRs reported by any node yet, the ensure is skipped:
-// a render without exceptions would be an allow-everything policy wearing this policy's name.
+// ensureTenantNetworkPolicy brings the namespace's tenant-isolation policy in line with the
+// administrator's pod-CIDR Setting, the one source of the pod address space. It is read through
+// the cache on every pass and rendered into the desired spec without touching any other object,
+// so a reconcile costs one cached read of the policy itself and nothing else — no node lists, no
+// CNI CRD reads, nothing to learn wrong.
+//
+// A non-empty Setting renders and aligns: the policy is created on first sight and rewritten only
+// when the render drifted, the drift comparison made with the API machinery's semantic equality so
+// a hand-touched object converges instead of fighting. An empty Setting is the opt-out: the policy
+// this operator noted as its own is collected again, and an object of the same name that nobody
+// here rendered is left exactly as found.
 func (r *InstanceReconciler) ensureTenantNetworkPolicy(ctx context.Context, inst *workercore.Instance) error {
-	cidrs, err := r.clusterPodCIDRs(ctx)
-	if err != nil {
-		return err
-	}
+	cidrs := parseIsolationPodCIDRs(settings.InstanceTenantIsolationPodCIDRs.ShouldValue(ctx))
 	if len(cidrs) == 0 {
-		ctrllog.FromContext(ctx).V(2).Info("no node podCIDRs reported yet; skip tenant network policy")
-		return nil
+		return r.deleteTenantNetworkPolicy(ctx, inst.Namespace)
 	}
 	desired := convertTenantNetworkPolicy(cidrs)
 	desired.Namespace = inst.Namespace
 
 	np := new(networking.NetworkPolicy)
-	err = r.Client.Get(ctx, ctrlcli.ObjectKey{
+	err := r.Client.Get(ctx, ctrlcli.ObjectKey{
 		Namespace: inst.Namespace, Name: instanceTenantNetworkPolicyName,
 	}, np)
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return fmt.Errorf("fetch tenant network policy: %w", err)
 		}
-		systemmeta.NoteResource(desired, "instances", nil)
+		systemmeta.NoteResource(desired, deviceplugin.InstanceResourceType, nil)
 		if err = r.Client.Create(ctx, desired); err != nil {
 			return fmt.Errorf("create tenant network policy: %w", err)
 		}
 		return nil
 	}
 
-	if reflect.DeepEqual(np.Spec, desired.Spec) {
+	if apiequality.Semantic.DeepEqual(np.Spec, desired.Spec) {
 		return nil
 	}
 	np.Spec = desired.Spec
@@ -134,4 +116,53 @@ func (r *InstanceReconciler) ensureTenantNetworkPolicy(ctx context.Context, inst
 		return fmt.Errorf("align tenant network policy: %w", err)
 	}
 	return nil
+}
+
+// deleteTenantNetworkPolicy collects the tenant-isolation policy of one namespace when the
+// pod-CIDR Setting empties. Only an object this operator noted as its own is removed: the fixed
+// name is this policy's public contract, so an object of the same name that nobody here rendered
+// belongs to whoever wrote it, and deleting their networking over a Setting edit is not this
+// controller's call. It is idempotent the way every level-based step must be: a missing policy is
+// already the desired state.
+func (r *InstanceReconciler) deleteTenantNetworkPolicy(ctx context.Context, namespace string) error {
+	np := new(networking.NetworkPolicy)
+	err := r.Client.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: namespace, Name: instanceTenantNetworkPolicyName,
+	}, np)
+	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			return fmt.Errorf("fetch tenant network policy: %w", err)
+		}
+		return nil
+	}
+	if systemmeta.DescribeResourceType(np) != deviceplugin.InstanceResourceType {
+		ctrllog.FromContext(ctx).V(2).Info(
+			"tenant network policy was not rendered by this operator; leaving it alone",
+			"namespace", namespace, "name", instanceTenantNetworkPolicyName,
+		)
+		return nil
+	}
+	if err := r.Client.Delete(ctx, np); err != nil {
+		return fmt.Errorf("delete tenant network policy: %w", err)
+	}
+	return nil
+}
+
+// parseIsolationPodCIDRs splits the Setting's comma-separated value into the CIDRs the ipBlock
+// exceptions carry, deduplicated and sorted so the render is byte-stable across reconciles and
+// across worker restarts. Blank segments from a trailing comma or padded spacing are dropped; the
+// Setting's admission has already refused anything that is not an IPv4 CIDR.
+func parseIsolationPodCIDRs(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	set := make(map[string]struct{})
+	for _, segment := range strings.Split(raw, ",") {
+		cidr := strings.TrimSpace(segment)
+		if cidr == "" {
+			continue
+		}
+		set[cidr] = struct{}{}
+	}
+	return slices.Sorted(maps.Keys(set))
 }

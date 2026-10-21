@@ -48,6 +48,8 @@ import (
 //   - Create/Update/Delete a Kubernetes Pod as the backing resource of the Instance based on the Instance spec.
 //   - Create a Kubernetes Service to expose the ports of the backing Pod if specified in the Instance spec. The Service
 //     belongs to the Instance rather than to the Pod, so it survives a stop and keeps its allocated node ports.
+//   - Ensure the namespace's tenant-isolation NetworkPolicy when the administrator's pod-CIDR
+//     Setting opts the cluster in, and collect it again when the Setting empties.
 //   - Update the Instance status based on the backing Pod status for better visibility and stability.
 type InstanceReconciler struct {
 	Client    ctrlcli.Client
@@ -725,9 +727,9 @@ func (r *InstanceReconciler) convertPodFromInstance(
 				// created under the InstanceType's own name and both sides spell the result with
 				// FormatLocalQueueName -- neither of which this package states or owns. The caller
 				// guarantees it is non-empty; see the entrance guard in Reconcile.
-				kueuectrlconst.QueueLabel:           instType.Status.Entrance,       // Scheduling.
-				deviceplugin.InstancePartOfLabelKey: string(inst.UID),               // Accessing.
-				deviceplugin.ComponentLabelKey:      deviceplugin.InstanceComponent, // Isolating.
+				kueuectrlconst.QueueLabel:           instType.Status.Entrance,          // Scheduling.
+				deviceplugin.InstancePartOfLabelKey: string(inst.UID),                  // Accessing.
+				systemmeta.ResourceTypeLabel:        deviceplugin.InstanceResourceType, // Isolating.
 			},
 		},
 		Spec: core.PodSpec{

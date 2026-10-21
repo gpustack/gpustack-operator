@@ -15,11 +15,15 @@ const (
 	ComponentLabelKey      = "app.kubernetes.io/component"
 	DeviceManagerComponent = "device-manager"
 
-	// InstanceComponent is the ComponentLabelKey value the Instance controller stamps on every
-	// Instance Pod. The tenant-isolation NetworkPolicy selects Instance Pods by it: unlike
-	// InstancePartOfLabelKey, which carries one UID per Instance, this value is stable across
-	// all Instances, so one policy per namespace can select them all.
-	InstanceComponent = "instance"
+	// InstanceResourceType is the systemmeta.ResourceTypeLabel value the Instance controller
+	// stamps on every Instance Pod, and the tenant-isolation NetworkPolicy selects Instance
+	// Pods by. Unlike InstancePartOfLabelKey, which carries one UID per Instance, this value
+	// is stable across all Instances, so one policy per namespace can select them all. It
+	// rides the label the operator already notes its rendered objects with, so the policy,
+	// the Pods it guards and the rest of the rendered family read as one vocabulary — and a
+	// third-party workload stamping a generic recommended label cannot walk into the
+	// isolation rules by accident.
+	InstanceResourceType = "instances"
 
 	// ManufacturerLabelKey carries the manufacturer a device manager pod was rolled for. The
 	// chart rolls one DaemonSet per manufacturer and stamps this on each.
