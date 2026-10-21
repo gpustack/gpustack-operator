@@ -1767,6 +1767,16 @@ Kubelet lowers the mount size when the <code>Pod</code> memory limit or node all
 <p>Changing the rendered capacity follows ordinary role rollout behavior.
 Existing Elastic members keep their mounts; new or replacement <code>Pod</code>s use the current value.
 Upgrading the operator adds the default mount to ordinary roles and triggers their recreate rollout.</p>
+<h3 id="engram-host-memory">Engram host memory</h3>
+<p>When a non-privileged role (<em><code>roles[].privileged</code></em> unset or <code>false</code>) enables Engram host-memory
+offload, the operator grants <code>IPC_LOCK</code> and <code>SYS_RESOURCE</code> on the <code>main</code> container so the engine can
+pin host DRAM without running the whole <code>Pod</code> privileged:</p>
+<ul>
+<li><code>vLLM</code>: pass <code>--engram-config</code> (or a dotted <code>--engram-config.*</code> flag) in <em><code>roles[].extraArgs</code></em> or
+<em><code>roles[].command</code></em> with <code>cpu_offload</code> left enabled (the default <code>true</code>). Passing <code>--engram-config</code>
+is required even when keeping <code>vLLM</code>&rsquo;s default settings so the operator can detect Engram offload.</li>
+<li><code>SGLang</code>: set <code>SGLANG_ENABLE_DSV41_ENGRAM_HOST_TABLE=1</code> in <em><code>roles[].env</code></em>.</li>
+</ul>
 <h3 id="compilation-cache-and-timeout">Compilation cache and timeout</h3>
 <p>An engine starts against a compilation cache and a startup budget.</p>
 <p>For an operator-managed role (<em><code>roles[].command</code></em> empty), the operator mounts a <code>DirectoryOrCreate</code>
@@ -2424,7 +2434,7 @@ structured snapshot and <code>Pod</code> scrape endpoints.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a78183e6366a83774e7ab4c659727ae43ac2b8a9/docs/modules/model-deployment/deployment.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/fe455ea00730beadff87fdcbc1d0ee105ee2cfff/docs/modules/model-deployment/deployment.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/deployment.md">Edit this page</a>
             
@@ -2447,6 +2457,7 @@ structured snapshot and <code>Pod</code> scrape endpoints.</li></ul>
       <ul>
         <li><a href="#take-over-roles">Take-over roles</a></li>
         <li><a href="#shared-memory">Shared memory</a></li>
+        <li><a href="#engram-host-memory">Engram host memory</a></li>
         <li><a href="#compilation-cache-and-timeout">Compilation cache and timeout</a></li>
       </ul>
     </li>

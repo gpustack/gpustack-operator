@@ -341,6 +341,17 @@ Changing the rendered capacity follows ordinary role rollout behavior.
 Existing Elastic members keep their mounts; new or replacement `Pod`s use the current value.
 Upgrading the operator adds the default mount to ordinary roles and triggers their recreate rollout.
 
+### Engram host memory
+
+When a non-privileged role (*`roles[].privileged`* unset or `false`) enables Engram host-memory
+offload, the operator grants `IPC_LOCK` and `SYS_RESOURCE` on the `main` container so the engine can
+pin host DRAM without running the whole `Pod` privileged:
+
+- `vLLM`: pass `--engram-config` (or a dotted `--engram-config.*` flag) in *`roles[].extraArgs`* or
+  *`roles[].command`* with `cpu_offload` left enabled (the default `true`). Passing `--engram-config`
+  is required even when keeping `vLLM`'s default settings so the operator can detect Engram offload.
+- `SGLang`: set `SGLANG_ENABLE_DSV41_ENGRAM_HOST_TABLE=1` in *`roles[].env`*.
+
 ### Compilation cache and timeout
 
 An engine starts against a compilation cache and a startup budget.
