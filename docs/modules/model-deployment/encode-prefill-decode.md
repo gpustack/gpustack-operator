@@ -7,9 +7,9 @@ admission rules.
 ## Contents
 
 - [Roles and request flow](#roles-and-request-flow)
+- [Configuration](#configuration)
 - [Admission constraints](#admission-constraints)
 - [Admitted matrix](#admitted-matrix)
-- [Unadmitted candidates](#unadmitted-candidates)
 - [Encoder-cache connectors](#encoder-cache-connectors)
 - [Scheduling co-location](#scheduling-co-location)
 - [Request routing across roles](#request-routing-across-roles)
@@ -30,6 +30,52 @@ runs in its own `Pod` set.
 
 A multimodal request goes through the encoder, then the prefiller, then the decoder. A text-only
 request skips the encoder and goes straight to *prefill* and *decode*.
+
+## Configuration
+
+A complete *EPD* deployment pairs one *Encode*, one *Prefill* and one *Decode* role behind a managed
+router:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen-vl-epd
+  namespace: team-a
+spec:
+  model:
+    name: Qwen/Qwen2.5-VL-7B-Instruct
+  engine:
+    name: vLLM  # vLLM or SGLang; vLLM is used here
+    image: gpustack/runner:cuda13.0-vllm0.30.0  # must meet the admitted matrix version floor
+  router:
+    name: llm-d-router  # required to pair Encode, Prefill and Decode
+  roles:
+    - name: encode
+      kind: Encode
+      replicas: 1
+      instanceType: gpustack-nvidia-h100-80gb-hbm3-linux-amd64
+      resources:
+        accelerator: "1"  # defaults to 1 on an accelerated InstanceType when omitted
+    - name: prefill
+      kind: Prefill
+      replicas: 1
+      instanceType: gpustack-nvidia-h100-80gb-hbm3-linux-amd64
+      resources:
+        accelerator: "1"
+    - name: decode
+      kind: Decode
+      replicas: 1
+      instanceType: gpustack-nvidia-h100-80gb-hbm3-linux-amd64
+      resources:
+        accelerator: "1"
+```
+
+The operator injects the encoder-cache and KV-transfer connectors onto the three roles and fronts
+each *Decode* `Pod` with the routing sidecar. On *Encode*, the operator defaults `--mm-encoder-only`,
+`--enforce-eager` and `--no-enable-prefix-caching`; *Prefill* and *Decode* keep default CUDA graph
+capture enabled. For a step-by-step live run and rendered `Pod` excerpts, see the
+[EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md).
 
 ## Admission constraints
 
@@ -129,7 +175,7 @@ tested SGLang `0.5.18` *EPD* ordering, *Prefill* runs `--language-only` and expe
 prepared by the router, so a multimodal request sent directly to the plain `Service` fails with
 `HTTP 400` (`Invalid bootstrap_room`) before reaching *Encode*.
 
-## Unadmitted candidates
+### Unadmitted candidates
 
 These candidates are refused or not configured:
 
