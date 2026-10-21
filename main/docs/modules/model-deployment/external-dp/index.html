@@ -1363,6 +1363,8 @@ and the Router balances requests across all of them. For captured commands and r
 <ul>
 <li><a href="#overview-and-selection">Overview and selection</a>
 </li>
+<li><a href="#configuration">Configuration</a>
+</li>
 <li><a href="#load-balancing-derivation">Load-balancing derivation</a>
 </li>
 <li><a href="#per-rank-pod-identity">Per-rank Pod identity</a>
@@ -1423,6 +1425,52 @@ The four ranks shared one <em>EP</em> collective over <strong>cross-<code>Pod</c
 The wide <em>TP</em> = 8 comparison kept all eight GPUs inside one NVLink-connected <code>Pod</code>.
 Separate GPU visibility, private IPC and <code>/dev/shm</code>, and no <em>remote direct memory access (RDMA)</em> interface
 bounded the measured transport; host NVLink did not carry cross-<code>Pod</code> traffic.</p>
+<h2 id="configuration">Configuration</h2>
+<p>A four-rank <em>External DP</em> group runs one <em>Server</em> role with <code>size: 4</code> and <em>TP</em> = 2 per member behind
+<code>vllm-router</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-external-dp</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-ai/DeepSeek-V2-Lite-Chat</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vllm-router </span><span class="w"> </span><span class="c"># balances requests across all rank endpoints</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- --<span class="l">policy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">round_robin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">  </span><span class="c"># four member Pods in one fate-sharing DP group</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">  </span><span class="c"># matches local --tensor-parallel-size per member</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">tensor-parallel-size</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">data-parallel-size</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;4&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">data-parallel-rank</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">$(GPUSTACK_MEMBER_INDEX) </span><span class="w"> </span><span class="c"># zero-based member index injected by the operator</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">data-parallel-address</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">$(GPUSTACK_REPLICA_LEADER_ADDRESS) </span><span class="w"> </span><span class="c"># leader DNS name injected by the operator</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">enable-expert-parallel</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">all2all-backend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">allgather_reducescatter</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">VLLM_PORT</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;19500&#34;</span><span class="w">  </span><span class="c"># keeps candidate ports below the ephemeral source-port range</span></span></span></code></pre></div>
+</div><p>When the cluster provides an <em>RDMA</em> fabric, add <code>interface: &quot;2&quot;</code> under <em><code>resources</code></em> so cross-<code>Pod</code>
+expert collectives run over InfiniBand or RoCE instead of TCP.</p>
 <h2 id="load-balancing-derivation">Load-balancing derivation</h2>
 <p>There is no <em>External DP</em> spec field. The operator reads each role&rsquo;s own <em><code>extraArgs</code></em> and <em><code>env</code></em> with
 the engine&rsquo;s flag table (<code>scanModelDeploymentParallelism</code>,
@@ -1677,7 +1725,7 @@ monolithic wide tensor-parallel group)</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0ffe734016c60d39a890150175cc1df5216195fc/docs/modules/model-deployment/external-dp.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/a78183e6366a83774e7ab4c659727ae43ac2b8a9/docs/modules/model-deployment/external-dp.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/external-dp.md">Edit this page</a>
             
@@ -1689,6 +1737,7 @@ monolithic wide tensor-parallel group)</li></ul>
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#overview-and-selection">Overview and selection</a></li>
+    <li><a href="#configuration">Configuration</a></li>
     <li><a href="#load-balancing-derivation">Load-balancing derivation</a></li>
     <li><a href="#per-rank-pod-identity">Per-rank Pod identity</a></li>
     <li><a href="#port-allocation">Port allocation</a>

@@ -1363,11 +1363,11 @@ admission rules.</p>
 <ul>
 <li><a href="#roles-and-request-flow">Roles and request flow</a>
 </li>
+<li><a href="#configuration">Configuration</a>
+</li>
 <li><a href="#admission-constraints">Admission constraints</a>
 </li>
 <li><a href="#admitted-matrix">Admitted matrix</a>
-</li>
-<li><a href="#unadmitted-candidates">Unadmitted candidates</a>
 </li>
 <li><a href="#encoder-cache-connectors">Encoder-cache connectors</a>
 </li>
@@ -1413,6 +1413,49 @@ runs in its own <code>Pod</code> set.</p>
 </table>
 <p>A multimodal request goes through the encoder, then the prefiller, then the decoder. A text-only
 request skips the encoder and goes straight to <em>prefill</em> and <em>decode</em>.</p>
+<h2 id="configuration">Configuration</h2>
+<p>A complete <em>EPD</em> deployment pairs one <em>Encode</em>, one <em>Prefill</em> and one <em>Decode</em> role behind a managed
+router:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-vl-epd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-VL-7B-Instruct</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM </span><span class="w"> </span><span class="c"># vLLM or SGLang; vLLM is used here</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0 </span><span class="w"> </span><span class="c"># must meet the admitted matrix version floor</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-d-router </span><span class="w"> </span><span class="c"># required to pair Encode, Prefill and Decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">encode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Encode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># defaults to 1 on an accelerated InstanceType when omitted</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><p>The operator injects the encoder-cache and KV-transfer connectors onto the three roles and fronts
+each <em>Decode</em> <code>Pod</code> with the routing sidecar. On <em>Encode</em>, the operator defaults <code>--mm-encoder-only</code>,
+<code>--enforce-eager</code> and <code>--no-enable-prefix-caching</code>; <em>Prefill</em> and <em>Decode</em> keep default CUDA graph
+capture enabled. For a step-by-step live run and rendered <code>Pod</code> excerpts, see the
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/">EPD Walkthrough</a>
+.</p>
 <h2 id="admission-constraints">Admission constraints</h2>
 <p>An <em>EPD</em> deployment must satisfy the rules below. Admission enforces every one except the encoder
 image floor, which is a requirement on the image you name.</p>
@@ -1592,7 +1635,7 @@ ordinary <em>Encode</em>, <em>Prefill</em>, <em>Decode</em> ordering) and provid
 tested SGLang <code>0.5.18</code> <em>EPD</em> ordering, <em>Prefill</em> runs <code>--language-only</code> and expects a <code>bootstrap_room</code>
 prepared by the router, so a multimodal request sent directly to the plain <code>Service</code> fails with
 <code>HTTP 400</code> (<code>Invalid bootstrap_room</code>) before reaching <em>Encode</em>.</p>
-<h2 id="unadmitted-candidates">Unadmitted candidates</h2>
+<h3 id="unadmitted-candidates">Unadmitted candidates</h3>
 <p>These candidates are refused or not configured:</p>
 <table>
   <thead>
@@ -1754,7 +1797,7 @@ hardware and when <em>EPD</em> helps.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0ffe734016c60d39a890150175cc1df5216195fc/docs/modules/model-deployment/encode-prefill-decode.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/a78183e6366a83774e7ab4c659727ae43ac2b8a9/docs/modules/model-deployment/encode-prefill-decode.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/encode-prefill-decode.md">Edit this page</a>
             
@@ -1766,6 +1809,7 @@ hardware and when <em>EPD</em> helps.</p>
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#roles-and-request-flow">Roles and request flow</a></li>
+    <li><a href="#configuration">Configuration</a></li>
     <li><a href="#admission-constraints">Admission constraints</a></li>
     <li><a href="#admitted-matrix">Admitted matrix</a>
       <ul>
@@ -1773,9 +1817,9 @@ hardware and when <em>EPD</em> helps.</p>
         <li><a href="#vllm-on-nvidia-amd">vLLM on NVIDIA, AMD</a></li>
         <li><a href="#vllm-on-ascend">vLLM on Ascend</a></li>
         <li><a href="#sglang">SGLang</a></li>
+        <li><a href="#unadmitted-candidates">Unadmitted candidates</a></li>
       </ul>
     </li>
-    <li><a href="#unadmitted-candidates">Unadmitted candidates</a></li>
     <li><a href="#encoder-cache-connectors">Encoder-cache connectors</a>
       <ul>
         <li><a href="#ecexampleconnector">ECExampleConnector</a></li>

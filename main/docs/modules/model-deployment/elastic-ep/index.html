@@ -1366,7 +1366,7 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
 </li>
 <li><a href="#shared-memory">Shared memory</a>
 </li>
-<li><a href="#minimal-manifest">Minimal manifest</a>
+<li><a href="#configuration">Configuration</a>
 </li>
 <li><a href="#changing-the-width">Changing the width</a>
 </li>
@@ -1413,8 +1413,7 @@ enforces the rest:</p>
 <li>every member asks for exactly <em>TP</em> whole unsliced GPUs;</li>
 <li>each member&rsquo;s <em>TP</em> group stays inside one <code>Pod</code> and one Ray node;</li>
 <li>pipeline and <em>prefill</em> context parallel sizes stay 1;</li>
-<li>you cannot supply <em><code>command</code></em>, because the renderer owns the command line of the managed role;</li>
-<li>there is no initial fabric to declare.</li>
+<li>you cannot supply <em><code>command</code></em>, because the renderer owns the command line of the managed role.</li>
 </ul>
 <p>The role&rsquo;s <em><code>size</code></em>, <em><code>instanceType</code></em> and <em><code>resources</code></em> are frozen with the profile: the ordinary role
 fields&rsquo; editability does not reach it, and width is the only configuration setting it offers.</p>
@@ -1450,7 +1449,7 @@ through the resize interface the engine already exposes.</p>
 Changing the role&rsquo;s <em><code>shmSize</code></em> affects new or replacement members; existing members keep their mounts.
 See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#shared-memory">Shared memory</a>
  for configuration, precedence and memory budgeting.</p>
-<h2 id="minimal-manifest">Minimal manifest</h2>
+<h2 id="configuration">Configuration</h2>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
@@ -1466,17 +1465,21 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#s
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-d-router</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vllm</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="m">0.29.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-gpu</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.29.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># defaults to the TP size (1 here) on an accelerated InstanceType when omitted</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">elasticEp</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">width</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">elastic-ep-max-dp-size</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;4&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ports</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">http</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="m">8000</span><span class="w">
@@ -1484,8 +1487,9 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#s
 </div><p>Weights reach the members through the same artifact and cache as any other deployment. See
 <a href="/gpustack-operator/main/docs/modules/model-delivery/">Model Delivery</a>
 .</p>
-<p>To use <em>TP</em> = 2, add <code>extraArgs: [&quot;--tensor-parallel-size&quot;, &quot;2&quot;]</code> and request <code>resources.accelerator: &quot;2&quot;</code>.
-If the accelerator quantity is omitted, admission defaults it to the <em>TP</em> size.
+<p>To use <em>TP</em> = 2, pass <code>--tensor-parallel-size 2</code> in <em><code>extraArgs</code></em> and request <em><code>resources.accelerator</code></em> <code>&quot;2&quot;</code>.
+When <em><code>resources.accelerator</code></em> is omitted on an accelerated <code>InstanceType</code>, the mutating admission
+webhook defaults it to the declared <em>TP</em> size (1 when <code>--tensor-parallel-size</code> is omitted).
 Explicit quantities must equal the <em>TP</em> size. Each member&rsquo;s CPU and memory scale with its GPU count.</p>
 <h3 id="maximum-width">Maximum width</h3>
 <p>Starting with vLLM 0.30.0, set the largest planned width through <em><code>extraArgs</code></em> when creating the deployment:</p>
@@ -1697,7 +1701,7 @@ profile, as described above.</li>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0ffe734016c60d39a890150175cc1df5216195fc/docs/modules/model-deployment/elastic-ep.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/a78183e6366a83774e7ab4c659727ae43ac2b8a9/docs/modules/model-deployment/elastic-ep.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/elastic-ep.md">Edit this page</a>
             
@@ -1711,7 +1715,7 @@ profile, as described above.</li>
     <li><a href="#what-the-profile-means">What the profile means</a></li>
     <li><a href="#prerequisites">Prerequisites</a></li>
     <li><a href="#shared-memory">Shared memory</a></li>
-    <li><a href="#minimal-manifest">Minimal manifest</a>
+    <li><a href="#configuration">Configuration</a>
       <ul>
         <li><a href="#maximum-width">Maximum width</a></li>
       </ul>

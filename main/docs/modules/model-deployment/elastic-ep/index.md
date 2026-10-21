@@ -9,7 +9,7 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
 - [What the profile means](#what-the-profile-means)
 - [Prerequisites](#prerequisites)
 - [Shared memory](#shared-memory)
-- [Minimal manifest](#minimal-manifest)
+- [Configuration](#configuration)
 - [Changing the width](#changing-the-width)
 - [Resize observations](#resize-observations)
 - [When a resize holds](#when-a-resize-holds)
@@ -42,8 +42,7 @@ enforces the rest:
 - every member asks for exactly *TP* whole unsliced GPUs;
 - each member's *TP* group stays inside one `Pod` and one Ray node;
 - pipeline and *prefill* context parallel sizes stay 1;
-- you cannot supply *`command`*, because the renderer owns the command line of the managed role;
-- there is no initial fabric to declare.
+- you cannot supply *`command`*, because the renderer owns the command line of the managed role.
 
 The role's *`size`*, *`instanceType`* and *`resources`* are frozen with the profile: the ordinary role
 fields' editability does not reach it, and width is the only configuration setting it offers.
@@ -88,7 +87,7 @@ The CPU head, master and GPU workers each get a separate memory-backed `EmptyDir
 Changing the role's *`shmSize`* affects new or replacement members; existing members keep their mounts.
 See [Shared memory](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#shared-memory) for configuration, precedence and memory budgeting.
 
-## Minimal manifest
+## Configuration
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -104,17 +103,21 @@ spec:
   router:
     name: llm-d-router
   engine:
-    name: vllm
-    version: 0.29.0
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0
   roles:
     - name: server
-      kind: server
+      kind: Server
       replicas: 1
       size: 1
       instanceType: elastic-gpu
-      image: gpustack/runner:cuda13.0-vllm0.29.0
+      resources:
+        accelerator: "1"  # defaults to the TP size (1 here) on an accelerated InstanceType when omitted
       elasticEp:
         width: 2
+      extraArgs:
+        - --elastic-ep-max-dp-size
+        - "4"
       ports:
         - name: http
           port: 8000
@@ -124,8 +127,9 @@ spec:
 Weights reach the members through the same artifact and cache as any other deployment. See
 [Model Delivery](/gpustack-operator/main/docs/modules/model-delivery/index.md).
 
-To use *TP* = 2, add `extraArgs: ["--tensor-parallel-size", "2"]` and request `resources.accelerator: "2"`.
-If the accelerator quantity is omitted, admission defaults it to the *TP* size.
+To use *TP* = 2, pass `--tensor-parallel-size 2` in *`extraArgs`* and request *`resources.accelerator`* `"2"`.
+When *`resources.accelerator`* is omitted on an accelerated `InstanceType`, the mutating admission
+webhook defaults it to the declared *TP* size (1 when `--tensor-parallel-size` is omitted).
 Explicit quantities must equal the *TP* size. Each member's CPU and memory scale with its GPU count.
 
 ### Maximum width
