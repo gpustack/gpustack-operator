@@ -1,13 +1,14 @@
 # Model Deployment Routing
 
-A managed router selects among the HTTP endpoints of serving replicas. Every routing choice measured here ran
-on a server role; on a *prefill/decode (PD)* pair, where each half is chosen separately, none has been run.
+A managed router selects among serving endpoints, then its policy chooses among them. This page covers
+endpoint selection and SGLang's tested DP routing modes.
 
 See [Prefill and Decode](prefill-decode.md) for the *external data parallelism (External DP)* boundary within *PD* roles.
 
 ## Contents
 
 - [Which Pods receive traffic](#which-pods-receive-traffic)
+- [SGLang DP routing](#sglang-dp-routing)
 - [Encode stage routing](#encode-stage-routing)
 - [Each router's default](#each-routers-default)
 - [Prefix affinity](#prefix-affinity)
@@ -47,6 +48,20 @@ All routed roles must use the same serving port. A shared custom port remains su
 Admission rejects vLLM's MultiPort mode because it starts endpoints on additional, incremented ports.
 A decoder proxy's internal backend port remains separate from its published HTTP port.
 See the [External DP walkthrough](../../walkthroughs/model-deployment/external-dp.md) for a minimal per-rank configuration.
+
+## SGLang DP routing
+
+With SGLang `0.5.18` and Gateway `0.3.1`, the container PoC verified ordinary DP attention with
+`--dp-aware` in *`spec.router.extraArgs`*. The Gateway represented ranks as logical workers, such as
+`http://host:port@0` and `http://host:port@1`; both ranks used one physical serving listener. The
+rank suffix does not indicate a separate HTTP port or `Pod`. This verifies the pinned container
+combination only, not a managed **`ModelDeployment`**.
+
+For *P/D*, that PoC used one `sglang-gateway` with `--pd-disaggregation` and omitted `--dp-aware`.
+The Gateway routed to one head for each role, and each engine group distributed work internally.
+Combining both flags produced an invalid Decode destination. This result also covers a single-host
+container run only; it does not establish Kubernetes deployment or recovery support. See
+[Prefill and Decode](prefill-decode.md#pair-connections) for the test boundary.
 
 ## Encode stage routing
 
