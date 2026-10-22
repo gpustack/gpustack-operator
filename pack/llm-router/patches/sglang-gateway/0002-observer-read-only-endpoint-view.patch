@@ -146,10 +146,10 @@ index a4ee2e7..0c9171f 100644
  pub mod reasoning_parser;
 diff --git a/sgl-model-gateway/src/observer.rs b/sgl-model-gateway/src/observer.rs
 new file mode 100644
-index 0000000..298c27f
+index 0000000..2893ad1
 --- /dev/null
 +++ b/sgl-model-gateway/src/observer.rs
-@@ -0,0 +1,360 @@
+@@ -0,0 +1,379 @@
 +// Read native registry membership and effective circuit state without changing routing.
 +// The selection fields use the native health and circuit predicates.
 +// Pod hints are address echoes; the operator binds them to Kubernetes identities.
@@ -282,9 +282,9 @@ index 0000000..298c27f
 +            url.clone(),
 +            ObserverWorker {
 +                url: url.clone(),
-+                port: url_port(&url),
++                port: url_port(worker.base_url()),
 +                role: role_name(worker.as_ref()),
-+                pod_hint: pod_hint(&url),
++                pod_hint: pod_hint(worker.base_url()),
 +                worker_id: id.as_str().to_string(),
 +                selection: ObserverSelection {
 +                    registered: true,
@@ -384,9 +384,28 @@ index 0000000..298c27f
 +    use super::*;
 +    use crate::core::circuit_breaker::CircuitBreakerConfig;
 +    use crate::core::worker::{BasicWorker, WorkerType};
-+    use crate::core::{BasicWorkerBuilder, Worker};
++    use crate::core::{BasicWorkerBuilder, DPAwareWorkerBuilder, Worker};
 +    use std::sync::Arc;
 +    use std::time::Duration;
++
++    #[tokio::test]
++    async fn dp_workers_keep_rank_identity_and_physical_listener() {
++        let context = AppContext::from_config(Default::default(), 5)
++            .await
++            .unwrap();
++        for rank in 0..2 {
++            context.worker_registry.register(Arc::new(
++                DPAwareWorkerBuilder::new("http://10.0.0.5:8000", rank, 2).build(),
++            ));
++        }
++        let rows = collect_workers(&context).unwrap();
++        assert_eq!(rows.len(), 2);
++        for (rank, row) in rows.iter().enumerate() {
++            assert_eq!(row.url, format!("http://10.0.0.5:8000@{rank}"));
++            assert_eq!(row.port.as_deref(), Some("8000"));
++            assert_eq!(row.pod_hint, "10.0.0.5:8000");
++        }
++    }
 +
 +    async fn fixture(
 +        raw_state: CircuitBreakerState,

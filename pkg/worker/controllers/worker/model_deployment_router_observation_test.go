@@ -1424,7 +1424,7 @@ func TestTheServingCountFoldsVirtualRowsOnOnePhysicalListener(t *testing.T) {
 		workers := make([]RouterObservedWorker, 0, 4)
 		for i := 0; i < 4; i++ {
 			workers = append(workers, RouterObservedWorker{
-				URL: "http://10.0.0.5:8000", Port: "8000", WorkerID: string(rune('a' + i)),
+				URL: fmt.Sprintf("http://10.0.0.5:8000@%d", i), Port: "8000", WorkerID: string(rune('a' + i)),
 				Selection: RouterObservedSelection{InSelection: true},
 			})
 		}
