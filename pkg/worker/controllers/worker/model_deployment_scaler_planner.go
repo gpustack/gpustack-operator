@@ -42,6 +42,7 @@ func (r *ModelDeploymentScalerReconciler) plan(
 	samples := r.sampler.RoleSamples(scaler)
 	current := deploymentReplicaVector(md)
 	interval := r.interval(scaler)
+	r.resetRebalanceForGenerationChange(scaler, md)
 
 	if scaler.Status.PendingCohort != nil {
 		cohort := scaler.Status.PendingCohort
@@ -59,6 +60,7 @@ func (r *ModelDeploymentScalerReconciler) plan(
 				return ctrlreconcile.Result{RequeueAfter: interval}, nil
 			}
 			target := cloneReplicaVector(cohort.BaselineVector)
+			r.recordRebalanceExhaustion(scaler, cohort, cohorts)
 			decisionID, err := r.writeVector(ctx, scaler, md, target, current, now)
 			if err != nil {
 				return ctrlreconcile.Result{}, err
@@ -96,6 +98,9 @@ func (r *ModelDeploymentScalerReconciler) plan(
 			return ctrlreconcile.Result{RequeueAfter: interval}, nil
 		}
 		target := cloneReplicaVector(scaler.Status.LastScaleDown.PreScaleDownVector)
+		if scaler.Status.Rebalance != nil && scaler.Status.Rebalance.DonorRole == retirement.RoleName {
+			scaler.Status.Rebalance = nil
+		}
 		decisionID, err := r.writeVector(ctx, scaler, md, target, current, now)
 		if err != nil {
 			return ctrlreconcile.Result{}, err
@@ -248,7 +253,11 @@ func (r *ModelDeploymentScalerReconciler) plan(
 	r.sampler.RecordStabilizationHistory(scaler, constraint.StabilizationHistory)
 	r.sampler.RecordPredictorStates(scaler, predictorByRole)
 	vector := cloneReplicaVector(constraint.Replicas)
-	vector = r.planRebalance(scaler, current, vector, algorithmByRole)
+	var rebalanceReason string
+	vector, rebalanceReason, err = r.planRebalance(ctx, scaler, md, current, vector, algorithmByRole, now, active)
+	if err != nil {
+		return ctrlreconcile.Result{}, err
+	}
 	scaler.Status.Roles = roleStatuses
 	scaler.Status.Predictors = scalerPredictorStatuses(predictorByRole)
 	if metricsReady {
@@ -258,9 +267,13 @@ func (r *ModelDeploymentScalerReconciler) plan(
 		r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeMetricsReady, meta.ConditionFalse,
 			workercore.ModelDeploymentScalerReasonWaitingForMetrics, strings.Join(metricsReasons, "; "), now)
 	}
-	if constraint.BlockingReason != "" {
+	blockingReason := constraint.BlockingReason
+	if rebalanceReason != "" {
+		blockingReason = rebalanceReason
+	}
+	if blockingReason != "" {
 		r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBlocked, meta.ConditionTrue,
-			constraint.BlockingReason, "the recommendation is held by bounds, ratios, or pacing", now)
+			blockingReason, "the recommendation is held by bounds, ratios, pacing, or quota-pool rebalance", now)
 	} else {
 		r.setCondition(
 			scaler, workercore.ModelDeploymentScalerConditionTypeBlocked, meta.ConditionFalse,
@@ -517,15 +530,6 @@ func (ratioCoupledAlgorithm) Recommend(
 		DesiredReplicas: obs.CurrentReplicas,
 		Reason:          algorithm.ReasonRatioCoupled,
 	}, prior
-}
-
-func (r *ModelDeploymentScalerReconciler) planRebalance(
-	_ *workercore.ModelDeploymentScaler,
-	_ map[string]int32,
-	target map[string]int32,
-	_ map[string]algorithm.RoleRecommendation,
-) map[string]int32 {
-	return target
 }
 
 func deploymentReplicaVector(md *workercore.ModelDeployment) map[string]int32 {
