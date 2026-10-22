@@ -1,0 +1,52 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: autoscaling-sglang-pd
+  namespace: gpustack-bench
+spec:
+  model:
+    name: /models
+    artifactRef:
+      name: qwen3-8b
+  engine:
+    name: SGLang
+    image: gpustack/runner:cuda12.9-sglang0.5.18
+  router:
+    name: llm-d-router
+  roles:
+    - name: prefill
+      kind: Prefill
+      replicas: 1
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda12.9-sglang0.5.18
+      imagePullPolicy: IfNotPresent
+      # An SGLang half takes 26 to 28 s to exit after its delete, so the grace has to carry that
+      # or the departing replica is killed while it is still serving.
+      terminationGracePeriodSeconds: 60
+      resources:
+        accelerator: "1"
+      extraArgs:
+        - --tp-size
+        - "1"
+        - --context-length
+        - "16384"
+        - --mem-fraction-static
+        - "0.90"
+    - name: decode
+      kind: Decode
+      replicas: 1
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda12.9-sglang0.5.18
+      imagePullPolicy: IfNotPresent
+      terminationGracePeriodSeconds: 60
+      resources:
+        accelerator: "1"
+      extraArgs:
+        - --tp-size
+        - "1"
+        - --context-length
+        - "16384"
+        - --mem-fraction-static
+        - "0.90"

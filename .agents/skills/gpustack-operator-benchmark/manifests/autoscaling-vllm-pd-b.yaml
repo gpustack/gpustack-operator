@@ -1,0 +1,70 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: autoscaling-vllm-pd-b
+  namespace: gpustack-bench
+spec:
+  model:
+    name: /models
+    artifactRef:
+      name: qwen3-8b
+  engine:
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0
+  router:
+    name: llm-d-router
+  roles:
+    - name: prefill
+      kind: Prefill
+      replicas: 1
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda13.0-vllm0.30.0
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "1"
+      extraArgs:
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "16384"
+        - --max-num-seqs
+        - "64"
+        - --gpu-memory-utilization
+        - "0.90"
+        - --enable-scale-out
+      # THE ENGINE HOLDS ITS CONNECTIONS AS LONG AS THE ROUTER HOLDS THEM. vLLM closes an idle
+      # HTTP connection after five seconds, and the router pools its upstream connections for far
+      # longer, so a request can be written to a connection the engine has already closed, and the
+      # router answers that request with a refusal the client sees as a failed request. The
+      # engine's keep-alive is raised to match the pool that holds the connection.
+      env:
+        - name: VLLM_HTTP_TIMEOUT_KEEP_ALIVE
+          value: "3600"
+    - name: decode
+      kind: Decode
+      replicas: 1
+      size: 1
+      instanceType: bench-gpu
+      image: gpustack/runner:cuda13.0-vllm0.30.0
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "1"
+      extraArgs:
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "16384"
+        - --max-num-seqs
+        - "64"
+        - --gpu-memory-utilization
+        - "0.90"
+        - --enable-scale-out
+      # THE ENGINE HOLDS ITS CONNECTIONS AS LONG AS THE ROUTER HOLDS THEM. vLLM closes an idle
+      # HTTP connection after five seconds, and the router pools its upstream connections for far
+      # longer, so a request can be written to a connection the engine has already closed, and the
+      # router answers that request with a refusal the client sees as a failed request. The
+      # engine's keep-alive is raised to match the pool that holds the connection.
+      env:
+        - name: VLLM_HTTP_TIMEOUT_KEEP_ALIVE
+          value: "3600"

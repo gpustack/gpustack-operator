@@ -17,6 +17,7 @@ Measure and compare the four `ModelDeployment` serving topologies on a real mult
 - **Scenario 2 (`cases/case-2-prefill-decode.sh`)** — [Prefill and Decode](../../../docs/walkthroughs/model-deployment/prefill-decode.md) ([benchmark](../../../docs/modules/model-deployment/prefill-decode-benchmark.md)): 2-arm comparison (`Aggregated` 3 × `Server(TP=2)` vs `P/D` 1 × `Prefill(TP=2)` + 2 × `Decode(TP=2)`) on a 6-GPU budget with `Qwen/Qwen3-32B`.
 - **Scenario 3 (`cases/case-3-elastic-ep.sh`)** — [Elastic EP](../../../docs/walkthroughs/model-deployment/elastic-ep.md) ([benchmark](../../../docs/modules/model-deployment/elastic-ep-benchmark.md)): 3-state online horizontal resize (`elasticEp.width: 2 -> 4`, 4 GPUs → 8 GPUs) under live load with `deepseek-ai/DeepSeek-V2-Lite-Chat`.
 - **Scenario 4 (`cases/case-4-external-dp.sh`)** — [External DP](../../../docs/walkthroughs/model-deployment/external-dp.md) ([benchmark](../../../docs/modules/model-deployment/external-dp-benchmark.md)): 2-arm comparison (`Wide TP=8` vs `External DP=4 × TP=2 + EP`) on an 8-GPU budget with `deepseek-ai/DeepSeek-V2-Lite-Chat`.
+- **Scenario 5 (`cases/case-5-autoscaling.sh`)** — [Autoscaling](../../../docs/modules/model-deployment/scaling.md): 5 arms over 4 algorithms (`Proportional`, `TokenThroughput`, `Predictive`) on 4 topologies, in two waves over 8 GPUs, each arm measured through a 4-phase load wave (baseline, ramp, sustain, cooldown) with a 2s sampler recording the replica count, the recommendation and the retirement that carried the count down. The admission case (`case-128.sh`) runs once before wave 1, on a cluster with nothing else on it, because it builds deployments of its own that ask for up to six GPUs; wave 1 then runs two 4-GPU slots side by side (vLLM P/D and SGLang P/D), and wave 2 runs a 6-GPU slot on the vLLM E/P/D triple beside a 2-GPU slot that runs the live-traffic E2E case (`case-129.sh`) against a single server.
 
 ## Orchestration & Hard Rules
 
@@ -41,7 +42,9 @@ Read [`orchestration.md`](../_e2e-lib/references/orchestration.md) and [`cluster
 - `scripts/stage_counts.sh` — collects per-role `POST /v1/chat/completions` access counts, `POST /v1/chat/completions/render` counts, and router access/metric series.
 - `scripts/make_doc_tables.py` — formats raw JSON cell outputs into Markdown tables for the benchmark guides under `docs/modules/model-deployment/`.
 - `manifests/` — declarative `ModelArtifact`, `ModelStore`, `InstanceType`, and `ModelDeployment` manifests for all 4 scenarios.
-- `cases/case-{1-epd,2-prefill-decode,3-elastic-ep,4-external-dp}.sh` — self-contained scenario runners.
+- `manifests/autoscaling-*.yaml` — the `ModelDeployment` manifests of Scenario 5, one per topology it measures: `autoscaling-vllm-pd.yaml`, `autoscaling-vllm-pd-b.yaml` (the same pair under a second name, so two slots never share a deployment), `autoscaling-sglang-pd.yaml`, `autoscaling-vllm-epd.yaml` and `autoscaling-e2e-server.yaml`.
+- `cases/case-{1-epd,2-prefill-decode,3-elastic-ep,4-external-dp,5-autoscaling}.sh` — self-contained scenario runners.
+- `cases/case-5-autoscaling.sh <report-dir> --summary-only` — rebuilds `summary.tsv`, `summary.md` and `comparison.json` from the artifacts a run already left behind, so a report is regenerated without spending the cluster time again. The summary carries one row per arm and phase with the request count, the error count, the TTFT and ITL percentiles, the output token rate, the scale-out lead and the retirement states the arm went through, and the engine's own account of a failed phase when it has one.
 
 ## Cases
 
@@ -51,3 +54,4 @@ Read [`orchestration.md`](../_e2e-lib/references/orchestration.md) and [`cluster
 | 2 | Prefill and Decode | `cases/case-2-prefill-decode.sh` | `3 × Server(TP=2)` vs `1 × Prefill(TP=2) + 2 × Decode(TP=2)` | `Qwen/Qwen3-32B` | 6 |
 | 3 | Elastic EP | `cases/case-3-elastic-ep.sh` | `width=2` (4 GPUs) → live resize → `width=4` (8 GPUs) | `deepseek-ai/DeepSeek-V2-Lite-Chat` | 4 → 8 |
 | 4 | External DP | `cases/case-4-external-dp.sh` | `1 × Server(TP=8)` vs `4 × Server(TP=2, DP=4, EP)` | `deepseek-ai/DeepSeek-V2-Lite-Chat` | 8 |
+| 5 | Autoscaling | `cases/case-5-autoscaling.sh` | `vLLM P/D` (`Proportional`, `TokenThroughput`, `Predictive`) vs `SGLang P/D` (`TokenThroughput`) vs `vLLM E/P/D` (`Predictive`) | `Qwen/Qwen3-8B`, `Qwen/Qwen2.5-VL-7B-Instruct` | 4 + 4, then 6 + 2 |
