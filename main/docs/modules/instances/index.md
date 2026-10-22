@@ -13,7 +13,7 @@ the user enter the workload container.
 
 ## Instance configuration
 
-The [Usage](https://github.com/gpustack/gpustack-operator/blob/25c6524fc31e93cd924f83ce4da57c5ae0243103/README.md#usage) example creates a sliced `Instance`. [Accelerator
+The [Usage](https://github.com/gpustack/gpustack-operator/blob/9233372f1f18e3ceda680bad0309dcf74b54b60a/README.md#usage) example creates a sliced `Instance`. [Accelerator
 Requests](../devices/requests.md#instance-api-requests) explains how
 *`spec.resources`* maps to the accelerator resource families.
 
@@ -81,4 +81,4 @@ another tenant's `Service` through the hosting node's address and node port.
 **See also** — [Heterogeneous Devices](/gpustack-operator/main/docs/modules/devices/index.md) (resource families) ·
 [Model Delivery](/gpustack-operator/main/docs/modules/model-delivery/index.md) (mounting model weights)
 
-**Next** → [Usage](https://github.com/gpustack/gpustack-operator/blob/25c6524fc31e93cd924f83ce4da57c5ae0243103/README.md#usage) — launch a sliced `Instance`.
+**Next** → [Usage](https://github.com/gpustack/gpustack-operator/blob/9233372f1f18e3ceda680bad0309dcf74b54b60a/README.md#usage) — launch a sliced `Instance`.
