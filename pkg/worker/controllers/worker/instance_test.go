@@ -1328,6 +1328,86 @@ func TestInstanceReconciler_RebuildsAdmissionRejectedPod(t *testing.T) {
 	})
 }
 
+func TestInstanceReconciler_ReportsAdmissionFailure(t *testing.T) {
+	const (
+		ns       = "default"
+		name     = "inst"
+		typeName = "active-type"
+
+		admissionFailureMessage = "Pod was rejected: Allocate failed due to no healthy devices present; " +
+			"cannot allocate unhealthy devices nvidia.com/gpu.sliced, which is unexpected"
+	)
+
+	cases := []struct {
+		name        string
+		message     string
+		conditions  []core.PodCondition
+		wantMessage string
+	}{
+		{
+			name:        "reports the admission rejection message without conditions",
+			message:     admissionFailureMessage,
+			wantMessage: admissionFailureMessage,
+		},
+		{
+			name:        "falls back to the admission rejection reason",
+			wantMessage: _PodReasonUnexpectedAdmissionError,
+		},
+		{
+			name:    "preserves admission failure over initialization conditions",
+			message: admissionFailureMessage,
+			conditions: []core.PodCondition{
+				{Type: core.PodScheduled, Status: core.ConditionTrue},
+				{Type: core.PodInitialized, Status: core.ConditionFalse, Reason: "ContainersNotInitialized"},
+			},
+			wantMessage: admissionFailureMessage,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			created := time.Unix(0, 0)
+			inst := newReadyInstance(ns, name, typeName)
+			inst.UID = "instance-uid"
+			inst.CreationTimestamp = meta.NewTime(created)
+			inst.Status.PhaseMessage = "previous phase message"
+			pod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Namespace:         ns,
+					Name:              name,
+					CreationTimestamp: meta.NewTime(created.Add(6 * time.Minute)),
+					OwnerReferences: []meta.OwnerReference{{
+						APIVersion: "worker.gpustack.ai/v1alpha1",
+						Kind:       "Instance",
+						Name:       inst.Name,
+						UID:        inst.UID,
+						Controller: ptr.To(true),
+					}},
+				},
+				Status: core.PodStatus{
+					Phase:      core.PodFailed,
+					Reason:     _PodReasonUnexpectedAdmissionError,
+					Message:    c.message,
+					Conditions: c.conditions,
+				},
+			}
+			it := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: typeName}}
+			cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: typeName}}
+			cli := buildInstanceClient(inst, pod, it, cq)
+
+			_, err := reconcileInstance(t, cli, ns, name)
+			require.NoError(t, err)
+
+			key := ctrlcli.ObjectKey{Namespace: ns, Name: name}
+			require.NoError(t, cli.Get(context.Background(), key, &core.Pod{}))
+			got := &workercore.Instance{}
+			require.NoError(t, cli.Get(context.Background(), key, got))
+			assert.Equal(t, "Failed", got.Status.Phase)
+			assert.Equal(t, c.wantMessage, got.Status.PhaseMessage)
+		})
+	}
+}
+
 // TestPartitionProfileMemoryPercent pins the boundaries of the VRAM-anchored percentage, which two
 // callers now share: the Instance webhook, which defaults the values onto the object, and the
 // ModelDeployment renderer, which derives them at render time.

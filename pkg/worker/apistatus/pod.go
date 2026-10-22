@@ -77,12 +77,22 @@ var podStatusPaths = kubeapistatus.NewSummarizer(
 // GetSummaryOfPod summarizes the given status by pod flow,
 // and returns the phase and phase message.
 //
+// A failed Pod keeps its terminal phase and message, falling back to its reason
+// when the message is empty. Conditions and container waiting states do not override it.
+//
 // When the summarized phase is "Initializing" or "Starting", the container waiting states
 // refine the result: the phase message is replaced with the waiting message of the first
 // waiting container, surfacing the real reason, e.g. an image pull failure, instead of
 // the generic startup hint; and the phase degrades to "NotReady" when the waiting reason
 // indicates an image pull failure, which hardly recovers without user intervention.
 func GetSummaryOfPod(podStatus *core.PodStatus) (phase, phaseMessage string) {
+	if podStatus.Phase == core.PodFailed {
+		phaseMessage = podStatus.Message
+		if phaseMessage == "" {
+			phaseMessage = podStatus.Reason
+		}
+		return string(core.PodFailed), phaseMessage
+	}
 	phase, phaseMessage = podStatusPaths.GetSummary(podStatus)
 	if phase != "Initializing" && phase != "Starting" {
 		return phase, phaseMessage
