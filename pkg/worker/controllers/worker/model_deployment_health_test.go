@@ -9,6 +9,10 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -883,4 +887,628 @@ func TestACondemnedReplicaIsNeverProbed(t *testing.T) {
 		assert.Zero(t, calls)
 		assert.False(t, qualifications[0].Eligible())
 	})
+}
+
+// healthPairDeployment builds a deployment with a Prefill role and a Decode role, each declaring its
+// own data-parallel width, on the engine named.
+//
+// THE WIDTHS ARE DECLARED BECAUSE THEY ARE THE ONLY PLACE THE ENGINE'S DATA-PARALLEL WIDTH IS
+// WRITTEN DOWN, and a probe that guessed them would ask about ranks the engine does not have.
+func healthPairDeployment(engine string, prefillWidth, decodeWidth int) *workercore.ModelDeployment {
+	md := &workercore.ModelDeployment{
+		ObjectMeta: meta.ObjectMeta{Name: "qwen", Namespace: "team-a", UID: "md-uid"},
+		Spec: workercore.ModelDeploymentSpec{
+			Engine: workercore.ModelDeploymentEngine{Name: engine, Image: "engine:latest"},
+			Model:  workercore.ModelDeploymentModel{Name: "Qwen/Qwen3-30B-A3B"},
+			Roles: []workercore.ModelDeploymentRole{
+				{
+					Name: "prefill", Replicas: 1, ReplicaSize: 1, InstanceType: "h20-8x",
+					Kind:      workercore.ModelDeploymentRoleKindPrefill,
+					ExtraArgs: []string{"--dp-size", strconvx.Itoa(prefillWidth)},
+				},
+				{
+					Name: "decode", Replicas: 1, ReplicaSize: 1, InstanceType: "h20-8x",
+					Kind:      workercore.ModelDeploymentRoleKindDecode,
+					ExtraArgs: []string{"--dp-size", strconvx.Itoa(decodeWidth)},
+				},
+			},
+		},
+	}
+
+	return md
+}
+
+// healthPairAddress is the address one member of a pair's group answers at.
+//
+// THE TWO ROLES OF ONE DEPLOYMENT NEVER SHARE AN ADDRESS, because the ordinary fixture derives an
+// address from the ordinal and the member index alone, and two roles of one deployment would then
+// answer at the same one, which is a shape no cluster has.
+func healthPairAddress(role string, ordinal, member int) string {
+	side := 0
+	if role == "decode" {
+		side = 1
+	}
+
+	return "10.0." + strconvx.Itoa(side) + "." + strconvx.Itoa(ordinal) + "." + strconvx.Itoa(1+member)
+}
+
+// healthPairHost is the authority one member of a pair's group is asked at.
+func healthPairHost(role string, ordinal, member int) string {
+	return healthPairAddress(role, ordinal, member) + ":8000"
+}
+
+// healthPairPod is one member of a pair's group, with the prefiller's bootstrap port published on it
+// when the prefiller is the one being built.
+//
+// THE BOOTSTRAP PORT IS PUBLISHED ONLY ON THE PREFILLER, because it is the prefiller that serves the
+// transfer endpoints the decode side has to be told about.
+func healthPairPod(role string, ordinal, member int, ready *bool, uid, bootstrapPort string) core.Pod {
+	pod := healthPod(role, ordinal, member, ready, uid)
+	pod.Status.PodIP = healthPairAddress(role, ordinal, member)
+	if bootstrapPort != "" {
+		pod.Annotations[modelDeploymentGroupForwardPairBootstrapPortAnnotation] = bootstrapPort
+	}
+
+	return pod
+}
+
+// healthPairFetch records every request and answers the directed pair the way the engine does.
+//
+// THE PREFILLERS ARE NAMED RATHER THAN GUESSED, because a request says which side of the pair it
+// is only to the engine: this operator sends the same chat route to both heads.
+type healthPairFetch struct {
+	mutex sync.Mutex
+	// asked records every request, in the order the legs were sent.
+	asked []modelDeploymentGroupForwardPairRequest
+	// prefillerHosts are the authorities the prefillers answer at.
+	prefillHosts map[string]bool
+	// failures maps an authority to the error that authority answers with.
+	failures map[string]error
+}
+
+func (f *healthPairFetch) fetch(
+	_ context.Context, request modelDeploymentGroupForwardPairRequest,
+) ([]byte, error) {
+	f.mutex.Lock()
+	f.asked = append(f.asked, request)
+	f.mutex.Unlock()
+
+	authority := request.URL[strings.Index(request.URL, "://")+3:]
+	if slash := strings.Index(authority, "/"); slash >= 0 {
+		authority = authority[:slash]
+	}
+	if err, failed := f.failures[authority]; failed {
+		return nil, err
+	}
+
+	return probePairAnswer(request.Body, f.prefillHosts[authority]), nil
+}
+
+// healthPairPairs returns the distinct pairs that were asked, each one named by the prefiller it
+// was asked for and the authority it was asked at.
+//
+// THE PAIR IS READ OUT OF THE REQUEST rather than out of the order the requests arrived in,
+// because a pair is two requests and the order of the two legs is not the identity of the pair.
+func healthPairPairs(t *testing.T, fetch *healthPairFetch) []string {
+	t.Helper()
+
+	seen := map[string]bool{}
+	var pairs []string
+	for _, request := range fetch.asked {
+		authority := request.URL[strings.Index(request.URL, "://")+3:]
+		if slash := strings.Index(authority, "/"); slash >= 0 {
+			authority = authority[:slash]
+		}
+		var body struct {
+			BootstrapHost string `json:"bootstrap_host"`
+		}
+		require.NoError(t, json.Unmarshal(request.Body, &body))
+		pair := body.BootstrapHost + "->" + authority
+		if seen[pair] {
+			continue
+		}
+		seen[pair] = true
+		pairs = append(pairs, pair)
+	}
+
+	return pairs
+}
+
+// healthPairQualification finds the qualification of the replica of one role.
+func healthPairQualification(
+	t *testing.T, qualifications []modelDeploymentInstanceQualification, role string,
+) modelDeploymentInstanceQualification {
+	t.Helper()
+
+	for _, q := range qualifications {
+		if q.View.Role == role {
+			return q
+		}
+	}
+	t.Fatalf("no qualification for role %q", role)
+
+	return modelDeploymentInstanceQualification{}
+}
+
+// TestGroupQualificationAsksTheDirectedPair is the positive contract of the pair wiring: a Prefill
+// group and a Decode group are observed as one pair, both answers are Verified, and each side keeps
+// the generation of its own group.
+func TestGroupQualificationAsksTheDirectedPair(t *testing.T) {
+	md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+	pods := stampHealthGroupTotals(md, []core.Pod{
+		healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+		healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", ""),
+	})
+	fetch := &healthPairFetch{prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true}}
+
+	qualifications := qualifyModelDeploymentInstances(
+		context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+	)
+
+	require.Len(t, qualifications, 2)
+	for _, q := range qualifications {
+		assert.Equal(t, modelDeploymentGroupForwardVerified, q.GroupForward.State,
+			"%s answered the pair", q.View.Role)
+		assert.True(t, q.Eligible(), "%s qualifies on a verified pair", q.View.Role)
+		assert.Equal(t, modelDeploymentLegVerified,
+			q.Leg(modelDeploymentLegMembersReady).Verdict,
+			"%s keeps its own readiness", q.View.Role)
+	}
+	assert.Len(t, fetch.asked, 2, "one rank pair is two requests")
+}
+
+// TestGroupQualificationNeverReadsNotApplicableForAPair pins the difference between a pair and an
+// ordinary group: a Prefill or a Decode replica is served by a pair whatever its member count is, so
+// it never reads NotApplicable, which is the answer for a group with no cross-member path at all.
+func TestGroupQualificationNeverReadsNotApplicableForAPair(t *testing.T) {
+	md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+	pods := stampHealthGroupTotals(md, []core.Pod{
+		healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+		healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", ""),
+	})
+	fetch := &healthPairFetch{prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true}}
+
+	qualifications := qualifyModelDeploymentInstances(
+		context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+	)
+
+	for _, q := range qualifications {
+		assert.NotEqual(t, modelDeploymentGroupForwardNotApplicable, q.GroupForward.State,
+			"%s is served by a pair, so there is no cross-member path of its own to not apply",
+			q.View.Role)
+	}
+}
+
+// TestGroupQualificationAggregatesPartnersIndependently is the any-success rule, read as behavior
+// rather than as a call count: a replica is Verified when at least one of its ready partners answers,
+// a later unsuccessful partner never displaces that answer, and the partner's own fault never
+// reaches the other side's cheap legs.
+func TestGroupQualificationAggregatesPartnersIndependently(t *testing.T) {
+	testCases := []struct {
+		name string
+		// failing names the authorities that answer with an error.
+		failing map[string]bool
+		// wantVerified names the replicas that end Verified, by role and ordinal.
+		wantVerified map[string]bool
+	}{
+		{
+			name: "the first decode fails and the second one answers",
+			failing: map[string]bool{
+				healthPairHost("decode", 0, 0): true,
+			},
+			wantVerified: map[string]bool{
+				"prefill/0": true, "prefill/1": true, "decode/1": true,
+			},
+		},
+		{
+			name: "the first prefiller fails and the second one answers",
+			failing: map[string]bool{
+				healthPairHost("prefill", 0, 0): true,
+			},
+			wantVerified: map[string]bool{
+				"prefill/1": true, "decode/0": true, "decode/1": true,
+			},
+		},
+		{
+			name: "every partner fails",
+			failing: map[string]bool{
+				healthPairHost("prefill", 0, 0): true,
+				healthPairHost("prefill", 1, 0): true,
+				healthPairHost("decode", 0, 0):  true,
+				healthPairHost("decode", 1, 0):  true,
+			},
+			wantVerified: map[string]bool{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+			md.Spec.Roles[0].Replicas = 2
+			md.Spec.Roles[1].Replicas = 2
+			pods := stampHealthGroupTotals(md, []core.Pod{
+				healthPairPod("prefill", 0, 0, healthBool(true), "uid-p00", "8998"),
+				healthPairPod("prefill", 1, 0, healthBool(true), "uid-p10", "8998"),
+				healthPairPod("decode", 0, 0, healthBool(true), "uid-d00", ""),
+				healthPairPod("decode", 1, 0, healthBool(true), "uid-d10", ""),
+			})
+			fetch := &healthPairFetch{
+				prefillHosts: map[string]bool{
+					healthPairHost("prefill", 0, 0): true,
+					healthPairHost("prefill", 1, 0): true,
+				},
+				failures: map[string]error{},
+			}
+			for authority := range tc.failing {
+				fetch.failures[authority] = errors.New("no route to host")
+			}
+
+			qualifications := qualifyModelDeploymentInstances(
+				context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+			)
+
+			require.Len(t, qualifications, 4)
+			for _, q := range qualifications {
+				name := q.View.Role + "/" + strconvx.Itoa(q.View.Ordinal)
+				want := tc.wantVerified[name]
+				state := modelDeploymentGroupForwardVerified
+				if !want {
+					state = modelDeploymentGroupForwardUnknown
+				}
+				assert.Equal(t, state, q.GroupForward.State,
+					"%s ends %s", name, state)
+				assert.Equal(t, modelDeploymentLegVerified,
+					q.Leg(modelDeploymentLegMembersReady).Verdict,
+					"%s keeps its own readiness whatever its partner did", name)
+				assert.Equal(t, modelDeploymentLegVerified,
+					q.Leg(modelDeploymentLegMemberSetComplete).Verdict,
+					"%s keeps its own completeness whatever its partner did", name)
+			}
+
+			pairs := healthPairPairs(t, fetch)
+			assert.Len(t, pairs, len(pairs), "every pair is asked at most once")
+			seen := map[string]bool{}
+			for _, pair := range pairs {
+				assert.False(t, seen[pair], "the pair %s is asked at most once", pair)
+				seen[pair] = true
+			}
+		})
+	}
+}
+
+// TestGroupQualificationHoldsAPairThatCouldNotBeAnswered is the fail-closed contract of the pair
+// wiring: a pair that could not be observed holds, and a hold is not a revocation.
+func TestGroupQualificationHoldsAPairThatCouldNotBeAnswered(t *testing.T) {
+	md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+	pods := stampHealthGroupTotals(md, []core.Pod{
+		healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+		healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", ""),
+	})
+	fetch := &healthPairFetch{
+		prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true},
+		failures: map[string]error{
+			healthPairHost("decode", 0, 0): errors.New("no route to host"),
+		},
+	}
+
+	qualifications := qualifyModelDeploymentInstances(
+		context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+	)
+
+	require.Len(t, qualifications, 2)
+	for _, q := range qualifications {
+		assert.Equal(t, modelDeploymentGroupForwardUnknown, q.GroupForward.State,
+			"%s holds a pair that could not be observed", q.View.Role)
+		assert.False(t, q.HasFailure(),
+			"%s holds rather than revokes: a pair that could not be read blames neither side",
+			q.View.Role)
+		assert.False(t, q.Eligible(), "%s is not eligible", q.View.Role)
+	}
+}
+
+// TestGroupQualificationHoldsWhenNoReadyPartnerIsAvailable covers the three ways a partner can be
+// absent, and pins that none of them reaches the ready side's own cheap legs.
+func TestGroupQualificationHoldsWhenNoReadyPartnerIsAvailable(t *testing.T) {
+	testCases := []struct {
+		name string
+		// pods builds the live members of the deployment.
+		pods func(md *workercore.ModelDeployment) []core.Pod
+		// wantPartnerLeg pins the partner's own completeness verdict.
+		wantPartnerComplete modelDeploymentLegVerdict
+	}{
+		{
+			name: "the opposite role has no pods at all",
+			pods: func(md *workercore.ModelDeployment) []core.Pod {
+				return []core.Pod{
+					healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+				}
+			},
+		},
+		{
+			name: "the opposite group is short of a member",
+			pods: func(md *workercore.ModelDeployment) []core.Pod {
+				md.Spec.Roles[1].ReplicaSize = 2
+
+				return []core.Pod{
+					healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+					healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", ""),
+				}
+			},
+			wantPartnerComplete: modelDeploymentLegFailed,
+		},
+		{
+			name: "the opposite member is not ready",
+			pods: func(md *workercore.ModelDeployment) []core.Pod {
+				return []core.Pod{
+					healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+					healthPairPod("decode", 0, 0, healthBool(false), "uid-d0", ""),
+				}
+			},
+			wantPartnerComplete: modelDeploymentLegVerified,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+			pods := stampHealthGroupTotals(md, tc.pods(md))
+			fetch := &healthPairFetch{
+				prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true},
+			}
+
+			qualifications := qualifyModelDeploymentInstances(
+				context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+			)
+
+			require.NotEmpty(t, qualifications)
+			prefill := healthPairQualification(t, qualifications, "prefill")
+			assert.Equal(t, modelDeploymentGroupForwardUnknown, prefill.GroupForward.State,
+				"the prefiller holds: no ready partner could complete the pair")
+			assert.Equal(t, modelDeploymentLegVerified,
+				prefill.Leg(modelDeploymentLegMembersReady).Verdict,
+				"the prefiller keeps its own readiness")
+			assert.Equal(t, modelDeploymentLegVerified,
+				prefill.Leg(modelDeploymentLegMemberSetComplete).Verdict,
+				"the prefiller keeps its own completeness")
+			assert.Empty(t, fetch.asked, "no partner means no request")
+
+			if tc.wantPartnerComplete != modelDeploymentLegVerified {
+				decode := healthPairQualification(t, qualifications, "decode")
+				assert.Equal(t, tc.wantPartnerComplete,
+					decode.Leg(modelDeploymentLegMemberSetComplete).Verdict,
+					"the partner's own shortfall is the partner's own leg")
+			}
+		})
+	}
+}
+
+// TestGroupQualificationHoldsAPairWhoseMembersAreNotReady pins that a replica which is not all
+// Ready=True and complete is never asked about on the network.
+func TestGroupQualificationHoldsAPairWhoseMembersAreNotReady(t *testing.T) {
+	md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+	pods := stampHealthGroupTotals(md, []core.Pod{
+		healthPairPod("prefill", 0, 0, healthBool(false), "uid-p0", "8998"),
+		healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", ""),
+	})
+	fetch := &healthPairFetch{
+		prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true},
+	}
+
+	qualifications := qualifyModelDeploymentInstances(
+		context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+	)
+
+	require.Len(t, qualifications, 2)
+	for _, q := range qualifications {
+		assert.Equal(t, modelDeploymentGroupForwardUnknown, q.GroupForward.State,
+			"%s holds: its own members are not ready", q.View.Role)
+	}
+	assert.Empty(t, fetch.asked, "a replica that is not ready is never asked about")
+}
+
+// TestGroupQualificationIsUnsupportedOnAnEngineWithNoPairObservation pins the standing capability
+// gap: an engine this operator has no verified pair observation for is Unsupported, and nothing is
+// asked of it.
+func TestGroupQualificationIsUnsupportedOnAnEngineWithNoPairObservation(t *testing.T) {
+	md := healthPairDeployment("TensorRT", 1, 1)
+	pods := stampHealthGroupTotals(md, []core.Pod{
+		healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+		healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", ""),
+	})
+	fetch := &healthPairFetch{
+		prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true},
+	}
+
+	qualifications := qualifyModelDeploymentInstances(
+		context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+	)
+
+	require.Len(t, qualifications, 2)
+	for _, q := range qualifications {
+		assert.Equal(t, modelDeploymentGroupForwardUnsupported, q.GroupForward.State,
+			"%s is unsupported on an engine with no pair observation", q.View.Role)
+	}
+	assert.Empty(t, fetch.asked, "an unsupported shape is never asked about")
+}
+
+// TestGroupQualificationIsUnsupportedWithoutAPairTransport pins the unwired capability: a caller
+// that hands over no pair transport gets no observation of a pair at all, which is Unsupported
+// rather than a question this operator cannot answer.
+func TestGroupQualificationIsUnsupportedWithoutAPairTransport(t *testing.T) {
+	md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+	pods := stampHealthGroupTotals(md, []core.Pod{
+		healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+		healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", ""),
+	})
+
+	qualifications := qualifyModelDeploymentInstances(
+		context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch,
+	)
+
+	require.Len(t, qualifications, 2)
+	for _, q := range qualifications {
+		assert.Equal(t, modelDeploymentGroupForwardUnsupported, q.GroupForward.State,
+			"%s has no observation of a pair without a transport", q.View.Role)
+		assert.Contains(t, q.GroupForward.Reason, "transport",
+			"the reason names the unwired capability")
+	}
+}
+
+// TestGroupQualificationIsUnsupportedOnARoleThatTookItsCommandLine pins that a role which took
+// over its command line serves a route this operator does not know, and that neither side of the
+// pair may be verified through it.
+func TestGroupQualificationIsUnsupportedOnARoleThatTookItsCommandLine(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// commandRole names the role that took over its command line.
+		commandRole string
+	}{
+		{name: "the prefiller took its command line", commandRole: "prefill"},
+		{name: "the decoder took its command line", commandRole: "decode"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+			for i := range md.Spec.Roles {
+				if md.Spec.Roles[i].Name == tc.commandRole {
+					md.Spec.Roles[i].Command = []string{"python3", "-m", "custom"}
+				}
+			}
+			pods := stampHealthGroupTotals(md, []core.Pod{
+				healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+				healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", ""),
+			})
+			fetch := &healthPairFetch{
+				prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true},
+			}
+
+			qualifications := qualifyModelDeploymentInstances(
+				context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+			)
+
+			require.Len(t, qualifications, 2)
+			for _, q := range qualifications {
+				assert.Equal(t, modelDeploymentGroupForwardUnsupported, q.GroupForward.State,
+					"%s is unsupported: a role whose route this operator does not know cannot be "+
+						"paired with anything", q.View.Role)
+			}
+			assert.Empty(t, fetch.asked, "an unsupported shape is never asked about")
+		})
+	}
+}
+
+// TestGroupQualificationIsUnsupportedOnAVLLMPairWithoutTheRoutingProxy pins the one known vLLM gap:
+// the prefiller's engine id is held in the prefiller's own transfer registry, which this operator
+// does not read, so a vLLM pair that no routing proxy drives cannot be observed. The answer is the
+// same with and without a partner Pod, and nothing is asked either way.
+func TestGroupQualificationIsUnsupportedOnAVLLMPairWithoutTheRoutingProxy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// withPartner says whether the decode group has a member at all.
+		withPartner bool
+	}{
+		{name: "with a decode group to pair with", withPartner: true},
+		{name: "with no decode group to pair with", withPartner: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := healthPairDeployment(workercore.ModelDeploymentEngineVLLM, 1, 1)
+			pods := []core.Pod{
+				healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+			}
+			if tc.withPartner {
+				pods = append(pods, healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", ""))
+			}
+			pods = stampHealthGroupTotals(md, pods)
+			fetch := &healthPairFetch{
+				prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true},
+			}
+
+			qualifications := qualifyModelDeploymentInstances(
+				context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+			)
+
+			require.NotEmpty(t, qualifications)
+			for _, q := range qualifications {
+				assert.Equal(t, modelDeploymentGroupForwardUnsupported, q.GroupForward.State,
+					"%s is unsupported: the prefiller's engine id is in the prefiller's own registry",
+					q.View.Role)
+				assert.Equal(t, modelDeploymentLegVerified,
+					q.Leg(modelDeploymentLegMembersReady).Verdict,
+					"%s keeps its own readiness whatever the configuration says", q.View.Role)
+			}
+			assert.Empty(t, fetch.asked, "an unsupported shape is never asked about")
+		})
+	}
+}
+
+// TestGroupQualificationRetainsTheWinningAttempt pins the evidence of a verified pair: the attempt
+// that verified the replica is retained with its shape and its request identifiers, so a reader can
+// tell a proxy-shape answer from a rank-covering one without re-deriving it.
+func TestGroupQualificationRetainsTheWinningAttempt(t *testing.T) {
+	md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+	pods := stampHealthGroupTotals(md, []core.Pod{
+		healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+		healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", ""),
+	})
+	fetch := &healthPairFetch{
+		prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true},
+	}
+
+	qualifications := qualifyModelDeploymentInstances(
+		context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+	)
+
+	for _, q := range qualifications {
+		require.NotNil(t, q.PairAttempt,
+			"%s keeps the attempt that verified it", q.View.Role)
+		assert.Equal(t, modelDeploymentGroupForwardPairShapeHeadToHead, q.PairAttempt.Shape,
+			"%s keeps the shape the attempt took", q.View.Role)
+		assert.NotEmpty(t, q.PairAttempt.RequestIDs,
+			"%s keeps the requests the answer was bound to", q.View.Role)
+		assert.Equal(t, q.Generation, q.GroupForward.Generation,
+			"%s carries the generation of the group the attempt bound", q.View.Role)
+	}
+}
+
+// TestGroupQualificationStatesTheGroup is the table of the group states, each with the legs that
+// produce it and the reason it carries.
+func TestGroupQualificationStatesTheGroup(t *testing.T) {
+	md := healthDeployment(1)
+	ready := healthPod("server", 0, 0, healthBool(true), "uid-a")
+	held := healthPod("server", 0, 0, nil, "uid-a")
+	unready := healthPod("server", 0, 0, healthBool(false), "uid-a")
+
+	qualified := qualifyModelDeploymentInstances(
+		context.Background(), md, []core.Pod{ready}, modelDeploymentPendingReplacement{}, boundProbeFetch,
+	)
+	require.Len(t, qualified, 1)
+	assert.Equal(t, modelDeploymentGroupStateEligible, qualified[0].GroupState(),
+		"a complete ready group qualifies")
+	assert.NotEmpty(t, qualified[0].Reason(), "an eligible group still says why")
+
+	starting := qualifyModelDeploymentInstances(
+		context.Background(), md, []core.Pod{held}, modelDeploymentPendingReplacement{}, boundProbeFetch,
+	)
+	require.Len(t, starting, 1)
+	assert.Equal(t, modelDeploymentGroupStateAwaitingReady, starting[0].GroupState(),
+		"a group whose members have not reported yet is awaiting its members")
+	assert.NotEmpty(t, starting[0].Reason(), "a held group names the leg that holds it")
+
+	revoked := qualifyModelDeploymentInstances(
+		context.Background(), md, []core.Pod{unready}, modelDeploymentPendingReplacement{}, boundProbeFetch,
+	)
+	require.Len(t, revoked, 1)
+	assert.Equal(t, modelDeploymentGroupStateWithdrawn, revoked[0].GroupState(),
+		"a member that reports not ready withdraws the group")
+	assert.NotEmpty(t, revoked[0].Reason(), "a withdrawn group names the fault")
+
+	unsupported := qualifyModelDeploymentInstances(
+		context.Background(), healthPairDeployment("TensorRT", 1, 1),
+		stampHealthGroupTotals(healthPairDeployment("TensorRT", 1, 1), []core.Pod{
+			healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+		}),
+		modelDeploymentPendingReplacement{}, boundProbeFetch,
+	)
+	require.Len(t, unsupported, 1)
+	assert.Equal(t, modelDeploymentGroupStateUnsupported, unsupported[0].GroupState(),
+		"a shape no observation exists for is unsupported")
 }

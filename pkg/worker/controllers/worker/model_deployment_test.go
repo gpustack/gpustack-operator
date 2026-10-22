@@ -2865,3 +2865,175 @@ func TestModelDeploymentReconciler_MultiRenderVersionCoexistence(t *testing.T) {
 			"explicit spec change replaces replicas from every render-version cohort")
 	}
 }
+
+// setEndpointEligibilityPodsReadinessAt writes one readiness answer on the member at one index of
+// every replica, so a case can place exactly one member of a group in one state.
+//
+// AN UNKNOWN ANSWER IS WRITTEN AS ONE rather than as an absent condition, because Kubernetes writes
+// PodReady=Unknown and the two are different facts about the cluster.
+func setEndpointEligibilityPodsReadinessAt(
+	t *testing.T, cli ctrlcli.Client, member string, status core.ConditionStatus,
+) {
+	t.Helper()
+
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		if pod.Labels[modelDeploymentMemberIndexLabel] != member {
+			continue
+		}
+		pod.Status.Conditions = []core.PodCondition{{Type: core.PodReady, Status: status}}
+		require.NoError(t, cli.Status().Update(context.Background(), pod))
+	}
+}
+
+// removeEndpointEligibilityPodsMemberAt deletes the member at one index of every replica, so a case
+// can leave a group short of a member.
+func removeEndpointEligibilityPodsMemberAt(t *testing.T, cli ctrlcli.Client, member string) {
+	t.Helper()
+
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		if pod.Labels[modelDeploymentMemberIndexLabel] != member {
+			continue
+		}
+		require.NoError(t, cli.Delete(context.Background(), pod))
+	}
+}
+
+// TestModelDeploymentReconciler_AnUnsafeMemberWithdrawsTheWholeGroup is the fail-closed member
+// result, read through the reconciler.
+//
+// A GROUP WHOSE MEMBER IS NOT Ready=True IS UNSAFE, and an unsafe group is withdrawn: the key goes
+// off every endpoint of the group, the healthy sibling included, whether the group was activated
+// before or never was. The cases are the three ways a member can stop being safe: it reports
+// Unknown, it reports nothing at all, and it is gone.
+func TestModelDeploymentReconciler_AnUnsafeMemberWithdrawsTheWholeGroup(t *testing.T) {
+	testCases := []struct {
+		name string
+		// replicaSize is the size of the replica under test.
+		replicaSize int32
+		// unsafe places one member of the group in an unsafe state.
+		unsafe func(t *testing.T, cli ctrlcli.Client)
+	}{
+		{
+			name:        "a sibling's readiness is unknown",
+			replicaSize: 2,
+			unsafe: func(t *testing.T, cli ctrlcli.Client) {
+				setEndpointEligibilityPodsReadinessAt(t, cli, "1", core.ConditionUnknown)
+			},
+		},
+		{
+			name:        "a sibling reports nothing at all",
+			replicaSize: 2,
+			unsafe: func(t *testing.T, cli ctrlcli.Client) {
+				for _, pod := range endpointEligibilityPods(t, cli) {
+					if pod.Labels[modelDeploymentMemberIndexLabel] != "1" {
+						continue
+					}
+					pod.Status.Conditions = nil
+					require.NoError(t, cli.Status().Update(context.Background(), pod))
+				}
+			},
+		},
+		{
+			name:        "a sibling is missing",
+			replicaSize: 2,
+			unsafe: func(t *testing.T, cli ctrlcli.Client) {
+				removeEndpointEligibilityPodsMemberAt(t, cli, "1")
+			},
+		},
+		{
+			name:        "a single member replica's member goes unknown",
+			replicaSize: 1,
+			unsafe: func(t *testing.T, cli ctrlcli.Client) {
+				setEndpointEligibilityPodsReadinessAt(t, cli, "0", core.ConditionUnknown)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Replicas = 1
+				md.Spec.Roles[0].ReplicaSize = tc.replicaSize
+			})
+			cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+			endpointEligibilityTestSeed(t, cli, md)
+			setEndpointEligibilityPodsReady(t, cli, true)
+			// The key is put on by hand, because otherwise there would be nothing to withdraw and
+			// the case would pass for the wrong reason.
+			setEndpointEligibilityLabelOnPods(t, cli, true)
+
+			tc.unsafe(t, cli)
+
+			before := endpointEligibilityPods(t, cli)
+			require.NotEmpty(t, before)
+
+			_, err := reconcileModelDeployment(t, cli)
+			require.NoError(t, err)
+
+			// EVERY ENDPOINT OF THE GROUP THAT SURVIVED LOSES THE KEY. A GROUP LEFT SHORT OF A
+			// MEMBER IS TAKEN AWAY WHOLESALE BY THE REPLICA CONTROLLER, so a member of such a
+			// group may not be there at all to check, and that is the withdrawal in its strongest
+			// form.
+			for _, pod := range endpointEligibilityPods(t, cli) {
+				assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible,
+					"%s lost the key: a group whose member is not Ready=True is unsafe, and an "+
+						"unsafe group is withdrawn whatever else is true of it", pod.Name)
+			}
+		})
+	}
+}
+
+// TestModelDeploymentReconciler_RecoveryRestoresTheGroupAfterAFreshProbe is the recovery half of the
+// qualification: a group that was held is restored by a fresh observation, and no healthy engine is
+// restarted to make that happen.
+func TestModelDeploymentReconciler_RecoveryRestoresTheGroupAfterAFreshProbe(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	// The members are given an address, because a member with no address is a member the
+	// observation cannot be asked at, and the point of the case is the observation.
+	for i, pod := range endpointEligibilityPods(t, cli) {
+		pod.Status.PodIP = "10.0.0." + strconv.Itoa(1+i)
+		require.NoError(t, cli.Status().Update(context.Background(), pod))
+	}
+
+	// The first pass cannot observe the group, so it is held and no member is selectable.
+	_, err := reconcileModelDeploymentWith(t, &ModelDeploymentReconciler{
+		Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
+		groupForwardFetch: func(context.Context, string, []byte) ([]byte, error) {
+			return nil, errors.New("the engine did not answer")
+		},
+	})
+	require.NoError(t, err)
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible,
+			"%s is not selectable while the group is held", pod.Name)
+	}
+
+	before := map[string]types.UID{}
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		before[pod.Name] = pod.UID
+	}
+
+	// The second pass observes the group and restores it.
+	_, err = reconcileModelDeploymentActivated(t, cli)
+	require.NoError(t, err)
+
+	members := endpointEligibilityPods(t, cli)
+	require.Len(t, members, 2)
+	// A REPLICA OF TWO MEMBERS IS LEADER-SERVED, so one member carries the key and the follower
+	// does not. The group's being restored is what the leader's key says.
+	leaders := 0
+	for _, pod := range members {
+		if pod.Labels[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue {
+			leaders++
+		}
+		assert.Equal(t, before[pod.Name], pod.UID,
+			"%s was not restarted to make the recovery happen", pod.Name)
+	}
+	assert.Equal(t, 1, leaders, "the restored group answers on one member")
+}

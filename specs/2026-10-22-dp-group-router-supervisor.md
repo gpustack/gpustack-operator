@@ -340,7 +340,7 @@ decision.
       Acceptance: The probe has an explicit result for ordinary groups and for Prefill/Decode groups. A supported P/D probe binds the response to an operator-generated request ID and validates the paired transfer path. An unsupported shape returns a typed fail-closed reason without claiming health.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker -run 'GroupForwardProbe|PD.*Probe'`
 
-- [ ] **T2 · Add the group qualification state machine**
+- [x] **T2 · Add the group qualification state machine**
       Blocked by: T1
       Owns: `pkg/worker/controllers/worker/model_deployment_health.go`, `pkg/worker/controllers/worker/model_deployment_health_test.go`, `pkg/worker/controllers/worker/model_deployment.go`, `pkg/worker/controllers/worker/model_deployment_test.go`
       Gate: review

@@ -92,6 +92,11 @@ type ModelDeploymentReconciler struct {
 	// answer leaves the group exactly as held as it was before.
 	groupForwardFetch modelDeploymentGroupForwardFetch
 
+	// groupForwardPairFetch asks a prefill group and a decode group whether the transfer path
+	// between them carries a request. A nil fetch means the production transport, which is wired:
+	// the qualifier is what answers Unsupported when a caller hands it no pair transport at all.
+	groupForwardPairFetch modelDeploymentGroupForwardPairFetch
+
 	// drainReader reads one member's engine in-flight activity for the retirement protocol. A nil
 	// reader is the production transport, which is a refusal until a collector lands behind the
 	// seam: the protocol then holds at Draining and deletes nothing, which is the safe direction
@@ -1390,9 +1395,13 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	if groupForwardFetch == nil {
 		groupForwardFetch = defaultGroupForwardFetch
 	}
+	groupForwardPairFetch := r.groupForwardPairFetch
+	if groupForwardPairFetch == nil {
+		groupForwardPairFetch = defaultGroupForwardPairFetch
+	}
 	qualifications := qualifyModelDeploymentInstances(
 		ctx, md, actual, modelDeploymentPendingReplacement{ordinals: replacedByRole},
-		groupForwardFetch,
+		groupForwardFetch, groupForwardPairFetch,
 	)
 	qualificationByMember := modelDeploymentQualificationsByMember(qualifications)
 
@@ -1725,6 +1734,18 @@ func modelDeploymentPodEligible(
 		// the pool whatever the group's own leg says. Returning the carried value unconditionally
 		// would leave a NotReady member selectable inside the very replica that is unverifiable.
 		if qualification.HasFailure() {
+			return false
+		}
+		// AN UNSAFE GROUP IS WITHDRAWN TOO, WHETHER OR NOT THIS OPERATOR CAN SAY ANYTHING ABOUT
+		// ITS FORWARD PATH. Ready=True is the only positive answer a member gives, so a group whose
+		// member has not reported ready, or has reported it as anything but ready, is unsafe, and an
+		// unsafe group has no selectable endpoint in it. The member itself is already out by the
+		// readiness check above; this is what takes its healthy sibling out with it.
+		//
+		// WHAT STAYS UNTOUCHED IS THE GROUP WHOSE MEMBERS ARE ALL READY and whose forward path this
+		// operator cannot verify: there the key is left exactly as it was, because revoking on a
+		// signal the predicate never made would be a verdict it did not reach.
+		if !qualification.MembersReady() {
 			return false
 		}
 		// Nothing to revoke on, and nothing may be restored. The key is left exactly as it was,
