@@ -69,6 +69,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.ModelDeploymentMetricMissing{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1_ModelDeploymentMetricMissing(ref),
 		v1.ModelDeploymentMetricWindow{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_ModelDeploymentMetricWindow(ref),
 		v1.ModelDeploymentMetrics{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_ModelDeploymentMetrics(ref),
+		v1.ModelDeploymentScaler{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1_ModelDeploymentScaler(ref),
+		v1.ModelDeploymentScalerList{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1_ModelDeploymentScalerList(ref),
 		v1.ModelPrefetch{}.OpenAPIModelName():                                        schema_gpustack_api_worker_v1_ModelPrefetch(ref),
 		v1.ModelPrefetchList{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1_ModelPrefetchList(ref),
 		v1.ModelStore{}.OpenAPIModelName():                                           schema_gpustack_api_worker_v1_ModelStore(ref),
@@ -202,6 +204,36 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentRouterMetrics{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterMetrics(ref),
 		v1alpha1.ModelDeploymentRouterRoleStatus{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterRoleStatus(ref),
 		v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref),
+		v1alpha1.ModelDeploymentScaler{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentScaler(ref),
+		v1alpha1.ModelDeploymentScalerAlgorithmSpec{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerAlgorithmSpec(ref),
+		v1alpha1.ModelDeploymentScalerBehaviorSpec{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerBehaviorSpec(ref),
+		v1alpha1.ModelDeploymentScalerBinding{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerBinding(ref),
+		v1alpha1.ModelDeploymentScalerBindingStatus{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerBindingStatus(ref),
+		v1alpha1.ModelDeploymentScalerCommitStatus{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCommitStatus(ref),
+		v1alpha1.ModelDeploymentScalerDecision{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerDecision(ref),
+		v1alpha1.ModelDeploymentScalerDemandSample{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerDemandSample(ref),
+		v1alpha1.ModelDeploymentScalerKalmanCovariance{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerKalmanCovariance(ref),
+		v1alpha1.ModelDeploymentScalerList{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerList(ref),
+		v1alpha1.ModelDeploymentScalerPendingCohortStatus{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerPendingCohortStatus(ref),
+		v1alpha1.ModelDeploymentScalerPredictiveSpec{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerPredictiveSpec(ref),
+		v1alpha1.ModelDeploymentScalerPredictorStatus{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerPredictorStatus(ref),
+		v1alpha1.ModelDeploymentScalerProportionalSpec{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerProportionalSpec(ref),
+		v1alpha1.ModelDeploymentScalerRebalanceSpec{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRebalanceSpec(ref),
+		v1alpha1.ModelDeploymentScalerRebalanceStatus{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRebalanceStatus(ref),
+		v1alpha1.ModelDeploymentScalerRoleBounds{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRoleBounds(ref),
+		v1alpha1.ModelDeploymentScalerRoleRatio{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRoleRatio(ref),
+		v1alpha1.ModelDeploymentScalerRoleStatus{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRoleStatus(ref),
+		v1alpha1.ModelDeploymentScalerRoleTarget{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRoleTarget(ref),
+		v1alpha1.ModelDeploymentScalerSamplingSpec{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerSamplingSpec(ref),
+		v1alpha1.ModelDeploymentScalerScaleDownRules{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerScaleDownRules(ref),
+		v1alpha1.ModelDeploymentScalerScaleDownStatus{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerScaleDownStatus(ref),
+		v1alpha1.ModelDeploymentScalerScaleUpRules{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerScaleUpRules(ref),
+		v1alpha1.ModelDeploymentScalerSpec{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerSpec(ref),
+		v1alpha1.ModelDeploymentScalerStabilizationSample{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerStabilizationSample(ref),
+		v1alpha1.ModelDeploymentScalerStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerStatus(ref),
+		v1alpha1.ModelDeploymentScalerStepPolicy{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerStepPolicy(ref),
+		v1alpha1.ModelDeploymentScalerTargetReference{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerTargetReference(ref),
+		v1alpha1.ModelDeploymentScalerTokenThroughputSpec{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerTokenThroughputSpec(ref),
 		v1alpha1.ModelDeploymentServingStatus{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentServingStatus(ref),
 		v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref),
 		v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref),
@@ -3083,6 +3115,103 @@ func schema_gpustack_api_worker_v1_ModelDeploymentMetrics(ref common.ReferenceCa
 		},
 		Dependencies: []string{
 			v1.ModelDeploymentCacheHit{}.OpenAPIModelName(), v1.ModelDeploymentMetricGauge{}.OpenAPIModelName(), v1.ModelDeploymentMetricMissing{}.OpenAPIModelName(), v1.ModelDeploymentMetricWindow{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelDeploymentScaler(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScaler is the v1 view of a metric-driven replica planner.\n\nConfiguration changes proxy to the v1alpha1 resource. The status subresource is served, so the planner's decisions are readable without going through the alpha version.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentScalerSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentScalerStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelDeploymentScalerList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerList holds the list of ModelDeploymentScalers.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelDeploymentScaler{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.ModelDeploymentScaler{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -10681,6 +10810,1654 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref common.
 		},
 		Dependencies: []string{
 			v1alpha1.ModelDeploymentRouterMetrics{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouterRoleStatus{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScaler(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScaler is the schema for a metric-driven replica planner over one ModelDeployment.\n\nIn Shadow mode it observes and records recommendations in status without modifying the target. In Active mode its reconciler commits the planned replica vector and decision annotation onto the target under the single-writer admission fence, and the ModelDeployment reconciler converges the serving replicas to that count.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentScalerSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentScalerStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerAlgorithmSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerAlgorithmSpec names the algorithm and holds its parameters.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"type": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Type is the algorithm that runs.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"proportional": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Proportional holds the parameters of the Proportional algorithm.\n\nIt is required when Type is Proportional and ignored otherwise.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerProportionalSpec{}.OpenAPIModelName()),
+						},
+					},
+					"tokenThroughput": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TokenThroughput holds the parameters of the TokenThroughput algorithm.\n\nIt is required when Type is TokenThroughput and ignored otherwise.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerTokenThroughputSpec{}.OpenAPIModelName()),
+						},
+					},
+					"predictive": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Predictive holds the parameters of the Predictive algorithm.\n\nIt is required when Type is Predictive and ignored otherwise.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerPredictiveSpec{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"type"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerPredictiveSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerProportionalSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerTokenThroughputSpec{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerBehaviorSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerBehaviorSpec tunes how fast a role may move and how long the scaler waits after a failure.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"scaleUp": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ScaleUp tunes how fast a role may grow.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentScalerScaleUpRules{}.OpenAPIModelName()),
+						},
+					},
+					"scaleDown": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ScaleDown tunes how fast a role may shrink and what happens after an aborted retirement.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentScalerScaleDownRules{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerScaleDownRules{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerScaleUpRules{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerBinding(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerBinding is the payload of the binding annotation.\n\nIt is the whole of the single-writer contract: the target names the scaler that owns it and the term that owner writes under, so a later scaler either takes over explicitly or stands down.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"scalerName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ScalerName is the name of the scaler that owns the target.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"scalerUID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ScalerUID is the UID of the scaler that owns the target.\n\nA scaler that was deleted and recreated with the same name carries a different UID, so the target can tell the two apart.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"term": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Term is the binding term the owner writes under.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+				Required: []string{"scalerName", "scalerUID", "term"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerBindingStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerBindingStatus is the binding a scaler holds.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"targetUID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TargetUID is the UID of the bound target.\n\nA target that was deleted and recreated carries a different UID, so the binding tells the two apart.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"targetName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TargetName is the name of the bound target.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"term": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Term is the binding term the scaler writes under.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCommitStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerCommitStatus is the decision the scaler last committed.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"decisionID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DecisionID identifies the decision.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"term": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Term is the binding term the decision was written under.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"vector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Vector is the replica count per role the decision committed.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: 0,
+										Type:    []string{"integer"},
+										Format:  "int32",
+									},
+								},
+							},
+						},
+					},
+					"baselineVector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BaselineVector is the replica count per role the decision started from.\n\nIt is the vector the scaler restores when the decision has to be retracted.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: 0,
+										Type:    []string{"integer"},
+										Format:  "int32",
+									},
+								},
+							},
+						},
+					},
+					"timestamp": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Timestamp is when the decision was committed.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"targetGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TargetGeneration is the generation of the target the decision was computed from.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerDecision(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerDecision is the payload of the decision annotation.\n\nIt records what the scaler last committed, so that a planner which lost its in-memory state rebuilds from the target instead of committing a vector twice.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"decisionID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DecisionID identifies the decision that produced the vector.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"term": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Term is the binding term the decision was written under.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"vector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Vector is the replica count per role the decision committed.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: 0,
+										Type:    []string{"integer"},
+										Format:  "int32",
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"decisionID", "term", "vector"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerDemandSample(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerDemandSample is one observation the predictor has seen.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"timestamp": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Timestamp is when the observation was made.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"tokensPerSecond": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TokensPerSecond is the demand that was observed.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"timestamp", "tokensPerSecond"},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerKalmanCovariance(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerKalmanCovariance is the covariance matrix of a predictor.\n\nIt is a two by two matrix in the order level, trend, so the four entries are the variance of the level, the covariance of the level with the trend, the covariance of the trend with the level, and the variance of the trend.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"p00": {
+						SchemaProps: spec.SchemaProps{
+							Description: "P00 is the variance of the level.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"p01": {
+						SchemaProps: spec.SchemaProps{
+							Description: "P01 is the covariance of the level with the trend.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"p10": {
+						SchemaProps: spec.SchemaProps{
+							Description: "P10 is the covariance of the trend with the level.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"p11": {
+						SchemaProps: spec.SchemaProps{
+							Description: "P11 is the variance of the trend.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerList holds the list of ModelDeploymentScalers.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentScaler{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScaler{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerPendingCohortStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerPendingCohortStatus is the scale-up the scaler is waiting on.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"decisionID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DecisionID identifies the decision that added the cohort.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"term": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Term is the binding term the decision was written under.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"baselineVector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BaselineVector is the replica count per role before the cohort was added.\n\nIt is the vector the scaler restores when the cohort is retracted.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: 0,
+										Type:    []string{"integer"},
+										Format:  "int32",
+									},
+								},
+							},
+						},
+					},
+					"targetVector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TargetVector is the replica count per role the cohort asked for.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: 0,
+										Type:    []string{"integer"},
+										Format:  "int32",
+									},
+								},
+							},
+						},
+					},
+					"startedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StartedAt is when the cohort was committed.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerPredictiveSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerPredictiveSpec holds the parameters of the Predictive algorithm.\n\nIt carries the TokenThroughput parameters as well, because the predictor falls back to the token throughput result while it has not seen enough points yet.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"tokenThroughput": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TokenThroughput holds the parameters the predictor falls back to.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentScalerTokenThroughputSpec{}.OpenAPIModelName()),
+						},
+					},
+					"horizonSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HorizonSeconds is how far ahead the demand is forecast.",
+							Minimum:     ptr.To[float64](30),
+							Maximum:     ptr.To[float64](600),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"prefillTokenCapacityPerReplica": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PrefillTokenCapacityPerReplica is the prompt-token rate one Prefill replica sustains.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"decodeTokenCapacityPerReplica": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DecodeTokenCapacityPerReplica is the generation-token rate one Decode replica sustains.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"serverTokenCapacityPerReplica": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ServerTokenCapacityPerReplica is the token rate one Server replica sustains.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"qLevel": {
+						SchemaProps: spec.SchemaProps{
+							Description: "QLevel is how much the level of the forecast follows each new observation.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"qTrend": {
+						SchemaProps: spec.SchemaProps{
+							Description: "QTrend is how much the trend of the forecast follows each new observation.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"measurementNoise": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MeasurementNoise is how much the forecast trusts each new observation.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"minPoints": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MinPoints is how many observations the predictor needs before it forecasts.\n\nUntil it has them, the algorithm reports that it is warming up and returns the token throughput result.",
+							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](64),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerTokenThroughputSpec{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerPredictorStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerPredictorStatus is the state of the predictor of one role.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the role this predictor belongs to.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"level": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Level is the demand the predictor currently believes in.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"trend": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Trend is how fast the predictor believes the demand is moving.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"covariance": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Covariance is how much the predictor trusts its own estimate.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerKalmanCovariance{}.OpenAPIModelName()),
+						},
+					},
+					"sampleCount": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SampleCount is how many observations the predictor has seen.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"history": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "History is the demand the predictor has seen.\n\nIt is bounded, because the predictor only needs the recent past.",
+							MaxItems:    ptr.To[int64](256),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentScalerDemandSample{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerDemandSample{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerKalmanCovariance{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerProportionalSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerProportionalSpec holds the parameters of the Proportional algorithm.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"metric": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Metric is the signal the algorithm scales on.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"roleTargets": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "RoleTargets is the signal one replica of each role is expected to carry.\n\nEvery role the scaler plans for needs a target, because the algorithm divides what it observed by it to reach a replica count.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentScalerRoleTarget{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"tolerance": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Tolerance is the fraction around the target inside which nothing happens.\n\nA role whose observed load already sits inside the tolerance holds its replica count, so a steady deployment does not move for noise.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"metric"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerRoleTarget{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRebalanceSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerRebalanceSpec tunes what the scaler does when one role cannot grow.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"policy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Policy decides whether another role may give resources back to an exhausted one.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"priority": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Priority orders the roles from the one that may give resources away to the one that may not.\n\nIt only means something under the Priority policy, where a role late in the order is the first one asked to shrink. A role that is not named keeps the place of its own recommendation.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRebalanceStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerRebalanceStatus is the transaction in which one role gives a replica to another.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"receiverRole": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReceiverRole is the role that receives the replica.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"donorRole": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DonorRole is the role that gives the replica.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"donorTargetReplicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DonorTargetReplicas is the replica count the donor is heading for.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"receiverTargetReplicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReceiverTargetReplicas is the replica count the receiver is heading for.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"startedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StartedAt is when the transaction began.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"exhaustionEpisodeGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ExhaustionEpisodeGeneration counts the exhaustion episodes the transaction belongs to.\n\nIt keeps one episode from draining more donors than it should.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"donationAttempted": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DonationAttempted says whether the donor was already asked to give the replica.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Reason says why the transaction is where it is.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRoleBounds(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerRoleBounds are the bounds one role stays inside.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the name of the role on the target.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"minReplicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MinReplicas is the fewest replicas this role may have.",
+							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](1024),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"maxReplicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxReplicas is the most replicas this role may have.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](1024),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"name", "maxReplicas"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRoleRatio(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerRoleRatio is a relationship two roles keep.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"numeratorRole": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NumeratorRole is the role whose replica count is the numerator.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"denominatorRole": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DenominatorRole is the role whose replica count is the denominator.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"target": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Target is the ratio the projection aims at.\n\nIt is the ratio the planner looks for inside the bounds of every other rule, and it is what a coupled pair settles on when nothing else decides.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"min": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Min is the smallest ratio the numerator may hold against the denominator.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"max": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Max is the largest ratio the numerator may hold against the denominator.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"numeratorRole", "denominatorRole"},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRoleStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerRoleStatus is what the scaler saw and recommends for one role.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the role this status belongs to.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"currentReplicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CurrentReplicas is the replica count the target reports for this role.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"readyReplicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReadyReplicas is the replica count of this role that is ready to serve.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"signalState": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SignalState is how much the scaler trusts what it observed for this role.\n\nIt is Fresh when every required signal was read in the last window, Idle when the role was read and had nothing to do, Missing when a required signal was absent and Stale when the window it belongs to has passed.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"promptTokensPerSecond": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PromptTokensPerSecond is the prompt-token rate the scaler observed.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"generationTokensPerSecond": {
+						SchemaProps: spec.SchemaProps{
+							Description: "GenerationTokensPerSecond is the generation-token rate the scaler observed.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"runningRequests": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RunningRequests is the number of requests the role was running.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"waitingRequests": {
+						SchemaProps: spec.SchemaProps{
+							Description: "WaitingRequests is the number of requests the role was waiting for.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"kvCacheUsage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "KVCacheUsage is how much of the key value cache the role was using.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"ttftMilliseconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TTFTMilliseconds is the time to first token the scaler observed.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"itlMilliseconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ITLMilliseconds is the inter-token latency the scaler observed.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"rawRecommendedReplicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RawRecommendedReplicas is the replica count the algorithm asked for, before the bounds and the ratios were applied.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"constrainedReplicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ConstrainedReplicas is the replica count the planner settled on after the bounds and the ratios were applied.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Reason says why the recommendation is what it is.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"lastScaleUpTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LastScaleUpTime is when this role last grew.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"stabilizationHistory": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "StabilizationHistory is the recommendation this role received over the last window.\n\nIt is bounded, and it is what lets the scale-down floor survive a restart.",
+							MaxItems:    ptr.To[int64](256),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentScalerStabilizationSample{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerStabilizationSample{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerRoleTarget(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerRoleTarget is the signal one replica of a role is expected to carry.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the role this target belongs to.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"target": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Target is the signal one replica of this role is expected to carry.\n\nIt is a quantity, so a rate is written as a quantity per second and a count as a plain number.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"name", "target"},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerSamplingSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerSamplingSpec tunes the observation interval and the pending timeout.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"intervalSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "IntervalSeconds is how often the scaler looks at the target.\n\nIt is the floor on how fast the scaler reacts and the floor on how often it writes, so a short interval costs scrape load and a long one costs reaction time.",
+							Minimum:     ptr.To[float64](5),
+							Maximum:     ptr.To[float64](300),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"pendingTimeoutSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PendingTimeoutSeconds is how long a committed scale-up may stay unadmitted before it is retracted.\n\nThe retraction restores the vector the scale-up started from, so a timeout undoes a change rather than leaving a role waiting for resources that never arrive.",
+							Minimum:     ptr.To[float64](60),
+							Maximum:     ptr.To[float64](1200),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerScaleDownRules(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerScaleDownRules tune how fast a role may shrink.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"stabilizationWindowSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StabilizationWindowSeconds is the window the recommendations are remembered over.\n\nThe largest recommendation in that window is the floor a scale-down may go to, so a role that was asked to grow does not shrink again right away.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](1800),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"cooldownAfterAbortSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CooldownAfterAbortSeconds is how long a role is held after an aborted retirement.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](3600),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"decodePostScaleUpGraceSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DecodePostScaleUpGraceSeconds is how long a Decode role is held after it grew.\n\nA Decode role that just grew does not shrink again inside this window, because a pair that oscillates costs more than it saves.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](3600),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"stepPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StepPolicy is a step bound stated in one unit.\n\nIt replaces the default of removing at most one replica per role per pass.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerStepPolicy{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerStepPolicy{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerScaleDownStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerScaleDownStatus is the outcome of the last scale-down.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"role": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Role is the role the scale-down removed a replica from.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"ordinal": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Ordinal is the replica the scale-down removed.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"preScaleDownVector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PreScaleDownVector is the replica count per role before the scale-down.\n\nIt is the vector the scaler restores when the retirement aborts.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: 0,
+										Type:    []string{"integer"},
+										Format:  "int32",
+									},
+								},
+							},
+						},
+					},
+					"outcome": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Outcome is how the scale-down ended.\n\nIt is Committed while the retirement runs and Aborted when the retirement failed and the scaler restored the vector.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"abortedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AbortedAt is when the retirement aborted.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"cooldownUntil": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CooldownUntil is when the role may shrink again.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerScaleUpRules(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerScaleUpRules tune how fast a role may grow.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"stabilizationWindowSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StabilizationWindowSeconds is how long a recommendation is held before it takes effect.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](600),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"maxStepReplicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxStepReplicas is the most replicas one pass may add to a role.\n\nZero leaves the bound unset, so only the percentage bound applies.",
+							Minimum:     ptr.To[float64](0),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"maxStepPercent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxStepPercent is the most percent of the current replica count one pass may add to a role.\n\nZero leaves the bound unset, so only the replica bound applies.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](1000),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"stepPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StepPolicy is a step bound stated in one unit.\n\nIt replaces the two bounds above, so a deployment states its cap once instead of twice.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerStepPolicy{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerStepPolicy{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerSpec defines the desired state of ModelDeploymentScaler.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"targetRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TargetRef names the ModelDeployment this scaler plans for.\n\nThe target is in this namespace. A scaler without a target has nothing to plan for, so the field is required and a name that matches nothing leaves the scaler unbound.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentScalerTargetReference{}.OpenAPIModelName()),
+						},
+					},
+					"mode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Mode decides whether the scaler only observes or also acts.\n\nShadow observes and publishes what it would have done, and changes nothing. Active publishes and the worker reconciler applies the committed vector. Shadow is the default, so a scaler that was just created never moves a target before its owner asked for it.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"suspend": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Suspend stops the scaler without deleting it.\n\nA suspended scaler releases its owned binding and stops planning without being deleted, reporting Suspended on its Bound and Active conditions until resumed.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"sampling": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Sampling tunes how often the scaler looks at the target and how long it waits for a committed scale-up to become admitted.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentScalerSamplingSpec{}.OpenAPIModelName()),
+						},
+					},
+					"roles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Roles are the roles of the target this scaler plans for, with the bounds each one stays inside.\n\nEvery role of the target the scaler plans for needs a bound, and a role the target does not have is refused, so that the planner never reasons about a role that is not there.",
+							MinItems:    ptr.To[int64](1),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentScalerRoleBounds{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"ratios": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"numeratorRole",
+									"denominatorRole",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Ratios are the relationships between roles that a committed vector has to keep.\n\nA ratio bounds the replica count of a numerator role against the replica count of a denominator role, so that a coupled prefill and decode pair does not drift apart. A ratio names roles the scaler plans for, and a ratio that names an unknown role is refused.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentScalerRoleRatio{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"algorithm": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Algorithm says how the scaler turns what it observes into a replica count.\n\nThe algorithm named here is the one that runs, and the parameters of the other algorithms are ignored, so a deployment states one algorithm and one set of parameters.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentScalerAlgorithmSpec{}.OpenAPIModelName()),
+						},
+					},
+					"behavior": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Behavior tunes how fast the scaler may move a role and how long it waits after a failure.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentScalerBehaviorSpec{}.OpenAPIModelName()),
+						},
+					},
+					"rebalance": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Rebalance tunes what the scaler does when one role cannot grow because the cluster is exhausted and another role could give resources back.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentScalerRebalanceSpec{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"targetRef", "roles", "algorithm"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerAlgorithmSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerBehaviorSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerRebalanceSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerRoleBounds{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerRoleRatio{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerSamplingSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerTargetReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerStabilizationSample(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerStabilizationSample is one recommendation a role received.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"timestamp": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Timestamp is when the recommendation was made.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"replicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Replicas is the replica count the recommendation asked for.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"timestamp", "replicas"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerStatus is the observed state of ModelDeploymentScaler.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"observedGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ObservedGeneration is the generation this status was computed from.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"binding": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Binding is the target this scaler is bound to.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerBindingStatus{}.OpenAPIModelName()),
+						},
+					},
+					"roles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Roles is what the scaler saw and what it recommends for each role.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentScalerRoleStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"lastCommit": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LastCommit is the decision the scaler last committed.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerCommitStatus{}.OpenAPIModelName()),
+						},
+					},
+					"pendingCohort": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PendingCohort is the scale-up the scaler committed and is waiting on.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerPendingCohortStatus{}.OpenAPIModelName()),
+						},
+					},
+					"rebalance": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Rebalance is the transaction in which one role gives a replica to another.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerRebalanceStatus{}.OpenAPIModelName()),
+						},
+					},
+					"lastScaleDown": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LastScaleDown is the outcome of the last scale-down the scaler committed.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerScaleDownStatus{}.OpenAPIModelName()),
+						},
+					},
+					"predictors": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Predictors is the state of the predictor of each role.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentScalerPredictorStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions holds the conditions of the scaler.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerBindingStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerCommitStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerPendingCohortStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerPredictorStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerRebalanceStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerRoleStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerScaleDownStatus{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerStepPolicy(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerStepPolicy is a bound on how far one role may move in one pass.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"type": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Type is the unit of Value.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"value": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Value is the bound expressed in the unit Type names.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"type", "value"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerTargetReference(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerTargetReference names the target of a scaler.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the name of the target ModelDeployment in this namespace.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerTokenThroughputSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerTokenThroughputSpec holds the parameters of the TokenThroughput algorithm.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"prefillTargetTokensPerSecond": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PrefillTargetTokensPerSecond is the prompt-token rate one Prefill replica sustains.\n\nIt is the capacity the demand is divided by, so the number of replicas follows from how many prompt tokens per second one replica is expected to serve.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"decodeTargetTokensPerSecond": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DecodeTargetTokensPerSecond is the generation-token rate one Decode replica sustains.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"serverTargetTokensPerSecond": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ServerTargetTokensPerSecond is the token rate one Server replica sustains, over prompt tokens and generation tokens together.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"stableWindowSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StableWindowSeconds is the window the stable recommendation is computed over.\n\nThe stable window is long enough to smooth a burst, so a short spike does not move the replica count.",
+							Minimum:     ptr.To[float64](30),
+							Maximum:     ptr.To[float64](600),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"panicWindowSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PanicWindowSeconds is the window the panic recommendation is computed over.\n\nThe panic window is short, so it reacts to a burst that the stable window smooths away.",
+							Minimum:     ptr.To[float64](10),
+							Maximum:     ptr.To[float64](300),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"panicThreshold": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PanicThreshold is the growth rate over the ready replicas that starts a panic.\n\nA panic holds the replica count up and stops scale-downs until the load settles.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"ttftTargetMilliseconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TTFTTargetMilliseconds is the time to first token the role is expected to keep under.\n\nA role that is observed above this target is a role that needs more replicas, whatever the token counters say.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"itlTargetMilliseconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ITLTargetMilliseconds is the inter-token latency the role is expected to keep under.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
 	}
 }
 

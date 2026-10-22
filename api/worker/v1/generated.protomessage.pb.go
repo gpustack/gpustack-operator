@@ -104,6 +104,10 @@ func (*ModelDeploymentMetricWindow) ProtoMessage() {}
 
 func (*ModelDeploymentMetrics) ProtoMessage() {}
 
+func (*ModelDeploymentScaler) ProtoMessage() {}
+
+func (*ModelDeploymentScalerList) ProtoMessage() {}
+
 func (*ModelPrefetch) ProtoMessage() {}
 
 func (*ModelPrefetchList) ProtoMessage() {}

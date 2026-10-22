@@ -252,6 +252,66 @@ func (*ModelDeploymentRouterRoleStatus) ProtoMessage() {}
 
 func (*ModelDeploymentRouterStatus) ProtoMessage() {}
 
+func (*ModelDeploymentScaler) ProtoMessage() {}
+
+func (*ModelDeploymentScalerAlgorithmSpec) ProtoMessage() {}
+
+func (*ModelDeploymentScalerBehaviorSpec) ProtoMessage() {}
+
+func (*ModelDeploymentScalerBinding) ProtoMessage() {}
+
+func (*ModelDeploymentScalerBindingStatus) ProtoMessage() {}
+
+func (*ModelDeploymentScalerCommitStatus) ProtoMessage() {}
+
+func (*ModelDeploymentScalerDecision) ProtoMessage() {}
+
+func (*ModelDeploymentScalerDemandSample) ProtoMessage() {}
+
+func (*ModelDeploymentScalerKalmanCovariance) ProtoMessage() {}
+
+func (*ModelDeploymentScalerList) ProtoMessage() {}
+
+func (*ModelDeploymentScalerPendingCohortStatus) ProtoMessage() {}
+
+func (*ModelDeploymentScalerPredictiveSpec) ProtoMessage() {}
+
+func (*ModelDeploymentScalerPredictorStatus) ProtoMessage() {}
+
+func (*ModelDeploymentScalerProportionalSpec) ProtoMessage() {}
+
+func (*ModelDeploymentScalerRebalanceSpec) ProtoMessage() {}
+
+func (*ModelDeploymentScalerRebalanceStatus) ProtoMessage() {}
+
+func (*ModelDeploymentScalerRoleBounds) ProtoMessage() {}
+
+func (*ModelDeploymentScalerRoleRatio) ProtoMessage() {}
+
+func (*ModelDeploymentScalerRoleStatus) ProtoMessage() {}
+
+func (*ModelDeploymentScalerRoleTarget) ProtoMessage() {}
+
+func (*ModelDeploymentScalerSamplingSpec) ProtoMessage() {}
+
+func (*ModelDeploymentScalerScaleDownRules) ProtoMessage() {}
+
+func (*ModelDeploymentScalerScaleDownStatus) ProtoMessage() {}
+
+func (*ModelDeploymentScalerScaleUpRules) ProtoMessage() {}
+
+func (*ModelDeploymentScalerSpec) ProtoMessage() {}
+
+func (*ModelDeploymentScalerStabilizationSample) ProtoMessage() {}
+
+func (*ModelDeploymentScalerStatus) ProtoMessage() {}
+
+func (*ModelDeploymentScalerStepPolicy) ProtoMessage() {}
+
+func (*ModelDeploymentScalerTargetReference) ProtoMessage() {}
+
+func (*ModelDeploymentScalerTokenThroughputSpec) ProtoMessage() {}
+
 func (*ModelDeploymentServingStatus) ProtoMessage() {}
 
 func (*ModelDeploymentSpec) ProtoMessage() {}

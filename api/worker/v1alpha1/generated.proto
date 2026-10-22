@@ -4404,6 +4404,973 @@ message ModelDeploymentRouterStatus {
   optional ModelDeploymentRouterMetrics metrics = 5;
 }
 
+// ModelDeploymentScaler is the schema for a metric-driven replica planner over one
+// ModelDeployment.
+//
+// In Shadow mode it observes and records recommendations in status without modifying the target.
+// In Active mode its reconciler commits the planned replica vector and decision annotation onto
+// the target under the single-writer admission fence, and the ModelDeployment reconciler converges
+// the serving replicas to that count.
+//
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["mds"],subResources=["status"]
+// +k8s:crd-gen:printcolumn:name="Target",type="string",jsonPath=".spec.targetRef.name"
+// +k8s:crd-gen:printcolumn:name="Mode",type="string",jsonPath=".spec.mode"
+// +k8s:crd-gen:printcolumn:name="Algorithm",type="string",jsonPath=".spec.algorithm.type"
+// +k8s:crd-gen:printcolumn:name="Bound",type="string",jsonPath=".status.conditions[?(@.type=='Bound')].status"
+// +k8s:crd-gen:printcolumn:name="Active",type="string",jsonPath=".status.conditions[?(@.type=='Active')].status"
+// +k8s:crd-gen:printcolumn:name="Blocked",type="string",jsonPath=".status.conditions[?(@.type=='Blocked')].status"
+message ModelDeploymentScaler {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional ModelDeploymentScalerSpec spec = 2;
+
+  optional ModelDeploymentScalerStatus status = 3;
+}
+
+// ModelDeploymentScalerAlgorithmSpec names the algorithm and holds its parameters.
+message ModelDeploymentScalerAlgorithmSpec {
+  // Type is the algorithm that runs.
+  //
+  // +required
+  // +k8s:validation:enum=["Proportional","TokenThroughput","Predictive"]
+  optional string type = 1;
+
+  // Proportional holds the parameters of the Proportional algorithm.
+  //
+  // It is required when Type is Proportional and ignored otherwise.
+  //
+  // +optional
+  optional ModelDeploymentScalerProportionalSpec proportional = 2;
+
+  // TokenThroughput holds the parameters of the TokenThroughput algorithm.
+  //
+  // It is required when Type is TokenThroughput and ignored otherwise.
+  //
+  // +optional
+  optional ModelDeploymentScalerTokenThroughputSpec tokenThroughput = 3;
+
+  // Predictive holds the parameters of the Predictive algorithm.
+  //
+  // It is required when Type is Predictive and ignored otherwise.
+  //
+  // +optional
+  optional ModelDeploymentScalerPredictiveSpec predictive = 4;
+}
+
+// ModelDeploymentScalerBehaviorSpec tunes how fast a role may move and how long the scaler
+// waits after a failure.
+message ModelDeploymentScalerBehaviorSpec {
+  // ScaleUp tunes how fast a role may grow.
+  //
+  // +optional
+  optional ModelDeploymentScalerScaleUpRules scaleUp = 1;
+
+  // ScaleDown tunes how fast a role may shrink and what happens after an aborted retirement.
+  //
+  // +optional
+  optional ModelDeploymentScalerScaleDownRules scaleDown = 2;
+}
+
+// ModelDeploymentScalerBinding is the payload of the binding annotation.
+//
+// It is the whole of the single-writer contract: the target names the scaler that owns it and the
+// term that owner writes under, so a later scaler either takes over explicitly or stands down.
+message ModelDeploymentScalerBinding {
+  // ScalerName is the name of the scaler that owns the target.
+  optional string scalerName = 1;
+
+  // ScalerUID is the UID of the scaler that owns the target.
+  //
+  // A scaler that was deleted and recreated with the same name carries a different UID, so the
+  // target can tell the two apart.
+  optional string scalerUID = 2;
+
+  // Term is the binding term the owner writes under.
+  optional int64 term = 3;
+}
+
+// ModelDeploymentScalerBindingStatus is the binding a scaler holds.
+message ModelDeploymentScalerBindingStatus {
+  // TargetUID is the UID of the bound target.
+  //
+  // A target that was deleted and recreated carries a different UID, so the binding tells the
+  // two apart.
+  //
+  // +optional
+  optional string targetUID = 1;
+
+  // TargetName is the name of the bound target.
+  //
+  // +optional
+  optional string targetName = 2;
+
+  // Term is the binding term the scaler writes under.
+  //
+  // +optional
+  optional int64 term = 3;
+}
+
+// ModelDeploymentScalerCommitStatus is the decision the scaler last committed.
+message ModelDeploymentScalerCommitStatus {
+  // DecisionID identifies the decision.
+  //
+  // +optional
+  optional string decisionID = 1;
+
+  // Term is the binding term the decision was written under.
+  //
+  // +optional
+  optional int64 term = 2;
+
+  // Vector is the replica count per role the decision committed.
+  //
+  // +optional
+  map<string, int32> vector = 3;
+
+  // BaselineVector is the replica count per role the decision started from.
+  //
+  // It is the vector the scaler restores when the decision has to be retracted.
+  //
+  // +optional
+  map<string, int32> baselineVector = 4;
+
+  // Timestamp is when the decision was committed.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time timestamp = 5;
+
+  // TargetGeneration is the generation of the target the decision was computed from.
+  //
+  // +optional
+  optional int64 targetGeneration = 6;
+}
+
+// ModelDeploymentScalerDecision is the payload of the decision annotation.
+//
+// It records what the scaler last committed, so that a planner which lost its in-memory state
+// rebuilds from the target instead of committing a vector twice.
+message ModelDeploymentScalerDecision {
+  // DecisionID identifies the decision that produced the vector.
+  optional string decisionID = 1;
+
+  // Term is the binding term the decision was written under.
+  optional int64 term = 2;
+
+  // Vector is the replica count per role the decision committed.
+  map<string, int32> vector = 3;
+}
+
+// ModelDeploymentScalerDemandSample is one observation the predictor has seen.
+message ModelDeploymentScalerDemandSample {
+  // Timestamp is when the observation was made.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time timestamp = 1;
+
+  // TokensPerSecond is the demand that was observed.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity tokensPerSecond = 2;
+}
+
+// ModelDeploymentScalerKalmanCovariance is the covariance matrix of a predictor.
+//
+// It is a two by two matrix in the order level, trend, so the four entries are the variance of
+// the level, the covariance of the level with the trend, the covariance of the trend with the
+// level, and the variance of the trend.
+message ModelDeploymentScalerKalmanCovariance {
+  // P00 is the variance of the level.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity p00 = 1;
+
+  // P01 is the covariance of the level with the trend.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity p01 = 2;
+
+  // P10 is the covariance of the trend with the level.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity p10 = 3;
+
+  // P11 is the variance of the trend.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity p11 = 4;
+}
+
+// ModelDeploymentScalerList holds the list of ModelDeploymentScalers.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelDeploymentScalerList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelDeploymentScaler items = 2;
+}
+
+// ModelDeploymentScalerPendingCohortStatus is the scale-up the scaler is waiting on.
+message ModelDeploymentScalerPendingCohortStatus {
+  // DecisionID identifies the decision that added the cohort.
+  //
+  // +optional
+  optional string decisionID = 1;
+
+  // Term is the binding term the decision was written under.
+  //
+  // +optional
+  optional int64 term = 2;
+
+  // BaselineVector is the replica count per role before the cohort was added.
+  //
+  // It is the vector the scaler restores when the cohort is retracted.
+  //
+  // +optional
+  map<string, int32> baselineVector = 3;
+
+  // TargetVector is the replica count per role the cohort asked for.
+  //
+  // +optional
+  map<string, int32> targetVector = 4;
+
+  // StartedAt is when the cohort was committed.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time startedAt = 5;
+}
+
+// ModelDeploymentScalerPredictiveSpec holds the parameters of the Predictive algorithm.
+//
+// It carries the TokenThroughput parameters as well, because the predictor falls back to the
+// token throughput result while it has not seen enough points yet.
+message ModelDeploymentScalerPredictiveSpec {
+  // TokenThroughput holds the parameters the predictor falls back to.
+  //
+  // +optional
+  optional ModelDeploymentScalerTokenThroughputSpec tokenThroughput = 1;
+
+  // HorizonSeconds is how far ahead the demand is forecast.
+  //
+  // +optional
+  // +k8s:validation:minimum=30
+  // +k8s:validation:maximum=600
+  optional int32 horizonSeconds = 2;
+
+  // PrefillTokenCapacityPerReplica is the prompt-token rate one Prefill replica sustains.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity prefillTokenCapacityPerReplica = 3;
+
+  // DecodeTokenCapacityPerReplica is the generation-token rate one Decode replica sustains.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity decodeTokenCapacityPerReplica = 4;
+
+  // ServerTokenCapacityPerReplica is the token rate one Server replica sustains.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity serverTokenCapacityPerReplica = 5;
+
+  // QLevel is how much the level of the forecast follows each new observation.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity qLevel = 6;
+
+  // QTrend is how much the trend of the forecast follows each new observation.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity qTrend = 7;
+
+  // MeasurementNoise is how much the forecast trusts each new observation.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity measurementNoise = 8;
+
+  // MinPoints is how many observations the predictor needs before it forecasts.
+  //
+  // Until it has them, the algorithm reports that it is warming up and returns the token
+  // throughput result.
+  //
+  // +optional
+  // +k8s:validation:minimum=1
+  // +k8s:validation:maximum=64
+  optional int32 minPoints = 9;
+}
+
+// ModelDeploymentScalerPredictorStatus is the state of the predictor of one role.
+message ModelDeploymentScalerPredictorStatus {
+  // Name is the role this predictor belongs to.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string name = 1;
+
+  // Level is the demand the predictor currently believes in.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity level = 2;
+
+  // Trend is how fast the predictor believes the demand is moving.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity trend = 3;
+
+  // Covariance is how much the predictor trusts its own estimate.
+  //
+  // +optional
+  optional ModelDeploymentScalerKalmanCovariance covariance = 4;
+
+  // SampleCount is how many observations the predictor has seen.
+  //
+  // +optional
+  optional int32 sampleCount = 5;
+
+  // History is the demand the predictor has seen.
+  //
+  // It is bounded, because the predictor only needs the recent past.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:maxItems=256
+  repeated ModelDeploymentScalerDemandSample history = 6;
+}
+
+// ModelDeploymentScalerProportionalSpec holds the parameters of the Proportional algorithm.
+message ModelDeploymentScalerProportionalSpec {
+  // Metric is the signal the algorithm scales on.
+  //
+  // +required
+  // +k8s:validation:enum=["QueueDepth","RunningRequests","WaitingRequests","PromptTokensPerSecond","GenerationTokensPerSecond","TotalTokensPerSecond"]
+  optional string metric = 1;
+
+  // RoleTargets is the signal one replica of each role is expected to carry.
+  //
+  // Every role the scaler plans for needs a target, because the algorithm divides what it
+  // observed by it to reach a replica count.
+  //
+  // +optional
+  // +listType=map
+  // +listMapKey=name
+  repeated ModelDeploymentScalerRoleTarget roleTargets = 2;
+
+  // Tolerance is the fraction around the target inside which nothing happens.
+  //
+  // A role whose observed load already sits inside the tolerance holds its replica count, so a
+  // steady deployment does not move for noise.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity tolerance = 3;
+}
+
+// ModelDeploymentScalerRebalanceSpec tunes what the scaler does when one role cannot grow.
+message ModelDeploymentScalerRebalanceSpec {
+  // Policy decides whether another role may give resources back to an exhausted one.
+  //
+  // +optional
+  // +k8s:validation:enum=["Opposing","Priority","Disabled"]
+  optional string policy = 1;
+
+  // Priority orders the roles from the one that may give resources away to the one that may
+  // not.
+  //
+  // It only means something under the Priority policy, where a role late in the order is the
+  // first one asked to shrink. A role that is not named keeps the place of its own
+  // recommendation.
+  //
+  // +optional
+  // +listType=atomic
+  repeated string priority = 2;
+}
+
+// ModelDeploymentScalerRebalanceStatus is the transaction in which one role gives a replica to
+// another.
+message ModelDeploymentScalerRebalanceStatus {
+  // ReceiverRole is the role that receives the replica.
+  //
+  // +optional
+  optional string receiverRole = 1;
+
+  // DonorRole is the role that gives the replica.
+  //
+  // +optional
+  optional string donorRole = 2;
+
+  // DonorTargetReplicas is the replica count the donor is heading for.
+  //
+  // +optional
+  optional int32 donorTargetReplicas = 3;
+
+  // ReceiverTargetReplicas is the replica count the receiver is heading for.
+  //
+  // +optional
+  optional int32 receiverTargetReplicas = 4;
+
+  // StartedAt is when the transaction began.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time startedAt = 5;
+
+  // ExhaustionEpisodeGeneration counts the exhaustion episodes the transaction belongs to.
+  //
+  // It keeps one episode from draining more donors than it should.
+  //
+  // +optional
+  optional int64 exhaustionEpisodeGeneration = 6;
+
+  // DonationAttempted says whether the donor was already asked to give the replica.
+  //
+  // +optional
+  optional bool donationAttempted = 7;
+
+  // Reason says why the transaction is where it is.
+  //
+  // +optional
+  optional string reason = 8;
+}
+
+// ModelDeploymentScalerRoleBounds are the bounds one role stays inside.
+message ModelDeploymentScalerRoleBounds {
+  // Name is the name of the role on the target.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string name = 1;
+
+  // MinReplicas is the fewest replicas this role may have.
+  //
+  // +optional
+  // +k8s:validation:minimum=1
+  // +k8s:validation:maximum=1024
+  optional int32 minReplicas = 2;
+
+  // MaxReplicas is the most replicas this role may have.
+  //
+  // +required
+  // +k8s:validation:minimum=1
+  // +k8s:validation:maximum=1024
+  optional int32 maxReplicas = 3;
+}
+
+// ModelDeploymentScalerRoleRatio is a relationship two roles keep.
+message ModelDeploymentScalerRoleRatio {
+  // NumeratorRole is the role whose replica count is the numerator.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string numeratorRole = 1;
+
+  // DenominatorRole is the role whose replica count is the denominator.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string denominatorRole = 2;
+
+  // Target is the ratio the projection aims at.
+  //
+  // It is the ratio the planner looks for inside the bounds of every other rule, and it is
+  // what a coupled pair settles on when nothing else decides.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity target = 3;
+
+  // Min is the smallest ratio the numerator may hold against the denominator.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity min = 4;
+
+  // Max is the largest ratio the numerator may hold against the denominator.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity max = 5;
+}
+
+// ModelDeploymentScalerRoleStatus is what the scaler saw and recommends for one role.
+message ModelDeploymentScalerRoleStatus {
+  // Name is the role this status belongs to.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string name = 1;
+
+  // CurrentReplicas is the replica count the target reports for this role.
+  //
+  // +optional
+  optional int32 currentReplicas = 2;
+
+  // ReadyReplicas is the replica count of this role that is ready to serve.
+  //
+  // +optional
+  optional int32 readyReplicas = 3;
+
+  // SignalState is how much the scaler trusts what it observed for this role.
+  //
+  // It is Fresh when every required signal was read in the last window, Idle when the role was
+  // read and had nothing to do, Missing when a required signal was absent and Stale when the
+  // window it belongs to has passed.
+  //
+  // +optional
+  optional string signalState = 4;
+
+  // PromptTokensPerSecond is the prompt-token rate the scaler observed.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity promptTokensPerSecond = 5;
+
+  // GenerationTokensPerSecond is the generation-token rate the scaler observed.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity generationTokensPerSecond = 6;
+
+  // RunningRequests is the number of requests the role was running.
+  //
+  // +optional
+  optional int32 runningRequests = 7;
+
+  // WaitingRequests is the number of requests the role was waiting for.
+  //
+  // +optional
+  optional int32 waitingRequests = 8;
+
+  // KVCacheUsage is how much of the key value cache the role was using.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity kvCacheUsage = 9;
+
+  // TTFTMilliseconds is the time to first token the scaler observed.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity ttftMilliseconds = 10;
+
+  // ITLMilliseconds is the inter-token latency the scaler observed.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity itlMilliseconds = 11;
+
+  // RawRecommendedReplicas is the replica count the algorithm asked for, before the bounds and
+  // the ratios were applied.
+  //
+  // +optional
+  optional int32 rawRecommendedReplicas = 12;
+
+  // ConstrainedReplicas is the replica count the planner settled on after the bounds and the
+  // ratios were applied.
+  //
+  // +optional
+  optional int32 constrainedReplicas = 13;
+
+  // Reason says why the recommendation is what it is.
+  //
+  // +optional
+  optional string reason = 14;
+
+  // LastScaleUpTime is when this role last grew.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time lastScaleUpTime = 15;
+
+  // StabilizationHistory is the recommendation this role received over the last window.
+  //
+  // It is bounded, and it is what lets the scale-down floor survive a restart.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:maxItems=256
+  repeated ModelDeploymentScalerStabilizationSample stabilizationHistory = 16;
+}
+
+// ModelDeploymentScalerRoleTarget is the signal one replica of a role is expected to carry.
+message ModelDeploymentScalerRoleTarget {
+  // Name is the role this target belongs to.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string name = 1;
+
+  // Target is the signal one replica of this role is expected to carry.
+  //
+  // It is a quantity, so a rate is written as a quantity per second and a count as a plain
+  // number.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity target = 2;
+}
+
+// ModelDeploymentScalerSamplingSpec tunes the observation interval and the pending timeout.
+message ModelDeploymentScalerSamplingSpec {
+  // IntervalSeconds is how often the scaler looks at the target.
+  //
+  // It is the floor on how fast the scaler reacts and the floor on how often it writes, so a
+  // short interval costs scrape load and a long one costs reaction time.
+  //
+  // +optional
+  // +k8s:validation:minimum=5
+  // +k8s:validation:maximum=300
+  optional int32 intervalSeconds = 1;
+
+  // PendingTimeoutSeconds is how long a committed scale-up may stay unadmitted before it is
+  // retracted.
+  //
+  // The retraction restores the vector the scale-up started from, so a timeout undoes a change
+  // rather than leaving a role waiting for resources that never arrive.
+  //
+  // +optional
+  // +k8s:validation:minimum=60
+  // +k8s:validation:maximum=1200
+  optional int32 pendingTimeoutSeconds = 2;
+}
+
+// ModelDeploymentScalerScaleDownRules tune how fast a role may shrink.
+message ModelDeploymentScalerScaleDownRules {
+  // StabilizationWindowSeconds is the window the recommendations are remembered over.
+  //
+  // The largest recommendation in that window is the floor a scale-down may go to, so a role
+  // that was asked to grow does not shrink again right away.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  // +k8s:validation:maximum=1800
+  optional int32 stabilizationWindowSeconds = 1;
+
+  // CooldownAfterAbortSeconds is how long a role is held after an aborted retirement.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  // +k8s:validation:maximum=3600
+  optional int32 cooldownAfterAbortSeconds = 2;
+
+  // DecodePostScaleUpGraceSeconds is how long a Decode role is held after it grew.
+  //
+  // A Decode role that just grew does not shrink again inside this window, because a pair that
+  // oscillates costs more than it saves.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  // +k8s:validation:maximum=3600
+  optional int32 decodePostScaleUpGraceSeconds = 3;
+
+  // StepPolicy is a step bound stated in one unit.
+  //
+  // It replaces the default of removing at most one replica per role per pass.
+  //
+  // +optional
+  optional ModelDeploymentScalerStepPolicy stepPolicy = 4;
+}
+
+// ModelDeploymentScalerScaleDownStatus is the outcome of the last scale-down.
+message ModelDeploymentScalerScaleDownStatus {
+  // Role is the role the scale-down removed a replica from.
+  //
+  // +optional
+  optional string role = 1;
+
+  // Ordinal is the replica the scale-down removed.
+  //
+  // +optional
+  optional int32 ordinal = 2;
+
+  // PreScaleDownVector is the replica count per role before the scale-down.
+  //
+  // It is the vector the scaler restores when the retirement aborts.
+  //
+  // +optional
+  map<string, int32> preScaleDownVector = 3;
+
+  // Outcome is how the scale-down ended.
+  //
+  // It is Committed while the retirement runs and Aborted when the retirement failed and the
+  // scaler restored the vector.
+  //
+  // +optional
+  optional string outcome = 4;
+
+  // AbortedAt is when the retirement aborted.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time abortedAt = 5;
+
+  // CooldownUntil is when the role may shrink again.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time cooldownUntil = 6;
+}
+
+// ModelDeploymentScalerScaleUpRules tune how fast a role may grow.
+message ModelDeploymentScalerScaleUpRules {
+  // StabilizationWindowSeconds is how long a recommendation is held before it takes effect.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  // +k8s:validation:maximum=600
+  optional int32 stabilizationWindowSeconds = 1;
+
+  // MaxStepReplicas is the most replicas one pass may add to a role.
+  //
+  // Zero leaves the bound unset, so only the percentage bound applies.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  optional int32 maxStepReplicas = 2;
+
+  // MaxStepPercent is the most percent of the current replica count one pass may add to a role.
+  //
+  // Zero leaves the bound unset, so only the replica bound applies.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  // +k8s:validation:maximum=1000
+  optional int32 maxStepPercent = 3;
+
+  // StepPolicy is a step bound stated in one unit.
+  //
+  // It replaces the two bounds above, so a deployment states its cap once instead of twice.
+  //
+  // +optional
+  optional ModelDeploymentScalerStepPolicy stepPolicy = 4;
+}
+
+// ModelDeploymentScalerSpec defines the desired state of ModelDeploymentScaler.
+message ModelDeploymentScalerSpec {
+  // TargetRef names the ModelDeployment this scaler plans for.
+  //
+  // The target is in this namespace. A scaler without a target has nothing to plan for, so the
+  // field is required and a name that matches nothing leaves the scaler unbound.
+  //
+  // +required
+  optional ModelDeploymentScalerTargetReference targetRef = 1;
+
+  // Mode decides whether the scaler only observes or also acts.
+  //
+  // Shadow observes and publishes what it would have done, and changes nothing. Active publishes
+  // and the worker reconciler applies the committed vector. Shadow is the default, so a scaler
+  // that was just created never moves a target before its owner asked for it.
+  //
+  // +optional
+  // +k8s:validation:enum=["Shadow","Active"]
+  // +k8s:validation:default="Shadow"
+  optional string mode = 2;
+
+  // Suspend stops the scaler without deleting it.
+  //
+  // A suspended scaler releases its owned binding and stops planning without being deleted,
+  // reporting Suspended on its Bound and Active conditions until resumed.
+  //
+  // +optional
+  optional bool suspend = 3;
+
+  // Sampling tunes how often the scaler looks at the target and how long it waits for a
+  // committed scale-up to become admitted.
+  //
+  // +optional
+  optional ModelDeploymentScalerSamplingSpec sampling = 4;
+
+  // Roles are the roles of the target this scaler plans for, with the bounds each one stays
+  // inside.
+  //
+  // Every role of the target the scaler plans for needs a bound, and a role the target does not
+  // have is refused, so that the planner never reasons about a role that is not there.
+  //
+  // +required
+  // +k8s:validation:minItems=1
+  // +listType=map
+  // +listMapKey=name
+  repeated ModelDeploymentScalerRoleBounds roles = 5;
+
+  // Ratios are the relationships between roles that a committed vector has to keep.
+  //
+  // A ratio bounds the replica count of a numerator role against the replica count of a
+  // denominator role, so that a coupled prefill and decode pair does not drift apart. A ratio
+  // names roles the scaler plans for, and a ratio that names an unknown role is refused.
+  //
+  // +optional
+  // +listType=map
+  // +listMapKey=numeratorRole
+  // +listMapKey=denominatorRole
+  repeated ModelDeploymentScalerRoleRatio ratios = 6;
+
+  // Algorithm says how the scaler turns what it observes into a replica count.
+  //
+  // The algorithm named here is the one that runs, and the parameters of the other algorithms
+  // are ignored, so a deployment states one algorithm and one set of parameters.
+  //
+  // +required
+  optional ModelDeploymentScalerAlgorithmSpec algorithm = 7;
+
+  // Behavior tunes how fast the scaler may move a role and how long it waits after a failure.
+  //
+  // +optional
+  optional ModelDeploymentScalerBehaviorSpec behavior = 8;
+
+  // Rebalance tunes what the scaler does when one role cannot grow because the cluster is
+  // exhausted and another role could give resources back.
+  //
+  // +optional
+  optional ModelDeploymentScalerRebalanceSpec rebalance = 9;
+}
+
+// ModelDeploymentScalerStabilizationSample is one recommendation a role received.
+message ModelDeploymentScalerStabilizationSample {
+  // Timestamp is when the recommendation was made.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time timestamp = 1;
+
+  // Replicas is the replica count the recommendation asked for.
+  //
+  // +required
+  optional int32 replicas = 2;
+}
+
+// ModelDeploymentScalerStatus is the observed state of ModelDeploymentScaler.
+message ModelDeploymentScalerStatus {
+  // ObservedGeneration is the generation this status was computed from.
+  //
+  // +optional
+  optional int64 observedGeneration = 1;
+
+  // Binding is the target this scaler is bound to.
+  //
+  // +optional
+  optional ModelDeploymentScalerBindingStatus binding = 2;
+
+  // Roles is what the scaler saw and what it recommends for each role.
+  //
+  // +optional
+  // +listType=map
+  // +listMapKey=name
+  repeated ModelDeploymentScalerRoleStatus roles = 3;
+
+  // LastCommit is the decision the scaler last committed.
+  //
+  // +optional
+  optional ModelDeploymentScalerCommitStatus lastCommit = 4;
+
+  // PendingCohort is the scale-up the scaler committed and is waiting on.
+  //
+  // +optional
+  optional ModelDeploymentScalerPendingCohortStatus pendingCohort = 5;
+
+  // Rebalance is the transaction in which one role gives a replica to another.
+  //
+  // +optional
+  optional ModelDeploymentScalerRebalanceStatus rebalance = 6;
+
+  // LastScaleDown is the outcome of the last scale-down the scaler committed.
+  //
+  // +optional
+  optional ModelDeploymentScalerScaleDownStatus lastScaleDown = 7;
+
+  // Predictors is the state of the predictor of each role.
+  //
+  // +optional
+  // +listType=map
+  // +listMapKey=name
+  repeated ModelDeploymentScalerPredictorStatus predictors = 8;
+
+  // Conditions holds the conditions of the scaler.
+  //
+  // +optional
+  // +patchMergeKey=type
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=type
+  repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 9;
+}
+
+// ModelDeploymentScalerStepPolicy is a bound on how far one role may move in one pass.
+message ModelDeploymentScalerStepPolicy {
+  // Type is the unit of Value.
+  //
+  // +required
+  // +k8s:validation:enum=["Pods","Percent"]
+  optional string type = 1;
+
+  // Value is the bound expressed in the unit Type names.
+  //
+  // +required
+  // +k8s:validation:minimum=1
+  optional int32 value = 2;
+}
+
+// ModelDeploymentScalerTargetReference names the target of a scaler.
+message ModelDeploymentScalerTargetReference {
+  // Name is the name of the target ModelDeployment in this namespace.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string name = 1;
+}
+
+// ModelDeploymentScalerTokenThroughputSpec holds the parameters of the TokenThroughput
+// algorithm.
+message ModelDeploymentScalerTokenThroughputSpec {
+  // PrefillTargetTokensPerSecond is the prompt-token rate one Prefill replica sustains.
+  //
+  // It is the capacity the demand is divided by, so the number of replicas follows from how
+  // many prompt tokens per second one replica is expected to serve.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity prefillTargetTokensPerSecond = 1;
+
+  // DecodeTargetTokensPerSecond is the generation-token rate one Decode replica sustains.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity decodeTargetTokensPerSecond = 2;
+
+  // ServerTargetTokensPerSecond is the token rate one Server replica sustains, over prompt
+  // tokens and generation tokens together.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity serverTargetTokensPerSecond = 3;
+
+  // StableWindowSeconds is the window the stable recommendation is computed over.
+  //
+  // The stable window is long enough to smooth a burst, so a short spike does not move the
+  // replica count.
+  //
+  // +optional
+  // +k8s:validation:minimum=30
+  // +k8s:validation:maximum=600
+  optional int32 stableWindowSeconds = 4;
+
+  // PanicWindowSeconds is the window the panic recommendation is computed over.
+  //
+  // The panic window is short, so it reacts to a burst that the stable window smooths away.
+  //
+  // +optional
+  // +k8s:validation:minimum=10
+  // +k8s:validation:maximum=300
+  optional int32 panicWindowSeconds = 5;
+
+  // PanicThreshold is the growth rate over the ready replicas that starts a panic.
+  //
+  // A panic holds the replica count up and stops scale-downs until the load settles.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity panicThreshold = 6;
+
+  // TTFTTargetMilliseconds is the time to first token the role is expected to keep under.
+  //
+  // A role that is observed above this target is a role that needs more replicas, whatever the
+  // token counters say.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity ttftTargetMilliseconds = 7;
+
+  // ITLTargetMilliseconds is the inter-token latency the role is expected to keep under.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity itlTargetMilliseconds = 8;
+}
+
 // ModelDeploymentServingStatus is the actual serving confirmation of a role's endpoints: a
 // deduplicated union over complete, identity-bound per-Router views. It is an observation,
 // never a restatement of the eligible count.

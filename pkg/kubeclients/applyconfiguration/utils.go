@@ -1286,6 +1286,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.ModelArtifactApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelDeployment"):
 		return &applyconfigurationworkerv1.ModelDeploymentApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("ModelDeploymentScaler"):
+		return &applyconfigurationworkerv1.ModelDeploymentScalerApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelPrefetch"):
 		return &applyconfigurationworkerv1.ModelPrefetchApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelStore"):
@@ -1526,6 +1528,60 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRouterRoleStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRouterStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRouterStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScaler"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerAlgorithmSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerAlgorithmSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerBehaviorSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerBehaviorSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerBindingStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerBindingStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerCommitStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerCommitStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerDemandSample"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerDemandSampleApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerKalmanCovariance"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerKalmanCovarianceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerPendingCohortStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerPendingCohortStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerPredictiveSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerPredictiveSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerPredictorStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerPredictorStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerProportionalSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerProportionalSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerRebalanceSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerRebalanceSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerRebalanceStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerRebalanceStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerRoleBounds"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerRoleBoundsApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerRoleRatio"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerRoleRatioApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerRoleStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerRoleStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerRoleTarget"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerRoleTargetApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerSamplingSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerSamplingSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerScaleDownRules"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerScaleDownRulesApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerScaleDownStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerScaleDownStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerScaleUpRules"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerScaleUpRulesApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerStabilizationSample"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerStabilizationSampleApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerStepPolicy"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerStepPolicyApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerTargetReference"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerTargetReferenceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerTokenThroughputSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerTokenThroughputSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentServingStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentServingStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentSpec"):

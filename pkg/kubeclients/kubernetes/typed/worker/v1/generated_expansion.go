@@ -33,6 +33,8 @@ type ModelArtifactExpansion interface{}
 
 type ModelDeploymentExpansion interface{}
 
+type ModelDeploymentScalerExpansion interface{}
+
 type ModelPrefetchExpansion interface{}
 
 type ModelStoreExpansion interface{}

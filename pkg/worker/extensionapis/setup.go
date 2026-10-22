@@ -23,6 +23,7 @@ var setups = []extensionapi.Setup{
 	new(worker.DevicesHandler),
 	new(worker.InstanceHandler),
 	new(worker.ModelDeploymentHandler),
+	new(worker.ModelDeploymentScalerHandler),
 	new(worker.ModelArtifactHandler),
 	new(worker.ModelPrefetchHandler),
 	new(worker.NodeModelStoreHandler),

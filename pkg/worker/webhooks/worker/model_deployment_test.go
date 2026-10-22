@@ -10,15 +10,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	admissionv1 "k8s.io/api/admission/v1"
+	authn "k8s.io/api/authentication/v1"
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -4614,4 +4618,333 @@ func TestValidateModelDeploymentRouter_ThresholdIsThePickersAlone(t *testing.T) 
 			assert.Equal(t, c.refused, refused)
 		})
 	}
+}
+
+// modelDeploymentFenceContext returns a context carrying an admission request from username.
+//
+// The fence reads the caller out of the request, because the API server records the service
+// account a bound token belongs to and that is the only identity that cannot be forged by
+// whoever holds a user's credentials.
+func modelDeploymentFenceContext(username string) context.Context {
+	return ctrladmission.NewContextWithRequest(context.Background(), ctrladmission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			UserInfo:  authn.UserInfo{Username: username},
+		},
+	})
+}
+
+// modelDeploymentFenceWebhook builds the handler with the identity of the operator and the
+// scalers it can see.
+func modelDeploymentFenceWebhook(scalers ...*workercore.ModelDeploymentScaler) *ModelDeploymentWebhook {
+	builder := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme)
+	for _, scaler := range scalers {
+		builder = builder.WithObjects(scaler)
+	}
+
+	return &ModelDeploymentWebhook{
+		APIReader:      builder.Build(),
+		Namespace:      testFenceNamespace,
+		ServiceAccount: testFenceServiceAccount,
+	}
+}
+
+const (
+	testFenceNamespace      = "gpustack-system"
+	testFenceServiceAccount = "gpustack-operator-worker"
+	testFenceUser           = "system:serviceaccount:team-a:a-user"
+)
+
+// testFenceOperatorUser is the identity the operator writes under.
+func testFenceOperatorUser() string {
+	return serviceaccount.MakeUsername(testFenceNamespace, testFenceServiceAccount)
+}
+
+// boundModelDeployment builds a deployment a scaler is bound to.
+func boundModelDeployment() *workercore.ModelDeployment {
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+	md.Annotations = map[string]string{
+		workercore.ModelDeploymentScalerBindingAnnotationKey: `{"scalerName":"qwen-scaler",` +
+			`"scalerUID":"uid-1","term":1}`,
+	}
+
+	return md
+}
+
+// TestModelDeploymentWebhookScalerFenceHoldsTheSingleWriterRule pins the rule that a bound
+// deployment has one writer of its replica count.
+//
+// THE TWO SIDES ARE PINNED SEPARATELY, because they are different rules. A user may change
+// everything about a bound deployment except the count and the two annotations that record who
+// owns it, and the operator may write all of them.
+func TestModelDeploymentWebhookScalerFenceHoldsTheSingleWriterRule(t *testing.T) {
+	scaler := &workercore.ModelDeploymentScaler{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen-scaler", UID: "uid-1"},
+	}
+
+	cases := []struct {
+		name      string
+		scalers   []*workercore.ModelDeploymentScaler
+		operator  bool
+		mutate    func(old, md *workercore.ModelDeployment)
+		wantField string
+	}{
+		{
+			name: "a user cannot change the replica count of a bound deployment",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Replicas++
+			},
+			wantField: "spec.roles",
+		},
+		{
+			name: "a user cannot rename a role of a bound deployment",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Name = "renamed"
+			},
+			wantField: "spec.roles",
+		},
+		{
+			name: "a user may change anything else about a bound deployment",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
+			},
+		},
+		{
+			name: "a user cannot add a binding",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey] = `{"scalerName":"other","scalerUID":"uid-2","term":1}`
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentScalerBindingAnnotationKey + "]",
+		},
+		{
+			name: "a user cannot change the decision",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Annotations[workercore.ModelDeploymentScalerDecisionAnnotationKey] = `{"decisionID":"d-1","term":1,"vector":{"server":8}}`
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentScalerDecisionAnnotationKey + "]",
+		},
+		{
+			name: "a user may give up a binding whose scaler is gone",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				delete(md.Annotations, workercore.ModelDeploymentScalerBindingAnnotationKey)
+			},
+		},
+		{
+			name:    "a user may not give up a binding whose scaler still exists",
+			scalers: []*workercore.ModelDeploymentScaler{scaler},
+			mutate: func(old, md *workercore.ModelDeployment) {
+				delete(md.Annotations, workercore.ModelDeploymentScalerBindingAnnotationKey)
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentScalerBindingAnnotationKey + "]",
+		},
+		{
+			name: "a user may give up a binding whose scaler was recreated",
+			scalers: []*workercore.ModelDeploymentScaler{{
+				ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen-scaler", UID: "uid-2"},
+			}},
+			mutate: func(old, md *workercore.ModelDeployment) {
+				delete(md.Annotations, workercore.ModelDeploymentScalerBindingAnnotationKey)
+			},
+		},
+		{
+			name: "a user may not change the replica count while giving up a binding",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				delete(md.Annotations, workercore.ModelDeploymentScalerBindingAnnotationKey)
+				md.Spec.Roles[0].Replicas++
+			},
+			wantField: "spec.roles",
+		},
+		{
+			name:     "the operator may acquire a binding",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				old.Annotations = nil
+				md.Annotations = map[string]string{
+					workercore.ModelDeploymentScalerBindingAnnotationKey: `{"scalerName":"qwen-scaler","scalerUID":"uid-1","term":1}`,
+				}
+			},
+		},
+		{
+			name:     "the operator may not acquire a binding with a term below one",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				old.Annotations = nil
+				md.Annotations = map[string]string{
+					workercore.ModelDeploymentScalerBindingAnnotationKey: `{"scalerName":"qwen-scaler","scalerUID":"uid-1","term":0}`,
+				}
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentScalerBindingAnnotationKey + "]",
+		},
+		{
+			name:     "the operator may not give a term back",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey] = `{"scalerName":"qwen-scaler","scalerUID":"uid-1","term":0}`
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentScalerBindingAnnotationKey + "]",
+		},
+		{
+			name:     "the operator may change the replica count with a decision under the same term",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Replicas++
+				md.Annotations[workercore.ModelDeploymentScalerDecisionAnnotationKey] = `{"decisionID":"d-1","term":1,"vector":{"server":5}}`
+			},
+		},
+		{
+			name:     "the operator may not change the replica count without a decision",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Replicas++
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentScalerDecisionAnnotationKey + "]",
+		},
+		{
+			name:     "the operator may not change the replica count with a decision under another term",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Replicas++
+				md.Annotations[workercore.ModelDeploymentScalerDecisionAnnotationKey] = `{"decisionID":"d-1","term":2,"vector":{"server":5}}`
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentScalerDecisionAnnotationKey + "]",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			old := boundModelDeployment()
+			md := boundModelDeployment()
+			tc.mutate(old, md)
+
+			username := testFenceUser
+			if tc.operator {
+				username = testFenceOperatorUser()
+			}
+
+			w := modelDeploymentFenceWebhook(tc.scalers...)
+			errs := w.validateModelDeploymentScalerFence(
+				modelDeploymentFenceContext(username), old, md)
+
+			if tc.wantField == "" {
+				assert.Empty(t, errs)
+				return
+			}
+			require.NotEmpty(t, errs)
+			fields := make([]string, 0, len(errs))
+			for _, err := range errs {
+				fields = append(fields, err.Field)
+			}
+			assert.Contains(t, fields, tc.wantField)
+		})
+	}
+}
+
+// TestModelDeploymentWebhookScalerFenceRefusesAUserWhoAddsABindingToAnUnboundDeployment pins that
+// an unbound deployment is not free for a user to claim.
+func TestModelDeploymentWebhookScalerFenceRefusesAUserWhoAddsABindingToAnUnboundDeployment(t *testing.T) {
+	old := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+	md.Annotations = map[string]string{
+		workercore.ModelDeploymentScalerBindingAnnotationKey: `{"scalerName":"qwen-scaler","scalerUID":"uid-1","term":1}`,
+	}
+
+	w := modelDeploymentFenceWebhook()
+	for _, prior := range []*workercore.ModelDeployment{nil, old} {
+		errs := w.validateModelDeploymentScalerFence(
+			modelDeploymentFenceContext(testFenceUser), prior, md)
+
+		require.NotEmpty(t, errs)
+		assert.Equal(t,
+			"metadata.annotations["+workercore.ModelDeploymentScalerBindingAnnotationKey+"]",
+			errs[0].Field)
+	}
+}
+
+// TestModelDeploymentWebhookScalerFenceRefusesAMalformedBinding pins that a binding nobody can
+// read is a binding nobody may write under.
+//
+// A BINDING THAT DOES NOT PARSE is not a binding that is ignored: it is a claim of ownership
+// that cannot be checked, and refusing under it is the only answer that keeps the rule.
+func TestModelDeploymentWebhookScalerFenceRefusesAMalformedBinding(t *testing.T) {
+	old := boundModelDeployment()
+	md := boundModelDeployment()
+	md.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey] = "not a binding"
+
+	w := modelDeploymentFenceWebhook()
+	errs := w.validateModelDeploymentScalerFence(
+		modelDeploymentFenceContext(testFenceUser), old, md)
+
+	require.NotEmpty(t, errs)
+	assert.Contains(t, errs[0].Detail, "binding")
+}
+
+// TestModelDeploymentWebhookScalerFenceOperatorBindingIdentityAndUnbindReplicaMutation pins that
+// an operator write must carry a non-empty scaler identity on a binding and cannot mutate replica
+// counts while removing the binding in the same request.
+func TestModelDeploymentWebhookScalerFenceOperatorBindingIdentityAndUnbindReplicaMutation(t *testing.T) {
+	w := modelDeploymentFenceWebhook()
+	ctx := modelDeploymentFenceContext(testFenceOperatorUser())
+
+	unbound := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+	missingIdentity := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+	missingIdentity.Annotations = map[string]string{
+		workercore.ModelDeploymentScalerBindingAnnotationKey: `{"scalerName":"","scalerUID":"uid-1","term":1}`,
+	}
+	errs := w.validateModelDeploymentScalerFence(ctx, unbound, missingIdentity)
+	require.NotEmpty(t, errs)
+	assert.Equal(t,
+		"metadata.annotations["+workercore.ModelDeploymentScalerBindingAnnotationKey+"]",
+		errs[0].Field)
+
+	oldBound := boundModelDeployment()
+	unbindingWithReplicaChange := boundModelDeployment()
+	delete(unbindingWithReplicaChange.Annotations, workercore.ModelDeploymentScalerBindingAnnotationKey)
+	unbindingWithReplicaChange.Spec.Roles[0].Replicas++
+	errs = w.validateModelDeploymentScalerFence(ctx, oldBound, unbindingWithReplicaChange)
+	require.NotEmpty(t, errs)
+	assert.Equal(t,
+		"metadata.annotations["+workercore.ModelDeploymentScalerBindingAnnotationKey+"]",
+		errs[0].Field)
+}
+
+// TestModelDeploymentWebhookScalerFenceAllowsOperatorToRepairMalformedBinding pins that a
+// corrupted binding annotation on the existing deployment can be repaired or overwritten by the
+// operator, while user writes remain refused.
+func TestModelDeploymentWebhookScalerFenceAllowsOperatorToRepairMalformedBinding(t *testing.T) {
+	oldCorrupt := boundModelDeployment()
+	oldCorrupt.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey] = "corrupt json"
+
+	w := modelDeploymentFenceWebhook()
+
+	// A user request cannot write under a corrupt old binding.
+	userCtx := modelDeploymentFenceContext(testFenceUser)
+	userEdit := oldCorrupt.DeepCopy()
+	errs := w.validateModelDeploymentScalerFence(userCtx, oldCorrupt, userEdit)
+	require.NotEmpty(t, errs)
+	assert.Equal(t, field.ErrorTypeInvalid, errs[0].Type)
+
+	// An operator request can repair/rebind the deployment.
+	opCtx := modelDeploymentFenceContext(testFenceOperatorUser())
+	repaired := boundModelDeployment()
+	errs = w.validateModelDeploymentScalerFence(opCtx, oldCorrupt, repaired)
+	assert.Empty(t, errs)
+}
+
+// TestModelDeploymentWebhookScalerFenceOrphanReturnsInternalErrorOnReaderFailure pins that an orphan
+// check returns an internal admission error rather than Forbidden when the scaler cannot be read.
+func TestModelDeploymentWebhookScalerFenceOrphanReturnsInternalErrorOnReaderFailure(t *testing.T) {
+	oldBound := boundModelDeployment()
+	unbound := boundModelDeployment()
+	delete(unbound.Annotations, workercore.ModelDeploymentScalerBindingAnnotationKey)
+
+	// Webhook with nil APIReader
+	wNilReader := &ModelDeploymentWebhook{
+		APIReader:      nil,
+		Namespace:      testFenceNamespace,
+		ServiceAccount: testFenceServiceAccount,
+	}
+	ctx := modelDeploymentFenceContext(testFenceUser)
+	errs := wNilReader.validateModelDeploymentScalerFence(ctx, oldBound, unbound)
+	require.NotEmpty(t, errs)
+	assert.Equal(t, field.ErrorTypeInternal, errs[0].Type)
 }

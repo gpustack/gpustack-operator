@@ -241,6 +241,16 @@ func (in ModelDeploymentMetrics) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScaler) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelDeploymentScaler"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScalerList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelDeploymentScalerList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelPrefetch) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.ModelPrefetch"
 }

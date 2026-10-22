@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -23,8 +25,10 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
+	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
@@ -69,10 +73,19 @@ type ModelDeploymentWebhook struct {
 	// the one value this handler defaults is read from another object, and a cache that is behind
 	// would decide it.
 	APIReader ctrlcli.Reader
+
+	// Namespace and ServiceAccount are where this operator runs and what it runs as.
+	//
+	// They name the only writer of a bound deployment's replica count. A request that does not
+	// carry that identity is a user's, and a user may not write the count a scaler owns.
+	Namespace      string
+	ServiceAccount string
 }
 
 func (r *ModelDeploymentWebhook) SetupWebhook(_ context.Context, opts webhook.SetupOptions) (runtime.Object, error) {
 	r.APIReader = opts.Manager.GetAPIReader()
+	r.Namespace = systemname.NamespaceName
+	r.ServiceAccount = kuberess.SystemRoutingServiceName
 
 	return &workercore.ModelDeployment{}, nil
 }
@@ -680,6 +693,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	md := obj.(*workercore.ModelDeployment)
 
 	errs := validateModelDeployment(md, nil)
+	errs = append(errs, r.validateModelDeploymentScalerFence(ctx, nil, md)...)
 	errs = append(errs, r.ValidateModelDeploymentElasticEP(ctx, md, nil)...)
 	errs = append(errs, validateModelDeploymentHostAccess(nil, md,
 		hostAccessAllowed(ctx, settings.InstancePrivilegedAllowed),
@@ -740,6 +754,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	// too long could never be shortened, and every later edit -- including one that removes the
 	// offending role -- would be refused. That is worse than the reconcile failure the rule prevents.
 	errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj))
+	errs = append(errs, r.validateModelDeploymentScalerFence(ctx, old, md)...)
 	errs = append(errs, r.ValidateModelDeploymentElasticEP(ctx, md, old)...)
 	errs = append(errs, validateModelDeploymentHostAccess(old, md,
 		hostAccessAllowed(ctx, settings.InstancePrivilegedAllowed),
@@ -2634,4 +2649,368 @@ func validateRolePartitionProfileOffered(
 	return field.ErrorList{field.Invalid(profilePath, ress.AcceleratorPartitionedProfile,
 		fmt.Sprintf("instance type %s does not offer this partition profile; offered: %v",
 			instType.Name, offered))}
+}
+
+// The rules the single-writer fence refuses an edit by, named in the refusal so a test and a
+// reader can tell which one fired.
+const (
+	modelDeploymentFenceRuleReplicaCount = "the replica count of a bound deployment belongs to the scaler that owns it"
+	modelDeploymentFenceRuleRoleSet      = "the roles of a bound deployment are planned by the scaler " +
+		"and cannot be added, removed, or renamed while bound"
+	modelDeploymentFenceRuleAnnotation = "the binding and decision annotations of a bound deployment belong to the scaler that owns it"
+	modelDeploymentFenceRuleTerm       = "a binding term is never given back"
+	modelDeploymentFenceRuleDecision   = "a replica count that changed under a binding carries the decision that changed it"
+	modelDeploymentFenceRuleOrphan     = "the scaler that owns this deployment still exists"
+)
+
+// validateModelDeploymentScalerFence holds the single-writer rule.
+//
+// A DEPLOYMENT THAT IS BOUND TO A SCALER HAS ONE WRITER OF ITS REPLICA COUNT, and that writer is
+// the scaler. The rule is enforced here rather than in the reconciler because a reconciler can
+// only refuse to act, while admission can refuse the write itself, and a second writer that gets
+// its write through is the failure this exists to prevent.
+//
+// THE RULE HAS TWO SIDES, because the two kinds of caller mean different things. A caller that
+// is not this operator is a user, and a user may change anything about a bound deployment except
+// the count and the two annotations that record who owns it. This operator may write all of them,
+// and may only do so in a shape a reader can check afterwards: a binding carries a term that
+// never goes backwards, and a count that changed under a binding carries the decision that
+// changed it.
+func (r *ModelDeploymentWebhook) validateModelDeploymentScalerFence(
+	ctx context.Context, old, md *workercore.ModelDeployment,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	replicasChanged := modelDeploymentScalerReplicaCountsChanged(old, md)
+
+	// A DEPLOYMENT WITH NO PREVIOUS STATE IS NOT A BOUND ONE. The rule is about a deployment that
+	// already carries a binding, and an object that carries none has no owner to protect.
+	if old == nil {
+		old = &workercore.ModelDeployment{}
+	}
+
+	oldBinding, oldHasBinding, oldErr := modelDeploymentScalerBindingOf(old)
+	newBinding, newHasBinding, newErr := modelDeploymentScalerBindingOf(md)
+	if newErr != nil {
+		return append(errs, field.Invalid(
+			field.NewPath("metadata", "annotations").Key(workercore.ModelDeploymentScalerBindingAnnotationKey),
+			md.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey],
+			"the binding of this deployment cannot be read, so nothing may be written under it: "+
+				newErr.Error()))
+	}
+
+	bindingChanged := modelDeploymentScalerBindingChanged(old, md)
+
+	if r.isOperatorRequest(ctx) {
+		return append(errs, r.validateModelDeploymentScalerOperatorFence(
+			oldBinding, oldHasBinding, newBinding, newHasBinding, bindingChanged,
+			replicasChanged, md)...)
+	}
+
+	if oldErr != nil {
+		return append(errs, field.Invalid(
+			field.NewPath("metadata", "annotations").Key(workercore.ModelDeploymentScalerBindingAnnotationKey),
+			old.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey],
+			"the binding of this deployment cannot be read, so nothing may be written under it: "+
+				oldErr.Error()))
+	}
+
+	return append(errs, r.validateModelDeploymentScalerUserFence(
+		ctx, oldBinding, oldHasBinding, newHasBinding, replicasChanged, old, md)...)
+}
+
+// validateModelDeploymentScalerOperatorFence holds the rules that apply to this operator's own
+// writes.
+//
+// THE TERM NEVER GOES BACKWARDS, because the term is what tells a reader which binding is newer.
+// A term that went backwards would make an old decision look newer than a new one, and the
+// reader would accept a write that the fence had already refused.
+//
+// A COUNT THAT CHANGED CARRIES THE DECISION THAT CHANGED IT, because a count without the
+// decision that produced it cannot be traced back to the observation that asked for it, and a
+// reader that cannot trace it cannot tell a scale-up from a hand edit.
+func (r *ModelDeploymentWebhook) validateModelDeploymentScalerOperatorFence(
+	oldBinding workercore.ModelDeploymentScalerBinding, oldHasBinding bool,
+	newBinding workercore.ModelDeploymentScalerBinding, newHasBinding bool,
+	bindingChanged, replicasChanged bool, md *workercore.ModelDeployment,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	annotationsPath := field.NewPath("metadata", "annotations")
+
+	if newHasBinding && (!oldHasBinding || bindingChanged) {
+		if newBinding.ScalerName == "" || newBinding.ScalerUID == "" {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentScalerBindingAnnotationKey),
+				md.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey],
+				"a binding must name both scalerName and scalerUID"))
+		}
+		if newBinding.Term < 1 {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentScalerBindingAnnotationKey),
+				newBinding.Term,
+				modelDeploymentFenceRuleTerm+": a binding term starts at one"))
+		}
+		if oldHasBinding && newBinding.Term < oldBinding.Term {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentScalerBindingAnnotationKey),
+				newBinding.Term,
+				fmt.Sprintf("%s: the term of this binding is %d, and the one it replaces is %d",
+					modelDeploymentFenceRuleTerm, newBinding.Term, oldBinding.Term)))
+		}
+	}
+
+	if replicasChanged && (oldHasBinding || newHasBinding) {
+		if !newHasBinding {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentScalerBindingAnnotationKey), "",
+				modelDeploymentFenceRuleDecision))
+			return errs
+		}
+		decision, hasDecision, err := modelDeploymentScalerDecisionOf(md)
+		if err != nil {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentScalerDecisionAnnotationKey),
+				md.Annotations[workercore.ModelDeploymentScalerDecisionAnnotationKey],
+				"the decision of this deployment cannot be read: "+err.Error()))
+			return errs
+		}
+		if !hasDecision {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentScalerDecisionAnnotationKey), "",
+				modelDeploymentFenceRuleDecision))
+			return errs
+		}
+		if decision.Term != newBinding.Term {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentScalerDecisionAnnotationKey),
+				decision.Term,
+				fmt.Sprintf("%s: the decision is written under term %d, and the binding is under "+
+					"term %d", modelDeploymentFenceRuleDecision, decision.Term, newBinding.Term)))
+		}
+	}
+
+	return errs
+}
+
+// validateModelDeploymentScalerUserFence holds the rules that apply to a caller that is not this
+// operator.
+//
+// A BOUND DEPLOYMENT KEEPS EVERYTHING ELSE. A user may still change the image, the arguments or
+// the labels of a deployment a scaler owns: what the scaler owns is how many replicas there are
+// and who may say so, not what those replicas run.
+//
+// THE ESCAPE HATCH EXISTS BECAUSE A SCALER THAT WAS DELETED LEAVES A BINDING BEHIND. Without it
+// the deployment could never be handed to another scaler, and its count could never be changed
+// again, because the binding that names a scaler that no longer exists names nothing that can
+// release it. The hatch is narrow: it admits the removal only when the scaler is really gone,
+// and it never admits a change of the count.
+func (r *ModelDeploymentWebhook) validateModelDeploymentScalerUserFence(
+	ctx context.Context,
+	oldBinding workercore.ModelDeploymentScalerBinding, oldHasBinding bool,
+	newHasBinding, replicasChanged bool,
+	old, md *workercore.ModelDeployment,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	annotationsPath := field.NewPath("metadata", "annotations")
+	bindingKey := annotationsPath.Key(workercore.ModelDeploymentScalerBindingAnnotationKey)
+	decisionKey := annotationsPath.Key(workercore.ModelDeploymentScalerDecisionAnnotationKey)
+
+	bindingChanged := old.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey] !=
+		md.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey]
+	decisionChanged := old.Annotations[workercore.ModelDeploymentScalerDecisionAnnotationKey] !=
+		md.Annotations[workercore.ModelDeploymentScalerDecisionAnnotationKey]
+	decisionRemoved := old.Annotations[workercore.ModelDeploymentScalerDecisionAnnotationKey] != "" &&
+		md.Annotations[workercore.ModelDeploymentScalerDecisionAnnotationKey] == ""
+
+	if !oldHasBinding {
+		// Nothing is bound, so there is no owner to protect. The annotations are still not the
+		// user's to write, because writing one is a claim of ownership.
+		if bindingChanged {
+			errs = append(errs, field.Forbidden(bindingKey, modelDeploymentFenceRuleAnnotation))
+		}
+		if decisionChanged && !decisionRemoved {
+			errs = append(errs, field.Forbidden(decisionKey, modelDeploymentFenceRuleAnnotation))
+		}
+		return errs
+	}
+
+	// The binding is being given up. The hatch below decides whether that is allowed, and every
+	// other rule about the annotations is answered by it.
+	if oldHasBinding && !newHasBinding {
+		if modelDeploymentScalerRoleSetChanged(old, md) {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec", "roles"), modelDeploymentFenceRuleRoleSet))
+		} else if replicasChanged {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec", "roles"), modelDeploymentFenceRuleReplicaCount))
+		}
+		if decisionChanged && !decisionRemoved {
+			errs = append(errs, field.Forbidden(decisionKey, modelDeploymentFenceRuleAnnotation))
+		}
+		if orphan, fErr := r.modelDeploymentScalerBindingIsOrphan(ctx, md.Namespace, oldBinding); !orphan {
+			if fErr != nil {
+				errs = append(errs, fErr)
+			}
+		}
+		return errs
+	}
+
+	if bindingChanged {
+		errs = append(errs, field.Forbidden(bindingKey, modelDeploymentFenceRuleAnnotation))
+	}
+	if decisionChanged {
+		errs = append(errs, field.Forbidden(decisionKey, modelDeploymentFenceRuleAnnotation))
+	}
+	if modelDeploymentScalerRoleSetChanged(old, md) {
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec", "roles"), modelDeploymentFenceRuleRoleSet))
+	} else if replicasChanged {
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec", "roles"), modelDeploymentFenceRuleReplicaCount))
+	}
+
+	return errs
+}
+
+// isOperatorRequest reports whether the request came from this operator.
+//
+// THE IDENTITY IS THE SERVICE ACCOUNT, because that is what the API server records for a request
+// made with a bound token. A request without that identity is treated as a user's, which is the
+// side that refuses. RBAC must restrict ServiceAccount creation and token projection in the operator
+// namespace so that only the operator workload executes under this service account identity.
+func (r *ModelDeploymentWebhook) isOperatorRequest(ctx context.Context) bool {
+	req, err := ctrladmission.RequestFromContext(ctx)
+	if err != nil {
+		return false
+	}
+
+	return req.UserInfo.Username == serviceaccount.MakeUsername(r.Namespace, r.ServiceAccount)
+}
+
+// modelDeploymentScalerBindingIsOrphan reports whether the scaler that owns a deployment is
+// really gone.
+//
+// THE SCALER IS READ LIVE, because the answer is about the cluster as it is now and not about
+// what the deployment recorded when it was bound. A scaler that was deleted and recreated with
+// the same name carries a different UID, and a deployment bound to the old one is free of it.
+func (r *ModelDeploymentWebhook) modelDeploymentScalerBindingIsOrphan(
+	ctx context.Context, namespace string, binding workercore.ModelDeploymentScalerBinding,
+) (bool, *field.Error) {
+	bindingKey := field.NewPath("metadata", "annotations").Key(workercore.ModelDeploymentScalerBindingAnnotationKey)
+	reader := r.APIReader
+	if reader == nil {
+		return false, field.InternalError(bindingKey,
+			fmt.Errorf("the scaler cannot be read, because this handler has no reader"))
+	}
+
+	scaler := new(workercore.ModelDeploymentScaler)
+	err := reader.Get(ctx, ctrlcli.ObjectKey{Namespace: namespace, Name: binding.ScalerName}, scaler)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, field.InternalError(bindingKey,
+			fmt.Errorf("the scaler %q could not be read: %w", binding.ScalerName, err))
+	}
+
+	if string(scaler.UID) != binding.ScalerUID {
+		return true, nil
+	}
+
+	return false, field.Forbidden(bindingKey,
+		fmt.Sprintf("%s: the scaler %q still exists", modelDeploymentFenceRuleOrphan, binding.ScalerName))
+}
+
+// modelDeploymentScalerBindingOf reads the binding a deployment carries.
+func modelDeploymentScalerBindingOf(
+	md *workercore.ModelDeployment,
+) (workercore.ModelDeploymentScalerBinding, bool, error) {
+	raw, ok := md.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey]
+	if !ok || raw == "" {
+		return workercore.ModelDeploymentScalerBinding{}, false, nil
+	}
+
+	binding := workercore.ModelDeploymentScalerBinding{}
+	if err := json.Unmarshal([]byte(raw), &binding); err != nil {
+		return workercore.ModelDeploymentScalerBinding{}, false, fmt.Errorf(
+			"the binding annotation is not a binding: %w", err)
+	}
+
+	return binding, true, nil
+}
+
+// modelDeploymentScalerDecisionOf reads the decision a deployment carries.
+func modelDeploymentScalerDecisionOf(
+	md *workercore.ModelDeployment,
+) (workercore.ModelDeploymentScalerDecision, bool, error) {
+	raw, ok := md.Annotations[workercore.ModelDeploymentScalerDecisionAnnotationKey]
+	if !ok || raw == "" {
+		return workercore.ModelDeploymentScalerDecision{}, false, nil
+	}
+
+	decision := workercore.ModelDeploymentScalerDecision{}
+	if err := json.Unmarshal([]byte(raw), &decision); err != nil {
+		return workercore.ModelDeploymentScalerDecision{}, false, fmt.Errorf(
+			"the decision annotation is not a decision: %w", err)
+	}
+
+	return decision, true, nil
+}
+
+// modelDeploymentScalerBindingChanged reports whether a deployment's binding annotation moved.
+func modelDeploymentScalerBindingChanged(old, md *workercore.ModelDeployment) bool {
+	return old.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey] !=
+		md.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey]
+}
+
+// modelDeploymentScalerRoleSetChanged reports whether roles were added, removed, or renamed.
+func modelDeploymentScalerRoleSetChanged(old, md *workercore.ModelDeployment) bool {
+	if old == nil || md == nil {
+		return false
+	}
+	if len(old.Spec.Roles) != len(md.Spec.Roles) {
+		return true
+	}
+
+	names := make(map[string]bool, len(old.Spec.Roles))
+	for i := range old.Spec.Roles {
+		names[old.Spec.Roles[i].Name] = true
+	}
+
+	for i := range md.Spec.Roles {
+		if !names[md.Spec.Roles[i].Name] {
+			return true
+		}
+	}
+
+	return false
+}
+
+// modelDeploymentScalerReplicaCountsChanged reports whether the replica count of any role moved.
+//
+// THE ROLES ARE MATCHED BY NAME, because that is how a deployment names them, and a count that
+// moved under another name is a different role rather than a changed count.
+func modelDeploymentScalerReplicaCountsChanged(old, md *workercore.ModelDeployment) bool {
+	if old == nil {
+		return false
+	}
+	if len(old.Spec.Roles) != len(md.Spec.Roles) {
+		return true
+	}
+
+	counts := make(map[string]int32, len(old.Spec.Roles))
+	for i := range old.Spec.Roles {
+		counts[old.Spec.Roles[i].Name] = old.Spec.Roles[i].Replicas
+	}
+
+	for i := range md.Spec.Roles {
+		was, ok := counts[md.Spec.Roles[i].Name]
+		if !ok || was != md.Spec.Roles[i].Replicas {
+			return true
+		}
+	}
+
+	return false
 }
