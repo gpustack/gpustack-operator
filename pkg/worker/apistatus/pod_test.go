@@ -8,6 +8,9 @@ import (
 )
 
 func TestGetSummaryOfPod(t *testing.T) {
+	const admissionFailureMessage = "Pod was rejected: Allocate failed due to no healthy devices present; " +
+		"cannot allocate unhealthy devices nvidia.com/gpu.sliced, which is unexpected"
+
 	readyConditions := []core.PodCondition{
 		{Type: core.PodScheduled, Status: core.ConditionTrue},
 		{Type: core.PodInitialized, Status: core.ConditionTrue},
@@ -29,8 +32,78 @@ func TestGetSummaryOfPod(t *testing.T) {
 		podStatus *core.PodStatus
 
 		wantPhase   string
-		wantMessage string // asserted only when non-empty
+		wantMessage string
 	}{
+		{
+			name: "failed pod preserves its message",
+			podStatus: &core.PodStatus{
+				Phase:   core.PodFailed,
+				Reason:  "UnexpectedAdmissionError",
+				Message: admissionFailureMessage,
+			},
+			wantPhase:   "Failed",
+			wantMessage: admissionFailureMessage,
+		},
+		{
+			name: "failed pod falls back to its reason",
+			podStatus: &core.PodStatus{
+				Phase:  core.PodFailed,
+				Reason: "UnexpectedAdmissionError",
+			},
+			wantPhase:   "Failed",
+			wantMessage: "UnexpectedAdmissionError",
+		},
+		{
+			name: "failed pod without diagnostics has an empty message",
+			podStatus: &core.PodStatus{
+				Phase: core.PodFailed,
+			},
+			wantPhase: "Failed",
+		},
+		{
+			name: "failed pod takes precedence over initialization conditions",
+			podStatus: &core.PodStatus{
+				Phase:      core.PodFailed,
+				Reason:     "UnexpectedAdmissionError",
+				Message:    "Allocate failed due to unhealthy devices",
+				Conditions: notInitializedConditions,
+			},
+			wantPhase:   "Failed",
+			wantMessage: "Allocate failed due to unhealthy devices",
+		},
+		{
+			name: "failed pod takes precedence over ready conditions",
+			podStatus: &core.PodStatus{
+				Phase:      core.PodFailed,
+				Reason:     "Evicted",
+				Message:    "The node was low on resource: memory.",
+				Conditions: readyConditions,
+			},
+			wantPhase:   "Failed",
+			wantMessage: "The node was low on resource: memory.",
+		},
+		{
+			name: "failed pod takes precedence over container waiting states",
+			podStatus: &core.PodStatus{
+				Phase:      core.PodFailed,
+				Reason:     "UnexpectedAdmissionError",
+				Message:    "Allocate failed due to unhealthy devices",
+				Conditions: notReadyConditions,
+				ContainerStatuses: []core.ContainerStatus{
+					{
+						Name: "main",
+						State: core.ContainerState{
+							Waiting: &core.ContainerStateWaiting{
+								Reason:  "ImagePullBackOff",
+								Message: "Back-off pulling image",
+							},
+						},
+					},
+				},
+			},
+			wantPhase:   "Failed",
+			wantMessage: "Allocate failed due to unhealthy devices",
+		},
 		{
 			name: "ready pod is ready",
 			podStatus: &core.PodStatus{
@@ -149,9 +222,7 @@ func TestGetSummaryOfPod(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			phase, message := GetSummaryOfPod(c.podStatus)
 			assert.Equal(t, c.wantPhase, phase, "phase")
-			if c.wantMessage != "" {
-				assert.Equal(t, c.wantMessage, message, "message")
-			}
+			assert.Equal(t, c.wantMessage, message, "message")
 		})
 	}
 }
