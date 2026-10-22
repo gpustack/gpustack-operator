@@ -522,14 +522,16 @@ func TestRenderModelDeploymentRouterObjects_EPDKeepsUnsupportedPrefillDiscoverab
 
 	t.Run("a healthy deployment is discovered through the leader of every role", func(t *testing.T) {
 		qualifications := deriveLabels(t)
-		// THE FIXTURE'S OWN PREMISE. Only a multi-member prefiller reaches Unsupported, so a
-		// deployment of one member per role cannot reproduce what the third phase states.
+		// THE FIXTURE'S OWN PREMISE. The deployment is an encoder of one member, a prefiller of
+		// two and a decoder of one. A Prefill or a Decode group is unverifiable whatever its
+		// member count, because its serving path is a pair, so the prefiller of two and the
+		// decoder of one report the same Unsupported the third phase states.
 		assert.Equal(t, modelDeploymentGroupForwardNotApplicable,
 			groupForwardOf(t, "encode", qualifications).State, "the encoder serves no tokens")
 		assert.Equal(t, modelDeploymentGroupForwardUnsupported,
 			groupForwardOf(t, "prefill", qualifications).State, "a multi-member prefiller is unverifiable")
-		assert.Equal(t, modelDeploymentGroupForwardNotApplicable,
-			groupForwardOf(t, "decode", qualifications).State, "a one-member replica has no group to verify")
+		assert.Equal(t, modelDeploymentGroupForwardUnsupported,
+			groupForwardOf(t, "decode", qualifications).State, "a decoder is unverifiable whatever its member count")
 
 		observeModelDeploymentEndpointEligibility(md, qualifications)
 		assert.Equal(t, string(meta.ConditionUnknown),
