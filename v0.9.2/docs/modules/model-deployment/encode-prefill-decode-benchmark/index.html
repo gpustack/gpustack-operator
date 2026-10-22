@@ -1,0 +1,2627 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.2/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  
+  <title>Encode, Prefill and Decode Benchmark · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.2/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.2/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.2/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.2/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.2"
+    data-home="/gpustack-operator/v0.9.2/" data-page="/gpustack-operator/v0.9.2/docs/modules/model-deployment/encode-prefill-decode-benchmark/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.2</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.2</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.2/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.2/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.9.2/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.2/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.9.2/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.9.2/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.9.2/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.9.2/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.9.2/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.9.2/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.9.2/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.2/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.9.2/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.9.2/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.9.2/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.9.2/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.9.2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.9.2/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Device Discovery" href="/gpustack-operator/v0.9.2/docs/modules/devices/discovery/" >Discovery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.9.2/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Scheduling Chain" href="/gpustack-operator/v0.9.2/docs/modules/devices/scheduling/" >Scheduling Chain</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Admission" href="/gpustack-operator/v0.9.2/docs/modules/devices/admission/" >Admission</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.9.2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Network Topology" href="/gpustack-operator/v0.9.2/docs/modules/rdma/network-topology/" >Network Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.9.2/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.9.2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.2/docs/modules/topology/scheduling/" >Scheduling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.2/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.9.2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.9.2/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.9.2/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.2/docs/modules/kv-cache/injection/" >Pod Injection</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.9.2/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.2/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.2/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-Heavy Nodes</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.9.2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.9.2/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Artifact API" href="/gpustack-operator/v0.9.2/docs/modules/model-delivery/views/" >API</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Image Source" href="/gpustack-operator/v0.9.2/docs/modules/model-delivery/image-source/" >Image Source</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.9.2/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Node Model Store" href="/gpustack-operator/v0.9.2/docs/modules/model-delivery/node-store/" >Node Store</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.2/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.9.2/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+          
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/deployment/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/encode-prefill-decode-benchmark/" aria-current="page">Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/metrics/" >Metrics</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Status" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/status/" >Status</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.9.2/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.9.2/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.9.2/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.2/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.2/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.2/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Command Reference" href="/gpustack-operator/v0.9.2/docs/reference/commands/" >Commands</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.2/docs/reference/settings/" >Settings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.2/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.2/docs/reference/instance-metrics/" >Instance Metrics</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Encode, Prefill and Decode Benchmark</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="encode-prefill-and-decode-benchmark">Encode, Prefill and Decode Benchmark</h1>
+<p>On one H100 SXM5 node, <em>Encode/Prefill/Decode (EPD)</em> reduced long-prompt generation stalls and
+repeated-image latency compared with aggregated serving and <em>Prefill/Decode (PD)</em>.
+Aggregated serving, <em>PD</em> and <em>EPD</em> used <strong>one, two and three GPUs</strong>, respectively.
+These results compare deployed configurations with unequal GPU budgets.</p>
+<p>At <code>8k</code> and concurrency 8, <em>EPD</em> reduced <em>inter-token latency (ITL)</em> p99 from <code>296.710 ms</code> to
+<strong>13.607 ms</strong>, or <strong>21.8× lower</strong>, compared with aggregated serving.
+Its <em>time to first token (TTFT)</em> p50 was higher: <code>4,182.324 ms</code> against <code>3,963.085 ms</code>.
+<a href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/encode-prefill-decode/">Encode, Prefill and Decode</a>
+ describes the role contract.</p>
+<p>The initial capture used cross-<code>Pod</code> TCP. The separate <a href="#infiniband-rdma-comparison">InfiniBand RDMA comparison</a>
+
+adds matched follow-up measurements while retaining the TCP results and conclusions.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#configurations">Configurations</a>
+</li>
+<li><a href="#hardware-model-and-workload">Hardware, model and workload</a>
+</li>
+<li><a href="#suite-1-multimodal-context-scaling">Suite 1: Multimodal context scaling</a>
+</li>
+<li><a href="#suite-2-mixed-vision-and-decode">Suite 2: Mixed vision and decode</a>
+</li>
+<li><a href="#suite-3-encoder-cache-reuse">Suite 3: Encoder-cache reuse</a>
+</li>
+<li><a href="#stage-execution-verification">Stage execution verification</a>
+</li>
+<li><a href="#summary">Summary</a>
+</li>
+<li><a href="#infiniband-rdma-comparison">InfiniBand RDMA comparison</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+</ul>
+<h2 id="configurations">Configurations</h2>
+<p>Each configuration used one <code>ModelDeployment</code>, with one replica per role and one GPU per <code>Pod</code>.
+All serving roles ran on the same GPU node, <code>gpu-node-0</code>.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Configuration</th>
+          <th>Roles</th>
+          <th style="text-align: right">GPUs</th>
+          <th>KV connector</th>
+          <th>Encoder connector</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Aggregated</td>
+          <td>1 <em>Server</em></td>
+          <td style="text-align: right">1</td>
+          <td>None</td>
+          <td>None</td>
+      </tr>
+      <tr>
+          <td><em>PD</em></td>
+          <td>1 <em>Prefill</em> + 1 <em>Decode</em></td>
+          <td style="text-align: right">2</td>
+          <td><code>MooncakeConnector</code>, TCP</td>
+          <td>None</td>
+      </tr>
+      <tr>
+          <td><em>EPD</em></td>
+          <td>1 <em>Encode</em> + 1 <em>Prefill</em> + 1 <em>Decode</em></td>
+          <td style="text-align: right">3</td>
+          <td><code>MooncakeConnector</code>, TCP</td>
+          <td><code>ECCPUConnector</code>, NIXL</td>
+      </tr>
+  </tbody>
+</table>
+<p>Each <code>Pod</code> exposed only its assigned GPU, with a private <code>/dev/shm</code> and IPC namespace.
+<em><code>hostIPC</code></em> was disabled, and no remote direct memory access (<em>RDMA</em>) interface was attached.
+<strong>All cross-<code>Pod</code> NIXL encoder-cache and Mooncake KV transfers used container TCP sockets over <code>eth0</code>.</strong>
+The host&rsquo;s NVLink fabric was not used between roles.</p>
+<h2 id="hardware-model-and-workload">Hardware, model and workload</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Property</th>
+          <th>Captured value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Cluster</td>
+          <td>Kubernetes v1.35.7; one CPU node and one GPU node</td>
+      </tr>
+      <tr>
+          <td>Hardware</td>
+          <td>8 × NVIDIA H100 80 GB HBM3 SXM5 on one node</td>
+      </tr>
+      <tr>
+          <td>GPUStack Operator</td>
+          <td>v0.9.1</td>
+      </tr>
+      <tr>
+          <td>Captured <code>InstanceType</code></td>
+          <td><code>bench-gpu</code>, selecting the H100 accelerator group</td>
+      </tr>
+      <tr>
+          <td>Runner</td>
+          <td><code>gpustack/runner:cuda13.0-vllm0.30.0</code></td>
+      </tr>
+      <tr>
+          <td>Router</td>
+          <td><code>gpustack/llm-router:v0.3.1</code>; disaggregation sidecar v0.11.0</td>
+      </tr>
+      <tr>
+          <td>Model</td>
+          <td><code>Qwen/Qwen2.5-VL-7B-Instruct</code>, revision <code>cc594898137f460bfe9f0759e9844b3ce807cfb5</code></td>
+      </tr>
+      <tr>
+          <td>Model delivery</td>
+          <td><code>ModelArtifact</code> <code>qwen2-5-vl-7b-instruct</code>; node delivery mount <code>/var/lib/gpustack/model</code>, served as <code>/models</code></td>
+      </tr>
+      <tr>
+          <td>Engine limits</td>
+          <td><code>--max-model-len 16384</code>, <code>--gpu-memory-utilization 0.85</code></td>
+      </tr>
+      <tr>
+          <td>Parallelism</td>
+          <td><em>Tensor parallelism (TP)</em> = 1 per role</td>
+      </tr>
+  </tbody>
+</table>
+<p>The operator added <code>--enforce-eager</code> and <code>--no-enable-prefix-caching</code> only to <em>Encode</em>.
+<em>Prefill</em> and <em>Decode</em> retained CUDA graphs.
+Aggregated serving and <em>PD</em> also set <code>--enable-scale-out</code> for router token rendering; <em>EPD</em> did not.</p>
+<h3 id="suite-1-workload">Suite 1 workload</h3>
+<p>Suite 1 varied image and text length with a <code>128</code>-token completion limit.
+Image dimensions are pixels; text-token values are generator targets.
+Measured prompt lengths include the model&rsquo;s multimodal request formatting.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Context</th>
+          <th>Image</th>
+          <th style="text-align: right">Text target</th>
+          <th>Measured prompt tokens</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>1k</code></td>
+          <td>560 × 560</td>
+          <td style="text-align: right">624</td>
+          <td>1,047–1,050</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td>840 × 840</td>
+          <td style="text-align: right">1,148</td>
+          <td>2,071–2,074</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td>1260 × 1260</td>
+          <td style="text-align: right">2,071</td>
+          <td>4,119–4,122</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td>1792 × 1792</td>
+          <td style="text-align: right">4,096</td>
+          <td>8,215–8,219</td>
+      </tr>
+  </tbody>
+</table>
+<p>Concurrency 1, 4 and 8 used 8, 12 and 24 measured requests per context, respectively.</p>
+<h3 id="suite-2-workload">Suite 2 workload</h3>
+<p>Two streams ran concurrently, with four workers and twelve requests each.
+The small stream used unique <code>560 × 560</code> images, a <code>624</code>-token text target and <code>max_tokens=256</code>.
+The heavy-vision stream used unique <code>1792 × 1792</code> images, a <code>400</code>-token text target and <code>max_tokens=64</code>.
+Measured prompt lengths were 1,048–1,051 and 4,520–4,523 tokens, respectively.</p>
+<h3 id="suite-3-workload">Suite 3 workload</h3>
+<p>Suite 3 reused one <code>1792 × 1792</code> image with a different question per request.
+It used a <code>400</code>-token text target and <code>max_tokens=64</code>; measured prompts contained 4,518–4,522 tokens.
+Concurrency 4 and 8 used 12 and 24 measured requests.</p>
+<h3 id="method">Method</h3>
+<p>The load generator ran inside the cluster. Each configuration ran once, sequentially on the same node.
+Two warm-up requests preceded every Suite 1 and Suite 3 cell and were excluded from latency summaries.
+The 45 result files contain 36 Suite 1 cells, three mixed-load runs and six repeated-image cells.
+Each mixed-load file reports both streams separately.</p>
+<p><strong>All 708 measured requests succeeded with zero errors</strong>, 236 per configuration.
+Each configuration also issued 28 warm-up requests.
+<em>Time per output token (TPOT)</em> measures per-request generation time per token; <em>ITL</em> measures streamed-token gaps.
+Bold table values mark lower latency or higher throughput within each matched workload and concurrency.</p>
+<h2 id="suite-1-multimodal-context-scaling">Suite 1: Multimodal context scaling</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Workload</th>
+          <th style="text-align: right">Concurrency</th>
+          <th>Configuration</th>
+          <th style="text-align: right">Requests</th>
+          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+          <th style="text-align: right">Output (tok/s)</th>
+          <th style="text-align: right">Throughput (req/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">1</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right"><strong>127.488</strong></td>
+          <td style="text-align: right"><strong>133.658</strong></td>
+          <td style="text-align: right"><strong>5.904</strong></td>
+          <td style="text-align: right"><strong>8.885</strong></td>
+          <td style="text-align: right"><strong>143.767</strong></td>
+          <td style="text-align: right">1.234</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">1</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right">193.346</td>
+          <td style="text-align: right">202.953</td>
+          <td style="text-align: right">6.014</td>
+          <td style="text-align: right">9.089</td>
+          <td style="text-align: right">130.569</td>
+          <td style="text-align: right">1.140</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">1</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right">157.290</td>
+          <td style="text-align: right">172.886</td>
+          <td style="text-align: right">5.926</td>
+          <td style="text-align: right">9.168</td>
+          <td style="text-align: right">135.864</td>
+          <td style="text-align: right"><strong>1.259</strong></td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">4</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right"><strong>132.585</strong></td>
+          <td style="text-align: right"><strong>317.836</strong></td>
+          <td style="text-align: right">6.810</td>
+          <td style="text-align: right">40.568</td>
+          <td style="text-align: right"><strong>429.372</strong></td>
+          <td style="text-align: right"><strong>4.179</strong></td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">352.986</td>
+          <td style="text-align: right">514.518</td>
+          <td style="text-align: right"><strong>6.302</strong></td>
+          <td style="text-align: right"><strong>12.260</strong></td>
+          <td style="text-align: right">371.169</td>
+          <td style="text-align: right">3.924</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">234.481</td>
+          <td style="text-align: right">435.045</td>
+          <td style="text-align: right">6.423</td>
+          <td style="text-align: right">13.121</td>
+          <td style="text-align: right">420.666</td>
+          <td style="text-align: right">3.925</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">8</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right"><strong>294.960</strong></td>
+          <td style="text-align: right"><strong>574.336</strong></td>
+          <td style="text-align: right">7.359</td>
+          <td style="text-align: right">43.814</td>
+          <td style="text-align: right"><strong>744.704</strong></td>
+          <td style="text-align: right"><strong>6.722</strong></td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">8</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right">397.371</td>
+          <td style="text-align: right">929.204</td>
+          <td style="text-align: right"><strong>6.956</strong></td>
+          <td style="text-align: right">16.274</td>
+          <td style="text-align: right">646.274</td>
+          <td style="text-align: right">5.925</td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">8</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right">343.176</td>
+          <td style="text-align: right">725.719</td>
+          <td style="text-align: right">6.987</td>
+          <td style="text-align: right"><strong>14.933</strong></td>
+          <td style="text-align: right">715.225</td>
+          <td style="text-align: right">6.592</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">1</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right"><strong>221.341</strong></td>
+          <td style="text-align: right"><strong>228.913</strong></td>
+          <td style="text-align: right"><strong>5.922</strong></td>
+          <td style="text-align: right"><strong>8.879</strong></td>
+          <td style="text-align: right"><strong>126.909</strong></td>
+          <td style="text-align: right"><strong>1.146</strong></td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">1</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right">323.722</td>
+          <td style="text-align: right">333.260</td>
+          <td style="text-align: right">6.022</td>
+          <td style="text-align: right">8.968</td>
+          <td style="text-align: right">109.430</td>
+          <td style="text-align: right">1.068</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">1</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right">261.095</td>
+          <td style="text-align: right">266.917</td>
+          <td style="text-align: right">5.935</td>
+          <td style="text-align: right">9.255</td>
+          <td style="text-align: right">120.054</td>
+          <td style="text-align: right">1.125</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">4</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right"><strong>393.122</strong></td>
+          <td style="text-align: right"><strong>584.277</strong></td>
+          <td style="text-align: right">6.611</td>
+          <td style="text-align: right">58.282</td>
+          <td style="text-align: right"><strong>385.090</strong></td>
+          <td style="text-align: right"><strong>3.245</strong></td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">583.651</td>
+          <td style="text-align: right">1,008.471</td>
+          <td style="text-align: right">6.589</td>
+          <td style="text-align: right">12.813</td>
+          <td style="text-align: right">300.633</td>
+          <td style="text-align: right">2.752</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">581.520</td>
+          <td style="text-align: right">794.935</td>
+          <td style="text-align: right"><strong>6.365</strong></td>
+          <td style="text-align: right"><strong>12.136</strong></td>
+          <td style="text-align: right">326.686</td>
+          <td style="text-align: right">3.025</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">8</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right">772.251</td>
+          <td style="text-align: right"><strong>1,137.334</strong></td>
+          <td style="text-align: right">7.751</td>
+          <td style="text-align: right">72.554</td>
+          <td style="text-align: right">528.024</td>
+          <td style="text-align: right">4.771</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">8</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right">1,056.469</td>
+          <td style="text-align: right">2,005.102</td>
+          <td style="text-align: right"><strong>7.622</strong></td>
+          <td style="text-align: right">15.551</td>
+          <td style="text-align: right">446.540</td>
+          <td style="text-align: right">3.887</td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">8</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right"><strong>613.996</strong></td>
+          <td style="text-align: right">1,230.158</td>
+          <td style="text-align: right">7.714</td>
+          <td style="text-align: right"><strong>15.438</strong></td>
+          <td style="text-align: right"><strong>537.856</strong></td>
+          <td style="text-align: right"><strong>5.092</strong></td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">1</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right">442.405</td>
+          <td style="text-align: right"><strong>448.422</strong></td>
+          <td style="text-align: right"><strong>5.956</strong></td>
+          <td style="text-align: right"><strong>8.646</strong></td>
+          <td style="text-align: right"><strong>94.195</strong></td>
+          <td style="text-align: right">1.006</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">1</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right">633.100</td>
+          <td style="text-align: right">649.480</td>
+          <td style="text-align: right">6.054</td>
+          <td style="text-align: right">9.639</td>
+          <td style="text-align: right">68.685</td>
+          <td style="text-align: right">0.931</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">1</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right"><strong>440.770</strong></td>
+          <td style="text-align: right">451.024</td>
+          <td style="text-align: right">5.959</td>
+          <td style="text-align: right">9.268</td>
+          <td style="text-align: right">88.808</td>
+          <td style="text-align: right"><strong>1.080</strong></td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">4</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">1,151.042</td>
+          <td style="text-align: right"><strong>1,229.450</strong></td>
+          <td style="text-align: right"><strong>6.301</strong></td>
+          <td style="text-align: right"><strong>10.512</strong></td>
+          <td style="text-align: right">179.650</td>
+          <td style="text-align: right">2.255</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">1,504.409</td>
+          <td style="text-align: right">2,001.824</td>
+          <td style="text-align: right">7.141</td>
+          <td style="text-align: right">13.195</td>
+          <td style="text-align: right">164.679</td>
+          <td style="text-align: right">1.685</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right"><strong>808.650</strong></td>
+          <td style="text-align: right">1,430.554</td>
+          <td style="text-align: right">6.994</td>
+          <td style="text-align: right">13.602</td>
+          <td style="text-align: right"><strong>204.756</strong></td>
+          <td style="text-align: right"><strong>2.363</strong></td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">8</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right">1,972.504</td>
+          <td style="text-align: right"><strong>2,403.576</strong></td>
+          <td style="text-align: right">9.298</td>
+          <td style="text-align: right">231.453</td>
+          <td style="text-align: right">231.845</td>
+          <td style="text-align: right">2.785</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">8</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right">2,055.500</td>
+          <td style="text-align: right">4,379.420</td>
+          <td style="text-align: right">8.578</td>
+          <td style="text-align: right">15.481</td>
+          <td style="text-align: right">216.193</td>
+          <td style="text-align: right">2.333</td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">8</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right"><strong>1,690.166</strong></td>
+          <td style="text-align: right">2,715.341</td>
+          <td style="text-align: right"><strong>8.469</strong></td>
+          <td style="text-align: right"><strong>15.352</strong></td>
+          <td style="text-align: right"><strong>255.080</strong></td>
+          <td style="text-align: right"><strong>2.985</strong></td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">1</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right">868.512</td>
+          <td style="text-align: right">893.580</td>
+          <td style="text-align: right"><strong>6.039</strong></td>
+          <td style="text-align: right"><strong>8.905</strong></td>
+          <td style="text-align: right">64.577</td>
+          <td style="text-align: right">0.705</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">1</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right">1,226.636</td>
+          <td style="text-align: right">1,266.734</td>
+          <td style="text-align: right">6.130</td>
+          <td style="text-align: right">9.598</td>
+          <td style="text-align: right">50.824</td>
+          <td style="text-align: right">0.565</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">1</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">8/8</td>
+          <td style="text-align: right"><strong>798.743</strong></td>
+          <td style="text-align: right"><strong>805.795</strong></td>
+          <td style="text-align: right">6.052</td>
+          <td style="text-align: right">9.204</td>
+          <td style="text-align: right"><strong>68.562</strong></td>
+          <td style="text-align: right"><strong>0.739</strong></td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">4</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">2,129.912</td>
+          <td style="text-align: right"><strong>2,439.747</strong></td>
+          <td style="text-align: right">7.527</td>
+          <td style="text-align: right">247.270</td>
+          <td style="text-align: right"><strong>136.270</strong></td>
+          <td style="text-align: right">1.289</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">2,867.606</td>
+          <td style="text-align: right">4,361.361</td>
+          <td style="text-align: right"><strong>6.991</strong></td>
+          <td style="text-align: right"><strong>12.842</strong></td>
+          <td style="text-align: right">104.379</td>
+          <td style="text-align: right">1.004</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right"><strong>1,572.574</strong></td>
+          <td style="text-align: right">3,156.539</td>
+          <td style="text-align: right">8.386</td>
+          <td style="text-align: right">15.283</td>
+          <td style="text-align: right">134.224</td>
+          <td style="text-align: right"><strong>1.393</strong></td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">8</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right"><strong>3,963.085</strong></td>
+          <td style="text-align: right"><strong>4,794.768</strong></td>
+          <td style="text-align: right">16.081</td>
+          <td style="text-align: right">296.710</td>
+          <td style="text-align: right">143.211</td>
+          <td style="text-align: right"><strong>1.460</strong></td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">8</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right">4,895.645</td>
+          <td style="text-align: right">8,582.882</td>
+          <td style="text-align: right"><strong>8.180</strong></td>
+          <td style="text-align: right">13.822</td>
+          <td style="text-align: right">105.850</td>
+          <td style="text-align: right">1.162</td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">8</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right">4,182.324</td>
+          <td style="text-align: right">5,839.159</td>
+          <td style="text-align: right">8.357</td>
+          <td style="text-align: right"><strong>13.607</strong></td>
+          <td style="text-align: right"><strong>144.753</strong></td>
+          <td style="text-align: right">1.434</td>
+      </tr>
+  </tbody>
+</table>
+<p>At <code>4k</code> and concurrency 8, <em>EPD</em> reduced <em>ITL</em> p99 from <code>231.453 ms</code> to <strong>15.352 ms</strong>, or <strong>15.1×</strong>.
+<em>TTFT</em> p50 also fell from <code>1,972.504 ms</code> to <code>1,690.166 ms</code>.
+At <code>8k</code> and concurrency 8, <em>ITL</em> p99 improved <strong>21.8×</strong>, but <em>TTFT</em> p50 increased by <code>219.239 ms</code>.
+Separating generation from prompt processing improved token-gap tails without consistently improving first-token latency.</p>
+<p>Aggregated serving had the lowest <em>TTFT</em> p50 for every <code>1k</code> cell and the lowest <em>TTFT</em> p95 for every <code>2k</code> cell.
+At <code>8k</code> and concurrency 4, <em>EPD</em> improved median <em>TTFT</em> but worsened its p95 against aggregated serving.
+The recorded medians and tails support different choices; <em>EPD</em> has no universal latency advantage.</p>
+<h2 id="suite-2-mixed-vision-and-decode">Suite 2: Mixed vision and decode</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Workload</th>
+          <th style="text-align: right">Concurrency</th>
+          <th>Configuration</th>
+          <th style="text-align: right">Requests</th>
+          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+          <th style="text-align: right">Output (tok/s)</th>
+          <th style="text-align: right">Throughput (req/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>concurrent_decode_1k</code></td>
+          <td style="text-align: right">4</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">1,214.046</td>
+          <td style="text-align: right">1,573.818</td>
+          <td style="text-align: right">12.417</td>
+          <td style="text-align: right">296.566</td>
+          <td style="text-align: right">176.449</td>
+          <td style="text-align: right">1.416</td>
+      </tr>
+      <tr>
+          <td><code>concurrent_decode_1k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">1,487.862</td>
+          <td style="text-align: right">1,828.701</td>
+          <td style="text-align: right"><strong>6.432</strong></td>
+          <td style="text-align: right">16.708</td>
+          <td style="text-align: right">158.198</td>
+          <td style="text-align: right">1.249</td>
+      </tr>
+      <tr>
+          <td><code>concurrent_decode_1k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right"><strong>647.387</strong></td>
+          <td style="text-align: right"><strong>1,001.308</strong></td>
+          <td style="text-align: right">8.551</td>
+          <td style="text-align: right"><strong>16.130</strong></td>
+          <td style="text-align: right"><strong>241.119</strong></td>
+          <td style="text-align: right"><strong>2.300</strong></td>
+      </tr>
+      <tr>
+          <td><code>heavy_vision_4k</code></td>
+          <td style="text-align: right">4</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">2,215.441</td>
+          <td style="text-align: right">2,419.269</td>
+          <td style="text-align: right"><strong>6.597</strong></td>
+          <td style="text-align: right">197.815</td>
+          <td style="text-align: right">90.644</td>
+          <td style="text-align: right">1.416</td>
+      </tr>
+      <tr>
+          <td><code>heavy_vision_4k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">2,379.965</td>
+          <td style="text-align: right">3,770.445</td>
+          <td style="text-align: right">7.138</td>
+          <td style="text-align: right"><strong>16.348</strong></td>
+          <td style="text-align: right">79.932</td>
+          <td style="text-align: right">1.249</td>
+      </tr>
+      <tr>
+          <td><code>heavy_vision_4k</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right"><strong>959.134</strong></td>
+          <td style="text-align: right"><strong>1,971.796</strong></td>
+          <td style="text-align: right">8.625</td>
+          <td style="text-align: right">16.845</td>
+          <td style="text-align: right"><strong>147.201</strong></td>
+          <td style="text-align: right"><strong>2.300</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>The mixed windows lasted <code>8.473 s</code>, <code>9.608 s</code> and <strong>5.217 s</strong> for aggregated serving, <em>PD</em> and <em>EPD</em>.
+Each stream&rsquo;s output and request throughput uses its configuration&rsquo;s full mixed window as the denominator.
+Combined output throughput was <code>267.093 tok/s</code>, <code>238.130 tok/s</code> and <strong>388.320 tok/s</strong>, respectively.</p>
+<p>For small requests, <em>EPD</em> reduced <em>TTFT</em> p50 from <code>1,214.046 ms</code> to <strong>647.387 ms</strong> against aggregated serving.
+Their <em>ITL</em> p99 fell from <code>296.566 ms</code> to <strong>16.130 ms</strong>, or <strong>18.4× lower</strong>.
+For heavy-vision requests, <em>TTFT</em> p50 fell from <code>2,215.441 ms</code> to <strong>959.134 ms</strong>.
+The isolated roles improved these mixed-load outcomes while using three GPUs instead of one.</p>
+<h2 id="suite-3-encoder-cache-reuse">Suite 3: Encoder-cache reuse</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Workload</th>
+          <th style="text-align: right">Concurrency</th>
+          <th>Configuration</th>
+          <th style="text-align: right">Requests</th>
+          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+          <th style="text-align: right">Output (tok/s)</th>
+          <th style="text-align: right">Throughput (req/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>repeated_4k_c4</code></td>
+          <td style="text-align: right">4</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">1,077.919</td>
+          <td style="text-align: right">1,337.691</td>
+          <td style="text-align: right">6.403</td>
+          <td style="text-align: right">25.708</td>
+          <td style="text-align: right">154.699</td>
+          <td style="text-align: right">2.417</td>
+      </tr>
+      <tr>
+          <td><code>repeated_4k_c4</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right">1,304.894</td>
+          <td style="text-align: right">1,418.578</td>
+          <td style="text-align: right">6.223</td>
+          <td style="text-align: right">12.202</td>
+          <td style="text-align: right">146.941</td>
+          <td style="text-align: right">2.296</td>
+      </tr>
+      <tr>
+          <td><code>repeated_4k_c4</code></td>
+          <td style="text-align: right">4</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">12/12</td>
+          <td style="text-align: right"><strong>298.825</strong></td>
+          <td style="text-align: right"><strong>322.128</strong></td>
+          <td style="text-align: right"><strong>6.144</strong></td>
+          <td style="text-align: right"><strong>9.712</strong></td>
+          <td style="text-align: right"><strong>367.278</strong></td>
+          <td style="text-align: right"><strong>5.739</strong></td>
+      </tr>
+      <tr>
+          <td><code>repeated_4k_c8</code></td>
+          <td style="text-align: right">8</td>
+          <td>Aggregated</td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right">2,196.771</td>
+          <td style="text-align: right">2,364.464</td>
+          <td style="text-align: right">6.988</td>
+          <td style="text-align: right">17.550</td>
+          <td style="text-align: right">187.667</td>
+          <td style="text-align: right">2.932</td>
+      </tr>
+      <tr>
+          <td><code>repeated_4k_c8</code></td>
+          <td style="text-align: right">8</td>
+          <td><em>PD</em></td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right">2,596.832</td>
+          <td style="text-align: right">2,685.146</td>
+          <td style="text-align: right"><strong>6.430</strong></td>
+          <td style="text-align: right"><strong>14.864</strong></td>
+          <td style="text-align: right">170.026</td>
+          <td style="text-align: right">2.657</td>
+      </tr>
+      <tr>
+          <td><code>repeated_4k_c8</code></td>
+          <td style="text-align: right">8</td>
+          <td><em>EPD</em></td>
+          <td style="text-align: right">24/24</td>
+          <td style="text-align: right"><strong>371.850</strong></td>
+          <td style="text-align: right"><strong>753.291</strong></td>
+          <td style="text-align: right">7.272</td>
+          <td style="text-align: right">15.744</td>
+          <td style="text-align: right"><strong>536.280</strong></td>
+          <td style="text-align: right"><strong>8.379</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>At concurrency 8, <em>EPD</em> reduced <em>TTFT</em> p50 from <code>2,196.771 ms</code> to <strong>371.850 ms</strong>, or <strong>5.9× lower</strong>.
+Output throughput rose from <code>187.667 tok/s</code> to <strong>536.280 tok/s</strong>, or <strong>2.86× higher</strong>.
+<em>PD</em> retained the lowest <em>ITL</em> p99 in that cell: <code>14.864 ms</code> against <em>EPD</em>&rsquo;s <code>15.744 ms</code>.</p>
+<p>These results establish a repeated-image advantage for the captured <em>EPD</em> configuration.
+They do not isolate encoder-cache hits from prefix caching, batching or the extra GPU allocation.
+The captured metrics are cumulative across suites, without a per-suite encoder-cache hit-rate delta.</p>
+<h2 id="stage-execution-verification">Stage execution verification</h2>
+<p>The stage capture separates completion access lines from token-render calls.
+It includes warm-up traffic and is broader than the 236 measured requests per configuration.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Configuration</th>
+          <th>Role</th>
+          <th style="text-align: right">Completion lines</th>
+          <th style="text-align: right">Render lines</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Aggregated</td>
+          <td><em>Server</em></td>
+          <td style="text-align: right">264</td>
+          <td style="text-align: right">266</td>
+      </tr>
+      <tr>
+          <td><em>PD</em></td>
+          <td><em>Prefill</em></td>
+          <td style="text-align: right">246</td>
+          <td style="text-align: right">266</td>
+      </tr>
+      <tr>
+          <td><em>PD</em></td>
+          <td><em>Decode</em></td>
+          <td style="text-align: right">264</td>
+          <td style="text-align: right">0</td>
+      </tr>
+      <tr>
+          <td><em>EPD</em></td>
+          <td><em>Encode</em></td>
+          <td style="text-align: right">264</td>
+          <td style="text-align: right">0</td>
+      </tr>
+      <tr>
+          <td><em>EPD</em></td>
+          <td><em>Prefill</em></td>
+          <td style="text-align: right">264</td>
+          <td style="text-align: right">0</td>
+      </tr>
+      <tr>
+          <td><em>EPD</em></td>
+          <td><em>Decode</em></td>
+          <td style="text-align: right">264</td>
+          <td style="text-align: right">0</td>
+      </tr>
+  </tbody>
+</table>
+<p>The <em>EPD</em> <em>Decode</em> sidecar also logged <strong>264 multimodal-item events</strong>.
+Each configuration&rsquo;s router access capture contained 280 lines.
+These counts establish traffic at every <em>EPD</em> stage, but are not request-ID correlation or byte-transfer measurements.
+The <em>PD</em> <em>Prefill</em> count is eighteen below its <em>Decode</em> count; the capture does not establish the reason.</p>
+<p>The aggregated and <em>PD</em> render counts are separate from completion counts.
+A successful response or matching aggregate counts alone cannot prove that every request traversed every intended stage.
+See <a href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/prefill-decode/#counting-engine-tokens">Counting engine tokens</a>
+ for the router&rsquo;s token-render requirement.</p>
+<h2 id="summary">Summary</h2>
+<h3 id="benefits">Benefits</h3>
+<ul>
+<li>Long-prompt generation tails improved: <em>EPD</em> had <strong>15.1×–21.8× lower ITL p99</strong> at <code>4k</code>/<code>8k</code>, concurrency 8, than aggregated serving.</li>
+<li>Repeated-image traffic reached <strong>536.280 tok/s</strong> at concurrency 8, with <strong>5.9× lower TTFT p50</strong> than aggregated serving.</li>
+<li>Mixed traffic completed in <strong>5.217 s</strong>, against <code>8.473 s</code> for aggregated serving, with lower first-token and token-gap tails.</li>
+</ul>
+<h3 id="trade-offs">Trade-offs</h3>
+<ul>
+<li><em>EPD</em> used <strong>three GPUs</strong>, compared with one for aggregated serving and two for <em>PD</em>.</li>
+<li>Small prompts often favored aggregated serving on first-token latency.</li>
+<li>The <code>8k</code>, concurrency-8 <em>EPD</em> median <em>TTFT</em> remained higher than aggregated serving despite much lower <em>ITL</em> p99.</li>
+</ul>
+<p>Choose <em>EPD</em> for large-image generation isolation, repeated-image workloads or the measured mixed-traffic benefits when three GPUs are available.
+Small-prompt first-token latency can favor aggregated serving.
+The cross-role TCP transfers and unequal GPU budgets prevent a universal latency or equal-cost efficiency claim.</p>
+<h2 id="infiniband-rdma-comparison">InfiniBand RDMA comparison</h2>
+<p>A follow-up on the same ConnectX-7 InfiniBand node setup described in
+<a href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/prefill-decode-benchmark/#infiniband-rdma-comparison">Prefill and Decode Benchmark</a>
+ ran the
+three-role <code>epd-arm3-epd</code> allocation with one GPU per role. <strong>All 16 measured cells completed:
+236/236 requests, with zero errors.</strong></p>
+<h3 id="transport-verification">Transport verification</h3>
+<p>Update <code>epd-deployment.yaml</code> from the
+<a href="/gpustack-operator/v0.9.2/docs/walkthroughs/model-deployment/encode-prefill-decode/#step-1-start-three-role-serving">TCP walkthrough</a>
+:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl"><span class="gi">+  kvTransfer:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    protocol: RDMA
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span>   roles:
+</span></span><span class="line"><span class="cl">     - name: encode
+</span></span><span class="line"><span class="cl">       kind: Encode
+</span></span><span class="line"><span class="cl">       resources:
+</span></span><span class="line"><span class="cl">         accelerator: &#34;1&#34;
+</span></span><span class="line"><span class="cl">     - name: prefill
+</span></span><span class="line"><span class="cl">       kind: Prefill
+</span></span><span class="line"><span class="cl">       resources:
+</span></span><span class="line"><span class="cl">         accelerator: &#34;1&#34;
+</span></span><span class="line"><span class="cl"><span class="gi">+        interface: &#34;1&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span>     - name: decode
+</span></span><span class="line"><span class="cl">       kind: Decode
+</span></span><span class="line"><span class="cl">       resources:
+</span></span><span class="line"><span class="cl">         accelerator: &#34;1&#34;
+</span></span><span class="line"><span class="cl"><span class="gi">+        interface: &#34;1&#34;
+</span></span></span></code></pre></div>
+</div><p><em>Prefill</em> bound <code>mlx5_5</code> with LID <code>21818</code>; <em>Decode</em> bound <code>mlx5_3</code> with LID <code>21813</code>.
+Both Mooncake workers logged protocol <code>rdma</code> and registered their KV caches.
+The receive log recorded <code>Received RDMA ready ACK</code>; the captured logs contained no failed-transfer entries.</p>
+<p>This verifies <strong>Mooncake KV transfer over InfiniBand RDMA</strong> between <em>Prefill</em> and <em>Decode</em>.
+NIXL <code>ECCPUConnector</code> still carried multimodal features between <em>Encode</em> and <em>Prefill</em>.
+The capture does not establish RDMA for that separate encoder-cache path.
+Each role used one GPU, so these cross-role transfers did not use NVLink.</p>
+<h3 id="context-scaling">Context scaling</h3>
+<p>The matched cells below retain the TCP baseline and add the RDMA follow-up.
+Both runs used the same context targets, concurrency and request counts.
+Bold values mark lower median first-token latency or higher output throughput within each pair.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Context</th>
+          <th style="text-align: right">Concurrency</th>
+          <th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right"><em>TTFT</em> reduction</th>
+          <th style="text-align: right">TCP output (tok/s)</th>
+          <th style="text-align: right">RDMA output (tok/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">1</td>
+          <td style="text-align: right">157.290</td>
+          <td style="text-align: right"><strong>125.393</strong></td>
+          <td style="text-align: right"><strong>1.25×</strong></td>
+          <td style="text-align: right">135.864</td>
+          <td style="text-align: right"><strong>140.079</strong></td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">4</td>
+          <td style="text-align: right">234.481</td>
+          <td style="text-align: right"><strong>176.407</strong></td>
+          <td style="text-align: right"><strong>1.33×</strong></td>
+          <td style="text-align: right">420.666</td>
+          <td style="text-align: right"><strong>494.492</strong></td>
+      </tr>
+      <tr>
+          <td><code>1k</code></td>
+          <td style="text-align: right">8</td>
+          <td style="text-align: right">343.176</td>
+          <td style="text-align: right"><strong>186.279</strong></td>
+          <td style="text-align: right"><strong>1.84×</strong></td>
+          <td style="text-align: right">715.225</td>
+          <td style="text-align: right"><strong>916.405</strong></td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">1</td>
+          <td style="text-align: right">261.095</td>
+          <td style="text-align: right"><strong>187.077</strong></td>
+          <td style="text-align: right"><strong>1.40×</strong></td>
+          <td style="text-align: right">120.054</td>
+          <td style="text-align: right"><strong>129.224</strong></td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">4</td>
+          <td style="text-align: right">581.520</td>
+          <td style="text-align: right"><strong>219.726</strong></td>
+          <td style="text-align: right"><strong>2.65×</strong></td>
+          <td style="text-align: right">326.686</td>
+          <td style="text-align: right"><strong>443.715</strong></td>
+      </tr>
+      <tr>
+          <td><code>2k</code></td>
+          <td style="text-align: right">8</td>
+          <td style="text-align: right">613.996</td>
+          <td style="text-align: right"><strong>379.328</strong></td>
+          <td style="text-align: right"><strong>1.62×</strong></td>
+          <td style="text-align: right">537.856</td>
+          <td style="text-align: right"><strong>749.450</strong></td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">1</td>
+          <td style="text-align: right">440.770</td>
+          <td style="text-align: right"><strong>308.062</strong></td>
+          <td style="text-align: right"><strong>1.43×</strong></td>
+          <td style="text-align: right">88.808</td>
+          <td style="text-align: right"><strong>104.528</strong></td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">4</td>
+          <td style="text-align: right">808.650</td>
+          <td style="text-align: right"><strong>342.357</strong></td>
+          <td style="text-align: right"><strong>2.36×</strong></td>
+          <td style="text-align: right">204.756</td>
+          <td style="text-align: right"><strong>302.606</strong></td>
+      </tr>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">8</td>
+          <td style="text-align: right">1,690.166</td>
+          <td style="text-align: right"><strong>442.003</strong></td>
+          <td style="text-align: right"><strong>3.82×</strong></td>
+          <td style="text-align: right">255.080</td>
+          <td style="text-align: right"><strong>531.323</strong></td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">1</td>
+          <td style="text-align: right">798.743</td>
+          <td style="text-align: right"><strong>553.685</strong></td>
+          <td style="text-align: right"><strong>1.44×</strong></td>
+          <td style="text-align: right">68.562</td>
+          <td style="text-align: right"><strong>80.768</strong></td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">4</td>
+          <td style="text-align: right">1,572.574</td>
+          <td style="text-align: right"><strong>605.871</strong></td>
+          <td style="text-align: right"><strong>2.60×</strong></td>
+          <td style="text-align: right">134.224</td>
+          <td style="text-align: right"><strong>226.206</strong></td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">8</td>
+          <td style="text-align: right">4,182.324</td>
+          <td style="text-align: right"><strong>1,207.904</strong></td>
+          <td style="text-align: right"><strong>3.46×</strong></td>
+          <td style="text-align: right">144.753</td>
+          <td style="text-align: right"><strong>360.029</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>At <code>4k</code>, concurrency 8, RDMA reduced <em>EPD</em> median <em>TTFT</em> <strong>3.82×</strong> and raised output throughput <strong>2.08×</strong>.
+At <code>8k</code>, concurrency 8, median <em>TTFT</em> fell <strong>3.46×</strong> while output throughput rose <strong>2.49×</strong>.
+The TCP <em>EPD</em> first-token regression against aggregated serving at <code>8k</code>, concurrency 8, reversed with RDMA.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Context, concurrency 8</th>
+          <th style="text-align: right">Aggregated <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right">RDMA EPD <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right">Aggregated output (tok/s)</th>
+          <th style="text-align: right">RDMA EPD output (tok/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>4k</code></td>
+          <td style="text-align: right">1,972.504</td>
+          <td style="text-align: right"><strong>442.003</strong></td>
+          <td style="text-align: right">231.845</td>
+          <td style="text-align: right"><strong>531.323</strong></td>
+      </tr>
+      <tr>
+          <td><code>8k</code></td>
+          <td style="text-align: right">3,963.085</td>
+          <td style="text-align: right"><strong>1,207.904</strong></td>
+          <td style="text-align: right">143.211</td>
+          <td style="text-align: right"><strong>360.029</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>Against the recorded aggregated configuration, RDMA <em>EPD</em> had <strong>4.46× lower median TTFT</strong> at <code>4k</code> and <strong>3.28× lower</strong> at <code>8k</code>.
+Output throughput was <strong>2.29×</strong> and <strong>2.51× higher</strong>, respectively.
+These comparisons still allocate three GPUs to <em>EPD</em> and one to aggregated serving.</p>
+<h3 id="mixed-traffic">Mixed traffic</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Stream</th>
+          <th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right">TCP <em>ITL</em> p99 (ms)</th>
+          <th style="text-align: right">RDMA <em>ITL</em> p99 (ms)</th>
+          <th style="text-align: right">TCP output (tok/s)</th>
+          <th style="text-align: right">RDMA output (tok/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>concurrent_decode_1k</code></td>
+          <td style="text-align: right">647.387</td>
+          <td style="text-align: right"><strong>215.522</strong></td>
+          <td style="text-align: right">16.130</td>
+          <td style="text-align: right"><strong>9.894</strong></td>
+          <td style="text-align: right">241.119</td>
+          <td style="text-align: right"><strong>466.705</strong></td>
+      </tr>
+      <tr>
+          <td><code>heavy_vision_4k</code></td>
+          <td style="text-align: right">959.134</td>
+          <td style="text-align: right"><strong>474.237</strong></td>
+          <td style="text-align: right">16.845</td>
+          <td style="text-align: right"><strong>10.119</strong></td>
+          <td style="text-align: right">147.201</td>
+          <td style="text-align: right"><strong>208.875</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>The concurrent decode stream had <strong>3.00× lower median TTFT</strong> and <strong>1.94× higher output throughput</strong>.
+Its <em>ITL</em> p99 fell to <strong>9.894 ms</strong>, against TCP <em>EPD</em> at 16.130 ms and aggregated serving at 296.566 ms.
+Heavy-vision median <em>TTFT</em> fell <strong>2.02×</strong>, with output throughput <strong>1.42× higher</strong>.
+Both streams shared the mixed window: 3.677 s with RDMA, against 5.217 s with TCP.</p>
+<h3 id="encoder-cache-reuse">Encoder-cache reuse</h3>
+<table>
+  <thead>
+      <tr>
+          <th style="text-align: right">Concurrency</th>
+          <th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
+          <th style="text-align: right">TCP output (tok/s)</th>
+          <th style="text-align: right">RDMA output (tok/s)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td style="text-align: right">4</td>
+          <td style="text-align: right">298.825</td>
+          <td style="text-align: right"><strong>246.151</strong></td>
+          <td style="text-align: right">367.278</td>
+          <td style="text-align: right"><strong>390.899</strong></td>
+      </tr>
+      <tr>
+          <td style="text-align: right">8</td>
+          <td style="text-align: right">371.850</td>
+          <td style="text-align: right"><strong>286.294</strong></td>
+          <td style="text-align: right">536.280</td>
+          <td style="text-align: right"><strong>700.762</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>The RDMA follow-up retained the repeated-image benefit and improved median <em>TTFT</em> in both measured cells.
+The captures still do not separate encoder-cache hits from prefix caching, batching or GPU allocation.</p>
+<h3 id="scope-and-trade-offs">Scope and trade-offs</h3>
+<p>RDMA reversed the <code>8k</code>, concurrency-8 first-token disadvantage while retaining separate generation resources.
+It required InfiniBand interfaces on both KV-transfer roles; declaring <code>RDMA</code> alone does not establish a working transport.
+The TCP and RDMA measurements are separate runs on the same GPU model, not repeated transport-only trials.</p>
+<p>Model, role counts and GPU budgets remained unchanged.
+Neither capture measures cross-node placement or RDMA encoder-cache transfer.</p>
+<p>Single-request <em>ITL</em> p99 rose slightly in all four context shapes, despite lower median <em>TTFT</em> and higher throughput.</p>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>One run per configuration, with 8–24 requests per stream or cell. Tail percentiles have limited sample support.</li>
+<li>Unequal GPU allocations prevent an equal-cost throughput or per-GPU efficiency conclusion.</li>
+<li>All serving roles shared one GPU node. Cross-node placement and bandwidth were not measured.</li>
+<li>The initial capture used cross-<code>Pod</code> TCP over <code>eth0</code>; the follow-up verified InfiniBand KV transfer. Neither establishes cross-<code>Pod</code> NVLink.</li>
+<li>The configurations ran sequentially with warmed model weights. Cache state and execution order were not independently controlled.</li>
+<li>Encoder-cache, prefix-cache and compute-isolation effects were not measured separately.</li>
+<li>Completion limits were fixed, but early stopping produced different output-token totals. Output throughput uses actual generated tokens.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/encode-prefill-decode/">Encode, Prefill and Decode</a>
+ (role and connector contracts)</li><li><a href="/gpustack-operator/v0.9.2/docs/walkthroughs/model-deployment/encode-prefill-decode/">Encode, Prefill and Decode Walkthrough</a>
+ (deployment manifest)</li><li><a href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/prefill-decode-benchmark/">Prefill and Decode Benchmark</a>
+ (equal-GPU text-model comparison)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.2/docs/modules/model-deployment/elastic-ep/">Elastic EP</a>
+ — resize one serving instance&rsquo;s collective in place.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/25c6524fc31e93cd924f83ce4da57c5ae0243103/docs/modules/model-deployment/encode-prefill-decode-benchmark.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#configurations">Configurations</a></li>
+    <li><a href="#hardware-model-and-workload">Hardware, model and workload</a>
+      <ul>
+        <li><a href="#suite-1-workload">Suite 1 workload</a></li>
+        <li><a href="#suite-2-workload">Suite 2 workload</a></li>
+        <li><a href="#suite-3-workload">Suite 3 workload</a></li>
+        <li><a href="#method">Method</a></li>
+      </ul>
+    </li>
+    <li><a href="#suite-1-multimodal-context-scaling">Suite 1: Multimodal context scaling</a></li>
+    <li><a href="#suite-2-mixed-vision-and-decode">Suite 2: Mixed vision and decode</a></li>
+    <li><a href="#suite-3-encoder-cache-reuse">Suite 3: Encoder-cache reuse</a></li>
+    <li><a href="#stage-execution-verification">Stage execution verification</a></li>
+    <li><a href="#summary">Summary</a>
+      <ul>
+        <li><a href="#benefits">Benefits</a></li>
+        <li><a href="#trade-offs">Trade-offs</a></li>
+      </ul>
+    </li>
+    <li><a href="#infiniband-rdma-comparison">InfiniBand RDMA comparison</a>
+      <ul>
+        <li><a href="#transport-verification">Transport verification</a></li>
+        <li><a href="#context-scaling">Context scaling</a></li>
+        <li><a href="#mixed-traffic">Mixed traffic</a></li>
+        <li><a href="#encoder-cache-reuse">Encoder-cache reuse</a></li>
+        <li><a href="#scope-and-trade-offs">Scope and trade-offs</a></li>
+      </ul>
+    </li>
+    <li><a href="#limitations">Limitations</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.2/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>
