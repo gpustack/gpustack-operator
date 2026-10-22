@@ -20,7 +20,8 @@ finishes.
 An edit that replaces a role's configuration deletes that role's old replicas one at a time, and
 each deleted replica drains exactly as below. The protocol reads a leaving replica as it is
 deployed — the size and command it was created with — so an edit elsewhere does not change how it
-is classified: a take-over replica is still held, a *prefill* or *decode* replica still refused.
+is classified: a take-over replica is still held, a *prefill* or *decode* replica still waits for
+its grace window.
 
 `G` below is the role's grace: *`roles[].terminationGracePeriodSeconds`*, 30 when unset, written to
 the `Pod`'s field of the same name.
@@ -87,6 +88,9 @@ surplus replicas, and a replica of a role the spec has dropped. Its progress is 
 [`status.retirement` field](status.md#status), and the replica stays in place, still counted,
 for as long as the protocol holds it.
 
+A replica that was never scheduled and never admitted is the one exception: it has nothing to drain,
+so it is removed without the protocol. See [Unadmitted replicas](#unadmitted-replicas).
+
 For `llm-d-router`, withdrawal also waits for recent dispatches reported for a target member.
 This applies after the Router removes that member from selection. These records do not increase
 the serving count. A dispatch to an unrelated survivor does not hold the target.
@@ -144,7 +148,6 @@ the configurations the protocol can measure.
 | answers with some gauges missing | held | a partial envelope is not evidence of an empty queue, and a reader cannot sum what it did not find |
 | the exec fails, times out, or returns a body that is not metrics | held | nothing was measured, and an absence of measurement is not a measurement of absence |
 | the container has restarted | held | the gauges now served come from an engine that did not exist when the protocol began watching |
-| a *prefill* or *decode* replica | refused | see below |
 | a take-over role | held | the operator renders no endpoint for it, so there is nothing to read |
 | an engine with no gauge list | refused | no such measurement exists for it |
 
@@ -157,21 +160,64 @@ keeps crash-looping ends as `Aborted` with its capacity retained, and never bloc
 > less for it. The protocol cannot tell whether a restarted engine is a replacement it should wait
 > for or a crash loop it should give up on, and the budget is what resolves that question.
 
-**A *prefill* or *decode* replica is refused outright.** Its queues are visible from both engines, so
-this is not a case of unmeasured work.
+**A disaggregated replica is held for a grace window, then drained like any other.** A *prefill* or
+*decode* replica has no verifiable decoder-side release, so the protocol waits before it reads such a
+replica. See [Disaggregated replicas](#disaggregated-replicas) below.
 
-What is not verifiable is the release. A *decode* replica reading zero is an engine about to be
-handed work, and nothing in either engine's metrics proves it will not be. This configuration stays refused
-until a decoder-side release can be verified, because the other answer deletes a *decode* replica in
-the middle of a *prefill*.
+### Disaggregated replicas
 
-Both engines report a decoder's work while it waits to receive its KV: a *prefill* half holds it in
-its transfer queue, and a *decode* half holds it in its own prealloc and transfer queues.
+A *prefill* or *decode* replica is classified as disaggregated when its member `Pod`s carry the
+`prefill` or `decode` role kind, when an SGLang member runs `--disaggregation-mode prefill` or
+`decode`, or when a vLLM member runs a data-parallel `External`, `Hybrid` or `MultiPort` load
+balance. The classification is read from the member's own rendered command, so it still applies to a
+replica whose role the spec has already dropped.
 
-The refusal is read from the member `Pod`'s own rendered command, so it still applies to a replica
-whose role the spec has already dropped. Both engines are covered: a vLLM
-member is recognized by its data-parallel balance flags, and an SGLang member by its
-`--disaggregation-mode prefill` or `decode`.
+What the protocol cannot verify is the release. A *decode* replica reading zero is an engine about to
+be handed work, and nothing in either engine's metrics proves it will not be. Both engines report a
+decoder's work while it waits to receive its KV: a *prefill* half holds it in its transfer queue, and
+a *decode* half holds it in its own prealloc and transfer queues.
+
+**The window is 60 seconds, measured from the moment the drain phase began.** The drain phase is
+entered only after the router withdrawal is confirmed, so the replica is already out of selection
+when the window starts. Once the window elapses, the ordinary two-consecutive-idle-reads check runs
+on the answering members, and the deletion commits when they are idle. The window sits inside the
+240-second drain budget, so it does not extend the operation.
+
+Answering-member selection is not part of this. It stays keyed on the vLLM data-parallel shapes
+alone, so a multi-`Pod` leader-served *prefill* or *decode* replica still answers through its leader
+rather than through every member. A member whose parallelism flags cannot be read is still held as
+unsupported.
+
+### Retirement adoption
+
+**A reservation is cancelled when the spec re-declares the ordinal it holds.** A scale-up that
+restores the ordinal of a reservation in `Admitted`, `Disqualified`, `Withdrawing`, `Draining` or
+`Aborted` cancels the reservation, provided the group still holds the members the reservation names
+and the replica qualifies on every ground except the reservation itself.
+
+The replica becomes eligible again through the reversible `modeldeployment.gpustack.ai/endpoint-eligible`
+label, which the reconciler restores on the members it held. The event `RetirementAdopted` records the
+cancellation.
+
+This is a cancellation and not a duplicate: the `Pod`s are already there and healthy, so the next
+pass finds the replica current and creates nothing. From `Deleting` on the behavior does not change,
+because the delete has already been committed; the delete completes and the ordinal is recreated on a
+later pass.
+
+Creating replicas for other ordinals or other roles never waits on a reservation, so a reservation
+for one replica never holds up the rest of the deployment.
+
+### Unadmitted replicas
+
+**A replica that was never scheduled and never admitted is removed without the protocol.** An
+undeclared replica whose members were never scheduled — no node, no address, still `Pending`, and
+without the `endpoint-eligible` label — and whose group `Workload` was never admitted has nothing to
+drain. The reconciler deletes its `Pod`s and its `Workload` straight away.
+
+An unscheduled `Pod` has no running container and no metrics endpoint, so running the protocol
+against it would hold for the whole drain budget and end as `Aborted`, retaining a `Pod` that was
+never going to serve. If admission or scheduling won the race before the pass ran, the replica enters
+ordinary retirement instead.
 
 ## Limitations
 
@@ -197,8 +243,10 @@ member is recognized by its data-parallel balance flags, and an SGLang member by
   replica does not have — and the *`reason`* names which. Selecting the leader does not narrow the
   deletion: as [the protocol above](#retirement-protocol) states, it still covers every member
   the reservation bound.
-- **A *prefill* or *decode* replica is refused by the protocol**, so it is never deleted through one.
-  The [drain window](#drain-window) still applies to it once something else deletes its `Pod`.
+- **A *prefill* or *decode* replica is held for the disaggregated grace window, then drained like any
+  other.** It is never deleted inside the 60 s window, and a replica that reaches the window while
+  still serving is held for the rest of the drain budget. The [drain window](#drain-window) still
+  applies to it once something else deletes its `Pod`.
 - **A direct decoder on a cluster below Kubernetes 1.29** runs its routing proxy as a classic
   container, which stops at the delete while the engine behind it drains, so a request in flight
   through the proxy still resets. The proxy's image has no shell to run a hook of its own.
@@ -206,6 +254,7 @@ member is recognized by its data-parallel balance flags, and an SGLang member by
 ---
 
 **See also** — [Model Deployment](deployment.md) for what turns a replica over ·
+[Model Deployment Scaling](scaling.md) for the count changes that start a retirement ·
 [Model Deployment Metrics](metrics.md) for the scrape endpoints the hook
 reads.
 

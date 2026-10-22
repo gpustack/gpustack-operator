@@ -262,6 +262,14 @@ contract, and what turns a replica over.
 (`shutdown.md`), the router's own behavior (`routing.md`), or the status views
 (`status.md`). Link each.
 
+## `docs/modules/model-deployment/scaling-benchmark.md`
+
+**Owns** — the measured H100 replica-scaling comparison: algorithm settings, two-wave GPU budgets,
+phase latency and throughput, request errors, scale-out timing and captured retirement limits.
+
+**Never** — algorithm field contracts (`scaling.md`) or an unmeasured zero-interruption guarantee.
+Keep failed configurations and incomplete lifecycle observations explicit.
+
 ## `docs/modules/model-deployment/prefill-decode.md`
 
 **Owns** — what pairs a prefill role with a decode role: the connector each engine and router
@@ -495,6 +503,15 @@ supersession is recorded that way because it has no new spec to be recorded in. 
 `**Corrected after shipping.**`. A spec naming another spec by file name is the case that forces one:
 when that file leaves the tree the name resolves to nothing, and leaving it alone preserves a pointer
 rather than a record.
+
+## `docs/walkthroughs/model-deployment/scaling.md`
+
+**Owns** — configuring and observing a `ModelDeploymentScaler`: Shadow then Active, algorithm
+replacement, EPD role ratios, live load, replica readiness, retirement and application cleanup.
+
+**Never** — the normative scaling contract (`../../modules/model-deployment/scaling.md`) or
+the full measurement tables (`../../modules/model-deployment/scaling-benchmark.md`). Distinguish
+reusable manifests from captured single-role lifecycle evidence.
 
 ## `docs/walkthroughs/model-deployment/elastic-ep.md`
 

@@ -1,7 +1,7 @@
 # Encode, Prefill and Decode Benchmark
 
-On one H100 SXM5 node, *Encode/Prefill/Decode (EPD)* reduced long-prompt generation stalls and
-repeated-image latency compared with aggregated serving and *Prefill/Decode (PD)*.
+On one H100 SXM5 node, *encode/prefill/decode (EPD)* reduced long-prompt generation stalls and
+repeated-image latency compared with aggregated serving and *prefill/decode (PD)*.
 Aggregated serving, *PD* and *EPD* used **one, two and three GPUs**, respectively.
 These results compare deployed configurations with unequal GPU budgets.
 

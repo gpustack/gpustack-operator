@@ -70,6 +70,8 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | A `NodeModelStore` or the `model-manager` plugin: a field and its writer, the status guard, mount authorization, materialization, a failure reason, collection, a metric | `docs/modules/model-delivery/node-store.md` |
 | Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, where replicas land and turning the preference off, upgrading, removing the cache | `docs/modules/model-delivery/operations.md` |
 | The `ModelDeployment` contract: the inherited reuse domain, the three override tiers, the owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field contract | `docs/modules/model-deployment/deployment.md` |
+| The measured replica-scaling comparison across algorithms and engines, its latency and throughput, scale-out timing, retirement observations and failure limits | `docs/modules/model-deployment/scaling-benchmark.md` |
+| Configuring and observing `ModelDeploymentScaler`, Shadow and Active modes, algorithm selection, EPD ratios and retirement | `docs/walkthroughs/model-deployment/scaling.md` |
 | How an `elasticEp` profile resizes a serving instance's expert-parallel collective in place without replacing surviving pods | `docs/modules/model-deployment/elastic-ep.md` |
 | The measured comparison of an expert-parallel collective before, during, and after a live `elasticEp.width` resize | `docs/modules/model-deployment/elastic-ep-benchmark.md` |
 | A recorded Elastic EP expansion, its captured CR output and inference checks | `docs/walkthroughs/model-deployment/elastic-ep.md` |

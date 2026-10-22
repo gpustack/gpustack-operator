@@ -35,6 +35,7 @@ order:
   /docs/walkthroughs/model-deployment/:
     - prefill-decode
     - encode-prefill-decode
+    - scaling
     - elastic-ep
     - external-dp
     - multi-host
@@ -70,6 +71,8 @@ order:
     - operations
   /docs/modules/model-deployment/:
     - deployment
+    - scaling
+    - scaling-benchmark
     - engine-versions
     - prefill-decode
     - prefill-decode-benchmark
@@ -105,6 +108,8 @@ overview_labels:
 children:
   /docs/modules/model-delivery/artifact/:
     - views
+  /docs/modules/model-deployment/scaling/:
+    - scaling-benchmark
   /docs/modules/model-deployment/prefill-decode/:
     - prefill-decode-benchmark
   /docs/modules/model-deployment/encode-prefill-decode/:
@@ -123,6 +128,7 @@ labels:
   /docs/walkthroughs/model-deployment/: Model Deployment
   /docs/walkthroughs/model-deployment/prefill-decode/: Prefill and Decode
   /docs/walkthroughs/model-deployment/encode-prefill-decode/: Encode, Prefill and Decode
+  /docs/walkthroughs/model-deployment/scaling/: Scaling
   /docs/walkthroughs/model-deployment/elastic-ep/: Elastic EP
   /docs/walkthroughs/model-deployment/external-dp/: External DP
   /docs/walkthroughs/model-deployment/multi-host/: Multi-Host Serving
@@ -154,6 +160,8 @@ labels:
   /docs/modules/model-delivery/peer-sync/: Node-to-Node Sync
   /docs/modules/model-delivery/operations/: Operations
   /docs/modules/model-deployment/deployment/: Configuration
+  /docs/modules/model-deployment/scaling/: Scaling
+  /docs/modules/model-deployment/scaling-benchmark/: Benchmark
   /docs/modules/model-deployment/prefill-decode/: Prefill and Decode
   /docs/modules/model-deployment/prefill-decode-benchmark/: Benchmark
   /docs/modules/model-deployment/encode-prefill-decode/: Encode, Prefill and Decode
