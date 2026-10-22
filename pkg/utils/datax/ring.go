@@ -314,6 +314,99 @@ func (r *RingBuffer[T]) Push(v T) {
 	}
 }
 
+// Clone returns a shallow copy of the buffer.
+//
+// CLONE MUST BE EXTERNALLY SYNCHRONIZED against concurrent Push operations, because
+// the underlying slice copy is not atomic across all slots.
+func (r *RingBuffer[T]) Clone() *RingBuffer[T] {
+	if r == nil {
+		return nil
+	}
+	size := r.mask + 1
+	dest := &RingBuffer[T]{
+		mask: r.mask,
+		data: make([]_RingNode[T], size),
+	}
+	copy(dest.data, r.data)
+	dest.head.Store(r.head.Load())
+	dest.tail.Store(r.tail.Load())
+	return dest
+}
+
+// Reset empties the buffer and clears the values it held.
+//
+// THE VALUES ARE CLEARED so that a reset buffer does not keep the objects it held alive,
+// and the free markers of the slots are restored so that the buffer is usable afterwards.
+// Reset must be externally synchronized against concurrent Push, DropWhile, At, First, Last, Data, and Len calls.
+func (r *RingBuffer[T]) Reset() {
+	tail := r.tail.Load()
+	var zero T
+	span := r.mask + 1
+	for i := uint64(0); i < span; i++ {
+		r.data[i].val = zero
+		r.data[i].seq.Store(tail + (i+span-tail%span)%span)
+	}
+	r.head.Store(tail)
+}
+
+// DropWhile removes the elements at the front of the buffer while the predicate holds for
+// them, and returns how many it removed.
+//
+// IT IS THE PRUNING A TIME WINDOW NEEDS, because the samples of a window are chronological
+// and the ones that fell out of it are at the front: dropping them costs one pass over the
+// window and no reallocation. DropWhile must be externally synchronized against concurrent
+// Push, DropWhile, At, First, Last, Data, Len, and Reset calls.
+func (r *RingBuffer[T]) DropWhile(predicate func(T) bool) int {
+	dropped := 0
+	for {
+		head := r.head.Load()
+		tail := r.tail.Load()
+		if head == tail {
+			return dropped
+		}
+		n := &r.data[head&r.mask]
+		switch diff := int64(n.seq.Load() - head - 1); {
+		case diff < 0:
+			// The slot is empty, so the buffer is empty.
+			return dropped
+		case diff > 0:
+			// The slot is being written by another goroutine, try again.
+			runtime.Gosched()
+			continue
+		}
+		if !predicate(n.val) {
+			return dropped
+		}
+		if !r.head.CompareAndSwap(head, head+1) {
+			continue
+		}
+		var zero T
+		n.val = zero
+		n.seq.Store(head + r.mask + 1)
+		dropped++
+	}
+}
+
+// At returns the element at the given index from the front of the buffer.
+//
+// IT IS COUNTED FROM THE OLDEST ELEMENT, and an index outside the buffer returns false.
+// At must be externally synchronized against concurrent Push, DropWhile, At, First, Last, Data, Len, and Reset calls.
+func (r *RingBuffer[T]) At(index int) (v T, ok bool) {
+	if index < 0 {
+		return v, false
+	}
+	head := r.head.Load()
+	position := head + uint64(index)
+	if position >= r.tail.Load() {
+		return v, false
+	}
+	n := &r.data[position&r.mask]
+	if n.seq.Load() != position+1 {
+		return v, false
+	}
+	return n.val, true
+}
+
 // First returns the first element of the buffer.
 func (r *RingBuffer[T]) First() (v T, ok bool) {
 	for {
