@@ -1,19 +1,18 @@
 # Shared Cache Walkthrough
 
-Create a store, a pool, a namespace grant and a workload in that order.
-
-On a cluster with GPUStack installed, replace the node selector, namespace, instance type and model
-name in the manifests below, then apply them in that order.
+Create a store, a pool, a namespace grant and a workload in that order, replacing the node selector,
+namespace, instance type and model name in the manifests below. The serving replicas then reuse each
+other's prefix KV blocks.
 
 ## Contents
 
 - [Summary](#summary)
+- [Environment](#environment)
 - [Step 1: Create the store](#step-1-create-the-store)
 - [Step 2: Create pool and binding](#step-2-create-pool-and-binding)
 - [Step 3: Create the workload](#step-3-create-the-workload)
 - [Step 4: Enable high availability](#step-4-enable-high-availability)
 - [Step 5: Add a disk tier](#step-5-add-a-disk-tier)
-- [Failover behavior](#failover-behavior)
 - [Step 6: Add a second team](#step-6-add-a-second-team)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
@@ -38,6 +37,16 @@ leaves references that resolve to nothing. Why the two scopes split this way is 
 **The Binding is the authorization point.** A namespace gets access to a store when an administrator
 creates a Binding in it. A user naming a pool is not a path this API has: *`poolRef`* is a
 same-namespace reference, so the name it accepts is a Binding's.
+
+## Environment
+
+| Item | Value |
+|---|---|
+| Cluster | Kubernetes with GPUStack installed |
+| Contributing nodes | selected by the backend's *`nodeSelector`*; Step 5's disk tier selects nodes labeled `kvcache: "true"` |
+| `InstanceType` | one from `kubectl get instancetype` |
+| Model | `Qwen/Qwen2.5-7B-Instruct` |
+| Engine | vLLM `gpustack/runner:cuda13.0-vllm0.29.0` |
 
 ## Step 1: Create the store
 
@@ -230,6 +239,17 @@ These conditions apply at one replica too; the phase does not summarize them:
 `RolloutComplete` exists because this workload disables the deployment deadline that would normally
 answer it: that deadline requires every replica to be available, and only one ever is here.
 
+### Failover behavior
+
+**A failover keeps nothing in memory.** A standby holds no data, so the replica that takes over knows
+none of the objects held in member memory and rebuilds from member remounts alone; a single leader
+that restarts does the same. High availability shortens the outage, and every one of those objects
+misses afterwards. Plan for a cold cache after every failover and every leader restart.
+
+**The store's snapshot is not offered, and its flags are refused in *`leader.extraArgs`***, because
+restoring a snapshot can make the cache serve another key's bytes instead of a miss.
+[High availability](../../modules/kv-cache/leader.md#high-availability) says why.
+
 ## Step 5: Add a disk tier
 
 A running member group cannot gain a local disk tier. Admission refuses the edit, because the members
@@ -269,17 +289,6 @@ $ install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
 A pool names exactly one backend and cannot be re-pointed. Serving workloads from `mooncake-disk`
 therefore takes its own `KVCachePool` and Binding. The tier writes in buckets, so a small cache can
 show an empty tier while it works; see [Bucket writes](../../modules/kv-cache/local-disk-tier.md#bucket-writes).
-
-## Failover behavior
-
-**A failover keeps nothing in memory.** A standby holds no data, so the replica that takes over knows
-none of the objects held in member memory and rebuilds from member remounts alone; a single leader
-that restarts does the same. High availability shortens the outage, and every one of those objects
-misses afterwards. Plan for a cold cache after every failover and every leader restart.
-
-**The store's snapshot is not offered, and its flags are refused in *`leader.extraArgs`***, because
-restoring a snapshot can make the cache serve another key's bytes instead of a miss.
-[High availability](../../modules/kv-cache/leader.md#high-availability) says why.
 
 ## Step 6: Add a second team
 
@@ -366,22 +375,22 @@ asked. *`status.effectiveQuota`* on each Binding shows the grant. See
 
 ## Troubleshooting
 
-| Symptom | Condition / Reason | Check & Mitigation |
+| Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| `KVCacheBackend` stuck in `Provisioning` or `Error` | `LeaderAvailable=False` | Leader `Deployment` unready, image missing election backend, or external endpoint address unreachable |
-| `KVCacheBackend` shows `Degraded` | `MembersMounted` shortfall (`SegmentsShort`, `NoSegments`) | `DaemonSet` member `Pod`s failing to mount or allocate memory/disk segments; check node capacity and daemon logs |
-| `KVCachePool` shows `Error` | `BackendResolved=False` / `CapacityAllocatable=False` | Referenced backend does not exist or has zero allocatable capacity |
-| `KVCachePool` `QuotaLedgerAvailable=False` | `MultiTenancyDisabled` | Backend explicitly set `multiTenancy: false`; ceiling quotas are intentionally not enforced |
-| `KVCachePoolBinding` `effectiveQuota: 0` | `QuotaGranted=False/ZeroGranted` | The master grants this domain nothing. Read the pool's `CapacityAllocatable`: `NothingToAllocate` means no member has mounted yet, and a restarted master can take roughly 30 s to remount its segments. Otherwise a proportional recut left this domain no share |
-| Pool reports oversubscribed | `QuotaWithinTotal=False/Oversubscribed` | The Bindings' ceilings sum past the pool's *`quota.total`*. This is not a fault: grants are recut in proportion and shown in each *`status.effectiveQuota`*. Lower a ceiling or raise *`quota.total`* for full grants |
-| Binding refused at apply with `Duplicate` on *`spec.domain.name`* | Domain already registered on the same master | Another Binding holds the name; an omitted name is `default`. Give each Binding a unique *`domain.name`* |
-| Two Bindings report one domain | `DomainExclusive=False/DomainClaimedByMultipleBindings` | Two creates raced past admission; delete one of them |
-| Member `Pod` stuck with `FailedMount ... hostPath type check failed` | `Pod` event | The tier directory does not exist on that node; create it as in Step 5 |
-| Member `Pod` runs but never becomes Ready | `MembersMounted=False` (`NoSegments`, or `MemberCrashLooping` if the container exits), or a `CAPACITY` below the expected figure | The directory exists but the image's user cannot write it; the container log says `no write permission on directory`. Run `install -d -o 65532 -g 0 -m 0750 <path>` for the default image. See [Directory requirements](../../modules/kv-cache/local-disk-tier.md#directory-requirements) |
-| Member init container restarts | `MembersMounted=False/MemberInitCrashLooping` | The directory-survey init container restarted; the condition message gives the restart count, exit code and termination message. The survey runs `sh -c`, so the member image needs a shell. An unwritable directory does not cause this |
-| Local disk tier reports preexisting content | `TierWasEmpty=False/PreexistingContent` | The directory held files from an earlier backend. Nothing was removed; empty it yourself. `cleanAfterDelete: true` empties it only when this backend is deleted |
-| HA Leader shows `3 desired / 1 ready` | Expected steady state | Only elected active leader is Ready; 2 standby leader replicas remain unready until failover |
-| Deletion of `KVCachePoolBinding` blocked | `Releasable=False/HeldByWorkloads` | Active `ModelDeployment`s or `Pod`s reference this binding; delete client workloads first |
+| `KVCacheBackend` stuck in `Provisioning` or `Error` | Condition: `LeaderAvailable=False` | Leader `Deployment` unready, image missing election backend, or external endpoint address unreachable |
+| `KVCacheBackend` shows `Degraded` | Condition: `MembersMounted` shortfall (`SegmentsShort`, `NoSegments`) | `DaemonSet` member `Pod`s failing to mount or allocate memory/disk segments; check node capacity and daemon logs |
+| `KVCachePool` shows `Error` | Condition: `BackendResolved=False` / `CapacityAllocatable=False` | Referenced backend does not exist or has zero allocatable capacity |
+| `KVCachePool` `QuotaLedgerAvailable=False` | Reason: `MultiTenancyDisabled` | Backend explicitly set `multiTenancy: false`; ceiling quotas are intentionally not enforced |
+| `KVCachePoolBinding` `effectiveQuota: 0` | Condition: `QuotaGranted=False/ZeroGranted` | The master grants this domain nothing. Read the pool's `CapacityAllocatable`: `NothingToAllocate` means no member has mounted yet, and a restarted master can take roughly 30 s to remount its segments. Otherwise a proportional recut left this domain no share |
+| Pool reports oversubscribed | Condition: `QuotaWithinTotal=False/Oversubscribed` | The Bindings' ceilings sum past the pool's *`quota.total`*. This is not a fault: grants are recut in proportion and shown in each *`status.effectiveQuota`*. Lower a ceiling or raise *`quota.total`* for full grants |
+| Binding refused at apply | Reason: `Duplicate` on *`spec.domain.name`* — the domain is already registered on the same master | Another Binding holds the name; an omitted name is `default`. Give each Binding a unique *`domain.name`* |
+| Two Bindings report one domain | Condition: `DomainExclusive=False/DomainClaimedByMultipleBindings` | Two creates raced past admission; delete one of them |
+| Member `Pod` stuck | Event: `FailedMount ... hostPath type check failed` | The tier directory does not exist on that node; create it as in Step 5 |
+| Member `Pod` runs but never becomes Ready | Condition: `MembersMounted=False` (`NoSegments`, or `MemberCrashLooping` if the container exits), or a `CAPACITY` below the expected figure | The directory exists but the image's user cannot write it; the container log says `no write permission on directory`. Run `install -d -o 65532 -g 0 -m 0750 <path>` for the default image. See [Directory requirements](../../modules/kv-cache/local-disk-tier.md#directory-requirements) |
+| Member init container restarts | Condition: `MembersMounted=False/MemberInitCrashLooping` | The directory-survey init container restarted; the condition message gives the restart count, exit code and termination message. The survey runs `sh -c`, so the member image needs a shell. An unwritable directory does not cause this |
+| Local disk tier reports preexisting content | Condition: `TierWasEmpty=False/PreexistingContent` | The directory held files from an earlier backend. Nothing was removed; empty it yourself. `cleanAfterDelete: true` empties it only when this backend is deleted |
+| HA Leader shows `3 desired / 1 ready` | Status: expected steady state | Only elected active leader is Ready; 2 standby leader replicas remain unready until failover |
+| Deletion of `KVCachePoolBinding` blocked | Condition: `Releasable=False/HeldByWorkloads` | Active `ModelDeployment`s or `Pod`s reference this binding; delete client workloads first |
 
 ---
 

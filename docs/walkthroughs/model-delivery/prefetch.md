@@ -7,6 +7,7 @@ The output below was captured with node model delivery enabled.
 ## Contents
 
 - [Summary](#summary)
+- [Environment](#environment)
 - [Step 1: Create artifact and prefetch](#step-1-create-artifact-and-prefetch)
 - [Step 2: Verify the cached model](#step-2-verify-the-cached-model)
 - [Step 3: Start a serving workload](#step-3-start-a-serving-workload)
@@ -21,6 +22,24 @@ The output below was captured with node model delivery enabled.
 node's disk before a serving `Pod` starts, so the rollout finds warm, checksum-verified weights and
 does not wait on a hub download.
 This shared preparation serves both the Elastic EP and External DP walkthroughs.
+
+| Object | Scope | Creator | Purpose |
+|---|---|---|---|
+| `ModelArtifact` | namespace | user | the weight files to cache and their revision |
+| `ModelStore` | cluster | administrator | the nodes that hold cached weights |
+| `ModelStoreBinding` | namespace | administrator | how much the namespace may cache, and the right to pin |
+| `ModelPrefetch` | namespace | user | warming the artifact onto the store's nodes |
+| `ModelDeployment` | namespace | user | the serving workload that finds the weights warm |
+
+## Environment
+
+The captured run used this setup:
+
+| Item | Captured setup |
+|---|---|
+| Cluster | Kubernetes with GPUStack, node model delivery enabled |
+| Node | one GPU node, named `gpu-node` in the manifests, with disk for the weights |
+| Model | `deepseek-ai/DeepSeek-V2-Lite-Chat` at revision `85864749cd611b4353ce1decdb286193298f64c7` |
 
 ## Step 1: Create artifact and prefetch
 
@@ -220,18 +239,18 @@ covered in [Pinning and expiry](../../modules/model-delivery/prefetch.md#pinning
 
 ## Troubleshooting
 
-| Symptom | Condition / Reason | Check & Mitigation |
+| Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| `ModelArtifact` resolution failed | `Resolved=False/AccessDenied` | Private or gated repository; check namespace `Secret` token and inspect `InvalidToken` event |
-| `ModelArtifact` resolution failed | `Resolved=False/RevisionNotFound` | Branch, tag, or commit hash misspelled (ModelScope does not default silently to master) |
-| `ModelArtifact` resolution failed | `Resolved=False/SourceUnavailable` | Hub endpoint unreachable, large directory enumeration timeout, or 5xx network error |
-| `ModelArtifact` resolution failed | `Resolved=False/EmptyManifest` | Allow/ignore pattern filters excluded all files; review the glob patterns |
-| Model deployment blocked at `Starting` | `WeightsReady=False/NodeDeliveryUnavailable` | CSI driver `model.csi.gpustack.ai` missing or `modelManager.enabled: false` in Helm values |
-| `ModelDeployment` blocked with pattern filters | `WeightsReady=False/FilterNeedsNodeDelivery` | Pattern filtering requires `Node` delivery mode; set `model-artifact-delivery-mode: Node` |
-| `Pod` stuck in `ContainerCreating` | `WeightsReady=False/Materializing` | The node plugin is actively downloading; check `Pod` `FailedMount` event for downloaded byte count |
-| Weight download failed on node | `WeightsReady=False/MaterializationFailed` | Check `kubectl get nodemodelstore <node> -o yaml` for digest failure *`reason`*, *`message`*, and *`retryTime`* |
-| `ModelPrefetch` fails to reach `Available` | `Degraded=True/NodeFailed` | One or more target nodes failed download; check node disk capacity and logs |
-| `ModelPrefetch` shows fewer ready nodes than *`minReady`* | `Lapsed=True/RetentionTTLExpired` | `Node` copies went unused past *`retention.ttlAfterLastUse`*, left *`readyNodes`* and released any pin, and nothing re-warms them; raise or remove the TTL |
+| `ModelArtifact` resolution failed | Condition: `Resolved=False/AccessDenied` | Private or gated repository; check namespace `Secret` token and inspect `InvalidToken` event |
+| `ModelArtifact` resolution failed | Condition: `Resolved=False/RevisionNotFound` | Branch, tag, or commit hash misspelled (ModelScope does not default silently to master) |
+| `ModelArtifact` resolution failed | Condition: `Resolved=False/SourceUnavailable` | Hub endpoint unreachable, large directory enumeration timeout, or 5xx network error |
+| `ModelArtifact` resolution failed | Condition: `Resolved=False/EmptyManifest` | Allow/ignore pattern filters excluded all files; review the glob patterns |
+| Model deployment blocked at `Starting` | Condition: `WeightsReady=False/NodeDeliveryUnavailable` | CSI driver `model.csi.gpustack.ai` missing or `modelManager.enabled: false` in Helm values |
+| `ModelDeployment` blocked with pattern filters | Condition: `WeightsReady=False/FilterNeedsNodeDelivery` | Pattern filtering requires `Node` delivery mode; set `model-artifact-delivery-mode: Node` |
+| `Pod` stuck in `ContainerCreating` | Condition: `WeightsReady=False/Materializing` | The node plugin is actively downloading; check `Pod` `FailedMount` event for downloaded byte count |
+| Weight download failed on node | Condition: `WeightsReady=False/MaterializationFailed` | Check `kubectl get nodemodelstore <node> -o yaml` for digest failure *`reason`*, *`message`*, and *`retryTime`* |
+| `ModelPrefetch` fails to reach `Available` | Condition: `Degraded=True/NodeFailed` | One or more target nodes failed download; check node disk capacity and logs |
+| `ModelPrefetch` shows fewer ready nodes than *`minReady`* | Condition: `Lapsed=True/RetentionTTLExpired` | `Node` copies went unused past *`retention.ttlAfterLastUse`*, left *`readyNodes`* and released any pin, and nothing re-warms them; raise or remove the TTL |
 | New `ModelPrefetch` rejected at admission | Over quota or unauthorized | Prefetch exceeds `ModelStoreBinding` *`quota.bytes`*, sets *`retention.pinned`* without `allowPinned: true`, or targets undeclared store |
 | Peer sync downloads continuously from Hub | `modelManager.port: 0` or peer sync disabled | Verify setting `model-store-peer-sync: true` and node `spec.peerSyncEnabled: true` |
 

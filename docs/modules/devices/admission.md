@@ -143,7 +143,7 @@ any one container asks for.
 - It acts on an UPDATE only while the old `Workload` holds no quota reservation, which is when Kueue
   rebuilds a suspended job's spec and still lets PodSets change.
 - It never denies. Its *`failurePolicy`* is `Ignore`, and the setting
-  [`workload-fit-affinity`](../../reference/settings.md#online-adjustable-settings) turns it off while the labels keep being published.
+  [`workload-fit-affinity`](../../reference/settings.md#settings) turns it off while the labels keep being published.
 - The pin never reaches the `Pod` or its owner's template: Kueue copies only labels, annotations, a
   *`nodeSelector`*, tolerations and scheduling gates onto them. A `Pod`-level pin would be unsafe, because
   the kubelet re-admits running `Pod`s against current node labels when it restarts.

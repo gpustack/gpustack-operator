@@ -234,11 +234,11 @@ the last group if you want to be able to take it off.
 
 **Three failure modes, all loud:**
 
-| Symptom | Cause | Fix |
+| Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| Refused at `kubectl apply` | the path breaks one of the five rules above, or the tier was added, removed or repathed on a running group | fix the path, or leave the tier alone; the message names which rule |
-| Member `Pod` stuck, event says `FailedMount ... hostPath type check failed` | the directory does not exist on that node | create it as above |
-| Member `Pod` runs but never becomes Ready; container log carries `FileStorageConfig: no write permission on directory: <path>` and `Store startup failed (attempt N): Invalid FileStorage configuration` | the directory exists but the image's user cannot write to it | `chown` it to the uid above |
+| Refused at `kubectl apply` | Admission refusal message | The path breaks one of the five rules above, or the tier was added, removed or repathed on a running group. Fix the path, or leave the tier alone; the message names which rule |
+| Member `Pod` stuck | Event: `FailedMount ... hostPath type check failed` | The directory does not exist on that node; create it as above |
+| Member `Pod` runs but never becomes Ready | Log: `FileStorageConfig: no write permission on directory: <path>` and `Store startup failed (attempt N): Invalid FileStorage configuration` | The directory exists but the image's user cannot write to it; `chown` it to the uid above |
 
 The last one never reaches a Ready state (the member's REST port opens only after the store mounts,
 so the readiness probe never passes), and `MembersMounted` reports the shortfall rather than the

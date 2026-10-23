@@ -106,7 +106,7 @@ the node's real CPU identity, as `${cpuManufacturer}-${id}`:
 - The key degrades to `generic` only when NFD reports no CPU identity at all.
 
 Whether that manufacturer subdivides the pools is a separate runtime decision, taken by
-[`instance-type-aware-cpu-manufacturer`](../../reference/settings.md#online-adjustable-settings) (see
+[`instance-type-aware-cpu-manufacturer`](../../reference/settings.md#settings) (see
 [Scheduling Chain](scheduling.md#naming-and-grouping)); the key stays CPU-accurate so the
 finest-grained `ResourceFlavor`s regroup without rewriting.
 

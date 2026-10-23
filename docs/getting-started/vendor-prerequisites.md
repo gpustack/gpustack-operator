@@ -7,107 +7,10 @@ Check the cited artifact and version for each manufacturer.
 
 ## Contents
 
-- [Allocator injection](#allocator-injection)
-- [Device plugin name collisions](#device-plugin-name-collisions)
-- [Single NFD per cluster](#single-nfd-per-cluster)
-- [Resource removal lag](#resource-removal-lag)
-- [Per manufacturer](#per-manufacturer)
+- [Manufacturer guides](#manufacturer-guides)
+- [Shared coexistence rules](#shared-coexistence-rules)
 
-## Allocator injection
-
-Whether a container toolkit is required at all follows directly from how GPUStack's allocator makes the
-accelerator visible: a `/dev` node needs nothing from the toolkit, while an env var needs the vendor's
-runtime hook to interpret it.
-
-| Manufacturer | Allocator injection | Toolkit required |
-|---|---|---|
-| AMD | `/dev` nodes (`/dev/kfd`, `/dev/dri/card*`, `/dev/dri/renderD*`) | No |
-| Ascend | `ASCEND_VISIBLE_DEVICES` | Yes |
-| Cambricon | `/dev` nodes (`/dev/cambricon_dev*`, the control nodes), plus `CAMBRICON_VISIBLE_DEVICES` | No |
-| Hygon | `/dev` nodes (`/dev/kfd`, `/dev/mkfd`, `/dev/dri/card*`, `/dev/dri/renderD*`) | No |
-| Iluvatar | `IX_VISIBLE_DEVICES` | Yes |
-| MetaX | `/dev` nodes (`/dev/mxcd`, `/dev/mxnd`, `/dev/mxgd`, `/dev/dri/card*`, `/dev/dri/renderD*`) | No |
-| Moore Threads | `MTHREADS_VISIBLE_DEVICES` | Yes |
-| NVIDIA | `NVIDIA_VISIBLE_DEVICES` by default, or a CDI request — see [NVIDIA](#nvidia) | Yes |
-| T-Head | `/dev` nodes (`/dev/alixpu`, `/dev/alixpu_ctl`, `/dev/alixpu_ppu<N>`) | No |
-
-> **Why** — a device plugin that names `/dev` entries directly needs only what `runc` already grants;
-> an env var needs the vendor's own runtime hook to translate it into a device grant, so removing that
-> hook removes the accelerator from the container.
-
-An env var reaches the container either way, so a missing toolkit does not fail the allocation: it
-produces a running container with the variable set and no accelerator behind it.
-
-## Device plugin name collisions
-
-The kubelet does not reject a second device-plugin registration for a resource name it already knows:
-it replaces the endpoint. Both plugins keep writing their own device sets, so node capacity oscillates
-between the two views, and a `Pod` can fail admission during the flap.
-
-Allocation can also fail when kubelet sends one plugin's device IDs to the other. Remove the duplicate
-plugin before submitting workloads.
-
-## Single NFD per cluster
-
-Run exactly one NFD master. Two masters write and garbage-collect the same
-`feature.node.kubernetes.io/*` labels, so each one's GC pass can erase the other's writes. Every
-Device Manager `DaemonSet` in this operator is placed onto a node by a `pci-<vendor>.present` label that
-NFD produces, so a lost label stops that `DaemonSet` from scheduling at all.
-
-A vendor GPU Operator obtains its node labels through a `NodeFeatureRule` or an NFD source.
-AMD's operator installs a cluster-scoped `NodeFeatureRule`, which the active NFD installation evaluates.
-GPUStack's bundled NFD can evaluate it: its master denies no label namespace and accepts `NodeFeature`
-labels from every namespace. Other operators require labels from a specific NFD source.
-Enable that source in the replacement NFD installation; see [NVIDIA](#nvidia).
-
-**Bringing your own NFD.** To use an existing NFD installation, disable GPUStack's bundled NFD.
-Set `--set node-feature-discovery.enabled=false` in chart mode, or
-`--disable-applications=node-feature-discovery` on the worker in image mode.
-See [Installation Modes](../operate/installation-modes.md#chart-and-image-modes) for the mode differences.
-
-The worker still installs the `gpustack-cpu-info` `NodeFeatureRule` in either mode.
-The replacement NFD installation must evaluate it and meet these requirements:
-
-1. A worker collecting `pci`, with `vendor` among its `deviceLabelFields` and device classes `02`, `03`,
-   `0b` and `12` whitelisted. Those are what produce the `pci-<vendor>.present` labels, and the
-   `gpustack-cpu-info` `NodeFeatureRule` matches the same classes.
-2. A worker collecting `system`, which publishes `system-os_release.*`.
-   GPUStack's scheduling chain does not use these labels, but the NVIDIA GPU Operator requires them.
-   GPUStack's bundled NFD publishes them, so the NVIDIA operator can run with its own NFD disabled.
-   See [NVIDIA](#nvidia).
-3. A master that evaluates `NodeFeature` objects from **every** namespace. The worker's and the
-   Device Managers' own `<node>-gpustack-*` objects are how their detections reach the `Node`.
-4. `restrictions.denyNodeFeatureLabels: false` and `disableExtendedResources: false`, since those
-   detections arrive as labels *and* as extended resources.
-5. A `denyLabelNs` that admits `acceleratable.feature.gpustack.ai` and `general.feature.gpustack.ai`.
-6. One owner for the NFD CRDs. Vendor charts bundle an NFD version of their own, so decide which
-   release installs them before installing two that both want to.
-
-A vendor chart that bundles NFD as a subchart exposes all five, so its NFD can be the cluster's one.
-The NVIDIA GPU Operator's already publishes `vendor` as its only `deviceLabelFields`, which is what
-item 1 asks for, and collects every source, which is item 2; its device classes are the gap.
-
-It whitelists `0300` and `0302` (the GPUs it was written for) and neither `0b` nor `12`, so an
-accelerator in either class never gets the label its Device Manager schedules on, and that `DaemonSet`
-stays unscheduled with nothing to say why. Both values live under that chart's
-`node-feature-discovery.worker.config.sources.pci`.
-
-Item 6 is not a version problem there: both charts vendor NFD 0.19.0, so the CRDs are the same objects
-and all that has to be settled is which release owns them. And the class gap only bites once a second
-manufacturer is present: the display-controller classes it does whitelist cover NVIDIA and AMD, so a
-cluster holding only those is already served by its list.
-
-Treat these requirements as a checklist. Hardware validation used the bundled NFD;
-a handover to an existing NFD installation has not been tested end to end.
-
-## Resource removal lag
-
-Removing a vendor's device plugin does not immediately remove its extended resource from the `Node`
-object: the kubelet only drops it once it reconverges. A scheduler can keep seeing the old resource as
-allocatable for a window after the plugin is gone, so "disabled" is not the same moment as "gone" from
-a scheduling decision's point of view.
-
-## Per manufacturer
+## Manufacturer guides
 
 ### AMD
 
@@ -564,6 +467,102 @@ Per [Allocator injection](#allocator-injection), GPUStack's allocator injects T-
 nodes directly, which is the mechanism the vendor's own container guide uses — it isolates a
 container by passing those nodes to `docker run --device`, with no vendor runtime in the path. Which
 nodes a container receives is in [Device Discovery](../modules/devices/discovery.md).
+
+## Shared coexistence rules
+
+### Allocator injection
+
+Whether a container toolkit is required at all follows directly from how GPUStack's allocator makes the
+accelerator visible: a `/dev` node needs nothing from the toolkit, while an env var needs the vendor's
+runtime hook to interpret it.
+
+| Manufacturer | Allocator injection | Toolkit required |
+|---|---|---|
+| AMD | `/dev` nodes (`/dev/kfd`, `/dev/dri/card*`, `/dev/dri/renderD*`) | No |
+| Ascend | `ASCEND_VISIBLE_DEVICES` | Yes |
+| Cambricon | `/dev` nodes (`/dev/cambricon_dev*`, the control nodes), plus `CAMBRICON_VISIBLE_DEVICES` | No |
+| Hygon | `/dev` nodes (`/dev/kfd`, `/dev/mkfd`, `/dev/dri/card*`, `/dev/dri/renderD*`) | No |
+| Iluvatar | `IX_VISIBLE_DEVICES` | Yes |
+| MetaX | `/dev` nodes (`/dev/mxcd`, `/dev/mxnd`, `/dev/mxgd`, `/dev/dri/card*`, `/dev/dri/renderD*`) | No |
+| Moore Threads | `MTHREADS_VISIBLE_DEVICES` | Yes |
+| NVIDIA | `NVIDIA_VISIBLE_DEVICES` by default, or a CDI request — see [NVIDIA](#nvidia) | Yes |
+| T-Head | `/dev` nodes (`/dev/alixpu`, `/dev/alixpu_ctl`, `/dev/alixpu_ppu<N>`) | No |
+
+> **Why** — a device plugin that names `/dev` entries directly needs only what `runc` already grants;
+> an env var needs the vendor's own runtime hook to translate it into a device grant, so removing that
+> hook removes the accelerator from the container.
+
+An env var reaches the container either way, so a missing toolkit does not fail the allocation: it
+produces a running container with the variable set and no accelerator behind it.
+
+### Device plugin name collisions
+
+The kubelet does not reject a second device-plugin registration for a resource name it already knows:
+it replaces the endpoint. Both plugins keep writing their own device sets, so node capacity oscillates
+between the two views, and a `Pod` can fail admission during the flap.
+
+Allocation can also fail when kubelet sends one plugin's device IDs to the other. Remove the duplicate
+plugin before submitting workloads.
+
+### Single NFD per cluster
+
+Run exactly one NFD master. Two masters write and garbage-collect the same
+`feature.node.kubernetes.io/*` labels, so each one's GC pass can erase the other's writes. Every
+Device Manager `DaemonSet` in this operator is placed onto a node by a `pci-<vendor>.present` label that
+NFD produces, so a lost label stops that `DaemonSet` from scheduling at all.
+
+A vendor GPU Operator obtains its node labels through a `NodeFeatureRule` or an NFD source.
+AMD's operator installs a cluster-scoped `NodeFeatureRule`, which the active NFD installation evaluates.
+GPUStack's bundled NFD can evaluate it: its master denies no label namespace and accepts `NodeFeature`
+labels from every namespace. Other operators require labels from a specific NFD source.
+Enable that source in the replacement NFD installation; see [NVIDIA](#nvidia).
+
+**Bringing your own NFD.** To use an existing NFD installation, disable GPUStack's bundled NFD.
+Set `--set node-feature-discovery.enabled=false` in chart mode, or
+`--disable-applications=node-feature-discovery` on the worker in image mode.
+See [Installation Modes](../operate/installation-modes.md#chart-and-image-modes) for the mode differences.
+
+The worker still installs the `gpustack-cpu-info` `NodeFeatureRule` in either mode.
+The replacement NFD installation must evaluate it and meet these requirements:
+
+1. A worker collecting `pci`, with `vendor` among its `deviceLabelFields` and device classes `02`, `03`,
+   `0b` and `12` whitelisted. Those are what produce the `pci-<vendor>.present` labels, and the
+   `gpustack-cpu-info` `NodeFeatureRule` matches the same classes.
+2. A worker collecting `system`, which publishes `system-os_release.*`.
+   GPUStack's scheduling chain does not use these labels, but the NVIDIA GPU Operator requires them.
+   GPUStack's bundled NFD publishes them, so the NVIDIA operator can run with its own NFD disabled.
+   See [NVIDIA](#nvidia).
+3. A master that evaluates `NodeFeature` objects from **every** namespace. The worker's and the
+   Device Managers' own `<node>-gpustack-*` objects are how their detections reach the `Node`.
+4. `restrictions.denyNodeFeatureLabels: false` and `disableExtendedResources: false`, since those
+   detections arrive as labels *and* as extended resources.
+5. A `denyLabelNs` that admits `acceleratable.feature.gpustack.ai` and `general.feature.gpustack.ai`.
+6. One owner for the NFD CRDs. Vendor charts bundle an NFD version of their own, so decide which
+   release installs them before installing two that both want to.
+
+A vendor chart that bundles NFD as a subchart satisfies them all, so its NFD can be the cluster's one.
+The NVIDIA GPU Operator's already publishes `vendor` as its only `deviceLabelFields`, which is what
+item 1 asks for, and collects every source, which is item 2; its device classes are the gap.
+
+It whitelists `0300` and `0302` (the GPUs it was written for) and neither `0b` nor `12`, so an
+accelerator in either class never gets the label its Device Manager schedules on, and that `DaemonSet`
+stays unscheduled with nothing to say why. Both values live under that chart's
+`node-feature-discovery.worker.config.sources.pci`.
+
+Item 6 is not a version problem there: both charts vendor NFD 0.19.0, so the CRDs are the same objects
+and all that has to be settled is which release owns them. And the class gap only bites once a second
+manufacturer is present: the display-controller classes it does whitelist cover NVIDIA and AMD, so a
+cluster holding only those is already served by its list.
+
+Treat these requirements as a checklist. Hardware validation used the bundled NFD;
+a handover to an existing NFD installation has not been tested end to end.
+
+### Resource removal lag
+
+Removing a vendor's device plugin does not immediately remove its extended resource from the `Node`
+object: the kubelet only drops it once it reconverges. A scheduler can keep seeing the old resource as
+allocatable for a window after the plugin is gone, so "disabled" is not the same moment as "gone" from
+a scheduling decision's point of view.
 
 ---
 

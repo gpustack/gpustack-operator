@@ -15,7 +15,7 @@ The separate [InfiniBand RDMA comparison](#infiniband-rdma-comparison) records t
 
 ## Contents
 
-- [Configurations](#configurations)
+- [Configuration](#configuration)
 - [Hardware, model and workload](#hardware-model-and-workload)
 - [Prompt lengths and concurrency](#prompt-lengths-and-concurrency)
 - [Per-rank registration](#per-rank-registration)
@@ -23,7 +23,7 @@ The separate [InfiniBand RDMA comparison](#infiniband-rdma-comparison) records t
 - [InfiniBand RDMA comparison](#infiniband-rdma-comparison)
 - [Limitations](#limitations)
 
-## Configurations
+## Configuration
 
 Each configuration used one `ModelDeployment` on the same GPU node, `gpu-node-0`.
 
