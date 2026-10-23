@@ -349,7 +349,7 @@ verbs path fails creating its completion queue, as above.
 
 | Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| no node advertises the key at all | The key is absent from every node's allocatable | The node has no *RDMA*-capable interface, or that family is switched off on the Device Manager. Run the allocatable read above, and check the `--no-shared` and `--no-partitioned` switches |
+| no node advertises the key at all | Status: the key is absent from every node's allocatable | The node has no *RDMA*-capable interface, or that family is switched off on the Device Manager. Run the allocatable read above, and check the `--no-shared` and `--no-partitioned` switches |
 | the key is advertised, every token unhealthy | Status: endpoint link `Failed` | The node judged every endpoint's link `Failed`, which withholds nothing but marks the tokens. [Read it yourself](network-topology.md#inspecting-the-record) |
 | the `Workload` is admitted and its `Pod` stays `Pending` | Status: `Pod` phase `Pending` | Over-subscription: nothing meters these keys. See [the section above](#kueue-and-rdma-keys) |
 | the `Pod` is scheduled, then refused on the node and not rescheduled | The kubelet refuses the `Pod` on the node | The node's totals sufficed but its devices sit on two *NUMA* nodes. Check the node's policy, and that both requests sit in one container |
