@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1145,11 +1146,11 @@ func TestModelDeploymentReconciler_RefusesAServiceItDoesNotOwn(t *testing.T) {
 // TestEndpointEligibleSelectorActivation pins the first-enable repair at the three rendered
 // surfaces.
 //
-// TWO REASONS WITHHOLD THE TERM, AND EACH IS ASSERTED ON ITS OWN. A shape that can never qualify
-// -- a role whose command line was replaced with no managed replica of it still standing -- renders
-// no eligibility term whatever any pass says. A shape that CAN qualify does not narrow until a real
-// pass records the predicate satisfied, so a supported pair with nothing decided renders no term
-// either, for a different reason.
+// THE TERM IS CARRIED FROM THE FIRST ENABLE BY A MANAGED PROTECTED GROUP, and it is withheld by
+// THE COMPATIBILITY CARVE-OUT: a shape that can never qualify -- a role whose command line was
+// replaced with no managed replica of it still standing -- renders no eligibility term whatever any
+// pass says. The two are asserted on their own, because they are different reasons and only one of
+// them is a decision this operator can make.
 //
 // The condition here is computed by the real qualifier and the real status observation, never set
 // by hand. Once a selector carries the term, a quiet pass retains it, and a definite fault still
@@ -1188,11 +1189,13 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		name   string
 		md     *workercore.ModelDeployment
 		reason string
+		narrow bool
 	}{
 		{
 			name:   "supported pair with nothing decided",
 			md:     prefill,
-			reason: "nothing has decided the predicate yet",
+			reason: "a managed protected group names the eligible endpoints from the first enable",
+			narrow: true,
 		},
 		{
 			name:   "pair that took its command line over",
@@ -1205,21 +1208,22 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 			reason: "the shape can never activate",
 		},
 	} {
-		t.Run(tc.name+" renders no narrowing", func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			front := renderModelDeploymentService(tc.md, nil)
 			_, has := front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
-			assert.False(t, has, "front Service must not narrow because "+tc.reason)
+			assert.Equal(t, tc.narrow, has, "front Service narrowing because "+tc.reason)
 			roleSvc := renderModelDeploymentRoleService(tc.md, &tc.md.Spec.Roles[0], nil, nil, false)
 			_, has = roleSvc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
-			assert.False(t, has, "role Service must not narrow because "+tc.reason)
+			assert.Equal(t, tc.narrow, has, "role Service narrowing because "+tc.reason)
 			published, err := renderModelDeploymentRouterObjects(context.Background(), tc.md,
 				map[string]string{tc.md.Spec.Roles[0].Name: "manufacturer"}, false)
 			require.NoError(t, err)
 			_, has = published.Contract.Roles[0].Selector[modelDeploymentLabelKeyEndpointEligible]
-			assert.False(t, has, "router discovery must not narrow because "+tc.reason)
-			assert.NotContains(t, published.ConfigMap.Data[modelDeploymentRouterConfigKey],
-				modelDeploymentLabelKeyEndpointEligible+"="+modelDeploymentEndpointEligibleValue,
-				"router discovery config must not narrow because "+tc.reason)
+			assert.Equal(t, tc.narrow, has, "router discovery narrowing because "+tc.reason)
+			assert.Equal(t, tc.narrow,
+				strings.Contains(published.ConfigMap.Data[modelDeploymentRouterConfigKey],
+					modelDeploymentLabelKeyEndpointEligible+"="+modelDeploymentEndpointEligibleValue),
+				"router discovery config narrowing because "+tc.reason)
 		})
 	}
 
@@ -1266,7 +1270,7 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		assert.False(t, has, "the router's published selector for it does not narrow either")
 	})
 
-	t.Run("quiet first enable keeps routing, activation narrows, quiet passes retain", func(t *testing.T) {
+	t.Run("a first enable demands the label, activation keeps it, quiet passes retain it", func(t *testing.T) {
 		quiet := func(context.Context, string, []byte) ([]byte, error) {
 			return nil, context.DeadlineExceeded
 		}
@@ -1279,7 +1283,8 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		assert.False(t, modelDeploymentEligibilityDecided(healthy), "no activation fact exists yet")
 		front := renderModelDeploymentService(healthy, nil)
 		_, has := front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
-		assert.False(t, has, "first enable with an unavailable observation must not narrow")
+		assert.True(t, has,
+			"a managed protected group names the eligible endpoints from the first enable, whatever the observation says")
 
 		working := qualifyModelDeploymentInstances(context.Background(), healthy, healthyPods,
 			modelDeploymentPendingReplacement{}, boundProbeFetch)
@@ -1300,7 +1305,8 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		assert.True(t, retained, "an already-narrowed selector survives a quiet pass")
 		fresh := renderModelDeploymentService(healthy, nil)
 		_, has = fresh.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
-		assert.False(t, has, "a from-scratch render never fabricates the term")
+		assert.True(t, has,
+			"a from-scratch render of a managed protected group carries the requirement as well")
 	})
 
 	t.Run("a definite fault still withdraws the replica", func(t *testing.T) {
@@ -1316,13 +1322,29 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 	})
 }
 
-func TestAdmissionFirstEnableUnknownPreservesExistingRouting(t *testing.T) {
+// TestAdmissionFirstEnableUnknownNarrowsOnlyTheManagedProtectedGroup pins what a first enable
+// does to the surfaces it is configured from while the observation is still unavailable.
+//
+// A MANAGED PROTECTED GROUP IS EXCLUDED BY BOTH THE SERVICE AND THE ROUTER SELECTORS from the
+// first enable, and it is excluded BY NAMING THE ELIGIBLE ENDPOINTS: no member carries the label
+// yet, so the group contributes no endpoint at all. The eligibility itself is never fabricated.
+//
+// A CUSTOM ROUTE KEEPS THE SELECTION IT HAD, because a route this operator cannot judge has no
+// eligible endpoint to name and a selector naming it would select nothing forever.
+func TestAdmissionFirstEnableUnknownNarrowsOnlyTheManagedProtectedGroup(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		custom bool
+		narrow bool
 	}{
-		{name: "supported engine without an available native observation"},
-		{name: "custom command without its required serving annotation", custom: true},
+		{
+			name:   "supported engine without an available native observation",
+			narrow: true,
+		},
+		{
+			name:   "custom command without its required serving annotation",
+			custom: true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			md := healthDeployment(2)
@@ -1345,20 +1367,21 @@ func TestAdmissionFirstEnableUnknownPreservesExistingRouting(t *testing.T) {
 			require.False(t, qs[0].HasFailure(), "setup requires healthy existing members")
 			for i := range pods {
 				view := modelDeploymentReplicaView{Members: []*core.Pod{&pods[i]}}
-				require.False(t, modelDeploymentPodEligible(md, &md.Spec.Roles[0], &pods[i], view, qs[0], true),
+				require.False(t, modelDeploymentPodEligible(md, &md.Spec.Roles[0], &pods[i], view, qs[0], true,
+					modelDeploymentGroupDecision{}),
 					"first enable must not fabricate eligibility")
 			}
 			for _, svc := range []*core.Service{
 				renderModelDeploymentService(md, nil), renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil, nil, false),
 			} {
 				_, narrowed := svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
-				assert.False(t, narrowed, "unavailable first-enable observation must preserve Service selection")
+				assert.Equal(t, tc.narrow, narrowed, "Service selection under an unavailable first-enable observation")
 			}
 			router, err := renderModelDeploymentRouterObjects(context.Background(), md, map[string]string{"server": "manufacturer"}, false)
 			require.NoError(t, err)
 			require.NotEmpty(t, router.Contract.Roles)
 			_, narrowed := router.Contract.Roles[0].Selector[modelDeploymentLabelKeyEndpointEligible]
-			assert.False(t, narrowed, "unavailable first-enable observation must preserve router discovery")
+			assert.Equal(t, tc.narrow, narrowed, "router discovery under an unavailable first-enable observation")
 		})
 	}
 }
@@ -1491,7 +1514,8 @@ func serviceLabelPods(
 		}
 		for _, member := range view.Members {
 			qualification, evaluated := byMember[member.UID]
-			eligible := modelDeploymentPodEligible(md, role, member, view, qualification, evaluated)
+			eligible := modelDeploymentPodEligible(md, role, member, view, qualification, evaluated,
+				modelDeploymentGroupDecision{})
 			// THE GATE IS ASKED OF THE MODE THIS REPLICA IS RUNNING, as the writer asks it.
 			effective := *role
 			if modelDeploymentReplicaRunsCommand(view.Members) {

@@ -483,3 +483,254 @@ func TestDocumentStageFilterDemands(t *testing.T) {
 		})
 	}
 }
+
+// The labels the operator's own vocabulary names for the roles it publishes. They are spelled out
+// here rather than imported, because the controller package imports this one and a test that
+// imported it back would close the cycle.
+const (
+	llmdTestRoleKindLabel  = "modeldeployment.gpustack.ai/role-kind"
+	llmdTestEligibleLabel  = "modeldeployment.gpustack.ai/endpoint-eligible"
+	llmdTestCandidateLabel = "modeldeployment.gpustack.ai/router-candidate"
+	llmdTestCandidateValue = "true"
+)
+
+// llmdStageFilters returns the match labels of every stage filter in a rendered llm-d document,
+// keyed by the filter's name.
+func llmdStageFilters(t *testing.T, document string) map[string]map[string]string {
+	t.Helper()
+
+	var rendered struct {
+		Plugins []struct {
+			Name       string `json:"name"`
+			Type       string `json:"type"`
+			Parameters struct {
+				MatchLabels map[string]string `json:"matchLabels"`
+			} `json:"parameters"`
+		} `json:"plugins"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(document), &rendered))
+
+	filters := map[string]map[string]string{}
+	for _, plugin := range rendered.Plugins {
+		if plugin.Type != "label-selector-filter" {
+			continue
+		}
+		filters[plugin.Name] = plugin.Parameters.MatchLabels
+	}
+	return filters
+}
+
+// TestRenderLLMD_CandidateLabelReplacesTheEligibilityTermInTheFiltersOfTheKindsItJudges pins the
+// marker-backed discovery shape: the candidate label names the members of every kind that may be
+// discovered, so the per-kind stage filter of a kind the operator judges admits that union.
+//
+// THE ELIGIBILITY TERM IS DROPPED RATHER THAN KEPT BESIDE THE CANDIDATE TERM. A stage filter is
+// per kind and the eligibility requirement is per role, so demanding it in the filter would
+// withhold the candidates of the role beside the one that carries it. The candidate term is
+// carried by every candidate of the kind, so it admits them all.
+func TestRenderLLMD_CandidateLabelReplacesTheEligibilityTermInTheFiltersOfTheKindsItJudges(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		roles         []Role
+		wantCandidate []string
+	}{
+		{
+			name: "every role requires eligibility",
+			roles: []Role{
+				{
+					Kind: "server", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{llmdTestEligibleLabel: "true"},
+				},
+				{
+					Kind: "prefill", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{llmdTestEligibleLabel: "true"},
+				},
+			},
+			wantCandidate: []string{"server", "prefill"},
+		},
+		{
+			name: "one role requires eligibility and one does not",
+			roles: []Role{
+				{
+					Kind: "server", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{llmdTestEligibleLabel: "true"},
+				},
+				{
+					Kind: "prefill", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{},
+				},
+			},
+			wantCandidate: []string{"server", "prefill"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output, err := Render(LLMD, Input{
+				Roles:               tc.roles,
+				EligibleLabelKey:    llmdTestEligibleLabel,
+				CandidateLabelKey:   llmdTestCandidateLabel,
+				CandidateLabelValue: llmdTestCandidateValue,
+			})
+			require.NoError(t, err)
+
+			filters := llmdStageFilters(t, output.Document)
+			require.Len(t, filters, len(tc.roles))
+			for _, kind := range tc.wantCandidate {
+				matchLabels, present := filters[kind+"-pods"]
+				require.True(t, present, "the %s stage filter is rendered", kind)
+
+				assert.Equal(t, llmdTestCandidateValue, matchLabels[llmdTestCandidateLabel],
+					"the %s filter admits the kind's candidate union", kind)
+				assert.NotContains(t, matchLabels, llmdTestEligibleLabel,
+					"the %s filter does not demand one role's eligibility requirement", kind)
+			}
+		})
+	}
+}
+
+// TestRenderLLMD_CandidateLabelDoesNotDependOnTheOrderOfTwoRolesOfOneKind pins that the rendered
+// filter of a kind is the same whichever of its two roles comes first.
+//
+// THIS IS THE CONTROL THAT SEPARATES THE CANDIDATE TERM FROM THE ELIGIBILITY TERM. Two roles of
+// one kind share one filter, so an implementation that reused a role's eligibility term would
+// render the term only when that role happened to be the one the kind's selector came from: it
+// would pass with the eligibility-carrying role first and fail with it last. Both orders are
+// rendered here, and the filter must carry the candidate term and no eligibility term in each.
+func TestRenderLLMD_CandidateLabelDoesNotDependOnTheOrderOfTwoRolesOfOneKind(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		roles []Role
+	}{
+		{
+			name: "the role that requires eligibility comes first",
+			roles: []Role{
+				{
+					Kind: "server", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{llmdTestEligibleLabel: "true"},
+				},
+				{
+					Kind: "server", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{},
+				},
+			},
+		},
+		{
+			name: "the role that requires eligibility comes last",
+			roles: []Role{
+				{
+					Kind: "server", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{},
+				},
+				{
+					Kind: "server", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{llmdTestEligibleLabel: "true"},
+				},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output, err := Render(LLMD, Input{
+				Roles:               tc.roles,
+				EligibleLabelKey:    llmdTestEligibleLabel,
+				CandidateLabelKey:   llmdTestCandidateLabel,
+				CandidateLabelValue: llmdTestCandidateValue,
+			})
+			require.NoError(t, err)
+
+			filters := llmdStageFilters(t, output.Document)
+			require.Len(t, filters, 1, "two roles of one kind share one stage filter")
+			matchLabels, present := filters["server-pods"]
+			require.True(t, present, "the server stage filter is rendered")
+
+			assert.Equal(t, llmdTestCandidateValue, matchLabels[llmdTestCandidateLabel],
+				"the filter admits the kind's candidate union")
+			assert.NotContains(t, matchLabels, llmdTestEligibleLabel,
+				"the filter does not demand one role's eligibility requirement")
+		})
+	}
+}
+
+// TestRenderLLMD_WithoutACandidateLabelTheEligibilityTermStaysPerKind pins the other shapes: a
+// deployment whose discovery is not marker-backed keeps the filters it has always rendered.
+//
+// THE TERM IS STILL PER KIND. The renderer keys the per-role selectors by kind, so the term a kind
+// carries is the one its last role supplied, and a kind whose last role requires nothing carries
+// no term at all. No candidate term appears anywhere, because there is no candidate label to name
+// one.
+func TestRenderLLMD_WithoutACandidateLabelTheEligibilityTermStaysPerKind(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		roles []Role
+		want  map[string]map[string]string
+	}{
+		{
+			name: "the term appears only for the kind whose role requires it",
+			roles: []Role{
+				{
+					Kind: "server", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{llmdTestEligibleLabel: "true"},
+				},
+				{
+					Kind: "prefill", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{},
+				},
+			},
+			want: map[string]map[string]string{
+				"server-pods": {
+					llmdTestRoleKindLabel: "server",
+					llmdTestEligibleLabel: "true",
+				},
+				"prefill-pods": {llmdTestRoleKindLabel: "prefill"},
+			},
+		},
+		{
+			name: "a kind whose last role requires nothing carries no term",
+			roles: []Role{
+				{
+					Kind: "server", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{llmdTestEligibleLabel: "true"},
+				},
+				{
+					Kind: "server", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{},
+				},
+			},
+			want: map[string]map[string]string{
+				"server-pods": {llmdTestRoleKindLabel: "server"},
+			},
+		},
+		{
+			name: "a kind whose last role requires eligibility carries the term",
+			roles: []Role{
+				{
+					Kind: "server", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{},
+				},
+				{
+					Kind: "server", RoleLabelKey: llmdTestRoleKindLabel,
+					Selector: map[string]string{llmdTestEligibleLabel: "true"},
+				},
+			},
+			want: map[string]map[string]string{
+				"server-pods": {
+					llmdTestRoleKindLabel: "server",
+					llmdTestEligibleLabel: "true",
+				},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output, err := Render(LLMD, Input{
+				Roles:            tc.roles,
+				EligibleLabelKey: llmdTestEligibleLabel,
+			})
+			require.NoError(t, err)
+
+			filters := llmdStageFilters(t, output.Document)
+			assert.Equal(t, tc.want, filters)
+			for name, matchLabels := range filters {
+				assert.NotContains(t, matchLabels, llmdTestCandidateLabel,
+					"the %s filter names no candidate term without a candidate label", name)
+			}
+		})
+	}
+}

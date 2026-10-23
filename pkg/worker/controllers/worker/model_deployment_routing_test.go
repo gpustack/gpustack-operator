@@ -413,7 +413,7 @@ func TestRouting_ARevokedManagedReplicaKeepsTheGateWhileTheRoleTurnsOver(t *test
 				}
 			}
 			require.NoError(t, r.convergeModelDeploymentEndpointEligibility(context.Background(), published,
-				replicaPods(t, f.cli), byMember, nil))
+				replicaPods(t, f.cli), byMember, nil, modelDeploymentPassObservation{}))
 			actual := replicaPods(t, f.cli)
 			require.NoError(t, r.syncModelDeploymentService(context.Background(), published, true, actual))
 			for _, name := range []string{md.Name, md.Name + "-server"} {

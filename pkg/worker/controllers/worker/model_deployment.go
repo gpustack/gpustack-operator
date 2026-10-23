@@ -169,7 +169,9 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 			// A teardown pass evaluates no health predicate, so it passes no qualifications and
 			// the endpoint answer stays the unobserved one rather than a verdict this pass never made.
 			if err = r.syncModelDeploymentStatus(
-				ctx, md, pods, nil, nil, nil, nil,
+				ctx, md, pods, nil, nil, nil, modelDeploymentPassObservation{
+					Serving: modelDeploymentServingUnobserved(md, "the teardown pass observed no router"),
+				},
 			); err != nil {
 				// The predicate drops status-only and metadata-only updates, so the change behind a
 				// conflict may deliver no event: requeue rather than wait for one.
@@ -309,7 +311,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// The weights are still resolving, so this pass has not reached the replicas and makes no
 		// qualification claim; the endpoint answer stays unobserved until a pass that has.
 		if err = r.syncModelDeploymentStatus(
-			ctx, md, pods, domain, nil, weights, nil,
+			ctx, md, pods, domain, nil, weights, modelDeploymentPassObservation{
+				Serving: modelDeploymentServingUnobserved(md, "the weights are still resolving"),
+			},
 		); err != nil {
 			// The predicate drops status-only updates, so the change behind a conflict may deliver
 			// no event: requeue rather than wait for one.
@@ -414,7 +418,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// one deletable by a count, which is the withdrawal this slice explicitly does not own.
 	//
 	// A fixed-profile deployment is untouched by this branch and keeps the path below unchanged.
-	if elastic, err := r.convergeModelDeploymentElastic(ctx, md, actual, desired, weights); err != nil {
+	if elastic, observation, err := r.convergeModelDeploymentElastic(
+		ctx, md, actual, desired, weights,
+	); err != nil {
 		return ctrl.Result{}, err
 	} else if elastic {
 		actual, err = r.listModelDeploymentPods(ctx, md)
@@ -422,12 +428,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			return ctrl.Result{}, err
 		}
 		masters := modelDeploymentElasticMasters(md, actual)
-		fetch := r.groupForwardFetch
-		if fetch == nil {
-			fetch = defaultGroupForwardFetch
-		}
-		qualifications := qualifyModelDeploymentInstances(ctx, md, masters, modelDeploymentPendingReplacement{}, fetch)
-		if err = r.syncModelDeploymentStatus(ctx, md, masters, domain, nil, weights, qualifications); err != nil {
+		// THE STATUS PUBLISHES THE PASS'S OWN OBSERVATION AND THE PASS'S OWN QUALIFICATIONS. A
+		// second qualification here would be a second verdict about a second grouping of the same
+		// Pods, and a status could publish a verdict the labels were never written from.
+		if err = r.syncModelDeploymentStatus(ctx, md, masters, domain, nil, weights, observation); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
@@ -1407,8 +1411,17 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 	eligibilityDecided := modelDeploymentQualificationsDecided(qualifications)
 
+	// THE PASS'S OBSERVATION IS COLLECTED ONCE, AFTER THE QUALIFICATION AND BEFORE THE LABEL WRITE,
+	// and the label write and the status both read it. The qualification can spend a whole probe, and
+	// a collection taken before it would be stale by the time the restore decision reads it; and two
+	// collections would be two answers about two moments.
+	observation := modelDeploymentPassObservation{
+		Serving:        r.observeModelDeploymentServing(ctx, md),
+		Qualifications: qualifications,
+	}
+
 	if err = r.convergeModelDeploymentEndpointEligibility(
-		ctx, md, actual, qualificationByMember, replacedByRole); err != nil {
+		ctx, md, actual, qualificationByMember, replacedByRole, observation); err != nil {
 		logger.Error(err, "converge endpoint eligibility")
 		return ctrl.Result{}, err
 	}
@@ -1440,7 +1453,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	r.recordModelDeploymentDepartures(md, actual)
 
 	if err = r.syncModelDeploymentStatus(
-		ctx, md, actual, domain, &rollout, weights, qualifications,
+		ctx, md, actual, domain, &rollout, weights, observation,
 	); err != nil {
 		// The predicate drops status-only updates, so the change behind a conflict may deliver no
 		// event: requeue rather than wait for one. The requeued pass also retries a failed create
@@ -1506,10 +1519,14 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentDepartures(
 // else writes the key; a patch that loses a race with some other change fails the pass and the
 // next pass re-derives from what then exists. Nothing is written blind: the diff is computed
 // against the object as it was read.
+//
+// THE OBSERVATION IS PART OF THE WRITE AND NOT A SECOND STEP AFTER IT: the label and the annotation
+// are written from one decision, and the decision is the one the same pass publishes.
 func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
 	qualificationByMember map[types.UID]modelDeploymentInstanceQualification,
 	replacedByRole map[string]map[int]bool,
+	observation modelDeploymentPassObservation,
 ) error {
 	logger := ctrllog.FromContext(ctx)
 
@@ -1550,7 +1567,8 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 		}
 
 		qualification, evaluated := qualificationByMember[pod.UID]
-		eligible := modelDeploymentPodEligible(md, role, pod, view, qualification, evaluated)
+		decision := r.modelDeploymentGroupDecisionOf(observation, md, role, view, pod)
+		eligible := modelDeploymentPodEligible(md, role, pod, view, qualification, evaluated, decision)
 		// The gate is asked of the mode this replica is running, not of the mode the spec states
 		// now. A desired command line would take the gate away from an old managed replica that has
 		// activated revocation, which is the replica the gate exists to withdraw.
@@ -1562,11 +1580,23 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 			liveSelectors[role.Name], modelDeploymentEligibilityDecided(md))
 		answering := modelDeploymentPodAnswersAPI(pod, view, md.Spec.Engine.Name,
 			eligible, gated, replacedByRole[role.Name])
+		// THE CANDIDATE FOLLOWS THE ROLE THE OPERATOR CONTROLS. A role it can ask about has its
+		// members judged, and the marker follows that judgement in the same write. A role it can
+		// never ask about has no judgement to follow, and its members keep the discovery membership
+		// they always had.
+		candidate := modelDeploymentRouterCandidateOf(md,
+			modelDeploymentRoleJudged(md, &effective), eligible,
+			modelDeploymentShapeOfMember(pod, view, md.Spec.Engine.Name),
+			pod.Labels[modelDeploymentRouterCandidateLabel] == modelDeploymentEndpointEligibleValue)
 		patched := pod.DeepCopy()
 		changed := modelDeploymentApplyLabel(
 			patched, modelDeploymentLabelKeyEndpointEligible, eligible)
 		changed = modelDeploymentApplyLabel(
 			patched, modelDeploymentLabelKeyAPIAnswering, answering) || changed
+		changed = modelDeploymentApplyGenerationAnnotation(
+			patched, eligible, decision.Generation) || changed
+		changed = modelDeploymentApplyLabel(
+			patched, modelDeploymentRouterCandidateLabel, candidate) || changed
 		if !changed {
 			continue
 		}
@@ -1599,6 +1629,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 			rewritten, modelDeploymentLabelKeyEndpointEligible, eligible)
 		modelDeploymentApplyLabel(
 			rewritten, modelDeploymentLabelKeyAPIAnswering, answering)
+		modelDeploymentApplyGenerationAnnotation(
+			rewritten, eligible, decision.Generation)
+		modelDeploymentApplyLabel(
+			rewritten, modelDeploymentRouterCandidateLabel, candidate)
 		if err := r.Client.Patch(ctx, rewritten, ctrlcli.MergeFromWithOptions(fresh,
 			ctrlcli.MergeFromWithOptimisticLock{})); err != nil && !kerrors.IsNotFound(err) {
 			return err
@@ -1622,6 +1656,79 @@ func modelDeploymentApplyLabel(pod *core.Pod, key string, present bool) bool {
 	}
 
 	return true
+}
+
+// modelDeploymentRouterCandidateOf reports whether a member is a routing candidate of its group.
+//
+// A MEMBER OF A ROLE THE OPERATOR CONTROLS IS ONE ONLY WHILE ITS GROUP IS ELIGIBLE, so it gains and
+// loses the marker in the same write as the eligibility label and under the same decision.
+//
+// A MEMBER OF A ROLE THE OPERATOR CANNOT JUDGE IS ONE WHILE THE SHAPE LETS IT ANSWER, which is the
+// membership it always had: a route this operator cannot judge is discovered by its own rules, and
+// the marker says the same thing about it. A follower of such a role does not answer, so it is not
+// a candidate and stays out of the deployment-wide discovery.
+//
+// A SHAPE THAT CANNOT BE READ HOLDS WHAT THE MEMBER ALREADY CARRIES, because a membership nobody
+// can read is not a membership to change.
+//
+// THE MARKER IS NEVER RETENTION AUTHORITY. Nothing here reads it to decide whether a group keeps
+// what it has: the retention fact is the eligibility label and the generation annotation, and the
+// marker says only that a member may be discovered.
+//
+// A DEPLOYMENT THAT DECLARES NO ROUTER HAS NO DISCOVERY SURFACE, so it carries no marker at all.
+func modelDeploymentRouterCandidateOf(
+	md *workercore.ModelDeployment, controllable, eligible bool,
+	shape modelDeploymentMemberShape, carried bool,
+) bool {
+	if md.Spec.Router == nil {
+		return false
+	}
+	if controllable {
+		return eligible
+	}
+	switch shape {
+	case modelDeploymentMemberShapeAllows:
+		return true
+	case modelDeploymentMemberShapeForbids:
+		return false
+	default:
+		// A SHAPE THAT CANNOT BE READ HOLDS THE MEMBERSHIP THE MEMBER ALREADY CARRIES.
+		return carried
+	}
+}
+
+// modelDeploymentMemberShape is what the deployed shape says about one member's membership.
+type modelDeploymentMemberShape int
+
+const (
+	// modelDeploymentMemberShapeUnknown is a shape that could not be read.
+	modelDeploymentMemberShapeUnknown modelDeploymentMemberShape = iota
+	// modelDeploymentMemberShapeAllows is a shape that lets this member answer.
+	modelDeploymentMemberShapeAllows
+	// modelDeploymentMemberShapeForbids is a shape that lets only another member answer.
+	modelDeploymentMemberShapeForbids
+)
+
+// modelDeploymentShapeOfMember reports what the deployed shape says about one member's membership.
+//
+// IT IS THE SHAPE HALF OF THE ANSWERING RULE ON ITS OWN: the leader of a leader-served replica
+// answers, every member of an External-DP one answers, and a shape that cannot be read is
+// unknown rather than a verdict.
+func modelDeploymentShapeOfMember(
+	pod *core.Pod, view modelDeploymentReplicaView, engine string,
+) modelDeploymentMemberShape {
+	switch modelDeploymentDeployedAnsweringShape(view, engine) {
+	case modelDeploymentAnsweringAll, modelDeploymentAnsweringSole:
+		return modelDeploymentMemberShapeAllows
+	case modelDeploymentAnsweringLeader:
+		if modelDeploymentAnsweringMemberLeader(pod) {
+			return modelDeploymentMemberShapeAllows
+		}
+
+		return modelDeploymentMemberShapeForbids
+	default:
+		return modelDeploymentMemberShapeUnknown
+	}
 }
 
 // modelDeploymentPodAnswersAPI reports whether a member is behind the deployment's HTTP Service
@@ -1699,10 +1806,16 @@ func modelDeploymentPodAnswersAPI(
 // THE PER-MEMBER SHAPE TERMS ARE UNCHANGED. Which members answer is still the shape's decision:
 // every rank-carrying member of an External-DP role, only the leader of a leader-served role, and
 // the whole replica at size one. Nothing here widens or narrows that.
+//
+// THE OBSERVATION CONJUNCTION IS ADDED AT THE RESTORATION DECISION, and nowhere else: a group is
+// restored on a fresh, complete and coherent observation of ITSELF, an already eligible group whose
+// generation is unchanged keeps what it has while the observation is lost, and everything else is
+// withdrawn.
 func modelDeploymentPodEligible(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, pod *core.Pod,
 	view modelDeploymentReplicaView,
 	qualification modelDeploymentInstanceQualification, evaluated bool,
+	decision modelDeploymentGroupDecision,
 ) bool {
 	if role.ElasticEP != nil {
 		if pod.Annotations[modelDeploymentElasticWithdrawnAnnotation] == "true" {
@@ -1718,14 +1831,26 @@ func modelDeploymentPodEligible(
 	if !podIsReady(pod) {
 		return false
 	}
+	// THE CARRIED VALUE IS THE MEMBER'S OWN PRE-WRITE FACT, and not a label this pass wrote and not a
+	// fact the collection read: it is what the member had before this pass decided anything.
+	//
+	// A PROTECTED GROUP HONORS IT ONLY UNDER THE GENERATION IT WAS ESTABLISHED UNDER. A carried
+	// label whose annotation does not name the group's CURRENT membership generation describes an
+	// earlier membership, and it is not carried forward: that is the check that stops a replaced
+	// group from being restored on the strength of the group it replaced.
+	carried := pod.Labels[modelDeploymentLabelKeyEndpointEligible] ==
+		modelDeploymentEndpointEligibleValue
+	carriedUnderThisGeneration := carried
+	if decision.Protected && !decision.GenerationNamed {
+		carriedUnderThisGeneration = false
+	}
 	if !evaluated {
 		// A PASS THAT EVALUATED NO PREDICATE LEAVES THE KEY ALONE, in either direction. The passes
 		// that return before the predicate is built are the ones that pass no qualifications, and
 		// a member missing from the map is a member whose group was never looked at. Reading the
 		// zero value as an empty, therefore eligible, leg set would grant eligibility on no
 		// evidence at all.
-		return pod.Labels[modelDeploymentLabelKeyEndpointEligible] ==
-			modelDeploymentEndpointEligibleValue
+		return carriedUnderThisGeneration
 	}
 	if !qualification.Activated() {
 		// A DEFINITE FAULT WITHDRAWS THROUGH THE GATE. The gate is about RESTORE only: a group this
@@ -1751,8 +1876,7 @@ func modelDeploymentPodEligible(
 		// Nothing to revoke on, and nothing may be restored. The key is left exactly as it was,
 		// which is what makes a first enable over a deployment whose engine cannot be verified
 		// leave existing routing untouched rather than narrow it.
-		return pod.Labels[modelDeploymentLabelKeyEndpointEligible] ==
-			modelDeploymentEndpointEligibleValue
+		return carriedUnderThisGeneration
 	}
 	if qualification.HasFailure() {
 		return false
@@ -1767,10 +1891,118 @@ func modelDeploymentPodEligible(
 	// of a group that is still serving.
 	shape := modelDeploymentDeployedAnsweringShape(view, md.Spec.Engine.Name)
 	if shape == modelDeploymentAnsweringAll || shape == modelDeploymentAnsweringSole {
-		return true
+		return modelDeploymentPodRestores(decision, carried)
 	}
 
-	return modelDeploymentAnsweringMemberLeader(pod)
+	if !modelDeploymentAnsweringMemberLeader(pod) {
+		return false
+	}
+
+	return modelDeploymentPodRestores(decision, carried)
+}
+
+// modelDeploymentPodRestores is the observation conjunction, applied to a member that has earned its
+// place in the pool.
+//
+// A PROTECTED MANAGED GROUP IS RESTORED ONLY ON A FRESH, COMPLETE AND COHERENT OBSERVATION OF ITSELF.
+// An already eligible group whose generation is unchanged keeps what it has while the observation is
+// lost, and a group the barrier holds is withdrawn rather than left serving on a stale answer.
+//
+// THE COMPATIBILITY CLASSES ARE EXEMPT, and the exemption is the point of them: a route this
+// operator cannot judge, and an ordinary single-member Server, keep the behavior they have today.
+func modelDeploymentPodRestores(
+	decision modelDeploymentGroupDecision, carried bool,
+) bool {
+	if !decision.Protected {
+		return true
+	}
+	if decision.Observed && decision.Fresh && decision.Fact.SnapshotValid {
+		return true
+	}
+	if decision.Observed && decision.Fact.Retained {
+		return carried
+	}
+
+	return false
+}
+
+// modelDeploymentGroupDecision is the collected answer read for one member's group.
+//
+// IT IS WHAT THE RESTORATION DECISION READS, and nothing else: the qualification and the probe stay
+// separate from it, because a Router that cannot be read says nothing about whether a member is
+// healthy.
+type modelDeploymentGroupDecision struct {
+	// Fact is what the collection knows about this group, and Observed says whether it knows
+	// anything at all: a group whose generation the answer does not carry has no fact, and a fact
+	// that is missing is not a fact that is valid.
+	Fact     modelDeploymentGroupServing
+	Observed bool
+	// Fresh is whether the collected answer is still inside its freshness window.
+	Fresh bool
+	// Generation is the group's current membership generation.
+	Generation modelDeploymentMembershipGeneration
+	// GenerationNamed says whether this member's own eligibility annotation names the group's
+	// current membership generation, which is what proves the label belongs to this membership.
+	GenerationNamed bool
+	// Protected says whether the protected-group rules apply to this group: it is a managed group
+	// with a cross-member fact, and the deployment declares a Router. WITHOUT A ROUTER THERE IS NO
+	// OBSERVATION TO WAIT FOR, and the group's existing qualification contract stands.
+	Protected bool
+}
+
+// modelDeploymentGroupDecisionOf reads the collected answer for one member's group.
+//
+// A GROUP THE ANSWER DOES NOT CARRY IS A GROUP WITH NO OBSERVATION, and that is a hold rather than a
+// confirmation: the answer is keyed by the group's CURRENT membership generation, so a group whose
+// membership moved since the collection is not the group the collection saw.
+func (r *ModelDeploymentReconciler) modelDeploymentGroupDecisionOf(
+	observation modelDeploymentPassObservation, md *workercore.ModelDeployment,
+	role *workercore.ModelDeploymentRole, view modelDeploymentReplicaView, pod *core.Pod,
+) modelDeploymentGroupDecision {
+	generation := modelDeploymentGenerationOf(view)
+	key := modelDeploymentGroupKey{Role: role.Name, Ordinal: view.Ordinal, Generation: generation}
+	fact, observed := observation.Serving.Groups[key]
+	protected := md.Spec.Router != nil &&
+		modelDeploymentGroupProtectionOf(md, role, view) == modelDeploymentGroupProtected
+
+	return modelDeploymentGroupDecision{
+		Fact:       fact,
+		Observed:   observed,
+		Fresh:      r.modelDeploymentServingFreshNow(observation.Serving),
+		Generation: generation,
+		GenerationNamed: pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] ==
+			string(generation),
+		Protected: protected,
+	}
+}
+
+// modelDeploymentApplyGenerationAnnotation writes or removes the eligibility generation annotation
+// and reports whether the object moved.
+//
+// IT IS WRITTEN WITH THE ELIGIBILITY LABEL AND NOT ON ITS OWN, so the two cannot disagree about
+// whether a member is eligible under which generation. A member that is not eligible carries no
+// annotation, because an annotation without a label would claim a qualification nobody holds.
+func modelDeploymentApplyGenerationAnnotation(
+	pod *core.Pod, eligible bool, generation modelDeploymentMembershipGeneration,
+) bool {
+	value := ""
+	if eligible {
+		value = string(generation)
+	}
+	if pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] == value {
+		return false
+	}
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
+	}
+	if value == "" {
+		delete(pod.Annotations, modelDeploymentAnnotationKeyEndpointEligibleGeneration)
+
+		return true
+	}
+	pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = value
+
+	return true
 }
 
 // modelDeploymentRoleExternalDP reads the role's own argument stream for its balance shape: the

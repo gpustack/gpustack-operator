@@ -57,7 +57,11 @@ func TestExternalDPRoutingSelectsQualifiedMembers(t *testing.T) {
 						if answers {
 							pod.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
 						}
-						want := member == 0 || (decided && i == 0)
+						// THE PROTECTED CLASS NAMES THE ELIGIBLE ENDPOINTS FROM THE FIRST ENABLE, decided or
+						// not: an External DP role's members all answer, so its surface reads every member's
+						// eligibility label rather than one member's seat. An ordinary multi-member role keeps
+						// its leader-only selection and adds the eligibility term on top of it.
+						want := i == 0 || member == 0
 						for name, selector := range map[string]labels.Selector{"discovery": discovery, "published": published, "service": service} {
 							assert.Equal(t, want, selector.Matches(labels.Set(pod.Labels)), "%s/%s/member-%d", name, role.Name, member)
 							if decided {

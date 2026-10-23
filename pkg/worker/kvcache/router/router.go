@@ -83,6 +83,19 @@ type Input struct {
 	// would drift.
 	EligibleLabelKey string
 
+	// CandidateLabelKey names the label that marks a routing candidate, and CandidateLabelValue is
+	// its value. They are set only when the discovery is marker-backed, which is when the
+	// deployment-wide selector names the candidates of roles whose requirements differ.
+	//
+	// A STAGE FILTER MUST THEN ADMIT THE KIND'S CANDIDATE UNION, and not one role's eligibility
+	// requirement: the filter is per kind, so two roles of one kind share it, and the requirement
+	// of the role that wins the kind would withhold the candidates of the role beside it. The
+	// candidate term is carried by every candidate of the kind, so it admits them all.
+	//
+	// AN EMPTY KEY LEAVES EVERY STAGE FILTER AS IT RENDERS TODAY.
+	CandidateLabelKey   string
+	CandidateLabelValue string
+
 	// EncoderURLs are the HTTP(S) endpoints of the deployment's encoders, as the router that takes
 	// a static list of them requires. Each entry is the encoder role's per-role Service URL rather
 	// than a replica address: the Service fronts every replica, so a scale changes nothing here
@@ -289,8 +302,17 @@ func renderLLMD(input Input) (Output, error) {
 		// the encoder and not of the prefiller". A role that can never activate never carries the
 		// label at all, so a term demanded of it would select nothing; its Selector has none, its
 		// stage filter is left alone, and its Pods stay selectable.
-		if value, ok := selectors[kind][input.EligibleLabelKey]; ok {
-			matchLabels[input.EligibleLabelKey] = value
+		switch {
+		case input.CandidateLabelKey != "":
+			// A MARKER-BACKED DISCOVERY NAMES THE CANDIDATES OF EVERY KIND, so the filter admits the
+			// candidate term instead of the eligibility term. The eligibility term is per role and this
+			// filter is per kind: demanding it here would withhold the candidates of the role beside the
+			// one that carries it, whichever of the two the kind's selector came from.
+			matchLabels[input.CandidateLabelKey] = input.CandidateLabelValue
+		default:
+			if value, ok := selectors[kind][input.EligibleLabelKey]; ok {
+				matchLabels[input.EligibleLabelKey] = value
+			}
 		}
 		plugins = append(plugins, map[string]any{
 			"name":       filter,

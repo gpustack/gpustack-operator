@@ -185,16 +185,16 @@ const (
 func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod, domain *modelDeploymentDomain,
 	rollout *modelDeploymentRollout, weights *modelArtifactWeights,
-	qualifications []modelDeploymentInstanceQualification,
+	observation modelDeploymentPassObservation,
 ) error {
-	// The serving answer is read per pass, before the status is derived: it is an
-	// observation of the Routers as they exist right now, and a change in it must reach
-	// the status on its own, the way any other observed change does. Every failure on the
-	// way is already a state of the answer, never a reconcile error.
-	serving := r.observeModelDeploymentServing(ctx, md)
+	// The serving answer is the one the pass collected, and the pass hands the same answer to the
+	// eligibility write: it is an observation of the Routers as they exist right now, and a change
+	// in it must reach the status on its own, the way any other observed change does. Every failure
+	// on the way is already a state of the answer, never a reconcile error.
+	serving := r.modelDeploymentServingForStatus(md, observation)
 
 	desired, err := r.computeModelDeploymentStatusWithQualifications(
-		ctx, md, pods, domain, rollout, weights, qualifications,
+		ctx, md, pods, domain, rollout, weights, observation.Qualifications,
 	)
 	if err != nil {
 		return err
@@ -211,6 +211,34 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	md.Status = *desired
 
 	return r.Client.Status().Update(ctx, md)
+}
+
+// modelDeploymentServingForStatus is the serving answer the status publishes.
+//
+// A CARRIER WITH NO ANSWER IS A PATH THAT OBSERVED NOTHING, and it says so rather than publishing
+// the empty string, which is not a serving state at all.
+//
+// A CONFIRMATION THAT HAS GROWN STALE IS NOT PUBLISHED AS ONE. The answer was judged fresh when it
+// was collected, and the writes between the collection and this publication are not bounded, so a
+// count confirmed minutes ago would be published as a count confirmed now.
+func (r *ModelDeploymentReconciler) modelDeploymentServingForStatus(
+	md *workercore.ModelDeployment, observation modelDeploymentPassObservation,
+) ServingAnswer {
+	serving := observation.Serving
+	if serving.State == "" {
+		serving = modelDeploymentServingUnobserved(md, "this pass observed no router")
+	}
+	if serving.State != workercore.ModelDeploymentServingStateConfirmed {
+		return serving
+	}
+	if r.modelDeploymentServingFreshNow(serving) {
+		return serving
+	}
+
+	return ServingAnswer{
+		State:  workercore.ModelDeploymentServingStateUnknown,
+		Reason: "the collected view is stale by the time this status was written",
+	}
 }
 
 // computeModelDeploymentStatusWithQualifications derives the status for a pass that has already

@@ -360,6 +360,47 @@ func modelDeploymentGroupForwardActivatable(
 	return !unsupported
 }
 
+// modelDeploymentRoleJudged reports whether the operator controls this role's eligibility, in the
+// stable sense: the requirement is in force before any observation is read, so a selector that
+// names it does not move when the gate decides.
+//
+// A ROLE THIS OPERATOR CANNOT ASK ABOUT IS NOT JUDGED. Its route is one this operator does not
+// know, so there is no group of it to qualify and no requirement to carry.
+//
+// A PROTECTED CLASS IS JUDGED WHEN THE OPERATOR CAN ASK ABOUT IT, and its requirement is in force
+// from the first enable, decided or not. THE PROTECTED CLASS AND THE JUDGED CLASS ARE TWO
+// DIFFERENT QUESTIONS: a protected class the operator cannot ask about keeps the requirement, and
+// the native selectors still require eligibility, while the judgment is not there to decide it.
+//
+// A GROUP THIS OPERATOR CAN ANSWER WITHOUT AN OBSERVATION IS JUDGED TOO: a replica of one member
+// has no cross-member path, and an encoder serves no tokens.
+//
+// A MANAGED PAIR IS JUDGED WHEN ITS PROBE PATH IS AVAILABLE, and what the pair's own observation
+// decides then is whether the group is qualified, not whether the requirement is in force. AN
+// UNAVAILABLE PROBE PATH LEAVES A PROTECTED PAIR UNJUDGED.
+//
+// THE PAIR ARM OF THE SWITCH BELOW IS NOT REACHED. A pair that is not protected is a pair whose
+// command line the user took over, and such a role is not activatable, so the first branch has
+// already answered it.
+func modelDeploymentRoleJudged(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	if !modelDeploymentGroupForwardActivatable(md, role) {
+		return false
+	}
+	if modelDeploymentProtectedRole(md, role) {
+		return true
+	}
+	switch ModelDeploymentEffectiveRoleKind(role) {
+	case workercore.ModelDeploymentRoleKindPrefill, workercore.ModelDeploymentRoleKindDecode:
+		return false
+	case workercore.ModelDeploymentRoleKindEncode:
+		return true
+	}
+
+	return modelDeploymentRoleSize(role) <= 1
+}
+
 // modelDeploymentPairableDeployment returns the deployment as the pair support check must read it
 // for the gate: its Prefill and Decode roles carry the operator's own command lines.
 //
@@ -397,29 +438,113 @@ func modelDeploymentEligibilityDecided(md *workercore.ModelDeployment) bool {
 	return false
 }
 
+// modelDeploymentGroupProtection names how one group's selection is governed.
+type modelDeploymentGroupProtection int
+
+const (
+	// modelDeploymentGroupUnprotected is a group this operator keeps its existing behavior for.
+	modelDeploymentGroupUnprotected modelDeploymentGroupProtection = iota
+	// modelDeploymentGroupProtected is a managed group whose selection is narrowed by the group's own
+	// eligibility, and whose restoration waits for a fresh observation of the group itself.
+	modelDeploymentGroupProtected
+)
+
+// modelDeploymentGroupProtectionOf names how one group's selection is governed.
+//
+// THE CLASSES ARE DECIDED BY THE SHAPE HELPERS RATHER THAN BY MATCHING A REASON STRING:
+//
+//   - a MANAGED PROTECTED GROUP -- a multi-member ordinary replica, an External DP one, or a
+//     Prefill or Decode one -- is narrowed by the group's own eligibility;
+//   - an UNSUPPORTED CUSTOM ROUTE, or an engine outside the capability matrix, keeps the existing
+//     compatibility carve-out, because this operator cannot judge the route at all;
+//   - an ORDINARY SINGLE-MEMBER SERVER keeps its existing behavior, including its observation
+//     compatibility, because there is no group to protect.
+//
+// THE ROLE IS READ AS THE EFFECTIVE ROLE, the one the standing members are running: a role that
+// took its command line over is not the managed role the spec still names, unless a standing member
+// still runs the operator's command.
+func modelDeploymentGroupProtectionOf(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, view modelDeploymentReplicaView,
+) modelDeploymentGroupProtection {
+	effective := *role
+	if modelDeploymentReplicaRunsCommand(view.Members) {
+		effective.Command = nil
+	}
+	if len(effective.Command) > 0 {
+		return modelDeploymentGroupUnprotected
+	}
+	if _, known := modelDeploymentGroupForwardEngines[md.Spec.Engine.Name]; !known {
+		return modelDeploymentGroupUnprotected
+	}
+	kind := ModelDeploymentEffectiveRoleKind(&effective)
+	if kind == workercore.ModelDeploymentRoleKindPrefill || kind == workercore.ModelDeploymentRoleKindDecode {
+		return modelDeploymentGroupProtected
+	}
+	if modelDeploymentRoleExternalDP(md, &effective) {
+		return modelDeploymentGroupProtected
+	}
+	if len(view.Members) > 1 {
+		return modelDeploymentGroupProtected
+	}
+
+	return modelDeploymentGroupUnprotected
+}
+
+// modelDeploymentProtectedRole reports whether a role's groups are narrowed by their own
+// eligibility.
+//
+// IT IS THE ROLE-SIDE ANSWER, and it is read from the role's own shape: a Prefill or a Decode role,
+// an External DP one, or a role whose members share more than one seat. The group-side answer also
+// reads the standing members, and the two agree for every role but a take-over.
+func modelDeploymentProtectedRole(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	// A ROLE THAT TOOK ITS COMMAND LINE OVER IS NOT THE MANAGED ROLE THE SPEC STILL NAMES, and the
+	// compatibility carve-out is the point of the class: narrowing a route nobody can judge would
+	// select nothing at all.
+	if len(role.Command) > 0 {
+		return false
+	}
+	kind := ModelDeploymentEffectiveRoleKind(role)
+	if kind == workercore.ModelDeploymentRoleKindPrefill || kind == workercore.ModelDeploymentRoleKindDecode {
+		return true
+	}
+	if modelDeploymentRoleExternalDP(md, role) {
+		return true
+	}
+
+	return role.ReplicaSize > 1
+}
+
 // modelDeploymentEligibilitySelectorActive is the ONE decision for whether a surface names
-// endpoint-eligible endpoints. Three halves, all required:
+// endpoint-eligible endpoints.
 //
-// STATIC: the shape must be able to activate at all -- an engine the matrix carries, whose roles
-// are ordinary server roles with the operator's own command, or a pair shape the support check
-// carries. An engine outside the matrix, a role whose command line is replaced with no managed
-// replica of it still standing, or a pair shape the support check refuses can never be qualified,
-// so its surfaces never narrow.
+// THE COMPATIBILITY CARVE-OUT COMES FIRST, because it is the one class that never narrows: an engine
+// outside the matrix, or a role that took its command line over, has no observation this operator can
+// make, and a surface naming eligible endpoints it can never qualify would select nothing.
 //
-// ACTIVATION: a pass must have recorded a decided predicate -- True (qualified) or False
-// (revoked). Narrowing on first enable before any pass has answered would select zero endpoints
-// and strand whatever routing the deployment already had; a decided False narrows precisely so a
-// definite fault withdraws all affected members instead of leaving them serving behind a legacy
-// selector that never reads the labels.
+// THE MANAGED PROTECTED CLASS IS PRESENT FROM THE FIRST ENABLE, including an undecided pass. A
+// surface without the requirement does not read the eligibility labels at all, so a group that has
+// never been qualified would keep serving on readiness alone.
 //
-// RETENTION: once a surface carries the term, the live selector keeps it while the shape stays
-// activatable. A later Unknown holds and a definite fault revokes through the per-pod label; the
-// selector itself does not churn back, or a quiet probe would hand old routing a zero-endpoint
-// Service. liveSelector is nil when rendering from scratch.
+// THE REMAINING CLASSES KEEP THE EXISTING THREE HALVES: the static half (the shape must be able to
+// activate at all), the activation half (a pass must have recorded a decided predicate -- True
+// (qualified) or False (revoked) -- because narrowing before any pass has answered would select zero
+// endpoints and strand whatever routing the deployment already had), and the retention half (once a
+// surface carries the term, the live selector keeps it while the shape stays activatable).
 func modelDeploymentEligibilitySelectorActive(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 	liveSelector map[string]string, passDecided bool,
 ) bool {
+	if _, known := modelDeploymentGroupForwardEngines[md.Spec.Engine.Name]; !known {
+		return false
+	}
+	if len(role.Command) > 0 {
+		return false
+	}
+	if modelDeploymentProtectedRole(md, role) {
+		return true
+	}
 	if !modelDeploymentGroupForwardActivatable(md, role) {
 		return false
 	}

@@ -178,6 +178,11 @@ observation-unknown state. An already eligible group keeps its current endpoint 
 its serving confirmation becomes `Unknown`. The group cannot restore after a generation change or
 withdrawal until a fresh, complete observation arrives.
 
+This barrier also applies when protection is first enabled for a managed group. A carried
+eligibility label alone does not prove qualification for the current membership generation.
+Managed multi-member and P/D selectors require eligibility from first enable, including an undecided
+pass. Preserve ordinary single-member Server behavior and the existing unsupported-custom exception.
+
 ### Feature 4 — Status and observability
 
 Status must describe qualification at group level. It must not collapse Router process health,
@@ -188,7 +193,7 @@ The observable contract must include:
 - role name and replica ordinal;
 - group generation derived from the sorted member UID set;
 - group state, such as `Eligible`, `Withdrawn`, `AwaitingMembers`, `AwaitingReady`,
-  `AwaitingProbe`, `Unsupported` or `Unknown`;
+  `AwaitingProbe`, `AwaitingObservation`, `Unsupported` or `Unknown`;
 - the blocking reason;
 - current member identities and readiness;
 - last qualification time;
@@ -198,6 +203,19 @@ The public status shape adds `status.roles[].groups[]`. Each group entry carries
 replica ordinal, generation, state, reason, current member identities and readiness, last
 qualification time and serving confirmation. The existing role endpoint counts remain derived
 views. They must not replace the group entries.
+
+`AwaitingObservation` means qualification passed but the Router observation blocks restoration.
+An unchanged eligible group that retains through observation loss remains `Eligible`, with serving
+confirmation `Unknown`. Keep the Router reason separate from any engine fault reason.
+Last qualification time records the latest transition into `Eligible` for that membership generation.
+Preserve its history during a later hold. A new generation inherits no qualification time.
+
+Elastic EP has one logical collective. Its synthetic admission ordinals do not define independent
+serving replicas. Publish one group at logical ordinal zero with every current GPU worker; exclude
+the ancillary Ray head. The member seat records its admission ordinal, not its runtime engine rank.
+Existing role counts keep their master-based view. Until whole-collective qualification is evaluated,
+publish group state `Unknown`, no qualification time and no confirmed serving count. A master's
+qualification or Router observation does not establish the collective's state, even with one worker.
 
 Acceptance criteria:
 
@@ -242,6 +260,13 @@ Acceptance criteria:
 - Group membership must be derived from current Pod identities. A previous generation must never
   qualify a replacement group.
 - The implementation must reuse the existing role and replica identity labels.
+- Mixed managed and compatibility routes use an internal Router candidate label when one broad
+  selector must express their union. Protected candidates follow the guarded eligibility write.
+  Compatibility candidates claim no qualification. Backfill Pod metadata before switching discovery.
+  Per-kind Router filters must preserve this union regardless of role order.
+  A decidable encoder follows its eligibility decision too. Custom candidates preserve the prior
+  discovery membership and its identity, kind and member-index filters. They must not admit a new
+  non-answering follower when External DP widens discovery. Preserve the existing actual EPD discovery membership.
 - The implementation must not invent additional ports. A new port is valid only when the engine
   and Router contract explicitly expose it.
 - P/D qualification must remain role-aware. A Decode head cannot represent a complete Decode
@@ -353,23 +378,24 @@ decision.
       Acceptance: External DP publishes every rank endpoint only for a qualified group. Any known unsafe member removes every endpoint in that group while healthy groups remain selectable. Ordinary groups keep leader-only selection. Prefill and Decode use independent eligibility views, and the deployment-wide Service cannot round-robin across role processes. `modelDeploymentGroupForwardActivatable` no longer excludes Prefill and Decode roles once T1 reports a supported or typed fail-closed P/D result.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker -run 'Service|Endpoint|Selector'`
 
-- [ ] **T4 · Make Router observation and selection group-aware**
+- [x] **T4 · Make Router observation and selection group-aware**
       Blocked by: T2
-      Owns: `pkg/worker/controllers/worker/model_deployment_router.go`, `pkg/worker/controllers/worker/model_deployment_router_observation.go`, `pkg/worker/controllers/worker/model_deployment_router_test.go`, `pkg/worker/controllers/worker/model_deployment_router_observation_test.go`
+      Owns: `pkg/worker/controllers/worker/model_deployment_router.go`, `pkg/worker/controllers/worker/model_deployment_router_observation.go`, `pkg/worker/controllers/worker/model_deployment_router_test.go`, `pkg/worker/controllers/worker/model_deployment_router_observation_test.go`, `pkg/worker/controllers/worker/model_deployment.go`, `pkg/worker/controllers/worker/model_deployment_test.go`, `pkg/worker/controllers/worker/model_deployment_service.go`, `pkg/worker/controllers/worker/model_deployment_service_test.go`, `pkg/worker/controllers/worker/model_deployment_elastic_reconcile.go`, `pkg/worker/controllers/worker/model_deployment_elastic_realization.go`, `pkg/worker/controllers/worker/model_deployment_correction_test.go`, `pkg/worker/controllers/worker/model_deployment_elastic_reconcile_test.go`, `pkg/worker/controllers/worker/model_deployment_final_review_test.go`, `pkg/worker/controllers/worker/model_deployment_routing_test.go`, `pkg/worker/controllers/worker/model_deployment_external_routing_test.go`; bounded candidate stamping in `pkg/worker/controllers/worker/model_deployment_render.go`; candidate-filter plumbing and controls in `pkg/worker/kvcache/router/router.go` and `pkg/worker/kvcache/router/router_test.go`; comment-only clarification in `pkg/worker/controllers/worker/model_deployment_health.go`; bounded observation-argument plumbing in `pkg/worker/controllers/worker/model_deployment_status.go` and `pkg/worker/controllers/worker/model_deployment_status_test.go` before transfer to T5.
       Gate: review
-      Acceptance: Router observations carry role, group generation and member identity. Selection never uses one healthy head as proof of a group. A missing, stale or disagreeing observation marks serving `Unknown` and blocks restoration; an already eligible group keeps its current endpoint eligibility until the observation is fresh again. Prefill and Decode are supervised by one Router when configured, but their group state remains independent.
+      Acceptance: Router observations carry role, group generation and member identity. Selection never uses one healthy head as proof of a group. Managed protected selectors require eligibility from first enable. A missing, stale or disagreeing observation marks serving `Unknown` and blocks restoration; only a previously eligible group with unchanged membership generation may retain. Bind carried eligibility to its generation and check every answering member. Collect once after qualification and reuse that answer for restoration and status. Preserve freshness at the restoration decision. Prefill and Decode are supervised by one Router when configured, but their group state remains independent.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker -run 'Router|Observation|Selection'`
 
 - [ ] **T5 · Enforce External DP admission and publish group status**
       Blocked by: T2
-      Owns: `api/worker/v1alpha1/model_deployment.go`, `api/worker/v1alpha1/model_deployment_test.go`, `pkg/worker/webhooks/worker/model_deployment*.go`, `pkg/worker/webhooks/worker/model_deployment*_test.go`, `pkg/worker/controllers/worker/model_deployment_status.go`, `pkg/worker/controllers/worker/model_deployment_status_test.go`
+      Owns: `api/worker/v1alpha1/model_deployment.go`, `api/worker/v1alpha1/model_deployment_test.go`, `pkg/worker/webhooks/worker/model_deployment*.go`, `pkg/worker/webhooks/worker/model_deployment*_test.go`, `pkg/worker/controllers/worker/model_deployment_status.go`, `pkg/worker/controllers/worker/model_deployment_status_test.go`, `pkg/worker/controllers/worker/model_deployment_group_status_test.go`; persisted-edit fixture correction in `TestElasticSharedMemoryEditRetainsExistingMembers` in `pkg/worker/controllers/worker/model_deployment_elastic_workload_test.go`.
       Gate: review
       Acceptance: External DP without a Router is rejected with `RouterRequired`; internal engine DP with one physical listener remains valid. `status.roles[].groups[]` reports generation, member readiness, state, reason, qualification time and serving confirmation. Status distinguishes incomplete members, unsafe readiness, probe failure, Router observation loss and confirmed serving. Generated API artifacts stay synchronized.
+      Coordination: API and admission work may run alongside T4. T5 starts status-file edits only after T4 releases its bounded collection plumbing and the coordinator transfers both status files. Generation requires a quiet tree and an explicit generated-path grant.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./api/worker/v1alpha1 ./pkg/worker/webhooks/worker ./pkg/worker/controllers/worker -run 'ModelDeployment.*(Status|Router|Parallelism|Group)' && make generate`
 
 - [ ] **T6 · Update contracts, content checks and cross-component tests**
       Blocked by: T3, T4, T5
-      Owns: `docs/modules/model-deployment/routing.md`, `docs/modules/model-deployment/prefill-decode.md`, `docs/README.md`, `testing/infra/**`, `pkg/worker/controllers/worker/model_deployment_group_contract_test.go`, `pkg/worker/controllers/worker/model_deployment_content_test.go`
+      Owns: `docs/modules/model-deployment/routing.md`, `docs/modules/model-deployment/prefill-decode.md`, `docs/modules/model-deployment/status.md`, `docs/modules/model-deployment/external-dp.md`, `docs/README.md`, `testing/infra/**`, `pkg/worker/controllers/worker/model_deployment_group_contract_test.go`, `pkg/worker/controllers/worker/model_deployment_content_test.go`
       Acceptance: Documentation describes one Router as the DP Supervisor boundary for externally addressable rank Pods, the fail-closed group barrier and the P/D role boundary. Cross-component tests cover rank failure, partial recovery, UID replacement, Router observation loss and unaffected-group service. Protocol tests validate ordinary, SSE, exact Chinese and structured JSON responses before failure, during unaffected-group service and after complete recovery.
       Verify: `make lint docs && GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker ./pkg/worker/webhooks/worker`
 

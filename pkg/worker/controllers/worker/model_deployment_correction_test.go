@@ -284,7 +284,8 @@ func TestCorrection_MixedServicesSelectRoutingUnion(t *testing.T) {
 					ModelDeploymentConditionEndpointEligibility.Unknown(md, "ObservationHeld", "retain the activated selector")
 				}
 				r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64)}
-				require.NoError(t, r.convergeModelDeploymentEndpointEligibility(context.Background(), md, pods, nil, nil))
+				require.NoError(t, r.convergeModelDeploymentEndpointEligibility(context.Background(), md, pods, nil, nil,
+					modelDeploymentPassObservation{}))
 				actual := replicaPods(t, cli)
 				require.Len(t, actual, 4)
 				require.NoError(t, r.syncModelDeploymentService(context.Background(), md, false, actual))
@@ -307,9 +308,14 @@ func TestCorrection_MixedServicesSelectRoutingUnion(t *testing.T) {
 						leader := modelDeploymentAnsweringMemberLeader(&pod)
 						want := leader
 						if ordinal == 0 {
-							want = (leader || tc.external) && (!tc.active || tc.qualified)
+							// THE MANAGED GROUP IS SELECTED THROUGH ITS OWN ELIGIBILITY, and it is
+							// selected that way from the first enable. A group with no decided
+							// predicate and no carried label has no eligible member, so the
+							// deployment's own managed leader is not selected while the take-over
+							// replica beside it keeps the legacy membership routing it had.
+							want = (leader || tc.external) && tc.qualified
 						}
-						assert.Equal(t, want, selector.Matches(labels.Set(pod.Labels)), "%s full selector for %s", svc.Name, pod.Name)
+						assert.Equal(t, want, selector.Matches(labels.Set(pod.Labels)), "%s selector for %s", svc.Name, pod.Name)
 					}
 				}
 				require.Equal(t, 2, fronts, "deployment and role HTTP selectors are both checked")
@@ -321,7 +327,8 @@ func TestCorrection_MixedServicesSelectRoutingUnion(t *testing.T) {
 						delete(actual[i].Labels, modelDeploymentLabelKeyEndpointEligible)
 						require.NoError(t, cli.Update(context.Background(), &actual[i]))
 					}
-					require.NoError(t, r.convergeModelDeploymentEndpointEligibility(context.Background(), md, actual, nil, nil))
+					require.NoError(t, r.convergeModelDeploymentEndpointEligibility(context.Background(), md, actual, nil, nil,
+						modelDeploymentPassObservation{}))
 					actual = replicaPods(t, cli)
 					require.NoError(t, r.syncModelDeploymentService(context.Background(), md, false, actual))
 					require.NoError(t, cli.List(context.Background(), published, ctrlcli.InNamespace(md.Namespace)))
@@ -468,7 +475,8 @@ func TestCorrection_UnknownShapeRetainsOnlyCarriedRouting(t *testing.T) {
 			require.Equal(t, tc.notReady || tc.peerFailed || tc.replacing, q.HasFailure(),
 				"unknown shape alone supplies no positive health failure")
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64)}
-			require.NoError(t, r.convergeModelDeploymentEndpointEligibility(ctx, md, pods, byMember, replacing))
+			require.NoError(t, r.convergeModelDeploymentEndpointEligibility(ctx, md, pods, byMember, replacing,
+				modelDeploymentPassObservation{}))
 			actual := replicaPods(t, cli)
 			require.Len(t, actual, 4)
 			require.NoError(t, r.syncModelDeploymentService(ctx, md, false, actual))
