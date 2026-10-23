@@ -46,6 +46,8 @@ type groupStatusCase struct {
 	readiness []*core.ConditionStatus
 	forward   modelDeploymentGroupForward
 	legs      []modelDeploymentQualificationLeg
+	// shape is the shape of the pair attempt that verified this replica, when one did.
+	shape modelDeploymentGroupForwardPairShape
 }
 
 // readinessAt is the readiness of the member in the given seat.
@@ -122,11 +124,23 @@ func groupStatusQualification(c groupStatusCase, members []*core.Pod) modelDeplo
 	view := modelDeploymentReplicaView{
 		Role: c.role, Ordinal: c.ordinal, Seated: true, Members: members,
 	}
+	generation := modelDeploymentGenerationOf(view)
+
+	// The attempt carries the shape that answered, and a case that names no shape produced none.
+	var attempt *modelDeploymentGroupForwardPairAttempt
+	if c.shape != "" {
+		attempt = &modelDeploymentGroupForwardPairAttempt{
+			PrefillGeneration: generation,
+			DecodeGeneration:  generation,
+			Shape:             c.shape,
+		}
+	}
 
 	return modelDeploymentInstanceQualification{
 		View:         view,
-		Generation:   modelDeploymentGenerationOf(view),
+		Generation:   generation,
 		GroupForward: c.forward,
+		PairAttempt:  attempt,
 		Observed:     true,
 		Legs:         legs,
 	}
@@ -1628,4 +1642,57 @@ func TestModelDeploymentGroupStatusPublishesAwaitingReadyForAFreshlyUnreadyMembe
 	assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, group.Serving.State,
 		"unsafe evidence confirms nothing")
 	assert.Nil(t, group.Serving.Value, "only a confirmation carries a count")
+}
+
+// TestModelDeploymentGroupStatusNamesTheProxyShapeInTheReasonOfAVerifiedGroup pins the reason a
+// qualified group publishes when the routing proxy answered its forward probe.
+func TestModelDeploymentGroupStatusNamesTheProxyShapeInTheReasonOfAVerifiedGroup(t *testing.T) {
+	const proxyReason = "routing proxy returned the expected content with the probe request ID while " +
+		"naming the prefiller; individual rank coverage and KV transfer remain unproven"
+
+	tests := []struct {
+		name       string
+		shape      modelDeploymentGroupForwardPairShape
+		wantReason string
+	}{
+		{
+			name:       "the_routing_proxy_shape_names_the_limit_it_carries",
+			shape:      modelDeploymentGroupForwardPairShapeViaRoutingProxy,
+			wantReason: proxyReason,
+		},
+		{
+			name:       "the_head_to_head_shape_keeps_the_generic_reason",
+			shape:      modelDeploymentGroupForwardPairShapeHeadToHead,
+			wantReason: "every leg of the group verified",
+		},
+		{
+			name:       "a_group_with_no_pair_attempt_keeps_the_generic_reason",
+			wantReason: "every leg of the group verified",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status := groupStatusRun(t, []groupStatusCase{{
+				role: "server", ordinal: 0, size: 2, shape: tc.shape,
+				forward: modelDeploymentGroupForward{
+					State:  modelDeploymentGroupForwardVerified,
+					Reason: "the group answered the forward observation",
+				},
+			}}, &modelDeploymentGroupServing{
+				SnapshotValid: false,
+				InvalidReason: "the Router's view could not be read",
+				State:         workercore.ModelDeploymentServingStateUnknown,
+				Retained:      true,
+			}, true)
+
+			group := groupStatusGroup(t, status)
+			assert.Equal(t, workercore.ModelDeploymentGroupStateEligible, group.State,
+				"the state does not change: the group is still qualified")
+			assert.Equal(t, tc.wantReason, group.Reason)
+			assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, group.Serving.State,
+				"the serving answer confirms nothing either way")
+			assert.Nil(t, group.Serving.Value, "only a confirmation carries a count")
+		})
+	}
 }

@@ -271,6 +271,12 @@ func (q modelDeploymentInstanceQualification) GroupState() modelDeploymentGroupS
 // thing and given the reason for another.
 func (q modelDeploymentInstanceQualification) Reason() string {
 	if q.Eligible() {
+		// Proxy responses do not prove individual rank coverage or KV transfer.
+		if q.PairAttempt != nil && q.PairAttempt.Shape == modelDeploymentGroupForwardPairShapeViaRoutingProxy {
+			return "routing proxy returned the expected content with the probe request ID while naming " +
+				"the prefiller; individual rank coverage and KV transfer remain unproven"
+		}
+
 		return "every leg of the group verified"
 	}
 	failed := q.HasFailure()
