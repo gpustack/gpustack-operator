@@ -3,12 +3,10 @@
 Configure topology levels across cloud zones and physical racks, request domain placement for
 multi-`Pod` replicas, and see what a node move and a hierarchy change do.
 
-Follow these steps to discover infrastructure hierarchies, apply placement constraints to serving
-workloads, and manage topology updates.
-
 ## Contents
 
 - [Summary](#summary)
+- [Environment](#environment)
 - [Step 1: Discover cloud zones](#step-1-discover-cloud-zones)
 - [Step 2: Request zone placement](#step-2-request-zone-placement)
 - [Step 3: Publish an inventory snapshot](#step-3-publish-an-inventory-snapshot)
@@ -23,6 +21,25 @@ workloads, and manage topology updates.
 or a physical rack. Configure a read-only cloud-zone `TopologySource`, then narrow placement to a
 static rack inventory snapshot. Moving a node between racks and changing the hierarchy levels have
 different effects on existing workloads.
+
+The steps discover infrastructure hierarchies, apply placement constraints to serving workloads, and
+manage topology updates.
+
+| Object | Scope | Creator | Purpose |
+|---|---|---|---|
+| `TopologySource` | cluster | administrator | the hierarchy levels and where each node's values come from |
+| `ConfigMap` | namespace | administrator | the versioned rack inventory snapshot (Step 3) |
+| `ModelDeployment` | namespace | user | the *`topology.requiredLevel`* placement constraint |
+
+## Environment
+
+| Item | Value |
+|---|---|
+| Cluster | Kubernetes with GPUStack installed |
+| Nodes | labeled `topology.kubernetes.io/region` and `topology.kubernetes.io/zone` for Steps 1 and 2; Steps 3 through 5 publish a `ConfigMap` rack inventory instead |
+| `InstanceType` | `gpustack--nvidia-a10g-linux-amd64` |
+| Model | `Qwen/Qwen2.5-7B-Instruct` |
+| Engine | vLLM `gpustack/runner:cuda13.0-vllm0.29.0`, with `llm-d-router` |
 
 ## Step 1: Discover cloud zones
 
@@ -212,11 +229,11 @@ For general failure surfaces (including `AwaitingQueueStatus`, `HoldAndDrain` fl
 domain capacity fragmentation), see [Topology-Aware Scheduling Failure Surfaces](../../modules/topology/scheduling.md#troubleshooting)
 and [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
 
-| Condition / Symptom | Status / Reason | Root cause & Mitigation |
+| Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| `TopologySource` `Ready=False` | `InvalidHierarchy` / `SnapshotInvalid` | Label hierarchy invalid (child key must have unique parent value); fix snapshot syntax or missing node entries |
-| `TopologySource` `Ready=False` | `OwnershipConflict` | Multiple writable sources target the same node; adjust node selectors to ensure disjoint sets |
-| `TopologySource` `Valid=False` | `ConfigMapReadFailed` | Verify `ConfigMap` name and namespace match the worker installation |
+| `TopologySource` `Ready=False` | Reason: `InvalidHierarchy` / `SnapshotInvalid` | Label hierarchy invalid (child key must have unique parent value); fix snapshot syntax or missing node entries |
+| `TopologySource` `Ready=False` | Reason: `OwnershipConflict` | Multiple writable sources target the same node; adjust node selectors to ensure disjoint sets |
+| `TopologySource` `Valid=False` | Reason: `ConfigMapReadFailed` | Verify `ConfigMap` name and namespace match the worker installation |
 | Node Topology Profile falls back to single-level `hostname` | Ambiguous source ownership | `Node` selected by 0 or multiple Ready sources; check node selectors across all sources |
 | Multi-role deployment has 1 `Workload` reserved but `Pod` not bound | Joint admission gang hold | First role fits in domain, but held until secondary role (*prefill*/*decode*) secures domain capacity; check other roles |
 

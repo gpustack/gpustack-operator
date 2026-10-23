@@ -1,25 +1,13 @@
 # Heterogeneous Devices Walkthrough
 
 Inspect accelerator scheduling on a four-node cluster through captured `kubectl` commands and output.
-Object YAML retains *`metadata.labels`*, *`spec`* and *`status`*. Each operation includes before-and-after
-`kubectl get instancetypes` output. `Node` names are genericized as `node-cpu`, `node-a10g`,
-`node-t4-a` and `node-t4-b`.
-
-The run uses the defaults: `instance-type-derived-from-node=true` auto-derives the pool objects, and
-`instance-type-aware-cpu-manufacturer=false` keeps the CPU manufacturer out of the aggregation layer until Step 5 flips it on.
-
-Watch three columns: **UNIT(CPU/RAM)/STORAGE**, the per-unit request the `InstanceType` charges; **CPU**, the collapsed
-CPU pool's `remaining/capacity` cores; **ACCELERATOR(EX/SH/SL/PT)**, the `onceMaxRequest/remaining` of each
-[four-view](../../modules/devices/admission.md#four-view-status) projection. This run predates the shared card-count
-reading, so its `SH` once-max figures are shares, not accelerators ([Pre-release breaks](../../modules/devices/requests.md#pre-release-breaks)).
-
-Each accelerator counts in exactly one of `EX`/`SH`/`SL` (unpartitioned) or `PT` (partitioned), so `0/0`
-under `PT` throughout means none is in a partitioning mode. For the all-partitioned and **mixed** configurations see the
-[three-configuration walkthrough](../../modules/devices/nvidia-mig.md#three-mig-configurations).
+Read pool objects, remove and re-admit a node, request a logical slice, author a custom pool, enable
+CPU awareness, and pin a workload to one node.
 
 ## Contents
 
 - [Summary](#summary)
+- [Environment](#environment)
 - [Step 1: Read the initial pools](#step-1-read-the-initial-pools)
 - [Step 2: Remove a managed node](#step-2-remove-a-managed-node)
 - [Step 3: Request a logical slice](#step-3-request-a-logical-slice)
@@ -35,7 +23,35 @@ NFD labels the nodes, and the Device Manager updates each `Devices` ledger. The 
 `ResourceFlavor`s. The operator creates the aggregated `InstanceType` and `ClusterQueue` pools that
 admit `Instance` `Pod`s.
 
-Four `linux/amd64` nodes, all operator-managed:
+| Object | Scope | Creator | Purpose |
+|---|---|---|---|
+| `InstanceType` | cluster | administrator | the schedulable pool; Step 4 authors a custom one beside the operator's derived pools |
+| `Instance` | namespace | user | the workload admitted against a pool |
+| `NodeFeature` | namespace | the worker | the per-node `managed` label whose flip removes a node from its pool (Step 2) |
+
+### Reading the captured output
+
+Object YAML retains *`metadata.labels`*, *`spec`* and *`status`*. Each operation includes
+before-and-after `kubectl get instancetypes` output. `Node` names are genericized as `node-cpu`,
+`node-a10g`, `node-t4-a` and `node-t4-b`.
+
+Watch three columns: **UNIT(CPU/RAM)/STORAGE**, the per-unit request the `InstanceType` charges; **CPU**, the collapsed
+CPU pool's `remaining/capacity` cores; **ACCELERATOR(EX/SH/SL/PT)**, the `onceMaxRequest/remaining` of each
+[four-view](../../modules/devices/admission.md#four-view-status) projection. This run predates the shared card-count
+reading, so its `SH` once-max figures are shares, not accelerators ([Pre-release breaks](../../modules/devices/requests.md#pre-release-breaks)).
+
+Each accelerator counts in exactly one of `EX`/`SH`/`SL` (unpartitioned) or `PT` (partitioned), so `0/0`
+under `PT` throughout means none is in a partitioning mode. For the all-partitioned and **mixed** configurations see the
+[three-configuration walkthrough](../../modules/devices/nvidia-mig.md#three-mig-configurations).
+
+## Environment
+
+The captured run used this cluster, settings and hardware:
+
+| Item | Captured setup |
+|---|---|
+| Cluster | four `linux/amd64` nodes, all operator-managed |
+| Settings | the defaults: `instance-type-derived-from-node=true` auto-derives the pool objects, and `instance-type-aware-cpu-manufacturer=false` keeps the CPU manufacturer out of the aggregation layer until Step 5 flips it on |
 
 | `Node` | CPU (`gKey`) | Cores | Accelerator (`aKey`) |
 |---|---|---|---|
@@ -777,7 +793,7 @@ exclusion are covered in [Stage 4: Kueue chain](../../modules/devices/scheduling
 
 ## Troubleshooting
 
-| Symptom | Root cause / Condition | Check & Mitigation |
+| Symptom | Signal | Check & Mitigation |
 |---|---|---|
 | An `Instance` does not become Ready and its `Workload` stays pending | Quota, flavor labels or a node pin the scheduler cannot satisfy | Read `kubectl -n <namespace> get instance <name> -o jsonpath='{.status.phaseMessage}'`, then `kubectl -n <namespace> get workloads`. Compare the type's remaining counts in `kubectl get instancetypes`. See [Step 6](#step-6-instance-pinning-and-volumes) for pins |
 | `Pod` rejected: `a Pod may request only one accelerator family, found [...]` | Two accelerator families in one `Pod` | Request one family. See [rule 1](../../modules/devices/requests.md#rule-1-family-and-container-group) |
