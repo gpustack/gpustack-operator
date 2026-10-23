@@ -1,13 +1,13 @@
 # Encode, Prefill and Decode Walkthrough
 
-Deploy one multimodal model across three disaggregated roles. The *Encode* role runs the visual
-encoder, *Prefill* consumes the encoder's embeddings and fills the KV cache, and *Decode* generates
-tokens. A managed `llm-d-router` fronts the three roles behind one endpoint.
+Deploy one multimodal model across *Encode*, *Prefill* and *Decode* roles fronted by a managed
+`llm-d-router`. Send a multimodal request and observe the encoder, prefiller and decoder serve it
+behind one endpoint.
 
 ## Contents
 
 - [Summary](#summary)
-- [Device and cluster](#device-and-cluster)
+- [Environment](#environment)
 - [Step 1: Start three-role serving](#step-1-start-three-role-serving)
 - [Step 2: Inspect role configuration](#step-2-inspect-role-configuration)
 - [Step 3: Send a multimodal request](#step-3-send-a-multimodal-request)
@@ -38,7 +38,15 @@ The comparison used one GPU for aggregated serving, two for *PD* and three for *
 Small-prompt first-token latency often favored aggregated serving.
 See [Encode, Prefill and Decode Benchmark](../../modules/model-deployment/encode-prefill-decode-benchmark.md) for measured benefits and costs.
 
-## Device and cluster
+| Object | Scope | Creator | Purpose |
+|---|---|---|---|
+| `ModelArtifact` | namespace | user | the Qwen2.5-VL-7B-Instruct weights the deployment serves |
+| `ModelPrefetch` | namespace | user | the artifact cached onto the H100 node before serving |
+| `InstanceType` | cluster | operator | the H100 accelerator group each role requests |
+| `ModelDeployment` | namespace | user | one *Encode*, *Prefill* and *Decode* replica each behind a router |
+| Router `Deployment` and `Service` | namespace | operator | the one HTTP endpoint requests are sent to |
+
+## Environment
 
 The recorded run used this cluster and model setup:
 
@@ -403,7 +411,7 @@ when the window ends fails at the client.
 
 ## Troubleshooting
 
-| Symptom | Condition / Reason | Check & Mitigation |
+| Symptom | Signal | Check & Mitigation |
 |---|---|---|
 | The apply is refused for the role set | Admission refusal message | An *Encode* role requires *Prefill* and *Decode*, admits one role per kind, is refused beside *Server*, and cannot take *`spec.kvCache`* or a role *`command`*. See [Admission constraints](../../modules/model-deployment/encode-prefill-decode.md#admission-constraints) |
 | The apply is refused for engine, router or platform | Admission refusal message | All three roles must resolve to one accelerator platform, and the router, engine and platform must match [the admitted matrix](../../modules/model-deployment/encode-prefill-decode.md#admitted-matrix) (`vllm-router` is refused on Ascend). See [Admitted matrix](../../modules/model-deployment/encode-prefill-decode.md#admitted-matrix) |
@@ -412,7 +420,7 @@ when the window ends fails at the client.
 | The Ascend encoder starts with no directory to write | `ECExampleConnector` needs a shared directory | Attach a ReadWriteMany claim through *`spec.roles[].additionalVolumes[].persistentVolumeClaim`* on *Encode* and *Prefill*. Both roles must match *`claimName`*, *`mountPath`* and *`subPath`*, and the encoder's mount must not be read-only |
 | The apply names port 5601 or 8997 | Admission refusal on an owned key | The `ECCPUConnector` encoder owns 5601, and an SGLang *Prefill* role owns 8997 once the deployment has an *Encode* role. Move the engine's HTTP port off these |
 | An encoder replica sits in `Draining` for minutes | The encoder exports no in-flight queue the drain can read | Retirement waits a fixed window of about 300 seconds. A transfer still in flight when it ends fails at the client |
-| `RoleKindsReady=False` | One role kind has zero ready replicas | Read the condition message for the kind, then inspect that role's `Pod`s and engine logs. The other roles keep running while the failing kind recovers |
+| Missing role readiness | Condition: `RoleKindsReady=False` | One role kind has zero ready replicas. Read the condition message for the kind, then inspect that role's `Pod`s and engine logs. The other roles keep running while the failing kind recovers |
 
 ---
 
