@@ -710,6 +710,23 @@ func TestValidateModelDeployment(t *testing.T) {
 			})),
 		},
 		{
+			// An unknown flag stays admitted on SGLang as on vLLM: rejecting what the
+			// operator does not know is the engine's own work.
+			name: "extra_args_unowned_key_sglang",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang, role(func(r *workercore.ModelDeploymentRole) {
+				r.ExtraArgs = []string{"--max-model-len=32768"}
+			})),
+		},
+		{
+			// THE ATTENTION WIDTH IS AN ORDINARY USER ARGUMENT. It is not operator-owned,
+			// so a role may declare it; the operator reads it rather than refusing it.
+			name: "extra_args_attention_dp_is_user_admissible",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang, role(func(r *workercore.ModelDeploymentRole) {
+				r.ExtraArgs = []string{"--attn-dp-size=2"}
+				r.Resources = cards(1)
+			})),
+		},
+		{
 			name: "env_owned_key",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
 				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}}
@@ -1700,6 +1717,68 @@ func TestValidateModelDeployment(t *testing.T) {
 					r.Resources = cards(1)
 				})),
 		},
+		{
+			// THE ATTENTION WIDTH IS NOT A DATA-PARALLEL MULTIPLIER. The attention groups
+			// share one model, so a member holding two of them still holds the tensor width
+			// alone and asks for no card beside it.
+			name: "parallel_width_sglang_attention_dp_adds_no_cards",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=1", "--attn-dp-size=2"}
+					r.Resources = cards(1)
+				})),
+		},
+		{
+			// THE SINGLE-POD ATTENTION-DP USER IS ADMITTED BEFORE AND AFTER. Two cards and
+			// an attention width of two ask for the two cards the tensor width already
+			// accounts for, and reading the attention width must not add a card beside them
+			// nor refuse a role that has always been admitted.
+			name: "parallel_width_sglang_single_pod_attention_dp_stays_admitted",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=2", "--attn-dp-size=2"}
+					r.Resources = cards(2)
+				})),
+		},
+		{
+			// THE ATTENTION WIDTH DOES NOT NARROW THE DATA-PARALLEL MULTIPLIER EITHER. The
+			// width the check multiplies is the one the engine's own degrees declare, and a
+			// second attention width beside a data-parallel width changes neither.
+			name: "parallel_width_sglang_attention_dp_does_not_narrow_the_dp_multiplier",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=2", "--dp-size=2", "--attn-dp-size=2"}
+					r.Resources = cards(3)
+				})),
+			wantMessage: "the engine needs 4 per member",
+		},
+		{
+			// A malformed attention width is refused where the engine would refuse it, with
+			// the flag named.
+			name: "parallel_width_sglang_attention_dp_must_be_an_integer",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--attn-dp-size=two"}
+					r.Resources = cards(1)
+				})),
+			wantMessage: `the --attn-dp-size value "two" is not an integer`,
+		},
+		{
+			// THE EXTERNAL SHAPE NEEDS A ROUTER, like every other external shape: the groups
+			// are served through a Router and need it to supervise them.
+			name: "sedp_external_shape_needs_a_router",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{
+						"--tp-size=2", "--attn-dp-size=2", "--nnodes=2",
+						"--node-rank=$(GPUSTACK_MEMBER_INDEX)",
+						"--dist-init-addr=$(GPUSTACK_REPLICA_LEADER_ADDRESS):29500",
+					}
+					r.Env = []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_RUST_SERVER", Value: "1"}}
+					r.Resources = cards(1)
+				})),
+			wantMessage: "RouterRequired",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -1717,6 +1796,25 @@ func TestValidateModelDeployment(t *testing.T) {
 				"refusal must name %q, got: %s", tc.wantMessage, errs.ToAggregate().Error())
 		})
 	}
+}
+
+// TestValidateModelDeployment_SGLangExternalDPIsAdmittedWithARouter pins the SGLang external
+// shape through admission: with a Router to supervise the groups, and the wiring flag that says
+// the width lives across the members, the role is admitted on one card per member.
+func TestValidateModelDeployment_SGLangExternalDPIsAdmittedWithARouter(t *testing.T) {
+	md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.ExtraArgs = []string{
+				"--tp-size=2", "--attn-dp-size=2", "--nnodes=2",
+				"--node-rank=$(GPUSTACK_MEMBER_INDEX)",
+				"--dist-init-addr=$(GPUSTACK_REPLICA_LEADER_ADDRESS):29500",
+			}
+			r.Env = []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_RUST_SERVER", Value: "1"}}
+			r.Resources = cards(1)
+		}))
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+
+	assert.Empty(t, validateModelDeployment(md, nil), "the external shape with a Router is admitted")
 }
 
 // TestValidateModelDeployment_TwoRolesPassTheWholePath is the seam the single-role spec left, now

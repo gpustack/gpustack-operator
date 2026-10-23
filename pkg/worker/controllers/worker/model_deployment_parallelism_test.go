@@ -21,6 +21,7 @@ func allOnesParallelism() ModelDeploymentDeclaredParallelism {
 		PrefillContextParallel:   1,
 		DecodeContextParallel:    1,
 		ExpertParallel:           1,
+		AttentionDataParallel:    1,
 		AttentionContextParallel: 1,
 		MoEDataParallel:          1,
 		DWDPSize:                 1,

@@ -1818,7 +1818,7 @@ func modelDeploymentPodEligible(
 	decision modelDeploymentGroupDecision,
 ) bool {
 	if role.ElasticEP != nil {
-		if pod.Annotations[modelDeploymentElasticWithdrawnAnnotation] == "true" {
+		if pod.Annotations[modelDeploymentElasticWithdrawnAnnotation] == modelDeploymentTrueValue {
 			return false
 		}
 		ordinal, valid := modelDeploymentPodOrdinal(pod)
@@ -2022,7 +2022,8 @@ func modelDeploymentRoleExternalDP(
 		// an accepted error-path semantics change, deliberately kept for a reviewed change.
 		return false
 	}
-	shape, _ := modelDeploymentLoadBalance(reading.declared)
+	shape, _ := modelDeploymentLoadBalance(md.Spec.Engine.Name,
+		ModelDeploymentEffectiveRoleKind(role), role.Env, reading.declared)
 
 	return shape != workercore.ModelDeploymentLoadBalanceInternal &&
 		shape != workercore.ModelDeploymentLoadBalanceUnknown
@@ -2933,7 +2934,8 @@ func modelDeploymentOwns(obj ctrlcli.Object, md *workercore.ModelDeployment) boo
 }
 
 func modelDeploymentOwnedResource(obj ctrlcli.Object) bool {
-	if obj.GetLabels()[elasticOperationLabel] == "true" || obj.GetLabels()[elasticObservationLabel] == "true" {
+	if obj.GetLabels()[elasticOperationLabel] == modelDeploymentTrueValue ||
+		obj.GetLabels()[elasticObservationLabel] == modelDeploymentTrueValue {
 		return true
 	}
 	if !systemmeta.MatchResource(obj, ModelDeploymentResourceType) {

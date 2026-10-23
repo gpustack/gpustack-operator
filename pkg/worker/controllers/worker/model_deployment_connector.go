@@ -917,6 +917,27 @@ func ModelDeploymentRoleUpstreamKind(kind workercore.ModelDeploymentRoleKind) (s
 	}
 }
 
+// modelDeploymentRoleKindFromUpstream reads the kind a Pod's role-kind label names. The label
+// carries the upstream spelling, so this is the reading that turns it back into the API kind.
+//
+// AN UNREADABLE LABEL IS NO KIND, not the server kind: a Pod whose label this reader cannot
+// place has said nothing about what it is, and a reader that answered "server" would let such
+// a Pod into the server-only shapes.
+func modelDeploymentRoleKindFromUpstream(upstream string) workercore.ModelDeploymentRoleKind {
+	switch upstream {
+	case "server":
+		return workercore.ModelDeploymentRoleKindServer
+	case "prefill":
+		return workercore.ModelDeploymentRoleKindPrefill
+	case "decode":
+		return workercore.ModelDeploymentRoleKindDecode
+	case "encode":
+		return workercore.ModelDeploymentRoleKindEncode
+	default:
+		return ""
+	}
+}
+
 // ModelDeploymentEffectiveRoleKind is the kind a role has, resolving the unset field.
 //
 // The CRD schema defaults it, so nothing arriving from the API server carries an empty one -- but
