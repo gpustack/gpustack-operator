@@ -540,7 +540,7 @@ The replacement NFD installation must evaluate it and meet these requirements:
 6. One owner for the NFD CRDs. Vendor charts bundle an NFD version of their own, so decide which
    release installs them before installing two that both want to.
 
-A vendor chart that bundles NFD as a subchart exposes all five, so its NFD can be the cluster's one.
+A vendor chart that bundles NFD as a subchart exposes all six, so its NFD can be the cluster's one.
 The NVIDIA GPU Operator's already publishes `vendor` as its only `deviceLabelFields`, which is what
 item 1 asks for, and collects every source, which is item 2; its device classes are the gap.
 
