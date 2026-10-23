@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1409,14 +1409,14 @@
       <article>
         
   <h1 id="encode-prefill-and-decode-walkthrough">Encode, Prefill and Decode Walkthrough</h1>
-<p>Deploy one multimodal model across three disaggregated roles. The <em>Encode</em> role runs the visual
-encoder, <em>Prefill</em> consumes the encoder&rsquo;s embeddings and fills the KV cache, and <em>Decode</em> generates
-tokens. A managed <code>llm-d-router</code> fronts the three roles behind one endpoint.</p>
+<p>Deploy one multimodal model across <em>Encode</em>, <em>Prefill</em> and <em>Decode</em> roles fronted by a managed
+<code>llm-d-router</code>. Send a multimodal request and observe the encoder, prefiller and decoder serve it
+behind one endpoint.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#summary">Summary</a>
 </li>
-<li><a href="#device-and-cluster">Device and cluster</a>
+<li><a href="#environment">Environment</a>
 </li>
 <li><a href="#step-1-start-three-role-serving">Step 1: Start three-role serving</a>
 </li>
@@ -1452,7 +1452,49 @@ The comparison used one GPU for aggregated serving, two for <em>PD</em> and thre
 Small-prompt first-token latency often favored aggregated serving.
 See <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/">Encode, Prefill and Decode Benchmark</a>
  for measured benefits and costs.</p>
-<h2 id="device-and-cluster">Device and cluster</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Object</th>
+          <th>Scope</th>
+          <th>Creator</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ModelArtifact</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>the Qwen2.5-VL-7B-Instruct weights the deployment serves</td>
+      </tr>
+      <tr>
+          <td><code>ModelPrefetch</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>the artifact cached onto the H100 node before serving</td>
+      </tr>
+      <tr>
+          <td><code>InstanceType</code></td>
+          <td>cluster</td>
+          <td>operator</td>
+          <td>the H100 accelerator group each role requests</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeployment</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>one <em>Encode</em>, <em>Prefill</em> and <em>Decode</em> replica each behind a router</td>
+      </tr>
+      <tr>
+          <td>Router <code>Deployment</code> and <code>Service</code></td>
+          <td>namespace</td>
+          <td>operator</td>
+          <td>the one HTTP endpoint requests are sent to</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="environment">Environment</h2>
 <p>The recorded run used this cluster and model setup:</p>
 <table>
   <thead>
@@ -1848,7 +1890,7 @@ when the window ends fails at the client.</p>
   <thead>
       <tr>
           <th>Symptom</th>
-          <th>Condition / Reason</th>
+          <th>Signal</th>
           <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
@@ -1894,9 +1936,9 @@ when the window ends fails at the client.</p>
           <td>Retirement waits a fixed window of about 300 seconds. A transfer still in flight when it ends fails at the client</td>
       </tr>
       <tr>
-          <td><code>RoleKindsReady=False</code></td>
-          <td>One role kind has zero ready replicas</td>
-          <td>Read the condition message for the kind, then inspect that role&rsquo;s <code>Pod</code>s and engine logs. The other roles keep running while the failing kind recovers</td>
+          <td>Missing role readiness</td>
+          <td>Condition: <code>RoleKindsReady=False</code></td>
+          <td>One role kind has zero ready replicas. Read the condition message for the kind, then inspect that role&rsquo;s <code>Pod</code>s and engine logs. The other roles keep running while the failing kind recovers</td>
       </tr>
   </tbody>
 </table>
@@ -1923,7 +1965,7 @@ when the window ends fails at the client.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/walkthroughs/model-deployment/encode-prefill-decode.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/walkthroughs/model-deployment/encode-prefill-decode.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/encode-prefill-decode.md">Edit this page</a>
             
@@ -1935,7 +1977,7 @@ when the window ends fails at the client.</p>
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#summary">Summary</a></li>
-    <li><a href="#device-and-cluster">Device and cluster</a></li>
+    <li><a href="#environment">Environment</a></li>
     <li><a href="#step-1-start-three-role-serving">Step 1: Start three-role serving</a></li>
     <li><a href="#step-2-inspect-role-configuration">Step 2: Inspect role configuration</a></li>
     <li><a href="#step-3-send-a-multimodal-request">Step 3: Send a multimodal request</a></li>

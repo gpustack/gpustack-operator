@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1411,11 +1411,11 @@
   <h1 id="rdma-networking-walkthrough">RDMA Networking Walkthrough</h1>
 <p>Request and verify <em>remote direct memory access (RDMA)</em> endpoints for workloads, align network adapters with GPUs on <em>non-uniform memory access (NUMA)</em> nodes,
 and configure multi-tenant and cache fabric interconnects.</p>
-<p>On a cluster with <em>RDMA</em>-capable hardware and GPUStack installed, follow these steps to verify
-interface discovery, container injection, <em>NUMA</em> alignment, and deployment integration.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#summary">Summary</a>
+</li>
+<li><a href="#environment">Environment</a>
 </li>
 <li><a href="#step-1-request-rdma">Step 1: Request RDMA</a>
 </li>
@@ -1441,6 +1441,57 @@ a workload can request network fabric beside its accelerators.</p>
  and
 <a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#rdma-resource-keys">RDMA resource keys</a>
 ).</p>
+<p>The steps verify interface discovery, container injection, <em>NUMA</em> alignment, and deployment
+integration.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Object</th>
+          <th>Scope</th>
+          <th>Creator</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Pod</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>a workload that requests <em>RDMA</em> endpoints beside its accelerator</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeployment</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>per-role interface requests under <em><code>roles[].resources.interface</code></em></td>
+      </tr>
+      <tr>
+          <td><code>KVCacheBackend</code></td>
+          <td>cluster</td>
+          <td>administrator</td>
+          <td>the cache transport carried over <em>RDMA</em> or EFA</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="environment">Environment</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Item</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Cluster</td>
+          <td>Kubernetes with GPUStack installed</td>
+      </tr>
+      <tr>
+          <td>Hardware</td>
+          <td><em>RDMA</em>-capable network adapters on the workload nodes</td>
+      </tr>
+  </tbody>
+</table>
 <h2 id="step-1-request-rdma">Step 1: Request RDMA</h2>
 <p>Inspect discovered interfaces and allocatable capacities on the target node first:</p>
 <div class="code-block">
@@ -1620,14 +1671,14 @@ and <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the
   <thead>
       <tr>
           <th>Symptom</th>
-          <th>Root cause</th>
+          <th>Signal</th>
           <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
   <tbody>
       <tr>
           <td><em>RDMA</em> resource keys present but all <code>Unhealthy</code></td>
-          <td>All port links failed or unreadable</td>
+          <td>Status: every port link <code>Failed</code> or unreadable</td>
           <td>Inspect <code>kubectl get devices &lt;node&gt; -o json</code> for <code>.spec.interfaces[].link</code>; verify physical cable and subnet manager</td>
       </tr>
       <tr>
@@ -1636,8 +1687,8 @@ and <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the
           <td>Inspect cluster allocatable <em>RDMA</em> keys (<code>device.gpustack.ai/rdma*</code>); add nodes or wait for active <code>Pod</code>s to finish</td>
       </tr>
       <tr>
-          <td><code>Pod</code> rejected with <code>TopologyAffinityError</code></td>
-          <td>Free GPUs and NICs reside on mismatched <em>NUMA</em> nodes</td>
+          <td><code>Pod</code> rejected at placement</td>
+          <td>Reason: <code>TopologyAffinityError</code> — free GPUs and NICs reside on mismatched <em>NUMA</em> nodes</td>
           <td>Ensure kubelet has <code>topologyManagerPolicy: restricted</code>; verify GPU and NIC requests are declared in the same container</td>
       </tr>
       <tr>
@@ -1647,7 +1698,7 @@ and <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the
       </tr>
       <tr>
           <td><code>Node</code> unexpectedly loses <code>feature.gpustack.ai/rdma.capable</code></td>
-          <td>Every endpoint on the node is unusable</td>
+          <td>Status: every endpoint on the node reports <code>Failed</code> or lacks a bound <em>RDMA</em> device</td>
           <td>Check kernel dmesg and interface carrier status; operator removes the label when every endpoint reports <code>Failed</code> or lacks a bound <em>RDMA</em> device. See <a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#three-node-labels">Network Topology</a>
 </td>
       </tr>
@@ -1683,7 +1734,7 @@ and <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/walkthroughs/rdma/network-endpoints.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/walkthroughs/rdma/network-endpoints.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/rdma/network-endpoints.md">Edit this page</a>
             
@@ -1695,6 +1746,7 @@ and <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#summary">Summary</a></li>
+    <li><a href="#environment">Environment</a></li>
     <li><a href="#step-1-request-rdma">Step 1: Request RDMA</a></li>
     <li><a href="#step-2-align-numa-with-kubelet">Step 2: Align NUMA with kubelet</a></li>
     <li><a href="#step-3-request-interfaces-per-role">Step 3: Request interfaces per role</a></li>

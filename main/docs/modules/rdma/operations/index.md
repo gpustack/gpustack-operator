@@ -347,14 +347,14 @@ verbs path fails creating its completion queue, as above.
 
 ## Troubleshooting
 
-| Symptom | Meaning | Check |
+| Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| no node advertises the key at all | the node has no *RDMA*-capable interface, or that family is switched off on the Device Manager | the allocatable read above; the `--no-shared` and `--no-partitioned` switches |
-| the key is advertised, every token unhealthy | the node judged every endpoint's link `Failed`, which withholds nothing but marks the tokens | [reading it yourself](/gpustack-operator/main/docs/modules/rdma/network-topology/index.md#inspecting-the-record) |
-| the `Workload` is admitted and its `Pod` stays `Pending` | over-subscription: nothing meters these keys | [the section above](#kueue-and-rdma-keys) |
-| the `Pod` is scheduled, then refused on the node and not rescheduled | the node's totals sufficed but its devices sit on two *NUMA* nodes | the node's policy, and that both requests sit in one container |
-| the container starts with fewer devices than expected | one `rdma_cm` is correct — count the `uverbs` entries | [the injected set](#injected-devices) |
-| a node drops out of scheduling without changing | its link broke: the hardware stays, the label does not | [reading it yourself](/gpustack-operator/main/docs/modules/rdma/network-topology/index.md#inspecting-the-record) |
+| no node advertises the key at all | Status: the key is absent from every node's allocatable | The node has no *RDMA*-capable interface, or that family is switched off on the Device Manager. Run the allocatable read above, and check the `--no-shared` and `--no-partitioned` switches |
+| the key is advertised, every token unhealthy | Status: endpoint link `Failed` | The node judged every endpoint's link `Failed`, which withholds nothing but marks the tokens. [Read it yourself](/gpustack-operator/main/docs/modules/rdma/network-topology/index.md#inspecting-the-record) |
+| the `Workload` is admitted and its `Pod` stays `Pending` | Status: `Pod` phase `Pending` | Over-subscription: nothing meters these keys. See [the section above](#kueue-and-rdma-keys) |
+| the `Pod` is scheduled, then refused on the node and not rescheduled | The kubelet refuses the `Pod` on the node | The node's totals sufficed but its devices sit on two *NUMA* nodes. Check the node's policy, and that both requests sit in one container |
+| the container starts with fewer devices than expected | Fewer `uverbs` entries than granted endpoints | One `rdma_cm` is correct — count the `uverbs` entries. See [the injected set](#injected-devices) |
+| a node drops out of scheduling without changing | Status: the node's link state in its `Devices` record | The hardware stays, the label does not. [Read it yourself](/gpustack-operator/main/docs/modules/rdma/network-topology/index.md#inspecting-the-record) |
 
 ---
 

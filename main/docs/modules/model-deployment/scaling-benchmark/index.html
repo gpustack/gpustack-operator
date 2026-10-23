@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1424,7 +1424,7 @@ engine startup and compute-graph compilation, and accelerator resource availabil
 </li>
 <li><a href="#environment">Environment</a>
 </li>
-<li><a href="#configurations">Configurations</a>
+<li><a href="#configuration">Configuration</a>
 </li>
 <li><a href="#suite-1-scaling-comparison">Suite 1: Scaling comparison</a>
 </li>
@@ -1505,7 +1505,7 @@ uninterrupted serving. Its scale-down and post-retirement phases completed witho
 <p>Requests went directly from the driver to the Router&rsquo;s cluster-internal endpoint.
 No <code>kubectl port-forward</code> carried inference traffic. vLLM roles set
 <code>VLLM_HTTP_TIMEOUT_KEEP_ALIVE=3600</code>; the separate lifecycle check still observed scale-out failures.</p>
-<h2 id="configurations">Configurations</h2>
+<h2 id="configuration">Configuration</h2>
 <p>Each role started with one replica and had bounds of one to two.
 The scaler used <code>Active</code> mode and a 10 s sampling interval.</p>
 <table>
@@ -2172,7 +2172,7 @@ examples from captured lifecycle evidence.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/modules/model-deployment/scaling-benchmark.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/modules/model-deployment/scaling-benchmark.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/scaling-benchmark.md">Edit this page</a>
             
@@ -2185,7 +2185,7 @@ examples from captured lifecycle evidence.</p>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#summary">Summary</a></li>
     <li><a href="#environment">Environment</a></li>
-    <li><a href="#configurations">Configurations</a>
+    <li><a href="#configuration">Configuration</a>
       <ul>
         <li><a href="#parallel-schedule">Parallel schedule</a></li>
         <li><a href="#workload">Workload</a></li>

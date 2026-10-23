@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1409,16 +1409,12 @@
       <article>
         
   <h1 id="external-dp-walkthrough">External DP Walkthrough</h1>
-<p>Configure four fixed <em>DP</em> ranks behind <code>vllm-router</code>, with one HTTP endpoint per rank.
-Each rank uses two GPUs with <em>TP</em> = 2, for eight H100 GPUs in total.
-The captured H100 SXM5 run used this fixed group in namespace <code>gpustack-bench</code>.
-Use <a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/">External DP</a>
- for parallelism and load-balancing background.</p>
+<p>Start four fixed <em>DP</em> ranks behind <code>vllm-router</code>, send requests to each rank directly, and confirm the Router reaches every endpoint.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#summary">Summary</a>
 </li>
-<li><a href="#device-and-cluster">Device and cluster</a>
+<li><a href="#environment">Environment</a>
 </li>
 <li><a href="#step-1-start-the-fixed-group">Step 1: Start the fixed group</a>
 </li>
@@ -1443,13 +1439,45 @@ The group has no online resize contract.</p>
 <p>The configuration uses one <em>Server</em> role with <em><code>replicas: 1</code></em> and <em><code>size: 4</code></em>.
 Each member requests two GPUs, but that scheduling request does not declare engine parallelism.
 Explicit <em>TP</em>, <em>DP</em>, rank and leader-address arguments define the engine group.</p>
+<p>Each rank uses two GPUs with <em>TP</em> = 2, for eight H100 GPUs in total.
+The captured H100 SXM5 run used this fixed group in namespace <code>gpustack-bench</code>.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Object</th>
+          <th>Scope</th>
+          <th>Creator</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ModelArtifact</code></td>
+          <td>namespace</td>
+          <td>user, via the prefetch procedure</td>
+          <td>the DeepSeek V2 Lite weights the deployment serves</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeployment</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>the fixed four-rank <em>DP</em> group behind the managed Router</td>
+      </tr>
+      <tr>
+          <td><code>InstanceType</code></td>
+          <td>cluster</td>
+          <td>operator</td>
+          <td>the whole-GPU H100 type each member requests</td>
+      </tr>
+  </tbody>
+</table>
 <p>At concurrency 64, <em>time to first token (TTFT)</em> p50 was <strong>2.58× lower</strong> for the four-rank group on <code>1024/256</code>:
 <strong>1,863.100 ms</strong> against wide <em>TP</em> = 8 at <code>4,798.411 ms</code>.
 On <code>4096/128</code>, it had <strong>1.23× lower TTFT p50</strong>: <strong>3,094.017 ms</strong> against <code>3,814.139 ms</code>.
 These benefits favor queueing-sensitive, fixed-group workloads; wide <em>TP</em> retained <strong>2.27×–6.99× higher output throughput</strong>.
 Use <a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/">External DP Benchmark</a>
  to compare tails as well as medians.</p>
-<h2 id="device-and-cluster">Device and cluster</h2>
+<h2 id="environment">Environment</h2>
 <table>
   <thead>
       <tr>
@@ -1731,28 +1759,34 @@ or placement across GPU nodes. Those configurations need separate compatibility 
   <thead>
       <tr>
           <th>Symptom</th>
-          <th>Check</th>
+          <th>Signal</th>
+          <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
   <tbody>
       <tr>
           <td>Members stay Pending</td>
+          <td>Status: member <code>Pod</code> phase <code>Pending</code></td>
           <td>Read Kueue quota, events and <code>InstanceType</code> capacity. Four members with two GPUs each need eight free GPUs.</td>
       </tr>
       <tr>
           <td>Ranks cannot initialize</td>
+          <td>Log: failing rank&rsquo;s engine startup log</td>
           <td>Verify rank values 0–3, <em>DP</em> width 4, the shared leader address and the engine&rsquo;s peer ports.</td>
       </tr>
       <tr>
           <td>Direct requests pass but Router requests fail</td>
+          <td>Status: <em><code>status.roles[].endpoints</code></em></td>
           <td>Read <em><code>status.roles[].endpoints</code></em>, Router discovery and eligibility labels.</td>
       </tr>
       <tr>
           <td>Router registers only rank 0</td>
+          <td>Status: <code>/observer/endpoints</code> lists one worker</td>
           <td>Confirm the build supports managed <em>External LB</em> discovery and the role reports <code>External</code>.</td>
       </tr>
       <tr>
           <td>Owned resources remain after deletion</td>
+          <td>Owned <code>Pod</code>s, <code>Service</code>s or <code>Deployment</code>s still listed</td>
           <td>Inspect owner references before removing leftovers. Do not infer complete cleanup from CR deletion alone.</td>
       </tr>
   </tbody>
@@ -1778,7 +1812,7 @@ or placement across GPU nodes. Those configurations need separate compatibility 
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/walkthroughs/model-deployment/external-dp.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/walkthroughs/model-deployment/external-dp.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/external-dp.md">Edit this page</a>
             
@@ -1790,7 +1824,7 @@ or placement across GPU nodes. Those configurations need separate compatibility 
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#summary">Summary</a></li>
-    <li><a href="#device-and-cluster">Device and cluster</a></li>
+    <li><a href="#environment">Environment</a></li>
     <li><a href="#step-1-start-the-fixed-group">Step 1: Start the fixed group</a>
       <ul>
         <li><a href="#port-allocation">Port allocation</a></li>

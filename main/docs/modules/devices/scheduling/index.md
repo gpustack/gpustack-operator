@@ -193,7 +193,7 @@ weights](../topology/scheduling.md#node-delivered-model-placement).
 The `ResourceFlavor` is the finest grain and setting-independent: always the CPU key, plus the
 accelerator key when accelerated, so the aggregation layer re-groups without rewriting a flavor. That
 layer (`ClusterQueue` / `InstanceType` / `InstanceTypeFlavor`) is grouped by the editable
-[`instance-type-aware-cpu-manufacturer`](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) (default `false`):
+[`instance-type-aware-cpu-manufacturer`](/gpustack-operator/main/docs/reference/settings/index.md#settings) (default `false`):
 
 ```
 ResourceFlavor (always the finest grain, setting-independent):
@@ -366,6 +366,6 @@ The per-accelerator **`AdmissionCheck`**, third of the five gates; its behavior 
 **See also** — [Device Discovery](/gpustack-operator/main/docs/modules/devices/discovery/index.md) (where the capacity signals come from) ·
 [Topology-Aware Scheduling](/gpustack-operator/main/docs/modules/topology/scheduling/index.md) (how topology profiles enter this chain) ·
 [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) (the same objects on a live cluster) ·
-[Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings)
+[Settings](/gpustack-operator/main/docs/reference/settings/index.md#settings)
 
 **Next** → [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md) — the five gates a request passes.

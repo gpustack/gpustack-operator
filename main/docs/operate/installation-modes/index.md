@@ -80,7 +80,7 @@ These switches change what a mode installs:
   cluster has no Device Managers (useful for control-plane-only). Before chart mode covered them, this
   switch was how the worker came to install them.
 - `modelManager.enabled=false` — no Model Manager `DaemonSet` and no `CSIDriver`, and the worker
-  then seeds no `Node` delivery; see [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#enable-the-plugin).
+  then seeds no `Node` delivery; see [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#prerequisites).
 - `worker.enabled=false` — the chart deploys only the applications, what image mode's overlay sets.
 
 ## Deployed and applied resources

@@ -7,6 +7,7 @@ The operator coordinates leader discovery and environment variable injection acr
 ## Contents
 
 - [Summary](#summary)
+- [Environment](#environment)
 - [Step 1: Define the deployment](#step-1-define-the-deployment)
 - [Step 2: Verify gang admission](#step-2-verify-gang-admission)
 - [Step 3: Verify distributed inference](#step-3-verify-distributed-inference)
@@ -29,20 +30,36 @@ Member `m0` acts as the primary master replica and receives all incoming `Servic
 Subordinate members (`m1`, `m2`, etc.) run auxiliary parallel workers and synchronize with `m0`.
 The operator injects cluster discovery environment variables into each container automatically.
 
-Prepare a cluster with at least two physical GPU nodes containing identical accelerator counts.
-Complete [cluster preparation](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#prepare-the-cluster) and [model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md).
-Verify inter-node network connectivity and high-speed fabric (such as RoCE, InfiniBand, or AWS EFA).
-Each node in the configuration provides eight GPUs.
+| Object | Scope | Creator | Purpose |
+|---|---|---|---|
+| `ModelArtifact` | namespace | user | the `deepseek-v2-lite-chat` weights each member mounts |
+| `InstanceType` | cluster | operator | the discovered H100 whole-GPU type the role requests |
+| `ModelDeployment` | namespace | user | one multi-host serving instance spanning two nodes |
+
+Complete [cluster preparation](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#prepare-the-cluster) and
+[model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md).
 *TP* spans the GPUs inside each host. *PP* spans the two hosts.
 
 This sixteen-GPU layout is a configuration example without measured runtime results. Unlike the
-recorded H100 walkthroughs in `gpustack-bench`, it uses the `gpustack-elastic` namespace, a
-`deepseek-v2-lite-chat` `ModelArtifact` in that namespace, and the `elastic-cpu-gpu` `InstanceType`
-from [Prepare the GPU InstanceType](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#prepare-the-gpu-instancetype).
+recorded H100 walkthroughs in `gpustack-bench`, it uses the `gpustack-elastic` namespace and a
+`deepseek-v2-lite-chat` `ModelArtifact` in that namespace. The manifest requests the same
+discovered H100 `InstanceType` as the other reusable manifests; see
+[Prepare the GPU InstanceType](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#prepare-the-gpu-instancetype).
 
 When running [model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md), warm the artifact onto **both**
 physical GPU nodes (`minReady: 2` across the GPU node pool rather than pinning a single
 `kubernetes.io/hostname`) so both `m0` and `m1` mount cached weights locally.
+
+## Environment
+
+| Item | Value |
+|---|---|
+| Nodes | two physical GPU nodes with identical accelerator counts |
+| GPUs | eight per node, sixteen total |
+| Fabric | inter-node high-speed network such as RoCE, InfiniBand or AWS EFA |
+| `InstanceType` | the discovered `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
+| Namespace | `gpustack-elastic` |
+| Model | `deepseek-v2-lite-chat` `ModelArtifact` in that namespace |
 
 ## Step 1: Define the deployment
 
@@ -69,7 +86,7 @@ spec:
       kind: Server
       replicas: 1
       size: 2
-      instanceType: elastic-cpu-gpu
+      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       image: gpustack/runner:cuda13.0-vllm0.29.0
       resources:
         accelerator: "8"
@@ -218,13 +235,13 @@ the role stops serving while its replacement is rebuilt.
 
 ## Troubleshooting
 
-| Symptom | Condition / Reason | Check & Mitigation |
+| Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| `ModelDeployment` stuck in `Starting`, Kueue composes no `Workload` | `QuotaReserved=False/PodGroupIncomplete` | Fewer instances exist than the role declares. Read the message for the counts, then check the `Pod`s that are missing or unschedulable |
-| An instance was lost and is being rebuilt | `ReplicasUpToDate=False/ReplacementInProgress` | A replica disappeared for a reason outside the spec: a drained node, Kueue reclaiming quota, an eviction or a manual delete. The `Pod`s of an instance share one lifecycle, so the whole instance is rebuilt. Check the node and Kueue events |
-| Replicas wait for quota | `QuotaReserved=False/Pending` | The `ClusterQueue` has insufficient capacity to admit the replica. Free capacity, raise the pool quota, or reduce per-member accelerator requests |
-| Secondary worker cannot reach the leader | Engine logs on `m1` | Check that the headless `Service` resolves `GPUSTACK_REPLICA_LEADER_ADDRESS` and that no `NetworkPolicy` blocks the engine's distributed port |
-| Engine errors on parallel size | Engine startup log | Check that `--tensor-parallel-size` matches the accelerators per member (*TP* size) and that `--pipeline-parallel-size` equals *`size`* (*PP* size) |
+| `ModelDeployment` stuck in `Starting`, Kueue composes no `Workload` | Condition: `QuotaReserved=False/PodGroupIncomplete` | Fewer instances exist than the role declares. Read the message for the counts, then check the `Pod`s that are missing or unschedulable |
+| An instance was lost and is being rebuilt | Condition: `ReplicasUpToDate=False/ReplacementInProgress` | A replica disappeared for a reason outside the spec: a drained node, Kueue reclaiming quota, an eviction or a manual delete. The `Pod`s of an instance share one lifecycle, so the whole instance is rebuilt. Check the node and Kueue events |
+| Replicas wait for quota | Condition: `QuotaReserved=False/Pending` | The `ClusterQueue` has insufficient capacity to admit the replica. Free capacity, raise the pool quota, or reduce per-member accelerator requests |
+| Secondary worker cannot reach the leader | Log: engine logs on `m1` | Check that the headless `Service` resolves `GPUSTACK_REPLICA_LEADER_ADDRESS` and that no `NetworkPolicy` blocks the engine's distributed port |
+| Engine errors on parallel size | Log: engine startup log | Check that `--tensor-parallel-size` matches the accelerators per member (*TP* size) and that `--pipeline-parallel-size` equals *`size`* (*PP* size) |
 
 ---
 

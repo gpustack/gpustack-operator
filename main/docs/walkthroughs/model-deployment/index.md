@@ -2,7 +2,6 @@
 
 Choose a serving configuration, then use its cluster profile and deployment manifest.
 The H100 walkthroughs distinguish recorded deployments from configuration examples.
-The illustrative *Multi-Host* configuration uses the separate `InstanceType` example below.
 
 ## Contents
 
@@ -39,7 +38,7 @@ Install the operator and enable node model delivery using the
 Use `kubectl`, `jq`, `curl`, and a kubeconfig for the intended cluster.
 
 The H100 recordings use one CPU node and one GPU node with eight NVIDIA H100 80 GB HBM3 SXM5 GPUs.
-Read each walkthrough's device and cluster section for its allocation and evidence limits.
+Read each walkthrough's environment section for its allocation and evidence limits.
 The *Multi-Host* example instead needs two GPU nodes.
 
 ```bash
@@ -61,34 +60,7 @@ The H100 manifests use the discovered whole-GPU type
 Each walkthrough explains this substitution; captured queue output retains the recorded name.
 Confirm the selected type's capacity before applying a manifest.
 
-For the illustrative *Multi-Host* configuration, save this custom type as `gpu-instance-type.yaml`.
-Apply it only on nodes with the matching RTX PRO accelerator group.
 Select another whole-GPU type when using different hardware, and verify model compatibility.
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: InstanceType
-metadata:
-  name: elastic-cpu-gpu
-spec:
-  generalGroup: generic
-  acceleratable: true
-  acceleratorGroup: nvidia-rtx-pro-6000-blackwell-server-edition
-  os: linux
-  arch: amd64
-  localStorage: 10Gi
-  unitResources:
-    cpu: "4"
-    ram: 16Gi
-```
-
-```bash
-kubectl apply -f gpu-instance-type.yaml
-kubectl get instancetype elastic-cpu-gpu
-```
-
-[Multi-Host](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md) uses `elastic-cpu-gpu` as an illustrative custom `InstanceType`.
-It is separate from the H100 type used by the other reusable manifests.
 
 ---
 

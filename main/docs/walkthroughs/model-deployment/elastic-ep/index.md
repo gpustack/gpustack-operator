@@ -1,14 +1,11 @@
 # Elastic EP Walkthrough
 
-Grow one vLLM serving collective on an eight-GPU H100 SXM5 node.
-Hold *TP* = 2 and expand *DP* width 2 → 4, increasing the *EP* world size from 4 to 8.
-The captured load completed **439/439 client requests with zero errors** during expansion.
-See [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) for the parallelism and profile contracts.
+Grow one vLLM serving collective on an eight-GPU H100 SXM5 node, widen it while it serves, and verify that requests keep completing across the resize.
 
 ## Contents
 
 - [Summary](#summary)
-- [Device and cluster](#device-and-cluster)
+- [Environment](#environment)
 - [Step 1: Start the elastic deployment](#step-1-start-the-elastic-deployment)
 - [Step 2: Verify baseline inference](#step-2-verify-baseline-inference)
 - [Step 3: Expand and verify inference](#step-3-expand-and-verify-inference)
@@ -26,13 +23,22 @@ The role keeps *`replicas: 1`*, *`size: 1`* and two GPUs per member.
 The *`elasticEp.width`* field controls member count: width 2 uses four GPUs; width 4 uses eight.
 Increasing ordinary *`replicas`* creates separate complete instances and does not expand this collective.
 
+Hold *TP* = 2 and expand *DP* width 2 → 4, increasing the *EP* world size from 4 to 8.
+The captured load completed **439/439 client requests with zero errors** during expansion.
+
+| Object | Scope | Creator | Purpose |
+|---|---|---|---|
+| `ModelArtifact` | namespace | user, via the prefetch procedure | the DeepSeek V2 Lite weights the deployment serves |
+| `ModelDeployment` | namespace | user | the elastic vLLM collective that expands in place |
+| `InstanceType` | cluster | operator | the whole-GPU H100 type each member requests |
+
 At concurrency 64, width 4 reduced *time to first token (TTFT)* p50 to **2,598.867 ms** from width 2's **6,509.231 ms**, or **2.50× lower**.
 Width growth suits high-concurrency first-token targets when process retention matters.
 It used twice the GPUs and lowered output throughput at every tested concurrency.
 Single-request *inter-token latency (ITL)* p50 rose from 8.566 to 15.675 ms.
 Use [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md) to assess generation latency and GPU cost before widening.
 
-## Device and cluster
+## Environment
 
 | Item | Captured setup |
 |---|---|
@@ -310,13 +316,13 @@ Use [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment
 
 ## Troubleshooting
 
-| Symptom | Check |
-|---|---|
-| Added members stay Pending | Read Kueue `Workload`s, queue quota, `Pod` events and free `Devices` capacity. Width 4 with *TP* = 2 needs eight GPUs. |
-| Four members run but effective width is unknown | Read the diagnostic observation and master logs. Allocated GPU capacity alone does not establish native width. |
-| `ElasticResize=False/ScaleRefused` | Read the last engine refusal and the [resize hold rules](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md#when-a-resize-holds). |
-| `ElasticResize=Unknown/WorldUnprovable` | Keep observing the current operation. An unanswered resize must not be resent manually. |
-| Inference stalls | Inspect the master and Ray worker logs, actual GPU visibility, `/dev/shm` capacity and node memory. |
+| Symptom | Signal | Check & Mitigation |
+|---|---|---|
+| Added members stay Pending | Status: member `Pod` phase `Pending` | Read Kueue `Workload`s, queue quota, `Pod` events and free `Devices` capacity. Width 4 with *TP* = 2 needs eight GPUs. |
+| Four members run but effective width is unknown | Status: `effective.Known` false in the diagnostic observation | Read the diagnostic observation and master logs. Allocated GPU capacity alone does not establish native width. |
+| `ElasticResize=False/ScaleRefused` | Condition: `ElasticResize=False`, Reason: `ScaleRefused` | Read the last engine refusal and the [resize hold rules](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md#when-a-resize-holds). |
+| `ElasticResize=Unknown/WorldUnprovable` | Condition: `ElasticResize=Unknown`, Reason: `WorldUnprovable` | Keep observing the current operation. An unanswered resize must not be resent manually. |
+| Inference stalls | Streaming requests stop returning tokens | Inspect the master and Ray worker logs, actual GPU visibility, `/dev/shm` capacity and node memory. |
 
 ```bash
 kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o yaml

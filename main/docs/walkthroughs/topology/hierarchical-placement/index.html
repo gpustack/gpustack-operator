@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1411,11 +1411,11 @@
   <h1 id="hierarchical-placement-walkthrough">Hierarchical Placement Walkthrough</h1>
 <p>Configure topology levels across cloud zones and physical racks, request domain placement for
 multi-<code>Pod</code> replicas, and see what a node move and a hierarchy change do.</p>
-<p>Follow these steps to discover infrastructure hierarchies, apply placement constraints to serving
-workloads, and manage topology updates.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#summary">Summary</a>
+</li>
+<li><a href="#environment">Environment</a>
 </li>
 <li><a href="#step-1-discover-cloud-zones">Step 1: Discover cloud zones</a>
 </li>
@@ -1437,6 +1437,69 @@ workloads, and manage topology updates.</p>
 or a physical rack. Configure a read-only cloud-zone <code>TopologySource</code>, then narrow placement to a
 static rack inventory snapshot. Moving a node between racks and changing the hierarchy levels have
 different effects on existing workloads.</p>
+<p>The steps discover infrastructure hierarchies, apply placement constraints to serving workloads, and
+manage topology updates.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Object</th>
+          <th>Scope</th>
+          <th>Creator</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>TopologySource</code></td>
+          <td>cluster</td>
+          <td>administrator</td>
+          <td>the hierarchy levels and where each node&rsquo;s values come from</td>
+      </tr>
+      <tr>
+          <td><code>ConfigMap</code></td>
+          <td>namespace</td>
+          <td>administrator</td>
+          <td>the versioned rack inventory snapshot (Step 3)</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeployment</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>the <em><code>topology.requiredLevel</code></em> placement constraint</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="environment">Environment</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Item</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Cluster</td>
+          <td>Kubernetes with GPUStack installed</td>
+      </tr>
+      <tr>
+          <td>Nodes</td>
+          <td>labeled <code>topology.kubernetes.io/region</code> and <code>topology.kubernetes.io/zone</code> for Steps 1 and 2; Steps 3 through 5 publish a <code>ConfigMap</code> rack inventory instead</td>
+      </tr>
+      <tr>
+          <td><code>InstanceType</code></td>
+          <td><code>gpustack--nvidia-a10g-linux-amd64</code></td>
+      </tr>
+      <tr>
+          <td>Model</td>
+          <td><code>Qwen/Qwen2.5-7B-Instruct</code></td>
+      </tr>
+      <tr>
+          <td>Engine</td>
+          <td>vLLM <code>gpustack/runner:cuda13.0-vllm0.29.0</code>, with <code>llm-d-router</code></td>
+      </tr>
+  </tbody>
+</table>
 <h2 id="step-1-discover-cloud-zones">Step 1: Discover cloud zones</h2>
 <p>Verify existing node labels and cluster status before configuring topology sources:</p>
 <div class="code-block">
@@ -1610,25 +1673,25 @@ and <a href="/gpustack-operator/main/docs/modules/topology/operations/#change-a-
 <table>
   <thead>
       <tr>
-          <th>Condition / Symptom</th>
-          <th>Status / Reason</th>
-          <th>Root cause &amp; Mitigation</th>
+          <th>Symptom</th>
+          <th>Signal</th>
+          <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
   <tbody>
       <tr>
           <td><code>TopologySource</code> <code>Ready=False</code></td>
-          <td><code>InvalidHierarchy</code> / <code>SnapshotInvalid</code></td>
+          <td>Reason: <code>InvalidHierarchy</code> / <code>SnapshotInvalid</code></td>
           <td>Label hierarchy invalid (child key must have unique parent value); fix snapshot syntax or missing node entries</td>
       </tr>
       <tr>
           <td><code>TopologySource</code> <code>Ready=False</code></td>
-          <td><code>OwnershipConflict</code></td>
+          <td>Reason: <code>OwnershipConflict</code></td>
           <td>Multiple writable sources target the same node; adjust node selectors to ensure disjoint sets</td>
       </tr>
       <tr>
           <td><code>TopologySource</code> <code>Valid=False</code></td>
-          <td><code>ConfigMapReadFailed</code></td>
+          <td>Reason: <code>ConfigMapReadFailed</code></td>
           <td>Verify <code>ConfigMap</code> name and namespace match the worker installation</td>
       </tr>
       <tr>
@@ -1663,7 +1726,7 @@ and <a href="/gpustack-operator/main/docs/modules/topology/operations/#change-a-
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/walkthroughs/topology/hierarchical-placement.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/walkthroughs/topology/hierarchical-placement.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/topology/hierarchical-placement.md">Edit this page</a>
             
@@ -1675,6 +1738,7 @@ and <a href="/gpustack-operator/main/docs/modules/topology/operations/#change-a-
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#summary">Summary</a></li>
+    <li><a href="#environment">Environment</a></li>
     <li><a href="#step-1-discover-cloud-zones">Step 1: Discover cloud zones</a></li>
     <li><a href="#step-2-request-zone-placement">Step 2: Request zone placement</a></li>
     <li><a href="#step-3-publish-an-inventory-snapshot">Step 3: Publish an inventory snapshot</a></li>

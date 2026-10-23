@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-delivery/operations/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1415,7 +1415,7 @@ with the steps below; <a href="/gpustack-operator/main/docs/modules/model-delive
  explains each mount.</p>
 <h2 id="contents">Contents</h2>
 <ul>
-<li><a href="#enable-the-plugin">Enable the plugin</a>
+<li><a href="#prerequisites">Prerequisites</a>
 </li>
 <li><a href="#configuration">Configuration</a>
 </li>
@@ -1434,7 +1434,21 @@ with the steps below; <a href="/gpustack-operator/main/docs/modules/model-delive
 <li><a href="#troubleshooting">Troubleshooting</a>
 </li>
 </ul>
-<h2 id="enable-the-plugin">Enable the plugin</h2>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li><strong>The operator namespace must admit privileged <code>Pod</code>s.</strong> The plugin container is privileged, so an
+enforced <code>pod-security.kubernetes.io/enforce</code> label there must be <code>privileged</code>, as the Device
+Manager already needs. Tenant namespaces may enforce <code>restricted</code>: it admits <code>csi</code> volumes.</li>
+<li><strong>Image mode</strong> installs it unless <code>--disable-applications</code> names <code>model-manager</code> (values key
+<code>modelManager</code>); see <a href="/gpustack-operator/main/docs/operate/installation-modes/">Installation Modes</a>
+. Its overlay
+sets only that switch: every other value keeps the chart&rsquo;s default, and no delivery is seeded, so
+<code>model-artifact-delivery-mode</code> stays <code>Engine</code> until you set it.</li>
+<li><strong>A kubelet with another root directory</strong> (some distributions use <code>/var/snap/...</code> or
+<code>/var/lib/k0s/kubelet</code>) needs <code>modelManager.kubeletDir</code> set to it, or no mount reaches a <code>Pod</code>. Image
+mode cannot set it, so there the plugin only works with the standard <code>/var/lib/kubelet</code>.</li>
+</ul>
+<h2 id="configuration">Configuration</h2>
 <p>The chart deploys it by default (<code>modelManager.enabled: true</code>) with the <code>CSIDriver</code>
 <code>model.csi.gpustack.ai</code>, one <code>DaemonSet</code> <code>Pod</code> per node, a <code>ServiceAccount</code> and a <code>ClusterRole</code> that grants
 only get, list and watch on <code>modelartifacts</code> and <code>nodemodelstores</code>, update on
@@ -1476,20 +1490,6 @@ hands each mount its artifact&rsquo;s <code>Secret</code>.</p>
       </tr>
   </tbody>
 </table>
-<ul>
-<li><strong>The operator namespace must admit privileged <code>Pod</code>s.</strong> The plugin container is privileged, so an
-enforced <code>pod-security.kubernetes.io/enforce</code> label there must be <code>privileged</code>, as the Device
-Manager already needs. Tenant namespaces may enforce <code>restricted</code>: it admits <code>csi</code> volumes.</li>
-<li><strong>Image mode</strong> installs it unless <code>--disable-applications</code> names <code>model-manager</code> (values key
-<code>modelManager</code>); see <a href="/gpustack-operator/main/docs/operate/installation-modes/">Installation Modes</a>
-. Its overlay
-sets only that switch: every other value keeps the chart&rsquo;s default, and no delivery is seeded, so
-<code>model-artifact-delivery-mode</code> stays <code>Engine</code> until you set it.</li>
-<li><strong>A kubelet with another root directory</strong> (some distributions use <code>/var/snap/...</code> or
-<code>/var/lib/k0s/kubelet</code>) needs <code>modelManager.kubeletDir</code> set to it, or no mount reaches a <code>Pod</code>. Image
-mode cannot set it, so there the plugin only works with the standard <code>/var/lib/kubelet</code>.</li>
-</ul>
-<h2 id="configuration">Configuration</h2>
 <table>
   <thead>
       <tr>
@@ -1508,7 +1508,7 @@ mode cannot set it, so there the plugin only works with the standard <code>/var/
       </tr>
       <tr>
           <td>Cluster runtime</td>
-          <td><a href="/gpustack-operator/main/docs/reference/settings/#online-adjustable-settings">Settings</a>
+          <td><a href="/gpustack-operator/main/docs/reference/settings/#settings">Settings</a>
  in the operator namespace</td>
           <td>administrator</td>
           <td>delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth</td>
@@ -1720,29 +1720,35 @@ and remove the old one afterwards.</li>
 <table>
   <thead>
       <tr>
-          <th>Reason</th>
-          <th>Look at</th>
+          <th>Symptom</th>
+          <th>Signal</th>
+          <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
   <tbody>
       <tr>
-          <td><code>NodeDeliveryUnavailable</code></td>
+          <td><code>WeightsReady=False</code>, no new <code>Pod</code> under <code>Node</code> delivery</td>
+          <td>Reason: <code>NodeDeliveryUnavailable</code></td>
           <td>the <code>CSIDriver</code> <code>model.csi.gpustack.ai</code> and <code>modelManager.enabled</code></td>
       </tr>
       <tr>
-          <td><code>FilterNeedsNodeDelivery</code></td>
+          <td>A patterned artifact under <code>Engine</code> delivery creates no <code>Pod</code></td>
+          <td>Reason: <code>FilterNeedsNodeDelivery</code></td>
           <td>the delivery <code>Setting</code>, or the artifact&rsquo;s patterns</td>
       </tr>
       <tr>
-          <td><code>Materializing</code></td>
+          <td><code>WeightsReady=False</code> while the node lists the digest <code>Downloading</code></td>
+          <td>Reason: <code>Materializing</code></td>
           <td>the <code>Pod</code>&rsquo;s <code>FailedMount</code> events for bytes received; a <code>Pod</code> starts up to about two minutes after the download ends</td>
       </tr>
       <tr>
-          <td><code>MaterializationFailed</code></td>
+          <td><code>WeightsReady=False</code> and the node lists the digest <code>Failed</code></td>
+          <td>Reason: <code>MaterializationFailed</code></td>
           <td>the node&rsquo;s <em><code>status.models</code></em> entry: reason, message and <em><code>retryTime</code></em></td>
       </tr>
       <tr>
-          <td><code>WeightsNotMounted</code></td>
+          <td>The <code>Pod</code>&rsquo;s <code>PodReadyToStartContainers</code> is not True yet</td>
+          <td>Reason: <code>WeightsNotMounted</code></td>
           <td>the <code>Pod</code>&rsquo;s <code>FailedMount</code> events: a <code>PermissionDenied</code> names the authorization rule that failed</td>
       </tr>
   </tbody>
@@ -1754,7 +1760,7 @@ and remove the old one afterwards.</li>
  for every field and
 reason</li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/">Model Artifact</a>
  for the artifact and its
-patterns</li><li><a href="/gpustack-operator/main/docs/reference/settings/#online-adjustable-settings">Settings</a>
+patterns</li><li><a href="/gpustack-operator/main/docs/reference/settings/#settings">Settings</a>
  for every <code>Setting</code>.</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
@@ -1770,7 +1776,7 @@ patterns</li><li><a href="/gpustack-operator/main/docs/reference/settings/#onlin
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/modules/model-delivery/operations.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/modules/model-delivery/operations.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/operations.md">Edit this page</a>
             
@@ -1781,7 +1787,7 @@ patterns</li><li><a href="/gpustack-operator/main/docs/reference/settings/#onlin
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#enable-the-plugin">Enable the plugin</a></li>
+    <li><a href="#prerequisites">Prerequisites</a></li>
     <li><a href="#configuration">Configuration</a>
       <ul>
         <li><a href="#pool-layer">Pool layer</a></li>

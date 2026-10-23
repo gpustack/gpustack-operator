@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1410,8 +1410,7 @@
         
   <h1 id="model-deployment-walkthroughs">Model Deployment Walkthroughs</h1>
 <p>Choose a serving configuration, then use its cluster profile and deployment manifest.
-The H100 walkthroughs distinguish recorded deployments from configuration examples.
-The illustrative <em>Multi-Host</em> configuration uses the separate <code>InstanceType</code> example below.</p>
+The H100 walkthroughs distinguish recorded deployments from configuration examples.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#choose-an-example">Choose an example</a>
@@ -1490,7 +1489,7 @@ its observed replica changes from reusable configuration examples.</p>
 .
 Use <code>kubectl</code>, <code>jq</code>, <code>curl</code>, and a kubeconfig for the intended cluster.</p>
 <p>The H100 recordings use one CPU node and one GPU node with eight NVIDIA H100 80 GB HBM3 SXM5 GPUs.
-Read each walkthrough&rsquo;s device and cluster section for its allocation and evidence limits.
+Read each walkthrough&rsquo;s environment section for its allocation and evidence limits.
 The <em>Multi-Host</em> example instead needs two GPU nodes.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1508,32 +1507,7 @@ specified by the serving walkthrough.</p>
 <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code>. The recordings used the custom type <code>bench-gpu</code>.
 Each walkthrough explains this substitution; captured queue output retains the recorded name.
 Confirm the selected type&rsquo;s capacity before applying a manifest.</p>
-<p>For the illustrative <em>Multi-Host</em> configuration, save this custom type as <code>gpu-instance-type.yaml</code>.
-Apply it only on nodes with the matching RTX PRO accelerator group.
-Select another whole-GPU type when using different hardware, and verify model compatibility.</p>
-<div class="code-block">
-  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">InstanceType</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-cpu-gpu</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">generalGroup</span><span class="p">:</span><span class="w"> </span><span class="l">generic</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">acceleratable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">acceleratorGroup</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia-rtx-pro-6000-blackwell-server-edition</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">localStorage</span><span class="p">:</span><span class="w"> </span><span class="l">10Gi</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">unitResources</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;4&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ram</span><span class="p">:</span><span class="w"> </span><span class="l">16Gi</span></span></span></code></pre></div>
-</div><div class="code-block">
-  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f gpu-instance-type.yaml
-</span></span><span class="line"><span class="cl">kubectl get instancetype elastic-cpu-gpu</span></span></code></pre></div>
-</div><p><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/">Multi-Host</a>
- uses <code>elastic-cpu-gpu</code> as an illustrative custom <code>InstanceType</code>.
-It is separate from the H100 type used by the other reusable manifests.</p>
+<p>Select another whole-GPU type when using different hardware, and verify model compatibility.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
@@ -1555,7 +1529,7 @@ It is separate from the H100 type used by the other reusable manifests.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/walkthroughs/model-deployment/_index.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/walkthroughs/model-deployment/_index.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/_index.md">Edit this page</a>
             

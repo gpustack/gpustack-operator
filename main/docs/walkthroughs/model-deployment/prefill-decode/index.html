@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1410,13 +1410,13 @@
         
   <h1 id="prefill-and-decode-walkthrough">Prefill and Decode Walkthrough</h1>
 <p>Deploy a disaggregated large language model (LLM) topology with dedicated <em>prefill</em> and <em>decode</em> roles
-fronted by a Router. The operator coordinates joint admission across both roles and routes requests
-through one endpoint.</p>
+fronted by a Router. Observe joint admission across both roles, then send completion requests through
+the router&rsquo;s single endpoint.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#summary">Summary</a>
 </li>
-<li><a href="#device-and-cluster">Device and cluster</a>
+<li><a href="#environment">Environment</a>
 </li>
 <li><a href="#step-1-start-disaggregated-serving">Step 1: Start disaggregated serving</a>
 </li>
@@ -1446,7 +1446,49 @@ At concurrency 16, long-prompt <em>inter-token latency (ITL)</em> p99 improved <
 The mixed steady stream had <strong>23.3× lower maximum ITL</strong>, with no p99 improvement.
 See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/">Prefill and Decode Benchmark</a>
  for throughput, tails and the decode-heavy outlier.</p>
-<h2 id="device-and-cluster">Device and cluster</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Object</th>
+          <th>Scope</th>
+          <th>Creator</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ModelArtifact</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>the Qwen3-32B weights the deployment serves</td>
+      </tr>
+      <tr>
+          <td><code>ModelPrefetch</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>the artifact cached onto the H100 node before serving</td>
+      </tr>
+      <tr>
+          <td><code>InstanceType</code></td>
+          <td>cluster</td>
+          <td>operator</td>
+          <td>the H100 accelerator group each role requests</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeployment</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>one <em>Prefill</em> and two <em>Decode</em> replicas behind a router</td>
+      </tr>
+      <tr>
+          <td>Router <code>Deployment</code> and <code>Service</code></td>
+          <td>namespace</td>
+          <td>operator</td>
+          <td>the one HTTP endpoint requests are sent to</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="environment">Environment</h2>
 <p>The deployment and probe below were captured on this cluster:</p>
 <table>
   <thead>
@@ -1709,50 +1751,50 @@ and <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#r
   <thead>
       <tr>
           <th>Symptom</th>
-          <th>Condition / Reason</th>
+          <th>Signal</th>
           <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
   <tbody>
       <tr>
           <td><code>ModelDeployment</code> stuck in <code>Starting</code>, Kueue composes no <code>Workload</code></td>
-          <td><code>QuotaReserved=False/PodGroupIncomplete</code></td>
+          <td>Condition: <code>QuotaReserved=False/PodGroupIncomplete</code></td>
           <td>Fewer replicas exist than a role declares. Read the message for the counts, then check the missing or unschedulable <code>Pod</code>s</td>
       </tr>
       <tr>
           <td>No <code>Workload</code> asks for quota any more</td>
-          <td><code>QuotaReserved=False/Parked</code></td>
+          <td>Condition: <code>QuotaReserved=False/Parked</code></td>
           <td>The groups could not all be placed, so their <code>Workload</code>s were deactivated. An identical re-apply does not clear this. Free the capacity and reactivate the <code>Workload</code>s, or recreate the deployment</td>
       </tr>
       <tr>
           <td>Part of the deployment was taken by another workload</td>
-          <td><code>QuotaReserved=False/PreemptedInPart</code></td>
+          <td>Condition: <code>QuotaReserved=False/PreemptedInPart</code></td>
           <td>A higher-priority workload reclaimed some replicas. The replicas that kept their quota hold accelerators until the reclaimed ones are admitted again or the deployment is deleted. Check what took the quota</td>
       </tr>
       <tr>
           <td><em><code>status.endpoint</code></em> is empty</td>
-          <td><code>RouterReady=False/NoReadyReplicas</code></td>
+          <td>Condition: <code>RouterReady=False/NoReadyReplicas</code></td>
           <td>The Router has no ready replica. It may still pull its image or fail readiness. Inspect the Router <code>Pod</code></td>
       </tr>
       <tr>
           <td>Router is not created</td>
-          <td><code>RouterReady=False/RenderFailed</code></td>
+          <td>Condition: <code>RouterReady=False/RenderFailed</code></td>
           <td>The Router render was refused as a spec problem, so no Router <code>Pod</code> exists. Read the condition message and check <em><code>spec.router</code></em></td>
       </tr>
       <tr>
           <td>Disaggregated roles fail KV transfer</td>
-          <td>Engine logs on both roles</td>
+          <td>Log: engine logs on both roles</td>
           <td>The protocol is deployment-wide, so the two ends cannot name different values. Check that the image carries the matching Mooncake build, that the device request fits the protocol and that the nodes can reach each other</td>
       </tr>
       <tr>
           <td>Router sees no cache events</td>
-          <td><code>KVEventsPublishing=False/PublisherDisabled</code></td>
+          <td>Condition: <code>KVEventsPublishing=False/PublisherDisabled</code></td>
           <td>A role that produces cache blocks renders no publisher. A routed SGLang deployment always reports this because only vLLM renders one. The condition reports configuration, not traffic. See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#operator-owned-keys">KV events</a>
 </td>
       </tr>
       <tr>
           <td>Missing role readiness</td>
-          <td><code>RoleKindsReady=False</code></td>
+          <td>Condition: <code>RoleKindsReady=False</code></td>
           <td>One of the role kinds (<em>Prefill</em> or <em>Decode</em>) has zero ready replicas; check failed engine <code>Pod</code>s</td>
       </tr>
   </tbody>
@@ -1782,7 +1824,7 @@ and <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#r
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/walkthroughs/model-deployment/prefill-decode.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/walkthroughs/model-deployment/prefill-decode.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/prefill-decode.md">Edit this page</a>
             
@@ -1794,7 +1836,7 @@ and <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#r
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#summary">Summary</a></li>
-    <li><a href="#device-and-cluster">Device and cluster</a></li>
+    <li><a href="#environment">Environment</a></li>
     <li><a href="#step-1-start-disaggregated-serving">Step 1: Start disaggregated serving</a></li>
     <li><a href="#step-2-pin-the-transfer-protocol">Step 2: Pin the transfer protocol</a></li>
     <li><a href="#step-3-verify-the-router">Step 3: Verify the router</a></li>

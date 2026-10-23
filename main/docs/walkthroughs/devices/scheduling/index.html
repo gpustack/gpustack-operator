@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1410,24 +1410,13 @@
         
   <h1 id="heterogeneous-devices-walkthrough">Heterogeneous Devices Walkthrough</h1>
 <p>Inspect accelerator scheduling on a four-node cluster through captured <code>kubectl</code> commands and output.
-Object YAML retains <em><code>metadata.labels</code></em>, <em><code>spec</code></em> and <em><code>status</code></em>. Each operation includes before-and-after
-<code>kubectl get instancetypes</code> output. <code>Node</code> names are genericized as <code>node-cpu</code>, <code>node-a10g</code>,
-<code>node-t4-a</code> and <code>node-t4-b</code>.</p>
-<p>The run uses the defaults: <code>instance-type-derived-from-node=true</code> auto-derives the pool objects, and
-<code>instance-type-aware-cpu-manufacturer=false</code> keeps the CPU manufacturer out of the aggregation layer until Step 5 flips it on.</p>
-<p>Watch three columns: <strong>UNIT(CPU/RAM)/STORAGE</strong>, the per-unit request the <code>InstanceType</code> charges; <strong>CPU</strong>, the collapsed
-CPU pool&rsquo;s <code>remaining/capacity</code> cores; <strong>ACCELERATOR(EX/SH/SL/PT)</strong>, the <code>onceMaxRequest/remaining</code> of each
-<a href="/gpustack-operator/main/docs/modules/devices/admission/#four-view-status">four-view</a>
- projection. This run predates the shared card-count
-reading, so its <code>SH</code> once-max figures are shares, not accelerators (<a href="/gpustack-operator/main/docs/modules/devices/requests/#pre-release-breaks">Pre-release breaks</a>
-).</p>
-<p>Each accelerator counts in exactly one of <code>EX</code>/<code>SH</code>/<code>SL</code> (unpartitioned) or <code>PT</code> (partitioned), so <code>0/0</code>
-under <code>PT</code> throughout means none is in a partitioning mode. For the all-partitioned and <strong>mixed</strong> configurations see the
-<a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#three-mig-configurations">three-configuration walkthrough</a>
-.</p>
+Read pool objects, remove and re-admit a node, request a logical slice, author a custom pool, enable
+CPU awareness, and pin a workload to one node.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#summary">Summary</a>
+</li>
+<li><a href="#environment">Environment</a>
 </li>
 <li><a href="#step-1-read-the-initial-pools">Step 1: Read the initial pools</a>
 </li>
@@ -1450,7 +1439,70 @@ under <code>PT</code> throughout means none is in a partitioning mode. For the a
 <p>NFD labels the nodes, and the Device Manager updates each <code>Devices</code> ledger. The worker derives Kueue
 <code>ResourceFlavor</code>s. The operator creates the aggregated <code>InstanceType</code> and <code>ClusterQueue</code> pools that
 admit <code>Instance</code> <code>Pod</code>s.</p>
-<p>Four <code>linux/amd64</code> nodes, all operator-managed:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Object</th>
+          <th>Scope</th>
+          <th>Creator</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>InstanceType</code></td>
+          <td>cluster</td>
+          <td>administrator</td>
+          <td>the schedulable pool; Step 4 authors a custom one beside the operator&rsquo;s derived pools</td>
+      </tr>
+      <tr>
+          <td><code>Instance</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>the workload admitted against a pool</td>
+      </tr>
+      <tr>
+          <td><code>NodeFeature</code></td>
+          <td>namespace</td>
+          <td>the worker</td>
+          <td>the per-node <code>managed</code> label whose flip removes a node from its pool (Step 2)</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="reading-the-captured-output">Reading the captured output</h3>
+<p>Object YAML retains <em><code>metadata.labels</code></em>, <em><code>spec</code></em> and <em><code>status</code></em>. Each operation includes
+before-and-after <code>kubectl get instancetypes</code> output. <code>Node</code> names are genericized as <code>node-cpu</code>,
+<code>node-a10g</code>, <code>node-t4-a</code> and <code>node-t4-b</code>.</p>
+<p>Watch three columns: <strong>UNIT(CPU/RAM)/STORAGE</strong>, the per-unit request the <code>InstanceType</code> charges; <strong>CPU</strong>, the collapsed
+CPU pool&rsquo;s <code>remaining/capacity</code> cores; <strong>ACCELERATOR(EX/SH/SL/PT)</strong>, the <code>onceMaxRequest/remaining</code> of each
+<a href="/gpustack-operator/main/docs/modules/devices/admission/#four-view-status">four-view</a>
+ projection. This run predates the shared card-count
+reading, so its <code>SH</code> once-max figures are shares, not accelerators (<a href="/gpustack-operator/main/docs/modules/devices/requests/#pre-release-breaks">Pre-release breaks</a>
+).</p>
+<p>Each accelerator counts in exactly one of <code>EX</code>/<code>SH</code>/<code>SL</code> (unpartitioned) or <code>PT</code> (partitioned), so <code>0/0</code>
+under <code>PT</code> throughout means none is in a partitioning mode. For the all-partitioned and <strong>mixed</strong> configurations see the
+<a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#three-mig-configurations">three-configuration walkthrough</a>
+.</p>
+<h2 id="environment">Environment</h2>
+<p>The captured run used this cluster, settings and hardware:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Item</th>
+          <th>Captured setup</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Cluster</td>
+          <td>four <code>linux/amd64</code> nodes, all operator-managed</td>
+      </tr>
+      <tr>
+          <td>Settings</td>
+          <td>the defaults: <code>instance-type-derived-from-node=true</code> auto-derives the pool objects, and <code>instance-type-aware-cpu-manufacturer=false</code> keeps the CPU manufacturer out of the aggregation layer until Step 5 flips it on</td>
+      </tr>
+  </tbody>
+</table>
 <table>
   <thead>
       <tr>
@@ -2136,7 +2188,7 @@ container&rsquo;s mount namespace per session, so every mount is visible over SS
 :
 a node-local volume pins the <code>Instance</code> to its node and that node&rsquo;s capacity; network or <code>ReadWriteMany</code>
 storage avoids the pin. A claim nothing binds creates no <code>Pod</code> and says why in <em><code>status.phaseMessage</code></em>;
-<a href="/gpustack-operator/main/docs/reference/settings/#online-adjustable-settings"><code>instance-persistent-volume-placement</code></a>
+<a href="/gpustack-operator/main/docs/reference/settings/#settings"><code>instance-persistent-volume-placement</code></a>
  turns this off.</li>
 <li><strong>Both new fields are immutable while the <code>Instance</code> runs</strong>, editable while stopped — the rule the rest
 of <em><code>spec</code></em> follows.</li>
@@ -2162,7 +2214,7 @@ kept separate so node-path mounts can be allowed without a container escape:</p>
   </tbody>
 </table>
 <p>Each gates taking its escape, so turning one off stops new grants without stranding an <code>Instance</code>
-that already holds one; <a href="/gpustack-operator/main/docs/reference/settings/#online-adjustable-settings">Settings</a>
+that already holds one; <a href="/gpustack-operator/main/docs/reference/settings/#settings">Settings</a>
  has the exact terms.</p>
 <p>Both govern the <strong>node</strong> boundary, not the namespace one: a <code>persistent</code>, <em><code>configMap</code></em> or <code>secret</code>
 source names an object in the <code>Instance</code>&rsquo;s own namespace and may always be mounted, the same reach a <code>Pod</code>
@@ -2185,7 +2237,7 @@ exclusion are covered in <a href="/gpustack-operator/main/docs/modules/devices/s
   <thead>
       <tr>
           <th>Symptom</th>
-          <th>Root cause / Condition</th>
+          <th>Signal</th>
           <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
@@ -2233,7 +2285,7 @@ exclusion are covered in <a href="/gpustack-operator/main/docs/modules/devices/s
       <h2>See also</h2>
       <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/devices/requests/">Accelerator Requests</a>
  (the contract behind Step 3)</li><li><a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#three-mig-configurations">NVIDIA MIG Operations</a>
- (hardware partitioning)</li><li><a href="/gpustack-operator/main/docs/reference/settings/#online-adjustable-settings">Settings</a>
+ (hardware partitioning)</li><li><a href="/gpustack-operator/main/docs/reference/settings/#settings">Settings</a>
  (the two gates)</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
@@ -2250,7 +2302,7 @@ exclusion are covered in <a href="/gpustack-operator/main/docs/modules/devices/s
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/walkthroughs/devices/scheduling.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/walkthroughs/devices/scheduling.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/devices/scheduling.md">Edit this page</a>
             
@@ -2261,7 +2313,12 @@ exclusion are covered in <a href="/gpustack-operator/main/docs/modules/devices/s
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#summary">Summary</a></li>
+    <li><a href="#summary">Summary</a>
+      <ul>
+        <li><a href="#reading-the-captured-output">Reading the captured output</a></li>
+      </ul>
+    </li>
+    <li><a href="#environment">Environment</a></li>
     <li><a href="#step-1-read-the-initial-pools">Step 1: Read the initial pools</a>
       <ul>
         <li><a href="#node">Node</a></li>

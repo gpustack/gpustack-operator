@@ -257,4 +257,4 @@ at the top of that file; when either changes, compare the rows here with the pre
 (where the unit spec is stamped) · [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md#instancetype-instance-webhooks)
 (what the webhooks enforce on it) · [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md#step-4-manage-a-custom-instancetype)
 
-**Next** → [Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) — configure resource derivation and CPU awareness.
+**Next** → [Settings](/gpustack-operator/main/docs/reference/settings/index.md#settings) — configure resource derivation and CPU awareness.

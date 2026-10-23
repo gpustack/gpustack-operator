@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1416,6 +1416,8 @@ The operator coordinates leader discovery and environment variable injection acr
 <ul>
 <li><a href="#summary">Summary</a>
 </li>
+<li><a href="#environment">Environment</a>
+</li>
 <li><a href="#step-1-define-the-deployment">Step 1: Define the deployment</a>
 </li>
 <li><a href="#step-2-verify-gang-admission">Step 2: Verify gang admission</a>
@@ -1441,22 +1443,86 @@ All member <code>Pod</code>s in a group live and die together under gang schedul
 <p>Member <code>m0</code> acts as the primary master replica and receives all incoming <code>Service</code> traffic.
 Subordinate members (<code>m1</code>, <code>m2</code>, etc.) run auxiliary parallel workers and synchronize with <code>m0</code>.
 The operator injects cluster discovery environment variables into each container automatically.</p>
-<p>Prepare a cluster with at least two physical GPU nodes containing identical accelerator counts.
-Complete <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#prepare-the-cluster">cluster preparation</a>
- and <a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">model prefetch</a>
+<table>
+  <thead>
+      <tr>
+          <th>Object</th>
+          <th>Scope</th>
+          <th>Creator</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ModelArtifact</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>the <code>deepseek-v2-lite-chat</code> weights each member mounts</td>
+      </tr>
+      <tr>
+          <td><code>InstanceType</code></td>
+          <td>cluster</td>
+          <td>operator</td>
+          <td>the discovered H100 whole-GPU type the role requests</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeployment</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>one multi-host serving instance spanning two nodes</td>
+      </tr>
+  </tbody>
+</table>
+<p>Complete <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#prepare-the-cluster">cluster preparation</a>
+ and
+<a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">model prefetch</a>
 .
-Verify inter-node network connectivity and high-speed fabric (such as RoCE, InfiniBand, or AWS EFA).
-Each node in the configuration provides eight GPUs.
 <em>TP</em> spans the GPUs inside each host. <em>PP</em> spans the two hosts.</p>
 <p>This sixteen-GPU layout is a configuration example without measured runtime results. Unlike the
-recorded H100 walkthroughs in <code>gpustack-bench</code>, it uses the <code>gpustack-elastic</code> namespace, a
-<code>deepseek-v2-lite-chat</code> <code>ModelArtifact</code> in that namespace, and the <code>elastic-cpu-gpu</code> <code>InstanceType</code>
-from <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#prepare-the-gpu-instancetype">Prepare the GPU InstanceType</a>
+recorded H100 walkthroughs in <code>gpustack-bench</code>, it uses the <code>gpustack-elastic</code> namespace and a
+<code>deepseek-v2-lite-chat</code> <code>ModelArtifact</code> in that namespace. The manifest requests the same
+discovered H100 <code>InstanceType</code> as the other reusable manifests; see
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#prepare-the-gpu-instancetype">Prepare the GPU InstanceType</a>
 .</p>
 <p>When running <a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">model prefetch</a>
 , warm the artifact onto <strong>both</strong>
 physical GPU nodes (<code>minReady: 2</code> across the GPU node pool rather than pinning a single
 <code>kubernetes.io/hostname</code>) so both <code>m0</code> and <code>m1</code> mount cached weights locally.</p>
+<h2 id="environment">Environment</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Item</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Nodes</td>
+          <td>two physical GPU nodes with identical accelerator counts</td>
+      </tr>
+      <tr>
+          <td>GPUs</td>
+          <td>eight per node, sixteen total</td>
+      </tr>
+      <tr>
+          <td>Fabric</td>
+          <td>inter-node high-speed network such as RoCE, InfiniBand or AWS EFA</td>
+      </tr>
+      <tr>
+          <td><code>InstanceType</code></td>
+          <td>the discovered <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
+      </tr>
+      <tr>
+          <td>Namespace</td>
+          <td><code>gpustack-elastic</code></td>
+      </tr>
+      <tr>
+          <td>Model</td>
+          <td><code>deepseek-v2-lite-chat</code> <code>ModelArtifact</code> in that namespace</td>
+      </tr>
+  </tbody>
+</table>
 <h2 id="step-1-define-the-deployment">Step 1: Define the deployment</h2>
 <p>Save the following multi-host definition as <code>multi-host.yaml</code>.
 The specification declares <code>replicas: 1</code> and <code>size: 2</code>, allocating sixteen whole GPUs across two <code>Pod</code>s.
@@ -1481,7 +1547,7 @@ The launch script sets <em>TP</em> = 8 across local GPUs and <em>PP</em> = 2 acr
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-cpu-gpu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.29.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;8&#34;</span><span class="w">
@@ -1602,34 +1668,34 @@ the role stops serving while its replacement is rebuilt.</p>
   <thead>
       <tr>
           <th>Symptom</th>
-          <th>Condition / Reason</th>
+          <th>Signal</th>
           <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
   <tbody>
       <tr>
           <td><code>ModelDeployment</code> stuck in <code>Starting</code>, Kueue composes no <code>Workload</code></td>
-          <td><code>QuotaReserved=False/PodGroupIncomplete</code></td>
+          <td>Condition: <code>QuotaReserved=False/PodGroupIncomplete</code></td>
           <td>Fewer instances exist than the role declares. Read the message for the counts, then check the <code>Pod</code>s that are missing or unschedulable</td>
       </tr>
       <tr>
           <td>An instance was lost and is being rebuilt</td>
-          <td><code>ReplicasUpToDate=False/ReplacementInProgress</code></td>
+          <td>Condition: <code>ReplicasUpToDate=False/ReplacementInProgress</code></td>
           <td>A replica disappeared for a reason outside the spec: a drained node, Kueue reclaiming quota, an eviction or a manual delete. The <code>Pod</code>s of an instance share one lifecycle, so the whole instance is rebuilt. Check the node and Kueue events</td>
       </tr>
       <tr>
           <td>Replicas wait for quota</td>
-          <td><code>QuotaReserved=False/Pending</code></td>
+          <td>Condition: <code>QuotaReserved=False/Pending</code></td>
           <td>The <code>ClusterQueue</code> has insufficient capacity to admit the replica. Free capacity, raise the pool quota, or reduce per-member accelerator requests</td>
       </tr>
       <tr>
           <td>Secondary worker cannot reach the leader</td>
-          <td>Engine logs on <code>m1</code></td>
+          <td>Log: engine logs on <code>m1</code></td>
           <td>Check that the headless <code>Service</code> resolves <code>GPUSTACK_REPLICA_LEADER_ADDRESS</code> and that no <code>NetworkPolicy</code> blocks the engine&rsquo;s distributed port</td>
       </tr>
       <tr>
           <td>Engine errors on parallel size</td>
-          <td>Engine startup log</td>
+          <td>Log: engine startup log</td>
           <td>Check that <code>--tensor-parallel-size</code> matches the accelerators per member (<em>TP</em> size) and that <code>--pipeline-parallel-size</code> equals <em><code>size</code></em> (<em>PP</em> size)</td>
       </tr>
   </tbody>
@@ -1657,7 +1723,7 @@ the role stops serving while its replacement is rebuilt.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/walkthroughs/model-deployment/multi-host.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/walkthroughs/model-deployment/multi-host.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/multi-host.md">Edit this page</a>
             
@@ -1669,6 +1735,7 @@ the role stops serving while its replacement is rebuilt.</p>
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#summary">Summary</a></li>
+    <li><a href="#environment">Environment</a></li>
     <li><a href="#step-1-define-the-deployment">Step 1: Define the deployment</a></li>
     <li><a href="#step-2-verify-gang-admission">Step 2: Verify gang admission</a></li>
     <li><a href="#step-3-verify-distributed-inference">Step 3: Verify distributed inference</a></li>

@@ -1,13 +1,13 @@
 # Prefill and Decode Walkthrough
 
 Deploy a disaggregated large language model (LLM) topology with dedicated *prefill* and *decode* roles
-fronted by a Router. The operator coordinates joint admission across both roles and routes requests
-through one endpoint.
+fronted by a Router. Observe joint admission across both roles, then send completion requests through
+the router's single endpoint.
 
 ## Contents
 
 - [Summary](#summary)
-- [Device and cluster](#device-and-cluster)
+- [Environment](#environment)
 - [Step 1: Start disaggregated serving](#step-1-start-disaggregated-serving)
 - [Step 2: Pin the transfer protocol](#step-2-pin-the-transfer-protocol)
 - [Step 3: Verify the router](#step-3-verify-the-router)
@@ -32,7 +32,15 @@ At concurrency 16, long-prompt *inter-token latency (ITL)* p99 improved **25.6×
 The mixed steady stream had **23.3× lower maximum ITL**, with no p99 improvement.
 See [Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md) for throughput, tails and the decode-heavy outlier.
 
-## Device and cluster
+| Object | Scope | Creator | Purpose |
+|---|---|---|---|
+| `ModelArtifact` | namespace | user | the Qwen3-32B weights the deployment serves |
+| `ModelPrefetch` | namespace | user | the artifact cached onto the H100 node before serving |
+| `InstanceType` | cluster | operator | the H100 accelerator group each role requests |
+| `ModelDeployment` | namespace | user | one *Prefill* and two *Decode* replicas behind a router |
+| Router `Deployment` and `Service` | namespace | operator | the one HTTP endpoint requests are sent to |
+
+## Environment
 
 The deployment and probe below were captured on this cluster:
 
@@ -299,16 +307,16 @@ This snapshot establishes released accelerator claims. Model-cache contents and 
 
 ## Troubleshooting
 
-| Symptom | Condition / Reason | Check & Mitigation |
+| Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| `ModelDeployment` stuck in `Starting`, Kueue composes no `Workload` | `QuotaReserved=False/PodGroupIncomplete` | Fewer replicas exist than a role declares. Read the message for the counts, then check the missing or unschedulable `Pod`s |
-| No `Workload` asks for quota any more | `QuotaReserved=False/Parked` | The groups could not all be placed, so their `Workload`s were deactivated. An identical re-apply does not clear this. Free the capacity and reactivate the `Workload`s, or recreate the deployment |
-| Part of the deployment was taken by another workload | `QuotaReserved=False/PreemptedInPart` | A higher-priority workload reclaimed some replicas. The replicas that kept their quota hold accelerators until the reclaimed ones are admitted again or the deployment is deleted. Check what took the quota |
-| *`status.endpoint`* is empty | `RouterReady=False/NoReadyReplicas` | The Router has no ready replica. It may still pull its image or fail readiness. Inspect the Router `Pod` |
-| Router is not created | `RouterReady=False/RenderFailed` | The Router render was refused as a spec problem, so no Router `Pod` exists. Read the condition message and check *`spec.router`* |
-| Disaggregated roles fail KV transfer | Engine logs on both roles | The protocol is deployment-wide, so the two ends cannot name different values. Check that the image carries the matching Mooncake build, that the device request fits the protocol and that the nodes can reach each other |
-| Router sees no cache events | `KVEventsPublishing=False/PublisherDisabled` | A role that produces cache blocks renders no publisher. A routed SGLang deployment always reports this because only vLLM renders one. The condition reports configuration, not traffic. See [KV events](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#operator-owned-keys) |
-| Missing role readiness | `RoleKindsReady=False` | One of the role kinds (*Prefill* or *Decode*) has zero ready replicas; check failed engine `Pod`s |
+| `ModelDeployment` stuck in `Starting`, Kueue composes no `Workload` | Condition: `QuotaReserved=False/PodGroupIncomplete` | Fewer replicas exist than a role declares. Read the message for the counts, then check the missing or unschedulable `Pod`s |
+| No `Workload` asks for quota any more | Condition: `QuotaReserved=False/Parked` | The groups could not all be placed, so their `Workload`s were deactivated. An identical re-apply does not clear this. Free the capacity and reactivate the `Workload`s, or recreate the deployment |
+| Part of the deployment was taken by another workload | Condition: `QuotaReserved=False/PreemptedInPart` | A higher-priority workload reclaimed some replicas. The replicas that kept their quota hold accelerators until the reclaimed ones are admitted again or the deployment is deleted. Check what took the quota |
+| *`status.endpoint`* is empty | Condition: `RouterReady=False/NoReadyReplicas` | The Router has no ready replica. It may still pull its image or fail readiness. Inspect the Router `Pod` |
+| Router is not created | Condition: `RouterReady=False/RenderFailed` | The Router render was refused as a spec problem, so no Router `Pod` exists. Read the condition message and check *`spec.router`* |
+| Disaggregated roles fail KV transfer | Log: engine logs on both roles | The protocol is deployment-wide, so the two ends cannot name different values. Check that the image carries the matching Mooncake build, that the device request fits the protocol and that the nodes can reach each other |
+| Router sees no cache events | Condition: `KVEventsPublishing=False/PublisherDisabled` | A role that produces cache blocks renders no publisher. A routed SGLang deployment always reports this because only vLLM renders one. The condition reports configuration, not traffic. See [KV events](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#operator-owned-keys) |
+| Missing role readiness | Condition: `RoleKindsReady=False` | One of the role kinds (*Prefill* or *Decode*) has zero ready replicas; check failed engine `Pod`s |
 
 ---
 

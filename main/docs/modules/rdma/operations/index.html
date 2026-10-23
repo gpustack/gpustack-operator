@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/rdma/operations/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1780,43 +1780,43 @@ verbs path fails creating its completion queue, as above.</p>
   <thead>
       <tr>
           <th>Symptom</th>
-          <th>Meaning</th>
-          <th>Check</th>
+          <th>Signal</th>
+          <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
   <tbody>
       <tr>
           <td>no node advertises the key at all</td>
-          <td>the node has no <em>RDMA</em>-capable interface, or that family is switched off on the Device Manager</td>
-          <td>the allocatable read above; the <code>--no-shared</code> and <code>--no-partitioned</code> switches</td>
+          <td>Status: the key is absent from every node&rsquo;s allocatable</td>
+          <td>The node has no <em>RDMA</em>-capable interface, or that family is switched off on the Device Manager. Run the allocatable read above, and check the <code>--no-shared</code> and <code>--no-partitioned</code> switches</td>
       </tr>
       <tr>
           <td>the key is advertised, every token unhealthy</td>
-          <td>the node judged every endpoint&rsquo;s link <code>Failed</code>, which withholds nothing but marks the tokens</td>
-          <td><a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#inspecting-the-record">reading it yourself</a>
+          <td>Status: endpoint link <code>Failed</code></td>
+          <td>The node judged every endpoint&rsquo;s link <code>Failed</code>, which withholds nothing but marks the tokens. <a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#inspecting-the-record">Read it yourself</a>
 </td>
       </tr>
       <tr>
           <td>the <code>Workload</code> is admitted and its <code>Pod</code> stays <code>Pending</code></td>
-          <td>over-subscription: nothing meters these keys</td>
-          <td><a href="#kueue-and-rdma-keys">the section above</a>
+          <td>Status: <code>Pod</code> phase <code>Pending</code></td>
+          <td>Over-subscription: nothing meters these keys. See <a href="#kueue-and-rdma-keys">the section above</a>
 </td>
       </tr>
       <tr>
           <td>the <code>Pod</code> is scheduled, then refused on the node and not rescheduled</td>
-          <td>the node&rsquo;s totals sufficed but its devices sit on two <em>NUMA</em> nodes</td>
-          <td>the node&rsquo;s policy, and that both requests sit in one container</td>
+          <td>The kubelet refuses the <code>Pod</code> on the node</td>
+          <td>The node&rsquo;s totals sufficed but its devices sit on two <em>NUMA</em> nodes. Check the node&rsquo;s policy, and that both requests sit in one container</td>
       </tr>
       <tr>
           <td>the container starts with fewer devices than expected</td>
-          <td>one <code>rdma_cm</code> is correct — count the <code>uverbs</code> entries</td>
-          <td><a href="#injected-devices">the injected set</a>
+          <td>Fewer <code>uverbs</code> entries than granted endpoints</td>
+          <td>One <code>rdma_cm</code> is correct — count the <code>uverbs</code> entries. See <a href="#injected-devices">the injected set</a>
 </td>
       </tr>
       <tr>
           <td>a node drops out of scheduling without changing</td>
-          <td>its link broke: the hardware stays, the label does not</td>
-          <td><a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#inspecting-the-record">reading it yourself</a>
+          <td>Status: the node&rsquo;s link state in its <code>Devices</code> record</td>
+          <td>The hardware stays, the label does not. <a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#inspecting-the-record">Read it yourself</a>
 </td>
       </tr>
   </tbody>
@@ -1847,7 +1847,7 @@ the bare host.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/modules/rdma/operations.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/modules/rdma/operations.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/rdma/operations.md">Edit this page</a>
             

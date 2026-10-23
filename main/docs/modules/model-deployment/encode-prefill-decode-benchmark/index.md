@@ -15,7 +15,7 @@ adds matched follow-up measurements while retaining the TCP results and conclusi
 
 ## Contents
 
-- [Configurations](#configurations)
+- [Configuration](#configuration)
 - [Hardware, model and workload](#hardware-model-and-workload)
 - [Suite 1: Multimodal context scaling](#suite-1-multimodal-context-scaling)
 - [Suite 2: Mixed vision and decode](#suite-2-mixed-vision-and-decode)
@@ -25,7 +25,7 @@ adds matched follow-up measurements while retaining the TCP results and conclusi
 - [InfiniBand RDMA comparison](#infiniband-rdma-comparison)
 - [Limitations](#limitations)
 
-## Configurations
+## Configuration
 
 Each configuration used one `ModelDeployment`, with one replica per role and one GPU per `Pod`.
 All serving roles ran on the same GPU node, `gpu-node-0`.

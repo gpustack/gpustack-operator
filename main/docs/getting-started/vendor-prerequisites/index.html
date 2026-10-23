@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1415,145 +1415,12 @@ Vendor keys and component names depend on the release.
 Check the cited artifact and version for each manufacturer.</p>
 <h2 id="contents">Contents</h2>
 <ul>
-<li><a href="#allocator-injection">Allocator injection</a>
+<li><a href="#manufacturer-guides">Manufacturer guides</a>
 </li>
-<li><a href="#device-plugin-name-collisions">Device plugin name collisions</a>
-</li>
-<li><a href="#single-nfd-per-cluster">Single NFD per cluster</a>
-</li>
-<li><a href="#resource-removal-lag">Resource removal lag</a>
-</li>
-<li><a href="#per-manufacturer">Per manufacturer</a>
+<li><a href="#shared-coexistence-rules">Shared coexistence rules</a>
 </li>
 </ul>
-<h2 id="allocator-injection">Allocator injection</h2>
-<p>Whether a container toolkit is required at all follows directly from how GPUStack&rsquo;s allocator makes the
-accelerator visible: a <code>/dev</code> node needs nothing from the toolkit, while an env var needs the vendor&rsquo;s
-runtime hook to interpret it.</p>
-<table>
-  <thead>
-      <tr>
-          <th>Manufacturer</th>
-          <th>Allocator injection</th>
-          <th>Toolkit required</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>AMD</td>
-          <td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
-          <td>No</td>
-      </tr>
-      <tr>
-          <td>Ascend</td>
-          <td><code>ASCEND_VISIBLE_DEVICES</code></td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>Cambricon</td>
-          <td><code>/dev</code> nodes (<code>/dev/cambricon_dev*</code>, the control nodes), plus <code>CAMBRICON_VISIBLE_DEVICES</code></td>
-          <td>No</td>
-      </tr>
-      <tr>
-          <td>Hygon</td>
-          <td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/mkfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
-          <td>No</td>
-      </tr>
-      <tr>
-          <td>Iluvatar</td>
-          <td><code>IX_VISIBLE_DEVICES</code></td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>MetaX</td>
-          <td><code>/dev</code> nodes (<code>/dev/mxcd</code>, <code>/dev/mxnd</code>, <code>/dev/mxgd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
-          <td>No</td>
-      </tr>
-      <tr>
-          <td>Moore Threads</td>
-          <td><code>MTHREADS_VISIBLE_DEVICES</code></td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>NVIDIA</td>
-          <td><code>NVIDIA_VISIBLE_DEVICES</code> by default, or a CDI request — see <a href="#nvidia">NVIDIA</a>
-</td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>T-Head</td>
-          <td><code>/dev</code> nodes (<code>/dev/alixpu</code>, <code>/dev/alixpu_ctl</code>, <code>/dev/alixpu_ppu&lt;N&gt;</code>)</td>
-          <td>No</td>
-      </tr>
-  </tbody>
-</table>
-<blockquote>
-<p><strong>Why</strong> — a device plugin that names <code>/dev</code> entries directly needs only what <code>runc</code> already grants;
-an env var needs the vendor&rsquo;s own runtime hook to translate it into a device grant, so removing that
-hook removes the accelerator from the container.</p>
-</blockquote>
-<p>An env var reaches the container either way, so a missing toolkit does not fail the allocation: it
-produces a running container with the variable set and no accelerator behind it.</p>
-<h2 id="device-plugin-name-collisions">Device plugin name collisions</h2>
-<p>The kubelet does not reject a second device-plugin registration for a resource name it already knows:
-it replaces the endpoint. Both plugins keep writing their own device sets, so node capacity oscillates
-between the two views, and a <code>Pod</code> can fail admission during the flap.</p>
-<p>Allocation can also fail when kubelet sends one plugin&rsquo;s device IDs to the other. Remove the duplicate
-plugin before submitting workloads.</p>
-<h2 id="single-nfd-per-cluster">Single NFD per cluster</h2>
-<p>Run exactly one NFD master. Two masters write and garbage-collect the same
-<code>feature.node.kubernetes.io/*</code> labels, so each one&rsquo;s GC pass can erase the other&rsquo;s writes. Every
-Device Manager <code>DaemonSet</code> in this operator is placed onto a node by a <code>pci-&lt;vendor&gt;.present</code> label that
-NFD produces, so a lost label stops that <code>DaemonSet</code> from scheduling at all.</p>
-<p>A vendor GPU Operator obtains its node labels through a <code>NodeFeatureRule</code> or an NFD source.
-AMD&rsquo;s operator installs a cluster-scoped <code>NodeFeatureRule</code>, which the active NFD installation evaluates.
-GPUStack&rsquo;s bundled NFD can evaluate it: its master denies no label namespace and accepts <code>NodeFeature</code>
-labels from every namespace. Other operators require labels from a specific NFD source.
-Enable that source in the replacement NFD installation; see <a href="#nvidia">NVIDIA</a>
-.</p>
-<p><strong>Bringing your own NFD.</strong> To use an existing NFD installation, disable GPUStack&rsquo;s bundled NFD.
-Set <code>--set node-feature-discovery.enabled=false</code> in chart mode, or
-<code>--disable-applications=node-feature-discovery</code> on the worker in image mode.
-See <a href="/gpustack-operator/main/docs/operate/installation-modes/#chart-and-image-modes">Installation Modes</a>
- for the mode differences.</p>
-<p>The worker still installs the <code>gpustack-cpu-info</code> <code>NodeFeatureRule</code> in either mode.
-The replacement NFD installation must evaluate it and meet these requirements:</p>
-<ol>
-<li>A worker collecting <code>pci</code>, with <code>vendor</code> among its <code>deviceLabelFields</code> and device classes <code>02</code>, <code>03</code>,
-<code>0b</code> and <code>12</code> whitelisted. Those are what produce the <code>pci-&lt;vendor&gt;.present</code> labels, and the
-<code>gpustack-cpu-info</code> <code>NodeFeatureRule</code> matches the same classes.</li>
-<li>A worker collecting <code>system</code>, which publishes <code>system-os_release.*</code>.
-GPUStack&rsquo;s scheduling chain does not use these labels, but the NVIDIA GPU Operator requires them.
-GPUStack&rsquo;s bundled NFD publishes them, so the NVIDIA operator can run with its own NFD disabled.
-See <a href="#nvidia">NVIDIA</a>
-.</li>
-<li>A master that evaluates <code>NodeFeature</code> objects from <strong>every</strong> namespace. The worker&rsquo;s and the
-Device Managers&rsquo; own <code>&lt;node&gt;-gpustack-*</code> objects are how their detections reach the <code>Node</code>.</li>
-<li><code>restrictions.denyNodeFeatureLabels: false</code> and <code>disableExtendedResources: false</code>, since those
-detections arrive as labels <em>and</em> as extended resources.</li>
-<li>A <code>denyLabelNs</code> that admits <code>acceleratable.feature.gpustack.ai</code> and <code>general.feature.gpustack.ai</code>.</li>
-<li>One owner for the NFD CRDs. Vendor charts bundle an NFD version of their own, so decide which
-release installs them before installing two that both want to.</li>
-</ol>
-<p>A vendor chart that bundles NFD as a subchart exposes all five, so its NFD can be the cluster&rsquo;s one.
-The NVIDIA GPU Operator&rsquo;s already publishes <code>vendor</code> as its only <code>deviceLabelFields</code>, which is what
-item 1 asks for, and collects every source, which is item 2; its device classes are the gap.</p>
-<p>It whitelists <code>0300</code> and <code>0302</code> (the GPUs it was written for) and neither <code>0b</code> nor <code>12</code>, so an
-accelerator in either class never gets the label its Device Manager schedules on, and that <code>DaemonSet</code>
-stays unscheduled with nothing to say why. Both values live under that chart&rsquo;s
-<code>node-feature-discovery.worker.config.sources.pci</code>.</p>
-<p>Item 6 is not a version problem there: both charts vendor NFD 0.19.0, so the CRDs are the same objects
-and all that has to be settled is which release owns them. And the class gap only bites once a second
-manufacturer is present: the display-controller classes it does whitelist cover NVIDIA and AMD, so a
-cluster holding only those is already served by its list.</p>
-<p>Treat these requirements as a checklist. Hardware validation used the bundled NFD;
-a handover to an existing NFD installation has not been tested end to end.</p>
-<h2 id="resource-removal-lag">Resource removal lag</h2>
-<p>Removing a vendor&rsquo;s device plugin does not immediately remove its extended resource from the <code>Node</code>
-object: the kubelet only drops it once it reconverges. A scheduler can keep seeing the old resource as
-allocatable for a window after the plugin is gone, so &ldquo;disabled&rdquo; is not the same moment as &ldquo;gone&rdquo; from
-a scheduling decision&rsquo;s point of view.</p>
-<h2 id="per-manufacturer">Per manufacturer</h2>
+<h2 id="manufacturer-guides">Manufacturer guides</h2>
 <h3 id="amd">AMD</h3>
 <p>Read against <strong>AMD GPU Operator v1.5.1</strong> —
 <a href="https://instinct.docs.amd.com/projects/gpu-operator/en/latest/index.html">Overview</a>
@@ -2170,6 +2037,134 @@ nodes directly, which is the mechanism the vendor&rsquo;s own container guide us
 container by passing those nodes to <code>docker run --device</code>, with no vendor runtime in the path. Which
 nodes a container receives is in <a href="/gpustack-operator/main/docs/modules/devices/discovery/">Device Discovery</a>
 .</p>
+<h2 id="shared-coexistence-rules">Shared coexistence rules</h2>
+<h3 id="allocator-injection">Allocator injection</h3>
+<p>Whether a container toolkit is required at all follows directly from how GPUStack&rsquo;s allocator makes the
+accelerator visible: a <code>/dev</code> node needs nothing from the toolkit, while an env var needs the vendor&rsquo;s
+runtime hook to interpret it.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Manufacturer</th>
+          <th>Allocator injection</th>
+          <th>Toolkit required</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>AMD</td>
+          <td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+          <td>No</td>
+      </tr>
+      <tr>
+          <td>Ascend</td>
+          <td><code>ASCEND_VISIBLE_DEVICES</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>Cambricon</td>
+          <td><code>/dev</code> nodes (<code>/dev/cambricon_dev*</code>, the control nodes), plus <code>CAMBRICON_VISIBLE_DEVICES</code></td>
+          <td>No</td>
+      </tr>
+      <tr>
+          <td>Hygon</td>
+          <td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/mkfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+          <td>No</td>
+      </tr>
+      <tr>
+          <td>Iluvatar</td>
+          <td><code>IX_VISIBLE_DEVICES</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>MetaX</td>
+          <td><code>/dev</code> nodes (<code>/dev/mxcd</code>, <code>/dev/mxnd</code>, <code>/dev/mxgd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+          <td>No</td>
+      </tr>
+      <tr>
+          <td>Moore Threads</td>
+          <td><code>MTHREADS_VISIBLE_DEVICES</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>NVIDIA</td>
+          <td><code>NVIDIA_VISIBLE_DEVICES</code> by default, or a CDI request — see <a href="#nvidia">NVIDIA</a>
+</td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>T-Head</td>
+          <td><code>/dev</code> nodes (<code>/dev/alixpu</code>, <code>/dev/alixpu_ctl</code>, <code>/dev/alixpu_ppu&lt;N&gt;</code>)</td>
+          <td>No</td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p><strong>Why</strong> — a device plugin that names <code>/dev</code> entries directly needs only what <code>runc</code> already grants;
+an env var needs the vendor&rsquo;s own runtime hook to translate it into a device grant, so removing that
+hook removes the accelerator from the container.</p>
+</blockquote>
+<p>An env var reaches the container either way, so a missing toolkit does not fail the allocation: it
+produces a running container with the variable set and no accelerator behind it.</p>
+<h3 id="device-plugin-name-collisions">Device plugin name collisions</h3>
+<p>The kubelet does not reject a second device-plugin registration for a resource name it already knows:
+it replaces the endpoint. Both plugins keep writing their own device sets, so node capacity oscillates
+between the two views, and a <code>Pod</code> can fail admission during the flap.</p>
+<p>Allocation can also fail when kubelet sends one plugin&rsquo;s device IDs to the other. Remove the duplicate
+plugin before submitting workloads.</p>
+<h3 id="single-nfd-per-cluster">Single NFD per cluster</h3>
+<p>Run exactly one NFD master. Two masters write and garbage-collect the same
+<code>feature.node.kubernetes.io/*</code> labels, so each one&rsquo;s GC pass can erase the other&rsquo;s writes. Every
+Device Manager <code>DaemonSet</code> in this operator is placed onto a node by a <code>pci-&lt;vendor&gt;.present</code> label that
+NFD produces, so a lost label stops that <code>DaemonSet</code> from scheduling at all.</p>
+<p>A vendor GPU Operator obtains its node labels through a <code>NodeFeatureRule</code> or an NFD source.
+AMD&rsquo;s operator installs a cluster-scoped <code>NodeFeatureRule</code>, which the active NFD installation evaluates.
+GPUStack&rsquo;s bundled NFD can evaluate it: its master denies no label namespace and accepts <code>NodeFeature</code>
+labels from every namespace. Other operators require labels from a specific NFD source.
+Enable that source in the replacement NFD installation; see <a href="#nvidia">NVIDIA</a>
+.</p>
+<p><strong>Bringing your own NFD.</strong> To use an existing NFD installation, disable GPUStack&rsquo;s bundled NFD.
+Set <code>--set node-feature-discovery.enabled=false</code> in chart mode, or
+<code>--disable-applications=node-feature-discovery</code> on the worker in image mode.
+See <a href="/gpustack-operator/main/docs/operate/installation-modes/#chart-and-image-modes">Installation Modes</a>
+ for the mode differences.</p>
+<p>The worker still installs the <code>gpustack-cpu-info</code> <code>NodeFeatureRule</code> in either mode.
+The replacement NFD installation must evaluate it and meet these requirements:</p>
+<ol>
+<li>A worker collecting <code>pci</code>, with <code>vendor</code> among its <code>deviceLabelFields</code> and device classes <code>02</code>, <code>03</code>,
+<code>0b</code> and <code>12</code> whitelisted. Those are what produce the <code>pci-&lt;vendor&gt;.present</code> labels, and the
+<code>gpustack-cpu-info</code> <code>NodeFeatureRule</code> matches the same classes.</li>
+<li>A worker collecting <code>system</code>, which publishes <code>system-os_release.*</code>.
+GPUStack&rsquo;s scheduling chain does not use these labels, but the NVIDIA GPU Operator requires them.
+GPUStack&rsquo;s bundled NFD publishes them, so the NVIDIA operator can run with its own NFD disabled.
+See <a href="#nvidia">NVIDIA</a>
+.</li>
+<li>A master that evaluates <code>NodeFeature</code> objects from <strong>every</strong> namespace. The worker&rsquo;s and the
+Device Managers&rsquo; own <code>&lt;node&gt;-gpustack-*</code> objects are how their detections reach the <code>Node</code>.</li>
+<li><code>restrictions.denyNodeFeatureLabels: false</code> and <code>disableExtendedResources: false</code>, since those
+detections arrive as labels <em>and</em> as extended resources.</li>
+<li>A <code>denyLabelNs</code> that admits <code>acceleratable.feature.gpustack.ai</code> and <code>general.feature.gpustack.ai</code>.</li>
+<li>One owner for the NFD CRDs. Vendor charts bundle an NFD version of their own, so decide which
+release installs them before installing two that both want to.</li>
+</ol>
+<p>A vendor chart that bundles NFD as a subchart satisfies them all, so its NFD can be the cluster&rsquo;s one.
+The NVIDIA GPU Operator&rsquo;s already publishes <code>vendor</code> as its only <code>deviceLabelFields</code>, which is what
+item 1 asks for, and collects every source, which is item 2; its device classes are the gap.</p>
+<p>It whitelists <code>0300</code> and <code>0302</code> (the GPUs it was written for) and neither <code>0b</code> nor <code>12</code>, so an
+accelerator in either class never gets the label its Device Manager schedules on, and that <code>DaemonSet</code>
+stays unscheduled with nothing to say why. Both values live under that chart&rsquo;s
+<code>node-feature-discovery.worker.config.sources.pci</code>.</p>
+<p>Item 6 is not a version problem there: both charts vendor NFD 0.19.0, so the CRDs are the same objects
+and all that has to be settled is which release owns them. And the class gap only bites once a second
+manufacturer is present: the display-controller classes it does whitelist cover NVIDIA and AMD, so a
+cluster holding only those is already served by its list.</p>
+<p>Treat these requirements as a checklist. Hardware validation used the bundled NFD;
+a handover to an existing NFD installation has not been tested end to end.</p>
+<h3 id="resource-removal-lag">Resource removal lag</h3>
+<p>Removing a vendor&rsquo;s device plugin does not immediately remove its extended resource from the <code>Node</code>
+object: the kubelet only drops it once it reconverges. A scheduler can keep seeing the old resource as
+allocatable for a window after the plugin is gone, so &ldquo;disabled&rdquo; is not the same moment as &ldquo;gone&rdquo; from
+a scheduling decision&rsquo;s point of view.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
@@ -2194,7 +2189,7 @@ worker applies.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/getting-started/vendor-prerequisites.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/getting-started/vendor-prerequisites.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/getting-started/vendor-prerequisites.md">Edit this page</a>
             
@@ -2205,11 +2200,7 @@ worker applies.</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#allocator-injection">Allocator injection</a></li>
-    <li><a href="#device-plugin-name-collisions">Device plugin name collisions</a></li>
-    <li><a href="#single-nfd-per-cluster">Single NFD per cluster</a></li>
-    <li><a href="#resource-removal-lag">Resource removal lag</a></li>
-    <li><a href="#per-manufacturer">Per manufacturer</a>
+    <li><a href="#manufacturer-guides">Manufacturer guides</a>
       <ul>
         <li><a href="#amd">AMD</a></li>
         <li><a href="#ascend">Ascend</a></li>
@@ -2220,6 +2211,14 @@ worker applies.</div>
         <li><a href="#moore-threads">Moore Threads</a></li>
         <li><a href="#nvidia">NVIDIA</a></li>
         <li><a href="#t-head">T-Head</a></li>
+      </ul>
+    </li>
+    <li><a href="#shared-coexistence-rules">Shared coexistence rules</a>
+      <ul>
+        <li><a href="#allocator-injection">Allocator injection</a></li>
+        <li><a href="#device-plugin-name-collisions">Device plugin name collisions</a></li>
+        <li><a href="#single-nfd-per-cluster">Single NFD per cluster</a></li>
+        <li><a href="#resource-removal-lag">Resource removal lag</a></li>
       </ul>
     </li>
   </ul>

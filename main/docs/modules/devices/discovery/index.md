@@ -106,7 +106,7 @@ the node's real CPU identity, as `${cpuManufacturer}-${id}`:
 - The key degrades to `generic` only when NFD reports no CPU identity at all.
 
 Whether that manufacturer subdivides the pools is a separate runtime decision, taken by
-[`instance-type-aware-cpu-manufacturer`](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) (see
+[`instance-type-aware-cpu-manufacturer`](/gpustack-operator/main/docs/reference/settings/index.md#settings) (see
 [Scheduling Chain](/gpustack-operator/main/docs/modules/devices/scheduling/index.md#naming-and-grouping)); the key stays CPU-accurate so the
 finest-grained `ResourceFlavor`s regroup without rewriting.
 

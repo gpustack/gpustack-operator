@@ -360,6 +360,10 @@ article :not(pre) > code { padding: .08rem .2rem; border-radius: .18rem; backgro
 article table { display: block; width: 100%; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: .9rem; }
 article th, article td { padding: .55rem .7rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 article th { background: var(--bg-subtle); }
+article th:first-child, article td:first-child { position: sticky; left: 0; background: var(--bg); }
+article th:first-child { background: var(--bg-subtle); }
+.pin-table-first-col article th:first-child,
+.pin-table-first-col article td:first-child { width: 1%; white-space: nowrap; }
 article blockquote { margin: 1.2rem 0; padding: .25rem 0 .25rem 1rem; border-left: 3px solid var(--quote-border); color: var(--quote-text); }
 article blockquote p { margin: .2rem 0; }
 article hr { margin: 2rem 0; border: 0; border-top: 1px solid var(--line); }

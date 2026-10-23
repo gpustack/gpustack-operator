@@ -313,6 +313,6 @@ downloads from this port for live bytes between the status thresholds.
 deliveries · [Model Artifact API](/gpustack-operator/main/docs/modules/model-delivery/views/index.md) for resource status and
 `progress` · [Node-to-Node Sync](/gpustack-operator/main/docs/modules/model-delivery/peer-sync/index.md) for where a node's bytes come from ·
 [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) for enabling, configuring and upgrading ·
-[Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) for the `Setting`s *`spec`* is built from.
+[Settings](/gpustack-operator/main/docs/reference/settings/index.md#settings) for the `Setting`s *`spec`* is built from.
 
 **Next** → [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md)

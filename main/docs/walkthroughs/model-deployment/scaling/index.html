@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1415,7 +1415,9 @@ adapt the scaler for <em>encode/prefill/decode (EPD)</em> serving. Captured life
 separately from the reusable configuration.</p>
 <h2 id="contents">Contents</h2>
 <ul>
-<li><a href="#prerequisites">Prerequisites</a>
+<li><a href="#summary">Summary</a>
+</li>
+<li><a href="#environment">Environment</a>
 </li>
 <li><a href="#step-1-prepare-the-target">Step 1: Prepare the target</a>
 </li>
@@ -1434,25 +1436,92 @@ separately from the reusable configuration.</p>
 <li><a href="#troubleshooting">Troubleshooting</a>
 </li>
 </ul>
-<h2 id="prerequisites">Prerequisites</h2>
-<p>Follow <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#prepare-the-cluster">cluster preparation</a>
- and
-<a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">model prefetch</a>
-. Use namespace <code>gpustack-bench</code> and artifact
-<code>qwen3-8b</code> from <code>Qwen/Qwen3-8B</code>, revision <code>b968826d9c46dd6066d109eabc6255188de91218</code>.
-The target needs two free GPUs initially and up to four after scaling, with one GPU per replica.</p>
-<p>Use a build that includes <code>ModelDeploymentScaler</code>, its controller and admission webhook.
-Prepare <code>kubectl</code>, <code>jq</code>, Python 3 with <code>aiohttp</code>, and a source checkout for the load client.
-Confirm that no other scaler owns the target. See
-<a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
- for algorithm contracts and
-<a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/#gitops-sync">GitOps exclusions</a>
-.</p>
+<h2 id="summary">Summary</h2>
+<p>Observe a <code>ModelDeploymentScaler</code> in <code>Shadow</code>, choose an algorithm, activate it in <code>Active</code>, and
+watch a replica retire.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Object</th>
+          <th>Scope</th>
+          <th>Creator</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ModelArtifact</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>the <code>qwen3-8b</code> weights the target serves</td>
+      </tr>
+      <tr>
+          <td><code>InstanceType</code></td>
+          <td>cluster</td>
+          <td>operator</td>
+          <td>the whole-GPU type each role replica requests</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeployment</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>the <em>PD</em> target whose replica counts the scaler drives</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeploymentScaler</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>the policy observed in <code>Shadow</code>, then allowed to act in <code>Active</code></td>
+      </tr>
+  </tbody>
+</table>
 <p>The <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">Scaling Benchmark</a>
  used eight H100 GPUs
 across concurrent configurations. This procedure starts one deployment.
 Its examples are configuration instructions; they are not a claim that this exact public-API sequence
 was executed in the recorded benchmark.</p>
+<h2 id="environment">Environment</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Item</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>GPUs</td>
+          <td>two free initially, up to four after scaling; one GPU per replica</td>
+      </tr>
+      <tr>
+          <td><code>InstanceType</code></td>
+          <td>the whole-GPU type of the intended cluster; the example uses the discovered <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
+      </tr>
+      <tr>
+          <td>Namespace</td>
+          <td><code>gpustack-bench</code></td>
+      </tr>
+      <tr>
+          <td>Model</td>
+          <td><code>Qwen/Qwen3-8B</code> from <code>ModelArtifact</code> <code>qwen3-8b</code>, revision <code>b968826d9c46dd6066d109eabc6255188de91218</code></td>
+      </tr>
+      <tr>
+          <td>Tools</td>
+          <td><code>kubectl</code>, <code>jq</code>, Python 3 with <code>aiohttp</code>; a source checkout provides the load client</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="prerequisites">Prerequisites</h3>
+<p>Follow <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#prepare-the-cluster">cluster preparation</a>
+ and
+<a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">model prefetch</a>
+ with namespace <code>gpustack-bench</code> and artifact
+<code>qwen3-8b</code>. Use a build that includes <code>ModelDeploymentScaler</code>, its controller and admission webhook.</p>
+<p>Confirm that no other scaler owns the target. See
+<a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
+ for algorithm contracts and
+<a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/#gitops-sync">GitOps exclusions</a>
+.</p>
 <h2 id="step-1-prepare-the-target">Step 1: Prepare the target</h2>
 <p>Save this example as <code>scaling-target.yaml</code>. Replace both <em><code>instanceType</code></em> values with the whole-GPU
 type for the intended cluster. The benchmark used <code>bench-gpu</code>; the reusable example uses the
@@ -1755,59 +1824,59 @@ Keep shared prefetched artifacts and <code>default/bench-driver</code> when othe
   <thead>
       <tr>
           <th>Symptom</th>
-          <th>Check</th>
-          <th>Action</th>
+          <th>Signal</th>
+          <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
   <tbody>
       <tr>
           <td>Counts remain at one</td>
-          <td>Mode and <code>Active</code> condition</td>
+          <td>Condition: <code>Active=False</code> with reason <code>ShadowMode</code></td>
           <td>Activate only after reviewing Shadow recommendations.</td>
       </tr>
       <tr>
-          <td><code>AlreadyBound</code></td>
-          <td>Binding owner</td>
-          <td>Use the existing owner or release it before applying another scaler.</td>
+          <td>Apply is refused</td>
+          <td>Reason: <code>AlreadyBound</code></td>
+          <td>Read the binding owner; use the existing owner or release it before applying another scaler.</td>
       </tr>
       <tr>
-          <td><code>InvalidBinding</code></td>
-          <td>Binding annotation on the target</td>
-          <td>Fix or remove the annotation; the scaler cannot tell which scaler owns the target.</td>
+          <td>Binding annotation is unreadable</td>
+          <td>Reason: <code>InvalidBinding</code></td>
+          <td>Fix or remove the annotation on the target; the scaler cannot tell which scaler owns the target.</td>
       </tr>
       <tr>
-          <td><code>BoundsConflict</code> or <code>RatioConflict</code></td>
-          <td>Current counts and policy</td>
-          <td>Include the current vector in every bound and ratio band.</td>
+          <td>Counts sit outside the policy</td>
+          <td>Reason: <code>BoundsConflict</code> or <code>RatioConflict</code></td>
+          <td>Compare the current counts with the policy; include the current vector in every bound and ratio band.</td>
       </tr>
       <tr>
-          <td><code>WaitingForMetrics</code></td>
-          <td>Role signals and engine metrics</td>
-          <td>Allow valid successive samples; investigate missing or restarted endpoints.</td>
+          <td>Recommendations wait on metrics</td>
+          <td>Reason: <code>WaitingForMetrics</code> on the <code>MetricsReady</code> condition</td>
+          <td>Allow valid successive samples from role signals and engine metrics; investigate missing or restarted endpoints.</td>
       </tr>
       <tr>
-          <td><code>ResourceExhausted</code></td>
-          <td><em><code>pendingCohort</code></em>, <code>Workload</code>s and quota</td>
-          <td>Restore admission capacity before retrying growth.</td>
+          <td>Growth stops at admission</td>
+          <td>Reason: <code>ResourceExhausted</code></td>
+          <td>Read <em><code>pendingCohort</code></em>, <code>Workload</code>s and quota; restore admission capacity before retrying growth.</td>
       </tr>
       <tr>
-          <td><code>ScaleDownAborted</code></td>
-          <td>Retirement reason and <em><code>lastScaleDown</code></em></td>
-          <td>Resolve the drain failure; wait through the abort cooldown.</td>
+          <td>Scale-down ends aborted</td>
+          <td>Reason: <code>ScaleDownAborted</code></td>
+          <td>Read the retirement reason and <em><code>lastScaleDown</code></em>; resolve the drain failure and wait through the abort cooldown.</td>
       </tr>
       <tr>
-          <td><code>PacingBounded</code> during cooldown</td>
-          <td>Stabilization, grace and coverage</td>
-          <td>Continue observation; a configured cooldown phase does not bypass guards.</td>
+          <td>Cooldown outlives its window</td>
+          <td>Reason: <code>PacingBounded</code></td>
+          <td>Check stabilization, grace and coverage; continue observation, since a configured cooldown phase does not bypass guards.</td>
       </tr>
       <tr>
           <td>Router failures during growth</td>
-          <td>Client errors and Router logs</td>
+          <td>Log: Router logs and client errors</td>
           <td>Preserve evidence; the recorded keep-alive setting did not prevent all failures.</td>
       </tr>
       <tr>
           <td>SGLang KV transfer failures</td>
-          <td>Engine logs and TCP port reuse</td>
+          <td>Log: engine logs and TCP port reuse</td>
           <td>Follow the <a href="/gpustack-operator/main/docs/reference/settings/#sglang-time-wait-reuse">documented setting</a>
  and verify kubelet prerequisites.</td>
       </tr>
@@ -1834,7 +1903,7 @@ Keep shared prefetched artifacts and <code>default/bench-driver</code> when othe
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/walkthroughs/model-deployment/scaling.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/walkthroughs/model-deployment/scaling.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/scaling.md">Edit this page</a>
             
@@ -1845,7 +1914,12 @@ Keep shared prefetched artifacts and <code>default/bench-driver</code> when othe
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#prerequisites">Prerequisites</a></li>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#environment">Environment</a>
+      <ul>
+        <li><a href="#prerequisites">Prerequisites</a></li>
+      </ul>
+    </li>
     <li><a href="#step-1-prepare-the-target">Step 1: Prepare the target</a></li>
     <li><a href="#step-2-observe-in-shadow">Step 2: Observe in Shadow</a></li>
     <li><a href="#step-3-choose-an-algorithm">Step 3: Choose an algorithm</a>

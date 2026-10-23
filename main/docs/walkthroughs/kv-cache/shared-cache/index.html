@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1409,12 +1409,14 @@
       <article>
         
   <h1 id="shared-cache-walkthrough">Shared Cache Walkthrough</h1>
-<p>Create a store, a pool, a namespace grant and a workload in that order.</p>
-<p>On a cluster with GPUStack installed, replace the node selector, namespace, instance type and model
-name in the manifests below, then apply them in that order.</p>
+<p>Create a store, a pool, a namespace grant and a workload in that order, replacing the node selector,
+namespace, instance type and model name in the manifests below. The serving replicas then reuse each
+other&rsquo;s prefix KV blocks.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#summary">Summary</a>
+</li>
+<li><a href="#environment">Environment</a>
 </li>
 <li><a href="#step-1-create-the-store">Step 1: Create the store</a>
 </li>
@@ -1425,8 +1427,6 @@ name in the manifests below, then apply them in that order.</p>
 <li><a href="#step-4-enable-high-availability">Step 4: Enable high availability</a>
 </li>
 <li><a href="#step-5-add-a-disk-tier">Step 5: Add a disk tier</a>
-</li>
-<li><a href="#failover-behavior">Failover behavior</a>
 </li>
 <li><a href="#step-6-add-a-second-team">Step 6: Add a second team</a>
 </li>
@@ -1482,6 +1482,37 @@ leaves references that resolve to nothing. Why the two scopes split this way is 
 <p><strong>The Binding is the authorization point.</strong> A namespace gets access to a store when an administrator
 creates a Binding in it. A user naming a pool is not a path this API has: <em><code>poolRef</code></em> is a
 same-namespace reference, so the name it accepts is a Binding&rsquo;s.</p>
+<h2 id="environment">Environment</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Item</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Cluster</td>
+          <td>Kubernetes with GPUStack installed</td>
+      </tr>
+      <tr>
+          <td>Contributing nodes</td>
+          <td>selected by the backend&rsquo;s <em><code>nodeSelector</code></em>; Step 5&rsquo;s disk tier selects nodes labeled <code>kvcache: &quot;true&quot;</code></td>
+      </tr>
+      <tr>
+          <td><code>InstanceType</code></td>
+          <td>one from <code>kubectl get instancetype</code></td>
+      </tr>
+      <tr>
+          <td>Model</td>
+          <td><code>Qwen/Qwen2.5-7B-Instruct</code></td>
+      </tr>
+      <tr>
+          <td>Engine</td>
+          <td>vLLM <code>gpustack/runner:cuda13.0-vllm0.29.0</code></td>
+      </tr>
+  </tbody>
+</table>
 <h2 id="step-1-create-the-store">Step 1: Create the store</h2>
 <p>Replace the <code>kubernetes.io/os: linux</code> selector with the labels of the nodes that should contribute memory.</p>
 <div class="code-block">
@@ -1670,6 +1701,15 @@ cost of changing <em><code>leader.electionBackend</code></em>.</p>
 </table>
 <p><code>RolloutComplete</code> exists because this workload disables the deployment deadline that would normally
 answer it: that deadline requires every replica to be available, and only one ever is here.</p>
+<h3 id="failover-behavior">Failover behavior</h3>
+<p><strong>A failover keeps nothing in memory.</strong> A standby holds no data, so the replica that takes over knows
+none of the objects held in member memory and rebuilds from member remounts alone; a single leader
+that restarts does the same. High availability shortens the outage, and every one of those objects
+misses afterwards. Plan for a cold cache after every failover and every leader restart.</p>
+<p><strong>The store&rsquo;s snapshot is not offered, and its flags are refused in <em><code>leader.extraArgs</code></em></strong>, because
+restoring a snapshot can make the cache serve another key&rsquo;s bytes instead of a miss.
+<a href="/gpustack-operator/main/docs/modules/kv-cache/leader/#high-availability">High availability</a>
+ says why.</p>
 <h2 id="step-5-add-a-disk-tier">Step 5: Add a disk tier</h2>
 <p>A running member group cannot gain a local disk tier. Admission refuses the edit, because the members
 would have to restart to mount the directory. Declare the tier when you create a backend. This diff
@@ -1708,15 +1748,6 @@ runs as uid 65532, so give the directory to that uid. The uid depends on the ima
 therefore takes its own <code>KVCachePool</code> and Binding. The tier writes in buckets, so a small cache can
 show an empty tier while it works; see <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/#bucket-writes">Bucket writes</a>
 .</p>
-<h2 id="failover-behavior">Failover behavior</h2>
-<p><strong>A failover keeps nothing in memory.</strong> A standby holds no data, so the replica that takes over knows
-none of the objects held in member memory and rebuilds from member remounts alone; a single leader
-that restarts does the same. High availability shortens the outage, and every one of those objects
-misses afterwards. Plan for a cold cache after every failover and every leader restart.</p>
-<p><strong>The store&rsquo;s snapshot is not offered, and its flags are refused in <em><code>leader.extraArgs</code></em></strong>, because
-restoring a snapshot can make the cache serve another key&rsquo;s bytes instead of a miss.
-<a href="/gpustack-operator/main/docs/modules/kv-cache/leader/#high-availability">High availability</a>
- says why.</p>
 <h2 id="step-6-add-a-second-team">Step 6: Add a second team</h2>
 <p>Each Binding is one ceiling and one reuse domain. To give a second team cache capacity, create a
 Binding in its namespace:</p>
@@ -1804,80 +1835,80 @@ covered in <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#ten
   <thead>
       <tr>
           <th>Symptom</th>
-          <th>Condition / Reason</th>
+          <th>Signal</th>
           <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
   <tbody>
       <tr>
           <td><code>KVCacheBackend</code> stuck in <code>Provisioning</code> or <code>Error</code></td>
-          <td><code>LeaderAvailable=False</code></td>
+          <td>Condition: <code>LeaderAvailable=False</code></td>
           <td>Leader <code>Deployment</code> unready, image missing election backend, or external endpoint address unreachable</td>
       </tr>
       <tr>
           <td><code>KVCacheBackend</code> shows <code>Degraded</code></td>
-          <td><code>MembersMounted</code> shortfall (<code>SegmentsShort</code>, <code>NoSegments</code>)</td>
+          <td>Condition: <code>MembersMounted</code> shortfall (<code>SegmentsShort</code>, <code>NoSegments</code>)</td>
           <td><code>DaemonSet</code> member <code>Pod</code>s failing to mount or allocate memory/disk segments; check node capacity and daemon logs</td>
       </tr>
       <tr>
           <td><code>KVCachePool</code> shows <code>Error</code></td>
-          <td><code>BackendResolved=False</code> / <code>CapacityAllocatable=False</code></td>
+          <td>Condition: <code>BackendResolved=False</code> / <code>CapacityAllocatable=False</code></td>
           <td>Referenced backend does not exist or has zero allocatable capacity</td>
       </tr>
       <tr>
           <td><code>KVCachePool</code> <code>QuotaLedgerAvailable=False</code></td>
-          <td><code>MultiTenancyDisabled</code></td>
+          <td>Reason: <code>MultiTenancyDisabled</code></td>
           <td>Backend explicitly set <code>multiTenancy: false</code>; ceiling quotas are intentionally not enforced</td>
       </tr>
       <tr>
           <td><code>KVCachePoolBinding</code> <code>effectiveQuota: 0</code></td>
-          <td><code>QuotaGranted=False/ZeroGranted</code></td>
+          <td>Condition: <code>QuotaGranted=False/ZeroGranted</code></td>
           <td>The master grants this domain nothing. Read the pool&rsquo;s <code>CapacityAllocatable</code>: <code>NothingToAllocate</code> means no member has mounted yet, and a restarted master can take roughly 30 s to remount its segments. Otherwise a proportional recut left this domain no share</td>
       </tr>
       <tr>
           <td>Pool reports oversubscribed</td>
-          <td><code>QuotaWithinTotal=False/Oversubscribed</code></td>
+          <td>Condition: <code>QuotaWithinTotal=False/Oversubscribed</code></td>
           <td>The Bindings&rsquo; ceilings sum past the pool&rsquo;s <em><code>quota.total</code></em>. This is not a fault: grants are recut in proportion and shown in each <em><code>status.effectiveQuota</code></em>. Lower a ceiling or raise <em><code>quota.total</code></em> for full grants</td>
       </tr>
       <tr>
-          <td>Binding refused at apply with <code>Duplicate</code> on <em><code>spec.domain.name</code></em></td>
-          <td>Domain already registered on the same master</td>
+          <td>Binding refused at apply</td>
+          <td>Reason: <code>Duplicate</code> on <em><code>spec.domain.name</code></em> — the domain is already registered on the same master</td>
           <td>Another Binding holds the name; an omitted name is <code>default</code>. Give each Binding a unique <em><code>domain.name</code></em></td>
       </tr>
       <tr>
           <td>Two Bindings report one domain</td>
-          <td><code>DomainExclusive=False/DomainClaimedByMultipleBindings</code></td>
+          <td>Condition: <code>DomainExclusive=False/DomainClaimedByMultipleBindings</code></td>
           <td>Two creates raced past admission; delete one of them</td>
       </tr>
       <tr>
-          <td>Member <code>Pod</code> stuck with <code>FailedMount ... hostPath type check failed</code></td>
-          <td><code>Pod</code> event</td>
+          <td>Member <code>Pod</code> stuck</td>
+          <td>Event: <code>FailedMount ... hostPath type check failed</code></td>
           <td>The tier directory does not exist on that node; create it as in Step 5</td>
       </tr>
       <tr>
           <td>Member <code>Pod</code> runs but never becomes Ready</td>
-          <td><code>MembersMounted=False</code> (<code>NoSegments</code>, or <code>MemberCrashLooping</code> if the container exits), or a <code>CAPACITY</code> below the expected figure</td>
+          <td>Condition: <code>MembersMounted=False</code> (<code>NoSegments</code>, or <code>MemberCrashLooping</code> if the container exits), or a <code>CAPACITY</code> below the expected figure</td>
           <td>The directory exists but the image&rsquo;s user cannot write it; the container log says <code>no write permission on directory</code>. Run <code>install -d -o 65532 -g 0 -m 0750 &lt;path&gt;</code> for the default image. See <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/#directory-requirements">Directory requirements</a>
 </td>
       </tr>
       <tr>
           <td>Member init container restarts</td>
-          <td><code>MembersMounted=False/MemberInitCrashLooping</code></td>
+          <td>Condition: <code>MembersMounted=False/MemberInitCrashLooping</code></td>
           <td>The directory-survey init container restarted; the condition message gives the restart count, exit code and termination message. The survey runs <code>sh -c</code>, so the member image needs a shell. An unwritable directory does not cause this</td>
       </tr>
       <tr>
           <td>Local disk tier reports preexisting content</td>
-          <td><code>TierWasEmpty=False/PreexistingContent</code></td>
+          <td>Condition: <code>TierWasEmpty=False/PreexistingContent</code></td>
           <td>The directory held files from an earlier backend. Nothing was removed; empty it yourself. <code>cleanAfterDelete: true</code> empties it only when this backend is deleted</td>
       </tr>
       <tr>
           <td>HA Leader shows <code>3 desired / 1 ready</code></td>
-          <td>Expected steady state</td>
+          <td>Status: expected steady state</td>
           <td>Only elected active leader is Ready; 2 standby leader replicas remain unready until failover</td>
       </tr>
       <tr>
           <td>Deletion of <code>KVCachePoolBinding</code> blocked</td>
-          <td><code>Releasable=False/HeldByWorkloads</code></td>
+          <td>Condition: <code>Releasable=False/HeldByWorkloads</code></td>
           <td>Active <code>ModelDeployment</code>s or <code>Pod</code>s reference this binding; delete client workloads first</td>
       </tr>
   </tbody>
@@ -1908,7 +1939,7 @@ covered in <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#ten
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/walkthroughs/kv-cache/shared-cache.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/walkthroughs/kv-cache/shared-cache.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/kv-cache/shared-cache.md">Edit this page</a>
             
@@ -1920,12 +1951,16 @@ covered in <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#ten
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#summary">Summary</a></li>
+    <li><a href="#environment">Environment</a></li>
     <li><a href="#step-1-create-the-store">Step 1: Create the store</a></li>
     <li><a href="#step-2-create-pool-and-binding">Step 2: Create pool and binding</a></li>
     <li><a href="#step-3-create-the-workload">Step 3: Create the workload</a></li>
-    <li><a href="#step-4-enable-high-availability">Step 4: Enable high availability</a></li>
+    <li><a href="#step-4-enable-high-availability">Step 4: Enable high availability</a>
+      <ul>
+        <li><a href="#failover-behavior">Failover behavior</a></li>
+      </ul>
+    </li>
     <li><a href="#step-5-add-a-disk-tier">Step 5: Add a disk tier</a></li>
-    <li><a href="#failover-behavior">Failover behavior</a></li>
     <li><a href="#step-6-add-a-second-team">Step 6: Add a second team</a></li>
     <li><a href="#limitations">Limitations</a></li>
     <li><a href="#troubleshooting">Troubleshooting</a></li>

@@ -6,7 +6,7 @@ with the steps below; [Node Model Store](/gpustack-operator/main/docs/modules/mo
 
 ## Contents
 
-- [Enable the plugin](#enable-the-plugin)
+- [Prerequisites](#prerequisites)
 - [Configuration](#configuration)
 - [Read a node](#read-a-node)
 - [Capacity rule](#capacity-rule)
@@ -16,7 +16,20 @@ with the steps below; [Node Model Store](/gpustack-operator/main/docs/modules/mo
 - [Removal and cache migration](#removal-and-cache-migration)
 - [Troubleshooting](#troubleshooting)
 
-## Enable the plugin
+## Prerequisites
+
+- **The operator namespace must admit privileged `Pod`s.** The plugin container is privileged, so an
+  enforced `pod-security.kubernetes.io/enforce` label there must be `privileged`, as the Device
+  Manager already needs. Tenant namespaces may enforce `restricted`: it admits `csi` volumes.
+- **Image mode** installs it unless `--disable-applications` names `model-manager` (values key
+  `modelManager`); see [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md). Its overlay
+  sets only that switch: every other value keeps the chart's default, and no delivery is seeded, so
+  `model-artifact-delivery-mode` stays `Engine` until you set it.
+- **A kubelet with another root directory** (some distributions use `/var/snap/...` or
+  `/var/lib/k0s/kubelet`) needs `modelManager.kubeletDir` set to it, or no mount reaches a `Pod`. Image
+  mode cannot set it, so there the plugin only works with the standard `/var/lib/kubelet`.
+
+## Configuration
 
 The chart deploys it by default (`modelManager.enabled: true`) with the `CSIDriver`
 `model.csi.gpustack.ai`, one `DaemonSet` `Pod` per node, a `ServiceAccount` and a `ClusterRole` that grants
@@ -32,23 +45,10 @@ hands each mount its artifact's `Secret`.
 | `modelManager.registrar.image` | `docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0` | the sidecar that registers the plugin with kubelet |
 | `modelManager.nodeSelector`, *`tolerations`* | every node, every taint | where it runs; a node without it cannot mount node-delivered weights |
 
-- **The operator namespace must admit privileged `Pod`s.** The plugin container is privileged, so an
-  enforced `pod-security.kubernetes.io/enforce` label there must be `privileged`, as the Device
-  Manager already needs. Tenant namespaces may enforce `restricted`: it admits `csi` volumes.
-- **Image mode** installs it unless `--disable-applications` names `model-manager` (values key
-  `modelManager`); see [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md). Its overlay
-  sets only that switch: every other value keeps the chart's default, and no delivery is seeded, so
-  `model-artifact-delivery-mode` stays `Engine` until you set it.
-- **A kubelet with another root directory** (some distributions use `/var/snap/...` or
-  `/var/lib/k0s/kubelet`) needs `modelManager.kubeletDir` set to it, or no mount reaches a `Pod`. Image
-  mode cannot set it, so there the plugin only works with the standard `/var/lib/kubelet`.
-
-## Configuration
-
 | Layer | Carrier | Who changes it | What |
 | --- | --- | --- | --- |
 | Deploy time | chart values; in image mode the worker's overlay, which sets only the switch | installer | the switch, the cache root, the kubelet directory, images, resources and placement, the delivery mode |
-| Cluster runtime | [Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) in the operator namespace | administrator | delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth |
+| Cluster runtime | [Settings](/gpustack-operator/main/docs/reference/settings/index.md#settings) in the operator namespace | administrator | delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth |
 | Object | the `ModelArtifact` | tenant | source, revision, patterns, `Secret`; immutable |
 
 The worker merges the runtime layer into every node's `NodeModelStore.spec` within a minute of a
@@ -240,18 +240,18 @@ kubelet retries it, and it succeeds once the new `Pod` serves.
 `WeightsReady` on the `ModelDeployment` says which side to look at; the full table is in the
 [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#status).
 
-| Reason | Look at |
-| --- | --- |
-| `NodeDeliveryUnavailable` | the `CSIDriver` `model.csi.gpustack.ai` and `modelManager.enabled` |
-| `FilterNeedsNodeDelivery` | the delivery `Setting`, or the artifact's patterns |
-| `Materializing` | the `Pod`'s `FailedMount` events for bytes received; a `Pod` starts up to about two minutes after the download ends |
-| `MaterializationFailed` | the node's *`status.models`* entry: reason, message and *`retryTime`* |
-| `WeightsNotMounted` | the `Pod`'s `FailedMount` events: a `PermissionDenied` names the authorization rule that failed |
+| Symptom | Signal | Check & Mitigation |
+|---|---|---|
+| `WeightsReady=False`, no new `Pod` under `Node` delivery | Reason: `NodeDeliveryUnavailable` | the `CSIDriver` `model.csi.gpustack.ai` and `modelManager.enabled` |
+| A patterned artifact under `Engine` delivery creates no `Pod` | Reason: `FilterNeedsNodeDelivery` | the delivery `Setting`, or the artifact's patterns |
+| `WeightsReady=False` while the node lists the digest `Downloading` | Reason: `Materializing` | the `Pod`'s `FailedMount` events for bytes received; a `Pod` starts up to about two minutes after the download ends |
+| `WeightsReady=False` and the node lists the digest `Failed` | Reason: `MaterializationFailed` | the node's *`status.models`* entry: reason, message and *`retryTime`* |
+| The `Pod`'s `PodReadyToStartContainers` is not True yet | Reason: `WeightsNotMounted` | the `Pod`'s `FailedMount` events: a `PermissionDenied` names the authorization rule that failed |
 
 ---
 
 **See also** — [Node Model Store](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md) for every field and
 reason · [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md) for the artifact and its
-patterns · [Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) for every `Setting`.
+patterns · [Settings](/gpustack-operator/main/docs/reference/settings/index.md#settings) for every `Setting`.
 
 **Next** → [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md)

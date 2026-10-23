@@ -24,10 +24,10 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/reference/settings/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
-<body class="docs-page">
+<body class="docs-page pin-table-first-col">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
@@ -1426,7 +1426,7 @@ rule</a>
 <ul>
 <li><a href="#who-owns-a-value">Who owns a value</a>
 </li>
-<li><a href="#online-adjustable-settings">Online-adjustable settings</a>
+<li><a href="#settings">Settings</a>
 </li>
 <li><a href="#troubleshooting">Troubleshooting</a>
 </li>
@@ -1497,22 +1497,22 @@ tracking its own membership would reconcile that membership against itself.</p>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system get setting settings-default-tracking -o yaml</span></span></code></pre></div>
 </div><ul>
 <li>The <code>Deployment</code> renders the variable with a non-blank value, so rule 2 owns the <code>Setting</code> whatever is
-stored. The <a href="#online-adjustable-settings">online-adjustable settings</a>
+stored. The <a href="#settings">Settings</a>
  list identifies the chart-rendered variables.</li>
 <li>The <code>Deployment</code> does not render it and the tracking list names it, so rule 3 owns the <code>Setting</code>.</li>
 <li>Neither, so rule 4 applies and the value you stored stands until you change it yourself.</li>
 </ul>
-<h2 id="online-adjustable-settings">Online-adjustable settings</h2>
+<h2 id="settings">Settings</h2>
 <p>A fixed catalog of named values, served as the namespaced <code>Setting</code> aggregated API resource
-(<code>gpustack.ai/v1</code>, short name <code>set</code>, category <code>gpustack</code>) and read at runtime with <code>kubectl</code>; the operator
-picks a new value up on its next reconcile. Fixed means the resource serves
+(<code>gpustack.ai/v1</code>, short name <code>set</code>, category <code>gpustack</code>) and read at runtime with <code>kubectl</code>; when a new value
+applies is the Effect window on each row. Fixed means the resource serves
 <code>get,list,watch,apply,update,patch</code> and no create/delete: you edit a <code>Setting</code>&rsquo;s <strong>value</strong>, not its existence.</p>
-<p>The <code>Env seed</code> column names the variable a <code>Setting</code> reads. Every one of them is authoritative on every
-worker start while the variable is present and holds a non-blank value, whether the chart renders it or
-you add it yourself (<a href="#who-owns-a-value">who owns a value</a>
-). The rows marked <em>chart-rendered</em> name a
-variable the chart writes onto the worker <code>Deployment</code> itself, so the chart re-asserts it on every start
-and every upgrade.</p>
+<p>The name in parentheses beside a <code>Setting</code> is the variable it reads. Every one of them is
+authoritative on every worker start while the variable is present and holds a non-blank value, whether
+the chart renders it or you add it yourself (<a href="#who-owns-a-value">who owns a value</a>
+). A variable marked
+<em>chart-rendered</em> is one the chart writes onto the worker <code>Deployment</code> itself, so the chart re-asserts
+it on every start and every upgrade.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># List every setting and its current value</span>
@@ -1522,280 +1522,200 @@ and every upgrade.</p>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system get setting node-management-manual -o yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system edit setting node-management-manual
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system patch setting instance-type-derived-from-node --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;false&#34;}}&#39;</span></span></span></code></pre></div>
-</div><p><strong>Effect windows</strong> — a <code>Setting</code> is either <strong>Immediate</strong>: its change is pushed to the thing that
-consumes it (the consuming controller watches the delegated settings Secret — a <code>Setting</code> never
-watches itself), or <strong>next trigger</strong>: applied when the next natural event named in its Effect text
-arrives — a <code>Pod</code> render, an admission call, a reconcile. Rows marked <strong>Immediate</strong> are the ones
-whose window the text does not already make obvious.</p>
+</div><p><strong>Effect windows</strong> — <strong>Immediate</strong>: the change does its own work. A consuming controller watches the
+delegated settings <code>Secret</code> and reconciles what the <code>Setting</code> governs, or an admission webhook starts
+judging every call by the new value. Values reach a process through a thirty-second read cache, so
+Immediate means within about that.</p>
+<p><strong>Next trigger</strong> — nothing moves on its own. The new value applies when the next natural event named
+in its Usage line arrives — a reconcile, a <code>Pod</code> render, a resolution or revalidation tick, or a
+request that reaches a webhook. Neither window needs a restart.</p>
 <table>
   <thead>
       <tr>
           <th><code>Setting</code></th>
-          <th>Env seed</th>
-          <th>Default</th>
-          <th>Effect</th>
+          <th>Description</th>
       </tr>
   </thead>
   <tbody>
       <tr>
-          <td><code>container-namespace</code></td>
-          <td><code>GPUSTACK_CONTAINER_NAMESPACE</code> — <em>chart-rendered; authoritative on every start once its chart value is non-blank</em></td>
-          <td><em>(blank)</em></td>
-          <td>Namespace to pull images from, for all built-in applications&rsquo; deployments.</td>
+          <td><code>container-namespace</code><br/>(<code>GPUSTACK_CONTAINER_NAMESPACE</code>, <em>chart-rendered</em>)</td>
+          <td>Effect window: Next trigger<br/>Default: <em>(blank)</em><br/>Usage: Namespace to pull images from, for all built-in applications&rsquo; deployments.</td>
       </tr>
       <tr>
-          <td><code>container-registry</code></td>
-          <td><code>GPUSTACK_CONTAINER_REGISTRY</code> — <em>chart-rendered; authoritative on every start once its chart value is non-blank</em></td>
-          <td><em>(blank)</em></td>
-          <td>Registry to pull images from, for all built-in applications&rsquo; deployments.</td>
+          <td><code>container-registry</code><br/>(<code>GPUSTACK_CONTAINER_REGISTRY</code>, <em>chart-rendered</em>)</td>
+          <td>Effect window: Next trigger<br/>Default: <em>(blank)</em><br/>Usage: Registry to pull images from, for all built-in applications&rsquo; deployments.</td>
       </tr>
       <tr>
-          <td><code>image-pull-policy</code></td>
-          <td><code>GPUSTACK_IMAGE_PULL_POLICY</code> — <em>chart-rendered; authoritative on every start</em></td>
-          <td><code>IfNotPresent</code></td>
-          <td>Image pull policy for all built-in applications&rsquo; deployments, on the same boundary as the secret above: a controller-rendered workload carries its own. The chart renders it, so a runtime edit to this <code>Setting</code> is reverted at the next worker start; change it through <code>global.imagePullPolicy</code> or <em><code>image.pullPolicy</code></em> and leave this <code>Setting</code> alone.</td>
+          <td><code>image-pull-policy</code><br/>(<code>GPUSTACK_IMAGE_PULL_POLICY</code>, <em>chart-rendered</em>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>IfNotPresent</code><br/>Usage: Image pull policy for all built-in applications&rsquo; deployments, on the same boundary as the secret above: a controller-rendered workload carries its own. The chart renders it, so a runtime edit to this <code>Setting</code> is reverted at the next worker start; change it through <code>global.imagePullPolicy</code> or <em><code>image.pullPolicy</code></em> and leave this <code>Setting</code> alone.</td>
       </tr>
       <tr>
-          <td><code>image-pull-secrets</code></td>
-          <td><code>GPUSTACK_IMAGE_PULL_SECRETS</code> — <em>chart-rendered; authoritative on every start once its chart value is non-blank</em></td>
-          <td><em>(blank)</em></td>
-          <td>Image pull secret for pulling images, for all built-in applications&rsquo; deployments — the subcharts the chart or the worker installs. It does NOT reach a workload a controller renders from a custom resource: a <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/">KV cache backend</a>
+          <td><code>image-pull-secrets</code><br/>(<code>GPUSTACK_IMAGE_PULL_SECRETS</code>, <em>chart-rendered</em>)</td>
+          <td>Effect window: Next trigger<br/>Default: <em>(blank)</em><br/>Usage: Image pull secret for pulling images, for all built-in applications&rsquo; deployments — the subcharts the chart or the worker installs. It does NOT reach a workload a controller renders from a custom resource: a <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/">KV cache backend</a>
  names its own <em><code>spec.imagePullSecrets</code></em>.</td>
       </tr>
       <tr>
-          <td><code>instance-access-static-address</code></td>
-          <td><code>GPUSTACK_INSTANCE_ACCESS_STATIC_ADDRESS</code></td>
-          <td><em>(blank)</em></td>
-          <td>Static access address for all <code>Instance</code>s; when unset, the access address is generated from host IPs.</td>
+          <td><code>instance-access-static-address</code><br/>(<code>GPUSTACK_INSTANCE_ACCESS_STATIC_ADDRESS</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <em>(blank)</em><br/>Usage: Static access address for all <code>Instance</code>s; when unset, the access address is generated from host IPs.</td>
       </tr>
       <tr>
-          <td><code>instance-access-wildcard-dns</code></td>
-          <td><code>GPUSTACK_INSTANCE_ACCESS_WILDCARD_DNS</code></td>
-          <td><em>(blank)</em></td>
-          <td>Wildcard DNS for all <code>Instance</code>s (e.g. <code>traefik.me</code>), used to build a per-<code>Instance</code> domain <code>&lt;instance-host-ip&gt;.&lt;wildcard-dns&gt;</code>. Only effective when <code>instance-access-static-address</code> is not set.</td>
+          <td><code>instance-access-wildcard-dns</code><br/>(<code>GPUSTACK_INSTANCE_ACCESS_WILDCARD_DNS</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <em>(blank)</em><br/>Usage: Wildcard DNS for all <code>Instance</code>s (e.g. <code>traefik.me</code>), used to build a per-<code>Instance</code> domain <code>&lt;instance-host-ip&gt;.&lt;wildcard-dns&gt;</code>. Only effective when <code>instance-access-static-address</code> is not set.</td>
       </tr>
       <tr>
-          <td><code>instance-general-resources-overcommit</code></td>
-          <td><code>GPUSTACK_INSTANCE_GENERAL_RESOURCES_OVERCOMMIT</code></td>
-          <td><code>true</code></td>
-          <td>Overcommit an <code>Instance</code>&rsquo;s general resources: when enabled, a general unit requests 800m CPU / 128Mi RAM and one-eighth local storage, an accelerated unit 100m CPU / 128Mi RAM and one-eighth local storage — so e.g. a 1C/4Gi + 128Gi type requesting 2 accelerators and 64Gi storage resolves to 200m/256Mi + 8Gi. A CPU limit whose whole cores cost more than the limit itself (e.g. <code>100m</code>, or <code>1500m</code> whose half core rounds up) requests the limit instead — a request may never exceed its limit.</td>
+          <td><code>instance-general-resources-overcommit</code><br/>(<code>GPUSTACK_INSTANCE_GENERAL_RESOURCES_OVERCOMMIT</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>true</code><br/>Usage: Overcommit an <code>Instance</code>&rsquo;s general resources: when enabled, a general unit requests 800m CPU / 128Mi RAM and one-eighth local storage, an accelerated unit 100m CPU / 128Mi RAM and one-eighth local storage — so e.g. a 1C/4Gi + 128Gi type requesting 2 accelerators and 64Gi storage resolves to 200m/256Mi + 8Gi. A CPU limit whose whole cores cost more than the limit itself (e.g. <code>100m</code>, or <code>1500m</code> whose half core rounds up) requests the limit instead — a request may never exceed its limit.</td>
       </tr>
       <tr>
-          <td><code>instance-host-path-volume-allowed</code></td>
-          <td><code>GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED</code></td>
-          <td><code>false</code></td>
-          <td><strong>Immediate.</strong> Whether an <code>Instance</code> may mount a hostPath volume (<em><code>spec.additionalVolumes[*].hostPath</code></em>), which reaches the node&rsquo;s filesystem. Kept separate from <code>instance-privileged-allowed</code> because it grants strictly less — the filesystem, but not the node&rsquo;s devices or kernel — so an admin can allow node-path mounts without allowing a container escape. Enforced whenever an <code>Instance</code> <strong>takes</strong> a hostPath mount, on the same terms; a mount it already has is matched by value, so reordering the list is not a new grant while repointing an entry at a different node path is.</td>
+          <td><code>instance-host-path-volume-allowed</code><br/>(<code>GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED</code>)</td>
+          <td>Effect window: Immediate<br/>Default: <code>false</code><br/>Usage: Whether an <code>Instance</code> may mount a hostPath volume (<em><code>spec.additionalVolumes[*].hostPath</code></em>), which reaches the node&rsquo;s filesystem. Kept separate from <code>instance-privileged-allowed</code> because it grants strictly less — the filesystem, but not the node&rsquo;s devices or kernel — so an admin can allow node-path mounts without allowing a container escape. Enforced whenever an <code>Instance</code> <strong>takes</strong> a hostPath mount, on the same terms; a mount it already has is matched by value, so reordering the list is not a new grant while repointing an entry at a different node path is.</td>
       </tr>
       <tr>
-          <td><code>instance-persistent-volume-placement</code></td>
-          <td><code>GPUSTACK_INSTANCE_PERSISTENT_VOLUME_PLACEMENT</code></td>
-          <td><code>true</code></td>
-          <td>Whether an <code>Instance</code>&rsquo;s persistent claims (<em><code>spec.volume.persistent</code></em>, <em><code>spec.additionalVolumes[*].persistent</code></em>) decide where its <code>Pod</code> runs, by the <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#claim-delivery-and-placement">claim placement rules</a>
+          <td><code>instance-persistent-volume-placement</code><br/>(<code>GPUSTACK_INSTANCE_PERSISTENT_VOLUME_PLACEMENT</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>true</code><br/>Usage: Whether an <code>Instance</code>&rsquo;s persistent claims (<em><code>spec.volume.persistent</code></em>, <em><code>spec.additionalVolumes[*].persistent</code></em>) decide where its <code>Pod</code> runs, by the <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#claim-delivery-and-placement">claim placement rules</a>
 : a bound claim adds its PV&rsquo;s required node affinity, and a claim nothing binds holds the <code>Pod</code> back with the reason in <em><code>status.phaseMessage</code></em>. <strong><code>false</code> is the escape path</strong>: the <code>Pod</code> is built from the claim names alone, as before, and Kueue&rsquo;s topology-aware scheduling may then assign a node the volume cannot reach, leaving the <code>Pod</code> Pending while its <code>Workload</code> holds quota. Read when a <code>Pod</code> is created, so a change never moves a running <code>Instance</code>; stop and start one to apply it.</td>
       </tr>
       <tr>
-          <td><code>instance-privileged-allowed</code></td>
-          <td><code>GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED</code></td>
-          <td><code>false</code></td>
-          <td><strong>Immediate.</strong> Whether an <code>Instance</code> may request privileged mode (<em><code>spec.privileged</code></em>), which escapes the container boundary and exposes the node&rsquo;s devices and kernel surface. Enforced by the <code>Instance</code> admission webhook whenever an <code>Instance</code> <strong>takes</strong> privileged mode — at creation, or through a later change, including one made while it is stopped. An <code>Instance</code> that already runs privileged keeps it: with this off it stays updatable, editable while stopped, and restartable. Like every setting here, a change takes up to 30s to reach the webhook, so an <code>Instance</code> created in that window is judged against the previous value.</td>
+          <td><code>instance-privileged-allowed</code><br/>(<code>GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED</code>)</td>
+          <td>Effect window: Immediate<br/>Default: <code>false</code><br/>Usage: Whether an <code>Instance</code> may request privileged mode (<em><code>spec.privileged</code></em>), which escapes the container boundary and exposes the node&rsquo;s devices and kernel surface. Enforced by the <code>Instance</code> admission webhook whenever an <code>Instance</code> <strong>takes</strong> privileged mode — at creation, or through a later change, including one made while it is stopped. An <code>Instance</code> that already runs privileged keeps it: with this off it stays updatable, editable while stopped, and restartable. Like every setting here, a change takes up to 30s to reach the webhook, so an <code>Instance</code> created in that window is judged against the previous value.</td>
       </tr>
       <tr>
-          <td><code>instance-ssh-server-image</code></td>
-          <td><code>GPUSTACK_INSTANCE_SSH_SERVER_IMAGE</code></td>
-          <td><code>gpustack/ssh-server:v1.3.0</code></td>
-          <td>Image of the SSH server used when deploying <code>Instance</code>s.</td>
+          <td><code>instance-ssh-server-image</code><br/>(<code>GPUSTACK_INSTANCE_SSH_SERVER_IMAGE</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>gpustack/ssh-server:v1.3.0</code><br/>Usage: Image of the SSH server used when deploying <code>Instance</code>s.</td>
       </tr>
       <tr>
-          <td><code>instance-isolation-pod-cidrs</code></td>
-          <td><code>GPUSTACK_INSTANCE_ISOLATION_POD_CIDRS</code></td>
-          <td><em>(blank)</em></td>
-          <td>The IPv4 pod CIDRs the Instance tenant-isolation <code>NetworkPolicy</code> carves out of its 0.0.0.0/0 external rule: <code>Instance</code> <code>Pod</code>s stay reachable from their own namespace and from outside the cluster, and never from another namespace&rsquo;s <code>Pod</code>s — see <a href="/gpustack-operator/main/docs/modules/instances/#network-isolation">Network isolation</a>
+          <td><code>instance-isolation-pod-cidrs</code><br/>(<code>GPUSTACK_INSTANCE_ISOLATION_POD_CIDRS</code>)</td>
+          <td>Effect window: Immediate<br/>Default: <em>(blank)</em><br/>Usage: The IPv4 pod CIDRs the Instance tenant-isolation <code>NetworkPolicy</code> carves out of its 0.0.0.0/0 external rule: <code>Instance</code> <code>Pod</code>s stay reachable from their own namespace and from outside the cluster, and never from another namespace&rsquo;s <code>Pod</code>s — see <a href="/gpustack-operator/main/docs/modules/instances/#network-isolation">Network isolation</a>
 . <strong>Blank (default) renders no policy at all</strong>: isolation is opt-in, and emptying the list collects the rendered policy again, never a same-named one written by hand. Needs a CNI that enforces <code>NetworkPolicy</code>; find the values with <code>kubectl get ippools.crd.projectcalico.org</code> on a Calico-IPAM cluster, or <code>kubectl get nodes -o jsonpath='{.items[*].spec.podCIDRs}'</code> where the nodes carve the pod addresses. Read by the namespace-isolation controller, which watches the delegated settings Secret: a change reconciles every non-reserved namespace within seconds. The chart carries the same value as <code>worker.instanceIsolationPodCIDRs</code>.</td>
       </tr>
       <tr>
-          <td><code>instance-type-aware-cpu-manufacturer</code></td>
-          <td><code>GPUSTACK_INSTANCE_TYPE_AWARE_CPU_MANUFACTURER</code></td>
-          <td><code>false</code></td>
-          <td>Whether the derived <code>ClusterQueue</code>/<code>InstanceType</code>/<code>InstanceTypeFlavor</code> aggregation splits by CPU manufacturer. When <code>false</code>, non-accelerated flavors collapse into one <code>generic</code> pool per os/arch and accelerated flavors pool per accelerator (CPU ignored); when <code>true</code>, every pool splits by the CPU key (<code>gpustack--${gKey}-…</code> / <code>gpustack--${gKey}--${aKey}-…</code>) and the <code>InstanceType</code> records the raw CPU detail. The <code>ResourceFlavor</code>s themselves are unaffected — they always carry the CPU key, so a flip only re-groups the aggregation layer. Read per-reconcile.</td>
+          <td><code>instance-type-aware-cpu-manufacturer</code><br/>(<code>GPUSTACK_INSTANCE_TYPE_AWARE_CPU_MANUFACTURER</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>false</code><br/>Usage: Whether the derived <code>ClusterQueue</code>/<code>InstanceType</code>/<code>InstanceTypeFlavor</code> aggregation splits by CPU manufacturer. When <code>false</code>, non-accelerated flavors collapse into one <code>generic</code> pool per os/arch and accelerated flavors pool per accelerator (CPU ignored); when <code>true</code>, every pool splits by the CPU key (<code>gpustack--${gKey}-…</code> / <code>gpustack--${gKey}--${aKey}-…</code>) and the <code>InstanceType</code> records the raw CPU detail. The <code>ResourceFlavor</code>s themselves are unaffected — they always carry the CPU key, so a flip only re-groups the aggregation layer. Read per-reconcile.</td>
       </tr>
       <tr>
-          <td><code>instance-type-derived-from-node</code></td>
-          <td><code>GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE</code></td>
-          <td><code>true</code></td>
-          <td>Whether the operator auto-derives the <code>InstanceType</code> (and its backing <code>ClusterQueue</code>) from node hardware. When <code>true</code>, the <code>NodeFlavorReconciler</code> authors the derived <code>InstanceType</code> (create-only); when <code>false</code>, it only aligns the <code>ResourceFlavor</code> and the administrator defines the <code>InstanceType</code> via the API, and owns feasibility with it — see <a href="#authoring-the-instancetype">Authoring the InstanceType</a>
+          <td><code>instance-type-derived-from-node</code><br/>(<code>GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>true</code><br/>Usage: Whether the operator auto-derives the <code>InstanceType</code> (and its backing <code>ClusterQueue</code>) from node hardware. When <code>true</code>, the <code>NodeFlavorReconciler</code> authors the derived <code>InstanceType</code> (create-only); when <code>false</code>, it only aligns the <code>ResourceFlavor</code> and the administrator defines the <code>InstanceType</code> via the API, and owns feasibility with it — see <a href="#authoring-the-instancetype">Authoring the InstanceType</a>
 . Read per-reconcile.</td>
       </tr>
       <tr>
-          <td><code>instance-type-drain-when-no-flavors</code></td>
-          <td><code>GPUSTACK_INSTANCE_TYPE_DRAIN_WHEN_NO_FLAVORS</code></td>
-          <td><code>true</code></td>
-          <td>Whether a <code>ClusterQueue</code> whose pool has lost all its <code>ResourceFlavor</code>s is drained (<code>HoldAndDrain</code>, so Kueue evicts admitted workloads) before its resource groups are emptied. When <code>true</code>, the queue is drained first; when <code>false</code>, the operator waits for the reservations to clear on their own, then empties. Either way the groups are emptied only once every reservation is zero, so Kueue&rsquo;s counters never go negative. Read per-reconcile.</td>
+          <td><code>instance-type-drain-when-no-flavors</code><br/>(<code>GPUSTACK_INSTANCE_TYPE_DRAIN_WHEN_NO_FLAVORS</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>true</code><br/>Usage: Whether a <code>ClusterQueue</code> whose pool has lost all its <code>ResourceFlavor</code>s is drained (<code>HoldAndDrain</code>, so Kueue evicts admitted workloads) before its resource groups are emptied. When <code>true</code>, the queue is drained first; when <code>false</code>, the operator waits for the reservations to clear on their own, then empties. Either way the groups are emptied only once every reservation is zero, so Kueue&rsquo;s counters never go negative. Read per-reconcile.</td>
       </tr>
       <tr>
-          <td><code>instance-type-mixed-on-node</code></td>
-          <td><code>GPUSTACK_INSTANCE_TYPE_MIXED_ON_NODE</code></td>
-          <td><code>true</code></td>
-          <td>Whether one node may surface both a GPU and a CPU-only <code>InstanceType</code>. When <code>true</code>, a node is summarized into every type it can serve; when <code>false</code>, a node with accelerators yields only a GPU <code>InstanceType</code> and a CPU-only node only a general one. Read per-reconcile.</td>
+          <td><code>instance-type-mixed-on-node</code><br/>(<code>GPUSTACK_INSTANCE_TYPE_MIXED_ON_NODE</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>true</code><br/>Usage: Whether one node may surface both a GPU and a CPU-only <code>InstanceType</code>. When <code>true</code>, a node is summarized into every type it can serve; when <code>false</code>, a node with accelerators yields only a GPU <code>InstanceType</code> and a CPU-only node only a general one. Read per-reconcile.</td>
       </tr>
       <tr>
-          <td><code>node-management-manual</code></td>
-          <td><code>GPUSTACK_NODE_MANAGEMENT_MANUAL</code></td>
-          <td><code>false</code></td>
-          <td>Skip auto-managing nodes. When <code>false</code>, the operator auto-onboards discovered nodes by injecting the <code>gpustack.ai/managed=true</code> label; when <code>true</code>, an administrator must opt nodes in manually. Read per-reconcile.</td>
+          <td><code>node-management-manual</code><br/>(<code>GPUSTACK_NODE_MANAGEMENT_MANUAL</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>false</code><br/>Usage: Skip auto-managing nodes. When <code>false</code>, the operator auto-onboards discovered nodes by injecting the <code>gpustack.ai/managed=true</code> label; when <code>true</code>, an administrator must opt nodes in manually. Read per-reconcile.</td>
       </tr>
       <tr>
-          <td><code>kv-cache-backend-image</code></td>
-          <td><code>GPUSTACK_KV_CACHE_BACKEND_IMAGE</code></td>
-          <td><code>gpustack/mirrored-mooncake:0.3.13.post1-cpu</code></td>
-          <td>Image every role of a <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/">KV cache backend</a>
+          <td><code>kv-cache-backend-image</code><br/>(<code>GPUSTACK_KV_CACHE_BACKEND_IMAGE</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>gpustack/mirrored-mooncake:0.3.13.post1-cpu</code><br/>Usage: Image every role of a <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/">KV cache backend</a>
  runs when the object does not name one itself. The default is this project&rsquo;s own build — a CPU build carrying TCP and EFA over DRAM, and the only image that can run <a href="/gpustack-operator/main/docs/modules/kv-cache/leader/#high-availability"><code>leader.electionBackend</code></a>
 . The per-vendor variant builds, their tags and which one a VRAM group needs are under <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#gpustack-build-variants">GPUStack build variants</a>
 . <strong>It does not fit every backend</strong>: a backend on another transport or runtime names its own <em><code>spec.image</code></em>, which always wins over this. <strong>Clearing this <code>Setting</code> restores the admission refusal</strong> for a backend naming no image anywhere. Why one default cannot fit every backend, and what having one costs, is under <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#image">Image</a>
 .</td>
       </tr>
       <tr>
-          <td><code>model-artifact-ca-bundle</code></td>
-          <td><code>GPUSTACK_MODEL_ARTIFACT_CA_BUNDLE</code></td>
-          <td><em>(blank)</em></td>
-          <td>Name of a <code>ConfigMap</code> in the worker&rsquo;s namespace whose <code>ca.crt</code> the resolution and the node plugin trust beside the system pool. <strong>It is not given to engine <code>Pod</code>s</strong>: they run in tenant namespaces, which cannot mount it.</td>
+          <td><code>model-artifact-ca-bundle</code><br/>(<code>GPUSTACK_MODEL_ARTIFACT_CA_BUNDLE</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <em>(blank)</em><br/>Usage: Name of a <code>ConfigMap</code> in the worker&rsquo;s namespace whose <code>ca.crt</code> the resolution and the node plugin trust beside the system pool. <strong>It is not given to engine <code>Pod</code>s</strong>: they run in tenant namespaces, which cannot mount it.</td>
       </tr>
       <tr>
-          <td><code>model-artifact-delivery-mode</code></td>
-          <td><code>GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE</code> — <em>chart-rendered when the plugin is deployed; authoritative on every start while it is rendered</em></td>
-          <td><code>Engine</code></td>
-          <td>How a hub artifact&rsquo;s weights reach a <code>ModelDeployment</code>: <code>Engine</code>, the engine downloads them, or <code>Node</code>, the node&rsquo;s <a href="/gpustack-operator/main/docs/modules/model-delivery/node-store/"><code>model-manager</code> plugin</a>
+          <td><code>model-artifact-delivery-mode</code><br/>(<code>GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE</code>, <em>chart-rendered</em>)</td>
+          <td>Effect window: Immediate<br/>Default: <code>Engine</code><br/>Usage: How a hub artifact&rsquo;s weights reach a <code>ModelDeployment</code>: <code>Engine</code>, the engine downloads them, or <code>Node</code>, the node&rsquo;s <a href="/gpustack-operator/main/docs/modules/model-delivery/node-store/"><code>model-manager</code> plugin</a>
  mounts a verified copy. The chart declares <code>Node</code> when it deploys the plugin, and the chart owns the <code>Setting</code> from then on: a runtime edit is reverted at the next worker start. Deploying or removing the plugin (<code>modelManager.enabled</code>) is what changes the value. <code>Node</code> is refused while the <code>CSIDriver</code> <code>model.csi.gpustack.ai</code> does not exist. <strong>Changing it rolls every deployment using a hub artifact once</strong>; see <a href="/gpustack-operator/main/docs/modules/model-delivery/operations/#switch-delivery">Switch delivery</a>
 .</td>
       </tr>
       <tr>
-          <td><code>model-artifact-https-proxy</code></td>
-          <td><code>GPUSTACK_MODEL_ARTIFACT_HTTPS_PROXY</code></td>
-          <td><em>(blank)</em></td>
-          <td>HTTPS proxy for resolution, revalidation and the node plugin&rsquo;s downloads, and the <code>HTTPS_PROXY</code> given to an engine downloading the weights, where a role&rsquo;s own value wins. Blank keeps the worker&rsquo;s own environment and renders nothing. Only an <code>http</code> or <code>https</code> URL without credentials is accepted, because the value reaches tenant <code>Pod</code>s; a value from the environment that is not refuses the worker&rsquo;s start.</td>
+          <td><code>model-artifact-https-proxy</code><br/>(<code>GPUSTACK_MODEL_ARTIFACT_HTTPS_PROXY</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <em>(blank)</em><br/>Usage: HTTPS proxy for resolution, revalidation and the node plugin&rsquo;s downloads, and the <code>HTTPS_PROXY</code> given to an engine downloading the weights, where a role&rsquo;s own value wins. Blank keeps the worker&rsquo;s own environment and renders nothing. Only an <code>http</code> or <code>https</code> URL without credentials is accepted, because the value reaches tenant <code>Pod</code>s; a value from the environment that is not refuses the worker&rsquo;s start.</td>
       </tr>
       <tr>
-          <td><code>model-artifact-huggingface-endpoint</code></td>
-          <td><code>GPUSTACK_MODEL_ARTIFACT_HUGGINGFACE_ENDPOINT</code></td>
-          <td><code>https://huggingface.co</code></td>
-          <td>The Hugging Face Hub a <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/"><code>ModelArtifact</code></a>
+          <td><code>model-artifact-huggingface-endpoint</code><br/>(<code>GPUSTACK_MODEL_ARTIFACT_HUGGINGFACE_ENDPOINT</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>https://huggingface.co</code><br/>Usage: The Hugging Face Hub a <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/"><code>ModelArtifact</code></a>
  resolves and revalidates against, and the <code>HF_ENDPOINT</code> an engine downloading the weights is given; the node plugin downloads from it too. What changing it does is under <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#engine-delivery">Engine delivery</a>
 .</td>
       </tr>
       <tr>
-          <td><code>model-artifact-modelscope-endpoint</code></td>
-          <td><code>GPUSTACK_MODEL_ARTIFACT_MODELSCOPE_ENDPOINT</code></td>
-          <td><code>https://www.modelscope.cn</code></td>
-          <td>The ModelScope hub a <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/"><code>ModelArtifact</code></a>
+          <td><code>model-artifact-modelscope-endpoint</code><br/>(<code>GPUSTACK_MODEL_ARTIFACT_MODELSCOPE_ENDPOINT</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>https://www.modelscope.cn</code><br/>Usage: The ModelScope hub a <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/"><code>ModelArtifact</code></a>
  resolves and revalidates against and the node plugin downloads from; an engine downloading the weights gets its host as <code>MODELSCOPE_DOMAIN</code> — the runners&rsquo; SDK takes a bare host. What changing it does is under <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#engine-delivery">Engine delivery</a>
 .</td>
       </tr>
       <tr>
-          <td><code>model-artifact-no-proxy</code></td>
-          <td><code>GPUSTACK_MODEL_ARTIFACT_NO_PROXY</code></td>
-          <td><em>(blank)</em></td>
-          <td>Comma-separated hosts that bypass <code>model-artifact-https-proxy</code>, for the node plugin too, given to engines as <code>NO_PROXY</code> on the same terms.</td>
+          <td><code>model-artifact-no-proxy</code><br/>(<code>GPUSTACK_MODEL_ARTIFACT_NO_PROXY</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <em>(blank)</em><br/>Usage: Comma-separated hosts that bypass <code>model-artifact-https-proxy</code>, for the node plugin too, given to engines as <code>NO_PROXY</code> on the same terms.</td>
       </tr>
       <tr>
-          <td><code>model-artifact-revalidate-interval</code></td>
-          <td><code>GPUSTACK_MODEL_ARTIFACT_REVALIDATE_INTERVAL</code></td>
-          <td><code>24h</code></td>
-          <td>How often a resolved hub artifact&rsquo;s access is checked again, at least <code>1m</code>; a <code>Secret</code> change checks it at once. What a refusal does is under <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#resolution-and-revalidation">Resolution and revalidation</a>
+          <td><code>model-artifact-revalidate-interval</code><br/>(<code>GPUSTACK_MODEL_ARTIFACT_REVALIDATE_INTERVAL</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>24h</code><br/>Usage: How often a resolved hub artifact&rsquo;s access is checked again, at least <code>1m</code>; a <code>Secret</code> change checks it at once. What a refusal does is under <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#resolution-and-revalidation">Resolution and revalidation</a>
 .</td>
       </tr>
       <tr>
-          <td><code>model-deployment-kv-cache-dtype-owned</code></td>
-          <td><code>GPUSTACK_MODEL_DEPLOYMENT_KV_CACHE_DTYPE_OWNED</code></td>
-          <td><code>true</code></td>
-          <td>Hand every <code>KVCachePoolBinding</code>&rsquo;s <em><code>spec.domain.dtype</code></em> to the engines attached through it as <code>--kv-cache-dtype</code>, verbatim, and refuse a pool-attached role or injected <code>Pod</code> naming that flag itself, and a new Binding declaring <code>auto</code> — see <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#engine-dtype">The dtype is handed to the engine</a>
+          <td><code>model-deployment-kv-cache-dtype-owned</code><br/>(<code>GPUSTACK_MODEL_DEPLOYMENT_KV_CACHE_DTYPE_OWNED</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>true</code><br/>Usage: Hand every <code>KVCachePoolBinding</code>&rsquo;s <em><code>spec.domain.dtype</code></em> to the engines attached through it as <code>--kv-cache-dtype</code>, verbatim, and refuse a pool-attached role or injected <code>Pod</code> naming that flag itself, and a new Binding declaring <code>auto</code> — see <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#engine-dtype">The dtype is handed to the engine</a>
 . <strong>It is the escape from a Binding whose spelling the engine rejects</strong>, which makes every new <code>Pod</code> fail argument parsing: <code>false</code> renders and refuses nothing, as before the flag was owned. Flipping it recreates every pool-attached replica at its next reconcile. The recovery is under <a href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/">Upgrading to an enforced Binding dtype</a>
 .</td>
       </tr>
       <tr>
-          <td><code>model-deployment-router-image</code></td>
-          <td><code>GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE</code></td>
-          <td><code>gpustack/llm-router:v0.3.1</code></td>
-          <td>Image a managed router runs when the <code>ModelDeployment</code> does not name one in <em><code>spec.router.image</code></em>. <strong>It carries every router this operator supports, and which binary runs is decided by the rendered command rather than by the image</strong> — <em><code>spec.router.name</code></em> picks the binary, and this setting only says where the binaries come from. Its default is safe for every cluster at once in a way <code>kv-cache-backend-image</code>&rsquo;s is not: it runs no model, so it links no accelerator runtime and cannot be paired with the wrong one. The default is this project&rsquo;s own build rather than an upstream tag, because the three routers are compiled from three separate sources and one of them carries a patch this repository ships, so no upstream image holds them together. An image named on the object is used verbatim and is never redirected to the cluster mirror, because it is the user&rsquo;s own reference.</td>
+          <td><code>model-deployment-router-image</code><br/>(<code>GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>gpustack/llm-router:v0.3.1</code><br/>Usage: Image a managed router runs when the <code>ModelDeployment</code> does not name one in <em><code>spec.router.image</code></em>. <strong>It carries every router this operator supports, and which binary runs is decided by the rendered command rather than by the image</strong> — <em><code>spec.router.name</code></em> picks the binary, and this setting only says where the binaries come from. Its default is safe for every cluster at once in a way <code>kv-cache-backend-image</code>&rsquo;s is not: it runs no model, so it links no accelerator runtime and cannot be paired with the wrong one. The default is this project&rsquo;s own build rather than an upstream tag, because the three routers are compiled from three separate sources and one of them carries a patch this repository ships, so no upstream image holds them together. An image named on the object is used verbatim and is never redirected to the cluster mirror, because it is the user&rsquo;s own reference.</td>
       </tr>
       <tr>
-          <td><code>model-deployment-router-proxy-image</code></td>
-          <td><code>GPUSTACK_MODEL_DEPLOYMENT_ROUTER_PROXY_IMAGE</code></td>
-          <td><code>gpustack/mirrored-envoy:distroless-v1.33.2</code></td>
-          <td>Proxy fronting a managed router&rsquo;s endpoint picker. It has <strong>no field on the API</strong> to override it: this operator renders the proxy&rsquo;s configuration against one proxy&rsquo;s configuration schema, so swapping the binary would mean swapping that configuration too. The setting exists for registry redirection and for pinning a release back, not for running a different proxy.</td>
+          <td><code>model-deployment-router-proxy-image</code><br/>(<code>GPUSTACK_MODEL_DEPLOYMENT_ROUTER_PROXY_IMAGE</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>gpustack/mirrored-envoy:distroless-v1.33.2</code><br/>Usage: Proxy fronting a managed router&rsquo;s endpoint picker. It has <strong>no field on the API</strong> to override it: this operator renders the proxy&rsquo;s configuration against one proxy&rsquo;s configuration schema, so swapping the binary would mean swapping that configuration too. The setting exists for registry redirection and for pinning a release back, not for running a different proxy.</td>
       </tr>
       <tr>
-          <td><code>model-deployment-routing-sidecar-image</code></td>
-          <td><code>GPUSTACK_MODEL_DEPLOYMENT_ROUTING_SIDECAR_IMAGE</code></td>
-          <td><code>gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0</code></td>
-          <td>Sidecar a decoder runs to accept a remote <em>prefill</em> handoff. Same terms as the proxy above: this operator renders its arguments, so the setting is for redirection and pinning rather than for a different implementation.</td>
+          <td><code>model-deployment-routing-sidecar-image</code><br/>(<code>GPUSTACK_MODEL_DEPLOYMENT_ROUTING_SIDECAR_IMAGE</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0</code><br/>Usage: Sidecar a decoder runs to accept a remote <em>prefill</em> handoff. Same terms as the proxy above: this operator renders its arguments, so the setting is for redirection and pinning rather than for a different implementation.</td>
       </tr>
       <tr>
-          <td><code>model-deployment-tcp-tw-reuse</code></td>
-          <td><code>GPUSTACK_MODEL_DEPLOYMENT_TCP_TW_REUSE</code></td>
-          <td><code>false</code></td>
-          <td>Render <code>net.ipv4.tcp_tw_reuse=1</code> on the <em>prefill</em> half of every SGLang <em>prefill</em>/<em>decode</em> pair, which otherwise <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#limitations">runs out of local ports</a>
+          <td><code>model-deployment-tcp-tw-reuse</code><br/>(<code>GPUSTACK_MODEL_DEPLOYMENT_TCP_TW_REUSE</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>false</code><br/>Usage: Render <code>net.ipv4.tcp_tw_reuse=1</code> on the <em>prefill</em> half of every SGLang <em>prefill</em>/<em>decode</em> pair, which otherwise <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#limitations">runs out of local ports</a>
  under sustained load. <strong>Allow the sysctl on the kubelet of every node that can run such a <code>Pod</code> before turning it on</strong>: without that the <code>Pod</code> fails with <code>SysctlForbidden</code>, and so does every replacement. The steps, which <code>Pod</code>s it reaches and how to confirm the refusal are under <a href="#sglang-time-wait-reuse">SGLang TIME-WAIT reuse</a>
 .</td>
       </tr>
       <tr>
-          <td><code>model-prefetch-warmup-image</code></td>
-          <td><code>GPUSTACK_MODEL_PREFETCH_WARMUP_IMAGE</code></td>
-          <td><code>gpustack/mirrored-python:3.12-alpine</code></td>
-          <td>Image the <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/"><code>ModelPrefetch</code></a>
+          <td><code>model-prefetch-warmup-image</code><br/>(<code>GPUSTACK_MODEL_PREFETCH_WARMUP_IMAGE</code>)</td>
+          <td>Effect window: Immediate<br/>Default: <code>gpustack/mirrored-python:3.12-alpine</code><br/>Usage: Image the <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/"><code>ModelPrefetch</code></a>
  warm-up <code>Pod</code> runs on each target node. The <code>Pod</code> mounts the artifact&rsquo;s volume, verifies every file reads back and exits, so the image needs only a shell, <code>find</code> and <code>sha256sum</code> — it never runs a model. It is a setting because the one thing it must guarantee is that the node can pull it, which only the cluster&rsquo;s own registry arrangement decides; an air-gapped cluster points it at its mirror.</td>
       </tr>
       <tr>
-          <td><code>model-store-download-bandwidth</code></td>
-          <td><code>GPUSTACK_MODEL_STORE_DOWNLOAD_BANDWIDTH</code></td>
-          <td><code>0</code></td>
-          <td>Per-node download rate limit, a quantity of bytes per second (<code>200Mi</code>); <code>0</code> is unlimited.</td>
+          <td><code>model-store-download-bandwidth</code><br/>(<code>GPUSTACK_MODEL_STORE_DOWNLOAD_BANDWIDTH</code>)</td>
+          <td>Effect window: Immediate<br/>Default: <code>0</code><br/>Usage: Per-node download rate limit, a quantity of bytes per second (<code>200Mi</code>); <code>0</code> is unlimited.</td>
       </tr>
       <tr>
-          <td><code>model-store-download-concurrency</code></td>
-          <td><code>GPUSTACK_MODEL_STORE_DOWNLOAD_CONCURRENCY</code></td>
-          <td><code>8</code></td>
-          <td>Concurrent HTTP requests the plugin makes per node, across every download; <code>1</code> to <code>64</code>.</td>
+          <td><code>model-store-download-concurrency</code><br/>(<code>GPUSTACK_MODEL_STORE_DOWNLOAD_CONCURRENCY</code>)</td>
+          <td>Effect window: Immediate<br/>Default: <code>8</code><br/>Usage: Concurrent HTTP requests the plugin makes per node, across every download; <code>1</code> to <code>64</code>.</td>
       </tr>
       <tr>
-          <td><code>model-store-high-watermark</code></td>
-          <td><code>GPUSTACK_MODEL_STORE_HIGH_WATERMARK</code></td>
-          <td><code>80</code></td>
-          <td>The node cache filesystem&rsquo;s usage percent above which the plugin removes content no <code>Pod</code> mounts; above the low watermark, at most <code>95</code>. On a filesystem shared with kubelet the plugin caps it below kubelet&rsquo;s thresholds (<a href="/gpustack-operator/main/docs/modules/model-delivery/operations/#capacity-rule">the capacity rule</a>
+          <td><code>model-store-high-watermark</code><br/>(<code>GPUSTACK_MODEL_STORE_HIGH_WATERMARK</code>)</td>
+          <td>Effect window: Immediate<br/>Default: <code>80</code><br/>Usage: The node cache filesystem&rsquo;s usage percent above which the plugin removes content no <code>Pod</code> mounts; above the low watermark, at most <code>95</code>. On a filesystem shared with kubelet the plugin caps it below kubelet&rsquo;s thresholds (<a href="/gpustack-operator/main/docs/modules/model-delivery/operations/#capacity-rule">the capacity rule</a>
 ).</td>
       </tr>
       <tr>
-          <td><code>model-store-low-watermark</code></td>
-          <td><code>GPUSTACK_MODEL_STORE_LOW_WATERMARK</code></td>
-          <td><code>70</code></td>
-          <td>The usage percent a collection removes down to; at least <code>1</code>, below the high watermark.</td>
+          <td><code>model-store-low-watermark</code><br/>(<code>GPUSTACK_MODEL_STORE_LOW_WATERMARK</code>)</td>
+          <td>Effect window: Immediate<br/>Default: <code>70</code><br/>Usage: The usage percent a collection removes down to; at least <code>1</code>, below the high watermark.</td>
       </tr>
       <tr>
-          <td><code>model-store-peer-sync</code></td>
-          <td><code>GPUSTACK_MODEL_STORE_PEER_SYNC</code></td>
-          <td><code>true</code></td>
-          <td>Whether a node&rsquo;s plugin may pull a model&rsquo;s content from the plugins of other nodes that hold it published, instead of the hub.</td>
+          <td><code>model-store-peer-sync</code><br/>(<code>GPUSTACK_MODEL_STORE_PEER_SYNC</code>)</td>
+          <td>Effect window: Immediate<br/>Default: <code>true</code><br/>Usage: Whether a node&rsquo;s plugin may pull a model&rsquo;s content from the plugins of other nodes that hold it published, instead of the hub.</td>
       </tr>
       <tr>
           <td><code>settings-default-tracking</code></td>
-          <td><em>(none)</em></td>
-          <td><code>instance-ssh-server-image</code>, <code>kv-cache-backend-image</code>, <code>model-deployment-router-image</code>, <code>model-deployment-router-proxy-image</code>, <code>model-deployment-routing-sidecar-image</code>, <code>model-prefetch-warmup-image</code></td>
-          <td>Comma-separated names of the <code>Setting</code>s the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its <code>Setting</code> follow rule 3 (<a href="#who-owns-a-value">who owns a value</a>
+          <td>Effect window: Next trigger<br/>Default: <code>instance-ssh-server-image</code>, <code>kv-cache-backend-image</code>, <code>model-deployment-router-image</code>, <code>model-deployment-router-proxy-image</code>, <code>model-deployment-routing-sidecar-image</code>, <code>model-prefetch-warmup-image</code><br/>Usage: Comma-separated names of the <code>Setting</code>s the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its <code>Setting</code> follow rule 3 (<a href="#who-owns-a-value">who owns a value</a>
 ); removing a name is what keeps an image pin across an operator upgrade (<a href="#keeping-an-image-pin">keeping a pin</a>
 ). An empty value tracks nothing, and whitespace, duplicates and unregistered names are dropped (<a href="#tracking-list">the tracking list</a>
 ). No environment variable reads this <code>Setting</code>, so nothing on the <code>Deployment</code> can take the list over.</td>
       </tr>
       <tr>
-          <td><code>workload-fit-affinity</code></td>
-          <td><code>GPUSTACK_WORKLOAD_FIT_AFFINITY</code></td>
-          <td><code>true</code></td>
-          <td><strong>Immediate.</strong> Whether the <code>Workload</code> webhook pins a logical slice, or a shared request of two or more accelerators, on an operator queue to nodes whose <a href="/gpustack-operator/main/docs/modules/devices/scheduling/#per-card-fit-labels">fit labels</a>
+          <td><code>workload-fit-affinity</code><br/>(<code>GPUSTACK_WORKLOAD_FIT_AFFINITY</code>)</td>
+          <td>Effect window: Immediate<br/>Default: <code>true</code><br/>Usage: Whether the <code>Workload</code> webhook pins a logical slice, or a shared request of two or more accelerators, on an operator queue to nodes whose <a href="/gpustack-operator/main/docs/modules/devices/scheduling/#per-card-fit-labels">fit labels</a>
  show that one accelerator can still host it. When <code>true</code>, Kueue&rsquo;s topology-aware scheduling skips a fragmented node; when <code>false</code>, <code>Workload</code>s pass unchanged while the fit labels are still published, so the pin can be switched off on its own. Read on every webhook call, so a change takes up to 30s to reach it, and it applies to <code>Workload</code>s created or updated after that.</td>
       </tr>
   </tbody>
 </table>
-<p>These settings (<code>node-management-manual</code>, <code>instance-type-mixed-on-node</code>, <code>instance-type-derived-from-node</code>,
-<code>instance-type-drain-when-no-flavors</code>, <code>instance-type-aware-cpu-manufacturer</code>) are read <strong>per-reconcile</strong>
-(<code>ShouldValueBool(ctx)</code>): flipping one re-converges the scheduling chain on the next reconcile, with no
-restart.</p>
 <h3 id="authoring-the-instancetype">Authoring the InstanceType</h3>
 <p>With <code>instance-type-derived-from-node=false</code> the operator authors no <code>InstanceType</code>, so the
 administrator owns both halves of a pool: which <code>InstanceType</code>s exist, and whether what their queue
@@ -2432,7 +2352,7 @@ user-facing settings, listed for completeness.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/reference/settings.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/reference/settings.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/settings.md">Edit this page</a>
             
@@ -2450,7 +2370,7 @@ user-facing settings, listed for completeness.</p>
         <li><a href="#finding-the-owning-rule">Finding the owning rule</a></li>
       </ul>
     </li>
-    <li><a href="#online-adjustable-settings">Online-adjustable settings</a>
+    <li><a href="#settings">Settings</a>
       <ul>
         <li><a href="#authoring-the-instancetype">Authoring the InstanceType</a></li>
         <li><a href="#sglang-time-wait-reuse">SGLang TIME-WAIT reuse</a></li>

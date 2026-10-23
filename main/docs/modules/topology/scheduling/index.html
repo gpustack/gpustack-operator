@@ -24,7 +24,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/topology/scheduling/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -1616,35 +1616,35 @@ upgraded by this path; create fresh managed objects for this release.</p>
   <thead>
       <tr>
           <th>Symptom</th>
-          <th>Read first</th>
-          <th>Meaning</th>
+          <th>Signal</th>
+          <th>Check &amp; Mitigation</th>
       </tr>
   </thead>
   <tbody>
       <tr>
-          <td><code>TopologySource</code> <code>Ready=False</code></td>
-          <td>Its <code>Valid</code> and <code>OwnershipConflict</code> conditions</td>
-          <td>The inventory is invalid, stale, expired, or contends with another writer</td>
+          <td><code>TopologySource</code> not ready</td>
+          <td>Condition: <code>Ready=False</code></td>
+          <td>The inventory is invalid, stale, expired, or contends with another writer. Read its <code>Valid</code> and <code>OwnershipConflict</code> conditions</td>
       </tr>
       <tr>
-          <td><code>ClusterQueue</code> <code>TopologyReady=False</code></td>
-          <td>Condition reason and referenced flavors/<code>Topology</code> resources</td>
-          <td>A flavor is missing <em>TAS</em> metadata, selectors overlap, quota is not conserved, or the flavor limit was exceeded</td>
+          <td><code>ClusterQueue</code> topology not ready</td>
+          <td>Condition: <code>TopologyReady=False</code></td>
+          <td>A flavor is missing <em>TAS</em> metadata, selectors overlap, quota is not conserved, or the flavor limit was exceeded. Read the condition reason and the referenced flavors/<code>Topology</code> resources</td>
       </tr>
       <tr>
           <td><code>ClusterQueue</code> <code>TopologyReady=Unknown</code>, reason <code>AwaitingQueueStatus</code></td>
-          <td>The queue&rsquo;s Kueue <code>Active</code> condition and the Kueue controller</td>
-          <td>Kueue has not written the queue status for the current generation, so dropping a flavor waits for it</td>
+          <td>Condition: <code>TopologyReady=Unknown</code>, Reason: <code>AwaitingQueueStatus</code></td>
+          <td>Kueue has not written the queue status for the current generation, so dropping a flavor waits for it. Check the queue&rsquo;s Kueue <code>Active</code> condition and the Kueue controller</td>
       </tr>
       <tr>
           <td><code>ModelDeployment</code> remains Pending</td>
-          <td>Its progress message and generated <code>Workload</code> conditions</td>
+          <td>Status: progress message, Condition: generated <code>Workload</code> conditions</td>
           <td>No one domain at the required level fits the complete PodSet</td>
       </tr>
       <tr>
           <td>Aggregate quota looks sufficient</td>
-          <td>Flavor profiles and <code>Workload</code> topology assignment</td>
-          <td>The request cannot combine capacity from different profiles or domains</td>
+          <td>Status: <code>Workload</code> topology assignment</td>
+          <td>The request cannot combine capacity from different profiles or domains. Compare the <code>Workload</code> topology assignment with the flavor profiles</td>
       </tr>
   </tbody>
 </table>
@@ -1674,7 +1674,7 @@ Kueue prose into a new stable reason. Operational checks and source examples are
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/modules/topology/scheduling.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/df701ea27457f6fbfacf5f7dc4a9949634969c0e/docs/modules/topology/scheduling.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/topology/scheduling.md">Edit this page</a>
             
