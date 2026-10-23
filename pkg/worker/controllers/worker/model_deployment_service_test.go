@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
@@ -1141,17 +1143,32 @@ func TestModelDeploymentReconciler_RefusesAServiceItDoesNotOwn(t *testing.T) {
 }
 
 // TestEndpointEligibleSelectorActivation pins the first-enable repair at the three rendered
-// surfaces. A shape that can never qualify -- a prefill role, a replaced command -- renders no
-// eligibility term whatever any pass says. A shape that can qualify does not narrow until a real
-// pass records the predicate satisfied; the condition here is computed by the real qualifier and
-// the real status observation, never set by hand. Once a selector carries the term, a quiet pass
-// retains it, and a definite fault still withdraws.
+// surfaces.
+//
+// TWO REASONS WITHHOLD THE TERM, AND EACH IS ASSERTED ON ITS OWN. A shape that can never qualify
+// -- a role whose command line was replaced with no managed replica of it still standing -- renders
+// no eligibility term whatever any pass says. A shape that CAN qualify does not narrow until a real
+// pass records the predicate satisfied, so a supported pair with nothing decided renders no term
+// either, for a different reason.
+//
+// The condition here is computed by the real qualifier and the real status observation, never set
+// by hand. Once a selector carries the term, a quiet pass retains it, and a definite fault still
+// withdraws.
 func TestEndpointEligibleSelectorActivation(t *testing.T) {
 	prefill := healthDeployment(2)
 	prefill.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	for i := range prefill.Spec.Roles {
 		prefill.Spec.Roles[i].Kind = workercore.ModelDeploymentRoleKindPrefill
 	}
+
+	// THE SAME PAIR WITH ONE ROLE TAKING ITS COMMAND LINE OVER: a shape the support check refuses,
+	// so no pass can ever qualify it and its surfaces never narrow.
+	prefillTakeOver := healthDeployment(2)
+	prefillTakeOver.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	for i := range prefillTakeOver.Spec.Roles {
+		prefillTakeOver.Spec.Roles[i].Kind = workercore.ModelDeploymentRoleKindPrefill
+	}
+	prefillTakeOver.Spec.Roles[0].Command = []string{"custom-server"}
 
 	takeOver := healthDeployment(2)
 	takeOver.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
@@ -1167,27 +1184,87 @@ func TestEndpointEligibleSelectorActivation(t *testing.T) {
 		healthPod("server", 0, 1, healthBool(true), "uid-b"),
 	})
 
-	for name, md := range map[string]*workercore.ModelDeployment{
-		"prefill role":     prefill,
-		"replaced command": takeOver,
+	for _, tc := range []struct {
+		name   string
+		md     *workercore.ModelDeployment
+		reason string
+	}{
+		{
+			name:   "supported pair with nothing decided",
+			md:     prefill,
+			reason: "nothing has decided the predicate yet",
+		},
+		{
+			name:   "pair that took its command line over",
+			md:     prefillTakeOver,
+			reason: "the shape can never activate",
+		},
+		{
+			name:   "replaced command",
+			md:     takeOver,
+			reason: "the shape can never activate",
+		},
 	} {
-		t.Run(name+" renders no narrowing", func(t *testing.T) {
-			front := renderModelDeploymentService(md, nil)
+		t.Run(tc.name+" renders no narrowing", func(t *testing.T) {
+			front := renderModelDeploymentService(tc.md, nil)
 			_, has := front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
-			assert.False(t, has, "front Service must not narrow a never-activating shape")
-			roleSvc := renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil, nil, false)
+			assert.False(t, has, "front Service must not narrow because "+tc.reason)
+			roleSvc := renderModelDeploymentRoleService(tc.md, &tc.md.Spec.Roles[0], nil, nil, false)
 			_, has = roleSvc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
-			assert.False(t, has, "role Service must not narrow a never-activating shape")
-			published, err := renderModelDeploymentRouterObjects(context.Background(), md,
-				map[string]string{md.Spec.Roles[0].Name: "manufacturer"}, false)
+			assert.False(t, has, "role Service must not narrow because "+tc.reason)
+			published, err := renderModelDeploymentRouterObjects(context.Background(), tc.md,
+				map[string]string{tc.md.Spec.Roles[0].Name: "manufacturer"}, false)
 			require.NoError(t, err)
 			_, has = published.Contract.Roles[0].Selector[modelDeploymentLabelKeyEndpointEligible]
-			assert.False(t, has, "router discovery must not narrow a never-activating shape")
+			assert.False(t, has, "router discovery must not narrow because "+tc.reason)
 			assert.NotContains(t, published.ConfigMap.Data[modelDeploymentRouterConfigKey],
 				modelDeploymentLabelKeyEndpointEligible+"="+modelDeploymentEndpointEligibleValue,
-				"router discovery config must not narrow a never-activating shape")
+				"router discovery config must not narrow because "+tc.reason)
 		})
 	}
+
+	t.Run("a take-over pair stays unnarrowed beside a qualified ordinary role", func(t *testing.T) {
+		// THE PREDICATE IS DECIDED HERE, and that is the whole point of this case. With nothing
+		// decided the ACTIVATION half would withhold the term on its own, so a take-over shape
+		// beside an ordinary one would be unnarrowed for a reason that has nothing to do with the
+		// take-over. Here the ordinary role's real qualification decides the predicate, so the
+		// ACTIVATION half WOULD narrow this deployment, and the take-over role's own surfaces stay
+		// unnarrowed because the shape can never activate -- which is then the only reason left.
+		md := healthDeployment(2, "prefill")
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		// THE TAKE-OVER ROLE IS THE FRONT ONE, because the deployment-wide Service routes the front
+		// role alone and the case is about that role's surfaces.
+		md.Spec.Roles[0], md.Spec.Roles[1] = md.Spec.Roles[1], md.Spec.Roles[0]
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+		md.Spec.Roles[0].Command = []string{"custom-server"}
+		pods := stampHealthGroupTotals(md, []core.Pod{
+			healthPod("server", 0, 0, healthBool(true), "uid-a"),
+			healthPod("server", 0, 1, healthBool(true), "uid-b"),
+		})
+		qs := qualifyModelDeploymentInstances(context.Background(), md, pods,
+			modelDeploymentPendingReplacement{}, boundProbeFetch)
+		require.Len(t, qs, 1, "only the ordinary role has members")
+		observeModelDeploymentEndpointEligibility(md, qs)
+		require.True(t, modelDeploymentEligibilityDecided(md),
+			"setup requires a decided predicate, so the take-over role's unnarrowed surfaces name the static half")
+
+		ordinary := renderModelDeploymentRoleService(md, &md.Spec.Roles[1], nil, nil, false)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			ordinary.Spec.Selector[modelDeploymentLabelKeyEndpointEligible],
+			"the ordinary role beside it narrows, so the predicate really is decided")
+
+		front := renderModelDeploymentService(md, nil)
+		_, has := front.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
+		assert.False(t, has, "a shape that can never activate never narrows, whatever any pass says")
+		roleSvc := renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil, nil, false)
+		_, has = roleSvc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible]
+		assert.False(t, has, "its own role Service does not narrow either")
+		published, err := renderModelDeploymentRouterObjects(context.Background(), md,
+			map[string]string{md.Spec.Roles[0].Name: "manufacturer"}, false)
+		require.NoError(t, err)
+		_, has = published.Contract.Roles[0].Selector[modelDeploymentLabelKeyEndpointEligible]
+		assert.False(t, has, "the router's published selector for it does not narrow either")
+	})
 
 	t.Run("quiet first enable keeps routing, activation narrows, quiet passes retain", func(t *testing.T) {
 		quiet := func(context.Context, string, []byte) ([]byte, error) {
@@ -1342,4 +1419,651 @@ func TestRenderModelDeploymentService_FrontGateReadsOnlyTheFrontRoleMembers(t *t
 			assert.False(t, narrowed, "a take-over front role is never narrowed by endpoint eligibility")
 		})
 	}
+}
+
+// serviceReadyUnknown is the readiness a member reports while kubelet has not made up its mind.
+//
+// THE GROUP IS HELD RATHER THAN REVOKED, and the replica is not part of the deployment-wide answer
+// at all: a member that has reported nothing is a member the operator knows nothing about.
+var serviceReadyUnknown *bool
+
+// serviceRoleOf returns the named role of a deployment, or nil when the deployment does not
+// declare one.
+func serviceRoleOf(md *workercore.ModelDeployment, name string) *workercore.ModelDeploymentRole {
+	for i := range md.Spec.Roles {
+		if md.Spec.Roles[i].Name == name {
+			return &md.Spec.Roles[i]
+		}
+	}
+
+	return nil
+}
+
+// serviceManagedMember is a member this operator built, which is what makes a role's effective
+// command line empty while such a member stands.
+func serviceManagedMember(role string, ordinal int) core.Pod {
+	member := healthPod(role, ordinal, 0, healthBool(true), "uid-managed")
+	member.Spec.Containers = []core.Container{{Name: modelDeploymentMainContainerName}}
+
+	return member
+}
+
+// serviceExternalDPMember is one member of an External-DP replica, carrying the command line the
+// render would have written.
+//
+// THE DEPLOYED SHAPE IS READ FROM THE MEMBERS and not from the role, so a member that carries no
+// command line reads as leader-served and the role's own arguments would never be consulted.
+func serviceExternalDPMember(role string, ordinal, member int, ready *bool, uid string) core.Pod {
+	pod := healthPod(role, ordinal, member, ready, uid)
+	pod.Spec.Containers = []core.Container{{
+		Name: modelDeploymentMainContainerName,
+		Args: []string{"--data-parallel-size", "2", "--data-parallel-rank", strconv.Itoa(member)},
+	}}
+
+	return pod
+}
+
+// serviceLabelPods runs the real qualifier and the real label writers over the members, and
+// returns the members with the eligibility and answering labels written plus the qualifications
+// the pass produced.
+//
+// THE WRITERS ARE THE REAL ONES: the question this file asks is which endpoints a Service selector
+// reaches, and that depends on the labels the writers put on the member. The live selectors are
+// the ones the live Services carry, because the writers read them to decide whether a member
+// answers.
+func serviceLabelPods(
+	t *testing.T, md *workercore.ModelDeployment, pods []core.Pod,
+	liveSelectors map[string]map[string]string,
+	pairFetch ...modelDeploymentGroupForwardPairFetch,
+) ([]core.Pod, []modelDeploymentInstanceQualification) {
+	t.Helper()
+
+	qualifications := qualifyModelDeploymentInstances(context.Background(), md, pods,
+		modelDeploymentPendingReplacement{}, boundProbeFetch, pairFetch...)
+	byMember := modelDeploymentQualificationsByMember(qualifications)
+
+	labelled := make([]core.Pod, len(pods))
+	copy(labelled, pods)
+	for _, view := range modelDeploymentGroupPodsByReplica(labelled) {
+		role := serviceRoleOf(md, view.Role)
+		if role == nil {
+			continue
+		}
+		for _, member := range view.Members {
+			qualification, evaluated := byMember[member.UID]
+			eligible := modelDeploymentPodEligible(md, role, member, view, qualification, evaluated)
+			// THE GATE IS ASKED OF THE MODE THIS REPLICA IS RUNNING, as the writer asks it.
+			effective := *role
+			if modelDeploymentReplicaRunsCommand(view.Members) {
+				effective.Command = nil
+			}
+			gated := modelDeploymentEligibilitySelectorActive(md, &effective,
+				liveSelectors[role.Name], modelDeploymentEligibilityDecided(md))
+			answering := modelDeploymentPodAnswersAPI(member, view, md.Spec.Engine.Name,
+				eligible, gated, map[int]bool{})
+			modelDeploymentApplyLabel(member, modelDeploymentLabelKeyEndpointEligible, eligible)
+			modelDeploymentApplyLabel(member, modelDeploymentLabelKeyAPIAnswering, answering)
+		}
+	}
+
+	return labelled, qualifications
+}
+
+// serviceReached names the members a Service's selector reaches, sorted, so a case states the
+// whole set it expects rather than probing for one member of it.
+func serviceReached(svc *core.Service, pods []core.Pod) []string {
+	selector := labels.SelectorFromSet(svc.Spec.Selector)
+	reached := make([]string, 0, len(pods))
+	for i := range pods {
+		if selector.Matches(labels.Set(pods[i].Labels)) {
+			reached = append(reached, pods[i].Name)
+		}
+	}
+	slices.Sort(reached)
+
+	return reached
+}
+
+// TestModelDeploymentGroupForwardActivatable states when a role's group-forward capability can
+// activate the eligibility gate.
+//
+// THREE FACTS ARE KEPT APART HERE. An engine the matrix does not carry has no observation at
+// all. A role that took its command line over serves a route the operator does not know, so it
+// cannot activate -- unless a managed member of it still stands, because the mode the standing
+// members run is the mode the gate asks about. A P/D role activates when the operator has an
+// observation for its pair, and a partner that took its own command line over does not take this
+// role's barrier away.
+func TestModelDeploymentGroupForwardActivatable(t *testing.T) {
+	pairDeployment := func(engine string, fronted bool) *workercore.ModelDeployment {
+		md := healthPairDeployment(engine, 1, 1)
+		if fronted {
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		}
+
+		return md
+	}
+	takenOver := func(md *workercore.ModelDeployment, role string) *workercore.ModelDeployment {
+		for i := range md.Spec.Roles {
+			if md.Spec.Roles[i].Name == role {
+				md.Spec.Roles[i].Command = []string{"custom-server"}
+			}
+		}
+
+		return md
+	}
+
+	testCases := []struct {
+		name string
+		md   *workercore.ModelDeployment
+		role string
+		// standing says a managed member of the role still stands, which is what makes the
+		// role's effective command line empty.
+		standing bool
+		want     bool
+	}{
+		{
+			name: "an ordinary role of a supported engine",
+			md:   healthDeployment(1),
+			role: "server",
+			want: true,
+		},
+		{
+			name: "an ordinary role of an engine outside the matrix",
+			md: func() *workercore.ModelDeployment {
+				md := healthDeployment(1)
+				md.Spec.Engine.Name = "no-such-engine"
+
+				return md
+			}(),
+			role: "server",
+			want: false,
+		},
+		{
+			name: "a role that took its command line over",
+			md: func() *workercore.ModelDeployment {
+				md := healthDeployment(1)
+				md.Spec.Roles[0].Command = []string{"custom-server"}
+
+				return md
+			}(),
+			role: "server",
+			want: false,
+		},
+		{
+			name:     "a role that took its command line over while a managed member stands",
+			md:       takenOver(healthDeployment(1), "server"),
+			role:     "server",
+			standing: true,
+			want:     true,
+		},
+		{
+			name: "a prefill role of a supported pair",
+			md:   pairDeployment(workercore.ModelDeploymentEngineSGLang, false),
+			role: "prefill",
+			want: true,
+		},
+		{
+			name: "a decode role of a supported pair",
+			md:   pairDeployment(workercore.ModelDeploymentEngineSGLang, false),
+			role: "decode",
+			want: true,
+		},
+		{
+			name: "a prefill role of an engine the pair matrix does not carry",
+			md:   pairDeployment("no-such-engine", false),
+			role: "prefill",
+			want: false,
+		},
+		{
+			name: "a vllm decode role with no routing proxy in front of it",
+			md:   pairDeployment(workercore.ModelDeploymentEngineVLLM, false),
+			role: "decode",
+			want: false,
+		},
+		{
+			name: "a vllm decode role with the routing proxy in front of it",
+			md:   pairDeployment(workercore.ModelDeploymentEngineVLLM, true),
+			role: "decode",
+			want: true,
+		},
+		{
+			name: "a prefill role that took its command line over",
+			md:   takenOver(pairDeployment(workercore.ModelDeploymentEngineSGLang, false), "prefill"),
+			role: "prefill",
+			want: false,
+		},
+		{
+			name:     "a prefill role that took its command line over while a managed member stands",
+			md:       takenOver(pairDeployment(workercore.ModelDeploymentEngineSGLang, false), "prefill"),
+			role:     "prefill",
+			standing: true,
+			want:     true,
+		},
+		{
+			name: "a decode role whose prefill partner took its command line over",
+			md:   takenOver(pairDeployment(workercore.ModelDeploymentEngineSGLang, false), "prefill"),
+			role: "decode",
+			want: true,
+		},
+		{
+			name: "a decode role that took its own command line over",
+			md:   takenOver(pairDeployment(workercore.ModelDeploymentEngineSGLang, false), "decode"),
+			role: "decode",
+			want: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			role := serviceRoleOf(tc.md, tc.role)
+			require.NotNil(t, role, "setup requires the named role")
+			if tc.standing {
+				member := serviceManagedMember(tc.role, 0)
+				role = modelDeploymentEffectiveRoleForEligibility(role, []*core.Pod{&member})
+			}
+
+			assert.Equal(t, tc.want, modelDeploymentGroupForwardActivatable(tc.md, role),
+				"the %s role of a %s deployment", tc.role, tc.md.Spec.Engine.Name)
+		})
+	}
+}
+
+// serviceExternalDPDeployment is a deployment whose role this operator serves with a data-parallel
+// replica, so every rank of the replica answers for itself.
+func serviceExternalDPDeployment() *workercore.ModelDeployment {
+	return newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Roles[0].Replicas = 2
+		md.Spec.Roles[0].ExtraArgs = []string{
+			"--data-parallel-size", "2",
+			"--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)",
+		}
+	})
+}
+
+// serviceLeaderMember is one member of a replica this operator serves with a leader, so the
+// member carries no parallelism and the replica answers for its leader alone.
+func serviceLeaderMember(role string, ordinal, member int, ready *bool, uid string) core.Pod {
+	pod := healthPod(role, ordinal, member, ready, uid)
+	pod.Spec.Containers = []core.Container{{Name: modelDeploymentMainContainerName}}
+
+	return pod
+}
+
+// TestRenderModelDeploymentRoleService_PrefillAndDecodeSelectIndependently states that the two
+// roles of a P/D deployment are selected by their own qualification, and that the deployment-wide
+// Service follows the front role alone.
+//
+// THE PAIR IS OBSERVED AS ONE THING, so a fault on one side is expected to reach the other side.
+// What this pins is the SELECTION: each role's Service reaches the members its own role
+// qualified, and the deployment-wide Service reaches exactly what the front role's Service
+// reaches.
+func TestRenderModelDeploymentRoleService_PrefillAndDecodeSelectIndependently(t *testing.T) {
+	testCases := []struct {
+		name string
+		// unsafe names the group that is not safe, by role and ordinal.
+		unsafeRole    string
+		unsafeOrdinal int
+		wantPrefill   []string
+		wantDecode    []string
+	}{
+		{
+			name:          "a prefill group that is not safe leaves the decode role selectable",
+			unsafeRole:    "prefill",
+			unsafeOrdinal: 0,
+			wantPrefill:   []string{"prefill-1-0"},
+			wantDecode:    []string{"decode-0-0", "decode-1-0"},
+		},
+		{
+			name:          "a decode group that is not safe leaves the prefill role selectable",
+			unsafeRole:    "decode",
+			unsafeOrdinal: 0,
+			wantPrefill:   []string{"prefill-0-0", "prefill-1-0"},
+			wantDecode:    []string{"decode-1-0"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+			for i := range md.Spec.Roles {
+				md.Spec.Roles[i].Replicas = 2
+			}
+			ready := func(role string, ordinal int) *bool {
+				if role == tc.unsafeRole && ordinal == tc.unsafeOrdinal {
+					return healthBool(false)
+				}
+
+				return healthBool(true)
+			}
+			pods := []core.Pod{
+				healthPairPod("prefill", 0, 0, ready("prefill", 0), "uid-p0", "8998"),
+				healthPairPod("prefill", 1, 0, ready("prefill", 1), "uid-p1", "8999"),
+				healthPairPod("decode", 0, 0, ready("decode", 0), "uid-d0", ""),
+				healthPairPod("decode", 1, 0, ready("decode", 1), "uid-d1", ""),
+			}
+			pods = stampHealthGroupTotals(md, pods)
+			fetch := &healthPairFetch{prefillHosts: map[string]bool{
+				healthPairHost("prefill", 0, 0): true,
+				healthPairHost("prefill", 1, 0): true,
+			}}
+
+			qualified, qualifications := serviceLabelPods(t, md, pods, nil, fetch.fetch)
+			observeModelDeploymentEndpointEligibility(md, qualifications)
+
+			prefillSvc := renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil, nil, false)
+			decodeSvc := renderModelDeploymentRoleService(md, &md.Spec.Roles[1], nil, nil, false)
+			deploymentSvc := renderModelDeploymentService(md, qualified)
+
+			assert.Equal(t, tc.wantPrefill, serviceReached(prefillSvc, qualified),
+				"the prefill role's Service reaches the members its own role qualified")
+			assert.Equal(t, tc.wantDecode, serviceReached(decodeSvc, qualified),
+				"the decode role's Service reaches the members its own role qualified")
+			assert.Equal(t, serviceReached(prefillSvc, qualified),
+				serviceReached(deploymentSvc, qualified),
+				"the deployment-wide Service follows the front role alone")
+		})
+	}
+}
+
+// TestRenderModelDeploymentService_NeverReachesAnotherRolesProcess states that the
+// deployment-wide Service of a P/D deployment names the front role and reaches no process of the
+// other role.
+func TestRenderModelDeploymentService_NeverReachesAnotherRolesProcess(t *testing.T) {
+	md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+	pods := []core.Pod{
+		healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+		healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", ""),
+	}
+	pods = stampHealthGroupTotals(md, pods)
+	fetch := &healthPairFetch{prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true}}
+
+	qualified, qualifications := serviceLabelPods(t, md, pods, nil, fetch.fetch)
+	observeModelDeploymentEndpointEligibility(md, qualifications)
+
+	front := modelDeploymentFrontRole(md)
+	require.Equal(t, "prefill", front.Name, "setup requires the prefill role to be the front")
+	deploymentSvc := renderModelDeploymentService(md, qualified)
+
+	assert.Equal(t, front.Name, deploymentSvc.Spec.Selector[modelDeploymentLabelKeyComponent],
+		"the deployment-wide Service names the front role")
+	assert.Equal(t, []string{"prefill-0-0"}, serviceReached(deploymentSvc, qualified),
+		"the deployment-wide Service reaches the front role and nothing else")
+}
+
+// TestRenderModelDeploymentRoleService_ExternalDPPublishesEveryRankOfAQualifiedGroup states that
+// an External-DP role's Service publishes every rank of a qualified group.
+func TestRenderModelDeploymentRoleService_ExternalDPPublishesEveryRankOfAQualifiedGroup(t *testing.T) {
+	md := serviceExternalDPDeployment()
+	pods := []core.Pod{
+		serviceExternalDPMember("server", 0, 0, healthBool(true), "uid-a0"),
+		serviceExternalDPMember("server", 0, 1, healthBool(true), "uid-a1"),
+		serviceExternalDPMember("server", 1, 0, healthBool(true), "uid-b0"),
+		serviceExternalDPMember("server", 1, 1, healthBool(true), "uid-b1"),
+	}
+	pods = stampHealthGroupTotals(md, pods)
+
+	qualified, qualifications := serviceLabelPods(t, md, pods, nil)
+	observeModelDeploymentEndpointEligibility(md, qualifications)
+
+	svc := renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil, nil, false)
+
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible],
+		"the Service names the endpoints the operator qualified")
+	assert.NotContains(t, svc.Spec.Selector, modelDeploymentMemberIndexLabel,
+		"an External-DP role publishes every rank and not only its leader")
+	assert.Equal(t, []string{"server-0-0", "server-0-1", "server-1-0", "server-1-1"},
+		serviceReached(svc, qualified),
+		"every rank of every qualified group is published")
+}
+
+// TestRenderModelDeploymentRoleService_AnOrdinaryGroupKeepsLeaderOnlySelection states that a role
+// this operator serves with a leader keeps its leader-only selection.
+func TestRenderModelDeploymentRoleService_AnOrdinaryGroupKeepsLeaderOnlySelection(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Roles[0].Replicas = 2
+	})
+	pods := []core.Pod{
+		serviceLeaderMember("server", 0, 0, healthBool(true), "uid-a0"),
+		serviceLeaderMember("server", 0, 1, healthBool(true), "uid-a1"),
+		serviceLeaderMember("server", 1, 0, healthBool(true), "uid-b0"),
+		serviceLeaderMember("server", 1, 1, healthBool(true), "uid-b1"),
+	}
+	pods = stampHealthGroupTotals(md, pods)
+
+	qualified, qualifications := serviceLabelPods(t, md, pods, nil)
+	observeModelDeploymentEndpointEligibility(md, qualifications)
+
+	svc := renderModelDeploymentRoleService(md, &md.Spec.Roles[0], nil, nil, false)
+
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible],
+		"the Service names the endpoints the operator qualified")
+	assert.Equal(t, strconv.Itoa(modelDeploymentLeaderMemberIndex),
+		svc.Spec.Selector[modelDeploymentMemberIndexLabel],
+		"an ordinary role keeps its leader-only selection")
+	assert.Equal(t, []string{"server-0-0", "server-1-0"}, serviceReached(svc, qualified),
+		"only the leader of every group answers")
+}
+
+// serviceConvergeServices runs the production Service convergence and returns the Services it
+// wrote, by name.
+//
+// THE PRODUCTION PATH IS USED because the term a previous pass narrowed onto a live Service is
+// cluster state a from-scratch render does not carry, and the retention of that term across a
+// quiet observation is what this file is about.
+func serviceConvergeServices(
+	t *testing.T, md *workercore.ModelDeployment, pods []core.Pod,
+	qualifications []modelDeploymentInstanceQualification, cli ctrlcli.Client,
+) map[string]*core.Service {
+	t.Helper()
+
+	reconciler := &ModelDeploymentReconciler{
+		Client:    cli,
+		APIReader: cli,
+		Recorder:  ctrlrecord.NewFakeRecorder(16),
+	}
+	require.NoError(t, reconciler.syncModelDeploymentService(context.Background(), md,
+		modelDeploymentQualificationsDecided(qualifications), pods))
+
+	services := map[string]*core.Service{}
+	for _, name := range []string{
+		md.Name, md.Name + "-prefill", md.Name + "-decode",
+		md.Name + "-" + md.Spec.Roles[0].Name,
+	} {
+		service := &core.Service{}
+		if err := cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: md.Namespace, Name: name},
+			service); err == nil {
+			services[name] = service
+		}
+	}
+
+	return services
+}
+
+// TestRenderModelDeploymentRoleService_AnUnsafeMemberWithdrawsItsWholeGroup states that one
+// member that is not safe takes every rank of its group out of the Service while every rank of
+// the healthy group stays.
+//
+// THE SERVICES ARE CONVERGED RATHER THAN RENDERED, because a term that was narrowed onto a live
+// Service has to survive a quiet observation: the deployment-wide condition is Unknown while a
+// group is held, and a term dropped then would hand the old routing back the group this operator
+// withdrew.
+func TestRenderModelDeploymentRoleService_AnUnsafeMemberWithdrawsItsWholeGroup(t *testing.T) {
+	testCases := []struct {
+		name string
+		// absent says the member of the second group is gone rather than unsafe.
+		absent bool
+		// unsafe says how the member of the second group reports itself.
+		unsafe func(pod *core.Pod)
+	}{
+		{
+			name: "a member that reports it is not ready",
+			unsafe: func(pod *core.Pod) {
+				pod.Status.Conditions = []core.PodCondition{
+					{Type: core.PodReady, Status: core.ConditionFalse},
+				}
+			},
+		},
+		{
+			name: "a member that reports nothing about its readiness",
+			unsafe: func(pod *core.Pod) {
+				pod.Status.Conditions = []core.PodCondition{
+					{Type: core.PodReady, Status: core.ConditionUnknown},
+				}
+			},
+		},
+		{
+			name:   "a member that is missing",
+			absent: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := serviceExternalDPDeployment()
+			md.UID = "uid-qwen"
+			members := []core.Pod{
+				serviceExternalDPMember("server", 0, 0, healthBool(true), "uid-a0"),
+				serviceExternalDPMember("server", 0, 1, healthBool(true), "uid-a1"),
+				serviceExternalDPMember("server", 1, 0, healthBool(true), "uid-b0"),
+				serviceExternalDPMember("server", 1, 1, healthBool(true), "uid-b1"),
+			}
+			for i := range members {
+				kubemeta.ControlOnWithoutBlock(&members[i], md,
+					workercore.SchemeGroupVersionKind("ModelDeployment"))
+			}
+
+			cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+			// the first pass: every group is healthy, so the Services narrow onto the members
+			// this operator qualified.
+			qualified, qualifications := serviceLabelPods(t, md, stampHealthGroupTotals(md, members), nil)
+			observeModelDeploymentEndpointEligibility(md, qualifications)
+			services := serviceConvergeServices(t, md, qualified, qualifications, cli)
+			require.NotNil(t, services[md.Name+"-"+md.Spec.Roles[0].Name], "setup requires the role Service")
+			assert.Equal(t, []string{"server-0-0", "server-0-1", "server-1-0", "server-1-1"},
+				serviceReached(services[md.Name+"-"+md.Spec.Roles[0].Name], qualified),
+				"the first pass publishes every rank of every healthy group")
+
+			// the second pass: one member of the second group is no longer safe.
+			faulted := make([]core.Pod, len(qualified))
+			copy(faulted, qualified)
+			if tc.absent {
+				faulted = append(faulted[:3], faulted[4:]...)
+			} else {
+				tc.unsafe(&faulted[2])
+			}
+			qualified, qualifications = serviceLabelPods(t, md, faulted, nil)
+			observeModelDeploymentEndpointEligibility(md, qualifications)
+			services = serviceConvergeServices(t, md, qualified, qualifications, cli)
+
+			service := services[md.Name+"-"+md.Spec.Roles[0].Name]
+			require.NotNil(t, service, "setup requires the role Service")
+			assert.Equal(t, modelDeploymentEndpointEligibleValue,
+				service.Spec.Selector[modelDeploymentLabelKeyEndpointEligible],
+				"the Service keeps naming the endpoints this operator qualified")
+			assert.Equal(t, []string{"server-0-0", "server-0-1"},
+				serviceReached(service, qualified),
+				"every rank of the healthy group stays selected and no rank of the unsafe group does")
+		})
+	}
+}
+
+// TestRenderModelDeploymentRoleService_ATakeOverKeepsTheNarrowedSelector states that a role that
+// takes its command line over while a managed member of it still stands keeps the Services
+// narrowed.
+//
+// THE PAIR CANNOT BE ASKED ANY MORE ONCE A ROLE TOOK ITS COMMAND LINE OVER, so the
+// deployment-wide condition is Unknown while the qualified groups keep the eligibility they have.
+// The Services then select by membership, and the group qualification has to reach that answer:
+// an unsafe member has to stay out, a healthy carried member has to stay in, and a member the
+// take-over brought and nothing labeled has to stay out too.
+func TestRenderModelDeploymentRoleService_ATakeOverKeepsTheNarrowedSelector(t *testing.T) {
+	md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+	md.UID = "uid-qwen"
+	md.Spec.Roles[1].Replicas = 2
+	members := []core.Pod{
+		healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998"),
+		healthPairPod("decode", 0, 0, serviceReadyUnknown, "uid-d0", ""),
+		healthPairPod("decode", 1, 0, healthBool(true), "uid-d1", ""),
+	}
+	for i := range members {
+		members[i].Spec.Containers = []core.Container{{Name: modelDeploymentMainContainerName}}
+		kubemeta.ControlOnWithoutBlock(&members[i], md,
+			workercore.SchemeGroupVersionKind("ModelDeployment"))
+	}
+	pods := stampHealthGroupTotals(md, members)
+	fetch := &healthPairFetch{prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true}}
+
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	// the first pass: the pair is verified, so the healthy groups qualify and the Services
+	// narrow onto them.
+	qualified, qualifications := serviceLabelPods(t, md, pods, nil, fetch.fetch)
+	observeModelDeploymentEndpointEligibility(md, qualifications)
+	services := serviceConvergeServices(t, md, qualified, qualifications, cli)
+	for _, name := range []string{md.Name, md.Name + "-prefill", md.Name + "-decode"} {
+		require.NotNil(t, services[name], "setup requires the %s Service", name)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			services[name].Spec.Selector[modelDeploymentLabelKeyEndpointEligible],
+			"the %s Service narrows onto the qualified members", name)
+	}
+	assert.Equal(t, []string{"decode-1-0"},
+		serviceReached(services[md.Name+"-decode"], qualified),
+		"the unsafe decode group is out of the decode role's Service")
+
+	// the prefill role takes its command line over while its managed member still stands, and
+	// the member the take-over brought carries no label.
+	md.Spec.Roles[0].Command = []string{"custom-server"}
+	takeover := healthPairPod("prefill", 1, 0, healthBool(true), "uid-p1", "")
+	takeover.Spec.Containers = []core.Container{{Name: modelDeploymentMainContainerName}}
+	kubemeta.ControlOnWithoutBlock(&takeover, md,
+		workercore.SchemeGroupVersionKind("ModelDeployment"))
+
+	// the second pass reads the live selectors the first pass left behind, the way the writer
+	// reads them, and the pair cannot be asked any more: nothing is decided, and the qualified
+	// groups keep the eligibility they have.
+	liveSelectors := map[string]map[string]string{}
+	for _, role := range md.Spec.Roles {
+		service := services[md.Name+"-"+role.Name]
+		require.NotNil(t, service, "setup requires the %s Service", role.Name)
+		liveSelectors[role.Name] = service.Spec.Selector
+	}
+	carried := append(append([]core.Pod{}, qualified...), takeover)
+	qualified, qualifications = serviceLabelPods(t, md, stampHealthGroupTotals(md, carried),
+		liveSelectors, fetch.fetch)
+	observeModelDeploymentEndpointEligibility(md, qualifications)
+	require.False(t, modelDeploymentEligibilityDecided(md),
+		"the pair cannot be asked, so the predicate is not decided")
+	services = serviceConvergeServices(t, md, qualified, qualifications, cli)
+
+	// THE REQUIREMENT STAYS IN FORCE. The take-over did not decide the predicate, so a pass that
+	// re-read the shape alone would let the requirement lapse and the Service would go back to
+	// naming whatever it finds. The eligibility is carried by the membership of the answering
+	// members here, so the requirement shows up as the note that says it is active.
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		services[md.Name+"-prefill"].Annotations[modelDeploymentEligibilityActiveAnnotation],
+		"the prefill role's Service keeps the requirement in force through the take-over")
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		services[md.Name].Annotations[modelDeploymentEligibilityActiveAnnotation],
+		"and so does the deployment-wide Service")
+	// THE DECODE ROLE'S SERVICE KEEPS THE TERM, because the retention reads it back from the live
+	// object: nothing has decided the predicate, so the term the first pass published is the one
+	// that holds.
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		services[md.Name+"-decode"].Spec.Selector[modelDeploymentLabelKeyEndpointEligible],
+		"the decode role's Service keeps the term the first pass published")
+
+	assert.Equal(t, []string{"prefill-0-0"},
+		serviceReached(services[md.Name+"-prefill"], qualified),
+		"the prefill role's Service keeps serving the managed member and not the take-over member")
+	assert.Equal(t, []string{"decode-1-0"},
+		serviceReached(services[md.Name+"-decode"], qualified),
+		"the decode role's Service keeps serving the healthy group and not the unsafe one")
+	assert.Equal(t, []string{"prefill-0-0"},
+		serviceReached(services[md.Name], qualified),
+		"the deployment-wide Service keeps serving the front role alone")
 }

@@ -244,10 +244,10 @@ func TestRenderModelDeploymentRouterObjects_SelectsEligibleEndpoints(t *testing.
 // mixedEligibilityDeployment is the shape whose roles disagree about activatability: an encoder of
 // one member, a prefiller of two and a decoder of one, on llm-d with vLLM.
 //
-// It is the only shape that separates the two questions the gate asks. The encoder and the decoder
-// have nothing to verify and answer NotApplicable, so they activate; the prefiller has a group and
-// an observation the operator refuses to make, so it answers Unsupported and never activates. One
-// deployment therefore carries a role the gate decides beside roles it may not.
+// It is the only shape that separates the two questions the gate asks. The encoder has nothing to
+// verify and answers NotApplicable, so it activates; the pair beside it took its command lines
+// over, so the operator knows no route to ask about it and it can never activate. One deployment
+// therefore carries a role the gate decides beside roles it may not.
 func mixedEligibilityDeployment() *workercore.ModelDeployment {
 	role := func(
 		name string, kind workercore.ModelDeploymentRoleKind, replicaSize int32,
@@ -271,6 +271,12 @@ func mixedEligibilityDeployment() *workercore.ModelDeployment {
 			role("prefill", workercore.ModelDeploymentRoleKindPrefill, 2),
 			role("decode", workercore.ModelDeploymentRoleKindDecode, 1),
 		}
+		// THE PREFILLER AND THE DECODER TOOK THEIR COMMAND LINES OVER, so the operator knows no
+		// route to ask the pair about and neither of them can ever activate. That is the premise
+		// the lifecycle below is about: a deployment whose roles disagree about activatability,
+		// with the encoder able to qualify and the pair beside it unable to.
+		md.Spec.Roles[1].Command = []string{"custom-server"}
+		md.Spec.Roles[2].Command = []string{"custom-server"}
 	})
 }
 
@@ -712,12 +718,12 @@ func TestRenderModelDeploymentRouterObjects_EPDKeepsUnsupportedPrefillDiscoverab
 // TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged pins the profile that
 // carries no activatable role against every byte a router Pod is rolled by.
 //
-// A prefill/decode pair answers Unsupported for its group-forward capability by construction, so
-// no pass ever writes an eligibility label on it. The gate has therefore nothing to say about this
-// shape, and any term it gained would select zero endpoints. The hash below is taken over the whole
-// ConfigMap, so it pins the picker document and every selector in it as well as the selector string
-// beside it -- which is the point: a change here that reads as a comment edit is a restart of every
-// prefill/decode router in the cluster.
+// A pair whose roles took their command lines over serves routes this operator does not know, so
+// no pass can ever qualify it and no pass ever writes an eligibility label on it. The gate has
+// therefore nothing to say about this shape, and any term it gained would select zero endpoints.
+// The hash below is taken over the whole ConfigMap, so it pins the picker document and every
+// selector in it as well as the selector string beside it -- which is the point: a change here that
+// reads as a comment edit is a restart of every prefill/decode router in the cluster.
 func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *testing.T) {
 	const (
 		wantSelector = "app.kubernetes.io/name=model-deployment," +
@@ -728,7 +734,13 @@ func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *tes
 	// Decided as well as dormant, because a decided condition is the only thing that could move
 	// this shape and the assertion that it does not is the whole claim.
 	for _, decided := range []bool{false, true} {
-		md := routedModelDeployment()
+		md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+			// THE PROFILE THE HASH BELOW PINS IS A SHAPE THE GATE MAY NEVER JUDGE, so both roles
+			// take their command lines over: the operator knows no route to ask the pair about,
+			// and a role it cannot ask about can never qualify.
+			md.Spec.Roles[0].Command = []string{"custom-server"}
+			md.Spec.Roles[1].Command = []string{"custom-server"}
+		})
 		if decided {
 			ModelDeploymentConditionEndpointEligibility.False(
 				md, modelDeploymentReasonEndpointsRevoked, "a member was withdrawn")

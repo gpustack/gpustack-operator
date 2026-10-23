@@ -330,10 +330,17 @@ func modelDeploymentRoleHasMultiMemberReplica(
 
 // modelDeploymentGroupForwardActivatable reports whether this role's group-forward capability
 // can ever reach Verified or NotApplicable — the two states that activate eligibility. A shape
-// the operator has no observation for (an engine absent from the matrix, or a prefill/decode
-// role) answers Unsupported by construction and can never activate, so an eligibility selector
-// on its Services would select zero endpoints forever: those Services render WITHOUT the term,
-// preserving the routing a deployment had before first enable.
+// the operator has no observation for (an engine absent from the matrix) answers Unsupported by
+// construction and can never activate, so an eligibility selector on its Services would select
+// zero endpoints forever: those Services render WITHOUT the term, preserving the routing a
+// deployment had before first enable.
+//
+// A P/D ROLE ACTIVATES WHEN THE OPERATOR HAS AN OBSERVATION FOR ITS PAIR. The check is asked
+// about the routes the operator still knows, because the gate is about the replicas serving: a
+// role that took its command line over while a managed member of it still stands has not lost the
+// route the operator knows, and a partner that took its own over does not take this role's
+// barrier away — the qualification answers Unsupported for that pair, so the group's existing
+// eligibility is held rather than revoked.
 func modelDeploymentGroupForwardActivatable(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) bool {
@@ -344,9 +351,33 @@ func modelDeploymentGroupForwardActivatable(
 		return false
 	}
 	kind := ModelDeploymentEffectiveRoleKind(role)
+	if kind != workercore.ModelDeploymentRoleKindPrefill &&
+		kind != workercore.ModelDeploymentRoleKindDecode {
+		return true
+	}
+	unsupported, _ := modelDeploymentGroupForwardPairSupport(modelDeploymentPairableDeployment(md))
 
-	return kind != workercore.ModelDeploymentRoleKindPrefill &&
-		kind != workercore.ModelDeploymentRoleKindDecode
+	return !unsupported
+}
+
+// modelDeploymentPairableDeployment returns the deployment as the pair support check must read it
+// for the gate: its Prefill and Decode roles carry the operator's own command lines.
+//
+// THE COPY EXISTS FOR THAT ONE DECISION, and it is never handed to the qualification, the probe,
+// a render or the caller's spec. The check reads the copy, whose P/D command lines are cleared, so
+// it asks about the pair the operator configured and not about a take-over. The gate is about the
+// replicas serving: a role that took its command line over while a managed member of it still
+// stands has not lost the route the operator knows.
+func modelDeploymentPairableDeployment(md *workercore.ModelDeployment) *workercore.ModelDeployment {
+	pairable := md.DeepCopy()
+	for i := range pairable.Spec.Roles {
+		switch ModelDeploymentEffectiveRoleKind(&pairable.Spec.Roles[i]) {
+		case workercore.ModelDeploymentRoleKindPrefill, workercore.ModelDeploymentRoleKindDecode:
+			pairable.Spec.Roles[i].Command = nil
+		}
+	}
+
+	return pairable
 }
 
 // modelDeploymentEligibilityDecided reports whether a pass has actually answered the whole-group
@@ -370,9 +401,10 @@ func modelDeploymentEligibilityDecided(md *workercore.ModelDeployment) bool {
 // endpoint-eligible endpoints. Three halves, all required:
 //
 // STATIC: the shape must be able to activate at all -- an engine the matrix carries, whose roles
-// are ordinary server roles with the operator's own command. An engine outside the matrix, a
-// prefill/decode role, or a role with a replaced command can never be qualified, so its surfaces
-// never narrow.
+// are ordinary server roles with the operator's own command, or a pair shape the support check
+// carries. An engine outside the matrix, a role whose command line is replaced with no managed
+// replica of it still standing, or a pair shape the support check refuses can never be qualified,
+// so its surfaces never narrow.
 //
 // ACTIVATION: a pass must have recorded a decided predicate -- True (qualified) or False
 // (revoked). Narrowing on first enable before any pass has answered would select zero endpoints

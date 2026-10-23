@@ -144,6 +144,12 @@ func TestPDRoutingKeepsReplicaLeaders(t *testing.T) {
 							pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{Deployment: md, Role: role, InstanceType: newRenderInstanceType()})
 							require.NoError(t, err)
 							stampModelDeploymentPod(pod, md, role, ordinal, member)
+							if member == 0 {
+								// A MEMBER THE SELECTORS MAY REACH IS BY DEFINITION ONE IT HAS MARKED
+								// ELIGIBLE. The label is written at runtime by the reconciler, and a
+								// selector that demands it reaches nothing without it.
+								pod.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+							}
 							assert.Equal(t, member == 0, discovery.Matches(labels.Set(pod.Labels)))
 							for _, selector := range selectors {
 								assert.Equal(t, member == 0, selector.Matches(labels.Set(pod.Labels)))
