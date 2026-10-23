@@ -1,14 +1,11 @@
 # External DP Walkthrough
 
-Configure four fixed *DP* ranks behind `vllm-router`, with one HTTP endpoint per rank.
-Each rank uses two GPUs with *TP* = 2, for eight H100 GPUs in total.
-The captured H100 SXM5 run used this fixed group in namespace `gpustack-bench`.
-Use [External DP](../../modules/model-deployment/external-dp.md) for parallelism and load-balancing background.
+Start four fixed *DP* ranks behind `vllm-router`, send requests to each rank directly, and confirm the Router reaches every endpoint.
 
 ## Contents
 
 - [Summary](#summary)
-- [Device and cluster](#device-and-cluster)
+- [Environment](#environment)
 - [Step 1: Start the fixed group](#step-1-start-the-fixed-group)
 - [Step 2: Read the running resources](#step-2-read-the-running-resources)
 - [Step 3: Send requests per rank](#step-3-send-requests-per-rank)
@@ -28,13 +25,22 @@ The configuration uses one *Server* role with *`replicas: 1`* and *`size: 4`*.
 Each member requests two GPUs, but that scheduling request does not declare engine parallelism.
 Explicit *TP*, *DP*, rank and leader-address arguments define the engine group.
 
+Each rank uses two GPUs with *TP* = 2, for eight H100 GPUs in total.
+The captured H100 SXM5 run used this fixed group in namespace `gpustack-bench`.
+
+| Object | Scope | Creator | Purpose |
+|---|---|---|---|
+| `ModelArtifact` | namespace | user, via the prefetch procedure | the DeepSeek V2 Lite weights the deployment serves |
+| `ModelDeployment` | namespace | user | the fixed four-rank *DP* group behind the managed Router |
+| `InstanceType` | cluster | discovered | the whole-GPU H100 type each member requests |
+
 At concurrency 64, *time to first token (TTFT)* p50 was **2.58× lower** for the four-rank group on `1024/256`:
 **1,863.100 ms** against wide *TP* = 8 at `4,798.411 ms`.
 On `4096/128`, it had **1.23× lower TTFT p50**: **3,094.017 ms** against `3,814.139 ms`.
 These benefits favor queueing-sensitive, fixed-group workloads; wide *TP* retained **2.27×–6.99× higher output throughput**.
 Use [External DP Benchmark](../../modules/model-deployment/external-dp-benchmark.md) to compare tails as well as medians.
 
-## Device and cluster
+## Environment
 
 | Item | Captured setup |
 |---|---|
@@ -321,13 +327,13 @@ or placement across GPU nodes. Those configurations need separate compatibility 
 
 ## Troubleshooting
 
-| Symptom | Check |
-|---|---|
-| Members stay Pending | Read Kueue quota, events and `InstanceType` capacity. Four members with two GPUs each need eight free GPUs. |
-| Ranks cannot initialize | Verify rank values 0–3, *DP* width 4, the shared leader address and the engine's peer ports. |
-| Direct requests pass but Router requests fail | Read *`status.roles[].endpoints`*, Router discovery and eligibility labels. |
-| Router registers only rank 0 | Confirm the build supports managed *External LB* discovery and the role reports `External`. |
-| Owned resources remain after deletion | Inspect owner references before removing leftovers. Do not infer complete cleanup from CR deletion alone. |
+| Symptom | Signal | Check & Mitigation |
+|---|---|---|
+| Members stay Pending | Status: member `Pod` phase `Pending` | Read Kueue quota, events and `InstanceType` capacity. Four members with two GPUs each need eight free GPUs. |
+| Ranks cannot initialize | Log: failing rank's engine startup log | Verify rank values 0–3, *DP* width 4, the shared leader address and the engine's peer ports. |
+| Direct requests pass but Router requests fail | Status: *`status.roles[].endpoints`* | Read *`status.roles[].endpoints`*, Router discovery and eligibility labels. |
+| Router registers only rank 0 | Status: `/observer/endpoints` lists one worker | Confirm the build supports managed *External LB* discovery and the role reports `External`. |
+| Owned resources remain after deletion | Owned `Pod`s, `Service`s or `Deployment`s still listed | Inspect owner references before removing leftovers. Do not infer complete cleanup from CR deletion alone. |
 
 ---
 
