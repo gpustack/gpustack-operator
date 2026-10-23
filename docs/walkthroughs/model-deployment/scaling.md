@@ -7,33 +7,54 @@ separately from the reusable configuration.
 
 ## Contents
 
+- [Summary](#summary)
+- [Environment](#environment)
 - [Prerequisites](#prerequisites)
 - [Step 1: Prepare the target](#step-1-prepare-the-target)
 - [Step 2: Observe in Shadow](#step-2-observe-in-shadow)
 - [Step 3: Choose an algorithm](#step-3-choose-an-algorithm)
 - [Step 4: Activate scaling](#step-4-activate-scaling)
 - [Step 5: Observe retirement](#step-5-observe-retirement)
-- [Verification](#verification)
 - [Cleanup](#cleanup)
 - [Troubleshooting](#troubleshooting)
 
-## Prerequisites
+## Summary
 
-Follow [cluster preparation](_index.md#prepare-the-cluster) and
-[model prefetch](../model-delivery/prefetch.md). Use namespace `gpustack-bench` and artifact
-`qwen3-8b` from `Qwen/Qwen3-8B`, revision `b968826d9c46dd6066d109eabc6255188de91218`.
-The target needs two free GPUs initially and up to four after scaling, with one GPU per replica.
+A `ModelDeploymentScaler` samples per-role signals from a running `ModelDeployment` and recommends
+replica counts. `Shadow` mode records recommendations without changing the target; `Active` mode
+lets the scaler write the target's replica counts.
 
-Use a build that includes `ModelDeploymentScaler`, its controller and admission webhook.
-Prepare `kubectl`, `jq`, Python 3 with `aiohttp`, and a source checkout for the load client.
-Confirm that no other scaler owns the target. See
-[Model Deployment Scaling](../../modules/model-deployment/scaling.md) for algorithm contracts and
-[GitOps exclusions](../../modules/model-deployment/scaling.md#gitops-sync).
+| Object | Scope | Creator | Purpose |
+|---|---|---|---|
+| `ModelArtifact` | namespace | user | the `qwen3-8b` weights the target serves |
+| `InstanceType` | cluster | operator | the whole-GPU type each role replica requests |
+| `ModelDeployment` | namespace | user | the *PD* target whose replica counts the scaler drives |
+| `ModelDeploymentScaler` | namespace | user | the policy observed in `Shadow`, then allowed to act in `Active` |
 
 The [Scaling Benchmark](../../modules/model-deployment/scaling-benchmark.md) used eight H100 GPUs
 across concurrent configurations. This procedure starts one deployment.
 Its examples are configuration instructions; they are not a claim that this exact public-API sequence
 was executed in the recorded benchmark.
+
+## Environment
+
+| Item | Value |
+|---|---|
+| GPUs | two free initially, up to four after scaling; one GPU per replica |
+| `InstanceType` | the whole-GPU type of the intended cluster; the example uses the discovered `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
+| Namespace | `gpustack-bench` |
+| Model | `Qwen/Qwen3-8B` from `ModelArtifact` `qwen3-8b`, revision `b968826d9c46dd6066d109eabc6255188de91218` |
+| Tools | `kubectl`, `jq`, Python 3 with `aiohttp`; a source checkout provides the load client |
+
+## Prerequisites
+
+Follow [cluster preparation](_index.md#prepare-the-cluster) and
+[model prefetch](../model-delivery/prefetch.md) with namespace `gpustack-bench` and artifact
+`qwen3-8b`. Use a build that includes `ModelDeploymentScaler`, its controller and admission webhook.
+
+Confirm that no other scaler owns the target. See
+[Model Deployment Scaling](../../modules/model-deployment/scaling.md) for algorithm contracts and
+[GitOps exclusions](../../modules/model-deployment/scaling.md#gitops-sync).
 
 ## Step 1: Prepare the target
 
@@ -343,7 +364,7 @@ If a shorter test window is needed, choose a positive downward stabilization win
 sampling interval. Zero stores the default 300 s. Keep *`maxReplicas`* at least as high as the current
 count; lowering it below that count blocks planning with `BoundsConflict`.
 
-## Verification
+### Verification
 
 The recorded standalone single-role check produced these observations:
 
@@ -381,18 +402,18 @@ Keep shared prefetched artifacts and `default/bench-driver` when other procedure
 
 ## Troubleshooting
 
-| Symptom | Check | Action |
+| Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| Counts remain at one | Mode and `Active` condition | Activate only after reviewing Shadow recommendations. |
-| `AlreadyBound` | Binding owner | Use the existing owner or release it before applying another scaler. |
-| `InvalidBinding` | Binding annotation on the target | Fix or remove the annotation; the scaler cannot tell which scaler owns the target. |
-| `BoundsConflict` or `RatioConflict` | Current counts and policy | Include the current vector in every bound and ratio band. |
-| `WaitingForMetrics` | Role signals and engine metrics | Allow valid successive samples; investigate missing or restarted endpoints. |
-| `ResourceExhausted` | *`pendingCohort`*, `Workload`s and quota | Restore admission capacity before retrying growth. |
-| `ScaleDownAborted` | Retirement reason and *`lastScaleDown`* | Resolve the drain failure; wait through the abort cooldown. |
-| `PacingBounded` during cooldown | Stabilization, grace and coverage | Continue observation; a configured cooldown phase does not bypass guards. |
-| Router failures during growth | Client errors and Router logs | Preserve evidence; the recorded keep-alive setting did not prevent all failures. |
-| SGLang KV transfer failures | Engine logs and TCP port reuse | Follow the [documented setting](../../reference/settings.md#sglang-time-wait-reuse) and verify kubelet prerequisites. |
+| Counts remain at one | Condition: `Active=False` with reason `ShadowMode` | Activate only after reviewing Shadow recommendations. |
+| `AlreadyBound` | Reason: `AlreadyBound` | Read the binding owner; use the existing owner or release it before applying another scaler. |
+| `InvalidBinding` | Reason: `InvalidBinding` | Fix or remove the annotation on the target; the scaler cannot tell which scaler owns the target. |
+| `BoundsConflict` or `RatioConflict` | Reason: `BoundsConflict` or `RatioConflict` | Compare the current counts with the policy; include the current vector in every bound and ratio band. |
+| `WaitingForMetrics` | Reason: `WaitingForMetrics` on the `MetricsReady` condition | Allow valid successive samples from role signals and engine metrics; investigate missing or restarted endpoints. |
+| `ResourceExhausted` | Reason: `ResourceExhausted` | Read *`pendingCohort`*, `Workload`s and quota; restore admission capacity before retrying growth. |
+| `ScaleDownAborted` | Reason: `ScaleDownAborted` | Read the retirement reason and *`lastScaleDown`*; resolve the drain failure and wait through the abort cooldown. |
+| `PacingBounded` during cooldown | Reason: `PacingBounded` | Check stabilization, grace and coverage; continue observation, since a configured cooldown phase does not bypass guards. |
+| Router failures during growth | Log: Router logs and client errors | Preserve evidence; the recorded keep-alive setting did not prevent all failures. |
+| SGLang KV transfer failures | Log: engine logs and TCP port reuse | Follow the [documented setting](../../reference/settings.md#sglang-time-wait-reuse) and verify kubelet prerequisites. |
 
 ---
 
