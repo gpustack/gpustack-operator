@@ -97,6 +97,17 @@ func idleDrain() modelDeploymentDrainAnswer {
 	}
 }
 
+func sglangIdleDrain() modelDeploymentDrainAnswer {
+	series := map[string]float64{}
+	for _, metric := range modelDeploymentInFlightMetrics[workercore.ModelDeploymentEngineSGLang] {
+		series[metric] = 0
+	}
+
+	return modelDeploymentDrainAnswer{
+		State: modelDeploymentDrainIdle, Complete: true, Series: series,
+	}
+}
+
 // busyDrain is a complete read with work in it.
 func busyDrain() modelDeploymentDrainAnswer {
 	answer := idleDrain()
@@ -669,15 +680,12 @@ func TestDrainHoldsOnAnythingThatIsNotAnObservation(t *testing.T) {
 }
 
 // TestDisaggregatedRetirementIsRefusedRatherThanMeasuredByThePrefiller pins the P/D case.
-//
-// A decoder waiting to receive KV is in the PREFILLER's transfer queue, and the prefiller reports
-// that work while the decoder that will serve it reports none. Reading the prefill gauges as the
-// decoder-side release would delete a decode cluster in the middle of a prefill.
 func TestDisaggregatedRetirementIsRefusedRatherThanMeasuredByThePrefiller(t *testing.T) {
 	// THE MEMBER CARRIES THE ARGUMENT, which is what the refusal now reads. The role declares the
 	// same thing because a rendered replica and its role agree, and declaring it on the role alone
 	// is no longer sufficient to refuse.
 	md := retirementDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
 		md.Spec.Roles[0].ExtraArgs = []string{"--data-parallel-external-lb"}
 	})
 	pods := []core.Pod{
@@ -687,7 +695,6 @@ func TestDisaggregatedRetirementIsRefusedRatherThanMeasuredByThePrefiller(t *tes
 		workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"member-1"}))
 	cli := newModelDeploymentClient(md.DeepCopy())
 	reader := &scriptedDrainReader{
-		// Even a perfect reading cannot retire this shape, which is what the case is about.
 		answers: map[types.UID][]modelDeploymentDrainAnswer{"member-1": {idleDrain(), idleDrain()}},
 	}
 	r := holdReconciler(cli, reader, time.Now())
@@ -695,7 +702,7 @@ func TestDisaggregatedRetirementIsRefusedRatherThanMeasuredByThePrefiller(t *tes
 	plan := r.planModelDeploymentRetirement(context.Background(), md, pods)
 
 	assert.Equal(t, workercore.ModelDeploymentRetirementStateDraining, plan.Reservation.State)
-	assert.Contains(t, plan.Reservation.Reason, "decoder-side release")
+	assert.Contains(t, plan.Reservation.Reason, modelDeploymentRetirementDisaggregatedGraceWindow.String()+" disaggregated handoff grace window")
 }
 
 // TestBudgetExpiryAbortsAndRetains is the abort contract, and the reason it exists in the shape it
@@ -831,31 +838,64 @@ func TestExternalTerminationIsRecorded(t *testing.T) {
 func TestAReDeclaredHeldGroupIsAdoptedAndCancelled(t *testing.T) {
 	testCases := []struct {
 		name    string
+		state   workercore.ModelDeploymentRetirementState
 		ready   *bool
 		want    bool
 		because string
 	}{
 		{
 			name:    "a healthy group at a re-declared ordinal is adopted",
+			state:   workercore.ModelDeploymentRetirementStateAborted,
 			ready:   healthBool(true),
 			want:    true,
 			because: "the spec wants the replica back and the group qualifies",
 		},
 		{
 			name:    "a group that does not qualify is not adopted",
+			state:   workercore.ModelDeploymentRetirementStateAborted,
 			ready:   healthBool(false),
 			want:    false,
 			because: "a broken group is what the operation was aborting",
+		},
+		{
+			name:    string(workercore.ModelDeploymentRetirementStateAdmitted),
+			state:   workercore.ModelDeploymentRetirementStateAdmitted,
+			ready:   healthBool(true),
+			want:    true,
+			because: "healthy re-declared members cancel a pre-delete reservation",
+		},
+		{
+			name:    string(workercore.ModelDeploymentRetirementStateDisqualified),
+			state:   workercore.ModelDeploymentRetirementStateDisqualified,
+			ready:   healthBool(true),
+			want:    true,
+			because: "healthy re-declared members cancel a pre-delete reservation",
+		},
+		{
+			name:    string(workercore.ModelDeploymentRetirementStateWithdrawing),
+			state:   workercore.ModelDeploymentRetirementStateWithdrawing,
+			ready:   healthBool(true),
+			want:    true,
+			because: "healthy re-declared members cancel a pre-delete reservation",
+		},
+		{
+			name:    string(workercore.ModelDeploymentRetirementStateDraining),
+			state:   workercore.ModelDeploymentRetirementStateDraining,
+			ready:   healthBool(true),
+			want:    true,
+			because: "healthy re-declared members cancel a pre-delete reservation",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			md := retirementDeployment()
+			md := retirementDeployment(func(md *workercore.ModelDeployment) {
+				md.Generation = 1
+			})
 			pods := []core.Pod{healthPod("server", 1, 0, tc.ready, "member-1")}
 			md = reserve(md, retirementReservation(
-				workercore.ModelDeploymentRetirementStateAborted, "server", 1, []string{"member-1"}))
-			cli := newModelDeploymentClient(md.DeepCopy())
+				tc.state, "server", 1, []string{"member-1"}))
+			cli := newModelDeploymentClient(md.DeepCopy(), pods[0].DeepCopy())
 			r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
 
 			plan := r.planModelDeploymentRetirement(context.Background(), md, pods)
@@ -867,6 +907,323 @@ func TestAReDeclaredHeldGroupIsAdoptedAndCancelled(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPreDeleteAdoptionCancelsInFlightRetirementOnScaleUp(t *testing.T) {
+	testCases := []struct {
+		name       string
+		state      workercore.ModelDeploymentRetirementState
+		ready      *bool
+		uidMatch   bool
+		wantAdopt  bool
+		wantDelete bool
+	}{
+		{
+			name:      "Admitted healthy same-UID replica is adopted on scale-up",
+			state:     workercore.ModelDeploymentRetirementStateAdmitted,
+			ready:     healthBool(true),
+			uidMatch:  true,
+			wantAdopt: true,
+		},
+		{
+			name:      "Disqualified healthy same-UID replica is adopted and restores eligibility",
+			state:     workercore.ModelDeploymentRetirementStateDisqualified,
+			ready:     healthBool(true),
+			uidMatch:  true,
+			wantAdopt: true,
+		},
+		{
+			name:      "Withdrawing healthy same-UID replica is adopted",
+			state:     workercore.ModelDeploymentRetirementStateWithdrawing,
+			ready:     healthBool(true),
+			uidMatch:  true,
+			wantAdopt: true,
+		},
+		{
+			name:      "Draining healthy same-UID replica is adopted",
+			state:     workercore.ModelDeploymentRetirementStateDraining,
+			ready:     healthBool(true),
+			uidMatch:  true,
+			wantAdopt: true,
+		},
+		{
+			name:      "Aborted healthy same-UID replica is adopted",
+			state:     workercore.ModelDeploymentRetirementStateAborted,
+			ready:     healthBool(true),
+			uidMatch:  true,
+			wantAdopt: true,
+		},
+		{
+			name:       "Deleting reservation is never adopted and finishes deletion",
+			state:      workercore.ModelDeploymentRetirementStateDeleting,
+			ready:      healthBool(true),
+			uidMatch:   true,
+			wantAdopt:  false,
+			wantDelete: true,
+		},
+		{
+			name:       "Settling reservation is never adopted",
+			state:      workercore.ModelDeploymentRetirementStateSettling,
+			ready:      healthBool(true),
+			uidMatch:   true,
+			wantAdopt:  false,
+			wantDelete: true,
+		},
+		{
+			name:      "Draining unhealthy replica is not adopted",
+			state:     workercore.ModelDeploymentRetirementStateDraining,
+			ready:     healthBool(false),
+			uidMatch:  true,
+			wantAdopt: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := retirementDeployment(func(md *workercore.ModelDeployment) {
+				md.Generation = 2
+				md.Spec.Roles[0].Replicas = 4
+			})
+			pod := renderedMember("server", 3, 0, tc.ready, "member-3")
+			delete(pod.Labels, modelDeploymentLabelKeyEndpointEligible)
+			reservedUID := "member-3"
+			if !tc.uidMatch {
+				reservedUID = "other-uid"
+			}
+			md = reserve(md, retirementReservation(
+				tc.state, "server", 3, []string{reservedUID},
+				func(res *workercore.ModelDeploymentRetirementStatus) {
+					res.ObservedGeneration = 1
+				}))
+			cli := newModelDeploymentClient(md.DeepCopy(), pod.DeepCopy())
+			r := holdReconciler(cli, &scriptedDrainReader{
+				answers: map[types.UID][]modelDeploymentDrainAnswer{
+					"member-3": {busyDrain(), busyDrain()},
+				},
+			}, time.Now())
+
+			plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{pod})
+
+			assert.Equal(t, tc.wantAdopt, plan.Clear)
+			if tc.wantAdopt {
+				assert.False(t, plan.Hold)
+				assert.False(t, plan.InFlight)
+				stored := new(core.Pod)
+				require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(&pod), stored))
+				assert.Equal(t, modelDeploymentEndpointEligibleValue,
+					stored.Labels[modelDeploymentLabelKeyEndpointEligible])
+			} else if tc.wantDelete {
+				assert.True(t, plan.Hold)
+			}
+		})
+	}
+
+	t.Run("adoption holds, retries, and rolls back earlier members when endpoint-eligible patch fails", func(t *testing.T) {
+		md := retirementDeployment(func(md *workercore.ModelDeployment) {
+			md.Generation = 2
+			md.Spec.Roles[0].Replicas = 4
+			md.Spec.Roles[0].ReplicaSize = 2
+		})
+		pod0 := renderedMember("server", 3, 0, healthBool(true), "member-3-0")
+		pod1 := renderedMember("server", 3, 1, healthBool(true), "member-3-1")
+		pod0.Annotations[kueuepodconst.GroupTotalCountAnnotation] = "2"
+		pod1.Annotations[kueuepodconst.GroupTotalCountAnnotation] = "2"
+		delete(pod0.Labels, modelDeploymentLabelKeyEndpointEligible)
+		delete(pod1.Labels, modelDeploymentLabelKeyEndpointEligible)
+		md = reserve(md, retirementReservation(
+			workercore.ModelDeploymentRetirementStateAborted, "server", 3, []string{"member-3-0", "member-3-1"},
+			func(res *workercore.ModelDeploymentRetirementStatus) {
+				res.ObservedGeneration = 1
+			}))
+		cli := newModelDeploymentClient(md.DeepCopy(), pod0.DeepCopy())
+		r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
+		r.groupForwardFetch = boundProbeFetch
+
+		plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{pod0, pod1})
+
+		assert.False(t, plan.Clear)
+		assert.True(t, plan.Hold)
+		assert.True(t, plan.InFlight)
+		stored0 := new(core.Pod)
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(&pod0), stored0))
+		assert.Empty(t, stored0.Labels[modelDeploymentLabelKeyEndpointEligible],
+			"earlier member must not remain endpoint-eligible when a sibling patch fails")
+	})
+}
+
+func TestDisaggregatedHandoffGraceWindowBeforeGaugeDrain(t *testing.T) {
+	now := time.Now()
+	testCases := []struct {
+		name       string
+		engine     string
+		roleKind   string
+		command    []string
+		elapsed    time.Duration
+		answers    []modelDeploymentDrainAnswer
+		wantState  workercore.ModelDeploymentRetirementState
+		wantReason string
+	}{
+		{
+			name:       "Prefill role-kind holds at 59s inside the 60s grace window",
+			engine:     workercore.ModelDeploymentEngineVLLM,
+			roleKind:   "prefill",
+			command:    shapePlainCommand,
+			elapsed:    59 * time.Second,
+			answers:    []modelDeploymentDrainAnswer{idleDrain(), idleDrain()},
+			wantState:  workercore.ModelDeploymentRetirementStateDraining,
+			wantReason: modelDeploymentRetirementDisaggregatedGraceWindow.String() + " disaggregated handoff grace window",
+		},
+		{
+			name:      "Prefill role-kind drains at 60s when two consecutive reads are idle",
+			engine:    workercore.ModelDeploymentEngineVLLM,
+			roleKind:  "prefill",
+			command:   shapePlainCommand,
+			elapsed:   60 * time.Second,
+			answers:   []modelDeploymentDrainAnswer{idleDrain(), idleDrain()},
+			wantState: workercore.ModelDeploymentRetirementStateDeleting,
+		},
+		{
+			name:       "Decode role-kind holds past 60s when gauges are still busy",
+			engine:     workercore.ModelDeploymentEngineVLLM,
+			roleKind:   "decode",
+			command:    shapePlainCommand,
+			elapsed:    65 * time.Second,
+			answers:    []modelDeploymentDrainAnswer{busyDrain(), idleDrain()},
+			wantState:  workercore.ModelDeploymentRetirementStateDraining,
+			wantReason: "still holds",
+		},
+		{
+			name:      "SGLang decode disaggregation mode drains past 60s when idle",
+			engine:    workercore.ModelDeploymentEngineSGLang,
+			command:   []string{"python3", "-m", "sglang.launch_server", "--disaggregation-mode", "decode"},
+			elapsed:   61 * time.Second,
+			answers:   []modelDeploymentDrainAnswer{sglangIdleDrain(), sglangIdleDrain()},
+			wantState: workercore.ModelDeploymentRetirementStateDeleting,
+		},
+		{
+			name:       "Unparseable parallelism flag is still refused past 60s",
+			engine:     workercore.ModelDeploymentEngineVLLM,
+			command:    []string{"vllm", "serve", "m", "--data-parallel-size", "bad-int"},
+			elapsed:    75 * time.Second,
+			answers:    []modelDeploymentDrainAnswer{idleDrain(), idleDrain()},
+			wantState:  workercore.ModelDeploymentRetirementStateDraining,
+			wantReason: "parallelism could not be read",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := retirementDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = tc.engine
+				md.Spec.Roles[0].Replicas = 1
+			})
+			pod := renderedMember("server", 1, 0, healthBool(true), "member-1", tc.command...)
+			if tc.roleKind != "" {
+				pod.Labels[modelDeploymentLabelKeyRoleKind] = tc.roleKind
+			}
+			md = reserve(md, retirementReservation(
+				workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"member-1"},
+				func(res *workercore.ModelDeploymentRetirementStatus) {
+					res.StartedAt = meta.NewTime(now.Add(-tc.elapsed))
+					res.PhaseStartedAt = meta.NewTime(now.Add(-tc.elapsed))
+					res.Deadline = meta.NewTime(now.Add(modelDeploymentRetirementOverallBudget))
+				}))
+			md = withResourceVersion(md)
+			cli := newModelDeploymentClient(md.DeepCopy(), pod.DeepCopy())
+			reader := &scriptedDrainReader{
+				answers: map[types.UID][]modelDeploymentDrainAnswer{"member-1": tc.answers},
+			}
+			r := holdReconciler(cli, reader, now)
+
+			plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{pod})
+
+			assert.Equal(t, tc.wantState, plan.Reservation.State)
+			if tc.wantReason != "" {
+				assert.Contains(t, plan.Reservation.Reason, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestDisaggregatedExternalDPDrainsAllMembersWhereasLeaderServedDrainsLeader(t *testing.T) {
+	now := time.Now()
+	t.Run("leader-served disaggregated multi-pod replica reads only member zero after 60s", func(t *testing.T) {
+		md := shapeDeployment(2)
+		md.Spec.Roles[0].Replicas = 1
+		m0 := shapeMember(1, 0, "m-0", shapePlainCommand...)
+		m1 := shapeMember(1, 1, "m-1", shapePlainCommand...)
+		m0.Labels[modelDeploymentLabelKeyRoleKind] = "decode"
+		m1.Labels[modelDeploymentLabelKeyRoleKind] = "decode"
+		m0.Annotations[kueuepodconst.GroupTotalCountAnnotation] = "2"
+		m1.Annotations[kueuepodconst.GroupTotalCountAnnotation] = "2"
+
+		md = reserve(md, retirementReservation(
+			workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"m-0", "m-1"},
+			func(res *workercore.ModelDeploymentRetirementStatus) {
+				res.PhaseStartedAt = meta.NewTime(now.Add(-65 * time.Second))
+			}))
+		md = withResourceVersion(md)
+		cli := newModelDeploymentClient(md.DeepCopy(), m0.DeepCopy(), m1.DeepCopy())
+		reader := &recordingDrainReader{busy: map[types.UID]bool{"m-1": true}}
+		r := holdReconciler(cli, reader, now)
+
+		plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{m0, m1})
+
+		assert.Equal(t, workercore.ModelDeploymentRetirementStateDeleting, plan.Reservation.State)
+		assert.Equal(t, map[string]int{"m-0": 2}, reader.readCounts())
+	})
+
+	t.Run("External-DP disaggregated multi-pod replica reads every member after 60s", func(t *testing.T) {
+		md := shapeDeployment(2, "--data-parallel-external-lb")
+		md.Spec.Roles[0].Replicas = 1
+		m0 := shapeMember(1, 0, "m-0", shapeExternalDPCommand...)
+		m1 := shapeMember(1, 1, "m-1", shapeExternalDPCommand...)
+		m0.Annotations[kueuepodconst.GroupTotalCountAnnotation] = "2"
+		m1.Annotations[kueuepodconst.GroupTotalCountAnnotation] = "2"
+
+		md = reserve(md, retirementReservation(
+			workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"m-0", "m-1"},
+			func(res *workercore.ModelDeploymentRetirementStatus) {
+				res.PhaseStartedAt = meta.NewTime(now.Add(-65 * time.Second))
+			}))
+		md = withResourceVersion(md)
+		cli := newModelDeploymentClient(md.DeepCopy(), m0.DeepCopy(), m1.DeepCopy())
+		reader := &recordingDrainReader{}
+		r := holdReconciler(cli, reader, now)
+
+		plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{m0, m1})
+
+		assert.Equal(t, workercore.ModelDeploymentRetirementStateDeleting, plan.Reservation.State)
+		assert.Equal(t, map[string]int{"m-0": 2, "m-1": 2}, reader.readCounts())
+	})
+}
+
+func TestPendingUnadmittedPodBypassesRetirementDrain(t *testing.T) {
+	md := retirementDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+	})
+	pendingPod := renderedMember("server", 1, 0, nil, "pending-1")
+	pendingPod.Status.Phase = core.PodPending
+	pendingPod.Status.PodIP = ""
+	pendingPod.Spec.NodeName = ""
+	delete(pendingPod.Labels, modelDeploymentLabelKeyEndpointEligible)
+
+	unadmittedWorkload := admittedReplicaWorkload([]*core.Pod{&pendingPod}, false)
+	cli := newModelDeploymentClient(md.DeepCopy(), pendingPod.DeepCopy(), unadmittedWorkload.DeepCopy())
+	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
+
+	plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{pendingPod})
+	refused := r.refuseModelDeploymentRemoval(
+		context.Background(), md, plan, &pendingPod, []core.Pod{pendingPod}, nil)
+	assert.False(t, refused, "an unadmitted never-scheduled replica bypasses retirement admission")
+
+	admittedWorkload := admittedReplicaWorkload([]*core.Pod{&pendingPod}, true)
+	cliAdmitted := newModelDeploymentClient(md.DeepCopy(), pendingPod.DeepCopy(), admittedWorkload.DeepCopy())
+	rAdmitted := holdReconciler(cliAdmitted, &scriptedDrainReader{}, time.Now())
+	planAdmitted := rAdmitted.planModelDeploymentRetirement(context.Background(), md, []core.Pod{pendingPod})
+	refusedAdmitted := rAdmitted.refuseModelDeploymentRemoval(
+		context.Background(), md, planAdmitted, &pendingPod, []core.Pod{pendingPod}, nil)
+	assert.True(t, refusedAdmitted, "an admitted workload still enters the retirement protocol")
 }
 
 // TestANewUIDAtTheOrdinalIsExternalTerminationNotAdoption is the half of adoption that must not
@@ -2871,4 +3228,152 @@ func (f *modelDeploymentRetirementReleaseFixture) planAt(
 	plan.Hold = true
 
 	return plan
+}
+
+// TestAdoptsModelDeploymentRetirement_PatchErrorHoldsReservation pins what a failed endpoint
+// eligibility write does to an adoption.
+//
+// ADOPTION IS A CANCELLATION, and a cancellation that half happened is worse than no cancellation:
+// the reservation would be gone while one member still carries the endpoint label the cancellation
+// was supposed to restore. So the write that fails holds the reservation instead of canceling it,
+// and the members already patched are rolled back to the state the adoption found them in.
+//
+// THE RETURN IS (false, true) BECAUSE BOTH HALVES MATTER. The first says the adoption did not
+// happen, and the second says the pass holds the reservation and comes back rather than treating
+// the failure as an answer about the replica.
+func TestAdoptsModelDeploymentRetirement_PatchErrorHoldsReservation(t *testing.T) {
+	md := retirementDeployment(func(md *workercore.ModelDeployment) {
+		md.Generation = 2
+		md.Spec.Roles[0].Replicas = 4
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	pod0 := renderedMember("server", 3, 0, healthBool(true), "member-3-0")
+	pod1 := renderedMember("server", 3, 1, healthBool(true), "member-3-1")
+	pod0.Annotations[kueuepodconst.GroupTotalCountAnnotation] = "2"
+	pod1.Annotations[kueuepodconst.GroupTotalCountAnnotation] = "2"
+	// The members lost the endpoint label when the retirement withdrew them from selection, and
+	// restoring it is the write the adoption is about.
+	delete(pod0.Labels, modelDeploymentLabelKeyEndpointEligible)
+	delete(pod1.Labels, modelDeploymentLabelKeyEndpointEligible)
+	reservation := retirementReservation(
+		workercore.ModelDeploymentRetirementStateAdmitted, "server", 3,
+		[]string{"member-3-0", "member-3-1"},
+		func(res *workercore.ModelDeploymentRetirementStatus) { res.ObservedGeneration = 1 })
+	md = reserve(md, reservation)
+
+	// THE SECOND MEMBER'S WRITE IS THE ONE THAT FAILS, so the first member has already been patched
+	// when the failure arrives and the rollback has something to roll back.
+	base := newModelDeploymentClient(md, pod0.DeepCopy(), pod1.DeepCopy())
+	cli := ctrlinterceptor.NewClient(base.(ctrlcli.WithWatch), ctrlinterceptor.Funcs{
+		Patch: func(ctx context.Context, client ctrlcli.WithWatch, obj ctrlcli.Object,
+			patch ctrlcli.Patch, opts ...ctrlcli.PatchOption,
+		) error {
+			pod, ok := obj.(*core.Pod)
+			if ok && pod.Name == pod1.Name &&
+				pod.Labels[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue {
+				return errors.New("the endpoint eligibility write was refused")
+			}
+
+			return client.Patch(ctx, obj, patch, opts...)
+		},
+	})
+	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
+	r.groupForwardFetch = boundProbeFetch
+
+	plan := &modelDeploymentRetirementPlan{
+		Reservation: reservation.DeepCopy(),
+		Target: modelDeploymentReplicaView{
+			Role: "server", Ordinal: 3, Seated: true,
+			Members: []*core.Pod{&pod0, &pod1},
+		},
+		held: sets.New[types.UID]("member-3-0", "member-3-1"),
+	}
+	plan.Hold = true
+	plan.InFlight = true
+
+	adopted, retry := r.adoptsModelDeploymentRetirement(
+		context.Background(), md, plan, []core.Pod{pod0, pod1})
+
+	assert.False(t, adopted, "a member whose endpoint eligibility could not be restored is not adopted")
+	assert.True(t, retry, "and the pass holds the reservation and comes back to try again")
+
+	stored := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(&pod0), stored))
+	assert.Empty(t, stored.Labels[modelDeploymentLabelKeyEndpointEligible],
+		"the member patched before the failure is rolled back to the state the adoption found it in")
+	assert.Empty(t, pod0.Labels[modelDeploymentLabelKeyEndpointEligible],
+		"and the in-memory member carries no eligibility the server does not")
+
+	require.NotNil(t, md.Status.Retirement, "the reservation is not cancelled by a failed adoption")
+	assert.Equal(t, workercore.ModelDeploymentRetirementStateAdmitted, md.Status.Retirement.State)
+	persisted := getModelDeployment(t, cli).Status.Retirement
+	require.NotNil(t, persisted, "and the persisted reservation is still on the object")
+	assert.Equal(t, workercore.ModelDeploymentRetirementStateAdmitted, persisted.State)
+	assert.Equal(t, []string{"member-3-0", "member-3-1"}, persisted.TargetMemberUIDs,
+		"the reservation still names the group it was about to cancel")
+}
+
+// TestRefuseModelDeploymentRemoval_WorkloadListErrorFallsThroughToRetirementAdmission pins the
+// conservative half of the never-scheduled bypass.
+//
+// A never-scheduled replica bypasses the retirement protocol when its Workload was never admitted,
+// because there is nothing to drain. That bypass is an ANSWER ABOUT THE WORKLOAD, and a list that
+// failed is not an answer about it. So a transient list error falls through to the ordinary
+// admission path rather than letting the removal through without a reservation.
+//
+// THE FALL-THROUGH IS ADMISSION, NOT A DELETE. The pass that admits holds the removal itself, and
+// the reservation it writes is what the next pass retires.
+func TestRefuseModelDeploymentRemoval_WorkloadListErrorFallsThroughToRetirementAdmission(t *testing.T) {
+	md := retirementDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+	})
+	pendingPod := renderedMember("server", 1, 0, nil, "pending-1")
+	pendingPod.Status.Phase = core.PodPending
+	pendingPod.Status.PodIP = ""
+	pendingPod.Spec.NodeName = ""
+	delete(pendingPod.Labels, modelDeploymentLabelKeyEndpointEligible)
+
+	// THE FIRST WORKLOAD LIST FAILS AND THE SECOND ANSWERS, which is what a transient error looks
+	// like from the controller's side: the probe cannot confirm the admission status, and the
+	// admission that follows reads a healthy API server again.
+	base := newModelDeploymentClient(md, pendingPod.DeepCopy())
+	lists := 0
+	fail := failOnce(errors.New("the workload list was refused"))
+	cli := ctrlinterceptor.NewClient(base.(ctrlcli.WithWatch), ctrlinterceptor.Funcs{
+		List: func(ctx context.Context, client ctrlcli.WithWatch, list ctrlcli.ObjectList,
+			opts ...ctrlcli.ListOption,
+		) error {
+			if _, ok := list.(*kueue.WorkloadList); ok {
+				lists++
+				if err := fail(); err != nil {
+					return err
+				}
+			}
+
+			return client.List(ctx, list, opts...)
+		},
+	})
+	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
+
+	plan := r.planModelDeploymentRetirement(context.Background(), md, []core.Pod{pendingPod})
+	require.Nil(t, plan.Reservation, "no operation is in flight, so the plan is the no-reservation plan")
+
+	refused := r.refuseModelDeploymentRemoval(
+		context.Background(), md, plan, &pendingPod, []core.Pod{pendingPod}, nil)
+
+	assert.True(t, refused, "a workload list that failed is not an answer, so the removal is held")
+	assert.Equal(t, 2, lists,
+		"the failed probe and the admission's own lookup are two separate reads")
+
+	require.NotNil(t, plan.Reservation, "the fall-through admitted a retirement reservation")
+	assert.Equal(t, workercore.ModelDeploymentRetirementStateAdmitted, plan.Reservation.State)
+	assert.True(t, plan.Hold, "and the admitted reservation holds the target")
+	assert.True(t, plan.InFlight, "and the pass comes back to run the protocol")
+
+	persisted := getModelDeployment(t, cli).Status.Retirement
+	require.NotNil(t, persisted, "and the reservation is persisted, not only held in the plan")
+	assert.Equal(t, workercore.ModelDeploymentRetirementStateAdmitted, persisted.State)
+	assert.Equal(t, "server", persisted.RoleName)
+	assert.Equal(t, int32(1), persisted.ReplicaOrdinal)
+	assert.Equal(t, []string{"pending-1"}, persisted.TargetMemberUIDs)
 }

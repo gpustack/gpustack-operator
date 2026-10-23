@@ -365,11 +365,18 @@ func TestDrainCollectorFixtureMatrix(t *testing.T) {
 			wantCalls:  0,
 		},
 		{
-			name:       "a disaggregated member is refused from the Pod's own command",
-			pod:        drainTestPod(disaggregated("--data-parallel-external-lb")),
-			bodies:     []string{vllmZero()},
+			name:         "a disaggregated member is measured from the Pod's own command",
+			pod:          drainTestPod(disaggregated("--data-parallel-external-lb")),
+			bodies:       []string{vllmZero()},
+			wantState:    modelDeploymentDrainIdle,
+			wantComplete: true,
+			wantCalls:    1,
+		},
+		{
+			name:       "malformed parallelism remains unsupported",
+			pod:        drainTestPod(disaggregated("--data-parallel-size=invalid")),
 			wantState:  modelDeploymentDrainUnsupported,
-			wantReason: "disaggregated shape",
+			wantReason: "could not be read",
 			wantCalls:  0,
 		},
 		{
@@ -643,13 +650,51 @@ func TestDrainCollectorDisaggregationIsReadFromThePodAlone(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			container := &corev1.Container{Name: drainTestContainer, Command: tc.command}
-			_, disaggregated := modelDeploymentDrainDisaggregated(tc.engine, container)
+			md := &workercore.ModelDeployment{
+				Spec: workercore.ModelDeploymentSpec{
+					Engine: workercore.ModelDeploymentEngine{Name: tc.engine},
+				},
+			}
+			pod := &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:    modelDeploymentMainContainerName,
+						Command: tc.command,
+					}},
+				},
+			}
+			disaggregated, reason := modelDeploymentRetirementDisaggregated(md, []*corev1.Pod{pod})
 			if disaggregated != tc.wantDisaggregated {
-				t.Fatalf("disaggregated = %v, want %v for %v", disaggregated, tc.wantDisaggregated, tc.command)
+				t.Fatalf("disaggregated = %v (reason: %q), want %v for %v", disaggregated, reason, tc.wantDisaggregated, tc.command)
 			}
 		})
 	}
+}
+
+func TestDrainCollectorAllowsValidDisaggregatedShapesAndRefusesUnknownParallelism(t *testing.T) {
+	t.Run("valid disaggregated shapes are scraped rather than refused", func(t *testing.T) {
+		pod := drainTestPod(func(pod *corev1.Pod) {
+			pod.Spec.Containers[0].Command = []string{"vllm", "serve", "m", "--data-parallel-external-lb"}
+		})
+		reader := newDrainTestReader(t, pod, vllmZero())
+
+		answer := reader.drain(t)
+		if answer.State != modelDeploymentDrainIdle {
+			t.Fatalf("state = %q, want %q (reason %q)", answer.State, modelDeploymentDrainIdle, answer.Reason)
+		}
+	})
+
+	t.Run("unparseable parallelism is still refused as unsupported", func(t *testing.T) {
+		pod := drainTestPod(func(pod *corev1.Pod) {
+			pod.Spec.Containers[0].Command = []string{"vllm", "serve", "m", "--data-parallel-size", "not-an-int"}
+		})
+		reader := newDrainTestReader(t, pod, vllmZero())
+
+		answer := reader.drain(t)
+		if answer.State != modelDeploymentDrainUnsupported {
+			t.Fatalf("state = %q, want %q (reason %q)", answer.State, modelDeploymentDrainUnsupported, answer.Reason)
+		}
+	})
 }
 
 // TestDrainCollectorArgvIsBoundedAndReadOnly pins the command the transport runs.

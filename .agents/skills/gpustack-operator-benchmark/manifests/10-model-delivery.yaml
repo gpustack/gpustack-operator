@@ -32,6 +32,30 @@ spec:
 apiVersion: worker.gpustack.ai/v1
 kind: ModelArtifact
 metadata:
+  name: qwen3-8b
+  namespace: gpustack-bench
+spec:
+  source:
+    huggingFace:
+      repository: Qwen/Qwen3-8B
+      revision: b968826d9c46dd6066d109eabc6255188de91218
+  allowPatterns:
+    - model-00001-of-00005.safetensors
+    - model-00002-of-00005.safetensors
+    - model-00003-of-00005.safetensors
+    - model-00004-of-00005.safetensors
+    - model-00005-of-00005.safetensors
+    - config.json
+    - generation_config.json
+    - merges.txt
+    - model.safetensors.index.json
+    - tokenizer.json
+    - tokenizer_config.json
+    - vocab.json
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelArtifact
+metadata:
   name: qwen3-32b
   namespace: gpustack-bench
 spec:
@@ -107,7 +131,7 @@ spec:
   storeRefs:
     - name: bench-models
   quota:
-    bytes: 220Gi
+    bytes: 260Gi
   allowPinned: true
 ---
 apiVersion: worker.gpustack.ai/v1
@@ -118,6 +142,24 @@ metadata:
 spec:
   artifactRef:
     name: qwen2-5-vl-7b-instruct
+  bindingRef:
+    name: bench-models
+  placement:
+    nodeSelector:
+      matchLabels:
+        kubernetes.io/hostname: computeinstance-e00v6dnves0rw6f2j2
+  minReady: 1
+  retention:
+    pinned: true
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelPrefetch
+metadata:
+  name: qwen3-8b
+  namespace: gpustack-bench
+spec:
+  artifactRef:
+    name: qwen3-8b
   bindingRef:
     name: bench-models
   placement:

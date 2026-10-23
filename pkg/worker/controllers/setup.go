@@ -17,6 +17,7 @@ var setups = []controller.Setup{
 	new(worker.KVCachePoolReconciler),
 	new(worker.ModelArtifactReconciler),
 	new(worker.ModelDeploymentReconciler),
+	new(worker.ModelDeploymentScalerReconciler),
 	new(worker.ModelDeploymentJointAdmissionReconciler),
 	new(worker.ModelDeploymentJointAdmissionCheckReconciler),
 	new(worker.ModelStoreReconciler),

@@ -6,6 +6,7 @@ fields and its conditions to diagnose a deployment that is still starting or has
 ## Contents
 
 - [Status](#status)
+- [Scaler annotations](#scaler-annotations)
 
 ## Status
 
@@ -456,9 +457,26 @@ resize lifecycle it reports on.
 A refusal still inside its retry bound stays `True`: it is not terminal yet. `WorldUnprovable`
 levels back to `True` on its own once a later pass proves the live world again.
 
+## Scaler annotations
+
+Two annotations on the `ModelDeployment` — `modeldeployment.gpustack.ai/scaler-binding` and
+`modeldeployment.gpustack.ai/scaler-decision` — record which `ModelDeploymentScaler` owns the
+replica count and which decision last changed it. They sit in *`metadata.annotations`*, not in
+*`status`*, because the single-writer fence is enforced at admission and a status field cannot
+refuse a write.
+
+[Binding fence](scaling.md#binding-fence) owns the payload of both annotations, the
+admission rules for bound and unbound deployments, and the escape hatch when a scaler is gone;
+[GitOps sync](scaling.md#gitops-sync) covers how a GitOps agent
+ignores the fields the scaler owns.
+
+The scaler's own `status` reports what it observed, what it recommends and what blocks it;
+[Scaler status](scaling.md#status) owns that contract.
+
 ---
 
 **See also** — [Model Deployment Configuration](deployment.md) (the contract this status reports on) ·
+[Model Deployment Scaling](scaling.md) (the scaler that owns a bound replica count) ·
 [Prefill and Decode](prefill-decode.md) (pairing *prefill* and *decode* roles) ·
 [Encode, Prefill and Decode](encode-prefill-decode.md) (*encode*, *prefill* and *decode* disaggregation) ·
 [KV Cache Election and Failover](../kv-cache/leader.md) (the leader process the conditions distinguish from the operator's own).

@@ -890,6 +890,31 @@ message ModelDeploymentMetrics {
   repeated ModelDeploymentMetricWindow transfer = 10;
 }
 
+// ModelDeploymentScaler is the v1 view of a metric-driven replica planner.
+//
+// Configuration changes proxy to the v1alpha1 resource. The status subresource is served, so
+// the planner's decisions are readable without going through the alpha version.
+//
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],subResources=["status"]
+message ModelDeploymentScaler {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelDeploymentScalerSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelDeploymentScalerStatus status = 3;
+}
+
+// ModelDeploymentScalerList holds the list of ModelDeploymentScalers.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelDeploymentScalerList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelDeploymentScaler items = 2;
+}
+
 // ModelPrefetch is the v1 view of a namespace's model residency: what is being warmed where, and
 // how far it has got.
 //

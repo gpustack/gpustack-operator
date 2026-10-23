@@ -135,3 +135,186 @@ func TestRingBuffer(t *testing.T) {
 	// Stats
 	assert.Equal(t, 4, b.Len(), "length should be 4")
 }
+
+func TestRingBufferDropWhile(t *testing.T) {
+	tests := []struct {
+		name     string
+		size     uint64
+		pushed   []int
+		drop     func(int) bool
+		wantDrop int
+		wantData []int
+	}{
+		{
+			name:     "an empty buffer drops nothing",
+			size:     4,
+			drop:     func(int) bool { return true },
+			wantDrop: 0,
+			wantData: []int{},
+		},
+		{
+			name:     "a predicate that never holds drops nothing",
+			size:     4,
+			pushed:   []int{1, 2, 3},
+			drop:     func(int) bool { return false },
+			wantDrop: 0,
+			wantData: []int{1, 2, 3},
+		},
+		{
+			name:     "a partial drop removes the front",
+			size:     4,
+			pushed:   []int{1, 2, 3, 4},
+			drop:     func(value int) bool { return value < 3 },
+			wantDrop: 2,
+			wantData: []int{3, 4},
+		},
+		{
+			name:     "dropping every element empties the buffer",
+			size:     4,
+			pushed:   []int{1, 2, 3},
+			drop:     func(int) bool { return true },
+			wantDrop: 3,
+			wantData: []int{},
+		},
+		{
+			name:     "a drop after an overwrite removes the oldest",
+			size:     3,
+			pushed:   []int{1, 2, 3, 4, 5},
+			drop:     func(value int) bool { return value < 4 },
+			wantDrop: 2,
+			wantData: []int{4, 5},
+		},
+		{
+			name:     "dropping every element after an overwrite empties the buffer",
+			size:     3,
+			pushed:   []int{1, 2, 3, 4, 5},
+			drop:     func(int) bool { return true },
+			wantDrop: 4,
+			wantData: []int{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			buffer := NewRingBuffer[int](test.size)
+			for _, value := range test.pushed {
+				buffer.Push(value)
+			}
+
+			dropped := buffer.DropWhile(test.drop)
+
+			assert.Equal(t, test.wantDrop, dropped, "dropped count")
+			assert.Equal(t, test.wantData, buffer.Data(), "remaining data")
+			assert.Equal(t, len(test.wantData), buffer.Len(), "remaining length")
+		})
+	}
+}
+
+func TestRingBufferReset(t *testing.T) {
+	tests := []struct {
+		name   string
+		size   uint64
+		pushed []int
+	}{
+		{
+			name: "resetting an empty buffer keeps it empty",
+			size: 4,
+		},
+		{
+			name:   "resetting a filled buffer empties it",
+			size:   4,
+			pushed: []int{1, 2, 3},
+		},
+		{
+			name:   "resetting a buffer that overwrote empties it",
+			size:   3,
+			pushed: []int{1, 2, 3, 4, 5},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			buffer := NewRingBuffer[int](test.size)
+			for _, value := range test.pushed {
+				buffer.Push(value)
+			}
+
+			buffer.Reset()
+
+			assert.Equal(t, 0, buffer.Len(), "length after reset")
+			assert.Equal(t, []int{}, buffer.Data(), "data after reset")
+			_, ok := buffer.First()
+			assert.False(t, ok, "first should fail after a reset")
+			_, ok = buffer.Last()
+			assert.False(t, ok, "last should fail after a reset")
+		})
+	}
+}
+
+func TestRingBufferResetKeepsTheBufferUsable(t *testing.T) {
+	buffer := NewRingBuffer[int](3)
+	for _, value := range []int{1, 2, 3, 4, 5} {
+		buffer.Push(value)
+	}
+
+	buffer.Reset()
+
+	for _, value := range []int{10, 11, 12, 13, 14} {
+		buffer.Push(value)
+	}
+	assert.Equal(t, []int{11, 12, 13, 14}, buffer.Data(), "data after the buffer is filled again")
+}
+
+func TestRingBufferResetClearsTheValuesItHeld(t *testing.T) {
+	type payload struct{ name string }
+
+	buffer := NewRingBuffer[*payload](4)
+	buffer.Push(&payload{name: "held"})
+
+	buffer.Reset()
+
+	assert.Equal(t, 0, buffer.Len(), "length after reset")
+	_, ok := buffer.First()
+	assert.False(t, ok, "first should fail after a reset")
+	for i := range buffer.data {
+		assert.Nil(t, buffer.data[i].val, "slot %d should be zeroed after reset", i)
+	}
+}
+
+func TestRingBufferAt(t *testing.T) {
+	buffer := NewRingBuffer[int](3)
+	for _, value := range []int{1, 2, 3, 4, 5} {
+		buffer.Push(value)
+	}
+
+	value, ok := buffer.At(0)
+	assert.True(t, ok, "the oldest element should be readable")
+	assert.Equal(t, 2, value, "the oldest element")
+	value, ok = buffer.At(3)
+	assert.True(t, ok, "the newest element should be readable")
+	assert.Equal(t, 5, value, "the newest element")
+	_, ok = buffer.At(4)
+	assert.False(t, ok, "an index outside the buffer should fail")
+	_, ok = buffer.At(-1)
+	assert.False(t, ok, "a negative index should fail")
+}
+
+func TestRingBufferClone(t *testing.T) {
+	var nilBuffer *RingBuffer[int]
+	assert.Nil(t, nilBuffer.Clone())
+
+	buffer := NewRingBuffer[int](4)
+	for _, value := range []int{1, 2, 3} {
+		buffer.Push(value)
+	}
+
+	cloned := buffer.Clone()
+	if !assert.NotNil(t, cloned) {
+		return
+	}
+	assert.Equal(t, buffer.Len(), cloned.Len())
+	assert.Equal(t, buffer.Data(), cloned.Data())
+
+	// Modifying cloned should not affect original.
+	cloned.Push(4)
+	assert.Equal(t, 3, buffer.Len())
+	assert.Equal(t, 4, cloned.Len())
+}

@@ -1,0 +1,43 @@
+# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{engine_type="unified",model_name="Qwen/Qwen2.5-7B-Instruct"} 7.0
+# TYPE sglang:num_queue_reqs gauge
+sglang:num_queue_reqs{engine_type="unified",model_name="Qwen/Qwen2.5-7B-Instruct"} 3.0
+# TYPE sglang:token_usage gauge
+sglang:token_usage{engine_type="unified",model_name="Qwen/Qwen2.5-7B-Instruct"} 0.44
+# TYPE sglang:prompt_tokens_total counter
+sglang:prompt_tokens_total{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 112000.0
+sglang:prompt_tokens_total{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1"} 112000.0
+# TYPE sglang:generation_tokens_total counter
+sglang:generation_tokens_total{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 43600.0
+sglang:generation_tokens_total{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1"} 43600.0
+# TYPE sglang:prefill_effective_tokens_total counter
+sglang:prefill_effective_tokens_total{mode="input",model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 68400.0
+sglang:prefill_effective_tokens_total{mode="input",model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1"} 68400.0
+sglang:prefill_effective_tokens_total{mode="device_hit",model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 21500.0
+sglang:prefill_effective_tokens_total{mode="device_hit",model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1"} 21500.0
+sglang:prefill_effective_tokens_total{mode="host_hit",model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 5200.0
+sglang:prefill_effective_tokens_total{mode="host_hit",model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1"} 5200.0
+sglang:prefill_effective_tokens_total{mode="storage_hit",model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 1040.0
+sglang:prefill_effective_tokens_total{mode="storage_hit",model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1"} 1040.0
+# TYPE sglang:time_to_first_token_seconds histogram
+sglang:time_to_first_token_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0",le="0.5"} 118.0
+sglang:time_to_first_token_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0",le="1.0"} 280.0
+sglang:time_to_first_token_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0",le="+Inf"} 354.0
+sglang:time_to_first_token_seconds_sum{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 51.816807671997506
+sglang:time_to_first_token_seconds_count{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 240.0
+sglang:time_to_first_token_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1",le="0.5"} 118.0
+sglang:time_to_first_token_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1",le="1.0"} 280.0
+sglang:time_to_first_token_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1",le="+Inf"} 354.0
+sglang:time_to_first_token_seconds_sum{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1"} 51.816807671997506
+sglang:time_to_first_token_seconds_count{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1"} 240.0
+# TYPE sglang:inter_token_latency_seconds histogram
+sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0",le="0.01"} 4200.0
+sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0",le="0.05"} 14200.0
+sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0",le="+Inf"} 16638.0
+sglang:inter_token_latency_seconds_sum{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 52.68845127601784
+sglang:inter_token_latency_seconds_count{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 16638.0
+sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1",le="0.01"} 4200.0
+sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1",le="0.05"} 14200.0
+sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1",le="+Inf"} 16638.0
+sglang:inter_token_latency_seconds_sum{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1"} 52.68845127601784
+sglang:inter_token_latency_seconds_count{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1"} 16638.0

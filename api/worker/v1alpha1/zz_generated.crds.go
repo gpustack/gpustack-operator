@@ -16,19 +16,20 @@ import (
 
 func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 	return map[string]*v1.CustomResourceDefinition{
-		"Devices":            crd_gpustack_api_worker_v1alpha1_Devices(),
-		"Instance":           crd_gpustack_api_worker_v1alpha1_Instance(),
-		"InstanceType":       crd_gpustack_api_worker_v1alpha1_InstanceType(),
-		"KVCacheBackend":     crd_gpustack_api_worker_v1alpha1_KVCacheBackend(),
-		"KVCachePool":        crd_gpustack_api_worker_v1alpha1_KVCachePool(),
-		"KVCachePoolBinding": crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding(),
-		"ModelArtifact":      crd_gpustack_api_worker_v1alpha1_ModelArtifact(),
-		"ModelDeployment":    crd_gpustack_api_worker_v1alpha1_ModelDeployment(),
-		"ModelPrefetch":      crd_gpustack_api_worker_v1alpha1_ModelPrefetch(),
-		"ModelStore":         crd_gpustack_api_worker_v1alpha1_ModelStore(),
-		"ModelStoreBinding":  crd_gpustack_api_worker_v1alpha1_ModelStoreBinding(),
-		"NodeModelStore":     crd_gpustack_api_worker_v1alpha1_NodeModelStore(),
-		"TopologySource":     crd_gpustack_api_worker_v1alpha1_TopologySource(),
+		"Devices":               crd_gpustack_api_worker_v1alpha1_Devices(),
+		"Instance":              crd_gpustack_api_worker_v1alpha1_Instance(),
+		"InstanceType":          crd_gpustack_api_worker_v1alpha1_InstanceType(),
+		"KVCacheBackend":        crd_gpustack_api_worker_v1alpha1_KVCacheBackend(),
+		"KVCachePool":           crd_gpustack_api_worker_v1alpha1_KVCachePool(),
+		"KVCachePoolBinding":    crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding(),
+		"ModelArtifact":         crd_gpustack_api_worker_v1alpha1_ModelArtifact(),
+		"ModelDeployment":       crd_gpustack_api_worker_v1alpha1_ModelDeployment(),
+		"ModelDeploymentScaler": crd_gpustack_api_worker_v1alpha1_ModelDeploymentScaler(),
+		"ModelPrefetch":         crd_gpustack_api_worker_v1alpha1_ModelPrefetch(),
+		"ModelStore":            crd_gpustack_api_worker_v1alpha1_ModelStore(),
+		"ModelStoreBinding":     crd_gpustack_api_worker_v1alpha1_ModelStoreBinding(),
+		"NodeModelStore":        crd_gpustack_api_worker_v1alpha1_NodeModelStore(),
+		"TopologySource":        crd_gpustack_api_worker_v1alpha1_TopologySource(),
 	}
 }
 
@@ -5914,6 +5915,1471 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 							Description: "",
 							Priority:    0,
 							JSONPath:    ".status.endpoint",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_ModelDeploymentScaler() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "modeldeploymentscalers.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "modeldeploymentscalers",
+				Singular: "modeldeploymentscaler",
+				ShortNames: []string{
+					"mds",
+				},
+				Kind:     "ModelDeploymentScaler",
+				ListKind: "ModelDeploymentScalerList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Namespaced",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "ModelDeploymentScaler is the schema for a metric-driven replica planner over one\nModelDeployment.\nIn Shadow mode it observes and records recommendations in status without modifying the target.\nIn Active mode its reconciler commits the planned replica vector and decision annotation onto\nthe target under the single-writer admission fence, and the ModelDeployment reconciler converges\nthe serving replicas to that count.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"targetRef",
+										"roles",
+										"algorithm",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"algorithm": {
+											Description: "Algorithm says how the scaler turns what it observes into a replica count.\nThe algorithm named here is the one that runs, and the parameters of the other algorithms\nare ignored, so a deployment states one algorithm and one set of parameters.",
+											Type:        "object",
+											Required: []string{
+												"type",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"predictive": {
+													Description: "Predictive holds the parameters of the Predictive algorithm.\nIt is required when Type is Predictive and ignored otherwise.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"decodeTokenCapacityPerReplica": {
+															Description: "DecodeTokenCapacityPerReplica is the generation-token rate one Decode replica sustains.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"horizonSeconds": {
+															Description: "HorizonSeconds is how far ahead the demand is forecast.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](600),
+															Minimum:     ptr.To[float64](30),
+														},
+														"measurementNoise": {
+															Description: "MeasurementNoise is how much the forecast trusts each new observation.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"minPoints": {
+															Description: "MinPoints is how many observations the predictor needs before it forecasts.\nUntil it has them, the algorithm reports that it is warming up and returns the token\nthroughput result.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](64),
+															Minimum:     ptr.To[float64](1),
+														},
+														"prefillTokenCapacityPerReplica": {
+															Description: "PrefillTokenCapacityPerReplica is the prompt-token rate one Prefill replica sustains.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"qLevel": {
+															Description: "QLevel is how much the level of the forecast follows each new observation.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"qTrend": {
+															Description: "QTrend is how much the trend of the forecast follows each new observation.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"serverTokenCapacityPerReplica": {
+															Description: "ServerTokenCapacityPerReplica is the token rate one Server replica sustains.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"tokenThroughput": {
+															Description: "TokenThroughput holds the parameters the predictor falls back to.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"decodeTargetTokensPerSecond": {
+																	Description: "DecodeTargetTokensPerSecond is the generation-token rate one Decode replica sustains.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"itlTargetMilliseconds": {
+																	Description: "ITLTargetMilliseconds is the inter-token latency the role is expected to keep under.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"panicThreshold": {
+																	Description: "PanicThreshold is the growth rate over the ready replicas that starts a panic.\nA panic holds the replica count up and stops scale-downs until the load settles.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"panicWindowSeconds": {
+																	Description: "PanicWindowSeconds is the window the panic recommendation is computed over.\nThe panic window is short, so it reacts to a burst that the stable window smooths away.",
+																	Type:        "integer",
+																	Format:      "int32",
+																	Maximum:     ptr.To[float64](300),
+																	Minimum:     ptr.To[float64](10),
+																},
+																"prefillTargetTokensPerSecond": {
+																	Description: "PrefillTargetTokensPerSecond is the prompt-token rate one Prefill replica sustains.\nIt is the capacity the demand is divided by, so the number of replicas follows from how\nmany prompt tokens per second one replica is expected to serve.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"serverTargetTokensPerSecond": {
+																	Description: "ServerTargetTokensPerSecond is the token rate one Server replica sustains, over prompt\ntokens and generation tokens together.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"stableWindowSeconds": {
+																	Description: "StableWindowSeconds is the window the stable recommendation is computed over.\nThe stable window is long enough to smooth a burst, so a short spike does not move the\nreplica count.",
+																	Type:        "integer",
+																	Format:      "int32",
+																	Maximum:     ptr.To[float64](600),
+																	Minimum:     ptr.To[float64](30),
+																},
+																"ttftTargetMilliseconds": {
+																	Description: "TTFTTargetMilliseconds is the time to first token the role is expected to keep under.\nA role that is observed above this target is a role that needs more replicas, whatever the\ntoken counters say.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+															},
+														},
+													},
+													Nullable: true,
+												},
+												"proportional": {
+													Description: "Proportional holds the parameters of the Proportional algorithm.\nIt is required when Type is Proportional and ignored otherwise.",
+													Type:        "object",
+													Required: []string{
+														"metric",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"metric": {
+															Description: "Metric is the signal the algorithm scales on.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"QueueDepth"`),
+																},
+																{
+																	Raw: []byte(`"RunningRequests"`),
+																},
+																{
+																	Raw: []byte(`"WaitingRequests"`),
+																},
+																{
+																	Raw: []byte(`"PromptTokensPerSecond"`),
+																},
+																{
+																	Raw: []byte(`"GenerationTokensPerSecond"`),
+																},
+																{
+																	Raw: []byte(`"TotalTokensPerSecond"`),
+																},
+															},
+														},
+														"roleTargets": {
+															Description: "RoleTargets is the signal one replica of each role is expected to carry.\nEvery role the scaler plans for needs a target, because the algorithm divides what it\nobserved by it to reach a replica count.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"name",
+																		"target",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"name": {
+																			Description: "Name is the role this target belongs to.",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](253),
+																			MinLength:   ptr.To[int64](1),
+																		},
+																		"target": {
+																			Description: "Target is the signal one replica of this role is expected to carry.\nIt is a quantity, so a rate is written as a quantity per second and a count as a plain\nnumber.",
+																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																			AnyOf: []v1.JSONSchemaProps{
+																				{
+																					Type: "integer",
+																				},
+																				{
+																					Type: "string",
+																				},
+																			},
+																			XIntOrString: true,
+																		},
+																	},
+																},
+															},
+															Nullable: true,
+															XListMapKeys: []string{
+																"name",
+															},
+															XListType: ptr.To[string]("map"),
+														},
+														"tolerance": {
+															Description: "Tolerance is the fraction around the target inside which nothing happens.\nA role whose observed load already sits inside the tolerance holds its replica count, so a\nsteady deployment does not move for noise.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+													},
+													Nullable: true,
+												},
+												"tokenThroughput": {
+													Description: "TokenThroughput holds the parameters of the TokenThroughput algorithm.\nIt is required when Type is TokenThroughput and ignored otherwise.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"decodeTargetTokensPerSecond": {
+															Description: "DecodeTargetTokensPerSecond is the generation-token rate one Decode replica sustains.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"itlTargetMilliseconds": {
+															Description: "ITLTargetMilliseconds is the inter-token latency the role is expected to keep under.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"panicThreshold": {
+															Description: "PanicThreshold is the growth rate over the ready replicas that starts a panic.\nA panic holds the replica count up and stops scale-downs until the load settles.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"panicWindowSeconds": {
+															Description: "PanicWindowSeconds is the window the panic recommendation is computed over.\nThe panic window is short, so it reacts to a burst that the stable window smooths away.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](300),
+															Minimum:     ptr.To[float64](10),
+														},
+														"prefillTargetTokensPerSecond": {
+															Description: "PrefillTargetTokensPerSecond is the prompt-token rate one Prefill replica sustains.\nIt is the capacity the demand is divided by, so the number of replicas follows from how\nmany prompt tokens per second one replica is expected to serve.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"serverTargetTokensPerSecond": {
+															Description: "ServerTargetTokensPerSecond is the token rate one Server replica sustains, over prompt\ntokens and generation tokens together.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"stableWindowSeconds": {
+															Description: "StableWindowSeconds is the window the stable recommendation is computed over.\nThe stable window is long enough to smooth a burst, so a short spike does not move the\nreplica count.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](600),
+															Minimum:     ptr.To[float64](30),
+														},
+														"ttftTargetMilliseconds": {
+															Description: "TTFTTargetMilliseconds is the time to first token the role is expected to keep under.\nA role that is observed above this target is a role that needs more replicas, whatever the\ntoken counters say.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+													},
+													Nullable: true,
+												},
+												"type": {
+													Description: "Type is the algorithm that runs.",
+													Type:        "string",
+													Enum: []v1.JSON{
+														{
+															Raw: []byte(`"Proportional"`),
+														},
+														{
+															Raw: []byte(`"TokenThroughput"`),
+														},
+														{
+															Raw: []byte(`"Predictive"`),
+														},
+													},
+												},
+											},
+										},
+										"behavior": {
+											Description: "Behavior tunes how fast the scaler may move a role and how long it waits after a failure.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"scaleDown": {
+													Description: "ScaleDown tunes how fast a role may shrink and what happens after an aborted retirement.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"cooldownAfterAbortSeconds": {
+															Description: "CooldownAfterAbortSeconds is how long a role is held after an aborted retirement.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](3600),
+															Minimum:     ptr.To[float64](0),
+														},
+														"decodePostScaleUpGraceSeconds": {
+															Description: "DecodePostScaleUpGraceSeconds is how long a Decode role is held after it grew.\nA Decode role that just grew does not shrink again inside this window, because a pair that\noscillates costs more than it saves.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](3600),
+															Minimum:     ptr.To[float64](0),
+														},
+														"stabilizationWindowSeconds": {
+															Description: "StabilizationWindowSeconds is the window the recommendations are remembered over.\nThe largest recommendation in that window is the floor a scale-down may go to, so a role\nthat was asked to grow does not shrink again right away.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](1800),
+															Minimum:     ptr.To[float64](0),
+														},
+														"stepPolicy": {
+															Description: "StepPolicy is a step bound stated in one unit.\nIt replaces the default of removing at most one replica per role per pass.",
+															Type:        "object",
+															Required: []string{
+																"type",
+																"value",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"type": {
+																	Description: "Type is the unit of Value.",
+																	Type:        "string",
+																	Enum: []v1.JSON{
+																		{
+																			Raw: []byte(`"Pods"`),
+																		},
+																		{
+																			Raw: []byte(`"Percent"`),
+																		},
+																	},
+																},
+																"value": {
+																	Description: "Value is the bound expressed in the unit Type names.",
+																	Type:        "integer",
+																	Format:      "int32",
+																	Minimum:     ptr.To[float64](1),
+																},
+															},
+															Nullable: true,
+														},
+													},
+												},
+												"scaleUp": {
+													Description: "ScaleUp tunes how fast a role may grow.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"maxStepPercent": {
+															Description: "MaxStepPercent is the most percent of the current replica count one pass may add to a role.\nZero leaves the bound unset, so only the replica bound applies.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](1000),
+															Minimum:     ptr.To[float64](0),
+														},
+														"maxStepReplicas": {
+															Description: "MaxStepReplicas is the most replicas one pass may add to a role.\nZero leaves the bound unset, so only the percentage bound applies.",
+															Type:        "integer",
+															Format:      "int32",
+															Minimum:     ptr.To[float64](0),
+														},
+														"stabilizationWindowSeconds": {
+															Description: "StabilizationWindowSeconds is how long a recommendation is held before it takes effect.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](600),
+															Minimum:     ptr.To[float64](0),
+														},
+														"stepPolicy": {
+															Description: "StepPolicy is a step bound stated in one unit.\nIt replaces the two bounds above, so a deployment states its cap once instead of twice.",
+															Type:        "object",
+															Required: []string{
+																"type",
+																"value",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"type": {
+																	Description: "Type is the unit of Value.",
+																	Type:        "string",
+																	Enum: []v1.JSON{
+																		{
+																			Raw: []byte(`"Pods"`),
+																		},
+																		{
+																			Raw: []byte(`"Percent"`),
+																		},
+																	},
+																},
+																"value": {
+																	Description: "Value is the bound expressed in the unit Type names.",
+																	Type:        "integer",
+																	Format:      "int32",
+																	Minimum:     ptr.To[float64](1),
+																},
+															},
+															Nullable: true,
+														},
+													},
+												},
+											},
+										},
+										"mode": {
+											Description: "Mode decides whether the scaler only observes or also acts.\nShadow observes and publishes what it would have done, and changes nothing. Active publishes\nand the worker reconciler applies the committed vector. Shadow is the default, so a scaler\nthat was just created never moves a target before its owner asked for it.",
+											Type:        "string",
+											Default: &v1.JSON{
+												Raw: []byte(`"Shadow"`),
+											},
+											Enum: []v1.JSON{
+												{
+													Raw: []byte(`"Shadow"`),
+												},
+												{
+													Raw: []byte(`"Active"`),
+												},
+											},
+										},
+										"ratios": {
+											Description: "Ratios are the relationships between roles that a committed vector has to keep.\nA ratio bounds the replica count of a numerator role against the replica count of a\ndenominator role, so that a coupled prefill and decode pair does not drift apart. A ratio\nnames roles the scaler plans for, and a ratio that names an unknown role is refused.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"numeratorRole",
+														"denominatorRole",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"denominatorRole": {
+															Description: "DenominatorRole is the role whose replica count is the denominator.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+															MinLength:   ptr.To[int64](1),
+														},
+														"max": {
+															Description: "Max is the largest ratio the numerator may hold against the denominator.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"min": {
+															Description: "Min is the smallest ratio the numerator may hold against the denominator.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"numeratorRole": {
+															Description: "NumeratorRole is the role whose replica count is the numerator.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+															MinLength:   ptr.To[int64](1),
+														},
+														"target": {
+															Description: "Target is the ratio the projection aims at.\nIt is the ratio the planner looks for inside the bounds of every other rule, and it is\nwhat a coupled pair settles on when nothing else decides.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"numeratorRole",
+												"denominatorRole",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"rebalance": {
+											Description: "Rebalance tunes what the scaler does when one role cannot grow because the cluster is\nexhausted and another role could give resources back.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"policy": {
+													Description: "Policy decides whether another role may give resources back to an exhausted one.",
+													Type:        "string",
+													Enum: []v1.JSON{
+														{
+															Raw: []byte(`"Opposing"`),
+														},
+														{
+															Raw: []byte(`"Priority"`),
+														},
+														{
+															Raw: []byte(`"Disabled"`),
+														},
+													},
+												},
+												"priority": {
+													Description: "Priority orders the roles from the one that may give resources away to the one that may\nnot.\nIt only means something under the Priority policy, where a role late in the order is the\nfirst one asked to shrink. A role that is not named keeps the place of its own\nrecommendation.",
+													Type:        "array",
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "string",
+														},
+													},
+													Nullable:  true,
+													XListType: ptr.To[string]("atomic"),
+												},
+											},
+										},
+										"roles": {
+											Description: "Roles are the roles of the target this scaler plans for, with the bounds each one stays\ninside.\nEvery role of the target the scaler plans for needs a bound, and a role the target does not\nhave is refused, so that the planner never reasons about a role that is not there.",
+											Type:        "array",
+											MinItems:    ptr.To[int64](1),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+														"maxReplicas",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"maxReplicas": {
+															Description: "MaxReplicas is the most replicas this role may have.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](1024),
+															Minimum:     ptr.To[float64](1),
+														},
+														"minReplicas": {
+															Description: "MinReplicas is the fewest replicas this role may have.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](1024),
+															Minimum:     ptr.To[float64](1),
+														},
+														"name": {
+															Description: "Name is the name of the role on the target.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+															MinLength:   ptr.To[int64](1),
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"sampling": {
+											Description: "Sampling tunes how often the scaler looks at the target and how long it waits for a\ncommitted scale-up to become admitted.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"intervalSeconds": {
+													Description: "IntervalSeconds is how often the scaler looks at the target.\nIt is the floor on how fast the scaler reacts and the floor on how often it writes, so a\nshort interval costs scrape load and a long one costs reaction time.",
+													Type:        "integer",
+													Format:      "int32",
+													Maximum:     ptr.To[float64](300),
+													Minimum:     ptr.To[float64](5),
+												},
+												"pendingTimeoutSeconds": {
+													Description: "PendingTimeoutSeconds is how long a committed scale-up may stay unadmitted before it is\nretracted.\nThe retraction restores the vector the scale-up started from, so a timeout undoes a change\nrather than leaving a role waiting for resources that never arrive.",
+													Type:        "integer",
+													Format:      "int32",
+													Maximum:     ptr.To[float64](1200),
+													Minimum:     ptr.To[float64](60),
+												},
+											},
+										},
+										"suspend": {
+											Description: "Suspend stops the scaler without deleting it.\nA suspended scaler releases its owned binding and stops planning without being deleted,\nreporting Suspended on its Bound and Active conditions until resumed.",
+											Type:        "boolean",
+										},
+										"targetRef": {
+											Description: "TargetRef names the ModelDeployment this scaler plans for.\nThe target is in this namespace. A scaler without a target has nothing to plan for, so the\nfield is required and a name that matches nothing leaves the scaler unbound.",
+											Type:        "object",
+											Required: []string{
+												"name",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"name": {
+													Description: "Name is the name of the target ModelDeployment in this namespace.",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](253),
+													MinLength:   ptr.To[int64](1),
+												},
+											},
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"binding": {
+											Description: "Binding is the target this scaler is bound to.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"targetName": {
+													Description: "TargetName is the name of the bound target.",
+													Type:        "string",
+												},
+												"targetUID": {
+													Description: "TargetUID is the UID of the bound target.\nA target that was deleted and recreated carries a different UID, so the binding tells the\ntwo apart.",
+													Type:        "string",
+												},
+												"term": {
+													Description: "Term is the binding term the scaler writes under.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+											},
+											Nullable: true,
+										},
+										"conditions": {
+											Description: "Conditions holds the conditions of the scaler.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"lastCommit": {
+											Description: "LastCommit is the decision the scaler last committed.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"baselineVector": {
+													Description: "BaselineVector is the replica count per role the decision started from.\nIt is the vector the scaler restores when the decision has to be retracted.",
+													Type:        "object",
+													AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+														Allows: true,
+														Schema: &v1.JSONSchemaProps{
+															Type:   "integer",
+															Format: "int32",
+														},
+													},
+													Nullable: true,
+												},
+												"decisionID": {
+													Description: "DecisionID identifies the decision.",
+													Type:        "string",
+												},
+												"targetGeneration": {
+													Description: "TargetGeneration is the generation of the target the decision was computed from.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+												"term": {
+													Description: "Term is the binding term the decision was written under.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+												"timestamp": {
+													Description: "Timestamp is when the decision was committed.",
+													Type:        "string",
+													Format:      "date-time",
+													Nullable:    true,
+												},
+												"vector": {
+													Description: "Vector is the replica count per role the decision committed.",
+													Type:        "object",
+													AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+														Allows: true,
+														Schema: &v1.JSONSchemaProps{
+															Type:   "integer",
+															Format: "int32",
+														},
+													},
+													Nullable: true,
+												},
+											},
+											Nullable: true,
+										},
+										"lastScaleDown": {
+											Description: "LastScaleDown is the outcome of the last scale-down the scaler committed.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"abortedAt": {
+													Description: "AbortedAt is when the retirement aborted.",
+													Type:        "string",
+													Format:      "date-time",
+													Nullable:    true,
+												},
+												"cooldownUntil": {
+													Description: "CooldownUntil is when the role may shrink again.",
+													Type:        "string",
+													Format:      "date-time",
+													Nullable:    true,
+												},
+												"ordinal": {
+													Description: "Ordinal is the replica the scale-down removed.",
+													Type:        "integer",
+													Format:      "int32",
+												},
+												"outcome": {
+													Description: "Outcome is how the scale-down ended.\nIt is Committed while the retirement runs and Aborted when the retirement failed and the\nscaler restored the vector.",
+													Type:        "string",
+												},
+												"preScaleDownVector": {
+													Description: "PreScaleDownVector is the replica count per role before the scale-down.\nIt is the vector the scaler restores when the retirement aborts.",
+													Type:        "object",
+													AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+														Allows: true,
+														Schema: &v1.JSONSchemaProps{
+															Type:   "integer",
+															Format: "int32",
+														},
+													},
+													Nullable: true,
+												},
+												"role": {
+													Description: "Role is the role the scale-down removed a replica from.",
+													Type:        "string",
+												},
+											},
+											Nullable: true,
+										},
+										"observedGeneration": {
+											Description: "ObservedGeneration is the generation this status was computed from.",
+											Type:        "integer",
+											Format:      "int64",
+										},
+										"pendingCohort": {
+											Description: "PendingCohort is the scale-up the scaler committed and is waiting on.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"baselineVector": {
+													Description: "BaselineVector is the replica count per role before the cohort was added.\nIt is the vector the scaler restores when the cohort is retracted.",
+													Type:        "object",
+													AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+														Allows: true,
+														Schema: &v1.JSONSchemaProps{
+															Type:   "integer",
+															Format: "int32",
+														},
+													},
+													Nullable: true,
+												},
+												"decisionID": {
+													Description: "DecisionID identifies the decision that added the cohort.",
+													Type:        "string",
+												},
+												"startedAt": {
+													Description: "StartedAt is when the cohort was committed.",
+													Type:        "string",
+													Format:      "date-time",
+													Nullable:    true,
+												},
+												"targetVector": {
+													Description: "TargetVector is the replica count per role the cohort asked for.",
+													Type:        "object",
+													AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+														Allows: true,
+														Schema: &v1.JSONSchemaProps{
+															Type:   "integer",
+															Format: "int32",
+														},
+													},
+													Nullable: true,
+												},
+												"term": {
+													Description: "Term is the binding term the decision was written under.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+											},
+											Nullable: true,
+										},
+										"predictors": {
+											Description: "Predictors is the state of the predictor of each role.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"covariance": {
+															Description: "Covariance is how much the predictor trusts its own estimate.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"p00": {
+																	Description: "P00 is the variance of the level.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"p01": {
+																	Description: "P01 is the covariance of the level with the trend.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"p10": {
+																	Description: "P10 is the covariance of the trend with the level.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"p11": {
+																	Description: "P11 is the variance of the trend.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+															},
+															Nullable: true,
+														},
+														"history": {
+															Description: "History is the demand the predictor has seen.\nIt is bounded, because the predictor only needs the recent past.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](256),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"timestamp",
+																		"tokensPerSecond",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"timestamp": {
+																			Description: "Timestamp is when the observation was made.",
+																			Type:        "string",
+																			Format:      "date-time",
+																		},
+																		"tokensPerSecond": {
+																			Description: "TokensPerSecond is the demand that was observed.",
+																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																			AnyOf: []v1.JSONSchemaProps{
+																				{
+																					Type: "integer",
+																				},
+																				{
+																					Type: "string",
+																				},
+																			},
+																			XIntOrString: true,
+																		},
+																	},
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"level": {
+															Description: "Level is the demand the predictor currently believes in.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"name": {
+															Description: "Name is the role this predictor belongs to.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+															MinLength:   ptr.To[int64](1),
+														},
+														"sampleCount": {
+															Description: "SampleCount is how many observations the predictor has seen.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"trend": {
+															Description: "Trend is how fast the predictor believes the demand is moving.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"rebalance": {
+											Description: "Rebalance is the transaction in which one role gives a replica to another.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"donationAttempted": {
+													Description: "DonationAttempted says whether the donor was already asked to give the replica.",
+													Type:        "boolean",
+												},
+												"donorRole": {
+													Description: "DonorRole is the role that gives the replica.",
+													Type:        "string",
+												},
+												"donorTargetReplicas": {
+													Description: "DonorTargetReplicas is the replica count the donor is heading for.",
+													Type:        "integer",
+													Format:      "int32",
+												},
+												"exhaustionEpisodeGeneration": {
+													Description: "ExhaustionEpisodeGeneration counts the exhaustion episodes the transaction belongs to.\nIt keeps one episode from draining more donors than it should.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+												"reason": {
+													Description: "Reason says why the transaction is where it is.",
+													Type:        "string",
+												},
+												"receiverRole": {
+													Description: "ReceiverRole is the role that receives the replica.",
+													Type:        "string",
+												},
+												"receiverTargetReplicas": {
+													Description: "ReceiverTargetReplicas is the replica count the receiver is heading for.",
+													Type:        "integer",
+													Format:      "int32",
+												},
+												"startedAt": {
+													Description: "StartedAt is when the transaction began.",
+													Type:        "string",
+													Format:      "date-time",
+													Nullable:    true,
+												},
+											},
+											Nullable: true,
+										},
+										"roles": {
+											Description: "Roles is what the scaler saw and what it recommends for each role.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"constrainedReplicas": {
+															Description: "ConstrainedReplicas is the replica count the planner settled on after the bounds and the\nratios were applied.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"currentReplicas": {
+															Description: "CurrentReplicas is the replica count the target reports for this role.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"generationTokensPerSecond": {
+															Description: "GenerationTokensPerSecond is the generation-token rate the scaler observed.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"itlMilliseconds": {
+															Description: "ITLMilliseconds is the inter-token latency the scaler observed.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"kvCacheUsage": {
+															Description: "KVCacheUsage is how much of the key value cache the role was using.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"lastScaleUpTime": {
+															Description: "LastScaleUpTime is when this role last grew.",
+															Type:        "string",
+															Format:      "date-time",
+															Nullable:    true,
+														},
+														"name": {
+															Description: "Name is the role this status belongs to.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+															MinLength:   ptr.To[int64](1),
+														},
+														"promptTokensPerSecond": {
+															Description: "PromptTokensPerSecond is the prompt-token rate the scaler observed.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"rawRecommendedReplicas": {
+															Description: "RawRecommendedReplicas is the replica count the algorithm asked for, before the bounds and\nthe ratios were applied.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"readyReplicas": {
+															Description: "ReadyReplicas is the replica count of this role that is ready to serve.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"reason": {
+															Description: "Reason says why the recommendation is what it is.",
+															Type:        "string",
+														},
+														"runningRequests": {
+															Description: "RunningRequests is the number of requests the role was running.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"signalState": {
+															Description: "SignalState is how much the scaler trusts what it observed for this role.\nIt is Fresh when every required signal was read in the last window, Idle when the role was\nread and had nothing to do, Missing when a required signal was absent and Stale when the\nwindow it belongs to has passed.",
+															Type:        "string",
+														},
+														"stabilizationHistory": {
+															Description: "StabilizationHistory is the recommendation this role received over the last window.\nIt is bounded, and it is what lets the scale-down floor survive a restart.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](256),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"timestamp",
+																		"replicas",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"replicas": {
+																			Description: "Replicas is the replica count the recommendation asked for.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																		"timestamp": {
+																			Description: "Timestamp is when the recommendation was made.",
+																			Type:        "string",
+																			Format:      "date-time",
+																		},
+																	},
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"ttftMilliseconds": {
+															Description: "TTFTMilliseconds is the time to first token the scaler observed.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"waitingRequests": {
+															Description: "WaitingRequests is the number of requests the role was waiting for.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Target",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.targetRef.name",
+						},
+						{
+							Name:        "Mode",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.mode",
+						},
+						{
+							Name:        "Algorithm",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.algorithm.type",
+						},
+						{
+							Name:        "Bound",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Bound')].status",
+						},
+						{
+							Name:        "Active",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Active')].status",
+						},
+						{
+							Name:        "Blocked",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Blocked')].status",
 						},
 					},
 				},

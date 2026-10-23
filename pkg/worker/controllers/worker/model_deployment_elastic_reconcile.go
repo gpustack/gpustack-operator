@@ -366,6 +366,11 @@ func (r *ModelDeploymentReconciler) elasticWithdrawal(ctx context.Context, md *w
 	if reason, held := r.observeModelDeploymentRetirementResidual(ctx, md, sets.New(master.UID)); held {
 		return false, reason
 	}
+	if disaggregated, reason := modelDeploymentRetirementDisaggregated(md, []*core.Pod{master}); reason != "" {
+		return false, reason
+	} else if disaggregated {
+		return false, "the member runs a disaggregated shape, which has no verifiable decoder-side release in elastic mode"
+	}
 	drain, err := r.modelDeploymentDrainReaderOf().Drain(ctx, modelDeploymentDrainTarget{
 		PodUID:        master.UID,
 		DeploymentUID: md.UID, Container: modelDeploymentMainContainerName, Role: ModelDeploymentElasticRole(md).Name, Engine: md.Spec.Engine.Name,

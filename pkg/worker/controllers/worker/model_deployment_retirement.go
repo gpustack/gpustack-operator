@@ -41,8 +41,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	kubeapistatus "gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
@@ -66,6 +68,8 @@ const (
 	// modelDeploymentRetirementDrainBudget is how long the protocol waits for the engine's own
 	// in-flight queues to reach zero, with every member still running.
 	modelDeploymentRetirementDrainBudget = 240 * time.Second
+
+	modelDeploymentRetirementDisaggregatedGraceWindow = 60 * time.Second
 
 	// modelDeploymentRetirementSettleBudget is how long the protocol waits for the accelerator and
 	// the quota to be released after the delete, which is a convergence rather than a decision.
@@ -230,10 +234,14 @@ func (r *ModelDeploymentReconciler) planModelDeploymentRetirement(
 	// answer is to cancel the operation and let ordinary convergence keep the Pods it already has.
 	// A different UID at the ordinal is a different group and is external termination above, so
 	// adoption cannot silently absorb a replacement.
-	if r.adoptsModelDeploymentRetirement(ctx, md, plan) {
+	if adopted, retry := r.adoptsModelDeploymentRetirement(ctx, md, plan, pods); adopted {
 		plan.Clear = true
 		plan.Hold = false
 		plan.InFlight = false
+
+		return plan
+	} else if retry {
+		plan.InFlight = true
 
 		return plan
 	}
@@ -985,9 +993,9 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementDrained(
 	// A DISAGGREGATED REPLICA IS NOT MEASURED BY THE PREFILLER'S QUEUES ALONE. A decoder waiting to
 	// receive KV is in the prefiller's transfer queue, and the prefiller reports that work while the
 	// decoder that will serve it reports none -- so a decoder-side zero read off its own gauges is
-	// zero on an engine that is about to be handed the whole model. The shape stays refused until a
-	// decoder-side release can be verified, because the other answer deletes a decode cluster in
-	// the middle of a prefill.
+	// zero on an engine that is about to be handed the whole model. The shape enforces a handoff grace
+	// window before drain proceeds to gauge reads, allowing pending transfers to settle because a
+	// decoder-side release cannot be verified directly from engine queues.
 	// The disaggregation shape is asked only where the spec can still answer it. A role the spec
 	// no longer declares cannot be read, and an absent answer is not a disaggregated one: the
 	// replica's own Pods say what they run, and that is what the drain reader needs anyway.
@@ -1012,8 +1020,14 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementDrained(
 		return "a member carries no engine container to read, so the replica's own command line could " +
 			"not be established", false
 	}
-	if externalDP.answer {
-		return "a disaggregated replica has no verifiable decoder-side release", false
+	if disaggregated, reason := modelDeploymentRetirementDisaggregated(md, plan.Target.Members); reason != "" {
+		return reason, false
+	} else if disaggregated && (plan.Reservation.PhaseStartedAt.IsZero() ||
+		r.modelDeploymentNow().Sub(plan.Reservation.PhaseStartedAt.Time) < modelDeploymentRetirementDisaggregatedGraceWindow) {
+		return fmt.Sprintf(
+			"the %s disaggregated handoff grace window is in progress because a disaggregated replica has no verifiable decoder-side release",
+			modelDeploymentRetirementDisaggregatedGraceWindow,
+		), false
 	}
 
 	// WHICH MEMBERS ARE READ IS THE SHAPE'S DECISION, not the member list's. A leader-served replica
@@ -1046,8 +1060,12 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementDrained(
 	return "", true
 }
 
-// modelDeploymentRetirementRenderedExternalDP reads whether a replica is disaggregated from every
-// member's own rendered command.
+// modelDeploymentRetirementRenderedExternalDP reads whether a replica uses external data-parallel
+// load balancing from every member's own rendered command, which decides whether every member or
+// only the leader answers drain gauge reads. Disaggregated handoff grace (including SGLang
+// prefill/decode modes and P/D role kinds) is checked separately by
+// modelDeploymentRetirementDisaggregated so leader-served multi-Pod SGLang replicas still drain
+// through their leader alone.
 //
 // EVERY MEMBER IS ASKED. A member whose engine container is not there has not been read, and a
 // replica is not classifiable from the members that happened to be legible. The answer is reported
@@ -1140,10 +1158,66 @@ func modelDeploymentRetirementMemberExternalDP(
 		return false, false
 	}
 
-	_, disaggregated := modelDeploymentDrainDisaggregated(
-		modelDeploymentRetirementEngine(md), container)
+	reading, err := scanModelDeploymentParallelism(modelDeploymentRetirementEngine(md),
+		container.Command, modelDeploymentContainerEnv(container))
+	if err != nil {
+		return false, true
+	}
+	shape, _ := modelDeploymentLoadBalance(reading.declared)
+	return shape == workercore.ModelDeploymentLoadBalanceExternal ||
+		shape == workercore.ModelDeploymentLoadBalanceHybrid ||
+		shape == workercore.ModelDeploymentLoadBalanceMultiPort, true
+}
 
-	return disaggregated, true
+func modelDeploymentRetirementDisaggregated(md *workercore.ModelDeployment, members []*core.Pod) (bool, string) {
+	engine := modelDeploymentRetirementEngine(md)
+	var answer modelDeploymentRetirementCommand
+	for _, member := range members {
+		kind := strings.ToLower(member.Labels[modelDeploymentLabelKeyRoleKind])
+		if kind == "" && md != nil {
+			roleName := modelDeploymentPodRole(member)
+			for i := range md.Spec.Roles {
+				if md.Spec.Roles[i].Name == roleName {
+					if k, ok := ModelDeploymentRoleUpstreamKind(
+						ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i])); ok {
+						kind = k
+					}
+					break
+				}
+			}
+		}
+		container, found := modelDeploymentDrainContainerOf(member, modelDeploymentMainContainerName)
+		if !found {
+			return false, "a member has no engine container to classify"
+		}
+		reading, err := scanModelDeploymentParallelism(engine,
+			container.Command, modelDeploymentContainerEnv(container))
+		if err != nil {
+			return false, "the member's parallelism could not be read: " + err.Error()
+		}
+		shape, reason := modelDeploymentLoadBalance(reading.declared)
+		if shape == workercore.ModelDeploymentLoadBalanceUnknown {
+			return false, reason
+		}
+		disaggregated := kind == "prefill" || kind == "decode" ||
+			modelDeploymentDrainSGLangDisaggregationMode(container.Command) != "" ||
+			shape == workercore.ModelDeploymentLoadBalanceExternal ||
+			shape == workercore.ModelDeploymentLoadBalanceHybrid ||
+			shape == workercore.ModelDeploymentLoadBalanceMultiPort
+		if answer.known && answer.answer != disaggregated {
+			return false, "the replica's members disagree on whether it is disaggregated, so its shape could not be established"
+		}
+		answer = modelDeploymentRetirementCommand{answer: disaggregated, known: true}
+	}
+	return answer.answer, ""
+}
+
+func modelDeploymentContainerEnv(container *core.Container) []workercore.ModelDeploymentEnvVar {
+	env := make([]workercore.ModelDeploymentEnvVar, 0, len(container.Env))
+	for _, entry := range container.Env {
+		env = append(env, workercore.ModelDeploymentEnvVar{Name: entry.Name, Value: entry.Value})
+	}
+	return env
 }
 
 // modelDeploymentRetirementDrainMembers is the set of members the drain reads for this replica.
@@ -1392,8 +1466,8 @@ func modelDeploymentRetirementRole(
 	return nil
 }
 
-// adoptsModelDeploymentRetirement reports whether an aborted operation has been overtaken by the
-// spec naming the same replica again.
+// adoptsModelDeploymentRetirement reports whether a pre-delete reservation can be canceled after
+// the spec names the same healthy, unchanged replica again.
 //
 // ADOPTION NEEDS ALL THREE, and each half rules out a different wrong answer. The spec must declare
 // the ordinal, or there is no intent to adopt. The live members must carry the reservation's UIDs,
@@ -1406,32 +1480,96 @@ func modelDeploymentRetirementRole(
 // healthy, and the next pass finds the replica current and creates nothing.
 func (r *ModelDeploymentReconciler) adoptsModelDeploymentRetirement(
 	ctx context.Context, md *workercore.ModelDeployment, plan *modelDeploymentRetirementPlan,
-) bool {
-	if plan.Reservation.State != workercore.ModelDeploymentRetirementStateAborted ||
+	pods []core.Pod,
+) (bool, bool) {
+	if (plan.Reservation.State != workercore.ModelDeploymentRetirementStateAdmitted &&
+		plan.Reservation.State != workercore.ModelDeploymentRetirementStateDisqualified &&
+		plan.Reservation.State != workercore.ModelDeploymentRetirementStateWithdrawing &&
+		plan.Reservation.State != workercore.ModelDeploymentRetirementStateDraining &&
+		plan.Reservation.State != workercore.ModelDeploymentRetirementStateAborted) ||
 		plan.held.Len() == 0 {
-		return false
+		return false, false
+	}
+	if plan.Reservation.State != workercore.ModelDeploymentRetirementStateAborted &&
+		md.Generation < plan.Reservation.ObservedGeneration {
+		return false, false
 	}
 
 	role := modelDeploymentRetirementRole(md, plan)
 	if role == nil || int(role.Replicas) <= int(plan.Reservation.ReplicaOrdinal) {
-		return false
+		return false, false
+	}
+	if plan.held.Len() != len(plan.Reservation.TargetMemberUIDs) ||
+		len(plan.Target.Members) != len(plan.Reservation.TargetMemberUIDs) {
+		return false, false
+	}
+	if len(modelDeploymentRetirementReplicaMembers(
+		pods, plan.Reservation.RoleName, int(plan.Reservation.ReplicaOrdinal),
+	)) != len(plan.Reservation.TargetMemberUIDs) {
+		return false, false
 	}
 
 	members := make([]core.Pod, 0, len(plan.Target.Members))
 	for _, member := range plan.Target.Members {
 		members = append(members, *member)
 	}
+	fetch := r.groupForwardFetch
+	if fetch == nil {
+		fetch = defaultGroupForwardFetch
+	}
 	qualifications := qualifyModelDeploymentInstances(
-		ctx, md, members, modelDeploymentPendingReplacement{}, defaultGroupForwardFetch,
+		ctx, md, members, modelDeploymentPendingReplacement{}, fetch,
 	)
 	for _, qualification := range qualifications {
 		if qualification.View.Role == plan.Reservation.RoleName &&
 			qualification.View.Ordinal == int(plan.Reservation.ReplicaOrdinal) {
-			return modelDeploymentRetirementAdoptable(qualification)
+			if !modelDeploymentRetirementAdoptable(qualification) {
+				return false, false
+			}
+			var patched []*core.Pod
+			for _, member := range plan.Target.Members {
+				if member.Labels[modelDeploymentLabelKeyEndpointEligible] != modelDeploymentEndpointEligibleValue {
+					base := member.DeepCopy()
+					candidate := member.DeepCopy()
+					if candidate.Labels == nil {
+						candidate.Labels = map[string]string{}
+					}
+					candidate.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+					if r.Client != nil {
+						if err := r.Client.Patch(ctx, candidate, ctrlcli.MergeFrom(base)); err != nil {
+							ctrllog.FromContext(ctx).Error(
+								err, "failed to restore endpoint eligibility on adopted retirement member",
+								"pod", member.Name,
+							)
+							for _, restored := range patched {
+								withdrawn := restored.DeepCopy()
+								delete(withdrawn.Labels, modelDeploymentLabelKeyEndpointEligible)
+								if err := r.Client.Patch(ctx, withdrawn, ctrlcli.MergeFrom(restored.DeepCopy())); err != nil {
+									ctrllog.FromContext(ctx).Error(
+										err, "failed to roll back endpoint eligibility", "pod", restored.Name,
+									)
+								}
+								delete(restored.Labels, modelDeploymentLabelKeyEndpointEligible)
+							}
+							return false, true
+						}
+					}
+					if member.Labels == nil {
+						member.Labels = map[string]string{}
+					}
+					member.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+					patched = append(patched, member)
+				}
+			}
+			if r.Recorder != nil {
+				r.Recorder.Event(md, core.EventTypeNormal, "RetirementAdopted",
+					"the declared replica was healthy and its retirement reservation was cancelled")
+			}
+			return true, false
 		}
 	}
 
-	return false
+	return false, false
 }
 
 // modelDeploymentRetirementAdoptable reports whether a retained replica qualifies on every ground
@@ -1658,6 +1796,45 @@ func (r *ModelDeploymentReconciler) refuseModelDeploymentRemoval(
 		return false
 	}
 
+	if plan.Reservation == nil || plan.Reservation.RoleName != role ||
+		int(plan.Reservation.ReplicaOrdinal) != ordinal {
+		podPointers := make([]*core.Pod, 0, len(pods))
+		for i := range pods {
+			podPointers = append(podPointers, &pods[i])
+		}
+		members := make([]*core.Pod, 0, 1)
+		for _, member := range modelDeploymentReplicaMembers(podPointers, ordinal) {
+			if modelDeploymentPodRole(member) == role {
+				members = append(members, member)
+			}
+		}
+		neverScheduled := len(members) > 0
+		for i := range members {
+			if !modelDeploymentReplicaNeverScheduled(members[i]) {
+				neverScheduled = false
+				break
+			}
+		}
+		if neverScheduled {
+			workloads, err := r.findModelDeploymentGroupWorkloads(ctx, md, modelDeploymentPodValues(members))
+			if err != nil {
+				logger.Error(err, "find workloads for never-scheduled retirement candidate", "pod", pod.Name)
+			}
+			admitted := false
+			for _, workload := range workloads {
+				if kubeapistatus.ConditionType(kueue.WorkloadAdmitted).IsTrue(workload) {
+					admitted = true
+					break
+				}
+			}
+			// On transient list error, fall through conservatively to standard retirement admission
+			// rather than bypassing retirement protocols on unconfirmed admission status.
+			if err == nil && !admitted {
+				return false
+			}
+		}
+	}
+
 	// A removal is refused while the protocol runs and while it retains. InFlight covers only the
 	// first: an abort clears it while keeping the target, so a second intent would overwrite the
 	// retained reservation. Hold is true exactly when something is retained, so both together
@@ -1680,6 +1857,11 @@ func (r *ModelDeploymentReconciler) refuseModelDeploymentRemoval(
 	}
 
 	return true
+}
+
+func modelDeploymentReplicaNeverScheduled(pod *core.Pod) bool {
+	return pod.Spec.NodeName == "" && pod.Status.PodIP == "" && pod.Status.Phase == core.PodPending &&
+		pod.Labels[modelDeploymentLabelKeyEndpointEligible] != modelDeploymentEndpointEligibleValue
 }
 
 // admitModelDeploymentRetirement writes the reservation for a replica a removal path wants gone.

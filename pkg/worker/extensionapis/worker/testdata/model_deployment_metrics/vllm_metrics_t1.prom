@@ -1,0 +1,30 @@
+# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 7.0
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 3.0
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 0.42
+# TYPE vllm:prompt_tokens_total counter
+vllm:prompt_tokens_total{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 132000.0
+# TYPE vllm:generation_tokens_total counter
+vllm:generation_tokens_total{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 51600.0
+# TYPE vllm:prefix_cache_hits_total counter
+vllm:prefix_cache_hits_total{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 33000.0
+# TYPE vllm:prefix_cache_queries_total counter
+vllm:prefix_cache_queries_total{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 64000.0
+# TYPE vllm:external_prefix_cache_hits_total counter
+vllm:external_prefix_cache_hits_total{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 0.0
+# TYPE vllm:external_prefix_cache_queries_total counter
+vllm:external_prefix_cache_queries_total{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 0.0
+# TYPE vllm:time_to_first_token_seconds histogram
+vllm:time_to_first_token_seconds_bucket{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct",le="0.5"} 118.0
+vllm:time_to_first_token_seconds_bucket{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct",le="1.0"} 280.0
+vllm:time_to_first_token_seconds_bucket{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct",le="+Inf"} 354.0
+vllm:time_to_first_token_seconds_sum{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 7.488968133926392
+vllm:time_to_first_token_seconds_count{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 354.0
+# TYPE vllm:inter_token_latency_seconds histogram
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct",le="0.01"} 4600.0
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct",le="0.05"} 14200.0
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct",le="+Inf"} 16638.0
+vllm:inter_token_latency_seconds_sum{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 95.50316835599187
+vllm:inter_token_latency_seconds_count{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 16638.0

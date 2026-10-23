@@ -161,7 +161,7 @@ func (c *modelDeploymentDrainCollector) Drain(
 			fmt.Sprintf("member %s has no container %q", pod.Name, target.Container)), nil
 	}
 
-	if reason, disaggregated := modelDeploymentDrainDisaggregated(target.Engine, container); disaggregated {
+	if reason, unsupported := modelDeploymentDrainParallelismUnreadable(target.Engine, container); unsupported {
 		return modelDeploymentDrainHold(modelDeploymentDrainUnsupported, reason), nil
 	}
 
@@ -868,46 +868,16 @@ func modelDeploymentDrainURL(pod *corev1.Pod) (string, bool) {
 	return fmt.Sprintf("%s://127.0.0.1:%d%s", schemeName, port, path), true
 }
 
-// modelDeploymentDrainDisaggregated reports whether the member runs a disaggregated shape, read
-// from the Pod's own rendered command and environment.
-//
-// THE EVIDENCE IS THE POD'S, NOT THE ROLE'S, and that is what makes this usable where the
-// protocol's own check is not. The protocol asks the role, and a role the spec has already dropped
-// is nil, so a disaggregated member whose role is gone reaches the read with nothing having refused
-// it. The render copies the role's extra arguments into the container command verbatim, and the
-// scan below reads the same tokens the protocol's own check reads, so the Pod alone answers the
-// same question the role would have.
-//
-// The scan is deliberately the tree's own, not a second parser. Two parsers of an engine's flags
-// would be two answers to which shapes are disaggregated, and they would drift.
-func modelDeploymentDrainDisaggregated(engine string, container *corev1.Container) (string, bool) {
-	env := make([]workercore.ModelDeploymentEnvVar, 0, len(container.Env))
-	for _, entry := range container.Env {
-		env = append(env, workercore.ModelDeploymentEnvVar{Name: entry.Name, Value: entry.Value})
-	}
-
-	reading, err := scanModelDeploymentParallelism(engine, container.Command, env)
+// modelDeploymentDrainParallelismUnreadable refuses parallelism declarations the controller cannot read.
+func modelDeploymentDrainParallelismUnreadable(engine string, container *corev1.Container) (string, bool) {
+	reading, err := scanModelDeploymentParallelism(engine, container.Command,
+		modelDeploymentContainerEnv(container))
 	if err != nil {
-		// A shape this tree cannot read is not a shape this read may act on. Refusing it is the
-		// direction that cannot delete a busy member.
 		return fmt.Sprintf("the member's parallelism could not be read: %v", err), true
 	}
 
-	shape, reason := modelDeploymentLoadBalance(reading.declared)
-	if shape == workercore.ModelDeploymentLoadBalanceUnknown {
+	if shape, reason := modelDeploymentLoadBalance(reading.declared); shape == workercore.ModelDeploymentLoadBalanceUnknown {
 		return reason, true
-	}
-	switch shape {
-	case workercore.ModelDeploymentLoadBalanceExternal,
-		workercore.ModelDeploymentLoadBalanceHybrid,
-		workercore.ModelDeploymentLoadBalanceMultiPort:
-		return fmt.Sprintf("the member runs a %s disaggregated shape, which has no verifiable "+
-			"decoder-side release", shape), true
-	}
-
-	if mode := modelDeploymentDrainSGLangDisaggregationMode(container.Command); mode != "" {
-		return fmt.Sprintf("the member runs the sglang %s disaggregation mode, which has no "+
-			"verifiable decoder-side release", mode), true
 	}
 
 	return "", false

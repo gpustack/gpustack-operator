@@ -32,6 +32,12 @@ for distributed multi-node serving.
 [Routing](routing.md) explain what the running service reports and how requests
 are directed.
 
+[Scaling](scaling.md) plans the replica count of a deployment from the signals it publishes, and
+[Shutdown](shutdown.md) explains the retirement protocol a scale-down runs.
+The [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) configures observation and
+active scaling. The [Scaling Benchmark](scaling-benchmark.md) records H100 measurements and
+the limits observed during scale-out and retirement.
+
 [Elastic EP](elastic-ep.md) keeps one serving instance and changes its collective while it runs.
 [Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) follows prefetch, startup with
 *tensor parallelism (TP)* = 2 and *data parallelism (DP)* = 2, and *DP* width 2 → 4 expansion.
