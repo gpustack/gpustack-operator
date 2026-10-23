@@ -30,7 +30,7 @@ The captured load completed **439/439 client requests with zero errors** during 
 |---|---|---|---|
 | `ModelArtifact` | namespace | user, via the prefetch procedure | the DeepSeek V2 Lite weights the deployment serves |
 | `ModelDeployment` | namespace | user | the elastic vLLM collective that expands in place |
-| `InstanceType` | cluster | discovered | the whole-GPU H100 type each member requests |
+| `InstanceType` | cluster | operator | the whole-GPU H100 type each member requests |
 
 At concurrency 64, width 4 reduced *time to first token (TTFT)* p50 to **2,598.867 ms** from width 2's **6,509.231 ms**, or **2.50× lower**.
 Width growth suits high-concurrency first-token targets when process retention matters.

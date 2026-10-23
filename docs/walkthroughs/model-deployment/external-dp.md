@@ -32,7 +32,7 @@ The captured H100 SXM5 run used this fixed group in namespace `gpustack-bench`.
 |---|---|---|---|
 | `ModelArtifact` | namespace | user, via the prefetch procedure | the DeepSeek V2 Lite weights the deployment serves |
 | `ModelDeployment` | namespace | user | the fixed four-rank *DP* group behind the managed Router |
-| `InstanceType` | cluster | discovered | the whole-GPU H100 type each member requests |
+| `InstanceType` | cluster | operator | the whole-GPU H100 type each member requests |
 
 At concurrency 64, *time to first token (TTFT)* p50 was **2.58× lower** for the four-rank group on `1024/256`:
 **1,863.100 ms** against wide *TP* = 8 at `4,798.411 ms`.
