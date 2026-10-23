@@ -232,11 +232,11 @@ In `ModelDeployment`, set `kvTransfer.protocol: EFA` and specify custom runner i
 
 | Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| *RDMA* resource keys present but all `Unhealthy` | All port links failed or unreadable | Inspect `kubectl get devices <node> -o json` for `.spec.interfaces[].link`; verify physical cable and subnet manager |
+| *RDMA* resource keys present but all `Unhealthy` | Status: every port link `Failed` or unreadable | Inspect `kubectl get devices <node> -o json` for `.spec.interfaces[].link`; verify physical cable and subnet manager |
 | `Workload` admitted by Kueue but `Pod` remains `Pending` | Over-admission: Kueue does not meter network resources | Inspect cluster allocatable *RDMA* keys (`device.gpustack.ai/rdma*`); add nodes or wait for active `Pod`s to finish |
-| `Pod` rejected with `TopologyAffinityError` | Free GPUs and NICs reside on mismatched *NUMA* nodes | Ensure kubelet has `topologyManagerPolicy: restricted`; verify GPU and NIC requests are declared in the same container |
+| `Pod` rejected at placement | Reason: `TopologyAffinityError` — free GPUs and NICs reside on mismatched *NUMA* nodes | Ensure kubelet has `topologyManagerPolicy: restricted`; verify GPU and NIC requests are declared in the same container |
 | Fewer `uverbs` devices inside container than expected | Shared tokens coalesced into duplicate endpoints | Requesting `rdma.shared: N` (N>1) may merge tokens from the same NIC; use `device.gpustack.ai/rdma: N` for distinct adapters |
-| `Node` unexpectedly loses `feature.gpustack.ai/rdma.capable` | Every endpoint on the node is unusable | Check kernel dmesg and interface carrier status; operator removes the label when every endpoint reports `Failed` or lacks a bound *RDMA* device. See [Network Topology](../../modules/rdma/network-topology.md#three-node-labels) |
+| `Node` unexpectedly loses `feature.gpustack.ai/rdma.capable` | Status: every endpoint on the node reports `Failed` or lacks a bound *RDMA* device | Check kernel dmesg and interface carrier status; operator removes the label when every endpoint reports `Failed` or lacks a bound *RDMA* device. See [Network Topology](../../modules/rdma/network-topology.md#three-node-labels) |
 | AWS EFA workload remains `Pending` indefinitely | `Workload` requested `device.gpustack.ai/rdma` instead of EFA | EFA nodes expose 0 allocatable for standard *RDMA* keys; configure `transport.protocol: EFA` or `TCP` |
 | `ModelDeployment` rejected with `no effective RDMA or EFA transfer leg uses the requested interfaces` | Interface requested with no *RDMA* or EFA path | Pair the request with `kvTransfer.protocol: RDMA` or `EFA` on a *prefill* and *decode* pair, or with a `KVCacheBackend` on that transport. A role with its own *`command`* has no managed direct path |
 
