@@ -13,8 +13,9 @@
 #              that the WHOLE group is withdrawn, and collects the exclusion evidence that tells
 #              SGLang External DP apart from internal data parallelism.
 # Environment: A cluster with 4 free GPUs on one InstanceType, NodeModelStore caching
-#              qwen3-8b, and an in-cluster default/bench-driver Pod. The model is Qwen/Qwen3-8B:
-#              one GPU per member, two members per group, two groups at peak = 4 GPUs.
+#              qwen3-8b, and an in-cluster default/bench-driver Pod. The model is Qwen/Qwen3-8B,
+#              served from the qwen3-8b artifact the store caches: one GPU per member, two members
+#              per group, two groups at peak = 4 GPUs.
 # Inputs:      The manifest is written by this script into OUT_DIR/sedp.yaml, from the shape
 #              documented in docs/modules/model-deployment/external-dp.md#sglang-external-dp. The
 #              operator stamps GPUSTACK_MEMBER_INDEX and GPUSTACK_REPLICA_LEADER_ADDRESS, so the
@@ -44,6 +45,13 @@ NS="${BENCH_NS:-gpustack-bench}"
 OUT="${1:-${REPO}/.claude/reports/$(date +%F)-benchmark/sedp}"
 DEPLOY="sedp"
 MODEL="${SEDP_MODEL:-Qwen/Qwen3-8B}"
+# THE ARTIFACT IS WHAT THE DEPLOYMENT SERVES, and naming it is what keeps the pod alive. Without
+# an artifactRef the operator renders the model as the repository and the engine downloads the
+# weights itself onto the container's writable layer -- 16GB for Qwen3-8B against the 15Gi
+# ephemeral limit the role derives -- so the pod is evicted while it is still starting, and the
+# NodeModelStore cache the environment already warmed is never read. With one, the operator
+# serves the weights from the delivery the artifact names and pins the served name below.
+ARTIFACT="${SEDP_ARTIFACT:-qwen3-8b}"
 IMAGE="${SEDP_IMAGE:-gpustack/runner:cuda13.0-sglang0.5.22}"
 ROUTER_IMAGE="${SEDP_ROUTER_IMAGE:-gpustack/llm-router:v0.3.1}"
 INSTANCE_TYPE="${SEDP_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}"
@@ -82,7 +90,13 @@ metadata:
   namespace: ${NS}
 spec:
   model:
-    name: ${MODEL}
+    # THE SERVED NAME IS /models, and the artifactRef is what makes it the served name: with an
+    # artifact the operator renders the model argument as the delivery's path or repository and
+    # pins --served-model-name to spec.model.name, so the engine answers to /models and the
+    # request bodies below carry that same string.
+    name: /models
+    artifactRef:
+      name: ${ARTIFACT}
   engine:
     name: SGLang
     image: ${IMAGE}
@@ -271,6 +285,7 @@ check_json() {
 # ---------------------------------------------------------------------------
 # The run.
 # ---------------------------------------------------------------------------
+log "The model is ${MODEL}, served as /models from the artifact ${ARTIFACT}"
 log "Writing the manifest into ${OUT}/sedp.yaml"
 write_manifest
 kubectl apply --dry-run=server -f "${OUT}/sedp.yaml" > "${OUT}/apply-dry-run.txt" 2>&1

@@ -9,7 +9,8 @@
 #              complete server-sent-event stream, an exact Chinese phrase and a structured JSON
 #              object. Every other cell measures throughput; this one measures whether the answer is
 #              right, and whether it was the ROUTER's answer rather than a replica's.
-# Environment: A cluster with 2 free GPUs on one InstanceType. The model is Qwen/Qwen3-8B: one GPU
+# Environment: A cluster with 2 free GPUs on one InstanceType, NodeModelStore caching qwen3-8b. The
+#              model is Qwen/Qwen3-8B, served from the qwen3-8b artifact the store caches: one GPU
 #              per replica, two replicas = 2 GPUs.
 # Inputs:      The manifest is written by this script into OUT_DIR/vs-content.yaml. The operator
 #              stamps each replica's own address, so the manifest is identical for every replica.
@@ -18,8 +19,8 @@
 #                is what makes the answer the ROUTER's answer and not a replica's;
 #              - the router names BOTH replicas as workers it sent requests to, under the policy the
 #                manifest pins;
-#              - the served model name is the deployment's own model name, because the operator pins
-#                --served-model-name to spec.model.name and a mismatch fails silently behind a
+#              - the served model name is /models, the name the manifest writes, because the operator
+#                pins --served-model-name to spec.model.name and a mismatch fails silently behind a
 #                deployment that reports Ready.
 # Cleanup:     Deletes the deployment on completion and releases its GPU claims.
 #
@@ -41,6 +42,13 @@ NS="${BENCH_NS:-gpustack-bench}"
 OUT="${1:-${REPO}/.claude/reports/$(date +%F)-benchmark/vs-content}"
 DEPLOY="vs-content"
 MODEL="${VS_MODEL:-Qwen/Qwen3-8B}"
+# THE ARTIFACT IS WHAT THE DEPLOYMENT SERVES, and naming it is what keeps the pod alive. Without
+# an artifactRef the operator renders the model as the repository and the engine downloads the
+# weights itself onto the container's writable layer -- 16GB for Qwen3-8B against the 15Gi
+# ephemeral limit the role derives -- so the pod is evicted while it is still starting, and the
+# NodeModelStore cache the environment already warmed is never read. With one, the operator
+# serves the weights from the delivery the artifact names and pins the served name below.
+ARTIFACT="${VS_ARTIFACT:-qwen3-8b}"
 IMAGE="${VS_IMAGE:-gpustack/runner:cuda13.0-vllm0.32.0}"
 ROUTER_IMAGE="${VS_ROUTER_IMAGE:-gpustack/llm-router:v0.3.1}"
 INSTANCE_TYPE="${VS_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}"
@@ -85,7 +93,13 @@ metadata:
   namespace: ${NS}
 spec:
   model:
-    name: ${MODEL}
+    # THE SERVED NAME IS /models, and the artifactRef is what makes it the served name: with an
+    # artifact the operator renders the model argument as the delivery's path or repository and
+    # pins --served-model-name to spec.model.name, so the engine answers to /models and the
+    # request bodies below carry that same string.
+    name: /models
+    artifactRef:
+      name: ${ARTIFACT}
   engine:
     name: vLLM
     image: ${IMAGE}
@@ -215,7 +229,7 @@ scrape_router_metrics() {
 # switch did not take.
 request_body() {
   local prompt="$1" max_tokens="$2" extra="${3:-{\}}"
-  jq -nc --arg model "$MODEL" --arg prompt "$prompt" --argjson max_tokens "$max_tokens" --argjson extra "$extra" \
+  jq -nc --arg model "/models" --arg prompt "$prompt" --argjson max_tokens "$max_tokens" --argjson extra "$extra" \
     '{model: $model, messages: [{role: "user", content: $prompt}], max_tokens: $max_tokens, temperature: 0, chat_template_kwargs: {enable_thinking: false}} + $extra'
 }
 
@@ -270,6 +284,7 @@ CHINESE_PROMPT="请只输出下面这句话，不要添加任何其他内容：�
 CHINESE_EXPECT="今天天气很好"
 JSON_PROMPT="Return a JSON object with the key name and the value gpu."
 
+log "The model is ${MODEL}, served as /models from the artifact ${ARTIFACT}"
 log "Writing the manifest into ${OUT}/vs-content.yaml"
 write_manifest
 kubectl apply --dry-run=server -f "${OUT}/vs-content.yaml" > "${OUT}/apply-dry-run.txt" 2>&1
@@ -392,7 +407,7 @@ done
 log "Sending ${SPREAD_REQUESTS} spread requests through the router"
 index=1
 while [ "$index" -le "$SPREAD_REQUESTS" ]; do
-  body="$(jq -nc --arg model "$MODEL" --arg i "$index" \
+  body="$(jq -nc --arg model "/models" --arg i "$index" \
     '{model: $model, messages: [{role: "user", content: ("Reply with the word blue only. Spread check " + $i + ".")}], max_tokens: 8, temperature: 0}')"
   curl -sf --max-time 120 "http://127.0.0.1:${LOCAL_PORT_BASE}/v1/chat/completions" \
     -H 'Content-Type: application/json' --data-binary "$body" \

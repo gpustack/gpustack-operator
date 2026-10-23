@@ -10,8 +10,9 @@
 #              proves the four content checks on every replica, and watches the gateway's worker
 #              set grow by exactly one worker per replica and shrink back with it.
 # Environment: A cluster with 2 free GPUs on one InstanceType, NodeModelStore caching qwen3-8b,
-#              and an in-cluster default/bench-driver Pod. The model is Qwen/Qwen3-8B: one GPU per
-#              replica, two replicas at peak = 2 GPUs.
+#              and an in-cluster default/bench-driver Pod. The model is Qwen/Qwen3-8B, served from
+#              the qwen3-8b artifact the store caches: one GPU per replica, two replicas at peak
+#              = 2 GPUs.
 # Inputs:      The manifest is written by this script into OUT_DIR/sglang-multi-server.yaml. The
 #              operator stamps the replica's own addresses, so the manifest is identical for every
 #              replica.
@@ -36,6 +37,13 @@ NS="${BENCH_NS:-gpustack-bench}"
 OUT="${1:-${REPO}/.claude/reports/$(date +%F)-benchmark/sglang-multi-server}"
 DEPLOY="sglang-multi-server"
 MODEL="${SGLANG_MODEL:-Qwen/Qwen3-8B}"
+# THE ARTIFACT IS WHAT THE DEPLOYMENT SERVES, and naming it is what keeps the pod alive. Without
+# an artifactRef the operator renders the model as the repository and the engine downloads the
+# weights itself onto the container's writable layer -- 16GB for Qwen3-8B against the 15Gi
+# ephemeral limit the role derives -- so the pod is evicted while it is still starting, and the
+# NodeModelStore cache the environment already warmed is never read. With one, the operator
+# serves the weights from the delivery the artifact names and pins the served name below.
+ARTIFACT="${SGLANG_ARTIFACT:-qwen3-8b}"
 IMAGE="${SGLANG_IMAGE:-gpustack/runner:cuda13.0-sglang0.5.22}"
 ROUTER_IMAGE="${SGLANG_ROUTER_IMAGE:-gpustack/llm-router:v0.3.1}"
 INSTANCE_TYPE="${SGLANG_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}"
@@ -68,7 +76,13 @@ metadata:
   namespace: ${NS}
 spec:
   model:
-    name: ${MODEL}
+    # THE SERVED NAME IS /models, and the artifactRef is what makes it the served name: with an
+    # artifact the operator renders the model argument as the delivery's path or repository and
+    # pins --served-model-name to spec.model.name, so the engine answers to /models and the
+    # request bodies below carry that same string.
+    name: /models
+    artifactRef:
+      name: ${ARTIFACT}
   engine:
     name: SGLang
     image: ${IMAGE}
@@ -169,15 +183,15 @@ wait_workers() {
   return 1
 }
 
-# THE MODEL IN THE BODY IS THE DEPLOYMENT'S OWN MODEL NAME. The operator pins the engine's
+# THE MODEL IN THE BODY IS THE DEPLOYMENT'S OWN SERVED NAME. The operator pins the engine's
 # --served-model-name to spec.model.name, and a request that names anything else fails silently
-# behind a deployment that still reports Ready. The four bodies below therefore carry ${MODEL},
-# which is the same string the manifest writes, and not a fixed one.
+# behind a deployment that still reports Ready. The manifest above writes /models, and the four
+# bodies below carry that same string -- the served name, not the repository the artifact holds.
 check_ordinary() {
   local port="$1" out="$2"
   curl --fail-with-body --max-time 120 "http://127.0.0.1:${port}/v1/completions" \
     -H 'Content-Type: application/json' \
-    -d "{\"model\":\"${MODEL}\",\"prompt\":\"The sky is\",\"max_tokens\":8,\"temperature\":0}" \
+    -d '{"model":"/models","prompt":"The sky is","max_tokens":8,"temperature":0}' \
     -o "$out" 2>"${out}.err"
 }
 
@@ -185,7 +199,7 @@ check_sse() {
   local port="$1" out="$2"
   curl --fail-with-body --no-buffer --max-time 120 "http://127.0.0.1:${port}/v1/completions" \
     -H 'Content-Type: application/json' \
-    -d "{\"model\":\"${MODEL}\",\"prompt\":\"A GPU is\",\"max_tokens\":8,\"temperature\":0,\"stream\":true,\"stream_options\":{\"include_usage\":true}}" \
+    -d '{"model":"/models","prompt":"A GPU is","max_tokens":8,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}' \
     -o "$out" 2>"${out}.err"
 }
 
@@ -193,7 +207,7 @@ check_chinese() {
   local port="$1" out="$2"
   curl --fail-with-body --max-time 120 "http://127.0.0.1:${port}/v1/completions" \
     -H 'Content-Type: application/json' \
-    -d "{\"model\":\"${MODEL}\",\"prompt\":\"请用一句中文说明什么是 GPU。\",\"max_tokens\":64,\"temperature\":0}" \
+    -d '{"model":"/models","prompt":"请用一句中文说明什么是 GPU。","max_tokens":64,"temperature":0}' \
     -o "$out" 2>"${out}.err"
 }
 
@@ -201,7 +215,7 @@ check_json() {
   local port="$1" out="$2"
   curl --fail-with-body --max-time 120 "http://127.0.0.1:${port}/v1/completions" \
     -H 'Content-Type: application/json' \
-    -d "{\"model\":\"${MODEL}\",\"prompt\":\"Return a JSON object with the key name and the value gpu.\",\"max_tokens\":64,\"temperature\":0,\"response_format\":{\"type\":\"json_object\"}}" \
+    -d '{"model":"/models","prompt":"Return a JSON object with the key name and the value gpu.","max_tokens":64,"temperature":0,"response_format":{"type":"json_object"}}' \
     -o "$out" 2>"${out}.err"
 }
 
@@ -240,6 +254,7 @@ collect_verdicts() {
     || echo "FAIL $(basename "$f")" >> "${OUT}/content-verdicts.txt"
 }
 
+log "The model is ${MODEL}, served as /models from the artifact ${ARTIFACT}"
 log "Writing the manifest into ${OUT}/sglang-multi-server.yaml"
 write_manifest
 kubectl apply --dry-run=server -f "${OUT}/sglang-multi-server.yaml" > "${OUT}/apply-dry-run.txt" 2>&1
