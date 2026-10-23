@@ -1,3 +1,7 @@
+---
+pin_table_first_col: true
+---
+
 # Settings & Environment Variables
 
 GPUStack Operator reads configuration from two places: the `Setting` resource, which you can change

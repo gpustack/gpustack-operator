@@ -27,7 +27,7 @@
   <link rel="stylesheet" href="{{ (resources.Get "css/site.css" | resources.ExecuteAsTemplate "css/site.css" . | fingerprint).RelPermalink }}">
   <link rel="stylesheet" href="{{ (resources.Get "css/code.css" | resources.ExecuteAsTemplate "css/code.css" . | fingerprint).RelPermalink }}">
 </head>
-<body class="{{ if .IsHome }}home{{ else }}docs-page{{ end }}">
+<body class="{{ if .IsHome }}home{{ else }}docs-page{{ end }}{{ with .Params.pin_table_first_col }} pin-table-first-col{{ end }}">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     {{ $brandLogo := $logo.Resize "64x64" | fingerprint }}
