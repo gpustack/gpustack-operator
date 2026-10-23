@@ -13,7 +13,7 @@ engine startup and compute-graph compilation, and accelerator resource availabil
 
 - [Summary](#summary)
 - [Environment](#environment)
-- [Configurations](#configurations)
+- [Configuration](#configuration)
 - [Suite 1: Scaling comparison](#suite-1-scaling-comparison)
 - [Verification](#verification)
 - [Benefits](#benefits)
@@ -52,7 +52,7 @@ Requests went directly from the driver to the Router's cluster-internal endpoint
 No `kubectl port-forward` carried inference traffic. vLLM roles set
 `VLLM_HTTP_TIMEOUT_KEEP_ALIVE=3600`; the separate lifecycle check still observed scale-out failures.
 
-## Configurations
+## Configuration
 
 Each role started with one replica and had bounds of one to two.
 The scaler used `Active` mode and a 10 s sampling interval.
