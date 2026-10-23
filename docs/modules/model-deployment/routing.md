@@ -233,9 +233,7 @@ unchanged, safe and current stays `Eligible` through an observation loss, with i
 confirmation `Unknown`. The group's reason and the Router's reason name different facts, so a lost
 Router view never reads as an engine fault.
 
-**The membership that proves the retention is read fresh, and it has to be complete, unchanged, safe
-and current.** A member that disappears, is replaced or becomes unready invalidates the retention. A
-later failed read cannot erase a change the collection already proved.
+Retained eligibility requires the [Group status](status.md#group-status) membership checks.
 
 **A Router process health result is not an engine group's health.** The Router answers for its own
 process; the group answers for the engine's members.

@@ -30,10 +30,8 @@ An External DP role is admitted only with a Router: `spec.router` is required, a
 members reachable. The rule does not reach a role that took its command line over, and it does not
 reach a shape read from anywhere but the role's own extra arguments.
 
-SGLang's engine-internal *DP attention* differs from *External DP*. A single-host Docker PoC used
-SGLang `0.5.18`, Gateway `0.3.1` and one Gateway for both roles. It used `--pd-disaggregation` without
-`--dp-aware`; the Decode group had two containers and one HTTP head. The engine distributed work
-across its ranks, and the tested requests returned correct responses.
+SGLang's engine-internal *DP attention* differs from *External DP*. The tested container combinations
+are in [SGLang DP routing](routing.md#sglang-dp-routing).
 
 This PoC does not validate a Kubernetes **`ModelDeployment`**, multi-host networking, or rank-failure
 withdrawal and recovery. Treat the split Decode group as an experimental topology until those checks
