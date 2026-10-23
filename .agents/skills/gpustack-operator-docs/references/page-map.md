@@ -416,7 +416,7 @@ genericized. Never hand-write plausible output.
 
 ## `docs/reference/settings.md`
 
-**Owns** — the online-adjustable `Setting` catalog and every `GPUSTACK_*` variable, including the
+**Owns** — the `Setting` catalog and every `GPUSTACK_*` variable, including the
 per-manufacturer overrides and vendor toolkit paths.
 
 ## `docs/getting-started/vendor-prerequisites.md`

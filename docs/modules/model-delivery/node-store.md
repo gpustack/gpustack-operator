@@ -313,6 +313,6 @@ downloads from this port for live bytes between the status thresholds.
 deliveries · [Model Artifact API](views.md) for resource status and
 `progress` · [Node-to-Node Sync](peer-sync.md) for where a node's bytes come from ·
 [Model Store Operations](operations.md) for enabling, configuring and upgrading ·
-[Settings](../../reference/settings.md#online-adjustable-settings) for the `Setting`s *`spec`* is built from.
+[Settings](../../reference/settings.md#settings) for the `Setting`s *`spec`* is built from.
 
 **Next** → [Model Store Operations](operations.md)

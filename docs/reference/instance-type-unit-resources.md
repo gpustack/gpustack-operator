@@ -257,4 +257,4 @@ at the top of that file; when either changes, compare the rows here with the pre
 (where the unit spec is stamped) · [Admission](../modules/devices/admission.md#instancetype-instance-webhooks)
 (what the webhooks enforce on it) · [Walkthrough](../walkthroughs/devices/scheduling.md#step-4-manage-a-custom-instancetype)
 
-**Next** → [Settings](settings.md#online-adjustable-settings) — configure resource derivation and CPU awareness.
+**Next** → [Settings](settings.md#settings) — configure resource derivation and CPU awareness.

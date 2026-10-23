@@ -193,7 +193,7 @@ weights](../topology/scheduling.md#node-delivered-model-placement).
 The `ResourceFlavor` is the finest grain and setting-independent: always the CPU key, plus the
 accelerator key when accelerated, so the aggregation layer re-groups without rewriting a flavor. That
 layer (`ClusterQueue` / `InstanceType` / `InstanceTypeFlavor`) is grouped by the editable
-[`instance-type-aware-cpu-manufacturer`](../../reference/settings.md#online-adjustable-settings) (default `false`):
+[`instance-type-aware-cpu-manufacturer`](../../reference/settings.md#settings) (default `false`):
 
 ```
 ResourceFlavor (always the finest grain, setting-independent):
@@ -366,6 +366,6 @@ The per-accelerator **`AdmissionCheck`**, third of the five gates; its behavior 
 **See also** — [Device Discovery](discovery.md) (where the capacity signals come from) ·
 [Topology-Aware Scheduling](../topology/scheduling.md) (how topology profiles enter this chain) ·
 [Walkthrough](../../walkthroughs/devices/scheduling.md) (the same objects on a live cluster) ·
-[Settings](../../reference/settings.md#online-adjustable-settings)
+[Settings](../../reference/settings.md#settings)
 
 **Next** → [Admission](admission.md) — the five gates a request passes.

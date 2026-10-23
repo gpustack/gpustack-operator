@@ -48,7 +48,7 @@ hands each mount its artifact's `Secret`.
 | Layer | Carrier | Who changes it | What |
 | --- | --- | --- | --- |
 | Deploy time | chart values; in image mode the worker's overlay, which sets only the switch | installer | the switch, the cache root, the kubelet directory, images, resources and placement, the delivery mode |
-| Cluster runtime | [Settings](../../reference/settings.md#online-adjustable-settings) in the operator namespace | administrator | delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth |
+| Cluster runtime | [Settings](../../reference/settings.md#settings) in the operator namespace | administrator | delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth |
 | Object | the `ModelArtifact` | tenant | source, revision, patterns, `Secret`; immutable |
 
 The worker merges the runtime layer into every node's `NodeModelStore.spec` within a minute of a
@@ -252,6 +252,6 @@ kubelet retries it, and it succeeds once the new `Pod` serves.
 
 **See also** — [Node Model Store](node-store.md) for every field and
 reason · [Model Artifact](artifact.md) for the artifact and its
-patterns · [Settings](../../reference/settings.md#online-adjustable-settings) for every `Setting`.
+patterns · [Settings](../../reference/settings.md#settings) for every `Setting`.
 
 **Next** → [Model Artifact](artifact.md)

@@ -760,7 +760,7 @@ spec:
   `persistent` entry follow the [claim placement rules](../../modules/model-delivery/artifact.md#claim-delivery-and-placement):
   a node-local volume pins the `Instance` to its node and that node's capacity; network or `ReadWriteMany`
   storage avoids the pin. A claim nothing binds creates no `Pod` and says why in *`status.phaseMessage`*;
-  [`instance-persistent-volume-placement`](../../reference/settings.md#online-adjustable-settings) turns this off.
+  [`instance-persistent-volume-placement`](../../reference/settings.md#settings) turns this off.
 - **Both new fields are immutable while the `Instance` runs**, editable while stopped — the rule the rest
   of *`spec`* follows.
 
@@ -773,7 +773,7 @@ kept separate so node-path mounts can be allowed without a container escape:
 | `instance-host-path-volume-allowed` | *`spec.additionalVolumes[*].hostPath`* — reaches the node's filesystem, but not its devices or kernel. |
 
 Each gates taking its escape, so turning one off stops new grants without stranding an `Instance`
-that already holds one; [Settings](../../reference/settings.md#online-adjustable-settings) has the exact terms.
+that already holds one; [Settings](../../reference/settings.md#settings) has the exact terms.
 
 Both govern the **node** boundary, not the namespace one: a `persistent`, *`configMap`* or `secret`
 source names an object in the `Instance`'s own namespace and may always be mounted, the same reach a `Pod`
@@ -804,6 +804,6 @@ exclusion are covered in [Stage 4: Kueue chain](../../modules/devices/scheduling
 
 ---
 
-**See also** — [Accelerator Requests](../../modules/devices/requests.md) (the contract behind Step 3) · [NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md#three-mig-configurations) (hardware partitioning) · [Settings](../../reference/settings.md#online-adjustable-settings) (the two gates)
+**See also** — [Accelerator Requests](../../modules/devices/requests.md) (the contract behind Step 3) · [NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md#three-mig-configurations) (hardware partitioning) · [Settings](../../reference/settings.md#settings) (the two gates)
 
 **Next** → [RDMA Networking Walkthrough](../rdma/network-endpoints.md) — request and verify RDMA endpoints with NUMA alignment.

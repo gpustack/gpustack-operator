@@ -458,7 +458,7 @@ waits instead when that node cannot run one, naming the node and the floor
   holding the digest, but only while they have room; placed anywhere else, its node downloads. See
   [a node-delivered model prefers the nodes holding
   it](../topology/scheduling.md#node-delivered-model-placement).
-- `Setting`s: [Settings & Environment Variables](../../reference/settings.md#online-adjustable-settings) carries the
+- `Setting`s: [Settings & Environment Variables](../../reference/settings.md#settings) carries the
   two hub endpoints, proxy, no-proxy, CA bundle, revalidation interval, delivery mode and the node
   cache's watermarks and download limits.
 
