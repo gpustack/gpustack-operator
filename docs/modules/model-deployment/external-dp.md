@@ -200,11 +200,11 @@ the role's `Service` and Router selectors carry a `member-index=0` term, because
 expose no HTTP endpoint. An External role is the opposite — every member answers — so both selectors
 must cover all ranks.
 
-The endpoint-eligibility gate makes that switch observable. While the gate is inactive, the selectors
-keep the leader term. Once it activates, `modelDeploymentSelectEligibleEndpoints`
-(`pkg/worker/controllers/worker/model_deployment_service.go`) deletes the leader term from the
-role's `Service` selector, and the Router role selector does the same
-(`model_deployment_router.go`), so `gpustack/llm-router` discovers and balances across every qualified rank `Pod`.
+An External role is a managed protected group, so its selectors narrow from the first enable:
+`modelDeploymentSelectEligibleEndpoints` (`pkg/worker/controllers/worker/model_deployment_service.go`)
+deletes the leader term from the role's `Service` selector, and the Router role selector does the same
+(`model_deployment_router.go`), so `gpustack/llm-router` discovers and balances across every qualified
+rank `Pod`. The eligibility term is what admits the qualified ranks.
 
 The answering side agrees: an External role's endpoint-selection mode is `modelDeploymentAnsweringAll`, read
 from the members' running arguments rather than the current spec, so a role edited mid-flight keeps

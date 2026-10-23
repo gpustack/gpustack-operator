@@ -7,6 +7,7 @@ fields and its conditions to diagnose a deployment that is still starting or has
 
 - [Status](#status)
 - [Scaler annotations](#scaler-annotations)
+- [Group status](#group-status)
 
 ## Status
 
@@ -506,6 +507,84 @@ ignores the fields the scaler owns.
 
 The scaler's own `status` reports what it observed, what it recommends and what blocks it;
 [Scaler status](scaling.md#status) owns that contract.
+
+## Group status
+
+*`status.roles[].groups[]`* describes each serving group the operator supervises. A group is the set
+of `Pod`s that form one logical serving replica of a role, and its identity is the role, the replica
+ordinal and the current sorted member UID set. A replaced member is a different set, so a previous
+qualification does not apply to the new one.
+
+| Field | Meaning |
+|---|---|
+| `role` | the role the group belongs to |
+| `ordinal` | the replica slot the group occupies within its role |
+| `generation` | the sorted member UID set the answers below were taken against |
+| `state` | the group's eligibility state |
+| `reason` | the fact that holds the group, or that it qualifies |
+| `members` | the group's current members, ordered by seat |
+| `lastQualificationTime` | when the group last entered `Eligible` for this generation |
+| `serving` | the Router's answer for this group |
+| `servingReason` | why that answer is what it is, when it is not a confirmation |
+
+Each member entry carries the member `Pod`'s `name` and `uid`, the `seat` it claims, and its `ready`
+value: `True`, `False` or `Unknown`. A member nobody has reported on is `Unknown`, not `False`.
+
+**The group entry answers what the role's counts cannot.** *`endpoints.eligible`* counts endpoints and
+*`endpoints.serving`* counts a Router's confirmation; the group entry names the members, the
+generation those answers were taken against, and the fact that holds the group.
+
+**The eight states are the operator's own.**
+
+| State | Meaning |
+|---|---|
+| `Eligible` | every leg verified and nothing else holds the group |
+| `Withdrawn` | a definite fault withdrew the group |
+| `AwaitingMembers` | the member set is not established |
+| `AwaitingReady` | the members are not all `Ready=True` |
+| `AwaitingProbe` | the forward path could not be observed |
+| `AwaitingObservation` | the group verified every leg and waits on a valid Router observation |
+| `Unsupported` | no observation exists for this shape |
+| `Unknown` | the pass has not evaluated the group yet |
+
+**`AwaitingObservation` names the one hold the qualification cannot name.** A group that passed every
+leg and waits on a valid Router observation is `AwaitingObservation`, while a group that passed every
+leg and is retained across an observation loss is `Eligible`, because the observation is not what holds
+it.
+
+**The retention is proved by the fresh membership, and that membership has to be complete, unchanged,
+safe and current.** It is read uncached when the collection runs, not taken from the reconciled list,
+and every member of it has to have reported ready. A member that disappears, is replaced or becomes
+unready invalidates the retention and the restoration. A later failed read cannot erase a change the
+collection already proved.
+
+**The reason names one fact and never two.** When a leg of the whole-group predicate holds the group,
+the reason names that leg; when the Router's observation holds it, the reason names the observation.
+A member fault and a lost Router view are told apart by the reason as well as by the state, and the
+Router's own reason never takes the group's place.
+
+**The qualification time is the transition, not the latest pass.** A group that stays `Eligible` keeps
+the instant it earned, and a group held in the same generation keeps it too, so an observation loss
+does not erase it. A group that leaves `Eligible` and comes back records the new instant. A new
+generation inherits no timestamp: the membership it names was never qualified.
+
+### Elastic EP collective
+
+An *Elastic EP* role publishes one group at ordinal zero, and that entry replaces the replica-derived
+groups a role of several `Pod`s would otherwise publish. Its members are the role's current GPU
+workers, the API/DP master included and the ancillary Ray head excluded. A worker on its way out is
+not a member, and a collective with no workers publishes no group at all. Each member's seat records
+its admission ordinal, not its runtime engine rank.
+
+**The collective's state is `Unknown`, and the master's own qualification does not change it.** The
+reason says that the whole elastic collective has not been evaluated as one group. The serving answer
+carries no count: `Unknown` with a Router, and `NotConfigured` without one. There is no qualification
+time, because an instant belongs to a transition into `Eligible` and the collective is never eligible.
+
+**A count and a group never describe the same membership on this shape.** The role's own counts are
+its replica counts, computed from the master the elastic path reads, because the master is the replica
+the Router observes. The group is computed from the whole worker set, because the collective is what
+a reader asks about when a rank fails.
 
 ---
 

@@ -25,6 +25,11 @@ A router policy such as `round_robin` chooses among those leaders; it does not a
 *External data parallelism (External DP)* inside a *Prefill* or *Decode* role has not been validated.
 [Issue #754](https://github.com/gpustack/gpustack-operator/issues/754) tracks that deferred combination.
 
+An External DP role is admitted only with a Router: `spec.router` is required, and the refusal names
+`RouterRequired`. The Router is what supervises the group's failure and recovery, not what makes its
+members reachable. The rule does not reach a role that took its command line over, and it does not
+reach a shape read from anywhere but the role's own extra arguments.
+
 SGLang's engine-internal *DP attention* differs from *External DP*. A single-host Docker PoC used
 SGLang `0.5.18`, Gateway `0.3.1` and one Gateway for both roles. It used `--pd-disaggregation` without
 `--dp-aware`; the Decode group had two containers and one HTTP head. The engine distributed work

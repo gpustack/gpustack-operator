@@ -1,7 +1,7 @@
 # Spec: DP Group Router Supervisor for ModelDeployment
 
-Status: Building
-Blocked on: implementation, local verification, and a separately approved Kubernetes acceptance run.
+Status: Shipped
+Blocked on: the host cleanup failure in `make lint` and a separately approved Kubernetes acceptance run.
 Type: Feature
 
 ## Summary
@@ -37,9 +37,9 @@ The relevant paths are:
 - `pkg/worker/controllers/worker/model_deployment_router_observation.go`
 - `pkg/worker/controllers/worker/model_deployment_service.go`
 
-The current group-forward probe supports ordinary multi-member server replicas. Prefill and
-Decode group probing is currently reported as unsupported. The current routing guide also keeps
-Prefill and Decode discovery at the leader member.
+Before this change, the group-forward probe supported ordinary multi-member server replicas and
+reported Prefill and Decode group probing as unsupported. Prefill and Decode discovery remains
+at the leader member, with eligibility decided for the whole group.
 
 A prior single-node H100 investigation used vLLM `0.30.0`, SGLang `0.5.18` and Gateway
 `0.3.1`. It established these facts:
@@ -174,9 +174,13 @@ fail-closed rule is the proposed replacement for the current distinction that pr
 eligibility on every `Unknown` result.
 
 If the operator cannot read a Router observation, it must block restoration and report an
-observation-unknown state. An already eligible group keeps its current endpoint eligibility, but
-its serving confirmation becomes `Unknown`. The group cannot restore after a generation change or
-withdrawal until a fresh, complete observation arrives.
+observation-unknown state. An already qualified group keeps its current endpoint eligibility only
+when fresh reads establish a complete, unchanged current-generation membership with every member
+`Ready=True`; its serving confirmation becomes `Unknown`. If the pass cannot establish deployment
+identity or fresh membership, it closes the group. A known deployment or member change, or a freshly
+unsafe member, also closes the group. A later read failure cannot erase an already observed change.
+The group cannot restore after a generation change or withdrawal until a fresh, complete observation
+arrives.
 
 This barrier also applies when protection is first enabled for a managed group. A carried
 eligibility label alone does not prove qualification for the current membership generation.
@@ -393,7 +397,7 @@ decision.
       Coordination: API and admission work may run alongside T4. T5 starts status-file edits only after T4 releases its bounded collection plumbing and the coordinator transfers both status files. Generation requires a quiet tree and an explicit generated-path grant.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./api/worker/v1alpha1 ./pkg/worker/webhooks/worker ./pkg/worker/controllers/worker -run 'ModelDeployment.*(Status|Router|Parallelism|Group)' && make generate`
 
-- [ ] **T6 · Update contracts, content checks and cross-component tests**
+- [x] **T6 · Update contracts, content checks and cross-component tests**
       Blocked by: T3, T4, T5
       Owns: `docs/modules/model-deployment/routing.md`, `docs/modules/model-deployment/prefill-decode.md`, `docs/modules/model-deployment/status.md`, `docs/modules/model-deployment/external-dp.md`, `docs/README.md`, `testing/infra/**`, `pkg/worker/controllers/worker/model_deployment_group_contract_test.go`, `pkg/worker/controllers/worker/model_deployment_content_test.go`
       Acceptance: Documentation describes one Router as the DP Supervisor boundary for externally addressable rank Pods, the fail-closed group barrier and the P/D role boundary. Cross-component tests cover rank failure, partial recovery, UID replacement, Router observation loss and unaffected-group service. Protocol tests validate ordinary, SSE, exact Chinese and structured JSON responses before failure, during unaffected-group service and after complete recovery.
@@ -401,7 +405,7 @@ decision.
 
 ### Test Plan
 
-[ ] I/we understand the owners of the involved components may require updates to existing tests to make this
+[x] I/we understand the owners of the involved components may require updates to existing tests to make this
 code solid enough prior to committing the changes necessary to implement this enhancement.
 
 #### Prerequisite testing updates
@@ -429,8 +433,8 @@ packages.
 - A replacement rank changes the sorted UID generation. The old qualification does not restore it.
 - A complete group recovers and passes the real probe. All endpoints return only after the probe.
 - Prefill and Decode fail independently. A P/D request requires one qualified group in each role.
-- A missing, stale or disagreeing Router observation reports `Unknown` and blocks restoration while
-  preserving current eligibility for an already serving group.
+- A missing, stale or disagreeing Router observation reports `Unknown` and blocks restoration.
+  Retention requires prior qualification and fresh, complete, unchanged, safe membership.
 - Response checks cover non-streaming arithmetic, complete SSE assembly, exact Chinese copying and
   structured JSON parsing across the withdrawal and recovery sequence.
 
