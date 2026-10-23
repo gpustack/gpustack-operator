@@ -244,8 +244,6 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 |---|---|
 | [Model Deployment](modules/model-deployment/_index.md) | Start with managed model serving. |
 | [Model Deployment Configuration](modules/model-deployment/deployment.md) | Configure serving roles and overrides. |
-| [Model Deployment Scaling](modules/model-deployment/scaling.md) | Plan a deployment's replica count from the signals it publishes. |
-| [Model Deployment Scaling Benchmark](modules/model-deployment/scaling-benchmark.md) | Compare five H100 scaling configurations with measured latency, throughput and lifecycle limits. |
 | [Engine Compatibility](modules/model-deployment/engine-versions.md) | Check engine releases, client and store requirements, and transport support. |
 | [Prefill and Decode](modules/model-deployment/prefill-decode.md) | Pair serving roles. |
 | [Prefill and Decode Benchmark](modules/model-deployment/prefill-decode-benchmark.md) | Compare equal-GPU H100 aggregated and disaggregated serving across fixed shapes and mixed traffic. |
@@ -255,6 +253,8 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | [Elastic EP Benchmark](modules/model-deployment/elastic-ep-benchmark.md) | Compare four- and eight-GPU H100 collectives and measure requests during live expansion. |
 | [External DP](modules/model-deployment/external-dp.md) | Run one fixed data-parallel group with an HTTP endpoint on every rank. |
 | [External DP Benchmark](modules/model-deployment/external-dp-benchmark.md) | Compare External DP ranks with a monolithic wide tensor-parallel group. |
+| [Model Deployment Scaling](modules/model-deployment/scaling.md) | Plan a deployment's replica count from the signals it publishes. |
+| [Model Deployment Scaling Benchmark](modules/model-deployment/scaling-benchmark.md) | Compare five H100 scaling configurations with measured latency, throughput and lifecycle limits. |
 | [Model Deployment Routing](modules/model-deployment/routing.md) | Choose a routing policy, confirm a Router serves. |
 | [Model Deployment Metrics](modules/model-deployment/metrics.md) | Read serving metrics. |
 | [Model Deployment Status](modules/model-deployment/status.md) | Diagnose deployment conditions, follow a retirement, read the scaler annotations. |
