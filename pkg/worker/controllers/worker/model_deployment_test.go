@@ -2713,7 +2713,7 @@ func TestModelDeploymentReconciler_MultiMemberRenderVersionUniformity(t *testing
 		pods := replicaPods(t, cli)
 		require.Len(t, pods, 2)
 		mixed := pods[1].DeepCopy()
-		mixed.Annotations[modelDeploymentRenderVersionAnnotation] = "2"
+		mixed.Annotations[modelDeploymentRenderVersionAnnotation] = strconv.Itoa(modelDeploymentRenderVersion + 1)
 		require.NoError(t, cli.Update(ctx, mixed))
 
 		_, err = reconcileModelDeployment(t, cli)

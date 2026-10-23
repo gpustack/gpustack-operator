@@ -20,7 +20,7 @@
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "prefill",
         "modeldeployment.gpustack.ai/pod-spec-hash": "90e7371e146f2cde16f638876d6285b6a53d61b5dafa44b10948f16650bfa3a8",
-        "modeldeployment.gpustack.ai/render-version": "1",
+        "modeldeployment.gpustack.ai/render-version": "2",
         "note.gpustack.ai/role": "prefill",
         "prometheus.io/path": "/metrics",
         "prometheus.io/port": "8000",
@@ -79,6 +79,22 @@
             {
               "name": "VLLM_CACHE_ROOT",
               "value": "/var/lib/gpustack/cache"
+            },
+            {
+              "name": "XDG_CACHE_HOME",
+              "value": "/var/lib/gpustack/cache/xdg"
+            },
+            {
+              "name": "FLASHINFER_WORKSPACE_BASE",
+              "value": "/var/lib/gpustack/cache/flashinfer"
+            },
+            {
+              "name": "TORCHINDUCTOR_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/inductor"
+            },
+            {
+              "name": "TRITON_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/triton"
             }
           ],
           "resources": {
@@ -177,7 +193,7 @@
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "decode",
         "modeldeployment.gpustack.ai/pod-spec-hash": "aa0d008ae187a42bf0830c587b495c0011936b58393b142763744a6436bc16e4",
-        "modeldeployment.gpustack.ai/render-version": "1",
+        "modeldeployment.gpustack.ai/render-version": "2",
         "note.gpustack.ai/role": "decode",
         "prometheus.io/path": "/metrics",
         "prometheus.io/port": "8000",
@@ -236,6 +252,22 @@
             {
               "name": "VLLM_CACHE_ROOT",
               "value": "/var/lib/gpustack/cache"
+            },
+            {
+              "name": "XDG_CACHE_HOME",
+              "value": "/var/lib/gpustack/cache/xdg"
+            },
+            {
+              "name": "FLASHINFER_WORKSPACE_BASE",
+              "value": "/var/lib/gpustack/cache/flashinfer"
+            },
+            {
+              "name": "TORCHINDUCTOR_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/inductor"
+            },
+            {
+              "name": "TRITON_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/triton"
             }
           ],
           "resources": {

@@ -618,7 +618,11 @@ func ModelDeploymentServedModelNames(engine string, args []string) ([]string, bo
 // image whose engine spells the variable differently, must be able to say so. An entry in
 // role.Env wins over the rendered one, and asking for a name this operator does not render is not
 // a conflict to refuse.
-var modelDeploymentDefaultedEnvNames = []string{
+//
+// The runtime cache names are defaulted for the same reason and for one more: each of them is
+// where an engine keeps a cache that grows while it starts, and the rendered value moves that
+// growth onto the mounted cache, which the pod's ephemeral-storage limit does not measure.
+var modelDeploymentDefaultedEnvNames = slices.Concat([]string{
 	"MC_TE_METRIC",
 	inject.MooncakeForceTCPEnv,
 	inject.MooncakeTCPMaxQueuedTransfersPerPeerEnv,
@@ -627,7 +631,7 @@ var modelDeploymentDefaultedEnvNames = []string{
 	inject.MooncakeTCPAdmissionTimeoutMsEnv,
 	"VLLM_CACHE_ROOT",
 	"SGLANG_CACHE_DIR",
-}
+}, modelDeploymentRuntimeCacheEnvNames)
 
 // ModelDeploymentOwnsArg reports whether the named argument belongs to the operator on this engine.
 //

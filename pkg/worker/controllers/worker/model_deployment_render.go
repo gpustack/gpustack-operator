@@ -105,7 +105,7 @@ const (
 
 	// modelDeploymentRenderVersion is the current operator Pod rendering baseline. Bump this
 	// constant whenever a change modifies the rendered Pod output of any ModelDeployment shape.
-	modelDeploymentRenderVersion = 1
+	modelDeploymentRenderVersion = 2
 	// modelDeploymentMinSupportedRenderVersion is the lowest render version that remains compatible
 	// with the current controller without replacing running Pods.
 	modelDeploymentMinSupportedRenderVersion = 1
@@ -1590,8 +1590,15 @@ func mergeModelDeploymentEnv(
 	// cache somewhere else, or runs an image whose engine spells the variable differently, has to
 	// be able to say so and have the entry survive: the operator's claim is only about the default,
 	// which the volume mounted above is what makes true.
+	//
+	// THE ENGINE'S OTHER STARTUP CACHES ARE DEFAULTED ALONGSIDE IT, for the same reason and for
+	// one more: each of them defaults to the container's writable layer, which the pod's
+	// ephemeral-storage limit measures, so a cache that grows there evicts the pod filling it
+	// while the same bytes on the mounted cache do not count against the limit at all.
 	defaulted := slices.Concat(
-		connector.DefaultedEnv, artifactDefaulted, modelDeploymentCompileCacheDefaultedEnv(engine))
+		connector.DefaultedEnv, artifactDefaulted,
+		modelDeploymentCompileCacheDefaultedEnv(engine),
+		modelDeploymentRuntimeCacheDefaultedEnv(engine))
 
 	env := make([]core.EnvVar, 0,
 		len(connector.Env)+len(artifactEnv)+len(defaulted)+len(role.Env))

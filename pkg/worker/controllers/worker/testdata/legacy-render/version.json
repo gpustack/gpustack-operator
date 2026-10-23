@@ -1,5 +1,5 @@
 {
-  "renderVersion": 1,
+  "renderVersion": 2,
   "minSupportedRenderVersion": 1,
   "fixtures": {
     "pair-ascend-llm-d": {
@@ -7,46 +7,46 @@
         "a7e5080f63a1644be91875c7ace4b998f3c976184382cdb961a510959aaa8864",
         "18d686bcd0890ddf4fef4cd4e78d2a551f314de261410be8fa77742807978165"
       ],
-      "digest": "9a0ee4c53ef854d3d9f9e1339bf50d004b07cc4b95ac6af994c726c0b0341fad"
+      "digest": "975c7ebe10a9350523eb4978dbfd69c399ad066f449465a7830b5b5691d0f923"
     },
     "pair-llm-d": {
       "podSpecHashes": [
         "1804d883b289dd436abc0128b5e05e2898aac260c0ca7206b88e31898d57a3b9",
         "47461bd22436ab8714a107105df8162c6a5ed92bf15555c1f642585c74572e21"
       ],
-      "digest": "daa77faa0961589692b57a203a5d4c29c7d35c67cf2452160ee8f96109787cf3"
+      "digest": "f15b73bd75faa2de6422b9cb87034c22abf1f3392f40c14fcc760b395387211a"
     },
     "pair-lone": {
       "podSpecHashes": [
         "90e7371e146f2cde16f638876d6285b6a53d61b5dafa44b10948f16650bfa3a8",
         "aa0d008ae187a42bf0830c587b495c0011936b58393b142763744a6436bc16e4"
       ],
-      "digest": "a42cb46462b2518a52809ff455adc7b839008a08cdd9be70a16ed53d7c7eeff9"
+      "digest": "20672ef70dca6054320a799d15b079f40540eda10c3b61f5c0c1d49daba34795"
     },
     "pair-shared-pool": {
       "podSpecHashes": [
         "63bb86eaf21b252303c04f77136406d3ce63ec87a2571671e3d66b9170f37c12",
         "0efbf42490ddeea1b7c0e99252126b604bb32d734e32b1421a2536d3ff029487"
       ],
-      "digest": "23f25bf1acac5ef439bd99606fffb9dfc97cef6781efc4e30f3b573626fe131f"
+      "digest": "6851ce7899c84a624f0cc2b5bfb6c3aab0bd2fe67ab750c8726829210153248e"
     },
     "server-command": {
       "podSpecHashes": [
         "97a24f04ba9eeccb2244d14f00f56dcc391975421740c0a81a8c5097c2f0ab45"
       ],
-      "digest": "63cfefee80766865d07ab74941b8fc3a0d3243d11ae04327c5b3eef59341cc75"
+      "digest": "3311f8f8362383aedee445a02f13c9e7fc632b31e55df3c3abb22ab53a10e462"
     },
     "server-defaulted": {
       "podSpecHashes": [
         "c10cf7e545174bd90f46bf7d605fa9b87a278fdece1fe9bd0a6160b1574312f2"
       ],
-      "digest": "f7e58b7cacf04d22a9324086be7501a2b8da494caa4b0526ba3c22213160fde3"
+      "digest": "accebeb4a3469b69b99d7712511294f7b5f400a1211e760f1a0c9b42dddddef5"
     },
     "server-explicit": {
       "podSpecHashes": [
         "c10cf7e545174bd90f46bf7d605fa9b87a278fdece1fe9bd0a6160b1574312f2"
       ],
-      "digest": "f7e58b7cacf04d22a9324086be7501a2b8da494caa4b0526ba3c22213160fde3"
+      "digest": "accebeb4a3469b69b99d7712511294f7b5f400a1211e760f1a0c9b42dddddef5"
     }
   }
 }
