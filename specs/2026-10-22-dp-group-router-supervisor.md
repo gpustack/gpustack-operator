@@ -385,7 +385,7 @@ decision.
       Acceptance: Router observations carry role, group generation and member identity. Selection never uses one healthy head as proof of a group. Managed protected selectors require eligibility from first enable. A missing, stale or disagreeing observation marks serving `Unknown` and blocks restoration; only a previously eligible group with unchanged membership generation may retain. Bind carried eligibility to its generation and check every answering member. Collect once after qualification and reuse that answer for restoration and status. Preserve freshness at the restoration decision. Prefill and Decode are supervised by one Router when configured, but their group state remains independent.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker -run 'Router|Observation|Selection'`
 
-- [ ] **T5 · Enforce External DP admission and publish group status**
+- [x] **T5 · Enforce External DP admission and publish group status**
       Blocked by: T2
       Owns: `api/worker/v1alpha1/model_deployment.go`, `api/worker/v1alpha1/model_deployment_test.go`, `pkg/worker/webhooks/worker/model_deployment*.go`, `pkg/worker/webhooks/worker/model_deployment*_test.go`, `pkg/worker/controllers/worker/model_deployment_status.go`, `pkg/worker/controllers/worker/model_deployment_status_test.go`, `pkg/worker/controllers/worker/model_deployment_group_status_test.go`; persisted-edit fixture correction in `TestElasticSharedMemoryEditRetainsExistingMembers` in `pkg/worker/controllers/worker/model_deployment_elastic_workload_test.go`.
       Gate: review

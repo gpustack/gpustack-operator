@@ -164,6 +164,27 @@ const (
 	modelDeploymentReasonRouterNoReadyReplica = "NoReadyReplicas"
 )
 
+// The reasons a group's serving answer carries.
+//
+// THEY NAME THE GROUP, because the deployment's own reasons name the deployment: the two are one
+// defect read at two levels, and a reader of a group entry is looking at the group.
+const (
+	// modelDeploymentReasonStaleGroupServing names a group whose Router view grew stale before
+	// the status could be published.
+	modelDeploymentReasonStaleGroupServing = "the collected view of this group is stale by the time " +
+		"this status was written"
+	// modelDeploymentReasonGroupUnobserved names a group the Router's answer does not carry.
+	modelDeploymentReasonGroupUnobserved = "the Router's answer does not carry this group"
+	// modelDeploymentReasonCollectiveNotEvaluated names the elastic collective, which the
+	// operator never qualified as one group.
+	//
+	// THE MASTER'S VERDICT IS NOT THE COLLECTIVE'S. The qualification that exists covers the
+	// master alone, and the master is one member of the collective rather than the collective
+	// itself, so publishing the master's state would publish a verdict about a different group.
+	modelDeploymentReasonCollectiveNotEvaluated = "the whole elastic collective has not been " +
+		"evaluated as one group"
+)
+
 // syncModelDeploymentStatus rebuilds the status from what was observed this pass and writes it only
 // if it differs from what is stored.
 //
@@ -200,6 +221,24 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 		return err
 	}
 	applyModelDeploymentServing(desired, serving)
+
+	// THE GROUP ENTRIES ARE ATTACHED HERE, and not inside the count, so that the collective's
+	// membership reaches the publication: the count reads the Pods this status was given, and the
+	// elastic deployment's group is not one of the count's replicas.
+	//
+	// THE COLLECTIVE'S MEMBERSHIP ARRIVES ON THE PASS'S CARRIER, and it is empty for every shape
+	// that has no collective, so the elastic role keeps the replica-derived groups.
+	collective := applyModelDeploymentGroupStatuses(
+		md, desired.Roles, observation.Qualifications, pods, observation.CollectiveMembers)
+
+	// THE GROUPS ARE RESOLVED FROM THE SAME ANSWER THE COUNTS WERE, so a group and the role it
+	// belongs to cannot describe two different moments of the same collection.
+	r.applyModelDeploymentGroupAnswer(desired, observation, md, collective)
+
+	// THE INSTANTS ARE SETTLED AGAINST WHAT WAS PUBLISHED BEFORE, so a group that stays eligible
+	// keeps the instant it earned rather than the instant of the latest pass.
+	applyModelDeploymentGroupQualificationTimes(
+		desired, md.Status.Roles, meta.NewTime(r.modelDeploymentNow()), collective)
 
 	// kubemeta.DeepEqual covers LastTransitionTime too, and that is correct rather than incidental:
 	// the condition accessors move it only when the condition's value changes, so an unchanged pass
@@ -276,6 +315,7 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatusWithQualificatio
 	// and two groupings are how two figures come to disagree about what a replica is.
 	qualified := modelDeploymentRoleQualified(qualifications)
 	holder.Status.Roles = modelDeploymentRoleStatuses(md, pods, wlByReplica, qualified)
+
 	if md.Spec.Router == nil {
 		holder.Status.Endpoint = modelDeploymentEndpoint(md)
 	} else {
@@ -580,6 +620,707 @@ func modelDeploymentRoleEndpoints(
 		Eligible: eligible,
 		Serving:  workercore.ModelDeploymentServingStatus{State: serving},
 	}
+}
+
+// The group projection.
+//
+// THE GROUP ENTRY IS THE PER-REPLICA ANSWER, and the role's counts above are its derived views. A
+// reader asking WHICH replica failed, or which one the Router stopped selecting, needs the entry
+// and cannot get it from the counts.
+//
+// THE STATE AND THE SERVING CONFIRMATION ARE TWO ANSWERS AND NEVER COLLAPSE INTO ONE: the state
+// names what holds the GROUP, and the serving confirmation names what the ROUTER says about it.
+
+// applyModelDeploymentGroupStatuses attaches one published entry to every group the status sees.
+//
+// ONE ENTRY PER GROUP, NOT PER MEMBER: a replica of three members is one group that names its
+// three members, and a list that named the members would answer a question nobody asked.
+//
+// THE GROUP COMES FROM THE PODS THIS STATUS READS, so a replica the pass created is published in
+// the pass that created it. THE MEMBERS COME WITH IT: a group without a qualification still has
+// members, and the absence of a qualification is not the absence of a membership.
+//
+// THE ELASTIC DEPLOYMENT'S GROUP IS ITS COLLECTIVE, and the collective's membership is the
+// complete current worker set rather than the members of one ordinal.
+//
+// THE COUNTS AND THE GROUP ARE TWO VIEWS, and on the elastic shape they are of DIFFERENT THINGS,
+// which the reader has to be told rather than left to discover. THE COUNTS ARE THE ROLE'S REPLICA
+// COUNTS: the role declares one replica, and the count says whether that replica is up. THE GROUP
+// NAMES THE MEMBERS OF THAT ONE REPLICA: the workers that make up the collective. The counts are
+// computed from the master the elastic path reads, because the master is the replica the Router
+// observes, and the group is computed from the whole worker set, because the collective is the
+// thing a reader asks about when a rank fails.
+//
+// SO A COUNT AND A GROUP NEVER DESCRIBE THE SAME MEMBERSHIP ON THIS SHAPE, and the group's own
+// reason says that the operator holds no verdict on the whole.
+//
+// THE STATE IS THE PASS'S OWN VERDICT WHERE THE PASS HAS ONE, and the PENDING STATE DERIVED FROM
+// THE VIEW WHERE IT DOES NOT. The two agree on a group whose members have not reported yet, which
+// is what keeps the pass that created a replica and the pass after it from publishing two
+// different answers about the same replica.
+//
+// THE ENTRIES ARE ORDERED BY ORDINAL, so a reader can find a replica without searching, and the
+// order does not depend on the order the cluster listed the Pods in.
+//
+// THE PUBLISHED COLLECTIVE IS RETURNED, because the Router's answer must not be read as an answer
+// about it: the Router observed the master, and the master is one member of the collective.
+func applyModelDeploymentGroupStatuses(
+	md *workercore.ModelDeployment, roles []workercore.ModelDeploymentRoleStatus,
+	qualifications []modelDeploymentInstanceQualification, pods []core.Pod,
+	collectiveMembers []core.Pod,
+) *modelDeploymentReplicaView {
+	byRole := make(map[string][]modelDeploymentReplicaView, len(roles))
+	for _, view := range modelDeploymentGroupPodsByReplica(pods) {
+		byRole[view.Role] = append(byRole[view.Role], view)
+	}
+
+	// THE COLLECTIVE IS THE ELASTIC ROLE'S ONLY LOGICAL REPLICA, so its entry replaces the
+	// replica-derived ones rather than joining them.
+	//
+	// AN ABSENT MEMBERSHIP PUBLISHES NO GROUP AT ALL, rather than a master-derived replica group.
+	// The master's group answers a question about one replica of the role, and the collective is
+	// the role's one replica seen whole: a reader that found the master's group where the
+	// collective belongs would read a verdict about a group this operator never evaluated.
+	collective := modelDeploymentElasticCollectiveView(md, collectiveMembers)
+
+	for i := range roles {
+		if ModelDeploymentElasticRole(md) != nil && roles[i].Name == ModelDeploymentElasticRole(md).Name {
+			if collective == nil {
+				continue
+			}
+			roles[i].Groups = []workercore.ModelDeploymentGroupStatus{
+				modelDeploymentGroupCollectiveStatus(md, *collective),
+			}
+			continue
+		}
+
+		groupViews := byRole[roles[i].Name]
+		if len(groupViews) == 0 {
+			continue
+		}
+		// THE ORDINAL IS THE ORDER, AND THE GENERATION BREAKS A TIE, because two groups can hold
+		// one ordinal only when one of them occupies no slot at all. The generation is what tells
+		// those two apart, so the order is settled with it rather than with the order the cluster
+		// happened to list the Pods in.
+		slices.SortStableFunc(groupViews, func(a, b modelDeploymentReplicaView) int {
+			if a.Ordinal != b.Ordinal {
+				return a.Ordinal - b.Ordinal
+			}
+
+			return strings.Compare(
+				string(modelDeploymentGenerationOf(a)), string(modelDeploymentGenerationOf(b)))
+		})
+
+		roles[i].Groups = make([]workercore.ModelDeploymentGroupStatus, 0, len(groupViews))
+		for _, view := range groupViews {
+			qualification, found := modelDeploymentGroupQualificationOf(
+				qualifications, view.Role, view.Ordinal, string(modelDeploymentGenerationOf(view)))
+			roles[i].Groups = append(roles[i].Groups,
+				modelDeploymentGroupStatus(md, view, qualification, found))
+		}
+	}
+
+	return collective
+}
+
+// modelDeploymentElasticCollectiveView is the elastic deployment's logical group.
+//
+// THE COLLECTIVE'S MEMBERS ARE THE CURRENT GPU WORKERS OF THE ELASTIC ROLE, the API/DP master
+// included, and the ancillary Ray head excluded: the head is not a worker, and a head in the
+// collective's membership would name a member of a group it does not serve.
+//
+// A WORKER ON ITS WAY OUT IS NOT A MEMBER, because it is leaving the collective, and publishing it
+// would make the membership and its generation flap on every departure.
+//
+// A COLLECTIVE WITH NO WORKERS IS NO GROUP, because there is nothing to name. The master is one
+// of the workers, so a collective without workers is also a deployment without a master.
+func modelDeploymentElasticCollectiveView(
+	md *workercore.ModelDeployment, members []core.Pod,
+) *modelDeploymentReplicaView {
+	role := ModelDeploymentElasticRole(md)
+	if role == nil {
+		return nil
+	}
+
+	workers := make([]*core.Pod, 0, len(members))
+	for i := range members {
+		member := &members[i]
+		if member.DeletionTimestamp != nil {
+			continue
+		}
+		if modelDeploymentPodRole(member) != role.Name {
+			continue
+		}
+		workers = append(workers, member)
+	}
+	if len(workers) == 0 {
+		return nil
+	}
+
+	return &modelDeploymentReplicaView{
+		Role:    role.Name,
+		Ordinal: 0,
+		Seated:  true,
+		Members: workers,
+	}
+}
+
+// modelDeploymentGroupCollectiveStatus is the published entry of the elastic collective.
+//
+// THE STATE IS UNKNOWN, because the operator never qualified the collective as one group: the
+// qualification that exists covers the master alone. Publishing a state nobody evaluated would be
+// a claim the operator cannot back, and publishing the master's state would be a claim about a
+// different group.
+//
+// THE SERVING ANSWER IS THE DEFAULT AND CARRIES NO COUNT, because only a confirmation carries a
+// count and the Router's answer carries the master's fact rather than the collective's.
+//
+// THE INSTANT IS NOT MINTED HERE, because an instant belongs to a transition into published
+// ELIGIBLE, and the collective is never eligible.
+func modelDeploymentGroupCollectiveStatus(
+	md *workercore.ModelDeployment, collective modelDeploymentReplicaView,
+) workercore.ModelDeploymentGroupStatus {
+	return workercore.ModelDeploymentGroupStatus{
+		Role:       collective.Role,
+		Ordinal:    int32(collective.Ordinal),
+		Generation: string(modelDeploymentGenerationOf(collective)),
+		State:      workercore.ModelDeploymentGroupStateUnknown,
+		Reason:     modelDeploymentReasonCollectiveNotEvaluated,
+		Members:    modelDeploymentCollectiveMembers(collective.Members),
+		Serving:    modelDeploymentGroupServingDefault(md),
+	}
+}
+
+// modelDeploymentGroupStatus is the published entry of one group.
+//
+// THE STATE IS THE QUALIFICATION'S OWN VERDICT WHERE THE PASS HAS ONE, and the pending state
+// derived from the view where it does not.
+func modelDeploymentGroupStatus(
+	md *workercore.ModelDeployment, view modelDeploymentReplicaView,
+	qualification modelDeploymentInstanceQualification, found bool,
+) workercore.ModelDeploymentGroupStatus {
+	var state workercore.ModelDeploymentGroupState
+	var reason string
+	if found {
+		state = workercore.ModelDeploymentGroupState(qualification.GroupState())
+		reason = qualification.Reason()
+	} else {
+		state, reason = modelDeploymentPendingGroupState(md, view)
+	}
+
+	return workercore.ModelDeploymentGroupStatus{
+		Role:       view.Role,
+		Ordinal:    int32(view.Ordinal),
+		Generation: string(modelDeploymentGenerationOf(view)),
+		State:      state,
+		Reason:     reason,
+		Members:    modelDeploymentGroupMembers(view.Members),
+		Serving:    modelDeploymentGroupServingDefault(md),
+	}
+}
+
+// modelDeploymentPendingGroupState is the state of a group the pass has not evaluated.
+//
+// IT IS THE MEMBER LEGS' OWN VERDICT, taken from the same helper the qualification takes them
+// from, so the pending state and the qualified state are ONE classification: a replica whose
+// members have not reported yet reads the same whether the pass has a qualification for it or
+// not, and a status that answered two ways about the same replica would move on a pass that
+// changed nothing.
+//
+// THE FORWARD LEG IS NOT AVAILABLE HERE, because reading it is the probe this pass did not run. A
+// group whose members are all ready is therefore not eligible: the classification could not be
+// reached, and the state says so rather than claiming a qualification nobody made.
+func modelDeploymentPendingGroupState(
+	md *workercore.ModelDeployment, view modelDeploymentReplicaView,
+) (workercore.ModelDeploymentGroupState, string) {
+	role := modelDeploymentRoleByName(md, view.Role)
+	if role == nil {
+		return workercore.ModelDeploymentGroupStateUnknown,
+			"the role this replica belongs to is not in the spec"
+	}
+
+	local := newModelDeploymentReplicaLocal(view, role)
+	complete := local.membersComplete
+	ready := local.membersReady
+	switch {
+	case complete.Verdict == modelDeploymentLegFailed:
+		return workercore.ModelDeploymentGroupStateWithdrawn, complete.Reason
+	case ready.Verdict == modelDeploymentLegFailed:
+		return workercore.ModelDeploymentGroupStateWithdrawn, ready.Reason
+	case complete.Verdict != modelDeploymentLegVerified:
+		return workercore.ModelDeploymentGroupStateAwaitingMembers, complete.Reason
+	case ready.Verdict != modelDeploymentLegVerified:
+		return workercore.ModelDeploymentGroupStateAwaitingReady, ready.Reason
+	default:
+		return workercore.ModelDeploymentGroupStateUnknown,
+			"the pass has not evaluated this group yet"
+	}
+}
+
+// modelDeploymentGroupMembers publishes the members of one group.
+//
+// THE MEMBERS ARE ORDERED BY SEAT, because the seat is what tells them apart, and a member that
+// claims none goes last: it cannot be placed, and an entry that put it in the middle would claim
+// an order the group does not have.
+//
+// A MEMBER THAT CLAIMS NO SEAT, OR ONE THAT CANNOT BE READ, PUBLISHES NO SEAT AT ALL, rather than
+// the leader's: the default the seat helper elsewhere uses is right there and wrong here.
+func modelDeploymentGroupMembers(members []*core.Pod) []workercore.ModelDeploymentGroupMemberStatus {
+	published := make([]workercore.ModelDeploymentGroupMemberStatus, 0, len(members))
+	for _, member := range members {
+		status := modelDeploymentGroupMemberStatusOf(member)
+		if seat, state := modelDeploymentMemberSeat(member); state == modelDeploymentSeatValid {
+			claimed := int32(seat)
+			status.Seat = &claimed
+		}
+		published = append(published, status)
+	}
+
+	slices.SortStableFunc(published, modelDeploymentGroupMemberOrder)
+
+	return published
+}
+
+// modelDeploymentCollectiveMembers publishes the members of the elastic collective.
+//
+// A MEMBER'S SEAT IS ITS ADMISSION ORDINAL HERE, and not the seat it claims among the members of
+// its own replica: the collective's members are whole replicas, so the seat they claim inside one
+// replica is not a seat of the collective at all, and publishing it would put every member in seat
+// zero.
+//
+// THE ORDINAL IS THE OPERATOR'S OWN FACT and not the engine's runtime rank: which member holds
+// which rank is the engine's business, and the operator's numbering never implies it.
+//
+// A WORKER WHOSE ORDINAL CANNOT BE READ PUBLISHES NO SEAT, on the same terms as any other member
+// that claims none.
+func modelDeploymentCollectiveMembers(members []*core.Pod) []workercore.ModelDeploymentGroupMemberStatus {
+	published := make([]workercore.ModelDeploymentGroupMemberStatus, 0, len(members))
+	for _, member := range members {
+		status := modelDeploymentGroupMemberStatusOf(member)
+		if ordinal, ok := modelDeploymentPodOrdinal(member); ok {
+			seat := int32(ordinal)
+			status.Seat = &seat
+		}
+		published = append(published, status)
+	}
+
+	slices.SortStableFunc(published, modelDeploymentGroupMemberOrder)
+
+	return published
+}
+
+// modelDeploymentGroupMemberStatusOf is the identity and the readiness one member publishes.
+//
+// THE SEAT IS NOT SET HERE, because what a member claims as its seat depends on the shape of the
+// group it belongs to.
+func modelDeploymentGroupMemberStatusOf(member *core.Pod) workercore.ModelDeploymentGroupMemberStatus {
+	return workercore.ModelDeploymentGroupMemberStatus{
+		Name:  member.Name,
+		UID:   string(member.UID),
+		Ready: modelDeploymentGroupMemberReady(member),
+	}
+}
+
+// modelDeploymentGroupMemberOrder orders published members by seat and then by identity.
+//
+// THE SEAT COMES FIRST because it is the position in the group, and the identity settles the
+// order of the members that share one, so two passes over the same membership publish the same
+// list.
+func modelDeploymentGroupMemberOrder(a, b workercore.ModelDeploymentGroupMemberStatus) int {
+	switch {
+	case a.Seat != nil && b.Seat != nil:
+		if *a.Seat != *b.Seat {
+			if *a.Seat < *b.Seat {
+				return -1
+			}
+
+			return 1
+		}
+	case a.Seat != nil:
+		return -1
+	case b.Seat != nil:
+		return 1
+	}
+
+	return strings.Compare(a.UID, b.UID)
+}
+
+// modelDeploymentGroupMemberReady is the readiness one member publishes.
+//
+// IT IS THREE-VALUED, and the third value is not an absence: a member whose Ready condition has
+// never been reported is Unknown, which is a different fact from a member that was observed and
+// found not ready. A status that cannot tell those two apart cannot say which one happened.
+func modelDeploymentGroupMemberReady(pod *core.Pod) meta.ConditionStatus {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type != core.PodReady {
+			continue
+		}
+		switch condition.Status {
+		case core.ConditionTrue:
+			return meta.ConditionTrue
+		case core.ConditionFalse:
+			return meta.ConditionFalse
+		}
+
+		return meta.ConditionUnknown
+	}
+
+	return meta.ConditionUnknown
+}
+
+// modelDeploymentGroupServingDefault is the serving answer a group carries before the Router's
+// answer is applied.
+//
+// A DEPLOYMENT WITH NO ROUTER HAS NOTHING TO CONFIRM, and a deployment with one has not been read
+// yet. The two are different answers, and neither of them is the empty string, which is not a
+// serving state at all.
+func modelDeploymentGroupServingDefault(md *workercore.ModelDeployment) workercore.ModelDeploymentServingStatus {
+	if md.Spec.Router == nil {
+		return workercore.ModelDeploymentServingStatus{
+			State: workercore.ModelDeploymentServingStateNotConfigured,
+		}
+	}
+
+	return workercore.ModelDeploymentServingStatus{
+		State: workercore.ModelDeploymentServingStateUnknown,
+	}
+}
+
+// applyModelDeploymentGroupAnswer resolves the Router's answer for every published group, and
+// holds the groups the observation holds.
+//
+// THE ANSWER IS THE PASS'S CARRIER, which is the one the restoration reads too, so the status and
+// the labels are written from one answer about one moment.
+//
+// THE HOLD IS THE RESTORATION BARRIER'S OWN QUESTION, READ GROUP BY GROUP: a protected group whose
+// observation is missing or invalid waits for one, and a group that retains keeps what it has.
+func (r *ModelDeploymentReconciler) applyModelDeploymentGroupAnswer(
+	status *workercore.ModelDeploymentStatus,
+	observation modelDeploymentPassObservation,
+	md *workercore.ModelDeployment,
+	collective *modelDeploymentReplicaView,
+) {
+	fresh := r.modelDeploymentServingFreshNow(observation.Serving)
+	for i := range status.Roles {
+		for j := range status.Roles[i].Groups {
+			group := &status.Roles[i].Groups[j]
+
+			// THE COLLECTIVE IS NOT THE GROUP THE ROUTER OBSERVED. The Router's answer carries the
+			// master's fact, and the master is one member of the collective rather than the
+			// collective itself, so the fact is never read as an answer about the collective --
+			// not even when the collective has a single member and its generation is the master's
+			// own generation.
+			if modelDeploymentGroupIsCollective(group, collective) {
+				group.Serving, group.ServingReason = modelDeploymentGroupCollectiveServing(md)
+				continue
+			}
+
+			fact, observed := observation.Serving.Groups[modelDeploymentGroupKeyOf(group)]
+
+			group.Serving, group.ServingReason = modelDeploymentGroupServingAnswer(
+				observation.Serving, fact, observed, fresh, md)
+
+			r.holdModelDeploymentGroup(group, observation, md, fresh)
+		}
+	}
+}
+
+// modelDeploymentGroupIsCollective reports whether a published group is the elastic collective.
+//
+// IT IS THE GROUP'S OWN SLOT: the collective is the elastic role's one logical replica, and it is
+// published at ordinal zero.
+func modelDeploymentGroupIsCollective(
+	group *workercore.ModelDeploymentGroupStatus, collective *modelDeploymentReplicaView,
+) bool {
+	if collective == nil {
+		return false
+	}
+
+	return group.Role == collective.Role && group.Ordinal == int32(collective.Ordinal)
+}
+
+// modelDeploymentGroupCollectiveServing is the serving answer the elastic collective publishes.
+//
+// IT IS THE DEFAULT, because the Router's answer is about the master and not about the
+// collective, and it CARRIES NO COUNT: only a confirmation carries a count, and the collective is
+// never confirmed.
+//
+// WITH A ROUTER THE REASON NAMES THE MISSING OBSERVATION, so a reader that finds an Unknown
+// serving answer can tell it apart from a Router that observed the collective and reported
+// nothing.
+func modelDeploymentGroupCollectiveServing(
+	md *workercore.ModelDeployment,
+) (workercore.ModelDeploymentServingStatus, string) {
+	if md.Spec.Router == nil {
+		return modelDeploymentGroupServingDefault(md), ""
+	}
+
+	return modelDeploymentGroupServingDefault(md), modelDeploymentReasonGroupUnobserved
+}
+
+// holdModelDeploymentGroup holds a group the Router's observation holds.
+//
+// A GROUP THE QUALIFICATION ALREADY HOLDS KEEPS ITS OWN STATE AND ITS OWN REASON: the
+// observation's reason never takes the place of the leg that holds the group.
+//
+// A GROUP THAT IS NOT PROTECTED IS NOT HELD: the compatibility classes keep the behavior they
+// have, and an ordinary single-member Server has no group to protect.
+func (r *ModelDeploymentReconciler) holdModelDeploymentGroup(
+	group *workercore.ModelDeploymentGroupStatus,
+	observation modelDeploymentPassObservation,
+	md *workercore.ModelDeployment,
+	fresh bool,
+) {
+	if group.State != workercore.ModelDeploymentGroupStateEligible {
+		return
+	}
+	if md.Spec.Router == nil {
+		return
+	}
+	role := modelDeploymentRoleByName(md, group.Role)
+	if role == nil {
+		return
+	}
+	qualification, found := modelDeploymentGroupQualificationOf(
+		observation.Qualifications, group.Role, int(group.Ordinal), group.Generation)
+	if !found {
+		return
+	}
+	if modelDeploymentGroupProtectionOf(md, role, qualification.View) != modelDeploymentGroupProtected {
+		return
+	}
+
+	fact, observed := observation.Serving.Groups[modelDeploymentGroupKeyOf(group)]
+	if modelDeploymentGroupRestores(observed, fresh, fact) {
+		return
+	}
+
+	// A GROUP WHOSE FRESH MEMBER IS NOT READY IS HELD BY THAT MEMBER, AND THE STATE NAMES THE LEG.
+	// AwaitingObservation names a group the Router's observation holds, and the observation is not
+	// what holds this one: the fresh membership is. The reason already names the member, and the
+	// Router's own reason stays on the answer it belongs to.
+	if observed && fact.MemberNotReady {
+		group.State = workercore.ModelDeploymentGroupStateAwaitingReady
+		group.Reason = modelDeploymentGroupObservationReason(observation.Serving, fact, observed)
+
+		return
+	}
+
+	group.State = workercore.ModelDeploymentGroupStateAwaitingObservation
+	group.Reason = modelDeploymentGroupObservationReason(observation.Serving, fact, observed)
+}
+
+// modelDeploymentGroupRestores reports whether the Router's answer lets this group keep serving.
+//
+// IT IS THE RESTORATION BARRIER'S OWN QUESTION, READ AT THE GROUP'S LEVEL: a group restores on a
+// fresh, complete and coherent observation of itself, and a group that is eligible and unchanged
+// keeps what it has while the observation is lost.
+func modelDeploymentGroupRestores(observed, fresh bool, fact modelDeploymentGroupServing) bool {
+	if observed && fresh && fact.SnapshotValid {
+		return true
+	}
+
+	return observed && fact.Retained
+}
+
+// modelDeploymentGroupServingAnswer is the serving answer one group publishes.
+//
+// THE GROUP'S OWN FACT IS THE ANSWER, AND ONLY A FRESH FACT MAY CONFIRM: a view that has grown
+// stale is not a confirmation, and publishing the count it carried would report an observation
+// the operator no longer has.
+//
+// A GROUP THE ANSWER DOES NOT CARRY IS NOT CONFIRMED BY THE DEPLOYMENT'S ANSWER: the union speaks
+// for the endpoints it counted, and it says nothing about a group it does not name. Such a group
+// says Unknown, or NotConfigured where there is no Router whose answer could be missing.
+func modelDeploymentGroupServingAnswer(
+	answer ServingAnswer, fact modelDeploymentGroupServing, observed, fresh bool,
+	md *workercore.ModelDeployment,
+) (workercore.ModelDeploymentServingStatus, string) {
+	switch {
+	case observed && !fresh:
+		return workercore.ModelDeploymentServingStatus{
+			State: workercore.ModelDeploymentServingStateUnknown,
+		}, modelDeploymentReasonStaleGroupServing
+	case observed:
+		serving := workercore.ModelDeploymentServingStatus{State: fact.State}
+		if serving.State == "" {
+			serving.State = workercore.ModelDeploymentServingStateUnknown
+		}
+		// ONLY A CONFIRMATION CARRIES A COUNT. The other states say that no count was established,
+		// and the API carries that as an absent value rather than as a zero.
+		if serving.State == workercore.ModelDeploymentServingStateConfirmed {
+			endpoints := fact.Endpoints
+			serving.Value = &endpoints
+		}
+
+		return serving, fact.InvalidReason
+	case md.Spec.Router == nil:
+		return workercore.ModelDeploymentServingStatus{
+			State: workercore.ModelDeploymentServingStateNotConfigured,
+		}, ""
+	default:
+		return workercore.ModelDeploymentServingStatus{
+			State: workercore.ModelDeploymentServingStateUnknown,
+		}, modelDeploymentGroupObservationReason(answer, fact, observed)
+	}
+}
+
+// modelDeploymentGroupObservationReason names what is missing from the Router's answer about one
+// group.
+//
+// THE GROUP'S OWN FACT NAMES ITS OWN DEFECT, and the deployment's answer names the defect of the
+// collection as a whole. Neither is ever empty: a reader that finds a serving state without a
+// reason cannot tell an unobserved Router from one that was observed and reported nothing.
+func modelDeploymentGroupObservationReason(
+	answer ServingAnswer, fact modelDeploymentGroupServing, observed bool,
+) string {
+	if observed && fact.InvalidReason != "" {
+		return fact.InvalidReason
+	}
+	if answer.Reason != "" {
+		return answer.Reason
+	}
+
+	return modelDeploymentReasonGroupUnobserved
+}
+
+// modelDeploymentGroupKeyOf is the key the Router's per-group facts are filed under.
+//
+// IT IS THE GROUP'S OWN IDENTITY, and a fact filed under another membership is not this group's
+// answer: the members changed, so the earlier observation describes Pods that are no longer the
+// group.
+func modelDeploymentGroupKeyOf(group *workercore.ModelDeploymentGroupStatus) modelDeploymentGroupKey {
+	return modelDeploymentGroupKey{
+		Role:       group.Role,
+		Ordinal:    int(group.Ordinal),
+		Generation: modelDeploymentMembershipGeneration(group.Generation),
+	}
+}
+
+// modelDeploymentGroupQualificationOf finds the qualification the pass reached for one group.
+//
+// IT IS THE GROUP'S OWN SLOT, the role and the ordinal AND THE GENERATION, because the answer
+// about a group is about that group and not about whichever group happens to share its role, and
+// because a qualification taken against a membership that has since changed describes Pods that
+// are no longer the group.
+func modelDeploymentGroupQualificationOf(
+	qualifications []modelDeploymentInstanceQualification,
+	role string, ordinal int, generation string,
+) (modelDeploymentInstanceQualification, bool) {
+	for _, qualification := range qualifications {
+		if qualification.View.Role != role {
+			continue
+		}
+		if qualification.View.Ordinal != ordinal {
+			continue
+		}
+		if string(qualification.Generation) != generation {
+			continue
+		}
+
+		return qualification, true
+	}
+
+	return modelDeploymentInstanceQualification{}, false
+}
+
+// modelDeploymentRoleByName finds the role the status names.
+func modelDeploymentRoleByName(md *workercore.ModelDeployment, name string) *workercore.ModelDeploymentRole {
+	for i := range md.Spec.Roles {
+		if md.Spec.Roles[i].Name == name {
+			return &md.Spec.Roles[i]
+		}
+	}
+
+	return nil
+}
+
+// applyModelDeploymentGroupQualificationTimes settles the instant each group last became eligible.
+//
+// THE INSTANT RECORDS THE TRANSITION INTO PUBLISHED ELIGIBLE, and nothing else. A group the
+// Router's observation holds has not been published as eligible, so it earns no instant of its
+// own: the instant would name a transition that never happened.
+//
+// A HELD GROUP KEEPS THE INSTANT IT EARNED, because the hold is the Router's and the
+// qualification that earned the instant still happened. The history survives it.
+//
+// A GROUP THAT COMES BACK TO PUBLISHED ELIGIBLE RECORDS A NEW ONE, because the instant names the
+// moment the group was published as eligible and that moment has moved.
+//
+// A NEW GENERATION INHERITS NOTHING: the membership it names is a membership that was never
+// qualified, and an inherited instant would claim otherwise.
+//
+// THE INSTANT IS RECORDED AT ONCE, WHEN THE GROUP FIRST QUALIFIES. Deferring it to a later pass
+// would move the status on the pass after the first one, and a status that moves for an unchanged
+// spec is a status write nobody asked for.
+func applyModelDeploymentGroupQualificationTimes(
+	status *workercore.ModelDeploymentStatus,
+	previous []workercore.ModelDeploymentRoleStatus,
+	now meta.Time,
+	collective *modelDeploymentReplicaView,
+) {
+	for i := range status.Roles {
+		for j := range status.Roles[i].Groups {
+			group := &status.Roles[i].Groups[j]
+
+			// THE COLLECTIVE INHERITS NO HISTORY FROM THE SLOT IT OCCUPIES. The entry that was
+			// published there before was a replica of the role -- the master's own group -- and its
+			// instant belongs to that group. At one worker the two share a generation, so the
+			// settlement would find the prior entry by its own slot and copy the instant across,
+			// giving a group that was never eligible the history of one that was.
+			if modelDeploymentGroupIsCollective(group, collective) {
+				group.LastQualificationTime = nil
+				continue
+			}
+
+			prior := modelDeploymentGroupStatusOf(previous, group)
+			switch {
+			case prior == nil:
+				// THE GROUP IS PUBLISHED FOR THE FIRST TIME.
+				if group.State == workercore.ModelDeploymentGroupStateEligible {
+					group.LastQualificationTime = &now
+				}
+			case prior.Generation != group.Generation:
+				// A NEW MEMBERSHIP EARNS ITS OWN INSTANT, AND INHERITS NONE.
+				if group.State == workercore.ModelDeploymentGroupStateEligible {
+					group.LastQualificationTime = &now
+				}
+			case group.State == workercore.ModelDeploymentGroupStateEligible &&
+				prior.State != workercore.ModelDeploymentGroupStateEligible:
+				// THE GROUP HAS COME BACK TO PUBLISHED ELIGIBLE.
+				group.LastQualificationTime = &now
+			case prior.LastQualificationTime != nil:
+				// THE HISTORY IS PRESERVED, THROUGH A HOLD AND THROUGH A WITHDRAWAL.
+				group.LastQualificationTime = prior.LastQualificationTime.DeepCopy()
+			case group.State == workercore.ModelDeploymentGroupStateEligible:
+				// THE GROUP IS ELIGIBLE AND ITS INSTANT WAS NEVER RECORDED.
+				group.LastQualificationTime = &now
+			}
+		}
+	}
+}
+
+// modelDeploymentGroupStatusOf finds the entry a group was published as before.
+//
+// IT IS THE GROUP'S OWN SLOT, the role and the ordinal, and NOT the generation: the generation is
+// what the entry is compared against, and a lookup that matched on it would never find the entry
+// whose membership has moved.
+func modelDeploymentGroupStatusOf(
+	previous []workercore.ModelDeploymentRoleStatus,
+	group *workercore.ModelDeploymentGroupStatus,
+) *workercore.ModelDeploymentGroupStatus {
+	for i := range previous {
+		if previous[i].Name != group.Role {
+			continue
+		}
+		for j := range previous[i].Groups {
+			if previous[i].Groups[j].Ordinal == group.Ordinal {
+				return &previous[i].Groups[j]
+			}
+		}
+	}
+
+	return nil
 }
 
 // observeModelDeploymentEndpointEligibility reports, at the deployment level, what the whole-group

@@ -3252,6 +3252,126 @@ message ModelDeploymentEnvVar {
   optional string value = 2;
 }
 
+// ModelDeploymentGroupMemberStatus is one member of a group, as it currently stands.
+message ModelDeploymentGroupMemberStatus {
+  // Name is the member Pod's name.
+  //
+  // +required
+  optional string name = 1;
+
+  // UID is the member Pod's identity. A replaced member is a different UID, which is what makes a
+  // replaced membership a different generation.
+  //
+  // +required
+  optional string uid = 2;
+
+  // Seat is the seat the member claims, absent when the member claims none or one that cannot be
+  // read. The group's reason names that defect.
+  //
+  // IN A GROUP WHOSE MEMBERS ARE WHOLE REPLICAS the seat is the member's ADMISSION ORDINAL,
+  // because the seat it claims among the members of its own replica is not a seat of that group
+  // at all. The ordinal is the operator's own fact and not the engine's runtime rank: which
+  // member holds which rank is the engine's business, and the operator's numbering never implies
+  // it.
+  //
+  // +optional
+  optional int32 seat = 3;
+
+  // Ready is the member's readiness, one of True, False or Unknown.
+  //
+  // A member whose Ready condition has never been reported is Unknown, not False: a member nobody
+  // has reported on is not a member that was observed and found not ready, and a diagnosis that
+  // cannot tell those two apart cannot say which one happened.
+  //
+  // +required
+  // +k8s:validation:enum=["True","False","Unknown"]
+  optional string ready = 4;
+}
+
+// ModelDeploymentGroupStatus is one group's qualification, as published.
+//
+// IT IS A DESCRIPTION OF ONE GROUP, NOT A COUNT OF THE ROLE'S ENDPOINTS. The role's counts remain
+// derived views and say nothing about which group holds which member.
+//
+// THE STATE AND THE SERVING CONFIRMATION ARE TWO ANSWERS AND NEVER COLLAPSE INTO ONE. The state
+// and the reason are the ENGINE's answer -- which leg of the whole-group predicate holds the group.
+// The serving confirmation is the ROUTER's answer. A group whose members are healthy and whose
+// Router view was lost is Eligible with an Unknown serving confirmation, and a group whose member
+// failed is Withdrawn, and neither reading can be mistaken for the other.
+message ModelDeploymentGroupStatus {
+  // Role is the role this group belongs to.
+  //
+  // +required
+  optional string role = 1;
+
+  // Ordinal is the replica slot this group occupies within its role.
+  //
+  // +required
+  optional int32 ordinal = 2;
+
+  // Generation is the membership the answers below were taken against: the sorted member UID set.
+  // A replaced member is a different set, so a prior verification does not apply to the new one.
+  //
+  // +required
+  optional string generation = 3;
+
+  // State is the group's eligibility state.
+  //
+  // IT IS THE QUALIFICATION'S STATE, EXCEPT WHEN THE ROUTER'S OBSERVATION HOLDS THE GROUP: a group
+  // that passed every leg and is waiting on a valid Router observation is AwaitingObservation,
+  // while a group that passed every leg and is retained across an observation loss is Eligible,
+  // because the observation is not what holds it.
+  //
+  // +required
+  // +k8s:validation:enum=["Eligible","Withdrawn","AwaitingMembers","AwaitingReady","AwaitingProbe","AwaitingObservation","Unsupported","Unknown"]
+  optional string state = 4;
+
+  // Reason names the fact that holds the group, or says that it qualifies.
+  //
+  // IT NAMES ONE FACT AND NEVER TWO. When a leg of the whole-group predicate holds the group, the
+  // reason names that leg. When the Router's observation holds the group, the reason names the
+  // observation. A member fault and a lost Router view are therefore told apart by the reason as
+  // well as by the state.
+  //
+  // +required
+  optional string reason = 5;
+
+  // Members are the group's current members, ordered by seat.
+  //
+  // +optional
+  // +listType=atomic
+  repeated ModelDeploymentGroupMemberStatus members = 6;
+
+  // LastQualificationTime is when the group last entered published Eligible for this generation.
+  //
+  // IT IS THE TRANSITION, NOT THE LATEST PASS. A group that stays Eligible keeps the instant it
+  // earned, and a group that is held in the same generation keeps it too, so an observation loss
+  // does not erase it. A group that leaves Eligible and comes back records the new instant. A NEW
+  // GENERATION INHERITS NO TIMESTAMP: the membership it names is a membership that was never
+  // qualified.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time lastQualificationTime = 7;
+
+  // Serving is the Router's answer for this group.
+  //
+  // +required
+  optional ModelDeploymentServingStatus serving = 8;
+
+  // ServingReason names why the Router's answer is what it is, when it is not a confirmation.
+  //
+  // IT IS PUBLISHED IN BOTH OBSERVATION-LOSS CASES, because the serving field has to be complete
+  // on its own: a reader who finds Serving without a reason here cannot tell an unobserved Router
+  // apart from one that was observed and reported nothing.
+  //
+  // IT IS SEPARATE FROM Reason, because the two name different facts. Reason names what holds the
+  // GROUP and ServingReason names what holds the SERVING ANSWER, so an engine fault's reason never
+  // appears here and the Router's reason never takes the group's place.
+  //
+  // +optional
+  optional string servingReason = 9;
+}
+
 // ModelDeploymentKVCache attaches the deployment to a KV cache pool.
 //
 // THE REUSE DOMAIN IS NOT DECLARED HERE, AND THAT IS A SECURITY PROPERTY. The storage layer's tenant
@@ -4150,6 +4270,23 @@ message ModelDeploymentRoleStatus {
   //
   // +optional
   optional ModelDeploymentRoleEndpointsStatus endpoints = 9;
+
+  // Groups is one entry per group of this role, ordered by replica ordinal.
+  //
+  // IT ANSWERS WHAT THE COUNTS ABOVE CANNOT. Those counts say how many instances the role has
+  // and how many are Ready; a group entry says which members form one scheduling group, what
+  // state that group stands in, and whether the Router confirms it is being served. A reader
+  // asking which replica failed, or which one the Router stopped selecting, needs the entry and
+  // cannot get it from the counts.
+  //
+  // IT IS AN ORDINARY LIST, NOT A MAP, because a group's generation changes whenever a member is
+  // replaced. A map keyed on the generation would replace the whole entry on every membership
+  // change, and a map keyed on the ordinal alone would let a reader match a stale entry to a new
+  // membership. The identity is carried in the entry instead.
+  //
+  // +optional
+  // +listType=atomic
+  repeated ModelDeploymentGroupStatus groups = 10;
 }
 
 // ModelDeploymentRoleTopology is the topology request for one independent replica group.

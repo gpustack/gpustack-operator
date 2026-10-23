@@ -546,14 +546,49 @@ func TestElasticSharedMemoryEditRetainsExistingMembers(t *testing.T) {
 		}
 	}
 
-	f.md.Spec.Roles[0].ShmSize = ptr.To(resource.MustParse("32Gi"))
+	// THE OPERATOR'S EDIT REACHES THE API SERVER, the way a user's edit does, and the server's
+	// copy is asserted to hold it BEFORE the pass that must act on it.
+	//
+	// A FIXTURE THAT EDITS ONLY THE IN-MEMORY OBJECT leaves the server's copy without the edit,
+	// and the pass's status write replaces the caller's object with the server's copy. The edit
+	// would then be gone before the render, the render would fall back to the default shared
+	// memory size, and the member born in the next pass would carry the PRE-CHANGE size. A test
+	// that expects the current size is measuring nothing unless the current size reached the
+	// server, so the precondition is asserted rather than assumed.
+	persist := func(edit func(*workercore.ModelDeploymentRole)) workercore.ModelDeploymentRole {
+		t.Helper()
+		edit(&f.md.Spec.Roles[0])
+		require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+
+		stored := new(workercore.ModelDeployment)
+		require.NoError(t, f.reconciler.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(f.md), stored))
+		require.Len(t, stored.Spec.Roles, 1)
+
+		return stored.Spec.Roles[0]
+	}
+
+	shmEdit := persist(func(role *workercore.ModelDeploymentRole) {
+		role.ShmSize = ptr.To(resource.MustParse("32Gi"))
+	})
+	require.NotNil(t, shmEdit.ShmSize,
+		"the operator's shared memory edit must be in the API server before the pass that acts on it")
+	require.Zero(t, shmEdit.ShmSize.Cmp(resource.MustParse("32Gi")),
+		"the operator's shared memory edit must be in the API server before the pass that acts on it")
+
 	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
 	require.NoError(t, err)
 	require.NoError(t, f.reconciler.Client.List(ctx, pods))
 	require.Len(t, pods.Items, 3)
 	assertRetained()
 
-	f.md.Spec.Roles[0].ElasticEP.Width = 3
+	widthEdit := persist(func(role *workercore.ModelDeploymentRole) {
+		role.ElasticEP.Width = 3
+	})
+	require.NotNil(t, widthEdit.ElasticEP,
+		"the width edit must be in the API server before the pass that acts on it")
+	require.Equal(t, int32(3), widthEdit.ElasticEP.Width,
+		"the width edit must be in the API server before the pass that acts on it")
+
 	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
 	require.NoError(t, err)
 	require.NoError(t, f.reconciler.Client.List(ctx, pods))

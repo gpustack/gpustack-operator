@@ -206,6 +206,10 @@ func (*ModelDeploymentEngine) ProtoMessage() {}
 
 func (*ModelDeploymentEnvVar) ProtoMessage() {}
 
+func (*ModelDeploymentGroupMemberStatus) ProtoMessage() {}
+
+func (*ModelDeploymentGroupStatus) ProtoMessage() {}
+
 func (*ModelDeploymentKVCache) ProtoMessage() {}
 
 func (*ModelDeploymentKVCacheDomain) ProtoMessage() {}
