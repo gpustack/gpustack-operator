@@ -2,6 +2,10 @@
 
 Start four fixed *DP* ranks behind `vllm-router`, send requests to each rank directly, and confirm the Router reaches every endpoint.
 
+The captured run in this walkthrough is **vLLM**. The *SGLang External DP* shape has a procedure
+below but **no captured result yet** — see
+[SGLang External DP](#sglang-external-dp).
+
 ## Contents
 
 - [Summary](#summary)
@@ -11,6 +15,7 @@ Start four fixed *DP* ranks behind `vllm-router`, send requests to each rank dir
 - [Step 3: Send requests per rank](#step-3-send-requests-per-rank)
 - [Step 4: Check Router coverage](#step-4-check-router-coverage)
 - [Step 5: Inspect and release](#step-5-inspect-and-release)
+- [SGLang External DP](#sglang-external-dp)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
@@ -311,6 +316,146 @@ Verify deletion of owned resources and release of all eight application GPU clai
 The runner log confirms deletion of the `ModelDeployment`, but no final owned-resource or released-device snapshot was captured.
 The model cache and cluster remain separate from application cleanup.
 
+## SGLang External DP
+
+**Nothing in this section is a captured result.** The steps below are the acceptance run's steps,
+written down before the run so the run has a fixed procedure to follow. No SGLang *External DP*
+deployment has been started on a cluster yet, so there is no captured listing, no captured status
+and no captured measurement to quote here. The results land after the acceptance run, and this
+section is where they will be written.
+
+The shape being exercised is described in
+[SGLang External DP](../../modules/model-deployment/external-dp.md#sglang-external-dp). This
+section carries the procedure; that page carries the contract.
+
+### The manifest
+
+Save the manifest as `sglang-external-dp.yaml`. It is the same shape the module page documents: one
+`Server` role with `size: 2`, one attention-DP group per member, the Rust server on, and a Router
+in front.
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: sglang-external-dp
+  namespace: gpustack-bench
+spec:
+  model:
+    name: Qwen/Qwen3-8B
+  engine:
+    name: SGLang
+    image: gpustack/runner:cuda13.0-sglang0.5.22
+  router:
+    name: sglang-gateway
+    image: gpustack/llm-router:v0.3.1
+  roles:
+    - name: server
+      kind: Server
+      replicas: 1
+      size: 2
+      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      image: gpustack/runner:cuda13.0-sglang0.5.22
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "1"
+      extraArgs:
+        - --tp-size
+        - "2"
+        - --attn-dp-size
+        - "2"
+        - --nnodes
+        - "2"
+        - --node-rank
+        - $(GPUSTACK_MEMBER_INDEX)
+        - --dist-init-addr
+        - $(GPUSTACK_REPLICA_LEADER_ADDRESS):29500
+      env:
+        - name: SGLANG_RUST_SERVER
+          value: "1"
+```
+
+The member index and the leader's DNS name are stamped by the operator and expanded by Kubernetes
+in the container arguments, so the manifest stays identical for every member.
+
+### The procedure
+
+```bash
+kubectl apply --dry-run=server -f sglang-external-dp.yaml
+kubectl apply -f sglang-external-dp.yaml
+
+# The group is Ready only when every member is qualified.
+kubectl -n gpustack-bench get modeldeployment sglang-external-dp \
+  -o jsonpath='{.status.phase}{"\n"}'
+
+# Every member publishes its own endpoint, and the role reports External.
+kubectl -n gpustack-bench get modeldeployment sglang-external-dp -o json \
+  | jq '.status.roles[] | {name, kind, parallelism, endpoints}'
+
+# The members of one instance, with their member indexes.
+kubectl -n gpustack-bench get pods \
+  -l app.kubernetes.io/instance=sglang-external-dp -o wide
+```
+
+Two observations carry the shape:
+
+- **`parallelism.loadBalance` reads `External`** on the role, and the declared degrees show the
+  *TP* width as `tensorParallel: 2`. The **attention width is not a status degree**: the status
+  carries no field for it, so it is read off the member's own rendered args — `--attn-dp-size 2` —
+  and not out of `parallelism`.
+- **The group's endpoints are per member.** A member's `/health` answers for that member's own
+  scheduler and is **blind to its peer**; the qualification guard is the group-forward probe — a
+  real generation posted to *every* member, each of which crosses the *FFN* collective.
+
+### Scaling the group count
+
+`replicas` counts **independent groups**; `size` counts members **inside** one group. Scaling
+`replicas` from 1 to 2 adds a whole second group, and each group brings its own members with it.
+
+```bash
+kubectl -n gpustack-bench patch modeldeployment sglang-external-dp --type=merge \
+  -p '{"spec":{"roles":[{"name":"server","replicas":2}]}}'
+```
+
+Expect the Router's worker set to grow by exactly the new group's members, and the new group's
+endpoints to be qualified before they are routed to. Scaling back to 1 withdraws the whole group
+atomically: **no surviving member stays routed**, and the scale-down runs the disaggregated
+handoff grace window, so **total scale-down latency is at least 60 s** plus the drain. The group
+reads `Draining` during that window.
+
+### Fault injection
+
+Make a **non-head** member NotReady — for example by isolating its readiness path — and observe
+that the **whole group** is withdrawn rather than the one member:
+
+```bash
+kubectl -n gpustack-bench get modeldeployment sglang-external-dp -o json \
+  | jq '.status.roles[] | {name, endpoints}'
+```
+
+A member fault stalls the survivor's in-flight requests until the collective aborts, because the
+members share the *FFN* tensor-parallel collective. That is the shape's cost, and it is recorded
+as observed rather than smoothed over.
+
+### The exclusion evidence
+
+The distinction between *SGLang External DP* and *internal* data parallelism rests on evidence
+that is enumerated, not on a single observation:
+
+- distinct member indexes and distinct member `Pod`s;
+- one group generation covering the member set (the sorted member-UID set);
+- per-door rank-targeted execution — the Rust listener **is** that scheduler's ingress;
+- the documented statement that the members share the *FFN* collective.
+
+"Distinct ports answered" alone is **not** sufficient evidence.
+
+### Cleanup
+
+```bash
+kubectl -n gpustack-bench delete modeldeployment sglang-external-dp --wait=true
+kubectl get devices -o json
+```
+
 ## Limitations
 
 The H100 recording establishes a ready fixed group, four confirmed endpoints and streaming traffic on every rank.
@@ -324,6 +469,12 @@ growth. Group sizing and replacement semantics are covered in
 
 The example does not establish *External DP* with *Prefill/Decode*, hybrid load balancing, multiple HTTP ports per `Pod`,
 or placement across GPU nodes. Those configurations need separate compatibility and runtime checks.
+
+**No *SGLang External DP* runtime result exists yet.** The shape is implemented and classified, and
+its procedure is written down in [SGLang External DP](#sglang-external-dp), but no SGLang
+*External DP* deployment has been run: there is no captured listing, group status, group-forward
+probe or scale-down timing. Every number on this page was recorded on the vLLM engine. The SGLang
+results land after the acceptance run, and this page is where they will be recorded.
 
 ## Troubleshooting
 
