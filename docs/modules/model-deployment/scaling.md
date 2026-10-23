@@ -651,14 +651,14 @@ unchecked writes through the binding fence.
 
 ## Troubleshooting
 
-| Symptom | Check | Action |
+| Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| Counts never change | `Active` condition | Use `Active` mode and clear suspension when ready to commit. Resolve missing, replaced or already-owned targets. |
-| Counts never change | `MetricsReady` and role signal states | Check engine metrics and allow a valid sampling window to form. |
-| Counts never change | `Blocked` and role reasons | Correct bounds or ratios, or wait for the named pacing or retirement guard. |
-| Recommendation differs from counts | *`rawRecommendedReplicas`* and *`constrainedReplicas`* | Check the role bounds, ratios and pacing limits that changed the request. |
-| Counts return to a baseline | *`pendingCohort`* and `ResourceExhausted` | Check admission and available quota before retrying growth. |
-| Counts return after shrinking | *`lastScaleDown`* | Resolve the aborted retirement before its cooldown expires. |
+| Counts never change | Condition: `Active` | Use `Active` mode and clear suspension when ready to commit. Resolve missing, replaced or already-owned targets. |
+| Counts never change | Condition: `MetricsReady`, Status: role `signalState` | Check engine metrics and allow a valid sampling window to form. |
+| Counts never change | Condition: `Blocked`, Status: role `reason` | Correct bounds or ratios, or wait for the named pacing or retirement guard. |
+| Recommendation differs from counts | Status: *`rawRecommendedReplicas`* and *`constrainedReplicas`* | Check the role bounds, ratios and pacing limits that changed the request. |
+| Counts return to a baseline | Status: *`pendingCohort`*, Reason: `ResourceExhausted` | Check admission and available quota before retrying growth. |
+| Counts return after shrinking | Status: *`lastScaleDown`* | Resolve the aborted retirement before its cooldown expires. |
 | A write is refused | Admission message | Check [Binding fence](#binding-fence) and [GitOps sync](#gitops-sync). An orphan recovery requires the named scaler to be gone or replaced. |
 
 ---
