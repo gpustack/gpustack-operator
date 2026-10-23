@@ -29,6 +29,8 @@ with the steps below; [Node Model Store](node-store.md) explains each mount.
   `/var/lib/k0s/kubelet`) needs `modelManager.kubeletDir` set to it, or no mount reaches a `Pod`. Image
   mode cannot set it, so there the plugin only works with the standard `/var/lib/kubelet`.
 
+## Configuration
+
 The chart deploys it by default (`modelManager.enabled: true`) with the `CSIDriver`
 `model.csi.gpustack.ai`, one `DaemonSet` `Pod` per node, a `ServiceAccount` and a `ClusterRole` that grants
 only get, list and watch on `modelartifacts` and `nodemodelstores`, update on
@@ -42,8 +44,6 @@ hands each mount its artifact's `Secret`.
 | `modelManager.securePort` | `32444` | metrics, readiness and liveness |
 | `modelManager.registrar.image` | `docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0` | the sidecar that registers the plugin with kubelet |
 | `modelManager.nodeSelector`, *`tolerations`* | every node, every taint | where it runs; a node without it cannot mount node-delivered weights |
-
-## Configuration
 
 | Layer | Carrier | Who changes it | What |
 | --- | --- | --- | --- |

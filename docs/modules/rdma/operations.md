@@ -354,7 +354,7 @@ verbs path fails creating its completion queue, as above.
 | the `Workload` is admitted and its `Pod` stays `Pending` | Status: `Pod` phase `Pending` | Over-subscription: nothing meters these keys. See [the section above](#kueue-and-rdma-keys) |
 | the `Pod` is scheduled, then refused on the node and not rescheduled | The kubelet refuses the `Pod` on the node | The node's totals sufficed but its devices sit on two *NUMA* nodes. Check the node's policy, and that both requests sit in one container |
 | the container starts with fewer devices than expected | Fewer `uverbs` entries than granted endpoints | One `rdma_cm` is correct — count the `uverbs` entries. See [the injected set](#injected-devices) |
-| a node drops out of scheduling without changing | The node's link broke | Its link broke: the hardware stays, the label does not. [Read it yourself](network-topology.md#inspecting-the-record) |
+| a node drops out of scheduling without changing | Status: the node's link state in its `Devices` record | The hardware stays, the label does not. [Read it yourself](network-topology.md#inspecting-the-record) |
 
 ---
 

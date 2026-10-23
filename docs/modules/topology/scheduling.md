@@ -199,8 +199,8 @@ upgraded by this path; create fresh managed objects for this release.
 
 | Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| `TopologySource` `Ready=False` | Condition: `Ready=False` | The inventory is invalid, stale, expired, or contends with another writer. Read its `Valid` and `OwnershipConflict` conditions |
-| `ClusterQueue` `TopologyReady=False` | Condition: `TopologyReady=False` | A flavor is missing *TAS* metadata, selectors overlap, quota is not conserved, or the flavor limit was exceeded. Read the condition reason and the referenced flavors/`Topology` resources |
+| `TopologySource` not ready | Condition: `Ready=False` | The inventory is invalid, stale, expired, or contends with another writer. Read its `Valid` and `OwnershipConflict` conditions |
+| `ClusterQueue` topology not ready | Condition: `TopologyReady=False` | A flavor is missing *TAS* metadata, selectors overlap, quota is not conserved, or the flavor limit was exceeded. Read the condition reason and the referenced flavors/`Topology` resources |
 | `ClusterQueue` `TopologyReady=Unknown`, reason `AwaitingQueueStatus` | Condition: `TopologyReady=Unknown`, Reason: `AwaitingQueueStatus` | Kueue has not written the queue status for the current generation, so dropping a flavor waits for it. Check the queue's Kueue `Active` condition and the Kueue controller |
 | `ModelDeployment` remains Pending | Status: progress message, Condition: generated `Workload` conditions | No one domain at the required level fits the complete PodSet |
 | Aggregate quota looks sufficient | Status: `Workload` topology assignment | The request cannot combine capacity from different profiles or domains. Compare the `Workload` topology assignment with the flavor profiles |

@@ -272,7 +272,7 @@ Ten conditions describe states that a single phase cannot represent. They are in
 cache not attached" is a real and actionable state. Nine are described below; `WeightsReady` is
 described with the artifact it reports on, in [Model Artifact](../model-delivery/artifact.md#status).
 
-#### `DomainRegistered`
+#### DomainRegistered
 
 Whether the referenced Binding resolved and its domain was read.
 
@@ -284,7 +284,7 @@ Whether the referenced Binding resolved and its domain was read.
 | `False` | `BindingNotReady` | wait for it, or look at the pool it points at |
 | `False` | `BindingDeleting` | find who deleted it; the replicas keep writing to the domain they attached to |
 
-#### `QuotaReserved`
+#### QuotaReserved
 
 Whether **every one of** the deployment's `Workload`s holds Kueue quota. Every
 replica is its own group with its own `Workload`, so a deployment of N replicas is N `Workload`s. `True`
@@ -340,7 +340,7 @@ What to do about it:
   to; giving the roles different types keeps one preemption from reclaiming both halves out of the
   same queue.
 
-#### `CacheAttached`
+#### CacheAttached
 
 Whether the cache is observed to be in effect, which is a different question
 from whether it was configured. It is judged downstream of the engine and **never** on a rendered flag
@@ -361,7 +361,7 @@ simply idle looks exactly like an unread one: no supported engine signals "the c
 initialized" before any traffic, so silence is the most common steady state. A connector that
 cannot come up keeps its replica from ever becoming Ready, which is reported there.
 
-#### `ReplicasUpToDate`
+#### ReplicasUpToDate
 
 Whether the running replicas match the desired explicit spec hash and meet
 the deployment's minimum `modeldeployment.gpustack.ai/render-version`. The explicit spec hash
@@ -408,7 +408,7 @@ condition on the object that names a held rollout.
 > connector — deletes every replica of every deployment on a pool for a few seconds of store
 > unavailability. Measured, a withheld edit lands within seconds of the store returning.
 
-#### `RoleKindsReady`
+#### RoleKindsReady
 
 Whether every role **kind** the deployment declares has at least one ready
 replica. It is deliberately **not** replica completeness: "every role has all the replicas it asked
@@ -437,7 +437,7 @@ Read this condition alongside *`phase`*: it reports readiness by role kind, whil
 replica completeness. Neither guarantees that an inference request succeeds; that also depends on
 the engine and `Service` connectivity.
 
-#### `KVEventsPublishing`
+#### KVEventsPublishing
 
 Whether every role that produces cache blocks has publisher configuration
 in its rendered `Pod`s. It reports configuration, not live traffic: a configured publisher that later
@@ -451,7 +451,7 @@ crashes remains `True`. *Encode* holds no KV cache and produces no cache blocks,
 | `False` | `NoRouter` | a *prefill/decode* pair has no router to consume events |
 | `Unknown` | `RoleUnmanaged` | a producing role replaced its command line, so the operator cannot inspect what it does |
 
-#### `RouterReady`
+#### RouterReady
 
 Whether the managed router rendered and has a ready replica. A render refusal is
 reported here rather than returned as an error, so the rest of the status (phase, the other
@@ -465,7 +465,7 @@ conditions, the role counts) keeps computing with the cause named.
 | `False` | `NoReadyReplicas` | the router's `Deployment` exists but no replica is ready |
 | `Unknown` | `NotDeployed` | the router's `Deployment` has not been created yet |
 
-#### `EndpointEligibility`
+#### EndpointEligibility
 
 Whether the deployment's endpoints have been qualified at all. It
 answers for the reading, not for the endpoints: until endpoint qualification exists it is
@@ -476,7 +476,7 @@ saw, and no pass that reports this has seen any.
 |---|---|---|
 | `Unknown` | `NotObserved` | no endpoint qualification has been observed for any role yet; the per-role *`endpoints.eligible`* counts are `null`, not zero |
 
-#### `ElasticResize`
+#### ElasticResize
 
 Whether an elastic scale stands blocked or terminally refused. It is
 written only for a deployment with an *`elasticEp`* role; [Elastic EP](elastic-ep.md) owns the

@@ -9,20 +9,19 @@ separately from the reusable configuration.
 
 - [Summary](#summary)
 - [Environment](#environment)
-- [Prerequisites](#prerequisites)
 - [Step 1: Prepare the target](#step-1-prepare-the-target)
 - [Step 2: Observe in Shadow](#step-2-observe-in-shadow)
 - [Step 3: Choose an algorithm](#step-3-choose-an-algorithm)
 - [Step 4: Activate scaling](#step-4-activate-scaling)
 - [Step 5: Observe retirement](#step-5-observe-retirement)
+- [Verification](#verification)
 - [Cleanup](#cleanup)
 - [Troubleshooting](#troubleshooting)
 
 ## Summary
 
-A `ModelDeploymentScaler` samples per-role signals from a running `ModelDeployment` and recommends
-replica counts. `Shadow` mode records recommendations without changing the target; `Active` mode
-lets the scaler write the target's replica counts.
+Observe a `ModelDeploymentScaler` in `Shadow`, choose an algorithm, activate it in `Active`, and
+watch a replica retire.
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
@@ -46,7 +45,7 @@ was executed in the recorded benchmark.
 | Model | `Qwen/Qwen3-8B` from `ModelArtifact` `qwen3-8b`, revision `b968826d9c46dd6066d109eabc6255188de91218` |
 | Tools | `kubectl`, `jq`, Python 3 with `aiohttp`; a source checkout provides the load client |
 
-## Prerequisites
+### Prerequisites
 
 Follow [cluster preparation](_index.md#prepare-the-cluster) and
 [model prefetch](../model-delivery/prefetch.md) with namespace `gpustack-bench` and artifact
@@ -364,7 +363,7 @@ If a shorter test window is needed, choose a positive downward stabilization win
 sampling interval. Zero stores the default 300 s. Keep *`maxReplicas`* at least as high as the current
 count; lowering it below that count blocks planning with `BoundsConflict`.
 
-### Verification
+## Verification
 
 The recorded standalone single-role check produced these observations:
 
@@ -405,13 +404,13 @@ Keep shared prefetched artifacts and `default/bench-driver` when other procedure
 | Symptom | Signal | Check & Mitigation |
 |---|---|---|
 | Counts remain at one | Condition: `Active=False` with reason `ShadowMode` | Activate only after reviewing Shadow recommendations. |
-| `AlreadyBound` | Reason: `AlreadyBound` | Read the binding owner; use the existing owner or release it before applying another scaler. |
-| `InvalidBinding` | Reason: `InvalidBinding` | Fix or remove the annotation on the target; the scaler cannot tell which scaler owns the target. |
-| `BoundsConflict` or `RatioConflict` | Reason: `BoundsConflict` or `RatioConflict` | Compare the current counts with the policy; include the current vector in every bound and ratio band. |
-| `WaitingForMetrics` | Reason: `WaitingForMetrics` on the `MetricsReady` condition | Allow valid successive samples from role signals and engine metrics; investigate missing or restarted endpoints. |
-| `ResourceExhausted` | Reason: `ResourceExhausted` | Read *`pendingCohort`*, `Workload`s and quota; restore admission capacity before retrying growth. |
-| `ScaleDownAborted` | Reason: `ScaleDownAborted` | Read the retirement reason and *`lastScaleDown`*; resolve the drain failure and wait through the abort cooldown. |
-| `PacingBounded` during cooldown | Reason: `PacingBounded` | Check stabilization, grace and coverage; continue observation, since a configured cooldown phase does not bypass guards. |
+| Apply is refused | Reason: `AlreadyBound` | Read the binding owner; use the existing owner or release it before applying another scaler. |
+| Binding annotation is unreadable | Reason: `InvalidBinding` | Fix or remove the annotation on the target; the scaler cannot tell which scaler owns the target. |
+| Counts sit outside the policy | Reason: `BoundsConflict` or `RatioConflict` | Compare the current counts with the policy; include the current vector in every bound and ratio band. |
+| Recommendations wait on metrics | Reason: `WaitingForMetrics` on the `MetricsReady` condition | Allow valid successive samples from role signals and engine metrics; investigate missing or restarted endpoints. |
+| Growth stops at admission | Reason: `ResourceExhausted` | Read *`pendingCohort`*, `Workload`s and quota; restore admission capacity before retrying growth. |
+| Scale-down ends aborted | Reason: `ScaleDownAborted` | Read the retirement reason and *`lastScaleDown`*; resolve the drain failure and wait through the abort cooldown. |
+| Cooldown outlives its window | Reason: `PacingBounded` | Check stabilization, grace and coverage; continue observation, since a configured cooldown phase does not bypass guards. |
 | Router failures during growth | Log: Router logs and client errors | Preserve evidence; the recorded keep-alive setting did not prevent all failures. |
 | SGLang KV transfer failures | Log: engine logs and TCP port reuse | Follow the [documented setting](../../reference/settings.md#sglang-time-wait-reuse) and verify kubelet prerequisites. |
 
