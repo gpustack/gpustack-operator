@@ -10,6 +10,8 @@ fields and its conditions to diagnose a deployment that is still starting or has
 
 ## Status
 
+### Phase and role summary
+
 *`status.phase`* is the field to read first: `Starting`, `Ready`, `Degraded` or `Deleting`. `Degraded`
 means some required serving capacity is ready and some is not: either some role replicas are down, or
 all role replicas are ready but a declared router has no ready replica.
@@ -30,6 +32,8 @@ Without a router, the `R` part is absent; a declared kind with nothing Ready sho
 roles of the same kind are summed. A serving instance made of several `Pod`s still counts once; use
 *`status.roles[].desired`* to see the requested count.
 
+### Serving endpoints
+
 Without a router, *`status.endpoint`* is the address the deployment-wide `Service` serves on, in the form
 `<scheme>://<name>.<namespace>.svc:<port>`. The scheme and port come from the first role that is not
 *Encode*, and the scheme is `https` only when that role passes `--ssl-certfile` or `--ssl-keyfile`.
@@ -48,6 +52,8 @@ router and engine `Pod` endpoints and reports partial coverage explicitly.
 Only `--ssl-certfile` or `--ssl-keyfile` turn the scheme to `https`. The rest of the `--ssl-*`
 family does not: both engines enable TLS for those two alone, so any other ssl argument passed by
 itself leaves an ordinary HTTP server.
+
+### Readiness gates
 
 **`ready` counts replicas whose engine answered, not replicas whose process started**, except on the
 three configurations listed below, which carry no gates and keep the weaker meaning. One still loading its
@@ -110,6 +116,8 @@ would restart a replica answering every request; an HTTP engine speaks TCP whate
 says, so a gate would **pass** while the published endpoint forwards a protocol nothing answers.
 Replicas of all three are Ready as soon as their process starts.
 
+### Quota and flavors
+
 *`quotaReserved`* is how many of the role's replicas hold a quota reservation. Each replica is its own
 `Workload` and reserves on its own, so a role sits anywhere between zero and `desired` while capacity
 arrives; a role that shared one `Workload` passed all-or-nothing, and this figure could not exist.
@@ -137,6 +145,8 @@ Which replica carries which flavor is deliberately not here: the ordinal such an
 on is the converger's internal slotting rather than a promise this API makes, and a reader who
 needs the mapping reads the replicas' own `Pod`s. A flavor reported here is read through the same
 lens the per-accelerator admission gate uses, so the two cannot disagree.
+
+### Parallelism
 
 *`parallelism`* reports the parallelism the role's own arguments declare, with the provenance of
 the reading. Every pass reads each managed role's own argument stream — its extra arguments,
@@ -167,6 +177,8 @@ degree, mode or balance is claimed from it.
 A stream that cannot be parsed, including an effective environment value that is not an
 integer, is likewise `Unknown` with the flag and value named — never a silently defaulted
 degree.
+
+### Endpoint eligibility
 
 `endpoints` separates what the operator qualified from what Routers were actually observed to
 select, and the two never collapse into one number:
@@ -205,6 +217,8 @@ The `EndpointEligibility` condition says the same thing at the deployment level:
 qualification observation exists it is `Unknown` with reason `NotObserved` — not `False`,
 which would say the operator disqualified endpoints it saw. A pass that has qualified nothing
 reports the condition and leaves the per-role counts `null`.
+
+### Retirement
 
 *`status.retirement`* is present only while a retirement operation is running, at most one at a
 time; absent means no operation. It names the role and replica ordinal it retires (ordinal
@@ -252,11 +266,15 @@ operation occupies.
 The drain step is where a replica still holding requests is caught before anything is cut; it is
 described in [Model Deployment Shutdown](shutdown.md#retirement-protocol).
 
+### Conditions
+
 Ten conditions describe states that a single phase cannot represent. They are independent: "quota reserved but
 cache not attached" is a real and actionable state. Nine are described below; `WeightsReady` is
 described with the artifact it reports on, in [Model Artifact](../model-delivery/artifact.md#status).
 
-**`DomainRegistered`** — whether the referenced Binding resolved and its domain was read.
+#### `DomainRegistered`
+
+Whether the referenced Binding resolved and its domain was read.
 
 | Value | Reason | Action |
 |---|---|---|
@@ -266,7 +284,9 @@ described with the artifact it reports on, in [Model Artifact](../model-delivery
 | `False` | `BindingNotReady` | wait for it, or look at the pool it points at |
 | `False` | `BindingDeleting` | find who deleted it; the replicas keep writing to the domain they attached to |
 
-**`QuotaReserved`** — whether **every one of** the deployment's `Workload`s holds Kueue quota. Every
+#### `QuotaReserved`
+
+Whether **every one of** the deployment's `Workload`s holds Kueue quota. Every
 replica is its own group with its own `Workload`, so a deployment of N replicas is N `Workload`s. `True`
 is therefore an answer about the whole set and not about whichever `Workload` sorts first, because half
 a deployment holding quota is not the deployment holding quota.
@@ -320,7 +340,9 @@ What to do about it:
   to; giving the roles different types keeps one preemption from reclaiming both halves out of the
   same queue.
 
-**`CacheAttached`** — whether the cache is observed to be in effect, which is a different question
+#### `CacheAttached`
+
+Whether the cache is observed to be in effect, which is a different question
 from whether it was configured. It is judged downstream of the engine and **never** on a rendered flag
 or a log line.
 
@@ -339,7 +361,9 @@ simply idle looks exactly like an unread one: no supported engine signals "the c
 initialized" before any traffic, so silence is the most common steady state. A connector that
 cannot come up keeps its replica from ever becoming Ready, which is reported there.
 
-**`ReplicasUpToDate`** — whether the running replicas match the desired explicit spec hash and meet
+#### `ReplicasUpToDate`
+
+Whether the running replicas match the desired explicit spec hash and meet
 the deployment's minimum `modeldeployment.gpustack.ai/render-version`. The explicit spec hash
 includes the resolved KV cache binding, so a replica carrying the current *`spec`* still differs from
 the desired hash once that connector stops resolving — the state behind `RolloutHeldByCache`.
@@ -384,7 +408,9 @@ condition on the object that names a held rollout.
 > connector — deletes every replica of every deployment on a pool for a few seconds of store
 > unavailability. Measured, a withheld edit lands within seconds of the store returning.
 
-**`RoleKindsReady`** — whether every role **kind** the deployment declares has at least one ready
+#### `RoleKindsReady`
+
+Whether every role **kind** the deployment declares has at least one ready
 replica. It is deliberately **not** replica completeness: "every role has all the replicas it asked
 for" is what *`phase`* answers, by summing every role's counts before judging.
 
@@ -411,7 +437,9 @@ Read this condition alongside *`phase`*: it reports readiness by role kind, whil
 replica completeness. Neither guarantees that an inference request succeeds; that also depends on
 the engine and `Service` connectivity.
 
-**`KVEventsPublishing`** — whether every role that produces cache blocks has publisher configuration
+#### `KVEventsPublishing`
+
+Whether every role that produces cache blocks has publisher configuration
 in its rendered `Pod`s. It reports configuration, not live traffic: a configured publisher that later
 crashes remains `True`. *Encode* holds no KV cache and produces no cache blocks, so it is excluded.
 
@@ -423,7 +451,9 @@ crashes remains `True`. *Encode* holds no KV cache and produces no cache blocks,
 | `False` | `NoRouter` | a *prefill/decode* pair has no router to consume events |
 | `Unknown` | `RoleUnmanaged` | a producing role replaced its command line, so the operator cannot inspect what it does |
 
-**`RouterReady`** — whether the managed router rendered and has a ready replica. A render refusal is
+#### `RouterReady`
+
+Whether the managed router rendered and has a ready replica. A render refusal is
 reported here rather than returned as an error, so the rest of the status (phase, the other
 conditions, the role counts) keeps computing with the cause named.
 
@@ -435,7 +465,9 @@ conditions, the role counts) keeps computing with the cause named.
 | `False` | `NoReadyReplicas` | the router's `Deployment` exists but no replica is ready |
 | `Unknown` | `NotDeployed` | the router's `Deployment` has not been created yet |
 
-**`EndpointEligibility`** — whether the deployment's endpoints have been qualified at all. It
+#### `EndpointEligibility`
+
+Whether the deployment's endpoints have been qualified at all. It
 answers for the reading, not for the endpoints: until endpoint qualification exists it is
 `Unknown`/`NotObserved`, because a `False` would say the operator disqualified endpoints it
 saw, and no pass that reports this has seen any.
@@ -444,7 +476,9 @@ saw, and no pass that reports this has seen any.
 |---|---|---|
 | `Unknown` | `NotObserved` | no endpoint qualification has been observed for any role yet; the per-role *`endpoints.eligible`* counts are `null`, not zero |
 
-**`ElasticResize`** — whether an elastic scale stands blocked or terminally refused. It is
+#### `ElasticResize`
+
+Whether an elastic scale stands blocked or terminally refused. It is
 written only for a deployment with an *`elasticEp`* role; [Elastic EP](elastic-ep.md) owns the
 resize lifecycle it reports on.
 
