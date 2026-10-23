@@ -268,7 +268,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -304,6 +309,16 @@
         
         
           <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
           
           
         
@@ -886,33 +901,13 @@
   
   
 
-
-
+  
   
 
   
-
-  
-    
-      
-      
-        
-        
-      
-    
   
 
-  
 
-  
-    
-      
-      
-        
-        
-      
-    
-  
 
   
 
@@ -931,6 +926,18 @@
   
 
   
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
 
   
     
@@ -942,6 +949,32 @@
     
   
 
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -965,6 +998,27 @@
           
           
         
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
       
     
       
@@ -1360,6 +1414,8 @@ fields and its conditions to diagnose a deployment that is still starting or has
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#status">Status</a>
+</li>
+<li><a href="#scaler-annotations">Scaler annotations</a>
 </li>
 </ul>
 <h2 id="status">Status</h2>
@@ -2034,11 +2090,27 @@ resize lifecycle it reports on.</p>
 </table>
 <p>A refusal still inside its retry bound stays <code>True</code>: it is not terminal yet. <code>WorldUnprovable</code>
 levels back to <code>True</code> on its own once a later pass proves the live world again.</p>
+<h2 id="scaler-annotations">Scaler annotations</h2>
+<p>Two annotations on the <code>ModelDeployment</code> — <code>modeldeployment.gpustack.ai/scaler-binding</code> and
+<code>modeldeployment.gpustack.ai/scaler-decision</code> — record which <code>ModelDeploymentScaler</code> owns the
+replica count and which decision last changed it. They sit in <em><code>metadata.annotations</code></em>, not in
+<em><code>status</code></em>, because the single-writer fence is enforced at admission and a status field cannot
+refuse a write.</p>
+<p><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/#binding-fence">Binding fence</a>
+ owns the payload of both annotations, the
+admission rules for bound and unbound deployments, and the escape hatch when a scaler is gone;
+<a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/#gitops-sync">GitOps sync</a>
+ covers how a GitOps agent
+ignores the fields the scaler owns.</p>
+<p>The scaler&rsquo;s own <code>status</code> reports what it observed, what it recommends and what blocks it;
+<a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/#status">Scaler status</a>
+ owns that contract.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
       <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
- (the contract this status reports on)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
+ (the contract this status reports on)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
+ (the scaler that owns a bound replica count)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
  (pairing <em>prefill</em> and <em>decode</em> roles)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/">Encode, Prefill and Decode</a>
  (<em>encode</em>, <em>prefill</em> and <em>decode</em> disaggregation)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/leader/">KV Cache Election and Failover</a>
  (the leader process the conditions distinguish from the operator&rsquo;s own).</li></ul>
@@ -2056,7 +2128,7 @@ levels back to <code>True</code> on its own once a later pass proves the live wo
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/9233372f1f18e3ceda680bad0309dcf74b54b60a/docs/modules/model-deployment/status.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/modules/model-deployment/status.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/status.md">Edit this page</a>
             
@@ -2068,6 +2140,7 @@ levels back to <code>True</code> on its own once a later pass proves the live wo
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#status">Status</a></li>
+    <li><a href="#scaler-annotations">Scaler annotations</a></li>
   </ul>
 </nav>
         

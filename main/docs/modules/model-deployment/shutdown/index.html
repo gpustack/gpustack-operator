@@ -268,7 +268,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -304,6 +309,16 @@
         
         
           <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
           
           
         
@@ -886,33 +901,13 @@
   
   
 
-
-
+  
   
 
   
-
-  
-    
-      
-      
-        
-        
-      
-    
   
 
-  
 
-  
-    
-      
-      
-        
-        
-      
-    
-  
 
   
 
@@ -931,6 +926,18 @@
   
 
   
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
 
   
     
@@ -942,6 +949,32 @@
     
   
 
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -965,6 +998,27 @@
           
           
         
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
       
     
       
@@ -1376,7 +1430,8 @@ finishes.</p>
 <p>An edit that replaces a role&rsquo;s configuration deletes that role&rsquo;s old replicas one at a time, and
 each deleted replica drains exactly as below. The protocol reads a leaving replica as it is
 deployed — the size and command it was created with — so an edit elsewhere does not change how it
-is classified: a take-over replica is still held, a <em>prefill</em> or <em>decode</em> replica still refused.</p>
+is classified: a take-over replica is still held, a <em>prefill</em> or <em>decode</em> replica still waits for
+its grace window.</p>
 <p><code>G</code> below is the role&rsquo;s grace: <em><code>roles[].terminationGracePeriodSeconds</code></em>, 30 when unset, written to
 the <code>Pod</code>&rsquo;s field of the same name.</p>
 <table>
@@ -1478,6 +1533,9 @@ surplus replicas, and a replica of a role the spec has dropped. Its progress is 
 <a href="/gpustack-operator/main/docs/modules/model-deployment/status/#status"><code>status.retirement</code> field</a>
 , and the replica stays in place, still counted,
 for as long as the protocol holds it.</p>
+<p>A replica that was never scheduled and never admitted is the one exception: it has nothing to drain,
+so it is removed without the protocol. See <a href="#unadmitted-replicas">Unadmitted replicas</a>
+.</p>
 <p>For <code>llm-d-router</code>, withdrawal also waits for recent dispatches reported for a target member.
 This applies after the Router removes that member from selection. These records do not increase
 the serving count. A dispatch to an unrelated survivor does not hold the target.</p>
@@ -1567,11 +1625,6 @@ the configurations the protocol can measure.</p>
           <td>the gauges now served come from an engine that did not exist when the protocol began watching</td>
       </tr>
       <tr>
-          <td>a <em>prefill</em> or <em>decode</em> replica</td>
-          <td>refused</td>
-          <td>see below</td>
-      </tr>
-      <tr>
           <td>a take-over role</td>
           <td>held</td>
           <td>the operator renders no endpoint for it, so there is nothing to read</td>
@@ -1592,18 +1645,52 @@ keeps crash-looping ends as <code>Aborted</code> with its capacity retained, and
 less for it. The protocol cannot tell whether a restarted engine is a replacement it should wait
 for or a crash loop it should give up on, and the budget is what resolves that question.</p>
 </blockquote>
-<p><strong>A <em>prefill</em> or <em>decode</em> replica is refused outright.</strong> Its queues are visible from both engines, so
-this is not a case of unmeasured work.</p>
-<p>What is not verifiable is the release. A <em>decode</em> replica reading zero is an engine about to be
-handed work, and nothing in either engine&rsquo;s metrics proves it will not be. This configuration stays refused
-until a decoder-side release can be verified, because the other answer deletes a <em>decode</em> replica in
-the middle of a <em>prefill</em>.</p>
-<p>Both engines report a decoder&rsquo;s work while it waits to receive its KV: a <em>prefill</em> half holds it in
-its transfer queue, and a <em>decode</em> half holds it in its own prealloc and transfer queues.</p>
-<p>The refusal is read from the member <code>Pod</code>&rsquo;s own rendered command, so it still applies to a replica
-whose role the spec has already dropped. Both engines are covered: a vLLM
-member is recognized by its data-parallel balance flags, and an SGLang member by its
-<code>--disaggregation-mode prefill</code> or <code>decode</code>.</p>
+<p><strong>A disaggregated replica is held for a grace window, then drained like any other.</strong> A <em>prefill</em> or
+<em>decode</em> replica has no verifiable decoder-side release, so the protocol waits before it reads such a
+replica. See <a href="#disaggregated-replicas">Disaggregated replicas</a>
+ below.</p>
+<h3 id="disaggregated-replicas">Disaggregated replicas</h3>
+<p>A <em>prefill</em> or <em>decode</em> replica is classified as disaggregated when its member <code>Pod</code>s carry the
+<code>prefill</code> or <code>decode</code> role kind, when an SGLang member runs <code>--disaggregation-mode prefill</code> or
+<code>decode</code>, or when a vLLM member runs a data-parallel <code>External</code>, <code>Hybrid</code> or <code>MultiPort</code> load
+balance. The classification is read from the member&rsquo;s own rendered command, so it still applies to a
+replica whose role the spec has already dropped.</p>
+<p>What the protocol cannot verify is the release. A <em>decode</em> replica reading zero is an engine about to
+be handed work, and nothing in either engine&rsquo;s metrics proves it will not be. Both engines report a
+decoder&rsquo;s work while it waits to receive its KV: a <em>prefill</em> half holds it in its transfer queue, and
+a <em>decode</em> half holds it in its own prealloc and transfer queues.</p>
+<p><strong>The window is 60 seconds, measured from the moment the drain phase began.</strong> The drain phase is
+entered only after the router withdrawal is confirmed, so the replica is already out of selection
+when the window starts. Once the window elapses, the ordinary two-consecutive-idle-reads check runs
+on the answering members, and the deletion commits when they are idle. The window sits inside the
+240-second drain budget, so it does not extend the operation.</p>
+<p>Answering-member selection is not part of this. It stays keyed on the vLLM data-parallel shapes
+alone, so a multi-<code>Pod</code> leader-served <em>prefill</em> or <em>decode</em> replica still answers through its leader
+rather than through every member. A member whose parallelism flags cannot be read is still held as
+unsupported.</p>
+<h3 id="retirement-adoption">Retirement adoption</h3>
+<p><strong>A reservation is cancelled when the spec re-declares the ordinal it holds.</strong> A scale-up that
+restores the ordinal of a reservation in <code>Admitted</code>, <code>Disqualified</code>, <code>Withdrawing</code>, <code>Draining</code> or
+<code>Aborted</code> cancels the reservation, provided the group still holds the members the reservation names
+and the replica qualifies on every ground except the reservation itself.</p>
+<p>The replica becomes eligible again through the reversible <code>modeldeployment.gpustack.ai/endpoint-eligible</code>
+label, which the reconciler restores on the members it held. The event <code>RetirementAdopted</code> records the
+cancellation.</p>
+<p>This is a cancellation and not a duplicate: the <code>Pod</code>s are already there and healthy, so the next
+pass finds the replica current and creates nothing. From <code>Deleting</code> on the behavior does not change,
+because the delete has already been committed; the delete completes and the ordinal is recreated on a
+later pass.</p>
+<p>Creating replicas for other ordinals or other roles never waits on a reservation, so a reservation
+for one replica never holds up the rest of the deployment.</p>
+<h3 id="unadmitted-replicas">Unadmitted replicas</h3>
+<p><strong>A replica that was never scheduled and never admitted is removed without the protocol.</strong> An
+undeclared replica whose members were never scheduled — no node, no address, still <code>Pending</code>, and
+without the <code>endpoint-eligible</code> label — and whose group <code>Workload</code> was never admitted has nothing to
+drain. The reconciler deletes its <code>Pod</code>s and its <code>Workload</code> straight away.</p>
+<p>An unscheduled <code>Pod</code> has no running container and no metrics endpoint, so running the protocol
+against it would hold for the whole drain budget and end as <code>Aborted</code>, retaining a <code>Pod</code> that was
+never going to serve. If admission or scheduling won the race before the pass ran, the replica enters
+ordinary retirement instead.</p>
 <h2 id="limitations">Limitations</h2>
 <ul>
 <li><strong>A request still running at <code>G</code> − 5 is cut</strong>, 25 s after the delete at the default. vLLM aborts it
@@ -1629,9 +1716,11 @@ replica does not have — and the <em><code>reason</code></em> names which. Sele
 deletion: as <a href="#retirement-protocol">the protocol above</a>
  states, it still covers every member
 the reservation bound.</li>
-<li><strong>A <em>prefill</em> or <em>decode</em> replica is refused by the protocol</strong>, so it is never deleted through one.
-The <a href="#drain-window">drain window</a>
- still applies to it once something else deletes its <code>Pod</code>.</li>
+<li><strong>A <em>prefill</em> or <em>decode</em> replica is held for the disaggregated grace window, then drained like any
+other.</strong> It is never deleted inside the 60 s window, and a replica that reaches the window while
+still serving is held for the rest of the drain budget. The <a href="#drain-window">drain window</a>
+ still
+applies to it once something else deletes its <code>Pod</code>.</li>
 <li><strong>A direct decoder on a cluster below Kubernetes 1.29</strong> runs its routing proxy as a classic
 container, which stops at the delete while the engine behind it drains, so a request in flight
 through the proxy still resets. The proxy&rsquo;s image has no shell to run a hook of its own.</li>
@@ -1640,7 +1729,8 @@ through the proxy still resets. The proxy&rsquo;s image has no shell to run a ho
     <section>
       <h2>See also</h2>
       <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment</a>
- for what turns a replica over</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
+ for what turns a replica over</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
+ for the count changes that start a retirement</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
  for the scrape endpoints the hook
 reads.</li></ul>
     </section><section class="next-page">
@@ -1657,7 +1747,7 @@ reads.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/9233372f1f18e3ceda680bad0309dcf74b54b60a/docs/modules/model-deployment/shutdown.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/modules/model-deployment/shutdown.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/shutdown.md">Edit this page</a>
             
@@ -1673,6 +1763,9 @@ reads.</li></ul>
       <ul>
         <li><a href="#reading-member-work">Reading member work</a></li>
         <li><a href="#drain-read-refusals">Drain read refusals</a></li>
+        <li><a href="#disaggregated-replicas">Disaggregated replicas</a></li>
+        <li><a href="#retirement-adoption">Retirement adoption</a></li>
+        <li><a href="#unadmitted-replicas">Unadmitted replicas</a></li>
       </ul>
     </li>
     <li><a href="#limitations">Limitations</a></li>

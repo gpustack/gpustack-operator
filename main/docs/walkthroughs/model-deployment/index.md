@@ -20,6 +20,7 @@ With *internal load balancing (Internal LB)*, the master distributes requests to
 |---|---|---|
 | [Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) | Disaggregated roles fronted by Router | Recorded H100 deployment with one *Prefill* and two *Decode* replicas, *TP* = 2, TCP KV transfer, and a linked [benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md). |
 | [Encode, Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) | Disaggregated multimodal roles fronted by Router | Recorded H100 deployment with one *Encode*, one *Prefill* and one *Decode* replica, NIXL encoder transfer, and a linked [benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md). |
+| [Scaling](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) | Independent replicas managed by `ModelDeploymentScaler` | Shadow and Active configuration, algorithm selection, role ratios, and observation of scale-out and retirement; links the measured H100 [benchmark](/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md). |
 | [Elastic EP](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) | One *Internal LB* instance on Ray | Recorded H100 expansion: *TP* = 2, *DP* width 2 → 4, *EP* world size 4 → 8; 439 client requests with zero errors. |
 | [External DP](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) | Four fixed *DP* ranks using multiprocessing | Recorded H100 deployment: *TP* = 2, *DP* = 4, *EP* world size 8; captured per-rank inference and Router coverage. |
 | [Multi-Host](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md) | Coordinated instance spanning multiple hosts | Not measured here. `size: 2`, sixteen GPUs across two physical nodes, leader `m0` routing, and gang admission. |
@@ -27,7 +28,8 @@ With *internal load balancing (Internal LB)*, the master distributes requests to
 A Router can front the *Internal LB* and *External LB* configurations.
 The engine's *load-balancing* mode determines which `Pod`s accept inference requests.
 Increasing *`roles[].replicas`* adds complete groups; see [role scaling](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior).
-That operation was not measured in these walkthroughs.
+The [Scaling Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) links a recorded single-role lifecycle check and distinguishes
+its observed replica changes from reusable configuration examples.
 
 ## Prepare the cluster
 

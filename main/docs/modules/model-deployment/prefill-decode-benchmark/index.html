@@ -268,7 +268,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -304,6 +309,16 @@
         
         
           <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
           
           
         
@@ -886,6 +901,12 @@
   
   
 
+  
+  
+
+  
+  
+
 
 
   
@@ -944,6 +965,18 @@
     
   
 
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -967,6 +1000,27 @@
           
           
         
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
       
     
       
@@ -1357,7 +1411,7 @@
       <article>
         
   <h1 id="prefill-and-decode-benchmark">Prefill and Decode Benchmark</h1>
-<p>On one H100 SXM5 node, <em>Prefill/Decode (PD)</em> isolated token generation from long-prompt processing.
+<p>On one H100 SXM5 node, <em>prefill/decode (PD)</em> isolated token generation from long-prompt processing.
 At concurrency 16, <em>inter-token latency (ITL)</em> p99 fell by <strong>25.6×–27.8×</strong> for the two long-prompt shapes.
 The cost was higher <em>time to first token (TTFT)</em> through one <em>Prefill</em> replica and TCP KV transfer.</p>
 <p>The initial suites and conclusions describe cross-<code>Pod</code> TCP.
@@ -2295,7 +2349,7 @@ Zero client errors establish completion for these samples, not a general availab
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/9233372f1f18e3ceda680bad0309dcf74b54b60a/docs/modules/model-deployment/prefill-decode-benchmark.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/modules/model-deployment/prefill-decode-benchmark.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/prefill-decode-benchmark.md">Edit this page</a>
             

@@ -1,6 +1,6 @@
 # Prefill and Decode Benchmark
 
-On one H100 SXM5 node, *Prefill/Decode (PD)* isolated token generation from long-prompt processing.
+On one H100 SXM5 node, *prefill/decode (PD)* isolated token generation from long-prompt processing.
 At concurrency 16, *inter-token latency (ITL)* p99 fell by **25.6×–27.8×** for the two long-prompt shapes.
 The cost was higher *time to first token (TTFT)* through one *Prefill* replica and TCP KV transfer.
 

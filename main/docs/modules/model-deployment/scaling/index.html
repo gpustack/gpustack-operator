@@ -1,0 +1,2188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Model Deployment Scaling · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-deployment/scaling/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">main</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">main</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/main/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling Chain</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Network Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod Injection</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-Heavy Nodes</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image Source</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node Store</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" aria-current="page">Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Deployment Scaling</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-deployment-scaling">Model Deployment Scaling</h1>
+<p>A <code>ModelDeploymentScaler</code> plans replica counts for one <code>ModelDeployment</code> from engine metrics.
+It reports its observations and recommendations in <em><code>status</code></em>. In <code>Active</code> mode, it also writes
+<em><code>spec.roles[].replicas</code></em> on the target. The <code>ModelDeployment</code> reconciler creates and retires the
+serving instances that count requires.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#resource">Resource</a>
+</li>
+<li><a href="#algorithms">Algorithms</a>
+</li>
+<li><a href="#bounds-and-ratios">Bounds and ratios</a>
+</li>
+<li><a href="#pacing-and-guards">Pacing and guards</a>
+</li>
+<li><a href="#resource-rebalancing">Resource rebalancing</a>
+</li>
+<li><a href="#binding-fence">Binding fence</a>
+</li>
+<li><a href="#gitops-sync">GitOps sync</a>
+</li>
+<li><a href="#status">Status</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+<li><a href="#troubleshooting">Troubleshooting</a>
+</li>
+</ul>
+<h2 id="resource">Resource</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler </span><span class="w"> </span><span class="c"># namespaced, short name mds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving </span><span class="w"> </span><span class="c"># required, immutable; ModelDeployment in this namespace</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Shadow       </span><span class="w"> </span><span class="c"># default; Active commits the recommendation</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">suspend</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">      </span><span class="c"># default; true stops planning and releases the binding</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sampling</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">intervalSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">15</span><span class="w">        </span><span class="c"># default; 5 to 300 seconds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">pendingTimeoutSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">300</span><span class="w">  </span><span class="c"># default; 60 to 1200 seconds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">  </span><span class="c"># at least one entry; provide bounds for every target role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server </span><span class="w"> </span><span class="c"># unique role name on the target</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">  </span><span class="c"># 1 to 1024; defaults to 1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">16</span><span class="w">  </span><span class="c"># required; 1 to 1024, at least minReplicas</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">  </span><span class="c"># one algorithm and only its matching parameter block</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Proportional</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">proportional</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l">QueueDepth </span><span class="w"> </span><span class="c"># required; running requests plus waiting requests</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">tolerance</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.1&#34;</span><span class="w">   </span><span class="c"># default when omitted; positive and at most 1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">roleTargets</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server </span><span class="w"> </span><span class="c"># unique scaled role name</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;8&#34;</span><span class="w">   </span><span class="c"># required positive quantity; requests per ready replica</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Alternative for a Server role; replace type and proportional above.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># type: TokenThroughput</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># tokenThroughput:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   serverTargetTokensPerSecond: &#34;2000&#34;  # required for a Server role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Alternative with a forecast; replace type and proportional above.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># type: Predictive</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># predictive:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   tokenThroughput:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#     serverTargetTokensPerSecond: &#34;2000&#34;  # fallback capacity</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   serverTokenCapacityPerReplica: &#34;2000&#34;  # forecast capacity</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">behavior</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">scaleUp</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stabilizationWindowSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">  </span><span class="c"># default; 0 to 600, zero disables the wait</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxStepReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">   </span><span class="c"># default; zero or omission stores 4</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxStepPercent</span><span class="p">:</span><span class="w"> </span><span class="m">100</span><span class="w">  </span><span class="c"># default; zero or omission stores 100</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># Optional: replace both bounds with one unit; zero prevents scale-up.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># stepPolicy:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c">#   type: Pods  # Pods or Percent</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c">#   value: 2    # required, nonnegative</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">scaleDown</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stabilizationWindowSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">300</span><span class="w">  </span><span class="c"># default; 0 to 1800</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">cooldownAfterAbortSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">300</span><span class="w">   </span><span class="c"># default; 0 to 3600</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decodePostScaleUpGraceSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">120</span><span class="w">  </span><span class="c"># default; 0 to 3600, Decode roles only</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># Optional: replace the default limit of one replica per pass.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># stepPolicy:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c">#   type: Percent  # Pods or Percent</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c">#   value: 10      # required, nonnegative; zero prevents scale-down</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">rebalance</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">Opposing </span><span class="w"> </span><span class="c"># default; Opposing, Priority or Disabled</span></span></span></code></pre></div>
+</div><p><em><code>targetRef.name</code></em> selects a target in the scaler&rsquo;s namespace. A scaler can precede its target;
+admission skips target-dependent checks while it is absent. The controller reports <code>TargetNotFound</code>
+until the target appears. Retargeting requires a new scaler because the reference is immutable.</p>
+<p><code>Shadow</code> computes recommendations without owning the target or writing replica counts.
+<code>Active</code> acquires the <a href="#binding-fence">Binding fence</a>
+ and commits decisions.
+Setting <em><code>suspend: true</code></em> stops planning and releases an owned binding. <code>kubectl get mds</code> shows the
+target, mode, algorithm, and <code>Bound</code>, <code>Active</code> and <code>Blocked</code> conditions.</p>
+<p><em><code>sampling.intervalSeconds</code></em> sets the sampling cadence and limits ordinary reaction speed.
+The sampler does not scrape a target again before the interval has passed, so a shorter interval
+increases scrape load. <em><code>pendingTimeoutSeconds</code></em> bounds the wait for scale-up
+admission; <a href="#pacing-and-guards">Pacing and guards</a>
+ explains the rollback when that wait expires.</p>
+<h2 id="algorithms">Algorithms</h2>
+<p><em><code>algorithm.type</code></em> selects <code>Proportional</code>, <code>TokenThroughput</code> or <code>Predictive</code>. Only its matching
+parameter block is accepted. If the type is omitted, admission infers it from a <em><code>proportional</code></em>
+or <em><code>predictive</code></em> block; otherwise it selects <code>TokenThroughput</code>.</p>
+<p>The three algorithms differ in the signal they read and the timescale they react on. <code>Proportional</code>
+compares one live measurement against a fixed target, <code>TokenThroughput</code> averages token rates over two
+windows, and <code>Predictive</code> forecasts those rates ahead of the peak. The workload decides which one
+fits: a request count that tracks GPU load, a compute load that request counts misstate, or traffic
+that climbs before the capacity arrives.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Algorithm</th>
+          <th>Mechanism</th>
+          <th>Suitable workload</th>
+          <th>Main constraint</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Proportional</code></td>
+          <td>One instantaneous metric (<code>QueueDepth</code>, <code>RunningRequests</code>, <code>WaitingRequests</code> or a token rate) over a fixed per-replica target, with a <em><code>tolerance</code></em> deadband.</td>
+          <td>Uniform-length requests (fixed-template classification, extraction, short chat) whose concurrency maps predictably to GPU load, or simple single-metric scaling.</td>
+          <td>Bursts and changing capacity can make the target inaccurate.</td>
+      </tr>
+      <tr>
+          <td><code>TokenThroughput</code></td>
+          <td>Two sliding windows (<em><code>stableWindowSeconds</code></em>, <em><code>panicWindowSeconds</code></em>) over prefix-cache-adjusted prompt and generation token rates, a <em><code>panicThreshold</code></em> burst mode, and p95 <em>time to first token (TTFT)</em> and <em>inter-token latency (ITL)</em> guards.</td>
+          <td>General LLM and <em>prefill/decode (PD)</em>-disaggregated serving with variable prompt and output lengths and prefix caching, where request count alone misstates compute load.</td>
+          <td>Sampling windows react after demand changes.</td>
+      </tr>
+      <tr>
+          <td><code>Predictive</code></td>
+          <td>A causal local-linear-trend Kalman filter forecasting token demand <em><code>horizonSeconds</code></em> ahead, taking the larger of the forecast count and the <code>TokenThroughput</code> fallback.</td>
+          <td>Sustained traffic ramps (scheduled business peaks, batch onset, multi-minute climbs) where replica initialization and weight loading ahead of the peak arrival offsets cold-start latency.</td>
+          <td>A new predictor uses the token result until enough observations arrive.</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="proportional">Proportional</h3>
+<p>The <a href="#resource">Resource</a>
+ example scales a <em>server</em> role on <code>QueueDepth</code>.
+The algorithm divides the observed role total by the ready replica count, then compares that load
+with <em><code>roleTargets[].target</code></em>. Outside <em><code>tolerance</code></em>, the recommendation is the ceiling of the role
+total divided by its target, with a minimum of one replica. Inside the tolerance, it holds the count.</p>
+<p><em><code>metric</code></em> accepts <code>QueueDepth</code>, <code>RunningRequests</code>, <code>WaitingRequests</code>, <code>PromptTokensPerSecond</code>,
+<code>GenerationTokensPerSecond</code> or <code>TotalTokensPerSecond</code>. <code>QueueDepth</code> adds running and waiting
+requests. <code>TotalTokensPerSecond</code> adds prompt and generation rates. Rate targets are tokens per
+second; request targets are counts per ready replica.</p>
+<p>Each entry in <em><code>roleTargets[]</code></em> names a scaled role and supplies a positive target. Names must be
+unique. Every scaled role needs its own target or a direct ratio to a targeted role.
+<em><code>tolerance</code></em> defaults to <code>0.1</code> when omitted. A supplied value must be positive and at most <code>1</code>.</p>
+<p>The proportional ratio, the tolerance deadband and the scale-down stabilization window follow the
+<a href="https://github.com/kubernetes/website/blob/1ffcdb2a3c3a4a3ebfc23473929072262a1bfaea/content/en/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale.md">Kubernetes Horizontal Pod Autoscaler</a>
+.</p>
+<h3 id="token-throughput">Token throughput</h3>
+<p>This example scales an SGLang <em>prefill</em> and <em>decode</em> pair, with an <em>encode</em> role coupled to <em>prefill</em>.
+It also works with vLLM: the scaler reads the target engine and needs no engine selector.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Active</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">encode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">16</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">16</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ratios</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">numeratorRole</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">denominatorRole</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">min</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.5&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">numeratorRole</span><span class="p">:</span><span class="w"> </span><span class="l">encode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">denominatorRole</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.5&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">TokenThroughput</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prefillTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">  </span><span class="c"># prompt capacity per Prefill replica</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decodeTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;800&#34;</span><span class="w">   </span><span class="c"># generation capacity per Decode replica</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># serverTargetTokensPerSecond: &#34;2000&#34;  # combined capacity for a Server role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stableWindowSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">180</span><span class="w">  </span><span class="c"># default; 30 to 600 seconds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">panicWindowSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">60</span><span class="w">    </span><span class="c"># default; 10 to 300 seconds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">panicThreshold</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">       </span><span class="c"># default; positive quantity</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;500&#34;</span><span class="w">  </span><span class="c"># default; positive quantity</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">    </span><span class="c"># default; positive quantity</span></span></span></code></pre></div>
+</div><p>The three token target fields describe the capacity of one replica of their role kind.
+A <em>prefill</em> replica serves cache-missed prompt tokens; a <em>decode</em> replica serves generation tokens.
+A <em>server</em> replica serves both. Supply a positive capacity for every scaled non-<em>encode</em> kind.
+An <em>encode</em> role needs a direct ratio to a <em>prefill</em> or <em>decode</em> role, in either direction.</p>
+<p>The algorithm averages demand over <em><code>stableWindowSeconds</code></em> and <em><code>panicWindowSeconds</code></em> separately.
+It divides each average by the per-replica capacity and rounds up. Panic starts when the recent
+rate reaches <em><code>panicThreshold</code></em> times the ready replicas&rsquo; capacity. During panic, it uses the larger
+recommendation and prevents scale-down. A threshold at or below <code>1</code> starts panic at or before capacity.</p>
+<p>Keep the panic window shorter than the stable window to react to bursts sooner.
+Admission validates each window&rsquo;s range but does not enforce their order.
+The latency guard also checks <em>TTFT</em> for <em>prefill</em> and <em>ITL</em> for <em>decode</em>. A <em>server</em> role checks both
+and uses the larger relative breach.</p>
+<p>A latency above its target prevents scale-down. Above <code>1.2</code> times the target, the guard recommends
+at least one more replica. Missing latency holds scale-down while allowing a throughput-driven
+increase. Bounds, ratios and pacing still constrain every recommendation.</p>
+<p>The stable and panic windows with their panic threshold follow the
+<a href="https://github.com/vllm-project/aibrix/blob/52b8834e6223eac7ca5c050b44486aa29b44a1a6/pkg/controller/podautoscaler/algorithm/kpa.go">vLLM AIBrix KPA</a>
+
+and the <a href="https://github.com/knative/serving/blob/knative-v1.23.0/pkg/autoscaler/scaling/autoscaler.go">Knative Serving KPA</a>
+.</p>
+<p><a href="https://arxiv.org/abs/2508.19559">HeteroScale</a>
+ scales the <em>prefill</em> and <em>decode</em> pools from
+cache-missed prefill throughput, decode throughput and a latency guard.
+<a href="https://arxiv.org/abs/2512.03416">TokenScale</a>
+ uses a per-stage token rate as a leading indicator of
+backpressure.</p>
+<h3 id="engine-signals">Engine signals</h3>
+<p>Both engines report running and waiting requests; a <em>decode</em> role also includes
+<code>sglang:num_decode_transfer_queue_reqs</code> in its waiting count.</p>
+<p>Both engines supply prompt and generation token counters. The scaler calculates rates from counter
+deltas between samples. For vLLM, it subtracts prefix-cache hit deltas from prompt-token deltas and
+clamps the result at zero. Prefix-cache queries do not cap the hits used in this calculation.</p>
+<p>For SGLang, the preferred prompt demand is the <code>mode=&quot;input&quot;</code> delta of
+<code>sglang:prefill_effective_tokens_total</code>. Without that counter in both samples, it subtracts the
+<code>device_hit</code>, <code>host_hit</code> and <code>storage_hit</code> deltas when available. Without cache accounting, it uses
+the prompt-token delta. A warm cache therefore reduces measured prompt demand when hits are reported.</p>
+<p>Latency uses the engine histogram deltas across the sampled replicas. The scaler selects the bucket
+boundary covering the ninety-fifth percentile. If buckets are absent or that percentile falls in
+the infinite bucket, it uses the histogram mean. <em><code>kvCacheUsage</code></em> averages the reported fractions.</p>
+<p>Only rank-zero or unlabelled series contribute. A restarted container or a decreasing counter
+invalidates the rate window until a new baseline exists. See
+<a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
+ for the engine series and scrape configuration.</p>
+<h3 id="predictive">Predictive</h3>
+<p>This example forecasts the same <em>prefill</em> and <em>decode</em> demand. The nested <em><code>tokenThroughput</code></em> block
+accepts all the fields described under <a href="#token-throughput">Token throughput</a>
+, with the same defaults
+and rules. Both fallback targets and forecast capacities are required for each scaled non-<em>encode</em> kind.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Active</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">16</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">16</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Predictive</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">predictive</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">prefillTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">decodeTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;800&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">horizonSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">300</span><span class="w">  </span><span class="c"># default; 30 to 600 seconds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prefillTokenCapacityPerReplica</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">  </span><span class="c"># prompt capacity per Prefill replica</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decodeTokenCapacityPerReplica</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;800&#34;</span><span class="w">   </span><span class="c"># generation capacity per Decode replica</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># serverTokenCapacityPerReplica: &#34;2000&#34;  # combined capacity for a Server role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">qLevel</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">             </span><span class="c"># default process noise for demand level</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">qTrend</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.1&#34;</span><span class="w">           </span><span class="c"># default process noise for demand trend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">measurementNoise</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10&#34;</span><span class="w">  </span><span class="c"># default observation noise</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minPoints</span><span class="p">:</span><span class="w"> </span><span class="m">6</span><span class="w">  </span><span class="c"># default; 1 to 64 observations</span></span></span></code></pre></div>
+</div><p><code>Predictive</code> uses a causal Kalman filter with a local linear trend. It forecasts demand over
+<em><code>horizonSeconds</code></em> and divides that forecast by the role kind&rsquo;s per-replica forecast capacity.
+The recommendation is at least the token-throughput result. Until <em><code>minPoints</code></em> observations arrive,
+it reports <code>PredictorWarmingUp</code> in the role&rsquo;s <em><code>reason</code></em> and uses that fallback result.</p>
+<p><em><code>qLevel</code></em> and <em><code>qTrend</code></em> control process noise for the demand level and trend.
+Higher values let those estimates change faster. <em><code>measurementNoise</code></em> describes uncertainty in new
+observations; higher values reduce their influence. Positive values tune the filter; omitted or
+nonpositive values use <code>1</code>, <code>0.1</code> and <code>10</code>, respectively.</p>
+<p>After warm-up, panic or a latency breach above <code>1.2</code> times the target requests at least one extra
+replica. Consolidation also requires that removing one replica would leave the others carrying
+no more than 80% of their per-replica capacity. The scale-down step policy and other guards still apply.</p>
+<p>The forecast follows the
+<a href="https://github.com/ai-dynamo/dynamo/blob/4f42be7bebd96ea0199088840549397809f80a92/docs/fern/pages/developer-guide/knowledge-base/modular-components/planner/planner-design.md">NVIDIA Dynamo Planner</a>
+.
+Its Kalman predictor estimates a local linear trend, and its load-based loop reacts to live metrics
+below the predicted capacity.</p>
+<h2 id="bounds-and-ratios">Bounds and ratios</h2>
+<p><em><code>roles[]</code></em> gives each target role a unique <em><code>name</code></em>, a <em><code>minReplicas</code></em> floor and a <em><code>maxReplicas</code></em>
+ceiling. Every target role needs bounds; an incomplete set blocks planning with <code>BoundsConflict</code>.
+The minimum defaults to <code>1</code>. Both counts range from <code>1</code> to <code>1024</code>, with the minimum no greater than
+the maximum. The scaler cannot scale to zero.</p>
+<p><em><code>ratios[]</code></em> connects roles through <em><code>numeratorRole</code></em> and <em><code>denominatorRole</code></em>.
+Both must name distinct scaled roles, and each ordered pair must be unique. Optional <em><code>min</code></em> and
+<em><code>max</code></em> bound the numerator count divided by the denominator count. Optional <em><code>target</code></em> is the
+preferred ratio. Supplied quantities must be positive; the target must lie within any supplied bounds.</p>
+<p>Setting <em><code>min</code></em>, <em><code>target</code></em> and <em><code>max</code></em> to the same value fixes a ratio. A target without bounds is
+a preference; bounds without a target are constraints. The <a href="#token-throughput">Token throughput</a>
+
+example allows <em>prefill</em> to <em>decode</em> ratios from <code>0.5</code> to <code>2</code>, prefers <code>1</code>, and couples <em>encode</em> to
+<em>prefill</em> with a preferred ratio of <code>0.5</code>.</p>
+<p>The planner applies bounds, pacing, guards and ratios to one replica vector and commits it atomically.
+For connected roles, it seeks a feasible vector close to the recommendations and uses ratio targets
+to break ties. An upward recommendation gives the component an upward direction; otherwise it may
+shrink. If no feasible vector is found, that component holds its current counts.</p>
+<p>The ratio comparison tolerates small rounding differences at a boundary. Admission checks feasibility
+with exact integer ratios and rejects configurations it proves impossible. A search that reaches its
+limit can admit an undecided configuration. Admission success therefore does not guarantee that
+planning can find a feasible vector for every combination of pacing and guards.</p>
+<p>The current replica vector must already satisfy the bounds and ratio bands. If it does not,
+planning stops with <code>BoundsConflict</code> or <code>RatioConflict</code>; adjust the policy to include the current
+vector before expecting the scaler to move it.</p>
+<h2 id="pacing-and-guards">Pacing and guards</h2>
+<p><em><code>behavior.scaleUp.stabilizationWindowSeconds</code></em> waits for recommendation history spanning the window
+before allowing growth. Zero disables that wait. The scale-down window holds the highest recent
+recommendation as its floor and prevents shrinkage until enough history exists. Recommendation
+history is kept in memory and reported in status, with at most 256 samples per role.</p>
+<p>Without an upward <em><code>stepPolicy</code></em>, one pass can add the larger of <em><code>maxStepReplicas</code></em> replicas and
+<em><code>maxStepPercent</code></em> of the current count, rounded up. The former accepts nonnegative integers; the
+latter ranges from <code>0</code> to <code>1000</code>. Omission or zero stores defaults of <code>4</code> and <code>100</code>, respectively.
+Setting one to zero does not disable that bound. Use a step policy to select one unit alone.</p>
+<p>A <em><code>stepPolicy</code></em> under either <em><code>scaleUp</code></em> or <em><code>scaleDown</code></em> requires <em><code>type</code></em> (<code>Pods</code> or <code>Percent</code>)
+and a nonnegative <em><code>value</code></em>. <code>Pods</code> counts serving replicas, even when each replica has several
+<code>Pod</code>s. <code>Percent</code> uses the current replica count and rounds up. Zero prevents movement in that
+direction. Without a downward policy, a pass removes at most one replica per role.</p>
+<p>The downward <em><code>stabilizationWindowSeconds</code></em>, <em><code>cooldownAfterAbortSeconds</code></em> and
+<em><code>decodePostScaleUpGraceSeconds</code></em> use their defaults when omitted or zero: <code>300</code>, <code>300</code> and <code>120</code>
+seconds. Zero does not disable these guards. Their accepted ranges are shown in the
+<a href="#resource">Resource</a>
+ example.</p>
+<p>The post-scale-up grace keeps a <em>decode</em> role&rsquo;s replica count stable while added replicas settle,
+which matters in the disaggregated arrangements described by
+<a href="https://arxiv.org/abs/2407.00079">Mooncake</a>
+.</p>
+<p>Scale-down also waits when any of these conditions holds:</p>
+<ul>
+<li>The role has no ready replica or the observation has incomplete coverage.</li>
+<li>The algorithm holds scale-down, including for panic or missing required signals.</li>
+<li>A retirement is active anywhere in the target, or an abort cooldown is active.</li>
+<li>A <em>decode</em> role is within its post-scale-up grace period.</li>
+</ul>
+<p>A pending unadmitted workload prevents further growth. While a committed scale-up cohort is pending,
+that ceiling applies across the target. If any added ordinal remains unadmitted past
+<em><code>sampling.pendingTimeoutSeconds</code></em>, the scaler restores the whole cohort&rsquo;s baseline vector in one
+write and reports <code>ResourceExhausted</code>.</p>
+<p>If a removed ordinal&rsquo;s retirement ends as <code>Aborted</code>, the scaler restores the pre-scale-down vector.
+It reports <code>ScaleDownAborted</code>, cancels any associated donor transaction, and starts
+<em><code>cooldownAfterAbortSeconds</code></em>. This cooldown prevents further scale-down across the target.</p>
+<h2 id="resource-rebalancing">Resource rebalancing</h2>
+<p>Rebalancing starts after a scale-up times out and restores its baseline. If the receiver still
+needs to grow, <em><code>rebalance.policy</code></em> decides whether another role can release capacity.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Policy</th>
+          <th>Donor selection</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Opposing</code></td>
+          <td>Default. A donor&rsquo;s own recommendation must be to shrink.</td>
+      </tr>
+      <tr>
+          <td><code>Priority</code></td>
+          <td>A lower-priority role may donate even when its own recommendation is to hold.</td>
+      </tr>
+      <tr>
+          <td><code>Disabled</code></td>
+          <td>No donation is attempted.</td>
+      </tr>
+  </tbody>
+</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">rebalance</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">Priority</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w">  </span><span class="c"># unique scaled role names, highest priority first</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">encode</span></span></span></code></pre></div>
+</div><p><em><code>priority[]</code></em> only affects <code>Priority</code>. A receiver may take from roles after it in the list,
+starting with the next listed role. Unlisted roles neither donate nor receive through this policy;
+they retain their ordinary recommendations. The donor and receiver must use the same nonempty
+<em><code>instanceType</code></em>, and the donor must remain above its minimum before donation.</p>
+<p>The <code>Opposing</code> policy follows the
+<a href="https://github.com/ai-dynamo/dynamo/blob/4f42be7bebd96ea0199088840549397809f80a92/components/src/dynamo/planner/core/budget.py">Dynamo Budget Guard</a>
+,
+which moves both legs of an opposing rebalance together or leaves both in place.</p>
+<p>The transaction removes one donor replica first. It waits for retirement to finish and the donor&rsquo;s
+<code>Workload</code> to disappear before adding one receiver replica. Both intermediate vectors must satisfy
+bounds and ratios. An aborted donor retirement restores the previous vector and cancels the transaction.</p>
+<p><code>RebalanceNotApplicable</code> means no eligible donor was found, including when pools differ.
+<code>RebalanceBlocked</code> means an intermediate vector violates policy or a <code>Priority</code> donation was already
+attempted during the exhaustion episode. A scaler spec edit or an external target generation change
+can start a new episode; the scaler&rsquo;s own committed generation does not reset that protection.</p>
+<h2 id="binding-fence">Binding fence</h2>
+<p>An active scaler owns the target&rsquo;s replica counts through two annotations:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Annotation</th>
+          <th>Payload</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>modeldeployment.gpustack.ai/scaler-binding</code></td>
+          <td><em><code>scalerName</code></em>, <em><code>scalerUID</code></em> and the binding <em><code>term</code></em>.</td>
+      </tr>
+      <tr>
+          <td><code>modeldeployment.gpustack.ai/scaler-decision</code></td>
+          <td><em><code>decisionID</code></em>, <em><code>term</code></em> and the committed replica <em><code>vector</code></em>.</td>
+      </tr>
+  </tbody>
+</table>
+<p>The webhook refuses user changes to a bound target&rsquo;s replica counts or either annotation.
+Other fields remain editable. On an unbound deployment, users may change counts but cannot install
+either ownership annotation. An operator commit writes the vector and its decision together under
+the binding&rsquo;s term. Terms start at one and cannot move backwards.</p>
+<p>A second scaler cannot take over an existing binding. It reports <code>AlreadyBound</code> and leaves the
+owner in place. <code>Shadow</code> and suspended scalers release bindings they own. If a target is deleted and
+recreated with a new UID, <code>TargetReplaced</code> stops planning until a scaler spec edit acknowledges the
+replacement. The scaler then clears target-specific state and can bind the new deployment.</p>
+<p>A binding annotation that cannot be parsed leaves the target unclaimed. The scaler reports
+<code>InvalidBinding</code> on <code>Bound</code> and <code>Active</code> and plans nothing, because it cannot tell which scaler
+owns the target. Fix or remove the annotation to let a scaler bind again.</p>
+<p>Deleting a scaler normally releases its binding through its finalizer and leaves the target serving.
+If an orphaned binding remains, a user may remove that annotation only when the named scaler is
+absent or has a different UID. That recovery write must leave replica counts unchanged.</p>
+<h2 id="gitops-sync">GitOps sync</h2>
+<p>Configure the GitOps controller to ignore the target&rsquo;s replica counts and both scaler annotations.
+Otherwise, admission rejects attempts to restore the counts from Git. Each role needs its own
+replica pointer; <code>~1</code> escapes the slash inside an annotation key.</p>
+<p>Argo CD reads <em><code>ignoreDifferences</code></em> from the <code>Application</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ignoreDifferences</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">group</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">jsonPointers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/spec/roles/0/replicas</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/metadata/annotations/modeldeployment.gpustack.ai~1scaler-binding</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/metadata/annotations/modeldeployment.gpustack.ai~1scaler-decision</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">syncPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">syncOptions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">RespectIgnoreDifferences=true</span></span></span></code></pre></div>
+</div><p><code>RespectIgnoreDifferences=true</code> also applies the exclusions during sync. Without it, differences
+can be hidden in the comparison while a sync still attempts to restore the declared counts.</p>
+<p>Flux versions that support <em><code>spec.ignore</code></em> on <code>Kustomization</code> use these paths:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">kustomize.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Kustomization</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ignore</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">group</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">paths</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/spec/roles/0/replicas</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/metadata/annotations/modeldeployment.gpustack.ai~1scaler-binding</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/metadata/annotations/modeldeployment.gpustack.ai~1scaler-decision</span></span></span></code></pre></div>
+</div><h2 id="status">Status</h2>
+<p>Status records observations, decisions and recovery state. The following fragments illustrate the
+field shapes; they are not captured output or configuration to apply. Optional entries appear only
+when the scaler has corresponding state. <em><code>observedGeneration</code></em> identifies the scaler spec generation
+used for the report.</p>
+<p>The scaler writes its status when its control plane moves: a decision, a binding, a condition or
+the replica counts of a role. A scaler that is steady writes nothing, so the sliding windows it
+holds are a snapshot rather than a live feed. The windows themselves are kept in memory and grow
+on every sampling pass, whether the status was written or not, and the scaler reads them back
+from the status when it starts planning again.</p>
+<h3 id="role-observations">Role observations</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">observedGeneration</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">binding</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">targetUID</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;target UID&gt;&#34;</span><span class="w">  </span><span class="c"># distinguishes a replacement with the same name</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">targetName</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">term</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># term used for active commits; Shadow may have no term</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">currentReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">  </span><span class="c"># desired count currently on the target</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">readyReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">   </span><span class="c"># ready serving replicas used to calculate capacity</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">signalState</span><span class="p">:</span><span class="w"> </span><span class="l">Fresh</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">promptTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2400&#34;</span><span class="w">  </span><span class="c"># cache-missed rate across sampled replicas</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">generationTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">runningRequests</span><span class="p">:</span><span class="w"> </span><span class="m">8</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">waitingRequests</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kvCacheUsage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.5&#34;</span><span class="w">  </span><span class="c"># mean reported cache fraction</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ttftMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;400&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">itlMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">rawRecommendedReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">  </span><span class="c"># algorithm result</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">constrainedReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">     </span><span class="c"># result after bounds, ratios, pacing and guards</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">TokenThroughput   </span><span class="w"> </span><span class="c"># algorithm or constraint explanation</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">lastScaleUpTime</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;last growth time&gt;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stabilizationHistory</span><span class="p">:</span><span class="w">  </span><span class="c"># at most 256 recommendations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;sample time&gt;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
+</div><p><em><code>signalState</code></em> is <code>Fresh</code> for current readings, <code>Idle</code> for a successfully observed role with no work,
+<code>Missing</code> for unavailable signals or an unestablished window, and <code>Stale</code> for expired readings.
+A missing signal differs from a measured zero. Incomplete coverage prevents scale-down, although
+usable partial observations can still justify growth.</p>
+<p><em><code>reason</code></em> can explain an algorithm decision, such as <code>WithinTolerance</code>, <code>Panic</code>, <code>NoReadyReplicas</code>,
+<code>LatencyGuardHold</code>, <code>LatencyGuardScaleUp</code>, <code>PredictorWarmingUp</code>, <code>PredictiveConsolidationHold</code> or
+<code>RatioCoupled</code>. A constraint reason can replace it. Compare <em><code>rawRecommendedReplicas</code></em> and
+<em><code>constrainedReplicas</code></em> to see how the planner changed the algorithm&rsquo;s request.</p>
+<h3 id="decisions-and-recovery">Decisions and recovery</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">lastCommit</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">decisionID</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;decision ID&gt;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">term</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">vector</span><span class="p">:</span><span class="w">  </span><span class="c"># committed replica counts by role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prefill</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decode</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">baselineVector</span><span class="p">:</span><span class="w">  </span><span class="c"># counts before this commit</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prefill</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decode</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;commit time&gt;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">targetGeneration</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">  </span><span class="c"># target generation expected after the write</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">pendingCohort</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">decisionID</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;scale-up decision ID&gt;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">term</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">baselineVector</span><span class="p">:</span><span class="w">  </span><span class="c"># restored if admission times out</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prefill</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decode</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">targetVector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prefill</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decode</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">startedAt</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;scale-up commit time&gt;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">rebalance</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">receiverRole</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">donorRole</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">donorTargetReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">receiverTargetReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">startedAt</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;transaction start time&gt;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">exhaustionEpisodeGeneration</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># identifies the exhaustion episode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">donationAttempted</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">        </span><span class="c"># guards repeated donations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">ReceiverAcquire</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">lastScaleDown</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ordinal</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">  </span><span class="c"># zero-based ordinal removed from this role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">preScaleDownVector</span><span class="p">:</span><span class="w">  </span><span class="c"># restored after an aborted retirement</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prefill</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decode</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">outcome</span><span class="p">:</span><span class="w"> </span><span class="l">Committed </span><span class="w"> </span><span class="c"># Aborted after a failed retirement is restored</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">abortedAt</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;abort time, when applicable&gt;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">cooldownUntil</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;cooldown end, when applicable&gt;&#34;</span></span></span></code></pre></div>
+</div><p><em><code>lastCommit</code></em> identifies the latest actual write and the target generation it expects.
+<em><code>pendingCohort</code></em> tracks added ordinals until admission or rollback.
+<em><code>lastScaleDown.outcome</code></em> is <code>Committed</code> while retirement runs and becomes <code>Aborted</code> after a failed
+retirement is restored. The abort and cooldown times record that recovery.</p>
+<p><em><code>rebalance.reason</code></em> records <code>ResourceExhausted</code>, <code>DonorRelease</code>, <code>ReceiverAcquire</code> or
+<code>DonationAttempted</code>, or an applicability/blocking reason. Its donor and receiver targets describe
+the two-step transaction. <em><code>exhaustionEpisodeGeneration</code></em> identifies the episode, and
+<em><code>donationAttempted</code></em> records whether it has already used a donation attempt.</p>
+<h3 id="predictor-state">Predictor state</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">predictors</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill </span><span class="w"> </span><span class="c"># role this state belongs to</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">level</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2400&#34;</span><span class="w">  </span><span class="c"># estimated demand in tokens per second</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">trend</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10&#34;</span><span class="w">    </span><span class="c"># demand change per second</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">covariance</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">p00</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># level variance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">p01</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">  </span><span class="c"># covariance of level with trend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">p10</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">  </span><span class="c"># covariance of trend with level</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">p11</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># trend variance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sampleCount</span><span class="p">:</span><span class="w"> </span><span class="m">6</span><span class="w">  </span><span class="c"># observations processed by the predictive filter</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">history</span><span class="p">:</span><span class="w">  </span><span class="c"># recent demand samples within the active window, at most 256</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;observation time&gt;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">tokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2400&#34;</span></span></span></code></pre></div>
+</div><p><em><code>predictors[]</code></em> persists demand history for <code>TokenThroughput</code> and filter state for <code>Predictive</code>.
+The <em><code>level</code></em>, <em><code>trend</code></em> and <em><code>covariance</code></em> fields describe the filter estimate and its uncertainty.
+The scaler restores this state from status when it resumes planning, and keeps it in memory while
+it plans, so the predictor warms up without a status write per pass.</p>
+<h3 id="conditions">Conditions</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">conditions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">MetricsReady </span><span class="w"> </span><span class="c"># Bound, Active, MetricsReady or Blocked</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;True&#34;</span><span class="w">      </span><span class="c"># True, False or Unknown</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">Observed</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">message</span><span class="p">:</span><span class="w"> </span><span class="l">all required role signals are available</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">observedGeneration</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># scaler generation used for this condition</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">lastTransitionTime</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;last condition transition time&gt;&#34;</span></span></span></code></pre></div>
+</div><p><code>Bound=True</code> means the target is available to this scaler. In <code>Active</code> mode, it also holds the
+binding. A <code>Shadow</code> scaler can report <code>Bound=True</code> without an ownership annotation.
+<code>Active</code> reports permission to commit, <code>MetricsReady</code> reports signal coverage, and <code>Blocked</code>
+reports planning constraints. Inspect each condition&rsquo;s generation because early exits can leave older conditions.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Condition</th>
+          <th>Success reason</th>
+          <th>Other reasons</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Bound</code></td>
+          <td><code>Bound</code></td>
+          <td><code>TargetNotFound</code>, <code>AlreadyBound</code>, <code>TargetReplaced</code>, <code>InvalidBinding</code>, <code>Suspended</code></td>
+      </tr>
+      <tr>
+          <td><code>Active</code></td>
+          <td><code>Active</code></td>
+          <td><code>TargetNotFound</code>, <code>AlreadyBound</code>, <code>TargetReplaced</code>, <code>InvalidBinding</code>, <code>Suspended</code>, <code>ShadowMode</code></td>
+      </tr>
+      <tr>
+          <td><code>MetricsReady</code></td>
+          <td><code>Observed</code></td>
+          <td><code>WaitingForMetrics</code>, <code>ResourceExhausted</code>, <code>BoundsConflict</code>, <code>RatioConflict</code></td>
+      </tr>
+      <tr>
+          <td><code>Blocked</code></td>
+          <td><code>Ready</code> (<code>False</code>)</td>
+          <td><code>BoundsConflict</code>, <code>RatioConflict</code>, <code>PacingBounded</code>, <code>ResourceExhausted</code>, <code>ScaleDownAborted</code>, <code>RebalanceNotApplicable</code>, <code>RebalanceBlocked</code></td>
+      </tr>
+  </tbody>
+</table>
+<p><code>BoundsConflict</code> means bounds are missing, inconsistent or exclude the current vector.
+<code>RatioConflict</code> means the current vector violates a ratio band or no feasible projection was found.
+<code>PacingBounded</code> means a step limit or guard held the recommendation. <code>WaitingForMetrics</code> means
+required readings or complete coverage are unavailable. <code>PredictorWarmingUp</code> is a role reason.</p>
+<h2 id="limitations">Limitations</h2>
+<p>Admission refuses roles with a custom <em><code>command</code></em> because their serving signals are unmanaged.
+It also refuses <em><code>elasticEp</code></em> roles, whose width grows one collective rather than adding independent
+replicas. At <em><code>maxReplicas</code></em>, generated group and member names must still fit the 63-character
+Kubernetes label limit. Shorten the deployment or role name if that maximum cannot be represented.</p>
+<p>The sampler reads at most 64 ready answering engine <code>Pod</code>s per role. Above that cap, coverage is
+incomplete and scale-down is held. New token and latency windows also need successive valid samples;
+a first observation alone cannot establish rates.</p>
+<p>A disaggregated scale-down follows the <a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/#retirement-protocol">Retirement protocol</a>
+ and
+<a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/#disaggregated-replicas">Disaggregated replicas</a>
+ handoff window. That window bounds the
+handoff wait; it does not wait indefinitely for every prefill request to finish.</p>
+<p>If a prefill lasts longer than the handoff window, a <em>decode</em> replica can leave while that prefill
+is still running, losing its request. For workloads with prefills that run for minutes, keep the
+<em>decode</em> <em><code>minReplicas</code></em> high enough to preserve the required serving capacity.</p>
+<p>Both resource webhooks use <code>failurePolicy: Fail</code>. If the webhook <code>Pod</code> is unavailable, writes that
+require it fail and are retried. Existing replicas keep serving. A webhook outage does not allow
+unchecked writes through the binding fence.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Symptom</th>
+          <th>Check</th>
+          <th>Action</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Counts never change</td>
+          <td><code>Active</code> condition</td>
+          <td>Use <code>Active</code> mode and clear suspension when ready to commit. Resolve missing, replaced or already-owned targets.</td>
+      </tr>
+      <tr>
+          <td>Counts never change</td>
+          <td><code>MetricsReady</code> and role signal states</td>
+          <td>Check engine metrics and allow a valid sampling window to form.</td>
+      </tr>
+      <tr>
+          <td>Counts never change</td>
+          <td><code>Blocked</code> and role reasons</td>
+          <td>Correct bounds or ratios, or wait for the named pacing or retirement guard.</td>
+      </tr>
+      <tr>
+          <td>Recommendation differs from counts</td>
+          <td><em><code>rawRecommendedReplicas</code></em> and <em><code>constrainedReplicas</code></em></td>
+          <td>Check the role bounds, ratios and pacing limits that changed the request.</td>
+      </tr>
+      <tr>
+          <td>Counts return to a baseline</td>
+          <td><em><code>pendingCohort</code></em> and <code>ResourceExhausted</code></td>
+          <td>Check admission and available quota before retrying growth.</td>
+      </tr>
+      <tr>
+          <td>Counts return after shrinking</td>
+          <td><em><code>lastScaleDown</code></em></td>
+          <td>Resolve the aborted retirement before its cooldown expires.</td>
+      </tr>
+      <tr>
+          <td>A write is refused</td>
+          <td>Admission message</td>
+          <td>Check <a href="#binding-fence">Binding fence</a>
+ and <a href="#gitops-sync">GitOps sync</a>
+. An orphan recovery requires the named scaler to be gone or replaced.</td>
+      </tr>
+  </tbody>
+</table>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
+ (target roles and replica counts)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">Scaling Benchmark</a>
+ (H100 measurements and observed failures)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Scaling Walkthrough</a>
+ (configuration and observation)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Model Deployment Status</a>
+ (target phase and conditions)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/">Model Deployment Shutdown</a>
+ (retirement during scale-down)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
+ (engine signals and scraping).</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Model Deployment Status</a>
+ — the target&rsquo;s status and scaler annotations.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/modules/model-deployment/scaling.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/scaling.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#resource">Resource</a></li>
+    <li><a href="#algorithms">Algorithms</a>
+      <ul>
+        <li><a href="#proportional">Proportional</a></li>
+        <li><a href="#token-throughput">Token throughput</a></li>
+        <li><a href="#engine-signals">Engine signals</a></li>
+        <li><a href="#predictive">Predictive</a></li>
+      </ul>
+    </li>
+    <li><a href="#bounds-and-ratios">Bounds and ratios</a></li>
+    <li><a href="#pacing-and-guards">Pacing and guards</a></li>
+    <li><a href="#resource-rebalancing">Resource rebalancing</a></li>
+    <li><a href="#binding-fence">Binding fence</a></li>
+    <li><a href="#gitops-sync">GitOps sync</a></li>
+    <li><a href="#status">Status</a>
+      <ul>
+        <li><a href="#role-observations">Role observations</a></li>
+        <li><a href="#decisions-and-recovery">Decisions and recovery</a></li>
+        <li><a href="#predictor-state">Predictor state</a></li>
+        <li><a href="#conditions">Conditions</a></li>
+      </ul>
+    </li>
+    <li><a href="#limitations">Limitations</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

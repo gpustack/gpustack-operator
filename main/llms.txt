@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers hardware, shapes accelerator capacity, and helps Kubernetes place workloads where that capacity is available.
 
-Documentation version: main. Source revision: 9233372f1f18e3ceda680bad0309dcf74b54b60a.
+Documentation version: main. Source revision: a8130d5809434b4c0ed6f98492f00ae142964df9.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -22,6 +22,7 @@ documentation and code for your release. This index routes questions; follow its
 - [Model Deployment Walkthroughs](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md): Choose a serving configuration and its hardware, model and `InstanceType` setup.
 - [Prefill and Decode Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md): Deploy H100 prefill and decode roles with tested TCP transfer settings.
 - [Encode, Prefill and Decode Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md): Deploy encode, prefill and decode roles and verify a multimodal request.
+- [Model Deployment Scaling Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md): Configure Shadow and Active scaling, choose algorithms and observe replica retirement.
 - [Elastic EP Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md): Expand an H100 collective from four to eight GPUs and verify effective width and inference.
 - [External DP Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md): Deploy four fixed H100 ranks and verify captured endpoint and Router coverage.
 - [Multi-Host Serving Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md): Scale models across multiple GPU nodes.
@@ -75,6 +76,8 @@ documentation and code for your release. This index routes questions; follow its
 
 - [Model Deployment](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/index.md): Start with managed model serving.
 - [Model Deployment Configuration](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md): Configure serving roles and overrides.
+- [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md): Plan a deployment's replica count from the signals it publishes.
+- [Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md): Compare five H100 scaling configurations with measured latency, throughput and lifecycle limits.
 - [Engine Compatibility](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md): Check engine releases, client and store requirements, and transport support.
 - [Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md): Pair serving roles.
 - [Prefill and Decode Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md): Compare equal-GPU H100 aggregated and disaggregated serving across fixed shapes and mixed traffic.
@@ -86,8 +89,8 @@ documentation and code for your release. This index routes questions; follow its
 - [External DP Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/index.md): Compare External DP ranks with a monolithic wide tensor-parallel group.
 - [Model Deployment Routing](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/routing/index.md): Choose a routing policy, confirm a Router serves.
 - [Model Deployment Metrics](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md): Read serving metrics.
-- [Model Deployment Status](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/status/index.md): Diagnose deployment conditions, follow a retirement.
-- [Model Deployment Shutdown](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/shutdown/index.md): Understand replica retirement and draining.
+- [Model Deployment Status](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/status/index.md): Diagnose deployment conditions, follow a retirement, read the scaler annotations.
+- [Model Deployment Shutdown](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/shutdown/index.md): Understand replica retirement, draining, adoption and unadmitted removal.
 
 ## GPU Instances
 
@@ -114,6 +117,6 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/9233372f1f18e3ceda680bad0309dcf74b54b60a/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/a8130d5809434b4c0ed6f98492f00ae142964df9/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.

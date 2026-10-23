@@ -86,6 +86,10 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/routing/</loc>
   </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling/</loc>
+  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/shutdown/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/status/</loc>
@@ -141,6 +145,8 @@
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/</loc>
   </url><url>
