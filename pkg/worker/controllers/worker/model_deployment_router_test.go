@@ -87,6 +87,33 @@ func TestRenderModelDeploymentRouterObjects_OwnedAndDiscoverable(t *testing.T) {
 		modelDeploymentLabelKeyRoleKind)
 }
 
+// TestRenderModelDeploymentRouterObjects_ExternalDPShapeRendersDPAware pins the recorded S-EDP
+// shape: the Server role declares --attn-dp-size 2 and never declares --dp-size, the classifier
+// reads the attention width, and the rendered router argv carries --dp-aware.
+//
+// THE RECORDED SHAPE DECLARED NO --dp-size. A gate on the data-parallel width never fired on it,
+// which is ISSUE-9: the S-EDP gateway registered one worker per group while every attention rank
+// should have registered. The render is gated on the classifier's own width.
+func TestRenderModelDeploymentRouterObjects_ExternalDPShapeRendersDPAware(t *testing.T) {
+	md := twoRoleDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+		md.Spec.Roles = md.Spec.Roles[:1]
+		md.Spec.Roles[0].Name = "server"
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Roles[0].ExtraArgs = []string{"--attn-dp-size", "2", "--nnodes", "2"}
+		md.Spec.Roles[0].Env = append(md.Spec.Roles[0].Env, workercore.ModelDeploymentEnvVar{
+			Name: modelDeploymentSGLangRustServerEnv, Value: "1",
+		})
+	})
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+	require.NoError(t, err)
+
+	assert.Contains(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args, "--dp-aware",
+		"the recorded shape declares --attn-dp-size 2 and no --dp-size; the attention width is what the gate reads")
+}
+
 // TestRenderModelDeploymentRouterObjects_BothSelectorsSelectOnlyThePodsThatAnswer states the set
 // every discovery path names: the members that answer the API, one per replica, at every role size.
 //
