@@ -329,6 +329,24 @@ func renderModelDeploymentRouterObjects(
 		RequestTimeoutSeconds:   md.Spec.Router.RequestTimeoutSeconds,
 		DisaggregationThreshold: md.Spec.Router.DisaggregationThresholdTokens,
 	}
+	// THE SGLANG EXTERNAL DP SHAPE NAMES ITS WIDTH TO THE GATEWAY. The gateway's --dp-aware fans
+	// its worker registration out per dp member, which is the one-worker-per-member contract the
+	// shape is held to; a width under two renders nothing, and so does every other engine.
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang {
+		for i := range md.Spec.Roles {
+			if !modelDeploymentRoleExternalDP(md, &md.Spec.Roles[i]) {
+				continue
+			}
+			reading, err := scanModelDeploymentParallelism(
+				md.Spec.Engine.Name, md.Spec.Roles[i].ExtraArgs, md.Spec.Roles[i].Env)
+			if err != nil {
+				return ModelDeploymentRouterObjects{}, fmt.Errorf(
+					"read the external-dp width the router renders: %w", err)
+			}
+			routerInput.DataParallelSize = int32(reading.declared.DataParallel)
+			break
+		}
+	}
 	if stageFiltered {
 		routerInput.EligibleLabelKey = modelDeploymentLabelKeyEndpointEligible
 	}

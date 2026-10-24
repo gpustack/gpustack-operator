@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -980,7 +981,7 @@ func (f *healthPairFetch) fetch(
 	// THE METRICS SCRAPE IS ANSWERED BY THE STUB ITSELF, minimally: the observation reads the
 	// mooncake series of both halves, and a GET that fell through to the chat answer would hand it
 	// a document that reads as no series at all.
-	if request.Method == "GET" {
+	if request.Method == http.MethodGet {
 		return []byte("vllm:mooncake_bytes_transferred_count 0.0\n" +
 			"vllm:mooncake_num_failed_recvs 0.0\n"), nil
 	}
@@ -1002,7 +1003,7 @@ func healthPairPairs(t *testing.T, fetch *healthPairFetch) []string {
 	seen := map[string]bool{}
 	var pairs []string
 	for _, request := range fetch.asked {
-		if request.Method == "GET" {
+		if request.Method == http.MethodGet {
 			// THE METRICS SCRAPES ARE NOT PAIRS. The observation reads both halves' mooncake
 			// exposition after the legs answer, and a scrape names no prefiller and no room.
 			continue

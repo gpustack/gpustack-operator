@@ -50,6 +50,14 @@ const (
 	// cherry-picked at pack/llm-router/patches/vllm-router/0001-epd-routing.patch,
 	// `CliArgs::epd_config`), so the whole stage is one argument rather than a repeatable flag.
 	argvRouterEPDConfigArg = "--epd-config"
+
+	// argvRouterDPAwareArg turns on the SGLang gateway's attention-data-parallel worker
+	// registration: with the flag, the gateway fans its local worker step out per dp rank and
+	// registers one worker per member instead of one per group. Upstream carries it as of
+	// sgl-project/sglang a9c97c9f69, cherry-picked at
+	// pack/llm-router/patches/sglang-gateway/0003-attn-dp-aware-worker-registration.patch; only
+	// the gateway has the flag.
+	argvRouterDPAwareArg = "--dp-aware"
 )
 
 // argvRouter is what one of these routers differs by. Everything not named here is shared.
@@ -190,6 +198,13 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 		return Output{}, fmt.Errorf("render %s: a deployment-wide selector would offer the %s role as "+
 			"a backend, so a deployment holding one needs a %s and a %s role beside it",
 			name, roleKindEncode, rolePrefill, roleKindDecode)
+	}
+	// THE EXTERNAL DP SHAPE IS WHERE ONE WORKER PER MEMBER IS THE CONTRACT. A dp width of two or
+	// more is the shape whose subordinate members the gateway would otherwise never register --
+	// the failure this program measured as one healthy worker where the contract is one endpoint
+	// per member -- and only the gateway carries the flag. Every other shape renders without it.
+	if name == SGLang && input.DataParallelSize >= 2 {
+		args = append(args, argvRouterDPAwareArg)
 	}
 	deployment := selectorArgs(argvRouterSelectorArg, input.EndpointLabels)
 	if deployment == nil {

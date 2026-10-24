@@ -82,6 +82,76 @@ func TestRenderVLLM_NamesItsOwnPortsAndTheOneItDials(t *testing.T) {
 	}
 }
 
+// TestRenderSGLang_RendersDPAwareOnlyForTheExternalDPShape pins the flag's shape gate.
+//
+// --dp-aware is what makes the gateway register one worker per dp member instead of one per
+// group, and the shape that needs it is the External DP shape: one server role at a dp width of
+// two or more. A width under two has no subordinate member to register, the vLLM router has no
+// such flag at all, and the disaggregated shape is P/D, whose halves are named by their own
+// selectors -- so each of the other three cases renders without it. D15.
+func TestRenderSGLang_RendersDPAwareOnlyForTheExternalDPShape(t *testing.T) {
+	testCases := []struct {
+		name             string
+		router           string
+		dataParallelSize int32
+		roles            []Role
+		wantDPAware      bool
+	}{
+		{
+			name:             "the external dp shape at width two carries the flag",
+			router:           SGLang,
+			dataParallelSize: 2,
+			roles:            []Role{serverRole()},
+			wantDPAware:      true,
+		},
+		{
+			name:             "a width of one has no subordinate member to register",
+			router:           SGLang,
+			dataParallelSize: 1,
+			roles:            []Role{serverRole()},
+			wantDPAware:      false,
+		},
+		{
+			name:             "the vllm router has no such flag",
+			router:           VLLM,
+			dataParallelSize: 2,
+			roles:            []Role{serverRole()},
+			wantDPAware:      false,
+		},
+		{
+			name:             "the disaggregated shape names its halves by their own selectors",
+			router:           SGLang,
+			dataParallelSize: 2,
+			roles:            []Role{prefillRole(), decodeRole()},
+			wantDPAware:      false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := Input{
+				Roles:            tc.roles,
+				Namespace:        "team-a",
+				EndpointLabels:   map[string]string{"app.kubernetes.io/instance": "qwen"},
+				ListenPort:       8000,
+				MetricsPort:      9090,
+				DiscoveryPort:    8000,
+				DataParallelSize: tc.dataParallelSize,
+			}
+			output, err := Render(tc.router, input)
+			require.NoError(t, err)
+
+			if tc.wantDPAware {
+				assert.Contains(t, output.Arguments, "--dp-aware",
+					"the external dp shape registers one worker per member")
+			} else {
+				assert.NotContains(t, output.Arguments, "--dp-aware",
+					"no other shape carries the flag")
+			}
+		})
+	}
+}
+
 // TestRenderVLLM_SelectorIsOneArgumentPerLabel pins the shape the flag actually takes.
 //
 // A comma-joined expression would be accepted and then read as ONE entry whose key carries the rest

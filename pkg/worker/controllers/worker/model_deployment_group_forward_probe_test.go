@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -708,7 +709,7 @@ func (f *probePairFetch) fetch(
 	// THE METRICS SCRAPE IS ANSWERED BY THE STUB ITSELF, minimally: the observation reads the
 	// mooncake series of both halves, and a GET that fell through to the chat answer would hand it
 	// a document that reads as no series at all.
-	if request.Method == "GET" {
+	if request.Method == http.MethodGet {
 		return []byte("vllm:mooncake_bytes_transferred_count 0.0\n" +
 			"vllm:mooncake_num_failed_recvs 0.0\n"), nil
 	}
@@ -832,7 +833,7 @@ func TestGroupForwardProbePDPairCarriesTheRequestOnBothHeads(t *testing.T) {
 
 	rooms := map[int64]bool{}
 	for _, request := range fetch.asked {
-		if request.Method == "GET" {
+		if request.Method == http.MethodGet {
 			continue
 		}
 		body := probePairBody(t, request)
@@ -937,6 +938,67 @@ func TestGroupForwardProbePDPairRecordsTheMooncakeCountersOfBothHalves(t *testin
 		"the decode half's mooncake series are recorded beside them")
 	assert.Contains(t, got.Decode.Observation, "no read-side success counter",
 		"the observation says explicitly that no exported series counts a successful pull")
+}
+
+// TestGroupForwardProbePDPairCopySurvivesAThinkWrapper holds that the copied compare reads the
+// answer's visible text: a leading <think>…</think> block is the chat template's noise and is
+// stripped before the compare, whatever the block carries.
+//
+// THE WRAPPER IS TEMPLATE NOISE. case-9 run2's enriched reason caught the byte-perfect copy
+// sitting behind an EMPTY wrapper (`<think>\n\n</think>\n\n探测P0D0：星河春风。`), which the exact
+// compare rejected -- a template artifact rejecting a pair that carried the request. D12/A.3,
+// approved on that classification.
+func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
+	md := probePairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1, "")
+	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
+	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
+	answer := func(content string) *probePairFetch {
+		return &probePairFetch{
+			prefillHost: probeHost(0, 0),
+			answers: map[string]string{
+				probeHost(1, 0): `{"id":"{{rid}}","choices":[{"message":{"content":` + strconv.Quote(content) + `},"finish_reason":"stop"}]}`,
+			},
+		}
+	}
+
+	t.Run("an empty wrapper ahead of the copy passes", func(t *testing.T) {
+		got := observeModelDeploymentGroupForwardPair(
+			context.Background(), md, prefill, decode, answer("<think></think>\n\n探测P0D0：星河春风。").fetch)
+
+		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
+			"the wrapper is the chat template's noise; the copy behind it is the answer")
+	})
+
+	t.Run("a reasoning block ahead of the copy passes", func(t *testing.T) {
+		got := observeModelDeploymentGroupForwardPair(
+			context.Background(), md, prefill, decode,
+			answer("<think>\nsome reasoning\n</think>\n探测P0D0：星河春风。").fetch)
+
+		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
+			"the wrapper is stripped whatever it carries")
+	})
+
+	t.Run("a wrapper does not rescue a wrong copy", func(t *testing.T) {
+		fetch := answer("<think></think>\n\n别的文字")
+		got := observeModelDeploymentGroupForwardPair(
+			context.Background(), md, prefill, decode, fetch.fetch)
+
+		assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
+			"the visible text still has to be the copy")
+		assert.Contains(t, got.Prefill.Reason, "别的文字",
+			"the raw answer stays in the reason for classification")
+		assert.Contains(t, got.Prefill.Reason, "<think>",
+			"the raw answer keeps its wrapper visible in the reason")
+	})
+
+	t.Run("the marker inside the wrapper is not the copy", func(t *testing.T) {
+		fetch := answer("<think>探测P0D0：星河春风。</think>\n\n别的文字")
+		got := observeModelDeploymentGroupForwardPair(
+			context.Background(), md, prefill, decode, fetch.fetch)
+
+		assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
+			"a copy the template swallowed is not a copy the decoder made")
+	})
 }
 
 // TestGroupForwardProbePDPairHoldsOnAnythingItCannotSee is the fail-closed contract of the directed

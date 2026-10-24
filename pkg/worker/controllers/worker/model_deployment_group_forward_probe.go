@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1087,11 +1088,17 @@ func modelDeploymentGroupForwardPairProbe(
 			return "", 0, "the " + legs[i].Name + " leg answered, but it did not finish normally, so " +
 				"the answer is not evidence that the pair carried one"
 		}
-		if reply.Content != expected {
-			// THE ANSWER IS NAMED IN THE REASON, bounded, so the run's evidence can tell a model
-			// that drifted from a context that was never whole. A reason that discarded the answer
-			// left the classification — answer drift, a broken read, a thinking leak — to a rerun
-			// this probe exists to avoid.
+		// THE COMPARE READS THE ANSWER'S VISIBLE TEXT. The chat template wraps its answer in a
+		// <think>…</think> block on this route whatever the thinking switch says -- case-9 run2's
+		// enriched reason caught the byte-perfect copy sitting behind an EMPTY wrapper -- and the
+		// wrapper is the template's noise, not the model's answer. The block is stripped before the
+		// compare; the rejected answer stays RAW in the reason, where the wrapper is still visible
+		// for the next classification.
+		if visible := modelDeploymentGroupForwardPairVisibleCopy(reply.Content); visible != expected {
+			// THE ANSWER IS NAMED IN THE REASON, bounded and unstripped, so the run's evidence can
+			// tell a model that drifted from a context that was never whole. A reason that discarded
+			// the answer left the classification — answer drift, a broken read, a thinking leak — to
+			// a rerun this probe exists to avoid.
 			return "", 0, "the " + legs[i].Name + " leg answered, but it did not carry the text the " +
 				"request asked to be copied, so nothing shows the prefill's KV reached it (answer: \"" +
 				modelDeploymentGroupForwardPairBounded(reply.Content, modelDeploymentGroupForwardPairAnswerBound) + "\")"
@@ -1099,6 +1106,21 @@ func modelDeploymentGroupForwardPairProbe(
 	}
 
 	return requestID, input.BootstrapRoom, ""
+}
+
+// modelDeploymentGroupForwardPairThinkWrapper matches a leading <think>…</think> block, across
+// lines, at the head of an answer.
+var modelDeploymentGroupForwardPairThinkWrapper = regexp.MustCompile(`(?s)^<think>.*?</think>`)
+
+// modelDeploymentGroupForwardPairVisibleCopy strips a leading <think>…</think> block from an
+// answer and trims what remains, leaving the copy the decode leg was asked for.
+//
+// THE WRAPPER IS TEMPLATE NOISE, NOT CONTENT. The Qwen3 chat template emits the block on this
+// route whatever the thinking switch says -- case-9 run2's enriched reason caught the byte-perfect
+// copy sitting behind an EMPTY wrapper -- so the exact compare reads the answer with the block
+// removed. Rejected answers stay raw in their reasons, where the wrapper is still visible.
+func modelDeploymentGroupForwardPairVisibleCopy(answer string) string {
+	return strings.TrimSpace(modelDeploymentGroupForwardPairThinkWrapper.ReplaceAllString(answer, ""))
 }
 
 // modelDeploymentGroupForwardPairAnswerBound is how much of a rejected answer the failure reason
