@@ -4,6 +4,10 @@ A *prefill/decode (PD)* deployment with *Prefill* and *Decode* roles is admitted
 operator connects them through a router and a transfer path. [Prefill and
 decode](deployment.md#prefill-and-decode) describes the role fields and admission rules.
 
+The recorded runs apply to vLLM `v0.30.0` and SGLang `0.5.22` behind the routers' pinned builds
+(`vllm-router` `v0.1.16.1`, `sglang-gateway` `gateway-v0.3.1`, `llm-d-router` `v0.11.0`). Other
+versions must be re-verified before they inherit a claim on this page.
+
 ## Contents
 
 - [Pair connections](#pair-connections)
@@ -30,12 +34,15 @@ An External DP role is admitted only with a Router: `spec.router` is required, a
 members reachable. The rule does not reach a role that took its command line over, and it does not
 reach a shape read from anywhere but the role's own extra arguments.
 
-SGLang's engine-internal *DP attention* differs from *External DP*. The tested container combinations
-are in [SGLang DP routing](routing.md#sglang-dp-routing).
+SGLang's engine-internal *DP attention* differs from *External DP*. On the SGLang External DP shape
+the operator renders `--dp-aware`, and the gateway registers one worker per attention-DP rank — see
+[Routing](routing.md#which-pods-receive-traffic).
 
-This PoC does not validate a Kubernetes **`ModelDeployment`**, multi-host networking, or rank-failure
-withdrawal and recovery. Treat the split Decode group as an experimental topology until those checks
-run. See [SGLang DP routing](routing.md#sglang-dp-routing) for the tested Router mode.
+For a *PD* pair, the tested container combination ran one `sglang-gateway` with `--pd-disaggregation`
+and **without** `--dp-aware`: combining the two flags produced an invalid *decode* destination. That
+combination was verified as a single-host container run only — it does not validate a Kubernetes
+**`ModelDeployment`**, multi-host networking, or rank-failure withdrawal and recovery — so treat a
+split *decode* group as an experimental topology until those checks run.
 
 With the managed `llm-d-router`, the connector a native vLLM role runs depends on whether
 *`spec.kvCache`* is set; the two settings render two different connector documents, not one document

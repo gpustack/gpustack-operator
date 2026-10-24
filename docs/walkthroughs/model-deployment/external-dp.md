@@ -378,7 +378,7 @@ spec:
 The member index and the leader's DNS name are stamped by the operator and expanded by Kubernetes
 in the container arguments, so the manifest stays identical for every member.
 
-### The procedure
+Apply it and watch the group reach Ready:
 
 ```bash
 kubectl apply --dry-run=server -f sglang-external-dp.yaml
@@ -387,7 +387,11 @@ kubectl apply -f sglang-external-dp.yaml
 # The group is Ready only when every member is qualified.
 kubectl -n gpustack-bench get modeldeployment sglang-external-dp \
   -o jsonpath='{.status.phase}{"\n"}'
+```
 
+### Observe the running shape
+
+```bash
 # Every member publishes its own endpoint, and the role reports External.
 kubectl -n gpustack-bench get modeldeployment sglang-external-dp -o json \
   | jq '.status.roles[] | {name, kind, parallelism, endpoints}'

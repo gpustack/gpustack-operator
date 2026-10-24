@@ -3,12 +3,13 @@
 A managed router selects among serving endpoints, then its policy chooses among them. This page covers
 endpoint selection and SGLang's tested DP routing modes.
 
-See [Prefill and Decode](prefill-decode.md) for the *external data parallelism (External DP)* boundary within *PD* roles.
+The recorded combinations are vLLM `0.29.0` and `0.30.0`, SGLang `0.5.18` and `0.5.22`,
+`vllm-router` `v0.1.16.1`, `sglang-gateway` `gateway-v0.3.1`, and `llm-d-router` `v0.11.0`.
+Facts on this page apply to those versions; newer builds must be re-verified before they inherit a claim.
 
 ## Contents
 
 - [Which Pods receive traffic](#which-pods-receive-traffic)
-- [SGLang DP routing](#sglang-dp-routing)
 - [Encode stage routing](#encode-stage-routing)
 - [Each router's default](#each-routers-default)
 - [Prefix affinity](#prefix-affinity)
@@ -40,6 +41,11 @@ qualified rank is discovered; the leader restriction applies only to a shape who
 expose no HTTP endpoint. The selectors keep the endpoint eligibility requirement, so an unhealthy
 group cannot receive new traffic.
 The replica's headless `Service` always publishes every member for peer communication.
+
+On the SGLang External DP shape the operator renders `--dp-aware` for the gateway, and the gateway
+then registers one worker per attention-DP rank. Each rank is a logical worker whose URL carries a
+rank suffix (`http://host:port@0`, `http://host:port@1`), and every suffix dials the member's one
+physical serving listener — the suffix is a rank, not a port.
 
 Known non-Internal modes follow the External selector rule. Status retains the engine's distinct mode name.
 Hybrid GPU behavior remains untested. See [Prefill and Decode](prefill-decode.md) for *PD* limitations.
@@ -76,20 +82,6 @@ Actual discovery is the intersection of the deployment-wide selector with the ro
 member filters, so a candidate the native filter excludes is not discovered. A per-kind filter admits
 that kind's union, because two roles of one kind share the filter and a filter demanding one role's
 requirement would withhold the other's members.
-
-## SGLang DP routing
-
-With SGLang `0.5.18` and Gateway `0.3.1`, the container PoC verified ordinary DP attention with
-`--dp-aware` in *`spec.router.extraArgs`*. The Gateway represented ranks as logical workers, such as
-`http://host:port@0` and `http://host:port@1`; both ranks used one physical serving listener. The
-rank suffix does not indicate a separate HTTP port or `Pod`. This verifies the pinned container
-combination only, not a managed **`ModelDeployment`**.
-
-For *P/D*, that PoC used one `sglang-gateway` with `--pd-disaggregation` and omitted `--dp-aware`.
-The Gateway routed to one head for each role, and each engine group distributed work internally.
-Combining both flags produced an invalid Decode destination. This result also covers a single-host
-container run only; it does not establish Kubernetes deployment or recovery support. See
-[Prefill and Decode](prefill-decode.md#pair-connections) for the test boundary.
 
 ## Encode stage routing
 

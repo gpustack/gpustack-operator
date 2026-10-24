@@ -4,6 +4,10 @@
 and the Router balances requests across all of them. For captured commands and results, follow the
 [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md).
 
+The recorded runs apply to vLLM `v0.30.0` on NVIDIA *H100*; the SGLang shape is stated against
+SGLang `0.5.22` with `sglang-gateway` `gateway-v0.3.1`. Other versions must be re-verified before
+they inherit a claim on this page.
+
 ## Contents
 
 - [Overview and selection](#overview-and-selection)
