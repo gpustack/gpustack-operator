@@ -321,8 +321,8 @@ The model cache and cluster remain separate from application cleanup.
 **The acceptance runs ran this procedure and their result is the record.** Two runs on SGLang
 `0.5.22` behind the `sglang-gateway` binary of `gpustack/llm-router:v0.3.1` exercised the shape
 end to end, two groups of two members each: all eight per-member content checks passed and the
-scale-down held the handoff grace window. The open boundaries and the measured numbers are
-stated under [Limitations](#limitations) below.
+scale-down held the handoff grace window. The measured numbers and the open boundaries are
+recorded in the module page's [results](../../modules/model-deployment/external-dp.md#results).
 
 The shape being exercised is described in
 [SGLang External DP](../../modules/model-deployment/external-dp.md#sglang-external-dp). This
@@ -433,8 +433,9 @@ gateway's registry. The per-rank remedy and its image floor are under
 
 Scaling back to 1 withdraws the whole group atomically, and the scale-down runs the
 disaggregated handoff grace window, so **total scale-down latency is at least 60 s** plus the
-drain. Measured, the withdrawn group's workers left the gateway's worker set after 482 s in one
-run and 310 s in the other. The group reads `Draining` during that window.
+drain — the measured withdrawals are recorded in the module page's
+[results](../../modules/model-deployment/external-dp.md#results). The group reads `Draining`
+during that window.
 
 In both runs the gateway then held zero healthy workers, and the surviving group did not
 republish `Eligible` within the case's 900 s budget — a surviving group's recovery from a
@@ -490,16 +491,14 @@ The example does not establish *External DP* with *Prefill/Decode*, hybrid load 
 or placement across GPU nodes. Those configurations need separate compatibility and runtime checks.
 
 **The SGLang acceptance record and its boundaries.** Two runs on SGLang `0.5.22` behind the
-`sglang-gateway` binary of `gpustack/llm-router:v0.3.1` captured the shape end to end: all
-eight per-member content
-checks passed in both runs, and the scale-down handoff grace window held — the withdrawn group's
-workers left the gateway's worker set after 482 s in one run and 310 s in the other.
+`sglang-gateway` binary of `gpustack/llm-router:v0.3.1` captured the shape end to end: all eight
+per-member content checks passed in both runs, and the scale-down handoff grace window held. The
+measured numbers and the open boundaries are recorded in the module page's
+[results](../../modules/model-deployment/external-dp.md#results).
 
-Not captured: a Router worker set covering every member — the gateway registers at most one
-worker per group on `gpustack/llm-router:v0.3.1` — and a surviving group's recovery after a
-scale-down, which never republished `Eligible` within the case's 900 s budget. The per-rank
-remedy (`--dp-aware` on an image from `gpustack/llm-router:v0.4.0`) has not been exercised at
-runtime.
+Two boundaries stayed open: a Router worker set covering every member, and a surviving group's
+recovery after a scale-down. The per-rank remedy (`--dp-aware` on an image from
+`gpustack/llm-router:v0.4.0`) has not been exercised at runtime.
 
 Every number earlier on this page was recorded on the vLLM engine.
 

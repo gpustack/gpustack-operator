@@ -313,7 +313,7 @@ Router's worker set followed every edit, the pinned `round_robin` policy split s
 eight and eight across the two workers at two replicas, both workers stayed healthy, and the
 deployment still served after the scale-back. The run completed 21 checks with zero failures.
 
-The second retired one of two replica groups of a *SGLang* [External DP](external-dp.md) deployment
+The second retired one of two replica groups of a *vLLM* [External DP](external-dp.md) deployment
 at data parallelism 2. The Router's worker set held every member throughout — two workers for one
 group of two, four for two groups of two, and two again after the scale-down.
 
