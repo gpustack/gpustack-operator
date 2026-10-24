@@ -20,7 +20,7 @@
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "server",
         "modeldeployment.gpustack.ai/pod-spec-hash": "c10cf7e545174bd90f46bf7d605fa9b87a278fdece1fe9bd0a6160b1574312f2",
-        "modeldeployment.gpustack.ai/render-version": "3",
+        "modeldeployment.gpustack.ai/render-version": "4",
         "note.gpustack.ai/role": "server",
         "prometheus.io/path": "/metrics",
         "prometheus.io/port": "8000",
@@ -83,6 +83,10 @@
             {
               "name": "HF_HUB_CACHE",
               "value": "/var/lib/gpustack/cache/hf-hub"
+            },
+            {
+              "name": "HF_XET_CACHE",
+              "value": "/var/lib/gpustack/cache/xet"
             },
             {
               "name": "PIP_CACHE_DIR",

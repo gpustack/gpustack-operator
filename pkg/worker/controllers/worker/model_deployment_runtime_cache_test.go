@@ -23,6 +23,7 @@ var runtimeCacheEnvLayout = []struct {
 	subDir string
 }{
 	{name: "HF_HUB_CACHE", subDir: "hf-hub"},
+	{name: "HF_XET_CACHE", subDir: "xet"},
 	{name: "PIP_CACHE_DIR", subDir: "pip"},
 	{name: "TORCH_HOME", subDir: "torch"},
 	{name: "FLASHINFER_WORKSPACE_BASE", subDir: "flashinfer"},

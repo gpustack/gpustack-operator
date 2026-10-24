@@ -16,11 +16,13 @@ import (
 // layer, so a cache that grows there evicts the pod that is filling it, while the same bytes on
 // the host-backed cache mount do not count against the limit at all.
 //
-// The six names below are the distinct roots those caches take at vLLM v0.32.0:
+// The seven names below are the distinct roots those caches take at vLLM v0.32.0:
 //
 //   - HF_HUB_CACHE is where huggingface_hub downloads model weights and tokenizer files. It
 //     is the cache that filled the container's writable layer in the recorded evictions, so it
 //     is the one this table exists for.
+//   - HF_XET_CACHE is where the Xet chunk cache lands. hf_xet reads it ahead of HF_HOME, so the
+//     chunk cache joins the hub cache on the mount while the token stays local.
 //   - PIP_CACHE_DIR is pip's download and wheel cache.
 //   - TORCH_HOME is the root torch keeps its hub checkpoints and cached state under.
 //   - FLASHINFER_WORKSPACE_BASE is the base FlashInfer builds its JIT workspace under. The
@@ -32,12 +34,12 @@ import (
 //   - TRITON_CACHE_DIR is where triton's compiled kernels are kept. Its default is under the
 //     home directory, beside the cache root rather than inside it.
 //
-// THE HUB TOKEN IS DELIBERATELY NOT RELOCATED. huggingface_hub keeps its token, its datasets
-// cache and its Xet chunk cache under HF_HOME, which follows XDG_CACHE_HOME when nothing pins
-// it; pointing that root at the mount would carry a credential onto a host-backed directory
-// every pod mounting the same path can read. Only byte-heavy cache subtrees are relocated, and
-// HF_HOME stays on the container's own filesystem, so a token written there leaves the pod with
-// the pod.
+// THE HUB TOKEN IS DELIBERATELY NOT RELOCATED. huggingface_hub keeps its token and its datasets
+// cache under HF_HOME, which follows XDG_CACHE_HOME when nothing pins it; pointing that root at
+// the mount would carry a credential onto a host-backed directory every pod mounting the same
+// path can read. Only byte-heavy cache subtrees are relocated, and HF_HOME stays on the
+// container's own filesystem, so a token written there leaves the pod with the pod. The datasets
+// cache stays local with it: a serving replica downloads weights, not datasets.
 //
 // NONE OF THESE IS THE ENGINE'S OWN CACHE ROOT. That one is VLLM_CACHE_ROOT or SGLANG_CACHE_DIR,
 // rendered by modelDeploymentCompileCacheDefaultedEnv, and this table does not repeat it.
@@ -48,6 +50,10 @@ import (
 const (
 	// modelDeploymentHFHubCacheEnv is where huggingface_hub downloads weights and tokenizers.
 	modelDeploymentHFHubCacheEnv = "HF_HUB_CACHE"
+
+	// modelDeploymentHFXetCacheEnv is where the Xet chunk cache lands; hf_xet reads it ahead
+	// of HF_HOME.
+	modelDeploymentHFXetCacheEnv = "HF_XET_CACHE"
 
 	// modelDeploymentPIPCacheDirEnv is pip's download and wheel cache.
 	modelDeploymentPIPCacheDirEnv = "PIP_CACHE_DIR"
@@ -83,6 +89,7 @@ type modelDeploymentRuntimeCache struct {
 // document every time.
 var modelDeploymentRuntimeCaches = []modelDeploymentRuntimeCache{
 	{Name: modelDeploymentHFHubCacheEnv, SubDir: "hf-hub"},
+	{Name: modelDeploymentHFXetCacheEnv, SubDir: "xet"},
 	{Name: modelDeploymentPIPCacheDirEnv, SubDir: "pip"},
 	{Name: modelDeploymentTorchHomeEnv, SubDir: "torch"},
 	{Name: modelDeploymentFlashInferWorkspaceBaseEnv, SubDir: "flashinfer"},
@@ -94,6 +101,7 @@ var modelDeploymentRuntimeCaches = []modelDeploymentRuntimeCache{
 // decides which environment variables the operator merely defaults.
 var modelDeploymentRuntimeCacheEnvNames = []string{
 	modelDeploymentHFHubCacheEnv,
+	modelDeploymentHFXetCacheEnv,
 	modelDeploymentPIPCacheDirEnv,
 	modelDeploymentTorchHomeEnv,
 	modelDeploymentFlashInferWorkspaceBaseEnv,
