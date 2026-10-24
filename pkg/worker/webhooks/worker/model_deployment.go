@@ -2131,11 +2131,16 @@ func validateModelDeploymentExternalDPRouter(md *workercore.ModelDeployment) fie
 		return nil
 	}
 
+	subject, verb := "the role", "declares"
+	if len(offenders) > 1 {
+		subject, verb = "the roles", "declare"
+	}
+
 	return field.ErrorList{field.Required(
 		field.NewPath("spec", "router"),
-		fmt.Sprintf("RouterRequired: the role %s declares external data parallelism, whose groups "+
+		fmt.Sprintf("RouterRequired: %s %s %s external data parallelism, whose groups "+
 			"are served through a Router and need it to supervise them; declare one under spec.router",
-			strings.Join(offenders, ", ")),
+			subject, strings.Join(offenders, ", "), verb),
 	)}
 }
 
