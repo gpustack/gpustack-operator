@@ -646,6 +646,10 @@ type modelDeploymentGroupForwardPairAttempt struct {
 	// BootstrapRooms are the rooms the attempt joined the legs on, one per pair it probed. The
 	// proxy path records none, because the proxy picks the room there.
 	BootstrapRooms []int64
+	// Mooncake carries the mooncake exposition lines both halves answered with, one entry per
+	// series, prefixed by the half. The prefill half's series are push evidence; the connector
+	// exports no counter for a successful read, so the copied answer stays the read-side proof.
+	Mooncake []string
 }
 
 // modelDeploymentGroupForwardPairResult is the outcome of one directed pair probe: one result per
@@ -993,6 +997,13 @@ func observeModelDeploymentGroupForwardPair(
 				// the room it joins the pair on and this operator never builds one there.
 				attempt.BootstrapRooms = append(attempt.BootstrapRooms, room)
 			}
+			// THE MOONCAKE SERIES ARE READ FROM BOTH HALVES while the pair is fresh: the prefill
+			// half's exposition carries the push evidence, and the decode half's carries whatever
+			// its connector did about it.
+			attempt.Mooncake = append(attempt.Mooncake,
+				modelDeploymentGroupForwardPairMooncakeSeries(probeCtx, prefillURL, engine.Path, "prefill", fetch)...)
+			attempt.Mooncake = append(attempt.Mooncake,
+				modelDeploymentGroupForwardPairMooncakeSeries(probeCtx, decodeURL, engine.Path, "decode", fetch)...)
 		}
 	}
 
@@ -1077,12 +1088,64 @@ func modelDeploymentGroupForwardPairProbe(
 				"the answer is not evidence that the pair carried one"
 		}
 		if reply.Content != expected {
+			// THE ANSWER IS NAMED IN THE REASON, bounded, so the run's evidence can tell a model
+			// that drifted from a context that was never whole. A reason that discarded the answer
+			// left the classification — answer drift, a broken read, a thinking leak — to a rerun
+			// this probe exists to avoid.
 			return "", 0, "the " + legs[i].Name + " leg answered, but it did not carry the text the " +
-				"request asked to be copied, so nothing shows the prefill's KV reached it"
+				"request asked to be copied, so nothing shows the prefill's KV reached it (answer: \"" +
+				modelDeploymentGroupForwardPairBounded(reply.Content, modelDeploymentGroupForwardPairAnswerBound) + "\")"
 		}
 	}
 
 	return requestID, input.BootstrapRoom, ""
+}
+
+// modelDeploymentGroupForwardPairAnswerBound is how much of a rejected answer the failure reason
+// carries. Two hundred characters is enough to tell a drifted copy from an unrelated answer, and
+// small enough that a reason stays a line.
+const modelDeploymentGroupForwardPairAnswerBound = 200
+
+// modelDeploymentGroupForwardPairBounded cuts a text to at most limit characters on rune
+// boundaries and marks the cut with an ellipsis. The engines answer in more than one script, and
+// a bound that splits a character corrupts the very evidence it carries.
+func modelDeploymentGroupForwardPairBounded(text string, limit int) string {
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "…"
+}
+
+// modelDeploymentGroupForwardPairMooncakeSeries reads one half's metrics exposition and reduces it
+// to the mooncake series the observation records.
+//
+// THE PUSH IS NOT THE PULL. vllm:mooncake_bytes_transferred is the sender's histogram, and its
+// _count is the number of transfers the prefill half completed; the connector exports no counter
+// for a successful read — vllm:mooncake_num_failed_recvs counts failed pulls only — so the series
+// are recorded as what they are, push evidence, and the copied answer stays the read-side proof.
+func modelDeploymentGroupForwardPairMooncakeSeries(
+	ctx context.Context, chatURL, enginePath, half string, fetch modelDeploymentGroupForwardPairFetch,
+) []string {
+	body, err := fetch(ctx, modelDeploymentGroupForwardPairRequest{
+		Method: http.MethodGet,
+		URL:    strings.TrimSuffix(chatURL, enginePath) + "/metrics",
+	})
+	if err != nil {
+		return []string{half + ": the mooncake exposition did not answer: " + err.Error()}
+	}
+	series := make([]string, 0)
+	for _, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "vllm:mooncake_") || strings.HasSuffix(trimmed, "_bucket") {
+			continue
+		}
+		series = append(series, half+": "+trimmed)
+	}
+	if len(series) == 0 {
+		return []string{half + ": the mooncake exposition carries no vllm:mooncake_ series"}
+	}
+	return series
 }
 
 // modelDeploymentGroupForwardPairSend asks every leg of a pair and reads the answers.
@@ -1418,6 +1481,14 @@ func modelDeploymentGroupForwardPairVerified(
 			"and the exact text requested for copying"
 		observation = "the routing proxy answered one request, bound to this operator's own identifier"
 	}
+	if len(attempt.Mooncake) > 0 {
+		observation += "; the mooncake exposition: " + strings.Join(attempt.Mooncake, "; ")
+	}
+	// THE READ SIDE HAS NO SUCCESS COUNTER. The connector's exported series count the sender's
+	// pushes and failed pulls only, so the observation says explicitly that the copied answer is
+	// the evidence a pull happened; a reader cannot take the counters for it.
+	observation += "; the mooncake connector exports no read-side success counter " +
+		"(vllm:mooncake_num_failed_recvs counts failed pulls only), so the copied answer is the read-side evidence"
 
 	return modelDeploymentGroupForwardPairResult{
 		Prefill: modelDeploymentGroupForward{

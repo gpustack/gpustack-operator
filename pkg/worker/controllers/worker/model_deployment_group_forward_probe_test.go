@@ -705,6 +705,13 @@ func (f *probePairFetch) fetch(
 	if slash := strings.Index(authority, "/"); slash >= 0 {
 		authority = authority[:slash]
 	}
+	// THE METRICS SCRAPE IS ANSWERED BY THE STUB ITSELF, minimally: the observation reads the
+	// mooncake series of both halves, and a GET that fell through to the chat answer would hand it
+	// a document that reads as no series at all.
+	if request.Method == "GET" {
+		return []byte("vllm:mooncake_bytes_transferred_count 0.0\n" +
+			"vllm:mooncake_num_failed_recvs 0.0\n"), nil
+	}
 	if err, failed := f.failures[authority]; failed {
 		return nil, err
 	}
@@ -817,12 +824,17 @@ func TestGroupForwardProbePDPairCarriesTheRequestOnBothHeads(t *testing.T) {
 	assert.Equal(t, got.Decode.Generation, got.Attempt.DecodeGeneration,
 		"the attempt records the generation it bound")
 
-	// TWO RANKS ON EACH SIDE IS FOUR PAIRS, AND A PAIR IS TWO REQUESTS.
-	assert.Len(t, fetch.asked, 8, "every rank pair of both groups is asked, both legs of it")
+	// TWO RANKS ON EACH SIDE IS FOUR PAIRS, AND A PAIR IS TWO REQUESTS plus the two halves' metrics
+	// scrapes that follow it: the observation reads the mooncake exposition of both halves after
+	// the legs answer. D12/A.2.
+	assert.Len(t, fetch.asked, 16, "every rank pair of both groups is asked, both legs of it, and each pair is followed by the two halves' metrics scrapes")
 	assert.Len(t, got.Attempt.RequestIDs, 4, "each rank pair carries its own identifier")
 
 	rooms := map[int64]bool{}
 	for _, request := range fetch.asked {
+		if request.Method == "GET" {
+			continue
+		}
 		body := probePairBody(t, request)
 		rid, _ := body["rid"].(string)
 		assert.Contains(t, rid, "gpustack-qualify-",
@@ -842,6 +854,89 @@ func TestGroupForwardProbePDPairCarriesTheRequestOnBothHeads(t *testing.T) {
 		}
 	}
 	assert.Len(t, rooms, 4, "each rank pair is joined on its own room")
+}
+
+// TestGroupForwardProbePDPairNamesTheAnswerItRejected holds that the copied check's failure
+// reason carries the answer it rejected, bounded, so the run's evidence can tell a model that
+// drifted from a context that was never whole.
+//
+// THE REASON USED TO DISCARD THE ANSWER. A hold that said only that the text did not match left
+// the classification — answer drift, a broken read, a thinking leak — to a rerun this probe exists
+// to avoid. D12/A.1.
+func TestGroupForwardProbePDPairNamesTheAnswerItRejected(t *testing.T) {
+	md := probePairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1, "")
+	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
+	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
+
+	t.Run("a short wrong answer is named in full", func(t *testing.T) {
+		fetch := &probePairFetch{
+			prefillHost: probeHost(0, 0),
+			answers: map[string]string{
+				probeHost(1, 0): `{"id":"{{rid}}","choices":[{"message":{"content":"别的文字"},"finish_reason":"stop"}]}`,
+			},
+		}
+		got := observeModelDeploymentGroupForwardPair(
+			context.Background(), md, prefill, decode, fetch.fetch)
+
+		assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
+			"a decoder that did not carry the copy holds the pair")
+		assert.Contains(t, got.Prefill.Reason, `(answer: "别的文字")`,
+			"the reason names the answer it rejected, so drift is tellable from a broken read")
+	})
+
+	t.Run("a long answer is bounded on rune boundaries", func(t *testing.T) {
+		long := strings.Repeat("长", 300)
+		fetch := &probePairFetch{
+			prefillHost: probeHost(0, 0),
+			answers: map[string]string{
+				probeHost(1, 0): `{"id":"{{rid}}","choices":[{"message":{"content":"` + long + `"},"finish_reason":"stop"}]}`,
+			},
+		}
+		got := observeModelDeploymentGroupForwardPair(
+			context.Background(), md, prefill, decode, fetch.fetch)
+
+		assert.Contains(t, got.Prefill.Reason, strings.Repeat("长", 200),
+			"the bound keeps the first two hundred characters")
+		assert.NotContains(t, got.Prefill.Reason, strings.Repeat("长", 201),
+			"the bound stops at two hundred characters")
+		assert.Contains(t, got.Prefill.Reason, "…",
+			"the cut is marked")
+	})
+}
+
+// TestGroupForwardProbePDPairRecordsTheMooncakeCountersOfBothHalves holds that the observation
+// records the mooncake series of both halves and says explicitly that the connector exports no
+// read-side success counter, so a reader can tell push evidence from pull evidence.
+//
+// THE COUNTER THE RUN READ WAS THE SENDER'S. vllm:mooncake_bytes_transferred is the prefill half's
+// histogram, and its _count says pushes happened; nothing exported counts a successful pull, which
+// is why the copied answer is the read-side proof. D12/A.2.
+func TestGroupForwardProbePDPairRecordsTheMooncakeCountersOfBothHalves(t *testing.T) {
+	md := probePairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1, "")
+	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
+	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
+	exposition := "# HELP vllm:mooncake_bytes_transferred transferred bytes\n" +
+		"vllm:mooncake_bytes_transferred_count 2.0\n" +
+		"# HELP vllm:mooncake_num_failed_recvs failed receives\n" +
+		"vllm:mooncake_num_failed_recvs 0.0\n"
+	fetch := func(_ context.Context, request modelDeploymentGroupForwardPairRequest) ([]byte, error) {
+		if strings.HasSuffix(request.URL, "/metrics") {
+			return []byte(exposition), nil
+		}
+		return probePairAnswer(request.Body, strings.Contains(request.URL, probeHost(0, 0))), nil
+	}
+
+	got := observeModelDeploymentGroupForwardPair(
+		context.Background(), md, prefill, decode, fetch)
+
+	assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
+		"a pair that carried the request is still verified")
+	assert.Contains(t, got.Prefill.Observation, "prefill: vllm:mooncake_bytes_transferred_count 2.0",
+		"the prefill half's mooncake series are recorded as push evidence")
+	assert.Contains(t, got.Decode.Observation, "decode: vllm:mooncake_num_failed_recvs 0.0",
+		"the decode half's mooncake series are recorded beside them")
+	assert.Contains(t, got.Decode.Observation, "no read-side success counter",
+		"the observation says explicitly that no exported series counts a successful pull")
 }
 
 // TestGroupForwardProbePDPairHoldsOnAnythingItCannotSee is the fail-closed contract of the directed
@@ -1047,8 +1142,8 @@ func TestGroupForwardProbePDPairNamesThePrefillerToTheRoutingProxy(t *testing.T)
 				"a decode group whose pair carried the request is verified")
 			assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
 				"the prefill group the proxy paired with is verified with it")
-			assert.Len(t, fetch.asked, 1,
-				"the proxy drives the transfer leg, so the operator asks it one question")
+			assert.Len(t, fetch.asked, 3,
+				"the proxy drives the transfer leg, so the operator asks it one question, and the two halves' metrics scrapes follow it")
 			assert.Len(t, got.Attempt.RequestIDs, 1,
 				"the one question carries its own identifier")
 
@@ -1148,8 +1243,8 @@ func TestGroupForwardProbePDPairAsksTheFrontedDecoderAtItsFrontDoor(t *testing.T
 
 	assert.Equal(t, modelDeploymentGroupForwardVerified, got.Decode.State,
 		"the front door is the address the proxy answers on")
-	assert.Len(t, fetch.asked, 1,
-		"the proxy drives the transfer leg, so the operator asks it one question")
+	assert.Len(t, fetch.asked, 3,
+		"the proxy drives the transfer leg, so the operator asks it one question, and the two halves' metrics scrapes follow it")
 	assert.Equal(t, "http://"+probeHost(1, 0)+"/v1/chat/completions", fetch.asked[0].URL,
 		"the front door is the port the Service targets, not the engine's port behind it")
 	assert.Equal(t, probeHost(0, 0),

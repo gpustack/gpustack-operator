@@ -977,6 +977,13 @@ func (f *healthPairFetch) fetch(
 	if slash := strings.Index(authority, "/"); slash >= 0 {
 		authority = authority[:slash]
 	}
+	// THE METRICS SCRAPE IS ANSWERED BY THE STUB ITSELF, minimally: the observation reads the
+	// mooncake series of both halves, and a GET that fell through to the chat answer would hand it
+	// a document that reads as no series at all.
+	if request.Method == "GET" {
+		return []byte("vllm:mooncake_bytes_transferred_count 0.0\n" +
+			"vllm:mooncake_num_failed_recvs 0.0\n"), nil
+	}
 	if err, failed := f.failures[authority]; failed {
 		return nil, err
 	}
@@ -995,6 +1002,11 @@ func healthPairPairs(t *testing.T, fetch *healthPairFetch) []string {
 	seen := map[string]bool{}
 	var pairs []string
 	for _, request := range fetch.asked {
+		if request.Method == "GET" {
+			// THE METRICS SCRAPES ARE NOT PAIRS. The observation reads both halves' mooncake
+			// exposition after the legs answer, and a scrape names no prefiller and no room.
+			continue
+		}
 		authority := request.URL[strings.Index(request.URL, "://")+3:]
 		if slash := strings.Index(authority, "/"); slash >= 0 {
 			authority = authority[:slash]
@@ -1054,7 +1066,7 @@ func TestGroupQualificationAsksTheDirectedPair(t *testing.T) {
 			q.Leg(modelDeploymentLegMembersReady).Verdict,
 			"%s keeps its own readiness", q.View.Role)
 	}
-	assert.Len(t, fetch.asked, 2, "one rank pair is two requests")
+	assert.Len(t, fetch.asked, 4, "one rank pair is two requests, and the two halves' metrics scrapes follow it")
 }
 
 // TestGroupQualificationNeverReadsNotApplicableForAPair pins the difference between a pair and an

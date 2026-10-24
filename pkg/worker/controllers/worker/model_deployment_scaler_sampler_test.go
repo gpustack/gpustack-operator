@@ -1042,7 +1042,7 @@ sglang:inter_token_latency_seconds_count{model_name="Qwen/Qwen3-8B"} 1500.0
 const scalerSamplerQuietDecodeWithoutHistogramExposition = `# TYPE sglang:num_running_reqs gauge
 sglang:num_running_reqs{engine_type="decode",model_name="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
 # TYPE sglang:num_queue_reqs gauge
-sglang:num_queue_reqs{engine_type="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:num_queue_reqs{engine_type="decode",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
 # TYPE sglang:num_decode_transfer_queue_reqs gauge
 sglang:num_decode_transfer_queue_reqs{engine_type="decode",model_name="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
 # TYPE sglang:prompt_tokens_total counter
