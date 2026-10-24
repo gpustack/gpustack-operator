@@ -1,9 +1,12 @@
 # Model Deployment Routing
 
-A managed router selects among the HTTP endpoints of serving replicas. Every routing choice measured here ran
-on a server role; on a *prefill/decode (PD)* pair, where each half is chosen separately, none has been run.
+A managed router selects among serving endpoints, then its policy chooses among them. This page covers
+endpoint selection and SGLang's tested DP routing modes.
 
-See [Prefill and Decode](prefill-decode.md) for the *external data parallelism (External DP)* boundary within *PD* roles.
+The recorded combinations are vLLM `0.29.0` and `0.30.0`, SGLang `0.5.18` and `0.5.22`,
+`vllm-router` `v0.1.16.1`, the `sglang-gateway` binary of `gpustack/llm-router:v0.3.1`, and
+`llm-d-router` `v0.11.0`.
+Facts on this page apply to those versions; newer builds must be re-verified before they inherit a claim.
 
 ## Contents
 
@@ -27,7 +30,6 @@ The engine's *load balancing (LB)* mode determines the candidate endpoints. The 
 | Qualified External Server group | Every qualified member; each member serves one *data parallelism (DP)* rank. |
 | *Prefill* or *Decode* group | Member 0 of each replica, including groups with `size > 1`. |
 | *Encode* group | Excluded from answering candidates and the deployment-wide `Service`. |
-| Unknown mode or unverified group | Keep the existing leader restriction; do not expand discovery. |
 
 *Encode* `Pod`s are never part of the deployment's answering set. Under `llm-d-router` they are
 discovered for stage routing, and under `vllm-router` their `Service` endpoint is passed through
@@ -35,9 +37,31 @@ discovered for stage routing, and under `vllm-router` their `Service` endpoint i
 `vllm-router` and `sglang-gateway`) are admitted with an *Encode* role for their supported engine
 and platform combinations. See [Encode stage routing](#encode-stage-routing).
 
-For an eligible External Server role, Router discovery and ordinary `Service`s omit `member-index=0`.
-They retain the endpoint eligibility label, so an unhealthy group cannot receive new traffic.
+For an eligible External Server role the selectors carry no member-index term at all, so every
+qualified rank is discovered; the leader restriction applies only to a shape whose subordinate members
+expose no HTTP endpoint. The selectors keep the endpoint eligibility requirement, so an unhealthy
+group cannot receive new traffic.
 The replica's headless `Service` always publishes every member for peer communication.
+
+On the SGLang External DP shape the operator renders `--dp-aware` for the gateway. With the flag,
+the gateway registers one worker per attention-DP rank: each rank is a logical worker whose URL
+carries a rank suffix (`http://host:port@0`, `http://host:port@1`), and every suffix dials the
+member's one physical serving listener — the suffix is a rank, not a port.
+
+That registration is the gateway patch this project ships: an image carrying it is
+`gpustack/llm-router:v0.4.0` or later, while the default
+[`model-deployment-router-image`](../../reference/settings.md) still names `v0.3.1`, which
+predates the patch. The registration activates only where *`spec.router.image`* or the setting
+names an image that carries the patch.
+
+No runtime run has exercised the flag: the render gate and the patched fan-out are verified in
+source and unit tests on the recorded shape.
+
+Without the flag the gateway registers at most one worker per group — recorded on
+`gpustack/llm-router:v0.3.1`, and on the `v0.4.0` gateway build with the flag withheld. Each
+group's subordinate member times out inside the gateway's 10 s discovery step and never enters
+the worker registry, and under load a group's registered worker can miss its registration too:
+a two-group, four-member deployment presented two healthy workers in one run and one in another.
 
 Known non-Internal modes follow the External selector rule. Status retains the engine's distinct mode name.
 Hybrid GPU behavior remains untested. See [Prefill and Decode](prefill-decode.md) for *PD* limitations.
@@ -47,6 +71,33 @@ All routed roles must use the same serving port. A shared custom port remains su
 Admission rejects vLLM's MultiPort mode because it starts endpoints on additional, incremented ports.
 A decoder proxy's internal backend port remains separate from its published HTTP port.
 See the [External DP walkthrough](../../walkthroughs/model-deployment/external-dp.md) for a minimal per-rank configuration.
+
+### How groups are excluded
+
+A managed protected group is excluded through its `Pod` set, not through a selector that loses a term.
+The requirement stays in the selector from the first enable, decided or not, and only the members whose
+group is qualified carry the matching label.
+
+| Group class | Exclusion |
+|---|---|
+| Managed protected group: multi-member ordinary, External DP, or *Prefill*/*Decode* | The selector carries the endpoint-eligibility requirement from the first enable, decided or not. Only the members whose group is qualified carry the matching label, so only they are discovered. |
+| Unsupported custom route, or an engine outside the capability matrix | The compatibility carve-out: the existing leader restriction, and no claim of qualification. |
+| Ordinary single-member Server | The leader restriction, with no eligibility requirement in the selector. |
+
+The Router and the ordinary `Service` take the same decision, so a request cannot reach an endpoint the
+`Service` does not front.
+
+### Managed and custom roles
+
+A deployment whose roles do not all carry the same requirement needs one deployment-wide selector to
+express their union, and the operator names that union through an internal candidate label,
+`modeldeployment.gpustack.ai/router-candidate`. The label says membership, not qualification: a
+candidate is a member that may be discovered, and the label is no proof that its group qualifies.
+
+Actual discovery is the intersection of the deployment-wide selector with the router's native role and
+member filters, so a candidate the native filter excludes is not discovered. A per-kind filter admits
+that kind's union, because two roles of one kind share the filter and a filter demanding one role's
+requirement would withhold the other's members.
 
 ## Encode stage routing
 
@@ -88,8 +139,8 @@ Encoders are also excluded from KV cache event discovery, because they produce n
 
 **`vllm-router` and `sglang-gateway` route by `cache_aware`, and `llm-d-router` scores every
 candidate for each request.** The operator renders no policy flag for the first two, so each runs its
-upstream default. The table describes the bundled vLLM router `v0.1.15` and SGLang gateway
-`gateway-v0.3.1`; the llm-d row describes the operator's scoring profile.
+upstream default. The table describes the bundled vLLM router `v0.1.16.1` and the `sglang-gateway` binary of
+`gpustack/llm-router:v0.3.1`; the llm-d row describes the operator's scoring profile.
 
 | *`spec.router.name`* | Default | Replica selection |
 |---|---|---|
@@ -178,14 +229,40 @@ the operator reports both.** The first is the qualification list, and the second
 of the Router itself; they are published separately in
 [`status.roles[].endpoints`](status.md#status) and never collapse into one number.
 
+**A group adds a third surface, and the operator publishes three related answers without collapsing
+them.** The role's counts, the group's own entry in
+[`status.roles[].groups[]`](status.md#group-status), and the Router's serving confirmation are three
+readings of one deployment, and the group entry answers a question the counts cannot: which members
+the group holds, and what holds it.
+
+`AwaitingObservation` names a group whose qualification passed and whose restoration the Router's
+observation blocks. A group that was already eligible and whose fresh membership is complete,
+unchanged, safe and current stays `Eligible` through an observation loss, with its serving
+confirmation `Unknown`. The group's reason and the Router's reason name different facts, so a lost
+Router view never reads as an engine fault.
+
+Retained eligibility requires the [Group status](status.md#group-status) membership checks.
+
+**A Router process health result is not an engine group's health.** The Router answers for its own
+process; the group answers for the engine's members.
+
 The observation is a plain HTTP GET with a short timeout against each Router `Pod`'s own address. It
 deliberately does not go through the Router `Service`, which would load balance across the Router's
 replicas and report one of them as the whole Router. What `Confirmed` then means is the
 serving-observation contract [`status.roles[].endpoints`](status.md#status) defines once.
 
+**Three bounds apply, and they serve different purposes.**
+
+| Bound | Value | What it covers |
+|---|---|---|
+| Fetch deadline | 2 seconds | one read of one Router's view |
+| Collection budget | 14 seconds | one collection, across every Router it reads |
+| Freshness policy | 15 seconds | how long a collected view informs the answer |
+
 **A collected view informs the answer for fifteen seconds.** Past that the answer becomes `Unknown`,
 so a Router that stops being reachable is reported as unobserved and never as serving whatever it
-served last.
+served last. The fetch deadline keeps one unreachable Router from consuming the collection budget the
+other Routers share.
 
 > The freshness bound is what keeps a stopped Router from reading as a healthy one. A view that
 > outlived its evidence would report a serving count for a process that is gone, and the only way
@@ -209,6 +286,15 @@ request. Each router's own `/metrics` does, for the series below, all seen expor
 
 Neither `sglang-gateway` nor `llm-d-router` keeps a running count per replica. Behind them, compare
 the engine `Pod`s' own counts instead, such as each `Pod`'s *time to first token (TTFT)* histogram `_count`.
+
+A scale event is visible in these series. On a *SGLang* multi-Server deployment scaled one to two,
+the gateway's worker set grew to two `smg_worker_health` series at `1`; on the scale back, the
+withdrawn worker's series stayed in the exposition at `-1` while
+`smg_discovery_deregistrations_total{reason="pod_deleted"}` incremented, and the surviving worker
+kept its `1`.
+
+Count the healthy series, not the lines, on a scaled deployment. The same run's four content
+classes served through the gateway with zero failures.
 
 ---
 

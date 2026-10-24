@@ -181,6 +181,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentAdditionalVolume(ref),
 		v1alpha1.ModelDeploymentEngine{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentEngine(ref),
 		v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentEnvVar(ref),
+		v1alpha1.ModelDeploymentGroupMemberStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentGroupMemberStatus(ref),
+		v1alpha1.ModelDeploymentGroupStatus{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelDeploymentGroupStatus(ref),
 		v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCache(ref),
 		v1alpha1.ModelDeploymentKVCacheDomain{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheDomain(ref),
 		v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheStatus(ref),
@@ -9446,6 +9448,147 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentEnvVar(ref common.Refere
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentGroupMemberStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentGroupMemberStatus is one member of a group, as it currently stands.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the member Pod's name.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"uid": {
+						SchemaProps: spec.SchemaProps{
+							Description: "UID is the member Pod's identity. A replaced member is a different UID, which is what makes a replaced membership a different generation.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"seat": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Seat is the seat the member claims, absent when the member claims none or one that cannot be read. The group's reason names that defect.\n\nIN A GROUP WHOSE MEMBERS ARE WHOLE REPLICAS the seat is the member's ADMISSION ORDINAL, because the seat it claims among the members of its own replica is not a seat of that group at all. The ordinal is the operator's own fact and not the engine's runtime rank: which member holds which rank is the engine's business, and the operator's numbering never implies it.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"ready": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Ready is the member's readiness, one of True, False or Unknown.\n\nA member whose Ready condition has never been reported is Unknown, not False: a member nobody has reported on is not a member that was observed and found not ready, and a diagnosis that cannot tell those two apart cannot say which one happened.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name", "uid", "ready"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentGroupStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentGroupStatus is one group's qualification, as published.\n\nIT IS A DESCRIPTION OF ONE GROUP, NOT A COUNT OF THE ROLE'S ENDPOINTS. The role's counts remain derived views and say nothing about which group holds which member.\n\nTHE STATE AND THE SERVING CONFIRMATION ARE TWO ANSWERS AND NEVER COLLAPSE INTO ONE. The state and the reason are the ENGINE's answer -- which leg of the whole-group predicate holds the group. The serving confirmation is the ROUTER's answer. A group whose members are healthy and whose Router view was lost is Eligible with an Unknown serving confirmation, and a group whose member failed is Withdrawn, and neither reading can be mistaken for the other.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"role": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Role is the role this group belongs to.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"ordinal": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Ordinal is the replica slot this group occupies within its role.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"generation": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Generation is the membership the answers below were taken against: the sorted member UID set. A replaced member is a different set, so a prior verification does not apply to the new one.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"state": {
+						SchemaProps: spec.SchemaProps{
+							Description: "State is the group's eligibility state.\n\nIT IS THE QUALIFICATION'S STATE, EXCEPT WHEN THE ROUTER'S OBSERVATION HOLDS THE GROUP: a group that passed every leg and is waiting on a valid Router observation is AwaitingObservation, while a group that passed every leg and is retained across an observation loss is Eligible, because the observation is not what holds it.\n\n\nPossible enum values:\n - `\"AwaitingMembers\"` is a group whose member set is not established.\n - `\"AwaitingObservation\"` is a group every leg verified that is waiting on a valid Router observation.\n - `\"AwaitingProbe\"` is a group whose forward path could not be observed.\n - `\"AwaitingReady\"` is a group whose members are not all Ready=True.\n - `\"Eligible\"` is a group every leg verified and nothing else holds.\n - `\"Unknown\"` is a group held on a fact this operator cannot name.\n - `\"Unsupported\"` is a shape no observation exists for.\n - `\"Withdrawn\"` is a group a definite fault withdrew.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"AwaitingMembers", "AwaitingObservation", "AwaitingProbe", "AwaitingReady", "Eligible", "Unknown", "Unsupported", "Withdrawn"},
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Reason names the fact that holds the group, or says that it qualifies.\n\nIT NAMES ONE FACT AND NEVER TWO. When a leg of the whole-group predicate holds the group, the reason names that leg. When the Router's observation holds the group, the reason names the observation. A member fault and a lost Router view are therefore told apart by the reason as well as by the state.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"members": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Members are the group's current members, ordered by seat.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentGroupMemberStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"lastQualificationTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LastQualificationTime is when the group last entered published Eligible for this generation.\n\nIT IS THE TRANSITION, NOT THE LATEST PASS. A group that stays Eligible keeps the instant it earned, and a group that is held in the same generation keeps it too, so an observation loss does not erase it. A group that leaves Eligible and comes back records the new instant. A NEW GENERATION INHERITS NO TIMESTAMP: the membership it names is a membership that was never qualified.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"serving": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Serving is the Router's answer for this group.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentServingStatus{}.OpenAPIModelName()),
+						},
+					},
+					"servingReason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ServingReason names why the Router's answer is what it is, when it is not a confirmation.\n\nIT IS PUBLISHED IN BOTH OBSERVATION-LOSS CASES, because the serving field has to be complete on its own: a reader who finds Serving without a reason here cannot tell an unobserved Router apart from one that was observed and reported nothing.\n\nIT IS SEPARATE FROM Reason, because the two name different facts. Reason names what holds the GROUP and ServingReason names what holds the SERVING ANSWER, so an engine fault's reason never appears here and the Router's reason never takes the group's place.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"role", "ordinal", "generation", "state", "reason", "serving"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentGroupMemberStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentServingStatus{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCache(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -10464,12 +10607,31 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 							Ref:         ref(v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName()),
 						},
 					},
+					"groups": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Groups is one entry per group of this role, ordered by replica ordinal.\n\nIT ANSWERS WHAT THE COUNTS ABOVE CANNOT. Those counts say how many instances the role has and how many are Ready; a group entry says which members form one scheduling group, what state that group stands in, and whether the Router confirms it is being served. A reader asking which replica failed, or which one the Router stopped selecting, needs the entry and cannot get it from the counts.\n\nIT IS AN ORDINARY LIST, NOT A MAP, because a group's generation changes whenever a member is replaced. A map keyed on the generation would replace the whole entry on every membership change, and a map keyed on the ordinal alone would let a reader match a stale entry to a new membership. The identity is carried in the entry instead.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentGroupStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"name", "desired", "ready", "quotaReserved", "unmanaged", "kind"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentGroupStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName()},
 	}
 }
 

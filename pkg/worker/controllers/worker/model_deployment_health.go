@@ -153,6 +153,10 @@ type modelDeploymentInstanceQualification struct {
 	// GroupForward is kept whole rather than flattened into a leg, because activation is
 	// decided from it and the status reports which state produced the hold.
 	GroupForward modelDeploymentGroupForward
+	// PairAttempt is the directed pair attempt that verified this replica, when one did. It is
+	// retained so a reader can tell a proxy-shape answer from a rank-covering one without
+	// re-deriving it, and so the requests the answer was bound to can be read.
+	PairAttempt *modelDeploymentGroupForwardPairAttempt
 	// Observed is whether any member's readiness has actually been reported. A replica this
 	// pass just created has not, and a deployment made entirely of those has made no eligibility
 	// observation at all -- which is what the status already calls NotObserved, and which must not
@@ -176,6 +180,122 @@ func (q modelDeploymentInstanceQualification) Leg(
 		Verdict: modelDeploymentLegUnknown,
 		Reason:  "the leg was not evaluated",
 	}
+}
+
+// modelDeploymentGroupState is the state a group's qualification stands in.
+//
+// THE NAMES ARE THE ONES THE STATUS PUBLISHES, because this operator reports one state per group
+// and a reader learns nothing from two vocabularies for one thing.
+type modelDeploymentGroupState string
+
+const (
+	// modelDeploymentGroupStateEligible is a group every leg verified.
+	modelDeploymentGroupStateEligible modelDeploymentGroupState = "Eligible"
+	// modelDeploymentGroupStateWithdrawn is a group a definite fault withdrew.
+	modelDeploymentGroupStateWithdrawn modelDeploymentGroupState = "Withdrawn"
+	// modelDeploymentGroupStateAwaitingMembers is a group whose member set is not established.
+	modelDeploymentGroupStateAwaitingMembers modelDeploymentGroupState = "AwaitingMembers"
+	// modelDeploymentGroupStateAwaitingReady is a group whose members are not all Ready=True.
+	modelDeploymentGroupStateAwaitingReady modelDeploymentGroupState = "AwaitingReady"
+	// modelDeploymentGroupStateAwaitingProbe is a group whose forward path could not be observed.
+	modelDeploymentGroupStateAwaitingProbe modelDeploymentGroupState = "AwaitingProbe"
+	// modelDeploymentGroupStateUnsupported is a shape no observation exists for.
+	modelDeploymentGroupStateUnsupported modelDeploymentGroupState = "Unsupported"
+	// modelDeploymentGroupStateUnknown is a group held on a fact this operator cannot name.
+	modelDeploymentGroupStateUnknown modelDeploymentGroupState = "Unknown"
+)
+
+// modelDeploymentQualificationLegOrder is the order the legs are evaluated in, and the order a held
+// group reports its blocking leg in.
+//
+// THE ORDER IS THE EVALUATION ORDER, so the first leg that is not verified is the one that would
+// have to change before the group could qualify.
+var modelDeploymentQualificationLegOrder = []modelDeploymentQualificationLegName{
+	modelDeploymentLegMemberSetComplete,
+	modelDeploymentLegMembersReady,
+	modelDeploymentLegGroupForward,
+	modelDeploymentLegNoPlannedRetirement,
+	modelDeploymentLegNoPendingReplacement,
+}
+
+// MembersReady reports whether every member of the group reports Ready=True.
+//
+// IT IS THE FAIL-CLOSED ANSWER TO THE MEMBER QUESTION. Ready=True is the only positive answer, so
+// a member that has not reported its readiness, or has reported it as anything but True, makes the
+// group unsafe. The leg itself stays three-valued, because a group that is still starting is HELD
+// and not REVOKED, but the group is withdrawn either way.
+func (q modelDeploymentInstanceQualification) MembersReady() bool {
+	return q.Leg(modelDeploymentLegMembersReady).Verdict == modelDeploymentLegVerified
+}
+
+// GroupState classifies the group.
+//
+// THE BLOCKING LEG IS SELECTED ONCE, so the state and the reason can never disagree about what
+// holds the group. The precedence reads a revocation above an unsupported shape above a hold, which
+// is the precedence the status already publishes, so the classification here and the status there
+// cannot disagree about which of two facts came first.
+func (q modelDeploymentInstanceQualification) GroupState() modelDeploymentGroupState {
+	if q.Eligible() {
+		return modelDeploymentGroupStateEligible
+	}
+	if q.HasFailure() {
+		return modelDeploymentGroupStateWithdrawn
+	}
+	if q.GroupForward.State == modelDeploymentGroupForwardUnsupported {
+		return modelDeploymentGroupStateUnsupported
+	}
+	for _, name := range modelDeploymentQualificationLegOrder {
+		if q.Leg(name).Verdict == modelDeploymentLegVerified {
+			continue
+		}
+		switch name {
+		case modelDeploymentLegMemberSetComplete:
+			return modelDeploymentGroupStateAwaitingMembers
+		case modelDeploymentLegMembersReady:
+			return modelDeploymentGroupStateAwaitingReady
+		case modelDeploymentLegGroupForward:
+			return modelDeploymentGroupStateAwaitingProbe
+		}
+
+		// THE FIRST LEG THAT IS NOT VERIFIED NAMES THE STATE, so a group held on the retirement or
+		// the replacement leg reports the state this operator has no finer name for.
+		return modelDeploymentGroupStateUnknown
+	}
+
+	return modelDeploymentGroupStateUnknown
+}
+
+// Reason names the fact that holds the group, or says that it qualifies.
+//
+// IT NAMES THE SAME LEG THE STATE NAMES, so a reader is never told that a group is awaiting one
+// thing and given the reason for another.
+func (q modelDeploymentInstanceQualification) Reason() string {
+	if q.Eligible() {
+		// Proxy responses do not prove individual rank coverage or KV transfer.
+		if q.PairAttempt != nil && q.PairAttempt.Shape == modelDeploymentGroupForwardPairShapeViaRoutingProxy {
+			return "routing proxy returned the expected content with the probe request ID while naming " +
+				"the prefiller; individual rank coverage and KV transfer remain unproven"
+		}
+
+		return "every leg of the group verified"
+	}
+	failed := q.HasFailure()
+	for _, name := range modelDeploymentQualificationLegOrder {
+		leg := q.Leg(name)
+		if failed && leg.Verdict == modelDeploymentLegFailed {
+			return leg.Reason
+		}
+	}
+	if q.GroupForward.State == modelDeploymentGroupForwardUnsupported {
+		return q.GroupForward.Reason
+	}
+	for _, name := range modelDeploymentQualificationLegOrder {
+		if leg := q.Leg(name); leg.Verdict != modelDeploymentLegVerified {
+			return leg.Reason
+		}
+	}
+
+	return q.GroupForward.Reason
 }
 
 // HasFailure reports a definite health fault. It is the signal that revokes unconditionally and
@@ -261,9 +381,16 @@ func (q modelDeploymentInstanceQualification) Activated() bool {
 // is already condemned by facts the informer cache carries, so it never pays for a live
 // observation, and more importantly its definite fault is never softened into a hold by an
 // observation that happens to be missing.
+//
+// THE DIRECTED PAIR TRANSPORT IS OPTIONAL. A Prefill or a Decode group is served by a pair, and
+// without that transport this operator has no observation of a pair at all, so such a group
+// answers Unsupported rather than being asked a question it cannot answer. A caller that must see
+// the pair answered has to wire the transport, and a caller that does not gets the answer the
+// ordinary group's shape implies.
 func qualifyModelDeploymentInstances(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
 	pending modelDeploymentPendingReplacement, fetch modelDeploymentGroupForwardFetch,
+	pairFetch ...modelDeploymentGroupForwardPairFetch,
 ) []modelDeploymentInstanceQualification {
 	roles := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
@@ -271,7 +398,7 @@ func qualifyModelDeploymentInstances(
 	}
 
 	views := modelDeploymentGroupPodsByReplica(pods)
-	qualifications := make([]modelDeploymentInstanceQualification, 0, len(views))
+	locals := make([]modelDeploymentReplicaLocal, 0, len(views))
 	for _, view := range views {
 		role := roles[view.Role]
 		if role == nil {
@@ -280,31 +407,60 @@ func qualifyModelDeploymentInstances(
 			continue
 		}
 
-		qualifications = append(qualifications, qualifyModelDeploymentInstance(
-			ctx, md, view, role, pending, fetch,
+		locals = append(locals, newModelDeploymentReplicaLocal(view, role))
+	}
+
+	answers := modelDeploymentGroupForwardAnswers(
+		ctx, md, locals, fetch, modelDeploymentPairTransport(pairFetch),
+	)
+
+	qualifications := make([]modelDeploymentInstanceQualification, 0, len(locals))
+	for i, local := range locals {
+		qualifications = append(qualifications, local.modelDeploymentQualification(
+			md, pending, answers[i],
 		))
 	}
 
 	return qualifications
 }
 
-// qualifyModelDeploymentInstance evaluates one replica's five legs.
-func qualifyModelDeploymentInstance(
-	ctx context.Context,
-	md *workercore.ModelDeployment,
-	view modelDeploymentReplicaView,
-	role *workercore.ModelDeploymentRole,
-	pending modelDeploymentPendingReplacement,
-	fetch modelDeploymentGroupForwardFetch,
-) modelDeploymentInstanceQualification {
-	// THE CHEAP LEGS ARE DECIDED BEFORE THE OBSERVATION IS ASKED FOR. A replica that is short a
-	// member or holds an unready one is already condemned by facts the informer cache carries, so
-	// it never pays for a live observation, and more importantly its definite fault is never
-	// softened into a hold by an observation that happens to be missing.
-	//
-	// Completeness is measured against the group total the members declare, never the role's
-	// declared size, so a replica the role has been edited away from stays whole.
-	// A shape the members cannot establish holds; a replica short of its total still fails.
+// modelDeploymentPairTransport reads the directed pair transport out of the optional argument.
+//
+// AN ABSENT TRANSPORT IS AN UNWIRED CAPABILITY and not a license to ask the pair anyway: the
+// caller that does not wire one has told this operator it has no way to observe a pair.
+func modelDeploymentPairTransport(
+	pairFetch []modelDeploymentGroupForwardPairFetch,
+) modelDeploymentGroupForwardPairFetch {
+	if len(pairFetch) == 0 {
+		return nil
+	}
+
+	return pairFetch[0]
+}
+
+// modelDeploymentReplicaLocal is the part of one replica's answer that needs no observation.
+//
+// THE LOCAL LEGS ARE HERE AND NOT IN THE QUALIFICATION because the observation needs to know them
+// before it asks anything: a pair can only be asked about two replicas that are both ready and
+// complete, and a replica that is neither is never asked about at all.
+type modelDeploymentReplicaLocal struct {
+	// view is the replica these legs belong to.
+	view modelDeploymentReplicaView
+	// role is the role the replica belongs to.
+	role *workercore.ModelDeploymentRole
+	// membersComplete and membersReady are the two member legs.
+	membersComplete modelDeploymentQualificationLeg
+	membersReady    modelDeploymentQualificationLeg
+}
+
+// newModelDeploymentReplicaLocal decides the two member legs of one replica.
+//
+// COMPLETENESS IS MEASURED AGAINST THE GROUP TOTAL THE MEMBERS DECLARE, never the role's declared
+// size, so a replica the role has been edited away from stays whole. A shape the members cannot
+// establish holds; a replica short of its total still fails.
+func newModelDeploymentReplicaLocal(
+	view modelDeploymentReplicaView, role *workercore.ModelDeploymentRole,
+) modelDeploymentReplicaLocal {
 	shape := modelDeploymentDeployedReplicaShape(view)
 	membersComplete := modelDeploymentQualificationLeg{
 		Name:    modelDeploymentLegMemberSetComplete,
@@ -350,24 +506,48 @@ func qualifyModelDeploymentInstance(
 			strconvx.Itoa(len(view.Members)) + " members report not ready"
 	}
 
-	// A replica condemned by a definite leg owes nothing to a live probe: the request would
-	// spend engine tokens on an answer that cannot soften the fault. The observation is still
-	// ASKED, with no transport: answers that never needed the network (a one-member replica is
-	// NotApplicable, an unverified shape is Unsupported) are unchanged, and only the probe leg
-	// comes back as an absence of evidence.
-	fetchForReplica := fetch
-	if membersComplete.Verdict == modelDeploymentLegFailed ||
-		membersReady.Verdict == modelDeploymentLegFailed {
-		fetchForReplica = nil
+	return modelDeploymentReplicaLocal{
+		view:            view,
+		role:            role,
+		membersComplete: membersComplete,
+		membersReady:    membersReady,
 	}
-	groupForward := observeModelDeploymentGroupForward(ctx, md, role, view, fetchForReplica)
+}
 
-	qualification := modelDeploymentInstanceQualification{
-		View:         view,
-		Generation:   modelDeploymentGenerationOf(view),
-		GroupForward: groupForward,
+// localReady reports whether the replica is complete and every member of it reports Ready=True.
+//
+// IT IS THE CONDITION A PAIR IS ASKED UNDER, and it is stricter than the ordinary group's: a pair
+// speaks for two replicas at once, so a replica that is not serving must not be one half of it.
+func (l modelDeploymentReplicaLocal) localReady() bool {
+	return l.membersComplete.Verdict == modelDeploymentLegVerified &&
+		l.membersReady.Verdict == modelDeploymentLegVerified
+}
+
+// localFault names the member leg that stopped the replica from being asked about.
+func (l modelDeploymentReplicaLocal) localFault() string {
+	if l.membersComplete.Verdict != modelDeploymentLegVerified {
+		return l.membersComplete.Reason
 	}
-	for _, member := range view.Members {
+
+	return l.membersReady.Reason
+}
+
+// modelDeploymentQualification assembles one replica's whole-group answer from its local legs and
+// its observation.
+//
+// THE LEG ORDER IS UNCHANGED, because the order the legs are read in is the order a reader of the
+// status reads them in.
+func (l modelDeploymentReplicaLocal) modelDeploymentQualification(
+	md *workercore.ModelDeployment, pending modelDeploymentPendingReplacement,
+	answer modelDeploymentGroupForwardAnswer,
+) modelDeploymentInstanceQualification {
+	qualification := modelDeploymentInstanceQualification{
+		View:         l.view,
+		Generation:   modelDeploymentGenerationOf(l.view),
+		GroupForward: answer.forward,
+		PairAttempt:  answer.attempt,
+	}
+	for _, member := range l.view.Members {
 		if modelDeploymentMemberReadiness(member) != modelDeploymentLegUnknown {
 			qualification.Observed = true
 
@@ -379,19 +559,19 @@ func qualifyModelDeploymentInstance(
 	// have every member it does hold reporting ready, while Kueue has composed no Workload for
 	// it and it is admitted by nothing. It is absent with some Pods lying around, not partly
 	// working.
-	qualification.Legs = append(qualification.Legs, membersComplete)
-	qualification.Legs = append(qualification.Legs, membersReady)
+	qualification.Legs = append(qualification.Legs, l.membersComplete)
+	qualification.Legs = append(qualification.Legs, l.membersReady)
 
 	qualification.Legs = append(qualification.Legs, modelDeploymentQualificationLeg{
 		Name:    modelDeploymentLegGroupForward,
-		Verdict: groupForwardVerdict(groupForward.State),
-		Reason:  groupForward.Reason,
+		Verdict: groupForwardVerdict(answer.forward.State),
+		Reason:  answer.forward.Reason,
 	})
 
 	qualification.Legs = append(qualification.Legs, modelDeploymentQualificationLeg{
 		Name:    modelDeploymentLegNoPlannedRetirement,
-		Verdict: retirementVerdict(md, view),
-		Reason:  retirementReason(md, view),
+		Verdict: retirementVerdict(md, l.view),
+		Reason:  retirementReason(md, l.view),
 	})
 
 	replacing := modelDeploymentQualificationLeg{
@@ -399,13 +579,231 @@ func qualifyModelDeploymentInstance(
 		Verdict: modelDeploymentLegVerified,
 		Reason:  "the replica is not condemned for replacement by this pass",
 	}
-	if view.Seated && pending.modelDeploymentPending(view.Role, view.Ordinal) {
+	if l.view.Seated && pending.modelDeploymentPending(l.view.Role, l.view.Ordinal) {
 		replacing.Verdict = modelDeploymentLegFailed
 		replacing.Reason = "the replica is condemned for replacement by this pass"
 	}
 	qualification.Legs = append(qualification.Legs, replacing)
 
 	return qualification
+}
+
+// modelDeploymentGroupForwardAnswer is one replica's observation and the evidence behind it.
+type modelDeploymentGroupForwardAnswer struct {
+	// forward is the observation itself.
+	forward modelDeploymentGroupForward
+	// attempt is the directed pair attempt that verified this replica, when a verified pair did.
+	attempt *modelDeploymentGroupForwardPairAttempt
+}
+
+// modelDeploymentGroupForwardAnswers asks the observation for every replica.
+//
+// THE ORDINARY ROLES ARE ASKED ONE BY ONE, and the Prefill and the Decode roles are asked AS PAIRS,
+// because neither half of a pair serves on its own: the prefiller computes the KV and the decoder
+// consumes it, so one request that comes back with the copied answer is evidence about both.
+func modelDeploymentGroupForwardAnswers(
+	ctx context.Context, md *workercore.ModelDeployment,
+	locals []modelDeploymentReplicaLocal,
+	fetch modelDeploymentGroupForwardFetch,
+	pairFetch modelDeploymentGroupForwardPairFetch,
+) []modelDeploymentGroupForwardAnswer {
+	answers := make([]modelDeploymentGroupForwardAnswer, len(locals))
+
+	var prefills, decodes []int
+	for i, local := range locals {
+		switch ModelDeploymentEffectiveRoleKind(local.role) {
+		case workercore.ModelDeploymentRoleKindPrefill:
+			prefills = append(prefills, i)
+
+			continue
+		case workercore.ModelDeploymentRoleKindDecode:
+			decodes = append(decodes, i)
+
+			continue
+		}
+
+		// A REPLICA CONDEMNED BY A DEFINITE MEMBER LEG OWES NOTHING TO A LIVE PROBE: the request
+		// would spend engine tokens on an answer that cannot soften the fault. The observation is
+		// still ASKED, with no transport: answers that never needed the network (a one-member
+		// replica is NotApplicable, an unverified shape is Unsupported) are unchanged, and only the
+		// probe leg comes back as an absence of evidence.
+		transport := fetch
+		if local.membersComplete.Verdict == modelDeploymentLegFailed ||
+			local.membersReady.Verdict == modelDeploymentLegFailed {
+			transport = nil
+		}
+		answers[i] = modelDeploymentGroupForwardAnswer{
+			forward: observeModelDeploymentGroupForward(ctx, md, local.role, local.view, transport),
+		}
+	}
+
+	for i, answer := range modelDeploymentPairAnswers(ctx, md, locals, prefills, decodes, pairFetch) {
+		answers[i] = answer
+	}
+
+	return answers
+}
+
+// modelDeploymentPairAnswers answers the Prefill and the Decode replicas of one deployment.
+//
+// THE CONFIGURATION IS DECIDED ONCE FOR BOTH ROLES, because a pair is a fact about the two roles
+// together: a role whose route this operator does not know cannot be paired with anything, and
+// neither can its opposite.
+func modelDeploymentPairAnswers(
+	ctx context.Context, md *workercore.ModelDeployment,
+	locals []modelDeploymentReplicaLocal,
+	prefills, decodes []int,
+	fetch modelDeploymentGroupForwardPairFetch,
+) map[int]modelDeploymentGroupForwardAnswer {
+	answers := map[int]modelDeploymentGroupForwardAnswer{}
+	if len(prefills) == 0 && len(decodes) == 0 {
+		return answers
+	}
+
+	unsupported, unsupportedReason := modelDeploymentGroupForwardPairSupport(md)
+
+	// THE CANDIDATES ARE THE ONES THAT MAY BE ASKED ABOUT. Every replica that is not a candidate
+	// already has its answer: the shape has no observation of it, or the replica is not ready
+	// enough to be asked about, or the transport is unwired.
+	candidates := func(group []int) []int {
+		ready := make([]int, 0, len(group))
+		for _, i := range group {
+			local := locals[i]
+			switch {
+			case unsupported:
+				answers[i] = modelDeploymentGroupForwardAnswer{
+					forward: modelDeploymentGroupForwardUnsupportedFor(unsupportedReason),
+				}
+			case !local.localReady():
+				answers[i] = modelDeploymentGroupForwardAnswer{
+					forward: modelDeploymentGroupForwardUnknownFor(
+						"the group is not complete and ready, so the pair was not asked: " +
+							local.localFault()),
+				}
+			case fetch == nil:
+				answers[i] = modelDeploymentGroupForwardAnswer{
+					forward: modelDeploymentGroupForwardUnsupportedFor(
+						"no directed pair transport is wired, so this operator has no observation " +
+							"of a prefill-decode pair"),
+				}
+			default:
+				ready = append(ready, i)
+			}
+		}
+
+		return ready
+	}
+	readyPrefills := candidates(prefills)
+	readyDecodes := candidates(decodes)
+
+	// A PAIR WITH NO PARTNER IS NOT A PAIR, so a replica with no ready counterpart holds with the
+	// reason that names what is missing.
+	if len(readyPrefills) == 0 || len(readyDecodes) == 0 {
+		for _, i := range append(append([]int{}, readyPrefills...), readyDecodes...) {
+			answers[i] = modelDeploymentGroupForwardAnswer{
+				forward: modelDeploymentGroupForwardUnknownFor(
+					"no ready replica of the other role is available to complete the pair"),
+			}
+		}
+
+		return answers
+	}
+
+	// THE RECIPES ARE ASKED IN A FIXED ORDER, so one pass asks the same pairs in the same order
+	// every time.
+	slices.SortStableFunc(readyPrefills, func(a, b int) int {
+		return locals[a].view.Ordinal - locals[b].view.Ordinal
+	})
+	slices.SortStableFunc(readyDecodes, func(a, b int) int {
+		return locals[a].view.Ordinal - locals[b].view.Ordinal
+	})
+
+	verified := map[int]bool{}
+	for _, prefill := range readyPrefills {
+		for _, decode := range readyDecodes {
+			if verified[prefill] && verified[decode] {
+				// NEITHER SIDE STILL NEEDS THIS PAIR, so asking it again could not change either
+				// answer and would spend engine tokens to learn nothing.
+				continue
+			}
+
+			result := observeModelDeploymentGroupForwardPair(
+				ctx, md, locals[prefill].view, locals[decode].view, fetch,
+			)
+
+			// THE TWO SIDES ARE FOLDED INDEPENDENTLY, because the driver answers each side on its
+			// own account. A VERIFIED ANSWER IS NEVER DISPLACED by a later unsuccessful partner,
+			// and the attempt that verified a replica is the evidence kept beside it.
+			if !verified[prefill] {
+				answers[prefill] = modelDeploymentGroupForwardAnswer{forward: result.Prefill}
+			}
+			if !verified[decode] {
+				answers[decode] = modelDeploymentGroupForwardAnswer{forward: result.Decode}
+			}
+			if result.Prefill.State == modelDeploymentGroupForwardVerified {
+				verified[prefill] = true
+				answers[prefill] = modelDeploymentGroupForwardAnswer{
+					forward: result.Prefill, attempt: &result.Attempt,
+				}
+			}
+			if result.Decode.State == modelDeploymentGroupForwardVerified {
+				verified[decode] = true
+				answers[decode] = modelDeploymentGroupForwardAnswer{
+					forward: result.Decode, attempt: &result.Attempt,
+				}
+			}
+		}
+	}
+
+	return answers
+}
+
+// modelDeploymentGroupForwardPairSupport reports whether this operator has NO verified observation for
+// the directed pair this deployment's shape implies, and why it has none.
+//
+// THE CHECKS ARE NARROW AND NAMED, because a general engine-support table would be a second place
+// where engine differences are decided, and the pair driver already decides most of them.
+//
+// THE FIRST ANSWER MEANS UNSUPPORTED, so that the call site reads as the question it is.
+func modelDeploymentGroupForwardPairSupport(
+	md *workercore.ModelDeployment,
+) (bool, string) {
+	// THE ENGINE IS THE PAIR DRIVER'S OWN FACT, and the driver states it the same way.
+	if _, known := modelDeploymentGroupForwardPairEngines[md.Spec.Engine.Name]; !known {
+		return true, "engine " + md.Spec.Engine.Name +
+			" has no group-forward observation this operator has verified"
+	}
+
+	// A ROLE THAT TOOK OVER ITS COMMAND LINE SERVES A ROUTE THIS OPERATOR DOES NOT KNOW, and a
+	// pair cannot be asked at a route nobody knows. The check covers BOTH halves of the pair,
+	// because a half that cannot be paired with is not made pairable by a partner that can.
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		switch ModelDeploymentEffectiveRoleKind(role) {
+		case workercore.ModelDeploymentRoleKindPrefill, workercore.ModelDeploymentRoleKindDecode:
+		default:
+			continue
+		}
+		if len(role.Command) > 0 {
+			return true, "role " + role.Name +
+				" took over its command line, so the route its pair would be asked at is one this " +
+				"operator does not know"
+		}
+	}
+
+	// THE VLLM PAIR IS OBSERVABLE ONLY THROUGH THE ROUTING PROXY, because the connector's
+	// handshake names the prefiller by an engine id that comes out of the prefiller's own transfer
+	// registry, and this operator does not read that registry.
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
+		if decodeRole := modelDeploymentGroupForwardPairDecodeRole(md); decodeRole != nil &&
+			!ModelDeploymentRoleFrontedByProxy(md, decodeRole) {
+			return true, "the prefiller's engine id is held in the prefiller's own transfer registry " +
+				"and this operator does not read that registry, so a vLLM pair that no routing " +
+				"proxy drives cannot be observed"
+		}
+	}
+
+	return false, ""
 }
 
 // modelDeploymentMemberReadiness reads one member's own readiness as three answers rather than

@@ -100,6 +100,9 @@ type recordingDrainReader struct {
 	busy  map[types.UID]bool
 	read  []types.UID
 	order []string
+	// answer is the read a member answers with. A nil answer is the engine's own idle
+	// series, so a case that names no engine keeps the read it always had.
+	answer func() modelDeploymentDrainAnswer
 }
 
 func (r *recordingDrainReader) Drain(
@@ -108,6 +111,9 @@ func (r *recordingDrainReader) Drain(
 	r.read = append(r.read, target.PodUID)
 	r.order = append(r.order, target.Container)
 
+	if r.answer != nil {
+		return r.answer(), nil
+	}
 	if r.busy[target.PodUID] {
 		return busyDrain(), nil
 	}

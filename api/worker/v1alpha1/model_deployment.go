@@ -1251,7 +1251,179 @@ type ModelDeploymentRoleStatus struct {
 	//
 	// +optional
 	Endpoints ModelDeploymentRoleEndpointsStatus `json:"endpoints" protobuf:"bytes,9,name=endpoints"`
+
+	// Groups is one entry per group of this role, ordered by replica ordinal.
+	//
+	// IT ANSWERS WHAT THE COUNTS ABOVE CANNOT. Those counts say how many instances the role has
+	// and how many are Ready; a group entry says which members form one scheduling group, what
+	// state that group stands in, and whether the Router confirms it is being served. A reader
+	// asking which replica failed, or which one the Router stopped selecting, needs the entry and
+	// cannot get it from the counts.
+	//
+	// IT IS AN ORDINARY LIST, NOT A MAP, because a group's generation changes whenever a member is
+	// replaced. A map keyed on the generation would replace the whole entry on every membership
+	// change, and a map keyed on the ordinal alone would let a reader match a stale entry to a new
+	// membership. The identity is carried in the entry instead.
+	//
+	// +optional
+	// +listType=atomic
+	Groups []ModelDeploymentGroupStatus `json:"groups,omitempty" protobuf:"bytes,10,rep,name=groups"`
 }
+
+// ModelDeploymentGroupStatus is one group's qualification, as published.
+//
+// IT IS A DESCRIPTION OF ONE GROUP, NOT A COUNT OF THE ROLE'S ENDPOINTS. The role's counts remain
+// derived views and say nothing about which group holds which member.
+//
+// THE STATE AND THE SERVING CONFIRMATION ARE TWO ANSWERS AND NEVER COLLAPSE INTO ONE. The state
+// and the reason are the ENGINE's answer -- which leg of the whole-group predicate holds the group.
+// The serving confirmation is the ROUTER's answer. A group whose members are healthy and whose
+// Router view was lost is Eligible with an Unknown serving confirmation, and a group whose member
+// failed is Withdrawn, and neither reading can be mistaken for the other.
+type ModelDeploymentGroupStatus struct {
+	// Role is the role this group belongs to.
+	//
+	// +required
+	Role string `json:"role" protobuf:"bytes,1,name=role"`
+
+	// Ordinal is the replica slot this group occupies within its role.
+	//
+	// +required
+	Ordinal int32 `json:"ordinal" protobuf:"varint,2,name=ordinal"`
+
+	// Generation is the membership the answers below were taken against: the sorted member UID set.
+	// A replaced member is a different set, so a prior verification does not apply to the new one.
+	//
+	// +required
+	Generation string `json:"generation" protobuf:"bytes,3,name=generation"`
+
+	// State is the group's eligibility state.
+	//
+	// IT IS THE QUALIFICATION'S STATE, EXCEPT WHEN THE ROUTER'S OBSERVATION HOLDS THE GROUP: a group
+	// that passed every leg and is waiting on a valid Router observation is AwaitingObservation,
+	// while a group that passed every leg and is retained across an observation loss is Eligible,
+	// because the observation is not what holds it.
+	//
+	// +required
+	// +k8s:validation:enum=["Eligible","Withdrawn","AwaitingMembers","AwaitingReady","AwaitingProbe","AwaitingObservation","Unsupported","Unknown"]
+	State ModelDeploymentGroupState `json:"state" protobuf:"bytes,4,name=state,casttype=ModelDeploymentGroupState"`
+
+	// Reason names the fact that holds the group, or says that it qualifies.
+	//
+	// IT NAMES ONE FACT AND NEVER TWO. When a leg of the whole-group predicate holds the group, the
+	// reason names that leg. When the Router's observation holds the group, the reason names the
+	// observation. A member fault and a lost Router view are therefore told apart by the reason as
+	// well as by the state.
+	//
+	// +required
+	Reason string `json:"reason" protobuf:"bytes,5,name=reason"`
+
+	// Members are the group's current members, ordered by seat.
+	//
+	// +optional
+	// +listType=atomic
+	Members []ModelDeploymentGroupMemberStatus `json:"members,omitempty" protobuf:"bytes,6,rep,name=members"`
+
+	// LastQualificationTime is when the group last entered published Eligible for this generation.
+	//
+	// IT IS THE TRANSITION, NOT THE LATEST PASS. A group that stays Eligible keeps the instant it
+	// earned, and a group that is held in the same generation keeps it too, so an observation loss
+	// does not erase it. A group that leaves Eligible and comes back records the new instant. A NEW
+	// GENERATION INHERITS NO TIMESTAMP: the membership it names is a membership that was never
+	// qualified.
+	//
+	// +optional
+	LastQualificationTime *meta.Time `json:"lastQualificationTime,omitempty" protobuf:"bytes,7,opt,name=lastQualificationTime"`
+
+	// Serving is the Router's answer for this group.
+	//
+	// +required
+	Serving ModelDeploymentServingStatus `json:"serving" protobuf:"bytes,8,name=serving"`
+
+	// ServingReason names why the Router's answer is what it is, when it is not a confirmation.
+	//
+	// IT IS PUBLISHED IN BOTH OBSERVATION-LOSS CASES, because the serving field has to be complete
+	// on its own: a reader who finds Serving without a reason here cannot tell an unobserved Router
+	// apart from one that was observed and reported nothing.
+	//
+	// IT IS SEPARATE FROM Reason, because the two name different facts. Reason names what holds the
+	// GROUP and ServingReason names what holds the SERVING ANSWER, so an engine fault's reason never
+	// appears here and the Router's reason never takes the group's place.
+	//
+	// +optional
+	ServingReason string `json:"servingReason,omitempty" protobuf:"bytes,9,opt,name=servingReason"`
+}
+
+// ModelDeploymentGroupMemberStatus is one member of a group, as it currently stands.
+type ModelDeploymentGroupMemberStatus struct {
+	// Name is the member Pod's name.
+	//
+	// +required
+	Name string `json:"name" protobuf:"bytes,1,name=name"`
+
+	// UID is the member Pod's identity. A replaced member is a different UID, which is what makes a
+	// replaced membership a different generation.
+	//
+	// +required
+	UID string `json:"uid" protobuf:"bytes,2,name=uid"`
+
+	// Seat is the seat the member claims, absent when the member claims none or one that cannot be
+	// read. The group's reason names that defect.
+	//
+	// IN A GROUP WHOSE MEMBERS ARE WHOLE REPLICAS the seat is the member's ADMISSION ORDINAL,
+	// because the seat it claims among the members of its own replica is not a seat of that group
+	// at all. The ordinal is the operator's own fact and not the engine's runtime rank: which
+	// member holds which rank is the engine's business, and the operator's numbering never implies
+	// it.
+	//
+	// +optional
+	Seat *int32 `json:"seat,omitempty" protobuf:"varint,3,opt,name=seat"`
+
+	// Ready is the member's readiness, one of True, False or Unknown.
+	//
+	// A member whose Ready condition has never been reported is Unknown, not False: a member nobody
+	// has reported on is not a member that was observed and found not ready, and a diagnosis that
+	// cannot tell those two apart cannot say which one happened.
+	//
+	// +required
+	// +k8s:validation:enum=["True","False","Unknown"]
+	Ready meta.ConditionStatus `json:"ready" protobuf:"bytes,4,opt,name=ready"`
+}
+
+// ModelDeploymentGroupState is the state one group's eligibility stands in.
+//
+// THE SEVEN QUALIFICATION STATES ARE THE OPERATOR'S OWN, spelled the same way, because a reader
+// learns nothing from two vocabularies for one thing. AWAITINGOBSERVATION IS THE EIGHTH, AND IT
+// IS NOT A SECOND VOCABULARY: it names the one hold the qualification cannot name, which is a
+// group waiting on a valid Router observation.
+//
+// IT IS NOT "Unknown". Unknown is the operator's name for a group held on a leg it has no finer
+// word for, so reusing it for a lost Router view would make the two the same reading, and a
+// diagnosis that cannot tell a lost observation apart from an engine failure cannot say which
+// happened.
+//
+// +enum
+type ModelDeploymentGroupState string
+
+const (
+	// ModelDeploymentGroupStateEligible is a group every leg verified and nothing else holds.
+	ModelDeploymentGroupStateEligible ModelDeploymentGroupState = "Eligible"
+	// ModelDeploymentGroupStateWithdrawn is a group a definite fault withdrew.
+	ModelDeploymentGroupStateWithdrawn ModelDeploymentGroupState = "Withdrawn"
+	// ModelDeploymentGroupStateAwaitingMembers is a group whose member set is not established.
+	ModelDeploymentGroupStateAwaitingMembers ModelDeploymentGroupState = "AwaitingMembers"
+	// ModelDeploymentGroupStateAwaitingReady is a group whose members are not all Ready=True.
+	ModelDeploymentGroupStateAwaitingReady ModelDeploymentGroupState = "AwaitingReady"
+	// ModelDeploymentGroupStateAwaitingProbe is a group whose forward path could not be observed.
+	ModelDeploymentGroupStateAwaitingProbe ModelDeploymentGroupState = "AwaitingProbe"
+	// ModelDeploymentGroupStateAwaitingObservation is a group every leg verified that is waiting on
+	// a valid Router observation.
+	ModelDeploymentGroupStateAwaitingObservation ModelDeploymentGroupState = "AwaitingObservation"
+	// ModelDeploymentGroupStateUnsupported is a shape no observation exists for.
+	ModelDeploymentGroupStateUnsupported ModelDeploymentGroupState = "Unsupported"
+	// ModelDeploymentGroupStateUnknown is a group held on a fact this operator cannot name.
+	ModelDeploymentGroupStateUnknown ModelDeploymentGroupState = "Unknown"
+)
 
 // ModelDeploymentRoleParallelismStatus is one role's declared parallelism, read from the
 // command line rendered for it.

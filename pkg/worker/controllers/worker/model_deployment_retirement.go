@@ -1163,7 +1163,9 @@ func modelDeploymentRetirementMemberExternalDP(
 	if err != nil {
 		return false, true
 	}
-	shape, _ := modelDeploymentLoadBalance(reading.declared)
+	shape, _ := modelDeploymentLoadBalance(modelDeploymentRetirementEngine(md),
+		modelDeploymentRoleKindFromUpstream(member.Labels[modelDeploymentLabelKeyRoleKind]),
+		modelDeploymentContainerEnv(container), reading.declared)
 	return shape == workercore.ModelDeploymentLoadBalanceExternal ||
 		shape == workercore.ModelDeploymentLoadBalanceHybrid ||
 		shape == workercore.ModelDeploymentLoadBalanceMultiPort, true
@@ -1195,7 +1197,9 @@ func modelDeploymentRetirementDisaggregated(md *workercore.ModelDeployment, memb
 		if err != nil {
 			return false, "the member's parallelism could not be read: " + err.Error()
 		}
-		shape, reason := modelDeploymentLoadBalance(reading.declared)
+		shape, reason := modelDeploymentLoadBalance(engine,
+			modelDeploymentRoleKindFromUpstream(kind),
+			modelDeploymentContainerEnv(container), reading.declared)
 		if shape == workercore.ModelDeploymentLoadBalanceUnknown {
 			return false, reason
 		}

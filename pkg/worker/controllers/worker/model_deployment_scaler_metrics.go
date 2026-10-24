@@ -53,6 +53,9 @@ type modelDeploymentScalerPodSample struct {
 	running        float64
 	waiting        float64
 	decodeTransfer float64
+	// prefillInflight is the prefill role's own backlog: the requests it has accepted and not yet
+	// scheduled. It is a queue of its own, and the ordinary waiting gauge does not count it.
+	prefillInflight float64
 	// kvUsage is the engine's cache usage, as a fraction of the cache it holds.
 	kvUsage float64
 	// kvUsageFound says whether the cache usage was reported at all.
@@ -292,6 +295,11 @@ func modelDeploymentScalerReadSGLang(
 	sample.requestsReadable = runningFound && waitingFound
 	sample.kvUsage, sample.kvUsageFound = modelDeploymentScalerSum(families, "sglang:token_usage", nil)
 	sample.decodeTransfer, _ = modelDeploymentScalerSum(families, "sglang:num_decode_transfer_queue_reqs", nil)
+	// THE PREFILL ROLE'S BACKLOG IS ITS OWN QUEUE. A prefill role keeps the requests it has
+	// accepted and not yet scheduled in the inflight queue, and its ordinary waiting queue is
+	// empty while that queue is not. A reader of the ordinary queue alone calls a busy role idle.
+	sample.prefillInflight, _ = modelDeploymentScalerSum(
+		families, "sglang:num_prefill_inflight_queue_reqs", nil)
 
 	prompt, promptFound := modelDeploymentScalerSum(families, "sglang:prompt_tokens_total", nil)
 	generation, generationFound := modelDeploymentScalerSum(families, "sglang:generation_tokens_total", nil)

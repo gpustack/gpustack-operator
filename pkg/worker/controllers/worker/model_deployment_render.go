@@ -67,6 +67,29 @@ const (
 	// already describes, and a replica that leaves loses its cached blocks to its siblings.
 	modelDeploymentLabelKeyRoleKind = "modeldeployment." + systemname.LabelPrefix + "role-kind"
 
+	// modelDeploymentRouterCandidateLabel marks a member as a routing candidate of its group.
+	//
+	// IT IS A ROUTING FACT AND NOT A QUALIFICATION: it says the member may be discovered, never
+	// that it passed a probe.
+	//
+	// A MEMBER OF A ROLE THE OPERATOR JUDGES CARRIES IT WHILE ITS GROUP IS ELIGIBLE, and it gains
+	// and loses it in the same write as the eligibility label. The judged roles are the ones the
+	// operator decides on its own: a protected managed group, an encoder, and an ordinary
+	// single-member server. A MANAGED PREFILL OR DECODE PAIR IS ONE OF THEM WHEN THE OPERATOR CAN
+	// OBSERVE THE PAIR, and a pair whose probe path is unavailable is not judged at all. THE
+	// PROTECTED CLASS AND THE JUDGED CLASS ARE TWO DIFFERENT QUESTIONS: the requirement is in force
+	// from the first enable either way, and the native selectors still require eligibility.
+	//
+	// A MEMBER OF A ROLE THE OPERATOR CANNOT JUDGE CARRIES IT WHILE THE DEPLOYED SHAPE LETS IT
+	// ANSWER, which is the membership it always had: a route this operator cannot judge is
+	// discovered by its own rules, and the marker says the same thing about it.
+	//
+	// IT EXISTS FOR THE MIXED UNION, where one deployment-wide selector has to name the candidates
+	// of roles whose requirements differ. There the eligibility term cannot be used, because it
+	// would withhold the roles that carry no requirement, and the per-kind filters cannot hold the
+	// requirements apart either, because they are per kind and two roles of one kind share one.
+	modelDeploymentRouterCandidateLabel = "modeldeployment." + systemname.LabelPrefix + "router-candidate"
+
 	// modelDeploymentPodSpecHashAnnotation carries the fingerprint of the explicit spec inputs and
 	// external resource bindings a replica member was built from.
 	modelDeploymentPodSpecHashAnnotation = "modeldeployment." + systemname.LabelPrefix + "pod-spec-hash"
@@ -82,7 +105,7 @@ const (
 
 	// modelDeploymentRenderVersion is the current operator Pod rendering baseline. Bump this
 	// constant whenever a change modifies the rendered Pod output of any ModelDeployment shape.
-	modelDeploymentRenderVersion = 1
+	modelDeploymentRenderVersion = 4
 	// modelDeploymentMinSupportedRenderVersion is the lowest render version that remains compatible
 	// with the current controller without replacing running Pods.
 	modelDeploymentMinSupportedRenderVersion = 1
@@ -744,6 +767,53 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	return pod, nil
 }
 
+// modelDeploymentStampRouterCandidate marks a rendered Pod that is a routing candidate.
+//
+// IT READS THE COMPLETED POD AND NOT THE DESIRED ROLE. The Pod says which mode it runs: a Pod that
+// took its command line over carries no metrics annotation, because the operator did not build that
+// command line and cannot claim the container serves the metrics the hook reads. The desired role
+// says what this Pod is asked to run, and a Pod is what is actually running.
+//
+// A ROLE THE OPERATOR CONTROLS IS NOT A CANDIDATE AT BIRTH. It has not been judged, and the marker
+// is written to such a member only while its group is eligible, so a managed newborn starts
+// unmarked and gains the marker with the eligibility label.
+//
+// A ROLE THE OPERATOR CANNOT JUDGE IS A CANDIDATE FROM BIRTH, and only the members the shape lets
+// answer carry it: the leader of a leader-served replica, and every member of an External-DP one.
+func modelDeploymentStampRouterCandidate(
+	pod *core.Pod, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, member int,
+) {
+	if md.Spec.Router == nil {
+		return
+	}
+	managed, _ := modelDeploymentMemberExecution(pod)
+	effective := *role
+	if managed {
+		// THE REPLICA RUNS THE OPERATOR'S COMMAND LINE, so the role's own command says nothing
+		// about the mode the replica is in.
+		effective.Command = nil
+	}
+	if modelDeploymentGroupForwardActivatable(md, &effective) {
+		return
+	}
+	// A MEMBER THIS OPERATOR DID NOT BUILD CARRIES NO MANAGED LOAD BALANCE, which is an
+	// established answer and not a missing one.
+	externalDP := managed && modelDeploymentRoleExternalDP(md, &effective)
+	switch modelDeploymentAnsweringShapeOf(externalDP, modelDeploymentRoleSize(&effective)) {
+	case modelDeploymentAnsweringAll, modelDeploymentAnsweringSole:
+	case modelDeploymentAnsweringLeader:
+		if member != modelDeploymentLeaderMemberIndex {
+			return
+		}
+	default:
+		return
+	}
+	if pod.Labels == nil {
+		pod.Labels = map[string]string{}
+	}
+	pod.Labels[modelDeploymentRouterCandidateLabel] = modelDeploymentEndpointEligibleValue
+}
+
 // modelDeploymentSharedMemoryVolumes adds the role's default mount unless one is explicit.
 func modelDeploymentSharedMemoryVolumes(
 	role *workercore.ModelDeploymentRole, vols []core.Volume, mounts []core.VolumeMount,
@@ -860,6 +930,7 @@ func stampModelDeploymentPod(
 	pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentExplicitSpecHash(
 		md, role, ordinal, member, bindingHash)
 	pod.Annotations[modelDeploymentRenderVersionAnnotation] = strconv.Itoa(modelDeploymentRenderVersion)
+	modelDeploymentStampRouterCandidate(pod, md, role, member)
 }
 
 // stampModelDeploymentRankEnv publishes the three facts a member needs to join its collective: who
@@ -1519,8 +1590,15 @@ func mergeModelDeploymentEnv(
 	// cache somewhere else, or runs an image whose engine spells the variable differently, has to
 	// be able to say so and have the entry survive: the operator's claim is only about the default,
 	// which the volume mounted above is what makes true.
+	//
+	// THE ENGINE'S OTHER STARTUP CACHES ARE DEFAULTED ALONGSIDE IT, for the same reason and for
+	// one more: each of them defaults to the container's writable layer, which the pod's
+	// ephemeral-storage limit measures, so a cache that grows there evicts the pod filling it
+	// while the same bytes on the mounted cache do not count against the limit at all.
 	defaulted := slices.Concat(
-		connector.DefaultedEnv, artifactDefaulted, modelDeploymentCompileCacheDefaultedEnv(engine))
+		connector.DefaultedEnv, artifactDefaulted,
+		modelDeploymentCompileCacheDefaultedEnv(engine),
+		modelDeploymentRuntimeCacheDefaultedEnv(engine))
 
 	env := make([]core.EnvVar, 0,
 		len(connector.Env)+len(artifactEnv)+len(defaulted)+len(role.Env))

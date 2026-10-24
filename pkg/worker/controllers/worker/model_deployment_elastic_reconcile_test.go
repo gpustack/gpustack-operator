@@ -1599,7 +1599,7 @@ func TestAFailedMemberReadRefusesTheEndpointSync(t *testing.T) {
 	f.reconciler.APIReader = watched
 	watched.failList = fmt.Errorf("the member list is unavailable")
 
-	_, err = f.reconciler.convergeModelDeploymentElastic(ctx, f.md, actual, desired, nil)
+	_, _, err = f.reconciler.convergeModelDeploymentElastic(ctx, f.md, actual, desired, nil)
 	require.ErrorContains(t, err, "the member list is unavailable",
 		"a pass that could not read its members must not write eligibility, service or router state")
 	require.Greater(t, len(watched.listOptions), 6, "the pass must have reached its closing read")

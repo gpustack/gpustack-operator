@@ -710,6 +710,23 @@ func TestValidateModelDeployment(t *testing.T) {
 			})),
 		},
 		{
+			// An unknown flag stays admitted on SGLang as on vLLM: rejecting what the
+			// operator does not know is the engine's own work.
+			name: "extra_args_unowned_key_sglang",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang, role(func(r *workercore.ModelDeploymentRole) {
+				r.ExtraArgs = []string{"--max-model-len=32768"}
+			})),
+		},
+		{
+			// THE ATTENTION WIDTH IS AN ORDINARY USER ARGUMENT. It is not operator-owned,
+			// so a role may declare it; the operator reads it rather than refusing it.
+			name: "extra_args_attention_dp_is_user_admissible",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang, role(func(r *workercore.ModelDeploymentRole) {
+				r.ExtraArgs = []string{"--attn-dp-size=2"}
+				r.Resources = cards(1)
+			})),
+		},
+		{
 			name: "env_owned_key",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
 				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}}
@@ -1700,6 +1717,68 @@ func TestValidateModelDeployment(t *testing.T) {
 					r.Resources = cards(1)
 				})),
 		},
+		{
+			// THE ATTENTION WIDTH IS NOT A DATA-PARALLEL MULTIPLIER. The attention groups
+			// share one model, so a member holding two of them still holds the tensor width
+			// alone and asks for no card beside it.
+			name: "parallel_width_sglang_attention_dp_adds_no_cards",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=1", "--attn-dp-size=2"}
+					r.Resources = cards(1)
+				})),
+		},
+		{
+			// THE SINGLE-POD ATTENTION-DP USER IS ADMITTED BEFORE AND AFTER. Two cards and
+			// an attention width of two ask for the two cards the tensor width already
+			// accounts for, and reading the attention width must not add a card beside them
+			// nor refuse a role that has always been admitted.
+			name: "parallel_width_sglang_single_pod_attention_dp_stays_admitted",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=2", "--attn-dp-size=2"}
+					r.Resources = cards(2)
+				})),
+		},
+		{
+			// THE ATTENTION WIDTH DOES NOT NARROW THE DATA-PARALLEL MULTIPLIER EITHER. The
+			// width the check multiplies is the one the engine's own degrees declare, and a
+			// second attention width beside a data-parallel width changes neither.
+			name: "parallel_width_sglang_attention_dp_does_not_narrow_the_dp_multiplier",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=2", "--dp-size=2", "--attn-dp-size=2"}
+					r.Resources = cards(3)
+				})),
+			wantMessage: "the engine needs 4 per member",
+		},
+		{
+			// A malformed attention width is refused where the engine would refuse it, with
+			// the flag named.
+			name: "parallel_width_sglang_attention_dp_must_be_an_integer",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--attn-dp-size=two"}
+					r.Resources = cards(1)
+				})),
+			wantMessage: `the --attn-dp-size value "two" is not an integer`,
+		},
+		{
+			// THE EXTERNAL SHAPE NEEDS A ROUTER, like every other external shape: the groups
+			// are served through a Router and need it to supervise them.
+			name: "sedp_external_shape_needs_a_router",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{
+						"--tp-size=2", "--attn-dp-size=2", "--nnodes=2",
+						"--node-rank=$(GPUSTACK_MEMBER_INDEX)",
+						"--dist-init-addr=$(GPUSTACK_REPLICA_LEADER_ADDRESS):29500",
+					}
+					r.Env = []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_RUST_SERVER", Value: "1"}}
+					r.Resources = cards(1)
+				})),
+			wantMessage: "RouterRequired",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -1717,6 +1796,25 @@ func TestValidateModelDeployment(t *testing.T) {
 				"refusal must name %q, got: %s", tc.wantMessage, errs.ToAggregate().Error())
 		})
 	}
+}
+
+// TestValidateModelDeployment_SGLangExternalDPIsAdmittedWithARouter pins the SGLang external
+// shape through admission: with a Router to supervise the groups, and the wiring flag that says
+// the width lives across the members, the role is admitted on one card per member.
+func TestValidateModelDeployment_SGLangExternalDPIsAdmittedWithARouter(t *testing.T) {
+	md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.ExtraArgs = []string{
+				"--tp-size=2", "--attn-dp-size=2", "--nnodes=2",
+				"--node-rank=$(GPUSTACK_MEMBER_INDEX)",
+				"--dist-init-addr=$(GPUSTACK_REPLICA_LEADER_ADDRESS):29500",
+			}
+			r.Env = []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_RUST_SERVER", Value: "1"}}
+			r.Resources = cards(1)
+		}))
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+
+	assert.Empty(t, validateModelDeployment(md, nil), "the external shape with a Router is admitted")
 }
 
 // TestValidateModelDeployment_TwoRolesPassTheWholePath is the seam the single-role spec left, now
@@ -4947,4 +5045,177 @@ func TestModelDeploymentWebhookScalerFenceOrphanReturnsInternalErrorOnReaderFail
 	errs := wNilReader.validateModelDeploymentScalerFence(ctx, oldBound, unbound)
 	require.NotEmpty(t, errs)
 	assert.Equal(t, field.ErrorTypeInternal, errs[0].Type)
+}
+
+// TestModelDeploymentExternalDPRequiresARouter refuses a role whose external data parallelism has
+// no Router to supervise it, and admits every shape that does not need one.
+//
+// THE TABLE IS THE PARSER'S VOCABULARY rather than one flag's spelling, so the refusal is pinned to
+// the SHAPE the parallelism parser derives: a change in the derivation moves this table instead of
+// silently widening or narrowing the refusal.
+//
+// THE CASES THAT ANOTHER RULE OWNS ARE NAMED AS SUCH. The rule under test must not refuse a
+// defect a neighboring rule already refuses, so those cases assert that the RouterRequired reason
+// is absent while the other refusal is still there.
+func TestModelDeploymentExternalDPRequiresARouter(t *testing.T) {
+	tests := []struct {
+		name   string
+		engine string
+		args   []string
+		// command replaces the role's whole command line, which is this rule's take-over case.
+		command []string
+		router  bool
+		// wantRefuse is whether the RouterRequired rule refuses this object.
+		wantRefuse bool
+		// wantOther is the refusal another rule owns, which this rule must not duplicate.
+		wantOther string
+	}{
+		{
+			name:       "an external balancer without a router is refused",
+			engine:     workercore.ModelDeploymentEngineVLLM,
+			args:       []string{"--data-parallel-external-lb"},
+			wantRefuse: true,
+		},
+		{
+			name:       "a role assigning itself a data-parallel rank without a router is refused",
+			engine:     workercore.ModelDeploymentEngineVLLM,
+			args:       []string{"--data-parallel-rank", "0"},
+			wantRefuse: true,
+		},
+		{
+			name:       "a hybrid balancer placing one rank locally without a router is refused",
+			engine:     workercore.ModelDeploymentEngineVLLM,
+			args:       []string{"--data-parallel-size=2", "--data-parallel-size-local=1", "--data-parallel-hybrid-lb"},
+			wantRefuse: true,
+		},
+		{
+			name:   "a hybrid balancer holding every rank locally needs no router",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			args:   []string{"--data-parallel-size=2", "--data-parallel-size-local=2", "--data-parallel-hybrid-lb"},
+		},
+		{
+			name:   "a role declaring no data parallelism needs no router",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			args:   []string{"--tensor-parallel-size=2"},
+		},
+		{
+			// The engine-internal exemption, proven with the engine's own flag: SGLang declares no
+			// wiring row, so its data parallelism is balanced inside the engine and a Router has
+			// nothing to supervise.
+			name:   "the engine's own data parallelism needs no router",
+			engine: workercore.ModelDeploymentEngineSGLang,
+			args:   []string{"--dp-size=2"},
+		},
+		{
+			name:   "an external balancer with a router is admitted",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			args:   []string{"--data-parallel-external-lb"},
+			router: true,
+		},
+		{
+			// THE RULE'S OWN TAKE-OVER CASE: a role that replaced its command line has no managed
+			// shape, so the external parallelism in its own argv is the operator's business and
+			// this rule does not refuse it.
+			name:    "a role that took over its command line needs no router",
+			engine:  workercore.ModelDeploymentEngineVLLM,
+			args:    []string{"--data-parallel-external-lb"},
+			command: []string{"vllm", "serve", "--data-parallel-external-lb"},
+		},
+		{
+			// THE RULE'S OWN SOURCE CASE: the reading did not come from the role's extra
+			// arguments, so the degrees are not ones this operator rendered and the unreadable
+			// stream belongs to the degree parser.
+			name:      "a declaration this rule cannot read is the parser's refusal",
+			engine:    workercore.ModelDeploymentEngineVLLM,
+			args:      []string{"--tensor-parallel-size", "banana"},
+			wantOther: `the --tensor-parallel-size value "banana" is not an integer`,
+		},
+		{
+			name:      "a multi-port balancer is the neighbouring rule's refusal",
+			engine:    workercore.ModelDeploymentEngineVLLM,
+			args:      []string{"--data-parallel-multi-port-external-lb"},
+			wantOther: "MultiPort load balancing is unsupported",
+		},
+		{
+			name:      "two shapes in one declaration are the parser's refusal",
+			engine:    workercore.ModelDeploymentEngineVLLM,
+			args:      []string{"--data-parallel-external-lb", "--data-parallel-hybrid-lb"},
+			wantOther: "different shapes",
+		},
+	}
+
+	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := modelDeployment(tc.engine, role(func(r *workercore.ModelDeploymentRole) {
+				r.ExtraArgs = tc.args
+				r.Command = tc.command
+			}))
+			if tc.router {
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			}
+
+			_, err := w.ValidateCreate(context.Background(), md)
+			message := ""
+			if err != nil {
+				message = err.Error()
+			}
+
+			if tc.wantRefuse {
+				require.Error(t, err)
+				assert.Contains(t, message, "RouterRequired")
+				assert.Contains(t, message, "spec.router")
+				assert.Contains(t, message, `the role "server" declares external data parallelism`)
+
+				return
+			}
+
+			assert.NotContains(t, message, "RouterRequired",
+				"the shape in this case is not external data parallelism, or a Router is configured")
+			if tc.wantOther != "" {
+				require.Error(t, err)
+				assert.Contains(t, message, tc.wantOther)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestModelDeploymentExternalDPRequiresARouterOnCreateAndOnUpdate proves the rule reaches both
+// admission entry points, because an object that was admitted before the rule existed must be
+// refused on its next write rather than living on.
+func TestModelDeploymentExternalDPRequiresARouterOnCreateAndOnUpdate(t *testing.T) {
+	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+		r.ExtraArgs = []string{"--data-parallel-external-lb"}
+	}))
+
+	_, err := w.ValidateCreate(context.Background(), md)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "RouterRequired")
+
+	old := md.DeepCopy()
+	md.Spec.Roles[0].Replicas++
+	_, err = w.ValidateUpdate(context.Background(), old, md)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "RouterRequired",
+		"an update that changes nothing else still has to be refused, or the rule only holds new objects")
+}
+
+// TestModelDeploymentSGLangInternalDPNeedsNoRouter is the exemption on its own, on both paths,
+// because it is the case that proves the rule reads the SHAPE rather than the word "data parallel".
+func TestModelDeploymentSGLangInternalDPNeedsNoRouter(t *testing.T) {
+	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+	md := modelDeployment(workercore.ModelDeploymentEngineSGLang, role(func(r *workercore.ModelDeploymentRole) {
+		r.ExtraArgs = []string{"--dp-size=2"}
+	}))
+
+	_, err := w.ValidateCreate(context.Background(), md)
+	assert.NoError(t, err, "the engine balances its own data parallelism and a Router has nothing to supervise")
+
+	old := md.DeepCopy()
+	md.Spec.Roles[0].Replicas++
+	_, err = w.ValidateUpdate(context.Background(), old, md)
+	assert.NoError(t, err)
 }

@@ -41,6 +41,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
@@ -314,11 +315,22 @@ const modelDeploymentObserverMaxBodyBytes = 4 << 20
 // the last read and the binding take out of the window.
 const modelDeploymentObservationBudget = modelDeploymentServingFreshness - time.Second
 
-// modelDeploymentObservationContext derives the single context every read of one collection runs
-// under, so a caller that supplied its own deadline keeps it and an unlimited caller still gets a
-// finite one.
+// modelDeploymentServingFetchTimeout bounds ONE read of a Router's view.
+//
+// IT IS SHORTER THAN THE COLLECTION'S BUDGET ON PURPOSE. A collection is a sum of its reads, so a
+// read that inherits only the collection's budget can spend all of it on one Router that never
+// answers and leave the other Routers nothing to read with. The collection's own budget still caps
+// the whole, and a caller's deadline that is earlier than this one still wins over both.
+const modelDeploymentServingFetchTimeout = 2 * time.Second
+
+// modelDeploymentObservationContext derives the context ONE read runs under, so a caller that
+// supplied its own deadline keeps it and an unlimited caller still gets a finite one.
+//
+// THE DEADLINE IT ADDS IS THE PER-FETCH ONE, not the collection's budget: this transport is
+// reachable on its own, and a read that waits for the whole collection's budget is a read that can
+// take the whole pass with it.
 func modelDeploymentObservationContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, modelDeploymentObservationBudget)
+	return context.WithTimeout(ctx, modelDeploymentServingFetchTimeout)
 }
 
 // modelDeploymentRouterObservationContext keeps collection within the active retirement budget.
@@ -619,6 +631,161 @@ type ServingAnswer struct {
 	// that reads as its own pool and is not. A role with no endpoint is an explicit zero, which
 	// is why the map is built for every role the union names and the reader supplies the rest.
 	ByRole map[string]int32
+	// Groups is the same collection read per GROUP rather than per deployment. The deployment-wide
+	// answer cannot tell two groups of one role apart, and a group whose view is partial has to be
+	// distinguishable from a group that is merely empty.
+	Groups map[modelDeploymentGroupKey]modelDeploymentGroupServing
+	// Members is each member's carried facts as this collection read them, which is the fresh
+	// read and not the caller's cached Pod list.
+	Members map[types.UID]modelDeploymentMemberServing
+	// CollectedAt is when the OLDEST evidence in this answer was read. The freshness of the whole
+	// answer is the freshness of its oldest evidence, so this is the instant the restore decision
+	// compares against the freshness window.
+	CollectedAt time.Time
+}
+
+// modelDeploymentGroupKey identifies one group: the role it belongs to, the replica ordinal it
+// occupies, and the CURRENT membership generation of that group.
+//
+// THE GENERATION IS THE GROUP'S CURRENT MEMBERSHIP AND NEVER THE MEMBERS THE ROUTER HAPPENED TO
+// LIST. A key built from the observed members would not match the group it belongs to on a partial
+// view, and the group would silently never get an answer -- the worst outcome here, because a
+// partial view is exactly where a confirmed serving count must not be published.
+type modelDeploymentGroupKey struct {
+	Role       string
+	Ordinal    int
+	Generation modelDeploymentMembershipGeneration
+}
+
+// modelDeploymentGroupServing is what the operator knows about ONE group from the Router's view.
+//
+// THE COUNTS ARE TWO KINDS OF THING. Endpoints counts the ROUTER endpoints in selection for this
+// group, while Members and Expected count MEMBERS: an ordinary group of three members has one
+// expected endpoint and three members, and a count that conflated the two would publish a group of
+// three as three endpoints.
+type modelDeploymentGroupServing struct {
+	// SnapshotValid is whether this operator holds a fresh, complete and coherent observation of
+	// this group. It is the restoration gate's input, and it is NOT the confirmation.
+	SnapshotValid bool
+	// InvalidReason names why the snapshot is not valid, in words a reader can act on.
+	InvalidReason string
+	// State is the serving state of this group.
+	State workercore.ModelDeploymentServingState
+	// Endpoints counts the Router endpoints in selection for this group.
+	Endpoints int32
+	// Members counts the group's current membership.
+	Members int32
+	// Expected counts the group's expected member count.
+	Expected int32
+	// Retained is whether the group is ELIGIBLE AND UNCHANGED GENERATION: every answering member
+	// already carries the eligibility label, and the eligibility annotation on those members names
+	// the group's current complete membership generation.
+	//
+	// IT IS THE ONE FACT THAT SEPARATES THE TWO CASES A STATUS HAS TO TELL APART. A retained group
+	// publishes Eligible while the observation is lost, and a group the barrier holds publishes
+	// AwaitingObservation, and a composite flag would collapse exactly that distinction.
+	Retained bool
+	// MemberNotReady says the fresh membership found a member of this group that is not ready.
+	//
+	// IT IS A KNOWN FACT AND NOT A MISSING ONE, so a later uncertainty does not erase it: a
+	// collection that could not read the Router's view afterwards still knows that this member was
+	// not ready. The state has to name the leg that holds the group, and the reason that names the
+	// member travels with this fact.
+	MemberNotReady bool
+}
+
+// modelDeploymentMemberServing is one member's carried facts as the collection read them.
+//
+// THEY ARE READ FRESH, AT COLLECTION TIME, AND NOT FROM THE CALLER'S POD LIST. The caller's list is
+// the informer cache's view of the deployment, and a cached value that has fallen behind is not new
+// proof of anything: a retention decision built on it would keep a group eligible on the strength
+// of a label the API server no longer carries.
+type modelDeploymentMemberServing struct {
+	// Eligible is whether the member carried the eligibility label.
+	Eligible bool
+	// Generation is the membership generation the eligibility annotation named, empty when the
+	// member carries no annotation.
+	Generation modelDeploymentMembershipGeneration
+	// Ready is whether the member reported ready in the fresh read.
+	//
+	// IT IS READ FRESH AND NOT FROM THE CALLER'S LIST, for the same reason the label is: the
+	// qualification's own readiness legs read the caller's list, and a list that is behind the API
+	// server cannot say that a member is ready. The fresh word is the one the collection is
+	// defined against, so it is the one that decides whether the group may be served.
+	Ready bool
+}
+
+// modelDeploymentPassObservation is what ONE pass observed about the deployment's groups, and it is
+// the carrier every reader of a pass's answers shares.
+//
+// THE RESTORATION DECISION AND THE STATUS MUST READ THE SAME ONE. A second collection would be a
+// second answer about a second moment, and a fresh qualification would be a second verdict about a
+// second grouping of the same Pods, so a status could publish a verdict the labels were never
+// written from.
+type modelDeploymentPassObservation struct {
+	// Serving is the collected Router answer, with the per-group facts and the freshness instant.
+	Serving ServingAnswer
+	// Qualifications is the whole-group answer the eligibility write acted on.
+	Qualifications []modelDeploymentInstanceQualification
+	// CollectiveMembers is the current membership of the deployment's logical group when the shape
+	// has one that is not a replica: the elastic collective's whole worker set.
+	//
+	// IT IS EMPTY FOR EVERY OTHER SHAPE, and the status then publishes the replica groups alone.
+	// The consumer identifies the elastic role from the deployment, so this carries the members and
+	// no group of its own.
+	//
+	// IT IS THE ALREADY-FETCHED, OWNER-CHECKED LIST, so populating it costs no second fetch and no
+	// probe.
+	CollectiveMembers []corev1.Pod
+}
+
+// modelDeploymentServingUnobserved is the answer a path that made no observation publishes.
+//
+// IT IS NOT THE ZERO VALUE, because the zero value's state is the empty string and that is not a
+// serving state at all: publishing it would tell a reader that the operator knows something it does
+// not. A deployment that declares no Router says so, and a deployment that declares one says that
+// this pass did not read it.
+func modelDeploymentServingUnobserved(md *workercore.ModelDeployment, reason string) ServingAnswer {
+	if md.Spec.Router == nil {
+		return ServingAnswer{State: workercore.ModelDeploymentServingStateNotConfigured}
+	}
+
+	return ServingAnswer{
+		State:  workercore.ModelDeploymentServingStateUnknown,
+		Reason: reason,
+	}
+}
+
+// modelDeploymentAnnotationKeyEndpointEligibleGeneration names the group's membership generation
+// under which a member's eligibility was established.
+//
+// IT IS AN ANNOTATION AND NOT A LABEL, because the generation is the sorted member UID set joined
+// with slashes and a label value cannot hold a slash. Its absence means the member was never made
+// eligible, and a value that differs from the group's current generation means the generation
+// changed after the eligibility was established.
+//
+// IT IS WRITTEN IN THE SAME PATCH AS THE ELIGIBILITY LABEL, so the two cannot disagree, and it is
+// per-Pod, so it is gone with the Pod that carried it.
+const modelDeploymentAnnotationKeyEndpointEligibleGeneration = "modeldeployment." + systemname.LabelPrefix +
+	"endpoint-eligible-generation"
+
+// modelDeploymentServingFreshNow reports whether a collected answer is still inside the freshness
+// window at the moment of the decision that reads it.
+//
+// THE RECHECK IS A COMPARISON AGAINST THE EXISTING CLOCK AND THE EXISTING WINDOW, and never a
+// second fetch: the answer was collected once, and reading the routers again would be a second
+// collection with a second budget and a second answer.
+//
+// IT EXISTS BECAUSE THE WINDOW IS JUDGED ONCE, AT THE AGGREGATION, AND THE DECISION THAT USES THE
+// ANSWER MAY COME LATER. The label write that follows the collection is a sequence of API round
+// trips, one per changed member, and nothing bounds it: an answer judged fresh when it was
+// aggregated can be stale by the time the last member is written.
+func (r *ModelDeploymentReconciler) modelDeploymentServingFreshNow(answer ServingAnswer) bool {
+	if answer.CollectedAt.IsZero() {
+		return false
+	}
+
+	return r.modelDeploymentNow().Sub(answer.CollectedAt) <= modelDeploymentServingFreshness
 }
 
 // modelDeploymentPhysicalEndpoint is what the union counts: one declared listener on one Pod. Every
@@ -753,10 +920,11 @@ const modelDeploymentServingFreshness = 15 * time.Second
 // against the URL the caller built from the Router Pod's own IP — never the Router's
 // Service, which would sample one replica and silently drop the rest.
 func defaultServingViewFetch(ctx context.Context, url string) ([]byte, error) {
-	// AN UNLIMITED CALLER STILL GETS A FINITE REQUEST. The collection derives one budget for the
-	// whole pass, but this transport is also reachable on its own, and a request that inherits a
-	// context with no deadline has none of its own: it waits as long as the Router keeps the
-	// connection open, which is unbounded and is exactly the shape of a Router that has wedged.
+	// ONE READ IS BOUNDED ON ITS OWN, at the per-fetch deadline, and the caller's own context still
+	// governs it: the earlier of the two deadlines wins, and a canceled caller ends the request
+	// with it. Without that bound a request that inherits only the collection's budget waits for
+	// that whole budget on one Router that never answers, which is exactly the shape of a Router
+	// that has wedged.
 	requestCtx, cancel := modelDeploymentObservationContext(ctx)
 	defer cancel()
 
@@ -793,6 +961,9 @@ func defaultServingViewFetch(ctx context.Context, url string) ([]byte, error) {
 // Pods the deployment renders, read each one's view directly, bind, and aggregate. Every
 // failure on the way is a property of the answer, not a reconcile error — a Router that
 // cannot be read is an Unknown in the wire, which is what the spec asks the field to say.
+//
+// IT IS THE ONE COLLECTION OF A PASS. The status and the restoration gate read this answer and
+// nothing else, so the two cannot answer about different moments.
 func (r *ModelDeploymentReconciler) observeModelDeploymentServing(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) ServingAnswer {
@@ -802,27 +973,305 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentServing(
 	ctx, cancel := r.modelDeploymentRouterObservationContext(ctx, md)
 	defer cancel()
 
-	endpointPods, err := r.listModelDeploymentPods(ctx, md)
-	if err != nil {
-		return ServingAnswer{
+	observations, live, failure := r.collectModelDeploymentRouterObservationsWithMembers(ctx, md)
+	if failure.reason != "" {
+		answer := ServingAnswer{
 			State:  workercore.ModelDeploymentServingStateUnknown,
-			Reason: fmt.Sprintf("the deployment's pods could not be listed: %v", err),
+			Reason: failure.reason,
 		}
-	}
-	live := make([]*corev1.Pod, 0, len(endpointPods))
-	for i := range endpointPods {
-		live = append(live, &endpointPods[i])
+		if !failure.retainable || len(live) == 0 {
+			// NO FRESH MEMBERSHIP, OR THE FAILURE PROVED THAT SOMETHING MOVED. There is no fact to
+			// publish, and a fact is the only thing that can hold a group open.
+			return answer
+		}
+
+		// THE GROUP FACTS ARE STILL PUBLISHED, because they are computed from the fresh membership
+		// rather than from the view, and a view that was never read is not what a group is judged
+		// on. The facts say Unknown and carry no confirmed count, and the retention they carry is
+		// the existing one: every answering member holds the eligibility label and the annotation
+		// on it names the group's current complete membership generation.
+		answer.CollectedAt = failure.readAt
+		answer.Groups, answer.Members = modelDeploymentServingGroups(md, live, nil, answer)
+
+		return answer
 	}
 
-	observations, failure := r.collectModelDeploymentRouterObservations(ctx, md, live)
-	if failure != "" {
-		return ServingAnswer{
-			State:  workercore.ModelDeploymentServingStateUnknown,
-			Reason: failure,
+	answer := aggregateModelDeploymentServing(true, observations, modelDeploymentServingFreshness)
+	answer.CollectedAt = modelDeploymentServingOldest(observations)
+	answer.Groups, answer.Members = modelDeploymentServingGroups(md, live, observations, answer)
+
+	// THE PUBLIC CONFIRMATION IS FILTERED BY THE GROUP FACTS, AND THE RAW EVIDENCE IS NOT TOUCHED.
+	// The aggregate keeps its own semantics, because the retirement path reads them, and a group
+	// seen half is not a deployment confirmed.
+	if answer.State == workercore.ModelDeploymentServingStateConfirmed {
+		for _, group := range answer.Groups {
+			if group.SnapshotValid {
+				continue
+			}
+			answer.State = workercore.ModelDeploymentServingStateUnknown
+			answer.Value = nil
+			answer.Reason = group.InvalidReason
+
+			break
 		}
 	}
 
-	return aggregateModelDeploymentServing(true, observations, modelDeploymentServingFreshness)
+	return answer
+}
+
+// modelDeploymentServingOldest is when the oldest evidence in the collection was read.
+//
+// THE FRESHNESS OF AN ANSWER IS THE FRESHNESS OF ITS OLDEST EVIDENCE, so this is the instant the
+// restoration decision compares against the freshness window.
+func modelDeploymentServingOldest(observations []RouterServingObservation) time.Time {
+	oldest := time.Time{}
+	for _, observation := range observations {
+		if observation.CollectedAt.IsZero() {
+			continue
+		}
+		if oldest.IsZero() || observation.CollectedAt.Before(oldest) {
+			oldest = observation.CollectedAt
+		}
+	}
+
+	return oldest
+}
+
+// modelDeploymentServingGroups computes the per-group serving facts and the per-member carried
+// facts from the fresh membership and the collected views.
+//
+// THE MEMBERSHIP IS THE FRESH READ THE COLLECTION MADE, and the carried facts come with it: they
+// are read from the same objects the views were bound to, so a member that was relabelled between
+// the two reads cannot be counted as one that carried the label.
+func modelDeploymentServingGroups(
+	md *workercore.ModelDeployment,
+	live []*corev1.Pod,
+	observations []RouterServingObservation,
+	answer ServingAnswer,
+) (map[modelDeploymentGroupKey]modelDeploymentGroupServing, map[types.UID]modelDeploymentMemberServing) {
+	members := make(map[types.UID]modelDeploymentMemberServing, len(live))
+	for _, pod := range live {
+		members[pod.UID] = modelDeploymentMemberServing{
+			Eligible: pod.Labels[modelDeploymentLabelKeyEndpointEligible] ==
+				modelDeploymentEndpointEligibleValue,
+			Generation: modelDeploymentMembershipGeneration(
+				pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration]),
+			Ready: podIsReady(pod),
+		}
+	}
+
+	// THE ENDPOINTS THE ROUTER HOLDS, PER MEMBER AND PER LISTENER. The fold is the physical
+	// listener for the reason the deployment-wide union uses it: one member's engine registers a
+	// row per virtual rank and they all share the one listener that member serves.
+	held := map[types.UID]map[int32]bool{}
+	for _, observation := range observations {
+		for _, endpoint := range observation.Bound {
+			if held[endpoint.PodUID] == nil {
+				held[endpoint.PodUID] = map[int32]bool{}
+			}
+			held[endpoint.PodUID][endpoint.Listener] = endpoint.Serving
+		}
+	}
+
+	pods := make([]corev1.Pod, 0, len(live))
+	for _, pod := range live {
+		pods = append(pods, *pod)
+	}
+
+	// THE COLLECTION'S OWN VERDICT GATES THE GROUP FACTS.
+	//
+	// AN ANSWER THAT IS NOT CONFIRMED SAYS THE COLLECTION WAS INCOMPLETE: no view was read, one
+	// was unusable, one was stale, or two views disagreed. An incomplete collection proves NOTHING
+	// ABOUT WHAT THE ROUTER HOLDS, and the group facts are computed from the endpoints that were
+	// bound, so without this gate a Router that did not answer would read as a Router that holds
+	// nothing, and the group would restore on the strength of a read that never happened.
+	//
+	// THE RETENTION FACT IS NOT GATED BY IT, because the retention is proved by the fresh
+	// membership rather than by the view: an already eligible group of the unchanged generation
+	// keeps what it has while the answer is lost, which is exactly what an unusable answer is.
+	unsound := answer.State != workercore.ModelDeploymentServingStateConfirmed
+	unsoundReason := answer.Reason
+
+	groups := make(map[modelDeploymentGroupKey]modelDeploymentGroupServing)
+	for _, view := range modelDeploymentGroupPods(pods, true) {
+		generation := modelDeploymentGenerationOf(view)
+		key := modelDeploymentGroupKey{Role: view.Role, Ordinal: view.Ordinal, Generation: generation}
+		fact := modelDeploymentGroupFact(md, view, generation, members, held)
+		if unsound {
+			fact.SnapshotValid = false
+			fact.State = workercore.ModelDeploymentServingStateUnknown
+			// A KNOWN FACT IS NOT ERASED BY A LATER UNCERTAINTY. The collection read the fresh
+			// membership and found a member that is not ready, and that word is a fact about the
+			// group whatever the Router's view did afterwards. The collection's own reason keeps
+			// its own place: it is the answer's reason, and it names the collection.
+			if !fact.MemberNotReady {
+				fact.InvalidReason = unsoundReason
+			}
+		}
+		groups[key] = fact
+	}
+
+	return groups, members
+}
+
+// modelDeploymentGroupFact is what one group looks like from the collected views.
+//
+// THE EXPECTED ENDPOINTS ARE THE ANSWERING SET, read from the shape helpers rather than
+// re-derived here: an ordinary group of three members has ONE expected endpoint and three members,
+// and a count that conflated the two would publish a group of three as three endpoints.
+func modelDeploymentGroupFact(
+	md *workercore.ModelDeployment,
+	view modelDeploymentReplicaView,
+	generation modelDeploymentMembershipGeneration,
+	members map[types.UID]modelDeploymentMemberServing,
+	held map[types.UID]map[int32]bool,
+) modelDeploymentGroupServing {
+	fact := modelDeploymentGroupServing{Members: int32(len(view.Members))}
+
+	shape := modelDeploymentDeployedReplicaShape(view)
+	fact.Expected = int32(shape.Total)
+	if shape.State == modelDeploymentReplicaShapeUnreadable {
+		fact.State = workercore.ModelDeploymentServingStateUnknown
+		fact.InvalidReason = shape.Reason
+
+		return fact
+	}
+
+	// A GROUP WITH A MEMBER THAT IS NOT READY IS NOT A GROUP THAT MAY BE SERVED, whatever the
+	// Router holds. The Router's view answers whether the Router is serving the group; readiness
+	// answers whether the group may be served at all, and the fresh membership is the freshest
+	// word on that.
+	//
+	// NO ACCEPTANCE PATH OPENS FOR AN UNSAFE GROUP. Not the retention, and not the fresh restore
+	// either: a collection that read the whole answering set confirms the Router's view of the
+	// group, and a confirmation about a group that may not be served is not a confirmation that
+	// restores it. The count stays unconfirmed, because only a confirmation carries one.
+	if reason, unsafe := modelDeploymentGroupUnsafe(view, members); unsafe {
+		fact.SnapshotValid = false
+		fact.State = workercore.ModelDeploymentServingStateUnknown
+		fact.InvalidReason = reason
+		fact.MemberNotReady = true
+
+		return fact
+	}
+
+	answering, reason := modelDeploymentAnsweringMembers(
+		modelDeploymentDeployedAnsweringShape(view, md.Spec.Engine.Name), view.Members)
+	if reason != "" {
+		fact.State = workercore.ModelDeploymentServingStateUnknown
+		fact.InvalidReason = reason
+
+		return fact
+	}
+
+	expected := make(map[types.UID]bool, len(answering))
+	for _, member := range answering {
+		expected[member.UID] = true
+	}
+
+	// THE ENDPOINTS THE ROUTER HOLDS FOR THIS GROUP, against the ones it is expected to hold.
+	observed := make(map[types.UID]bool, len(view.Members))
+	endpoints := int32(0)
+	for _, member := range view.Members {
+		listeners, bound := held[member.UID]
+		if !bound {
+			continue
+		}
+		observed[member.UID] = true
+		for _, serving := range listeners {
+			if serving && expected[member.UID] {
+				endpoints++
+			}
+		}
+	}
+
+	// A GROUP WHOSE EXPECTED ENDPOINTS CANNOT BE JUDGED IS A GROUP WHOSE COMPLETENESS CANNOT BE
+	// JUDGED. The Router holds either every expected endpoint of the group or none of them: a
+	// partial view is a contradiction, and a group seen half is not a group seen.
+	switch {
+	case len(observed) == 0:
+		// A COHERENT ZERO IS NOT A FAULT. It says the Router is not serving this group, which is a
+		// fact about the Router and not a verdict on the group, and it does not block a restore.
+		fact.SnapshotValid = true
+		fact.State = workercore.ModelDeploymentServingStateConfirmed
+	case modelDeploymentSameMembers(observed, expected):
+		fact.SnapshotValid = true
+		fact.State = workercore.ModelDeploymentServingStateConfirmed
+		fact.Endpoints = endpoints
+	default:
+		heldExpected := 0
+		for uid := range observed {
+			if expected[uid] {
+				heldExpected++
+			}
+		}
+		fact.State = workercore.ModelDeploymentServingStateUnknown
+		fact.InvalidReason = fmt.Sprintf(
+			"the router's view of the group is partial: it holds %d of the group's %d expected "+
+				"endpoints, so the group's serving cannot be confirmed",
+			heldExpected, len(expected))
+
+		return fact
+	}
+
+	// THE RETENTION FACT: every answering member carries the eligibility label, and the eligibility
+	// annotation on those members names the group's CURRENT complete membership generation.
+	fact.Retained = true
+	for _, member := range answering {
+		carried, known := members[member.UID]
+		if !known || !carried.Eligible || carried.Generation != generation {
+			fact.Retained = false
+
+			break
+		}
+	}
+
+	return fact
+}
+
+// modelDeploymentGroupUnsafe reports whether a member of the group is not ready, and why.
+//
+// A GROUP WITH AN UNREADY MEMBER IS UNSAFE. A member that has not reported ready is not a member
+// the group may be served by, and its healthy sibling does not make it one.
+//
+// THE FRESH MEMBERSHIP DECIDES, because the qualification's own readiness legs read the caller's
+// list. A list that is behind the API server cannot say that a member is ready, so it cannot close
+// a group the fresh read has found unsafe, and the fresh word is the one the collection is defined
+// against.
+func modelDeploymentGroupUnsafe(
+	view modelDeploymentReplicaView, members map[types.UID]modelDeploymentMemberServing,
+) (string, bool) {
+	for _, member := range view.Members {
+		carried, known := members[member.UID]
+		if !known {
+			continue
+		}
+		if !carried.Ready {
+			return fmt.Sprintf(
+				"the group's member %s is not ready, so the group may not be served",
+				member.Name), true
+		}
+	}
+
+	return "", false
+}
+
+// modelDeploymentSameMembers reports whether two member sets hold the same members.
+//
+// THE SETS ARE COMPARED AND NOT THE COUNTS, because a group of three whose Router holds one
+// follower and not the leader holds as many members as a group whose Router holds the leader
+// alone, and only the sets tell them apart.
+func modelDeploymentSameMembers(a, b map[types.UID]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for uid := range a {
+		if !b[uid] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // collectModelDeploymentRouterObservations is the ONE collection of Router views, and both callers
@@ -839,11 +1288,82 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentServing(
 func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 	ctx context.Context, md *workercore.ModelDeployment, _ []*corev1.Pod,
 ) ([]RouterServingObservation, string) {
+	observations, _, failure := r.collectModelDeploymentRouterObservationsWithMembers(ctx, md)
+
+	return observations, failure.reason
+}
+
+// modelDeploymentCollectionFailure is why a collection produced no answer, and what that failure
+// leaves the operator allowed to conclude.
+//
+// THE CLASS IS THE POINT, AND THE REASON STRING CANNOT CARRY IT. A failure that proved nothing
+// about the group's identity leaves a group that was already qualified at its current generation
+// with what it has, and the serving answer says Unknown. A failure that proved that something
+// moved closes the group, because the group is no longer the group that was qualified.
+//
+// A FAILURE THAT IS NOT RETAINABLE IS A CLOSED ONE. There is no third state, and a fact is the
+// only thing that can hold a group open: a group fact is published on a failure path only when it
+// is computed from a membership read that actually happened.
+type modelDeploymentCollectionFailure struct {
+	reason string
+	// retainable says the failure proved nothing about the group's identity.
+	retainable bool
+	// readAt is when the fresh membership was read. It is the instant a failure-path answer
+	// carries, because that membership is the only evidence such an answer holds.
+	readAt time.Time
+}
+
+// modelDeploymentGuardError says WHICH read of the guard failed, because the opening and the
+// closing guard do not treat their failures alike.
+//
+// THE OPENING GUARD BINDS THE PASS TO THE OBJECT IT WAS ASKED ABOUT, so a failure to read the
+// deployment's own identity closes every group. THE CLOSING GUARD IS A BOOKEND: its failure means
+// it proved nothing, which is not the same as proving that something moved.
+type modelDeploymentGuardError struct {
+	reason string
+	// identity says the deployment's own identity could not be read.
+	identity bool
+	// routers says the Router processes could not be listed.
+	routers bool
+	// members says the membership could not be listed.
+	members bool
+}
+
+func (f modelDeploymentGuardError) Error() string { return f.reason }
+
+// collectModelDeploymentRouterObservationsWithMembers is the collection and the fresh membership it
+// read.
+//
+// THE MEMBERSHIP COMES BACK BECAUSE THE GROUP FACTS ARE COMPUTED AGAINST IT. The per-group facts
+// read the answering set and each member's carried label and annotation, and reading them from the
+// caller's Pod list instead would read the informer cache's view of the deployment: a cached value
+// that has fallen behind is not new proof that a member was ever eligible.
+func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWithMembers(
+	ctx context.Context, md *workercore.ModelDeployment,
+) ([]RouterServingObservation, []*corev1.Pod, modelDeploymentCollectionFailure) {
 	collectCtx, cancel := r.modelDeploymentRouterObservationContext(ctx, md)
 	defer cancel()
 	if err := collectCtx.Err(); err != nil {
-		return nil, fmt.Sprintf("the router observation budget is exhausted: %v", err)
+		return nil, nil, modelDeploymentCollectionFailure{
+			reason: fmt.Sprintf("the router observation budget is exhausted: %v", err),
+		}
 	}
+
+	// THE FRESH MEMBERSHIP IS READ FIRST, AND READ ONCE.
+	//
+	// IT IS THE EVIDENCE THE RETENTION RESTS ON, so it is read before anything that can fail, and
+	// the opening guard takes it rather than listing the members a second time. The closing guard
+	// still lists them, because its whole purpose is to see whether they moved.
+	//
+	// THE PASS IS STILL BOUNDED BY ONE BUDGET AND ONE ROUND TRIP: no read was added, and one was
+	// removed.
+	live, err := r.listFreshModelDeploymentPods(collectCtx, md)
+	if err != nil {
+		return nil, nil, modelDeploymentCollectionFailure{
+			reason: fmt.Sprintf("the deployment's pods could not be listed uncached: %v", err),
+		}
+	}
+	readAt := r.modelDeploymentNow()
 
 	// THE COLLECTION IS BOUNDED BY THE LIVE OBJECTS, not by the snapshot this pass started
 	// from. The deployment and its membership are read through the uncached reader before and
@@ -856,19 +1376,33 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 	// THE FIRST BOOKEND IS TAKEN BEFORE ANY DISCOVERY. It is the state the pass is defined
 	// against, so a Router that appears or a member that leaves after it is a change underneath
 	// this collection, which is exactly what the closing bookend is there to catch.
-	before, guardErr := r.snapshotModelDeploymentObservationGuard(collectCtx, md)
-	if guardErr != nil {
-		return nil, guardErr.Error()
+	before, guardFailure := r.snapshotModelDeploymentObservationGuard(collectCtx, md, live)
+	if guardFailure.reason != "" {
+		if guardFailure.identity {
+			// THE PASS COULD NOT BIND ITSELF TO THE OBJECT IT WAS ASKED ABOUT, so it can conclude
+			// nothing about any group in it.
+			return nil, nil, modelDeploymentCollectionFailure{reason: guardFailure.reason}
+		}
+
+		// THE ROUTERS COULD NOT BE LISTED. The group is not the Router, and the fresh membership
+		// is in hand, so the groups keep what they had.
+		return nil, live, modelDeploymentCollectionFailure{
+			reason:     guardFailure.reason,
+			retainable: true,
+			readAt:     readAt,
+		}
 	}
 	// THE FIRST BOOKEND IS ALSO COMPARED WITH THE CALLER. Two equal fresh snapshots are a fact
 	// about the two reads alone, so a caller holding a REPLACED deployment would see the same
 	// before and after and read its own stale object as an unchanged one. The caller's UID and
 	// generation are the claim this collection has to be about.
 	if !before.matchesCaller(md) {
-		return nil, fmt.Sprintf(
-			"the caller read deployment %s at generation %d but the deployment is now %s at "+
-				"generation %d; the views would describe an object this pass was not asked about",
-			md.UID, md.Generation, before.deploymentUID, before.generation)
+		return nil, nil, modelDeploymentCollectionFailure{
+			reason: fmt.Sprintf(
+				"the caller read deployment %s at generation %d but the deployment is now %s at "+
+					"generation %d; the views would describe an object this pass was not asked about",
+				md.UID, md.Generation, before.deploymentUID, before.generation),
+		}
 	}
 
 	// DISCOVERY READS LIVE. The Router processes this pass will bind are the ones the API server
@@ -883,17 +1417,16 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 			modelDeploymentRouterLabelKey:   md.Spec.Router.Name,
 		},
 	); err != nil {
-		return nil, fmt.Sprintf("the router's pods could not be listed: %v", err)
+		return nil, live, modelDeploymentCollectionFailure{
+			reason:     fmt.Sprintf("the router's pods could not be listed: %v", err),
+			retainable: true,
+			readAt:     readAt,
+		}
 	}
 
 	// BINDING USES THE SAME FRESH OBJECTS, not the caller's list. The endpoints a view binds to
 	// are resolved against Pods this pass re-read, so a member that was replaced, relabelled or
 	// replaced in place since the caller listed them cannot be counted as the member it claims.
-	live, err := r.listFreshModelDeploymentPods(collectCtx, md)
-	if err != nil {
-		return nil, fmt.Sprintf("the deployment's pods could not be listed uncached: %v", err)
-	}
-
 	fetch := r.servingViewFetch
 	if fetch == nil {
 		fetch = defaultServingViewFetch
@@ -955,29 +1488,83 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 	}
 
 	if err := collectCtx.Err(); err != nil {
-		return nil, fmt.Sprintf("the router observation budget is exhausted: %v", err)
+		return nil, live, modelDeploymentCollectionFailure{
+			reason:     fmt.Sprintf("the router observation budget is exhausted: %v", err),
+			retainable: true,
+			readAt:     readAt,
+		}
 	}
 
 	// THE CHAIN IS BOOKENDED, like the deployment's own identity above. The owners were read
 	// once and shared by every process, so this pass re-reads each of them and refuses the whole
 	// collection if one moved while the views were being read. Without it, sharing the read would
 	// have meant a reparent after the first process went unnoticed by every later one.
+	//
+	// THE ROUTERS MOVING IS NOT THE GROUP MOVING, so this failure retains: the membership the
+	// groups are judged on did not move, and the serving answer says Unknown.
 	if err := owners.verify(collectCtx); err != nil {
-		return nil, fmt.Sprintf("the routers' owning chain changed while the routers were being "+
-			"observed; the collected views describe an owner this pass can no longer stand behind: %v", err)
+		return nil, live, modelDeploymentCollectionFailure{
+			reason: fmt.Sprintf("the routers' owning chain changed while the routers were being "+
+				"observed; the collected views describe an owner this pass can no longer stand behind: %v", err),
+			retainable: true,
+			readAt:     readAt,
+		}
 	}
 
-	after, guardErr := r.snapshotModelDeploymentObservationGuard(collectCtx, md)
-	if guardErr != nil {
-		return nil, guardErr.Error()
+	after, guardFailure := r.snapshotModelDeploymentObservationGuard(collectCtx, md, nil)
+	if guardFailure.reason != "" {
+		// A KNOWN CHANGE DOMINATES A LATER UNCERTAINTY. The closing bookend may have read enough
+		// to prove that the deployment or the membership moved before a later read failed, and a
+		// read failure must not erase a change the same snapshot already proved.
+		//
+		// ONLY THE FACTS THE CLOSING SNAPSHOT ACTUALLY READ ARE COMPARED. A snapshot that failed
+		// before it read the deployment knows nothing about it, and a snapshot that failed before it
+		// listed the members knows nothing about them.
+		if before.deploymentMoved(after) {
+			return nil, live, modelDeploymentCollectionFailure{
+				reason: fmt.Sprintf(
+					"the deployment changed while the routers were being observed; the collected " +
+						"views describe an earlier snapshot and cannot confirm absence"),
+				readAt: readAt,
+			}
+		}
+		if before.membersMoved(after) {
+			return nil, live, modelDeploymentCollectionFailure{
+				reason: fmt.Sprintf(
+					"the membership changed while the routers were being observed; the collected " +
+						"views describe an earlier snapshot and cannot confirm absence"),
+				readAt: readAt,
+			}
+		}
+
+		// THE CLOSING BOOKEND COULD NOT BE READ. It exists to prove that something moved, and it
+		// proved nothing.
+		return nil, live, modelDeploymentCollectionFailure{
+			reason:     guardFailure.reason,
+			retainable: true,
+			readAt:     readAt,
+		}
 	}
-	if before != after {
-		return nil, fmt.Sprintf(
-			"the deployment or its membership changed while the routers were being observed; " +
-				"the collected views describe an earlier snapshot and cannot confirm absence")
+	if before.identityMoved(after) {
+		return nil, live, modelDeploymentCollectionFailure{
+			reason: fmt.Sprintf(
+				"the deployment or its membership changed while the routers were being observed; " +
+					"the collected views describe an earlier snapshot and cannot confirm absence"),
+			readAt: readAt,
+		}
+	}
+	if before.routerFacts != after.routerFacts {
+		return nil, live, modelDeploymentCollectionFailure{
+			reason: fmt.Sprintf(
+				"the routers' processes changed while the routers were being observed; the group's " +
+					"members did not move, so the group keeps what it has and the serving answer " +
+					"stays unknown"),
+			retainable: true,
+			readAt:     readAt,
+		}
 	}
 
-	return observations, ""
+	return observations, live, modelDeploymentCollectionFailure{}
 }
 
 // listFreshModelDeploymentPods reads the deployment's own Pods through the uncached reader.
@@ -1022,16 +1609,40 @@ type modelDeploymentObservationGuard struct {
 	// changed, and memberUIDs keeps answering the plain membership question.
 	memberFacts string
 	routerFacts string
+	// read records which of the facts above this snapshot actually read.
+	read modelDeploymentGuardRead
+}
+
+// modelDeploymentGuardRead records which parts of a guard snapshot were read.
+//
+// A SNAPSHOT THAT FAILED PART WAY THROUGH KNOWS SOME OF THEM. The facts it did read are facts, and
+// a snapshot that proved the deployment changed must not lose that proof because the membership
+// listing failed afterwards. The facts it never reached are unknown, and an unknown is not a value
+// that can be compared: a field that was never read is not a change.
+type modelDeploymentGuardRead struct {
+	deployment bool
+	members    bool
+	routers    bool
 }
 
 // snapshotModelDeploymentObservationGuard reads that identity through the uncached reader.
+//
+// THE MEMBERS ARE PASSED IN when the caller has already read them, and listed here when it has
+// not. THE OPENING GUARD TAKES THE HOISTED MEMBERSHIP READ, so the membership is listed once per
+// collection and not twice; THE CLOSING GUARD LISTS THEM AGAIN, because its whole purpose is to
+// see whether they moved.
 func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
-	ctx context.Context, md *workercore.ModelDeployment,
-) (modelDeploymentObservationGuard, error) {
+	ctx context.Context, md *workercore.ModelDeployment, members []*corev1.Pod,
+) (modelDeploymentObservationGuard, modelDeploymentGuardError) {
+	guard := modelDeploymentObservationGuard{}
+
 	live := new(workercore.ModelDeployment)
 	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(md), live); err != nil {
-		return modelDeploymentObservationGuard{},
-			fmt.Errorf("the deployment could not be re-read uncached during observation: %w", err)
+		return guard, modelDeploymentGuardError{
+			reason: fmt.Errorf(
+				"the deployment could not be re-read uncached during observation: %w", err).Error(),
+			identity: true,
+		}
 	}
 	ownerUIDs := make([]string, 0, len(live.OwnerReferences))
 	for _, owner := range live.OwnerReferences {
@@ -1039,16 +1650,39 @@ func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
 	}
 	sort.Strings(ownerUIDs)
 
-	members := new(corev1.PodList)
-	if err := r.APIReader.List(ctx, members,
-		ctrlcli.InNamespace(md.Namespace),
-		ctrlcli.MatchingLabels{
-			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
-			modelDeploymentLabelKeyInstance: md.Name,
-		},
-	); err != nil {
-		return modelDeploymentObservationGuard{},
-			fmt.Errorf("the membership could not be re-read uncached during observation: %w", err)
+	// THE DEPLOYMENT'S OWN FACTS ARE KNOWN FROM HERE ON, and they stay known when a later read
+	// fails. A snapshot that proved the deployment changed must not lose that proof because the
+	// membership or the Router listing failed afterwards.
+	guard.deploymentUID = string(live.UID)
+	guard.generation = live.Generation
+	guard.ownerUIDs = strings.Join(ownerUIDs, ",")
+	guard.read.deployment = true
+
+	owned := make([]corev1.Pod, 0, len(members))
+	if members == nil {
+		listed := new(corev1.PodList)
+		if err := r.APIReader.List(ctx, listed,
+			ctrlcli.InNamespace(md.Namespace),
+			ctrlcli.MatchingLabels{
+				modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+				modelDeploymentLabelKeyInstance: md.Name,
+			},
+		); err != nil {
+			return guard, modelDeploymentGuardError{
+				reason: fmt.Errorf(
+					"the membership could not be re-read uncached during observation: %w", err).Error(),
+				members: true,
+			}
+		}
+		for i := range listed.Items {
+			if modelDeploymentOwns(&listed.Items[i], md) {
+				owned = append(owned, listed.Items[i])
+			}
+		}
+	} else {
+		for i := range members {
+			owned = append(owned, *members[i])
+		}
 	}
 	// EVERY FACT A BINDING ACTED ON IS IN THE BOOKEND, not only the membership. A member that kept
 	// its UID while its controlling owner, its role, its member rank or the listener it declares
@@ -1060,12 +1694,6 @@ func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
 	// owned by this deployment is not a fact any binding can act on, and keeping it out is what makes
 	// the guard describe exactly the set the bindings read: otherwise one such Pod's churn refuses the
 	// whole collection over a member this deployment does not have.
-	owned := make([]corev1.Pod, 0, len(members.Items))
-	for i := range members.Items {
-		if modelDeploymentOwns(&members.Items[i], md) {
-			owned = append(owned, members.Items[i])
-		}
-	}
 	memberUIDs := make([]string, 0, len(owned))
 	memberFacts := make([]string, 0, len(owned))
 	for i := range owned {
@@ -1074,6 +1702,12 @@ func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
 	}
 	sort.Strings(memberUIDs)
 	sort.Strings(memberFacts)
+
+	// THE MEMBERSHIP'S FACTS ARE KNOWN FROM HERE ON, and they stay known when the Router listing
+	// fails. A member that left under the collection is a change the collection already proved.
+	guard.memberUIDs = strings.Join(memberUIDs, ",")
+	guard.memberFacts = strings.Join(memberFacts, ";")
+	guard.read.members = true
 
 	// The Router processes are read under the same snapshot for the same reason: a process that
 	// lost its address or changed owner is no longer the process this pass read.
@@ -1086,8 +1720,11 @@ func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
 			modelDeploymentRouterLabelKey:   md.Spec.Router.Name,
 		},
 	); err != nil {
-		return modelDeploymentObservationGuard{},
-			fmt.Errorf("the routers could not be re-read uncached during observation: %w", err)
+		return guard, modelDeploymentGuardError{
+			reason: fmt.Errorf(
+				"the routers could not be re-read uncached during observation: %w", err).Error(),
+			routers: true,
+		}
 	}
 	routerFacts := make([]string, 0, len(routers.Items))
 	for i := range routers.Items {
@@ -1095,14 +1732,47 @@ func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
 	}
 	sort.Strings(routerFacts)
 
-	return modelDeploymentObservationGuard{
-		deploymentUID: string(live.UID),
-		generation:    live.Generation,
-		ownerUIDs:     strings.Join(ownerUIDs, ","),
-		memberUIDs:    strings.Join(memberUIDs, ","),
-		memberFacts:   strings.Join(memberFacts, ";"),
-		routerFacts:   strings.Join(routerFacts, ";"),
-	}, nil
+	guard.routerFacts = strings.Join(routerFacts, ";")
+	guard.read.routers = true
+
+	return guard, modelDeploymentGuardError{}
+}
+
+// identityMoved reports whether the deployment's own identity or the membership moved between two
+// bookends.
+//
+// THE ROUTER PROCESSES ARE NOT PART OF IT. A collection whose routers were reparented or replaced
+// describes a different set of processes, but the group's members did not move, and the retention
+// is proved by the fresh membership rather than by the view.
+func (g modelDeploymentObservationGuard) identityMoved(other modelDeploymentObservationGuard) bool {
+	return g.deploymentMoved(other) || g.membersMoved(other)
+}
+
+// deploymentMoved reports whether the deployment's own identity moved between two snapshots.
+//
+// ONLY THE FACTS BOTH SNAPSHOTS READ. A snapshot that failed before the deployment was read knows
+// nothing about it, and an unknown is not a change: it is the absence of one.
+func (g modelDeploymentObservationGuard) deploymentMoved(other modelDeploymentObservationGuard) bool {
+	if !g.read.deployment || !other.read.deployment {
+		return false
+	}
+
+	return g.deploymentUID != other.deploymentUID ||
+		g.generation != other.generation ||
+		g.ownerUIDs != other.ownerUIDs
+}
+
+// membersMoved reports whether the membership moved between two snapshots.
+//
+// ONLY THE FACTS BOTH SNAPSHOTS READ, for the same reason as deploymentMoved. A closing snapshot
+// that failed before it listed the members knows nothing about them, and a closing snapshot that
+// read them knows them even if the Router listing failed afterwards.
+func (g modelDeploymentObservationGuard) membersMoved(other modelDeploymentObservationGuard) bool {
+	if !g.read.members || !other.read.members {
+		return false
+	}
+
+	return g.memberUIDs != other.memberUIDs || g.memberFacts != other.memberFacts
 }
 
 // matchesCaller reports whether the first uncached read is still the object the caller passed in.
@@ -1119,6 +1789,17 @@ func (g modelDeploymentObservationGuard) matchesCaller(md *workercore.ModelDeplo
 // its controlling owner as an identity, the workload role and member rank it declares, the
 // listeners it declares, whether it is running, and whether it is terminating. Two snapshots that
 // carry the same fact describe the same member; two that differ describe a member that moved.
+//
+// THE READINESS IS PART OF THE FACT, because a member that stopped reporting ready is a member
+// that moved: it is no longer a member the group may be served by, and a member the group's
+// qualification admitted on an earlier readiness is not the member it admitted. The phase alone
+// does not say it, because a member whose readiness probe fails stays Running.
+//
+// THE ELIGIBILITY LABEL AND THE GENERATION ANNOTATION ARE PART OF THE FACT, because the collection
+// now consumes them: the retention rule reads them to decide whether a group is eligible and
+// unchanged generation, and a fact that left them out would let a label or an annotation change
+// under the collection without the collection noticing. The member index above is the ordinal, and
+// it is here for the same reason.
 func modelDeploymentMemberFact(pod *corev1.Pod) string {
 	owner := "none"
 	if ref := meta.GetControllerOf(pod); ref != nil {
@@ -1142,6 +1823,9 @@ func modelDeploymentMemberFact(pod *corev1.Pod) string {
 		strings.Join(listeners, "+"),
 		string(pod.Status.Phase),
 		strconv.FormatBool(terminating),
+		strconv.FormatBool(podIsReady(pod)),
+		pod.Labels[modelDeploymentLabelKeyEndpointEligible],
+		pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration],
 	}, "|")
 }
 

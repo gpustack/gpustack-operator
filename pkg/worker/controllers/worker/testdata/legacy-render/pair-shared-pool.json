@@ -21,7 +21,7 @@
         "kueue.x-k8s.io/role-hash": "prefill",
         "kvcache.gpustack.ai/client-config": "{\"metadata_server\":\"P2PHANDSHAKE\",\"master_server_address\":\"shared-kv-master.gpustack-system.svc:50051\",\"protocol\":\"tcp\",\"device_name\":\"\",\"mode\":\"standalone-store\",\"global_segment_size\":0,\"local_buffer_size\":134217728,\"tenant_id\":\"team-a-shared\"}",
         "modeldeployment.gpustack.ai/pod-spec-hash": "63bb86eaf21b252303c04f77136406d3ce63ec87a2571671e3d66b9170f37c12",
-        "modeldeployment.gpustack.ai/render-version": "1",
+        "modeldeployment.gpustack.ai/render-version": "4",
         "note.gpustack.ai/role": "prefill",
         "prometheus.io/path": "/metrics",
         "prometheus.io/port": "8000",
@@ -121,6 +121,34 @@
             {
               "name": "VLLM_CACHE_ROOT",
               "value": "/var/lib/gpustack/cache"
+            },
+            {
+              "name": "HF_HUB_CACHE",
+              "value": "/var/lib/gpustack/cache/hf-hub"
+            },
+            {
+              "name": "HF_XET_CACHE",
+              "value": "/var/lib/gpustack/cache/xet"
+            },
+            {
+              "name": "PIP_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/pip"
+            },
+            {
+              "name": "TORCH_HOME",
+              "value": "/var/lib/gpustack/cache/torch"
+            },
+            {
+              "name": "FLASHINFER_WORKSPACE_BASE",
+              "value": "/var/lib/gpustack/cache/flashinfer"
+            },
+            {
+              "name": "TORCHINDUCTOR_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/inductor"
+            },
+            {
+              "name": "TRITON_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/triton"
             }
           ],
           "resources": {
@@ -225,7 +253,7 @@
         "kueue.x-k8s.io/role-hash": "decode",
         "kvcache.gpustack.ai/client-config": "{\"metadata_server\":\"P2PHANDSHAKE\",\"master_server_address\":\"shared-kv-master.gpustack-system.svc:50051\",\"protocol\":\"tcp\",\"device_name\":\"\",\"mode\":\"standalone-store\",\"global_segment_size\":0,\"local_buffer_size\":134217728,\"tenant_id\":\"team-a-shared\"}",
         "modeldeployment.gpustack.ai/pod-spec-hash": "0efbf42490ddeea1b7c0e99252126b604bb32d734e32b1421a2536d3ff029487",
-        "modeldeployment.gpustack.ai/render-version": "1",
+        "modeldeployment.gpustack.ai/render-version": "4",
         "note.gpustack.ai/role": "decode",
         "prometheus.io/path": "/metrics",
         "prometheus.io/port": "8000",
@@ -325,6 +353,34 @@
             {
               "name": "VLLM_CACHE_ROOT",
               "value": "/var/lib/gpustack/cache"
+            },
+            {
+              "name": "HF_HUB_CACHE",
+              "value": "/var/lib/gpustack/cache/hf-hub"
+            },
+            {
+              "name": "HF_XET_CACHE",
+              "value": "/var/lib/gpustack/cache/xet"
+            },
+            {
+              "name": "PIP_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/pip"
+            },
+            {
+              "name": "TORCH_HOME",
+              "value": "/var/lib/gpustack/cache/torch"
+            },
+            {
+              "name": "FLASHINFER_WORKSPACE_BASE",
+              "value": "/var/lib/gpustack/cache/flashinfer"
+            },
+            {
+              "name": "TORCHINDUCTOR_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/inductor"
+            },
+            {
+              "name": "TRITON_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/triton"
             }
           ],
           "resources": {

@@ -1484,6 +1484,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentEngineApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentEnvVar"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentEnvVarApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentGroupMemberStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentGroupMemberStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentGroupStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentGroupStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVCache"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVCacheApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVCacheDomain"):

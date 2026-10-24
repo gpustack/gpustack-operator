@@ -992,3 +992,293 @@ func TestModelDeploymentScalerSampler_StaleWindowAndDecodeTransfer(t *testing.T)
 	assert.False(t, stale.CompleteCoverage,
 		"a stale window does not count as complete coverage for scale-down")
 }
+
+// scalerSamplerBusyVLLMExposition is a vLLM decode role carrying a backlog the QueueDepth metric
+// counts and the RunningRequests metric does not: one request running, twenty-three waiting, and
+// the counters and latency histograms of a working replica.
+const scalerSamplerBusyVLLMExposition = `# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{model_name="Qwen/Qwen3-8B"} 1.0
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting{model_name="Qwen/Qwen3-8B"} 23.0
+# TYPE vllm:prompt_tokens_total counter
+vllm:prompt_tokens_total{model_name="Qwen/Qwen3-8B"} 1000.0
+# TYPE vllm:generation_tokens_total counter
+vllm:generation_tokens_total{model_name="Qwen/Qwen3-8B"} 500.0
+# TYPE vllm:prefix_cache_hits_total counter
+vllm:prefix_cache_hits_total{model_name="Qwen/Qwen3-8B"} 40.0
+# TYPE vllm:prefix_cache_queries_total counter
+vllm:prefix_cache_queries_total{model_name="Qwen/Qwen3-8B"} 60.0
+# TYPE vllm:time_to_first_token_seconds histogram
+vllm:time_to_first_token_seconds_bucket{model_name="Qwen/Qwen3-8B",le="0.5"} 40.0
+vllm:time_to_first_token_seconds_bucket{model_name="Qwen/Qwen3-8B",le="+Inf"} 60.0
+vllm:time_to_first_token_seconds_sum{model_name="Qwen/Qwen3-8B"} 20.0
+vllm:time_to_first_token_seconds_count{model_name="Qwen/Qwen3-8B"} 60.0
+# TYPE vllm:inter_token_latency_seconds histogram
+vllm:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen3-8B",le="0.01"} 1200.0
+vllm:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen3-8B",le="+Inf"} 1500.0
+vllm:inter_token_latency_seconds_sum{model_name="Qwen/Qwen3-8B"} 40.0
+vllm:inter_token_latency_seconds_count{model_name="Qwen/Qwen3-8B"} 1500.0
+`
+
+// scalerSamplerIdleVLLMExposition is a vLLM decode role that is serving nothing: its gauges read
+// zero and it exports no latency histogram, because it was added and never received a request.
+const scalerSamplerIdleVLLMExposition = `# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{model_name="Qwen/Qwen3-8B"} 0.0
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting{model_name="Qwen/Qwen3-8B"} 0.0
+# TYPE vllm:prompt_tokens_total counter
+vllm:prompt_tokens_total{model_name="Qwen/Qwen3-8B"} 0.0
+# TYPE vllm:generation_tokens_total counter
+vllm:generation_tokens_total{model_name="Qwen/Qwen3-8B"} 0.0
+`
+
+// TestModelDeploymentScalerSampler_VLLMQueueDepthCountsTheBacklog holds the P1 contract on a
+// vLLM-shaped role: the QueueDepth metric counts running and waiting requests together, so a
+// backlog of twenty-three waiting behind one running is a rise against a target of four.
+//
+// THE WAITING QUEUE IS PART OF THE DEPTH. A metric that counted running alone would read one
+// request against a target of four and call the role quiet while twenty-three requests waited.
+func TestModelDeploymentScalerSampler_VLLMQueueDepthCountsTheBacklog(t *testing.T) {
+	t.Parallel()
+
+	pod := scalerSamplerPod("decode-0", "decode", types.UID("pod-uid"), 0)
+	target := scalerSamplerTarget(types.UID("target-uid"), workercore.ModelDeploymentEngineVLLM,
+		scalerSamplerRole("decode", workercore.ModelDeploymentRoleKindDecode, 1))
+	scaler := scalerSamplerScaler(types.UID("scaler-uid"), 15)
+	script := &scalerSamplerScripted{
+		bodies:   map[string][]byte{"decode-0": []byte(scalerSamplerBusyVLLMExposition)},
+		failures: map[string]bool{},
+		asked:    map[string]int{},
+	}
+	sampler := &modelDeploymentScalerSampler{Scrape: script.scrape}
+
+	start := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	sampler.SampleRoleMetrics(context.Background(), scaler, target, []core.Pod{pod}, start)
+	observation := sampler.SampleRoleMetrics(context.Background(), scaler, target,
+		[]core.Pod{pod}, start.Add(15*time.Second))["decode"]
+
+	assert.Equal(t, 1.0, observation.RunningRequests,
+		"the running request is read from the vLLM gauge")
+	assert.Equal(t, 23.0, observation.WaitingRequests,
+		"the waiting queue is read from the vLLM gauge")
+
+	recommendation, _ := algorithm.NewProportional(algorithm.MetricQueueDepth, 4, 0.1).
+		Recommend(observation, nil)
+	assert.Equal(t, algorithm.ReasonScaleUp, recommendation.Reason,
+		"a depth of twenty-four against a target of four is a rise")
+	assert.Greater(t, recommendation.DesiredReplicas, int32(1),
+		"one replica cannot carry a queue of twenty-four against a target of four")
+}
+
+// TestModelDeploymentScalerSampler_VLLMIdleGaugesReturnToFloor holds the P2 contract on a
+// vLLM-shaped role: quiet gauges read idle, an idle role is fully covered, and the QueueDepth
+// metric returns it to its floor of one.
+//
+// THE LATENCY HISTOGRAM OF A REPLICA THAT SERVED NOTHING IS NOT A GAP IN THE READING. The vLLM
+// reader behaves like the SGLang one here: a replica that was added and never received a request
+// exports no latency histogram, and the gauge path judges the role idle without it.
+func TestModelDeploymentScalerSampler_VLLMIdleGaugesReturnToFloor(t *testing.T) {
+	t.Parallel()
+
+	pod := scalerSamplerPod("decode-0", "decode", types.UID("pod-uid"), 0)
+	target := scalerSamplerTarget(types.UID("target-uid"), workercore.ModelDeploymentEngineVLLM,
+		scalerSamplerRole("decode", workercore.ModelDeploymentRoleKindDecode, 1))
+	scaler := scalerSamplerScaler(types.UID("scaler-uid"), 15)
+	script := &scalerSamplerScripted{
+		bodies:   map[string][]byte{"decode-0": []byte(scalerSamplerIdleVLLMExposition)},
+		failures: map[string]bool{},
+		asked:    map[string]int{},
+	}
+	sampler := &modelDeploymentScalerSampler{Scrape: script.scrape}
+
+	start := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	sampler.SampleRoleMetrics(context.Background(), scaler, target, []core.Pod{pod}, start)
+	observation := sampler.SampleRoleMetrics(context.Background(), scaler, target,
+		[]core.Pod{pod}, start.Add(15*time.Second))["decode"]
+
+	assert.Equal(t, algorithm.SignalIdle, observation.GaugeState,
+		"a role whose gauges and counters say that nothing is running is idle")
+	assert.True(t, observation.CompleteCoverage,
+		"an idle role is fully covered: it was read, it was quiet")
+
+	recommendation, _ := algorithm.NewProportional(algorithm.MetricQueueDepth, 4, 0.1).
+		Recommend(observation, nil)
+	assert.Equal(t, int32(1), recommendation.DesiredReplicas,
+		"a role that served nothing returns to its floor")
+	assert.False(t, recommendation.HoldScaleDown,
+		"a role that served nothing is not held above its floor")
+}
+
+// TestModelDeploymentScalerSampler_VLLMRunningRequestsIgnoresWaiting pins why a scaler on the
+// RunningRequests metric holds a backlogged role at its floor: the metric counts one running
+// request against a target of four and never sees the twenty-three waiting behind it.
+//
+// THIS IS THE CASE-9 RUN3 DOCUMENTATION. Nine rows failed there because the declared metric was
+// RunningRequests: the depth was twenty-four and the recommendation held at one. The test
+// documents that hold; it does not endorse the metric.
+func TestModelDeploymentScalerSampler_VLLMRunningRequestsIgnoresWaiting(t *testing.T) {
+	t.Parallel()
+
+	pod := scalerSamplerPod("decode-0", "decode", types.UID("pod-uid"), 0)
+	target := scalerSamplerTarget(types.UID("target-uid"), workercore.ModelDeploymentEngineVLLM,
+		scalerSamplerRole("decode", workercore.ModelDeploymentRoleKindDecode, 1))
+	scaler := scalerSamplerScaler(types.UID("scaler-uid"), 15)
+	script := &scalerSamplerScripted{
+		bodies:   map[string][]byte{"decode-0": []byte(scalerSamplerBusyVLLMExposition)},
+		failures: map[string]bool{},
+		asked:    map[string]int{},
+	}
+	sampler := &modelDeploymentScalerSampler{Scrape: script.scrape}
+
+	start := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	sampler.SampleRoleMetrics(context.Background(), scaler, target, []core.Pod{pod}, start)
+	observation := sampler.SampleRoleMetrics(context.Background(), scaler, target,
+		[]core.Pod{pod}, start.Add(15*time.Second))["decode"]
+
+	assert.Equal(t, 23.0, observation.WaitingRequests,
+		"the backlog is in the observation; the metric below is what ignores it")
+
+	recommendation, _ := algorithm.NewProportional(algorithm.MetricRunningRequests, 4, 0.1).
+		Recommend(observation, nil)
+	assert.Equal(t, int32(1), recommendation.DesiredReplicas,
+		"one running request against a target of four never rises, whatever is waiting")
+	assert.Equal(t, algorithm.ReasonWithinTolerance, recommendation.Reason,
+		"a quarter of the target reads as within tolerance on this metric")
+}
+
+// scalerSamplerSGLangPrefillExposition is an SGLang prefill role with one request running, an
+// empty ordinary waiting queue and twenty-five requests waiting in the prefill inflight queue.
+//
+// THE ORDINARY QUEUE IS EMPTY ON PURPOSE. This is the shape the recorded run read: a prefill role
+// that was busy while the scaler saw one running request and nothing waiting.
+const scalerSamplerSGLangPrefillExposition = `# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{engine_type="prefill",model_name="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 1.0
+# TYPE sglang:num_queue_reqs gauge
+sglang:num_queue_reqs{engine_type="prefill",model_name="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:num_prefill_inflight_queue_reqs gauge
+sglang:num_prefill_inflight_queue_reqs{engine_type="prefill",model_name="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 25.0
+# TYPE sglang:num_decode_transfer_queue_reqs gauge
+sglang:num_decode_transfer_queue_reqs{engine_type="prefill",model_name="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+`
+
+// scalerSamplerQuietDecodeExposition is an SGLang decode role that is serving nothing and has
+// served nothing: its gauges read zero, its counters have not moved, and its latency histograms
+// carry no new sample.
+const scalerSamplerQuietDecodeExposition = `# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{engine_type="decode",model_name="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:num_queue_reqs gauge
+sglang:num_queue_reqs{engine_type="decode",model_name="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:num_decode_transfer_queue_reqs gauge
+sglang:num_decode_transfer_queue_reqs{engine_type="decode",model_name="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:prompt_tokens_total counter
+sglang:prompt_tokens_total{model_name="Qwen/Qwen3-8B",pp_rank="0",tp_rank="0"} 1000.0
+# TYPE sglang:generation_tokens_total counter
+sglang:generation_tokens_total{model_name="Qwen/Qwen3-8B",pp_rank="0",tp_rank="0"} 500.0
+# TYPE sglang:time_to_first_token_seconds histogram
+sglang:time_to_first_token_seconds_bucket{model_name="Qwen/Qwen3-8B",le="0.5"} 40.0
+sglang:time_to_first_token_seconds_bucket{model_name="Qwen/Qwen3-8B",le="+Inf"} 60.0
+sglang:time_to_first_token_seconds_sum{model_name="Qwen/Qwen3-8B"} 20.0
+sglang:time_to_first_token_seconds_count{model_name="Qwen/Qwen3-8B"} 60.0
+# TYPE sglang:inter_token_latency_seconds histogram
+sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen3-8B",le="0.01"} 1200.0
+sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen3-8B",le="+Inf"} 1500.0
+sglang:inter_token_latency_seconds_sum{model_name="Qwen/Qwen3-8B"} 40.0
+sglang:inter_token_latency_seconds_count{model_name="Qwen/Qwen3-8B"} 1500.0
+`
+
+// scalerSamplerQuietDecodeWithoutHistogramExposition is the same quiet decode role on a replica
+// that was added and never received a request.
+//
+// THE HISTOGRAMS ARE ABSENT ON PURPOSE. A replica that served nothing exports no latency
+// histogram, and that is what the sampler has to read as a quiet replica rather than as a broken
+// one.
+const scalerSamplerQuietDecodeWithoutHistogramExposition = `# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{engine_type="decode",model_name="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:num_queue_reqs gauge
+sglang:num_queue_reqs{engine_type="decode",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:num_decode_transfer_queue_reqs gauge
+sglang:num_decode_transfer_queue_reqs{engine_type="decode",model_name="Qwen/Qwen3-8B",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:prompt_tokens_total counter
+sglang:prompt_tokens_total{model_name="Qwen/Qwen3-8B",pp_rank="0",tp_rank="0"} 1000.0
+# TYPE sglang:generation_tokens_total counter
+sglang:generation_tokens_total{model_name="Qwen/Qwen3-8B",pp_rank="0",tp_rank="0"} 500.0
+`
+
+// TestModelDeploymentScalerSampler_SGLangPrefillInflightQueue holds that a prefill role reads the
+// requests waiting in the prefill inflight queue.
+//
+// THE PREFILL ROLE'S BACKLOG IS ITS OWN QUEUE. An SGLang prefill role keeps the requests it has
+// accepted and not yet scheduled in the inflight queue, and its ordinary waiting queue is empty
+// while that queue is not. A sampler that reads only the ordinary queue sees a role with one
+// running request and nothing waiting, and the role then reads as idle while its backlog grows.
+func TestModelDeploymentScalerSampler_SGLangPrefillInflightQueue(t *testing.T) {
+	t.Parallel()
+
+	pod := scalerSamplerPod("prefill-0", "prefill", types.UID("pod-uid"), 0)
+	target := scalerSamplerTarget(types.UID("target-uid"), workercore.ModelDeploymentEngineSGLang,
+		scalerSamplerRole("prefill", workercore.ModelDeploymentRoleKindPrefill, 1))
+	scaler := scalerSamplerScaler(types.UID("scaler-uid"), 15)
+	script := &scalerSamplerScripted{
+		bodies:   map[string][]byte{"prefill-0": []byte(scalerSamplerSGLangPrefillExposition)},
+		failures: map[string]bool{},
+		asked:    map[string]int{},
+	}
+	sampler := &modelDeploymentScalerSampler{Scrape: script.scrape}
+
+	start := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	observation := sampler.SampleRoleMetrics(context.Background(), scaler, target, []core.Pod{pod}, start)["prefill"]
+
+	assert.Equal(t, 1.0, observation.RunningRequests,
+		"the running request is read from the ordinary request gauge")
+	assert.Equal(t, 25.0, observation.WaitingRequests,
+		"a prefill role adds the requests waiting in the prefill inflight queue to its waiting queue")
+}
+
+// TestModelDeploymentScalerSampler_AddedReplicaWithoutHistograms holds that a role whose added
+// replica served nothing is judged idle on its gauges and counters, and that it reaches its floor.
+//
+// THE LATENCY HISTOGRAM OF A REPLICA THAT SERVED NOTHING IS NOT A GAP IN THE READING. A replica
+// that was added and never received a request exports no latency histogram, and a sampler that
+// reads the histogram's absence as a sign of trouble holds the whole role above its floor for
+// ever. The role's gauges and counters say that nothing is running and nothing is waiting, and
+// that is the truth about the role.
+//
+// THE LATENCY SIGNAL STAYS MISSING, because the algorithms that measure latency are held by a
+// missing signal, and only the gauge path may read the role as idle.
+func TestModelDeploymentScalerSampler_AddedReplicaWithoutHistograms(t *testing.T) {
+	t.Parallel()
+
+	working := scalerSamplerPod("decode-0", "decode", types.UID("pod-uid-0"), 0)
+	added := scalerSamplerPod("decode-1", "decode", types.UID("pod-uid-1"), 1)
+	target := scalerSamplerTarget(types.UID("target-uid"), workercore.ModelDeploymentEngineSGLang,
+		scalerSamplerRole("decode", workercore.ModelDeploymentRoleKindDecode, 2))
+	scaler := scalerSamplerScaler(types.UID("scaler-uid"), 15)
+	script := &scalerSamplerScripted{
+		bodies: map[string][]byte{
+			"decode-0": []byte(scalerSamplerQuietDecodeExposition),
+			"decode-1": []byte(scalerSamplerQuietDecodeWithoutHistogramExposition),
+		},
+		failures: map[string]bool{},
+		asked:    map[string]int{},
+	}
+	sampler := &modelDeploymentScalerSampler{Scrape: script.scrape}
+
+	start := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	sampler.SampleRoleMetrics(context.Background(), scaler, target, []core.Pod{working, added}, start)
+	observation := sampler.SampleRoleMetrics(context.Background(), scaler, target,
+		[]core.Pod{working, added}, start.Add(15*time.Second))["decode"]
+
+	assert.Equal(t, algorithm.SignalIdle, observation.GaugeState,
+		"a role whose gauges and counters say that nothing is running is idle, whatever its histograms say")
+	assert.Equal(t, algorithm.SignalMissing, observation.LatencyState,
+		"the latency signal stays missing, so the algorithms that measure latency are still held")
+	assert.True(t, observation.CompleteCoverage,
+		"an idle role is fully covered: it was read, it was quiet")
+
+	recommendation, _ := algorithm.NewProportional(algorithm.MetricQueueDepth, 4, 0.1).
+		Recommend(observation, nil)
+	assert.Equal(t, int32(1), recommendation.DesiredReplicas,
+		"a role that served nothing returns to its floor")
+	assert.False(t, recommendation.HoldScaleDown,
+		"a role that served nothing is not held above its floor")
+}

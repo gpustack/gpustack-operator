@@ -4,10 +4,15 @@
 and the Router balances requests across all of them. For captured commands and results, follow the
 [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md).
 
+The recorded runs apply to vLLM `v0.30.0` on NVIDIA *H100*; the SGLang shape is stated against
+SGLang `0.5.22` with the `sglang-gateway` binary of `gpustack/llm-router:v0.3.1`. Other versions must be re-verified before
+they inherit a claim on this page.
+
 ## Contents
 
 - [Overview and selection](#overview-and-selection)
 - [Configuration](#configuration)
+- [SGLang External DP](#sglang-external-dp)
 - [Load-balancing derivation](#load-balancing-derivation)
 - [Per-rank Pod identity](#per-rank-pod-identity)
 - [Port allocation](#port-allocation)
@@ -32,6 +37,7 @@ The serving configurations compare as follows:
 | Monolithic *TP* | one engine process group, one master | one endpoint (the master) | replica replacement, not in-place |
 | *Elastic EP* | Ray *Internal LB*, one instance | one endpoint (the master) | online *`elasticEp.width`* scale-up |
 | *External DP* | fixed ranks, `--data-parallel-rank` each | one endpoint **per rank**, Router-balanced | fixed; world-size changes recreate |
+| *SGLang External DP* | one distributed launch over `size` members, *FFN* tensor-parallel across them | one endpoint **per member**, Router-balanced | fixed; replica count changes recreate groups |
 
 Choose *External DP* for fixed *MoE* groups that need per-rank HTTP ingress or lower median first-token
 latency under high concurrency. Its independent rank schedulers do not guarantee higher output throughput.
@@ -70,7 +76,7 @@ spec:
       kind: Server
       replicas: 1
       size: 4  # four member Pods in one fate-sharing DP group
-      instanceType: gpustack-nvidia-h100-80gb-hbm3-linux-amd64
+      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
         accelerator: "2"  # matches local --tensor-parallel-size per member
       extraArgs:
@@ -92,6 +98,132 @@ spec:
 
 When the cluster provides an *RDMA* fabric, add `interface: "2"` under *`resources`* so cross-`Pod`
 expert collectives run over InfiniBand or RoCE instead of TCP.
+
+## SGLang External DP
+
+*SGLang External DP* is the same serving shape on the SGLang engine: one instance is **one SGLang
+distributed launch spanning `size` member `Pod`s**, with **one attention-DP group per member
+`Pod`**. Under `SGLANG_RUST_SERVER=1` every attention-DP group hosts an HTTP listener of its own,
+so each member `Pod` answers on the base port of its own `Pod` IP and the Router balances across
+the members.
+
+### Shape and example
+
+The launch spans the members, so the *TP* width counts every member's GPU while the attention width
+counts the groups. With two members and one GPU each, `--tp-size 2 --attn-dp-size 2 --nnodes 2`
+gives each member one attention-DP group of one scheduler, with the *FFN* tensor-parallel group
+spanning both members.
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen3-sglang-external-dp
+  namespace: team-a
+spec:
+  model:
+    name: Qwen/Qwen3-8B
+  engine:
+    name: SGLang
+    image: gpustack/runner:cuda13.0-sglang0.5.22
+  router:
+    name: sglang-gateway  # balances requests across all member endpoints
+  roles:
+    - name: server
+      kind: Server
+      replicas: 1
+      size: 2  # two member Pods in one fate-sharing group
+      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      resources:
+        accelerator: "1"  # one GPU per member; the FFN tensor-parallel group spans both
+      extraArgs:
+        - --tp-size
+        - "2"
+        - --attn-dp-size
+        - "2"
+        - --nnodes
+        - "2"
+        - --node-rank
+        - $(GPUSTACK_MEMBER_INDEX)  # zero-based member index injected by the operator
+        - --dist-init-addr
+        - $(GPUSTACK_REPLICA_LEADER_ADDRESS):29500  # leader DNS name injected by the operator
+      env:
+        - name: SGLANG_RUST_SERVER
+          value: "1"
+```
+
+`--node-rank` is the only argument that differs between members. It carries
+`$(GPUSTACK_MEMBER_INDEX)` verbatim, and Kubernetes expands the reference in the container
+arguments against the member's own environment — the same mechanism the vLLM example above uses
+for `--data-parallel-rank`. The operator stamps the member index per member and the leader's DNS
+name per instance; it does not restate them in the manifest.
+
+The **dist-init port must differ from the role's HTTP port** and stay clear of the role's port
+range. The operator fills the listener's `--host` and `--port` (`8000` by default); the example
+uses `29500` for the collective rendezvous, which is a member-local port — each member has its own
+network namespace, so the derived-port budget does not collide across members.
+
+Use the modern `--attn-dp-size` spelling. The deprecated `--dp-size N --enable-dp-attention` pair
+resolves to the same attention width, but the operator reads `--attn-dp-size` and
+`--attention-data-parallel-size`, and the deprecated pair is not what the classification contract
+below is stated in.
+
+### Classification contract
+
+An SGLang role derives *External* only when **all** of these hold:
+
+| Condition | Why it is necessary |
+|---|---|
+| `--attn-dp-size` (or `--attention-data-parallel-size`) ≥ 2 | More than one attention group exists |
+| `--nnodes` ≥ 2 | The groups are on different members |
+| `SGLANG_RUST_SERVER` set to a true value in the role's environment | Every group gets a listener of its own, so the group is reachable from outside |
+| The role's kind is `Server` | A *Prefill* or *Decode* role is served through its own leg, and the balance of that leg is the leg's own business |
+
+Anything less stays **Internal**, leader-served. A single-`Pod` attention-DP launch is *internal
+data parallelism* and is not this shape; an attention-DP launch behind the Python frontend is not
+this shape either, because the groups share one frontend and the group is balanced inside itself.
+The vote reads the environment value the way SGLang's own environment reader reads it, and a role
+that declares a value SGLang would refuse is left to the engine to refuse.
+
+### Difference from vLLM
+
+vLLM *External DP* members are **independent engines**. SGLang members **share the *FFN*
+tensor-parallel collective**: attention runs per member, *FFN* runs across members. Three
+consequences follow, and they are the honest cost of the shape:
+
+- **A member fault stalls the survivor's in-flight requests** until the collective aborts, instead
+  of failing fast. The group is withdrawn as a unit; the survivor is not left serving a collective
+  whose peer is gone.
+- **Capacity is the group, not the member count.** Two members of one GPU each serve one model's
+  attention width, not two independent models' worth of capacity.
+- **Withdrawal is group-atomic**, under the same supervisor contract vLLM *External DP* groups use:
+  a fault in any member withdraws every candidate endpoint of that group, and the group returns
+  only when every member is qualified again.
+
+Scale-down runs the **disaggregated handoff grace window (60 s)** before the member gauge reads,
+so expect **at least 60 s of scale-down latency** on top of the drain itself. The group is
+`Draining` during that window; that is the contract, not a stall.
+
+### Limits
+
+- **A Router is required.** An *External* group has one endpoint per member and no leader, so the
+  Router is what balances them. Admission refuses a role that declares external data parallelism
+  with no `spec.router`, naming the rule `RouterRequired`.
+- **Single-role deployments only.** A deployment that mixes an *SGLang External DP* role with other
+  roles is out of scope for this round.
+- **Dense text models only.** The Rust server's pipeline refuses multimodal models.
+- **`--load-balance-method` is not rendered.** Under the Rust server it is inert; the group's own
+  balance is the Router's. This is recorded, not relied on.
+
+### Probe and health
+
+A member's `/health` is **blind to its peer**: it reports that member's own scheduler, not that the
+collective is whole. The qualification guard is the **group-forward probe** — a real generation
+posted to *every* member, each of which crosses the *FFN* collective.
+
+A passing probe on member *i* therefore proves the collective served a real generation through
+member *i*'s own listener, which is a stronger qualification than an independent replica's. A
+member that answers `/health` while its peer is gone is not a healthy group.
 
 ## Load-balancing derivation
 
@@ -117,8 +249,8 @@ A Hybrid vote also normalizes to External at local size 1 and Internal when loca
 The derived mode is reported per role as `.status.roles[].parallelism.loadBalance` (`External`,
 `Hybrid`, `Internal`, `MultiPort`, or `Unknown`), beside the declared degrees (*`dataParallel`*,
 *`dataParallelLocal`*, *`expertParallel`*) and modes (*`expertParallel`* from `--enable-expert-parallel`).
-SGLang declares the degrees through `--dp-size` and `--ep-size`, but the External load-balancing flags are
-vLLM's — an SGLang role resolves to Internal unless its engine accepts the same flags.
+SGLang declares its degrees through `--dp-size`, `--ep-size` and `--attn-dp-size`, and reaches
+*External* through its own contract — see [SGLang External DP](#sglang-external-dp).
 
 ## Per-rank Pod identity
 
@@ -200,11 +332,11 @@ the role's `Service` and Router selectors carry a `member-index=0` term, because
 expose no HTTP endpoint. An External role is the opposite — every member answers — so both selectors
 must cover all ranks.
 
-The endpoint-eligibility gate makes that switch observable. While the gate is inactive, the selectors
-keep the leader term. Once it activates, `modelDeploymentSelectEligibleEndpoints`
-(`pkg/worker/controllers/worker/model_deployment_service.go`) deletes the leader term from the
-role's `Service` selector, and the Router role selector does the same
-(`model_deployment_router.go`), so `gpustack/llm-router` discovers and balances across every qualified rank `Pod`.
+An External role is a managed protected group, so its selectors narrow from the first enable:
+`modelDeploymentSelectEligibleEndpoints` (`pkg/worker/controllers/worker/model_deployment_service.go`)
+deletes the leader term from the role's `Service` selector, and the Router role selector does the same
+(`model_deployment_router.go`), so `gpustack/llm-router` discovers and balances across every qualified
+rank `Pod`. The eligibility term is what admits the qualified ranks.
 
 The answering side agrees: an External role's endpoint-selection mode is `modelDeploymentAnsweringAll`, read
 from the members' running arguments rather than the current spec, so a role edited mid-flight keeps
@@ -226,6 +358,8 @@ Admission enforces these boundaries on managed roles:
 - `MultiPort` (`--data-parallel-multi-port-external-lb`) is refused: managed roles require one HTTP
   endpoint per `Pod`.
 - An unreadable balance (`Unknown`) is refused with the parse's stated reason.
+- An *External* role with no `spec.router` is refused with the rule named `RouterRequired`: an
+  external group has one endpoint per member and no leader, so the Router is what balances it.
 - The *Encode* role is refused beside External and Hybrid load balance: an encoder has one producer
   and one output key, so there is no per-member endpoint to balance across.
 - *Prefill* and *Decode* roles beside *External DP* are not refused, but the combination is unvalidated
@@ -267,6 +401,24 @@ placement remains unmeasured.
 *External DP* group against a monolithic *TP* = 8 group on the same eight GPUs; the
 [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md) holds the per-step
 commands, the native group measurements, and the troubleshooting rows.
+
+**The SGLang runtime record.** Recorded on SGLang `0.5.22` behind the `sglang-gateway` binary
+of `gpustack/llm-router:v0.3.1`, two groups of two members each: all eight content checks —
+ordinary, JSON, Chinese and streaming requests through each member's own listener — passed in
+both runs. The scale-down held the disaggregated handoff grace window, the withdrawn group's
+workers leaving the gateway's worker set after 482 s in one run and 310 s in the other.
+
+The gateway registers at most one worker per group on `gpustack/llm-router:v0.3.1`, and on
+`v0.4.0` without the rendered flag: each group's subordinate member times out inside the
+gateway's 10 s discovery step, and the two-group runs presented two healthy workers in one
+run and one in the other.
+
+Router coverage of every member therefore waits on `gpustack/llm-router:v0.4.0` and later
+under the rendered `--dp-aware`, a combination no runtime run has exercised yet.
+
+After the scale-down the surviving group never republished `Eligible` within the case's 900 s
+budget while the retired group read `Withdrawn`, so a surviving group's recovery from a
+scale-down is unverified.
 
 ---
 

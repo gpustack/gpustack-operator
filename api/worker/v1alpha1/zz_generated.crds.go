@@ -5572,6 +5572,164 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																},
 															},
 														},
+														"groups": {
+															Description: "Groups is one entry per group of this role, ordered by replica ordinal.\nIT ANSWERS WHAT THE COUNTS ABOVE CANNOT. Those counts say how many instances the role has\nand how many are Ready; a group entry says which members form one scheduling group, what\nstate that group stands in, and whether the Router confirms it is being served. A reader\nasking which replica failed, or which one the Router stopped selecting, needs the entry and\ncannot get it from the counts.\nIT IS AN ORDINARY LIST, NOT A MAP, because a group's generation changes whenever a member is\nreplaced. A map keyed on the generation would replace the whole entry on every membership\nchange, and a map keyed on the ordinal alone would let a reader match a stale entry to a new\nmembership. The identity is carried in the entry instead.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"role",
+																		"ordinal",
+																		"generation",
+																		"state",
+																		"reason",
+																		"serving",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"generation": {
+																			Description: "Generation is the membership the answers below were taken against: the sorted member UID set.\nA replaced member is a different set, so a prior verification does not apply to the new one.",
+																			Type:        "string",
+																		},
+																		"lastQualificationTime": {
+																			Description: "LastQualificationTime is when the group last entered published Eligible for this generation.\nIT IS THE TRANSITION, NOT THE LATEST PASS. A group that stays Eligible keeps the instant it\nearned, and a group that is held in the same generation keeps it too, so an observation loss\ndoes not erase it. A group that leaves Eligible and comes back records the new instant. A NEW\nGENERATION INHERITS NO TIMESTAMP: the membership it names is a membership that was never\nqualified.",
+																			Type:        "string",
+																			Format:      "date-time",
+																			Nullable:    true,
+																		},
+																		"members": {
+																			Description: "Members are the group's current members, ordered by seat.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"name",
+																						"uid",
+																						"ready",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"name": {
+																							Description: "Name is the member Pod's name.",
+																							Type:        "string",
+																						},
+																						"ready": {
+																							Description: "Ready is the member's readiness, one of True, False or Unknown.\nA member whose Ready condition has never been reported is Unknown, not False: a member nobody\nhas reported on is not a member that was observed and found not ready, and a diagnosis that\ncannot tell those two apart cannot say which one happened.",
+																							Type:        "string",
+																							Enum: []v1.JSON{
+																								{
+																									Raw: []byte(`"True"`),
+																								},
+																								{
+																									Raw: []byte(`"False"`),
+																								},
+																								{
+																									Raw: []byte(`"Unknown"`),
+																								},
+																							},
+																						},
+																						"seat": {
+																							Description: "Seat is the seat the member claims, absent when the member claims none or one that cannot be\nread. The group's reason names that defect.\nIN A GROUP WHOSE MEMBERS ARE WHOLE REPLICAS the seat is the member's ADMISSION ORDINAL,\nbecause the seat it claims among the members of its own replica is not a seat of that group\nat all. The ordinal is the operator's own fact and not the engine's runtime rank: which\nmember holds which rank is the engine's business, and the operator's numbering never implies\nit.",
+																							Type:        "integer",
+																							Format:      "int32",
+																							Nullable:    true,
+																						},
+																						"uid": {
+																							Description: "UID is the member Pod's identity. A replaced member is a different UID, which is what makes a\nreplaced membership a different generation.",
+																							Type:        "string",
+																						},
+																					},
+																				},
+																			},
+																			Nullable:  true,
+																			XListType: ptr.To[string]("atomic"),
+																		},
+																		"ordinal": {
+																			Description: "Ordinal is the replica slot this group occupies within its role.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																		"reason": {
+																			Description: "Reason names the fact that holds the group, or says that it qualifies.\nIT NAMES ONE FACT AND NEVER TWO. When a leg of the whole-group predicate holds the group, the\nreason names that leg. When the Router's observation holds the group, the reason names the\nobservation. A member fault and a lost Router view are therefore told apart by the reason as\nwell as by the state.",
+																			Type:        "string",
+																		},
+																		"role": {
+																			Description: "Role is the role this group belongs to.",
+																			Type:        "string",
+																		},
+																		"serving": {
+																			Description: "Serving is the Router's answer for this group.",
+																			Type:        "object",
+																			Required: []string{
+																				"state",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"state": {
+																					Description: "State is the confirmation answer. Only Confirmed means the union was observed; the other\nstates differ in WHY no number is offered, and none of them encodes one.",
+																					Type:        "string",
+																					Enum: []v1.JSON{
+																						{
+																							Raw: []byte(`"Confirmed"`),
+																						},
+																						{
+																							Raw: []byte(`"NotConverged"`),
+																						},
+																						{
+																							Raw: []byte(`"Unknown"`),
+																						},
+																						{
+																							Raw: []byte(`"NotConfigured"`),
+																						},
+																					},
+																				},
+																				"value": {
+																					Description: "Value is the confirmed serving count, present only when State is Confirmed, with an\nexplicit zero as real as any other number.",
+																					Type:        "integer",
+																					Format:      "int32",
+																					Nullable:    true,
+																				},
+																			},
+																		},
+																		"servingReason": {
+																			Description: "ServingReason names why the Router's answer is what it is, when it is not a confirmation.\nIT IS PUBLISHED IN BOTH OBSERVATION-LOSS CASES, because the serving field has to be complete\non its own: a reader who finds Serving without a reason here cannot tell an unobserved Router\napart from one that was observed and reported nothing.\nIT IS SEPARATE FROM Reason, because the two name different facts. Reason names what holds the\nGROUP and ServingReason names what holds the SERVING ANSWER, so an engine fault's reason never\nappears here and the Router's reason never takes the group's place.",
+																			Type:        "string",
+																		},
+																		"state": {
+																			Description: "State is the group's eligibility state.\nIT IS THE QUALIFICATION'S STATE, EXCEPT WHEN THE ROUTER'S OBSERVATION HOLDS THE GROUP: a group\nthat passed every leg and is waiting on a valid Router observation is AwaitingObservation,\nwhile a group that passed every leg and is retained across an observation loss is Eligible,\nbecause the observation is not what holds it.",
+																			Type:        "string",
+																			Enum: []v1.JSON{
+																				{
+																					Raw: []byte(`"Eligible"`),
+																				},
+																				{
+																					Raw: []byte(`"Withdrawn"`),
+																				},
+																				{
+																					Raw: []byte(`"AwaitingMembers"`),
+																				},
+																				{
+																					Raw: []byte(`"AwaitingReady"`),
+																				},
+																				{
+																					Raw: []byte(`"AwaitingProbe"`),
+																				},
+																				{
+																					Raw: []byte(`"AwaitingObservation"`),
+																				},
+																				{
+																					Raw: []byte(`"Unsupported"`),
+																				},
+																				{
+																					Raw: []byte(`"Unknown"`),
+																				},
+																			},
+																		},
+																	},
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
 														"kind": {
 															Description: "Kind echoes the role's kind, so reading the status alone answers which half of a\ndisaggregated deployment an entry describes. It is ALWAYS present: every role has a kind,\ndefaulted if the user named none, so an absent value would mean the status was written by\nsomething that did not know about kinds rather than that the role has none.\nThe enum is the same one the spec field carries and has to stay that way: this field is written\nfrom the spec field with the unset case resolved, so a value the writer can produce and this\nlist does not name would make every later status write on the object fail, taking every other\nfigure down with the kind. The marker sits on the field because the type's own enum marker is a\nGo-level one and does not become schema validation.",
 															Type:        "string",

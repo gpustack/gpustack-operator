@@ -108,7 +108,8 @@ func TestFinalReview_ServicesKeepDeployedRanksBeforeNewConfigurationAppears(t *t
 			}
 			cli := newCompositionClient(objects...)
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64)}
-			require.NoError(t, r.convergeModelDeploymentEndpointEligibility(ctx, md, pods, nil, nil))
+			require.NoError(t, r.convergeModelDeploymentEndpointEligibility(ctx, md, pods, nil, nil,
+				modelDeploymentPassObservation{}))
 			pods = replicaPods(t, cli)
 			require.Len(t, pods, 2)
 			require.NoError(t, r.syncModelDeploymentService(ctx, md, false, pods))
@@ -125,7 +126,8 @@ func TestFinalReview_ServicesKeepDeployedRanksBeforeNewConfigurationAppears(t *t
 				md.Spec.Roles[0].Command = []string{"vllm", "serve", "qwen", "--port", "8000"}
 				md.Spec.Roles[0].ExtraArgs = nil
 			}
-			require.NoError(t, r.convergeModelDeploymentEndpointEligibility(ctx, md, pods, nil, nil))
+			require.NoError(t, r.convergeModelDeploymentEndpointEligibility(ctx, md, pods, nil, nil,
+				modelDeploymentPassObservation{}))
 			pods = replicaPods(t, cli)
 			require.Len(t, pods, 2, "no new mode or shape has appeared")
 			require.NoError(t, r.syncModelDeploymentService(ctx, md, false, pods))
