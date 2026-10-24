@@ -17,6 +17,21 @@ AGAINST: sgl-project/sglang gateway-v0.3.1.
 WHEN TO REMOVE: the first upstream gateway tag that carries a9c97c9f69 — bump
 SGLANG_GATEWAY_VERSION to that tag and delete this patch.
 
+TWO LINES MORE THAN THE CHERRY-PICK, AND WHY. gateway-v0.3.1's discover_metadata MOVES
+model_path and served_model_name out of the server info it holds, because Option::filter takes
+its receiver by value. Upstream's own commit rewrote that whole region to borrow through as_ref
+and to read the identity from /model_info, so upstream's tree never partially moves the struct
+and its borrow of the whole struct for num_dp_ranks is legal. The cherry-pick keeps
+gateway-v0.3.1's moving block and adds a borrow of the whole struct, and a partial move forbids
+that: the gateway crate does not compile, with error[E0382], borrow of partially moved value
+server_info. Here the two moves become borrows, which is the compiler's own first suggestion, so
+the whole-struct borrow is legal. Both lines matter: the borrow checker reports one error at a
+time, so fixing only the served_model_name move produces the same error again on the next build.
+
+THE DIFF BELOW IS REBASED ONTO gateway-v0.3.1's OWN LINE NUMBERING. The cherry-pick's hunks were
+written against upstream's tree, whose identity region is longer, so their headers name lines that
+gateway-v0.3.1 does not have. The content is the same change; the headers are this file's own.
+
 Operator side: the SGLang External DP shape renders --dp-aware for this gateway
 (pkg/worker/kvcache/router/argv.go).
 
@@ -27,10 +42,10 @@ Date:   Wed Sep 30 13:34:18 2026 -0700
     [Feature] Add --attn-dp-size and deprecate --enable-dp-attention (#41818)
 
 diff --git a/sgl-model-gateway/src/core/steps/worker/local/discover_dp.rs b/sgl-model-gateway/src/core/steps/worker/local/discover_dp.rs
-index 58d1a855b0..f7cc8147c4 100644
+index a84f394..6b68291 100644
 --- a/sgl-model-gateway/src/core/steps/worker/local/discover_dp.rs
 +++ b/sgl-model-gateway/src/core/steps/worker/local/discover_dp.rs
-@@ -19,7 +19,7 @@ pub async fn get_dp_info(url: &str, api_key: Option<&str>) -> Result<DpInfo, Str
+@@ -24,7 +24,7 @@ pub async fn get_dp_info(url: &str, api_key: Option<&str>) -> Result<DpInfo, Str
      let info = get_server_info(url, api_key).await?;
  
      let dp_size = info
@@ -40,10 +55,10 @@ index 58d1a855b0..f7cc8147c4 100644
  
      let model_id = info
 diff --git a/sgl-model-gateway/src/core/steps/worker/local/discover_metadata.rs b/sgl-model-gateway/src/core/steps/worker/local/discover_metadata.rs
-index 0125acb17e..b896c07d23 100644
+index 635cd30..26a84e6 100644
 --- a/sgl-model-gateway/src/core/steps/worker/local/discover_metadata.rs
 +++ b/sgl-model-gateway/src/core/steps/worker/local/discover_metadata.rs
-@@ -33,6 +33,7 @@ pub struct ServerInfo {
+@@ -34,6 +34,7 @@ pub struct ServerInfo {
      pub served_model_name: Option<String>,
      pub tp_size: Option<usize>,
      pub dp_size: Option<usize>,
@@ -51,7 +66,7 @@ index 0125acb17e..b896c07d23 100644
      pub load_balance_method: Option<String>,
      pub disaggregation_mode: Option<String>,
      pub version: Option<String>,
-@@ -43,6 +44,16 @@ pub struct ServerInfo {
+@@ -44,6 +45,16 @@ pub struct ServerInfo {
      pub max_num_reqs: Option<usize>,
  }
  
@@ -68,7 +83,22 @@ index 0125acb17e..b896c07d23 100644
  /// Model information returned from /model_info endpoint.
  #[derive(Debug, Clone, Deserialize, Serialize)]
  pub struct ModelInfo {
-@@ -328,8 +339,8 @@ impl StepExecutor<LocalWorkerWorkflowData> for DiscoverMetadataStep {
+@@ -237,19 +248,19 @@ impl StepExecutor for DiscoverMetadataStep {
+                 if let Ok(server_info) =
+                     get_server_info(&config.url, config.api_key.as_deref()).await
+                 {
+-                    if let Some(model_path) = server_info.model_path.filter(|s| !s.is_empty()) {
+-                        labels.insert("model_path".to_string(), model_path);
++                    if let Some(model_path) = server_info.model_path.as_ref().filter(|s| !s.is_empty()) {
++                        labels.insert("model_path".to_string(), model_path.clone());
+                     }
+                     if let Some(served_model_name) =
+-                        server_info.served_model_name.filter(|s| !s.is_empty())
++                        server_info.served_model_name.as_ref().filter(|s| !s.is_empty())
+                     {
+-                        labels.insert("served_model_name".to_string(), served_model_name);
++                        labels.insert("served_model_name".to_string(), served_model_name.clone());
+                     }
                      if let Some(tp_size) = server_info.tp_size {
                          labels.insert("tp_size".to_string(), tp_size.to_string());
                      }
@@ -79,7 +109,7 @@ index 0125acb17e..b896c07d23 100644
                      }
                      if let Some(load_balance_method) = server_info.load_balance_method {
                          labels.insert("load_balance_method".to_string(), load_balance_method);
-@@ -400,3 +411,30 @@ impl StepExecutor<LocalWorkerWorkflowData> for DiscoverMetadataStep {
+@@ -306,3 +317,30 @@ impl StepExecutor for DiscoverMetadataStep {
          true
      }
  }
