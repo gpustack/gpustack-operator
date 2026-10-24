@@ -4,7 +4,8 @@ A managed router selects among serving endpoints, then its policy chooses among 
 endpoint selection and SGLang's tested DP routing modes.
 
 The recorded combinations are vLLM `0.29.0` and `0.30.0`, SGLang `0.5.18` and `0.5.22`,
-`vllm-router` `v0.1.16.1`, `sglang-gateway` `gateway-v0.3.1`, and `llm-d-router` `v0.11.0`.
+`vllm-router` `v0.1.16.1`, the `sglang-gateway` binary of `gpustack/llm-router:v0.3.1`, and
+`llm-d-router` `v0.11.0`.
 Facts on this page apply to those versions; newer builds must be re-verified before they inherit a claim.
 
 ## Contents
@@ -42,10 +43,25 @@ expose no HTTP endpoint. The selectors keep the endpoint eligibility requirement
 group cannot receive new traffic.
 The replica's headless `Service` always publishes every member for peer communication.
 
-On the SGLang External DP shape the operator renders `--dp-aware` for the gateway, and the gateway
-then registers one worker per attention-DP rank. Each rank is a logical worker whose URL carries a
-rank suffix (`http://host:port@0`, `http://host:port@1`), and every suffix dials the member's one
-physical serving listener — the suffix is a rank, not a port.
+On the SGLang External DP shape the operator renders `--dp-aware` for the gateway. With the flag,
+the gateway registers one worker per attention-DP rank: each rank is a logical worker whose URL
+carries a rank suffix (`http://host:port@0`, `http://host:port@1`), and every suffix dials the
+member's one physical serving listener — the suffix is a rank, not a port.
+
+That registration is the gateway patch this project ships: an image carrying it is
+`gpustack/llm-router:v0.4.0` or later, while the default
+[`model-deployment-router-image`](../../reference/settings.md) still names `v0.3.1`, which
+predates the patch. The registration activates only where *`spec.router.image`* or the setting
+names an image that carries the patch.
+
+No runtime run has exercised the flag: the render gate and the patched fan-out are verified in
+source and unit tests on the recorded shape.
+
+Without the flag the gateway registers at most one worker per group — recorded on
+`gpustack/llm-router:v0.3.1`, and on the `v0.4.0` gateway build with the flag withheld. Each
+group's subordinate member times out inside the gateway's 10 s discovery step and never enters
+the worker registry, and under load a group's registered worker can miss its registration too:
+a two-group, four-member deployment presented two healthy workers in one run and one in another.
 
 Known non-Internal modes follow the External selector rule. Status retains the engine's distinct mode name.
 Hybrid GPU behavior remains untested. See [Prefill and Decode](prefill-decode.md) for *PD* limitations.
@@ -123,8 +139,8 @@ Encoders are also excluded from KV cache event discovery, because they produce n
 
 **`vllm-router` and `sglang-gateway` route by `cache_aware`, and `llm-d-router` scores every
 candidate for each request.** The operator renders no policy flag for the first two, so each runs its
-upstream default. The table describes the bundled vLLM router `v0.1.15` and SGLang gateway
-`gateway-v0.3.1`; the llm-d row describes the operator's scoring profile.
+upstream default. The table describes the bundled vLLM router `v0.1.16.1` and the `sglang-gateway` binary of
+`gpustack/llm-router:v0.3.1`; the llm-d row describes the operator's scoring profile.
 
 | *`spec.router.name`* | Default | Replica selection |
 |---|---|---|

@@ -181,8 +181,8 @@ The log labels do not identify each rank, and no synchronized rank counters veri
 Every captured metric window reported **zero failed transfers and zero failed receives**.
 
 A later runtime-acceptance run drove a *SGLang* *PD* deployment of one *prefill* and one *decode*
-replica through content, scaling and transfer checks with the scaler active, on operator build
-`dev-73b405c6`: 29 checks passed with zero failures, warnings or blocked rows.
+replica through content, scaling and transfer checks with the scaler active:
+29 checks passed with zero failures, warnings or blocked rows.
 
 The scaler read the engine's waiting-request counter during a transfer and recorded 24 waiting
 requests on the *decode* role; under load the *decode* role grew to two replicas, and both roles

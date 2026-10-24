@@ -5,7 +5,7 @@ and the Router balances requests across all of them. For captured commands and r
 [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md).
 
 The recorded runs apply to vLLM `v0.30.0` on NVIDIA *H100*; the SGLang shape is stated against
-SGLang `0.5.22` with `sglang-gateway` `gateway-v0.3.1`. Other versions must be re-verified before
+SGLang `0.5.22` with the `sglang-gateway` binary of `gpustack/llm-router:v0.3.1`. Other versions must be re-verified before
 they inherit a claim on this page.
 
 ## Contents
@@ -402,11 +402,23 @@ placement remains unmeasured.
 [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md) holds the per-step
 commands, the native group measurements, and the troubleshooting rows.
 
-**No SGLang *External DP* runtime result exists yet.** Everything above was recorded on the vLLM
-engine. The *SGLang External DP* shape described in this page is implemented and classified, but
-its runtime behaviour — the group-forward probe, the group-atomic withdrawal, the 60 s scale-down
-window — is not yet measured on a cluster. Those numbers land with the acceptance run and will be
-recorded here; until then, treat the *SGLang* section as a contract, not a result.
+**The SGLang runtime record.** Recorded on SGLang `0.5.22` behind the `sglang-gateway` binary
+of `gpustack/llm-router:v0.3.1`, two groups of two members each: all eight content checks —
+ordinary, JSON, Chinese and streaming requests through each member's own listener — passed in
+both runs. The scale-down held the disaggregated handoff grace window, the withdrawn group's
+workers leaving the gateway's worker set after 482 s in one run and 310 s in the other.
+
+The gateway registers at most one worker per group on `gpustack/llm-router:v0.3.1`, and on
+`v0.4.0` without the rendered flag: each group's subordinate member times out inside the
+gateway's 10 s discovery step, and the two-group runs presented two healthy workers in one
+run and one in the other.
+
+Router coverage of every member therefore waits on `gpustack/llm-router:v0.4.0` and later
+under the rendered `--dp-aware`, a combination no runtime run has exercised yet.
+
+After the scale-down the surviving group never republished `Eligible` within the case's 900 s
+budget while the retired group read `Withdrawn`, so a surviving group's recovery from a
+scale-down is unverified.
 
 ---
 

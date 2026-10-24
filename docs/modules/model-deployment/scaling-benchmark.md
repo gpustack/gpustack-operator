@@ -305,8 +305,8 @@ before release completes. Kubernetes can display a deleting `Pod` as `Terminatin
 `Terminating` is not a retirement state. The captures do not include every transition, and zero client
 errors in the two scale-down phases do not prove every in-flight request survives every retirement.
 
-Two later runtime-acceptance runs measured the same contracts on an eight-GPU *H100* node with the
-scaler active and operator build `dev-73b405c6`.
+Two later runtime-acceptance runs measured the same contracts on an eight-GPU *H100* node with
+the scaler active.
 
 The first scaled a *vLLM* multi-Server deployment by hand through one to two to one replicas. The
 Router's worker set followed every edit, the pinned `round_robin` policy split sixteen requests

@@ -2,8 +2,8 @@
 
 Start four fixed *DP* ranks behind `vllm-router`, send requests to each rank directly, and confirm the Router reaches every endpoint.
 
-The captured run in this walkthrough is **vLLM**. The *SGLang External DP* shape has a procedure
-below but **no captured result yet** — see
+The captured run in this walkthrough is **vLLM**. The *SGLang External DP* shape ran as the
+acceptance runs' procedure; what they captured and what stayed open is recorded in
 [SGLang External DP](#sglang-external-dp).
 
 ## Contents
@@ -318,11 +318,11 @@ The model cache and cluster remain separate from application cleanup.
 
 ## SGLang External DP
 
-**Nothing in this section is a captured result.** The steps below are the acceptance run's steps,
-written down before the run so the run has a fixed procedure to follow. No SGLang *External DP*
-deployment has been started on a cluster yet, so there is no captured listing, no captured status
-and no captured measurement to quote here. The results land after the acceptance run, and this
-section is where they will be written.
+**The acceptance runs ran this procedure and their result is the record.** Two runs on SGLang
+`0.5.22` behind the `sglang-gateway` binary of `gpustack/llm-router:v0.3.1` exercised the shape
+end to end, two groups of two members each: all eight per-member content checks passed and the
+scale-down held the handoff grace window. The open boundaries and the measured numbers are
+stated under [Limitations](#limitations) below.
 
 The shape being exercised is described in
 [SGLang External DP](../../modules/model-deployment/external-dp.md#sglang-external-dp). This
@@ -421,11 +421,24 @@ kubectl -n gpustack-bench patch modeldeployment sglang-external-dp --type=merge 
   -p '{"spec":{"roles":[{"name":"server","replicas":2}]}}'
 ```
 
-Expect the Router's worker set to grow by exactly the new group's members, and the new group's
-endpoints to be qualified before they are routed to. Scaling back to 1 withdraws the whole group
-atomically: **no surviving member stays routed**, and the scale-down runs the disaggregated
-handoff grace window, so **total scale-down latency is at least 60 s** plus the drain. The group
-reads `Draining` during that window.
+On the recorded `gpustack/llm-router:v0.3.1`, the Router's worker set grew by **one** worker
+per new group, not by every member: each group's subordinate member times out inside the
+gateway's 10 s discovery step and never registers, and under load a group's registered worker
+can miss its registration too — the two runs presented two healthy workers in one and one in
+the other.
+
+The new group's endpoints are qualified and labeled on the operator side; the shortfall is the
+gateway's registry. The per-rank remedy and its image floor are under
+[Routing](../../modules/model-deployment/routing.md#which-pods-receive-traffic).
+
+Scaling back to 1 withdraws the whole group atomically, and the scale-down runs the
+disaggregated handoff grace window, so **total scale-down latency is at least 60 s** plus the
+drain. Measured, the withdrawn group's workers left the gateway's worker set after 482 s in one
+run and 310 s in the other. The group reads `Draining` during that window.
+
+In both runs the gateway then held zero healthy workers, and the surviving group did not
+republish `Eligible` within the case's 900 s budget — a surviving group's recovery from a
+scale-down is unverified.
 
 ### Fault injection
 
@@ -438,8 +451,10 @@ kubectl -n gpustack-bench get modeldeployment sglang-external-dp -o json \
 ```
 
 A member fault stalls the survivor's in-flight requests until the collective aborts, because the
-members share the *FFN* tensor-parallel collective. That is the shape's cost, and it is recorded
-as observed rather than smoothed over.
+members share the *FFN* tensor-parallel collective. That is the shape's cost, and it is stated
+here as the contract: the acceptance runs could not adjudicate the fault leg, because the fault
+premise — exactly one eligible group after the scale-down — never held within the case's 900 s
+budget, so no fault was injected against a settled state.
 
 ### The exclusion evidence
 
@@ -474,11 +489,19 @@ growth. Group sizing and replacement semantics are covered in
 The example does not establish *External DP* with *Prefill/Decode*, hybrid load balancing, multiple HTTP ports per `Pod`,
 or placement across GPU nodes. Those configurations need separate compatibility and runtime checks.
 
-**No *SGLang External DP* runtime result exists yet.** The shape is implemented and classified, and
-its procedure is written down in [SGLang External DP](#sglang-external-dp), but no SGLang
-*External DP* deployment has been run: there is no captured listing, group status, group-forward
-probe or scale-down timing. Every number on this page was recorded on the vLLM engine. The SGLang
-results land after the acceptance run, and this page is where they will be recorded.
+**The SGLang acceptance record and its boundaries.** Two runs on SGLang `0.5.22` behind the
+`sglang-gateway` binary of `gpustack/llm-router:v0.3.1` captured the shape end to end: all
+eight per-member content
+checks passed in both runs, and the scale-down handoff grace window held — the withdrawn group's
+workers left the gateway's worker set after 482 s in one run and 310 s in the other.
+
+Not captured: a Router worker set covering every member — the gateway registers at most one
+worker per group on `gpustack/llm-router:v0.3.1` — and a surviving group's recovery after a
+scale-down, which never republished `Eligible` within the case's 900 s budget. The per-rank
+remedy (`--dp-aware` on an image from `gpustack/llm-router:v0.4.0`) has not been exercised at
+runtime.
+
+Every number earlier on this page was recorded on the vLLM engine.
 
 ## Troubleshooting
 

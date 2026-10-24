@@ -156,8 +156,7 @@ Client JSON establishes request completion and errors.
 After deletion, the `Devices` snapshot recorded all eight H100 accelerators with *`remaining`* = `1600000`.
 This records released accelerator claims; it does not prove removal of model-cache or cluster infrastructure.
 
-A later runtime-acceptance run measured the same expansion on an eight-GPU *H100* node with
-operator build `dev-73b405c6`:
+A later runtime-acceptance run measured the same expansion on an eight-GPU *H100* node:
 
 | Observation | Captured result |
 |---|---|
