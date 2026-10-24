@@ -32,16 +32,19 @@
 #              platform gpu-h100-sxm 8xH100 non-preemptible with a cpu-e2 system node, 8
 #              accelerators on the one GPU node, InstanceType
 #              gpustack--nvidia-h100-80gb-hbm3-linux-amd64, operator
-#              thxcode/gpustack-operator:dev-6ddcf389.
+#              <dev>/gpustack-operator:<tag> (a development image; tests pull gpustack/gpustack-operator unless a dev image is named).
 # Inputs:      The manifest is written by this script into OUT_DIR/vpd-scaler.yaml and the scaler
 #              into OUT_DIR/vpd-scaler-scaler.yaml. The operator stamps each replica's own
 #              address, so the manifest is identical for every replica.
 #
 #              THE TUNING IS DELIBERATE AND STATED HERE, not hidden in the numbers. The algorithm
-#              is Proportional on RunningRequests with a target of four requests per replica and a
+#              is Proportional on QueueDepth with a target of four requests per replica and a
 #              tolerance of 0.1: the scaler divides what it observed by the target and takes the
-#              ceiling, so a role crosses its target at five running requests and is held inside
-#              the tolerance band below that. The sampling interval is 10 s so the rise is seen
+#              ceiling, so a role crosses its target at five queued requests (running plus
+#              waiting) and is held inside the tolerance band below that. QueueDepth is the
+#              live-proven signal: RunningRequests does not count the waiting queue, and the run
+#              on that metric held a role at one replica while twenty-three requests waited
+#              (case-9 run3). The sampling interval is 10 s so the rise is seen
 #              within a short run. The scale-down stabilization window is 30 s rather than the
 #              default 300 s, because a five-minute window would outlive the test, and the
 #              decode post-scale-up grace is 30 s rather than the default 120 s for the same
@@ -271,7 +274,7 @@ spec:
   algorithm:
     type: Proportional
     proportional:
-      metric: RunningRequests
+      metric: QueueDepth
       tolerance: "0.1"
       roleTargets:
         - name: prefill

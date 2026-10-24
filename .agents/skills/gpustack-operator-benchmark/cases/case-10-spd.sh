@@ -40,7 +40,7 @@
 #              platform gpu-h100-sxm 8xH100 non-preemptible with a cpu-e2 system node, 8
 #              accelerators on the one GPU node, InstanceType
 #              gpustack--nvidia-h100-80gb-hbm3-linux-amd64, operator
-#              thxcode/gpustack-operator:dev-6ddcf389.
+#              <dev>/gpustack-operator:<tag> (a development image; tests pull gpustack/gpustack-operator unless a dev image is named).
 # Inputs:      The manifest is written by this script into OUT_DIR/spd.yaml and the scaler into
 #              OUT_DIR/spd-scaler.yaml. The operator stamps each replica's own address, so the
 #              manifest is identical for every replica.

@@ -25,7 +25,7 @@
 #              platform gpu-h100-sxm 8xH100 non-preemptible with a cpu-e2 system node, 8
 #              accelerators on the one GPU node, InstanceType
 #              gpustack--nvidia-h100-80gb-hbm3-linux-amd64, operator
-#              thxcode/gpustack-operator:dev-6ddcf389.
+#              <dev>/gpustack-operator:<tag> (a development image; tests pull gpustack/gpustack-operator unless a dev image is named).
 # Inputs:      manifests/external-dp-arm2-external-dp.yaml, copied into OUT_DIR and rewritten
 #              there so the RECORDED manifest is not modified in place. The copy carries the
 #              pinned runner image (DECISIONS.md D6) and this case's own deployment name; the

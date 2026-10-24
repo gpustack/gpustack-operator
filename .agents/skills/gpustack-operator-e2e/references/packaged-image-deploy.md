@@ -43,12 +43,13 @@ deploy.sh <NS> <PACKAGE_TAG> \
 ```
 
 `deploy.sh` sets `image.tag=<PACKAGE_TAG>` itself; the trailing `image.pullPolicy=Always` overrides its
-default `IfNotPresent` so the kubelet pulls the freshly pushed tag instead of a cached one. Example, for
-an image pushed as `thxcode/gpustack-operator:dev`:
+default `IfNotPresent` so the kubelet pulls the freshly pushed tag instead of a cached one. The published
+image is `gpustack/gpustack-operator`; a development verification pushes to your own namespace as
+`<your-namespace>/gpustack-operator:dev-<tag>` and overrides the repository accordingly:
 
 ```
 bash .claude/skills/_e2e-lib/scripts/deploy.sh gpustack-system dev \
-  --set image.repository=thxcode/gpustack-operator \
+  --set image.repository=<your-namespace>/gpustack-operator \
   --set image.pullPolicy=Always
 ```
 

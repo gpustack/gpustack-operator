@@ -19,7 +19,7 @@
 #              platform gpu-h100-sxm 8xH100 non-preemptible with a cpu-e2 system node, 8
 #              accelerators on the one GPU node, InstanceType
 #              gpustack--nvidia-h100-80gb-hbm3-linux-amd64, operator
-#              thxcode/gpustack-operator:dev-6ddcf389.
+#              <dev>/gpustack-operator:<tag> (a development image; tests pull gpustack/gpustack-operator unless a dev image is named).
 # Inputs:      manifests/elastic-ep.yaml; scripts/bench_client.py (in-cluster).
 # Expected:    State 1 and State 3 complete all 6 concurrency cells (c=1..64) with 0 errors,
 #              State 2 preserves master Pod UID across width 2 -> 4 resize, and all 8 GPUs are
