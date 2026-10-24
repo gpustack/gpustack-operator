@@ -204,7 +204,11 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 	// register -- the failure this program measured as one healthy worker where the contract is
 	// one endpoint per member -- and only the gateway carries the flag. The width is the one the
 	// External DP classifier reads, so a shape the classifier admits is a shape the flag covers.
-	// Every other shape renders without it.
+	// Every other shape renders without it. The flag belongs to this undivided shape alone: the
+	// split shape above renders the gateway's disaggregation mode, and the gateway rejects
+	// dp-aware beside it -- combining the two produced an invalid decode destination in the
+	// recorded container run -- so a split deployment carries no flag whatever widths its roles
+	// declare.
 	if name == SGLang && input.AttentionDataParallelSize >= 2 {
 		args = append(args, argvRouterDPAwareArg)
 	}

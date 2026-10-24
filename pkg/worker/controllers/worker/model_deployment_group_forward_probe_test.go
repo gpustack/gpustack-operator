@@ -825,10 +825,11 @@ func TestGroupForwardProbePDPairCarriesTheRequestOnBothHeads(t *testing.T) {
 	assert.Equal(t, got.Decode.Generation, got.Attempt.DecodeGeneration,
 		"the attempt records the generation it bound")
 
-	// TWO RANKS ON EACH SIDE IS FOUR PAIRS, AND A PAIR IS TWO REQUESTS plus the two halves' metrics
-	// scrapes that follow it: the observation reads the mooncake exposition of both halves after
-	// the legs answer. D12/A.2.
-	assert.Len(t, fetch.asked, 16, "every rank pair of both groups is asked, both legs of it, and each pair is followed by the two halves' metrics scrapes")
+	// TWO RANKS ON EACH SIDE IS FOUR PAIRS, AND A PAIR IS TWO REQUESTS: eight leg calls, and one
+	// metrics scrape of each half after the first pair answers. The halves' addresses do not vary
+	// by rank and the exposition is cumulative, so the mooncake evidence is read once rather than
+	// once per pair.
+	assert.Len(t, fetch.asked, 10, "every rank pair of both groups is asked, both legs of it, and the attempt scrapes each half's metrics once")
 	assert.Len(t, got.Attempt.RequestIDs, 4, "each rank pair carries its own identifier")
 
 	rooms := map[int64]bool{}
@@ -976,6 +977,15 @@ func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
 
 		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
 			"the wrapper is stripped whatever it carries")
+	})
+
+	t.Run("leading whitespace ahead of the wrapper still passes", func(t *testing.T) {
+		got := observeModelDeploymentGroupForwardPair(
+			context.Background(), md, prefill, decode,
+			answer("\n <think></think>\n\n探测P0D0：星河春风。").fetch)
+
+		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
+			"a template that opens with a newline or a space ahead of the wrapper is as noise as the wrapper")
 	})
 
 	t.Run("a wrapper does not rescue a wrong copy", func(t *testing.T) {

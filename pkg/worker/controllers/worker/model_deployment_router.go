@@ -331,7 +331,9 @@ func renderModelDeploymentRouterObjects(
 	}
 	// THE SGLANG EXTERNAL DP SHAPE NAMES ITS WIDTH TO THE GATEWAY. The gateway's --dp-aware fans
 	// its worker registration out per dp member, which is the one-worker-per-member contract the
-	// shape is held to; a width under two renders nothing, and so does every other engine.
+	// shape is held to; a width under two renders nothing, and so does every other engine. The
+	// first external role the declaration carries decides the width: a deployment declaring more
+	// than one such role is outside the validated shapes, and the later roles are not read.
 	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang {
 		for i := range md.Spec.Roles {
 			if !modelDeploymentRoleExternalDP(md, &md.Spec.Roles[i]) {

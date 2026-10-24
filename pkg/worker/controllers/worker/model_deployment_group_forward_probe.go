@@ -974,6 +974,8 @@ func observeModelDeploymentGroupForwardPair(
 	probeCtx, cancel := context.WithTimeout(ctx, modelDeploymentGroupForwardPairBound)
 	defer cancel()
 
+	var mooncakeRead bool
+
 	for prefillRank := 0; prefillRank < prefillWidth; prefillRank++ {
 		for decodeRank := 0; decodeRank < decodeWidth; decodeRank++ {
 			if viaProxy && (prefillRank > 0 || decodeRank > 0) {
@@ -998,13 +1000,18 @@ func observeModelDeploymentGroupForwardPair(
 				// the room it joins the pair on and this operator never builds one there.
 				attempt.BootstrapRooms = append(attempt.BootstrapRooms, room)
 			}
-			// THE MOONCAKE SERIES ARE READ FROM BOTH HALVES while the pair is fresh: the prefill
-			// half's exposition carries the push evidence, and the decode half's carries whatever
-			// its connector did about it.
-			attempt.Mooncake = append(attempt.Mooncake,
-				modelDeploymentGroupForwardPairMooncakeSeries(probeCtx, prefillURL, engine.Path, "prefill", fetch)...)
-			attempt.Mooncake = append(attempt.Mooncake,
-				modelDeploymentGroupForwardPairMooncakeSeries(probeCtx, decodeURL, engine.Path, "decode", fetch)...)
+			if !mooncakeRead {
+				// THE MOONCAKE SERIES ARE READ FROM BOTH HALVES ONCE, after the first pair and while
+				// its transfer is fresh: the prefill half's exposition carries the push evidence, and
+				// the decode half's carries whatever its connector did about it. The halves' addresses
+				// do not vary by rank and the exposition is cumulative, so a later pair would repeat
+				// the same lines.
+				mooncakeRead = true
+				attempt.Mooncake = append(attempt.Mooncake,
+					modelDeploymentGroupForwardPairMooncakeSeries(probeCtx, prefillURL, engine.Path, "prefill", fetch)...)
+				attempt.Mooncake = append(attempt.Mooncake,
+					modelDeploymentGroupForwardPairMooncakeSeries(probeCtx, decodeURL, engine.Path, "decode", fetch)...)
+			}
 		}
 	}
 
@@ -1109,8 +1116,10 @@ func modelDeploymentGroupForwardPairProbe(
 }
 
 // modelDeploymentGroupForwardPairThinkWrapper matches a leading <think>…</think> block, across
-// lines, at the head of an answer.
-var modelDeploymentGroupForwardPairThinkWrapper = regexp.MustCompile(`(?s)^<think>.*?</think>`)
+// lines, at the head of an answer, with whitespace tolerated on either side of the block: chat
+// templates emit a leading newline or space before the wrapper on some variants, and an anchored
+// match that refused it would leave the wrapper in place and reject the copy behind it.
+var modelDeploymentGroupForwardPairThinkWrapper = regexp.MustCompile(`(?s)^\s*<think>.*?</think>\s*`)
 
 // modelDeploymentGroupForwardPairVisibleCopy strips a leading <think>…</think> block from an
 // answer and trims what remains, leaving the copy the decode leg was asked for.
@@ -1505,12 +1514,14 @@ func modelDeploymentGroupForwardPairVerified(
 	}
 	if len(attempt.Mooncake) > 0 {
 		observation += "; the mooncake exposition: " + strings.Join(attempt.Mooncake, "; ")
+		// THE READ SIDE HAS NO SUCCESS COUNTER. The connector's exported series count the sender's
+		// pushes and failed pulls only, so the observation says explicitly that the copied answer is
+		// the evidence a pull happened; a reader cannot take the counters for it. The sentence rides
+		// the exposition, so a shape that carries no mooncake series says nothing about a connector
+		// it does not run.
+		observation += "; the mooncake connector exports no read-side success counter " +
+			"(vllm:mooncake_num_failed_recvs counts failed pulls only), so the copied answer is the read-side evidence"
 	}
-	// THE READ SIDE HAS NO SUCCESS COUNTER. The connector's exported series count the sender's
-	// pushes and failed pulls only, so the observation says explicitly that the copied answer is
-	// the evidence a pull happened; a reader cannot take the counters for it.
-	observation += "; the mooncake connector exports no read-side success counter " +
-		"(vllm:mooncake_num_failed_recvs counts failed pulls only), so the copied answer is the read-side evidence"
 
 	return modelDeploymentGroupForwardPairResult{
 		Prefill: modelDeploymentGroupForward{
