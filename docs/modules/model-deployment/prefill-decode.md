@@ -25,15 +25,6 @@ A router policy such as `round_robin` chooses among those leaders; it does not a
 *External data parallelism (External DP)* inside a *Prefill* or *Decode* role has not been validated.
 [Issue #754](https://github.com/gpustack/gpustack-operator/issues/754) tracks that deferred combination.
 
-SGLang's engine-internal *DP attention* differs from *External DP*. A single-host Docker PoC used
-SGLang `0.5.18`, Gateway `0.3.1` and one Gateway for both roles. It used `--pd-disaggregation` without
-`--dp-aware`; the Decode group had two containers and one HTTP head. The engine distributed work
-across its ranks, and the tested requests returned correct responses.
-
-This PoC does not validate a Kubernetes **`ModelDeployment`**, multi-host networking, or rank-failure
-withdrawal and recovery. Treat the split Decode group as an experimental topology until those checks
-run. See [SGLang DP routing](routing.md#sglang-dp-routing) for the tested Router mode.
-
 With the managed `llm-d-router`, the connector a native vLLM role runs depends on whether
 *`spec.kvCache`* is set; the two settings render two different connector documents, not one document
 with a field toggled:
