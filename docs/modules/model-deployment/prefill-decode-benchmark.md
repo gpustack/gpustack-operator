@@ -180,6 +180,18 @@ The log labels do not identify each rank, and no synchronized rank counters veri
 
 Every captured metric window reported **zero failed transfers and zero failed receives**.
 
+A later runtime-acceptance run drove a *SGLang* *PD* deployment of one *prefill* and one *decode*
+replica through content, scaling and transfer checks with the scaler active, on operator build
+`dev-73b405c6`: 29 checks passed with zero failures, warnings or blocked rows.
+
+The scaler read the engine's waiting-request counter during a transfer and recorded 24 waiting
+requests on the *decode* role; under load the *decode* role grew to two replicas, and both roles
+returned to their floor of one with no retirement outstanding.
+
+The deployment published each role's group independently, the four content classes served through
+the `sglang-gateway`, the thinking switch held on the arithmetic, Chinese and JSON requests, and
+the Mooncake transfer over the direct leg moved 54 MB across six transfers with zero failures.
+
 ## Benefits
 
 - At `4096/128`, concurrency 16, *ITL* p99 fell from 458.058 ms to **17.895 ms**, a **25.6× reduction**.

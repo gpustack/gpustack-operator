@@ -156,6 +156,24 @@ Client JSON establishes request completion and errors.
 After deletion, the `Devices` snapshot recorded all eight H100 accelerators with *`remaining`* = `1600000`.
 This records released accelerator claims; it does not prove removal of model-cache or cluster infrastructure.
 
+A later runtime-acceptance run measured the same expansion on an eight-GPU *H100* node with
+operator build `dev-73b405c6`:
+
+| Observation | Captured result |
+|---|---|
+| Ready at width 2 | about two minutes after the apply |
+| State-1 sweep | six concurrency cells, zero errors |
+| Load through the resize | 471 requests over 260 seconds, zero errors |
+| Width patch 2 → 4 to Ready | ten seconds |
+| Ray cluster | three active nodes and four GPUs → five nodes and eight GPUs |
+| Final observation | effective width 4, stable width 4, reason `native ranks and forwards agree` |
+| ElasticResize condition | `True` / `NoRefusal` |
+| State-3 sweep | six concurrency cells at width 4, zero errors |
+
+The operator deletes the operation record when the operation ends, so the terminal state reads from
+the condition and the observation. An earlier attempt on the same image did not converge and remains
+an open observation; this run does not explain it.
+
 ## Benefits
 
 - The deployment expanded from **4 to 8 GPUs** while retaining its serving master and existing GPU worker.

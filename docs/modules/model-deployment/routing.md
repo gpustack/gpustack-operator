@@ -279,6 +279,15 @@ request. Each router's own `/metrics` does, for the series below, all seen expor
 Neither `sglang-gateway` nor `llm-d-router` keeps a running count per replica. Behind them, compare
 the engine `Pod`s' own counts instead, such as each `Pod`'s *time to first token (TTFT)* histogram `_count`.
 
+A scale event is visible in these series. On a *SGLang* multi-Server deployment scaled one to two,
+the gateway's worker set grew to two `smg_worker_health` series at `1`; on the scale back, the
+withdrawn worker's series stayed in the exposition at `-1` while
+`smg_discovery_deregistrations_total{reason="pod_deleted"}` incremented, and the surviving worker
+kept its `1`.
+
+Count the healthy series, not the lines, on a scaled deployment. The same run's four content
+classes served through the gateway with zero failures.
+
 ---
 
 **See also** — [Prefill and Decode](prefill-decode.md) for *`spec.router`* and the flags each router refuses · [Encode, Prefill and Decode](encode-prefill-decode.md) for *EPD* disaggregation and connector options · [Model Deployment Metrics](metrics.md) for the router counters a deployment's snapshot reads.
