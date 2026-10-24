@@ -538,10 +538,11 @@ func modelDeploymentSGLangExternalDP(
 }
 
 // modelDeploymentEngineBool reads a boolean the way SGLang's own environment reader reads it:
-// the spellings it accepts as true, compared without regard to case.
+// only the spellings that reader accepts as true, compared without regard to case. Every other
+// value is false, which is the same silence the engine itself answers an unknown spelling with.
 func modelDeploymentEngineBool(value string) bool {
 	switch strings.ToLower(value) {
-	case modelDeploymentTrueValue, "1", "yes", "y":
+	case modelDeploymentTrueValue, "1":
 		return true
 	default:
 		return false

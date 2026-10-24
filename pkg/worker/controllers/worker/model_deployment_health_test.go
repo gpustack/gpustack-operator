@@ -1067,7 +1067,7 @@ func TestGroupQualificationAsksTheDirectedPair(t *testing.T) {
 			q.Leg(modelDeploymentLegMembersReady).Verdict,
 			"%s keeps its own readiness", q.View.Role)
 	}
-	assert.Len(t, fetch.asked, 4, "one rank pair is two requests, and the two halves' metrics scrapes follow it")
+	assert.Len(t, fetch.asked, 2, "one rank pair is two requests, and an SGLang pair scrapes no metrics")
 }
 
 // TestGroupQualificationNeverReadsNotApplicableForAPair pins the difference between a pair and an

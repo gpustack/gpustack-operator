@@ -128,11 +128,11 @@ func TestSGLangExternalDPBalanceShape(t *testing.T) {
 			want:      workercore.ModelDeploymentLoadBalanceExternal,
 		},
 		{
-			name:      "the Rust server spelled yes is the Rust server",
+			name:      "the Rust server spelled yes is not the Rust server",
 			engine:    sglang,
 			extraArgs: sedpExtraArgs(),
 			env:       []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_RUST_SERVER", Value: "yes"}},
-			want:      workercore.ModelDeploymentLoadBalanceExternal,
+			want:      workercore.ModelDeploymentLoadBalanceInternal,
 		},
 		{
 			name:      "the vote is the SGLang engine's alone",

@@ -825,11 +825,10 @@ func TestGroupForwardProbePDPairCarriesTheRequestOnBothHeads(t *testing.T) {
 	assert.Equal(t, got.Decode.Generation, got.Attempt.DecodeGeneration,
 		"the attempt records the generation it bound")
 
-	// TWO RANKS ON EACH SIDE IS FOUR PAIRS, AND A PAIR IS TWO REQUESTS: eight leg calls, and one
-	// metrics scrape of each half after the first pair answers. The halves' addresses do not vary
-	// by rank and the exposition is cumulative, so the mooncake evidence is read once rather than
-	// once per pair.
-	assert.Len(t, fetch.asked, 10, "every rank pair of both groups is asked, both legs of it, and the attempt scrapes each half's metrics once")
+	// TWO RANKS ON EACH SIDE IS FOUR PAIRS, AND A PAIR IS TWO REQUESTS: eight leg calls. An
+	// SGLang pair scrapes no metrics: its connector exports no vllm:mooncake_ series, so the
+	// mooncake evidence is a vLLM-path record.
+	assert.Len(t, fetch.asked, 8, "every rank pair of both groups is asked, both legs of it, and an SGLang pair scrapes no metrics")
 	assert.Len(t, got.Attempt.RequestIDs, 4, "each rank pair carries its own identifier")
 
 	rooms := map[int64]bool{}
@@ -914,7 +913,7 @@ func TestGroupForwardProbePDPairNamesTheAnswerItRejected(t *testing.T) {
 // histogram, and its _count says pushes happened; nothing exported counts a successful pull, which
 // is why the copied answer is the read-side proof. D12/A.2.
 func TestGroupForwardProbePDPairRecordsTheMooncakeCountersOfBothHalves(t *testing.T) {
-	md := probePairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1, "")
+	md := probePairDeployment(workercore.ModelDeploymentEngineVLLM, 1, 1, "llm-d-router")
 	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
 	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
 	exposition := "# HELP vllm:mooncake_bytes_transferred transferred bytes\n" +
@@ -939,6 +938,17 @@ func TestGroupForwardProbePDPairRecordsTheMooncakeCountersOfBothHalves(t *testin
 		"the decode half's mooncake series are recorded beside them")
 	assert.Contains(t, got.Decode.Observation, "no read-side success counter",
 		"the observation says explicitly that no exported series counts a successful pull")
+
+	t.Run("an SGLang pair records no mooncake lines", func(t *testing.T) {
+		md := probePairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1, "")
+		got := observeModelDeploymentGroupForwardPair(
+			context.Background(), md, prefill, decode, fetch)
+
+		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
+			"the pair itself still verifies")
+		assert.NotContains(t, got.Prefill.Observation, "mooncake",
+			"SGLang exports no vllm:mooncake_ series, so its observation carries no line about them")
+	})
 }
 
 // TestGroupForwardProbePDPairCopySurvivesAThinkWrapper holds that the copied compare reads the
@@ -1045,10 +1055,10 @@ func TestGroupForwardProbePDPairHoldsOnAnythingItCannotSee(t *testing.T) {
 			wantInWords: "did not carry the text",
 		},
 		{
-			name:        "the decoder that did not finish normally is a hold",
+			name:        "the decoder that aborted its answer is a hold",
 			engine:      workercore.ModelDeploymentEngineSGLang,
-			answer:      `{"id":"` + probeRIDPlaceholder + `","choices":[{"message":{"content":"探测P0D0：星河春风。"},"finish_reason":"length"}]}`,
-			wantInWords: "did not finish normally",
+			answer:      `{"id":"` + probeRIDPlaceholder + `","choices":[{"message":{"content":"探测P0D0：星河春风。"},"finish_reason":"abort"}]}`,
+			wantInWords: "finish reason reports",
 		},
 		{
 			name:        "a leg that never answers is a hold",
@@ -1214,8 +1224,15 @@ func TestGroupForwardProbePDPairNamesThePrefillerToTheRoutingProxy(t *testing.T)
 				"a decode group whose pair carried the request is verified")
 			assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
 				"the prefill group the proxy paired with is verified with it")
-			assert.Len(t, fetch.asked, 3,
-				"the proxy drives the transfer leg, so the operator asks it one question, and the two halves' metrics scrapes follow it")
+			// The proxy drives the transfer leg, so the operator asks it one question. A vLLM pair
+			// follows it with each half's metrics scrape; an SGLang pair scrapes nothing, because
+			// its connector exports no vllm:mooncake_ series.
+			want := 1
+			if tc.engine == workercore.ModelDeploymentEngineVLLM {
+				want = 3
+			}
+			assert.Len(t, fetch.asked, want,
+				"the proxy is asked one question, and only a vLLM pair scrapes metrics after it")
 			assert.Len(t, got.Attempt.RequestIDs, 1,
 				"the one question carries its own identifier")
 
@@ -1315,8 +1332,8 @@ func TestGroupForwardProbePDPairAsksTheFrontedDecoderAtItsFrontDoor(t *testing.T
 
 	assert.Equal(t, modelDeploymentGroupForwardVerified, got.Decode.State,
 		"the front door is the address the proxy answers on")
-	assert.Len(t, fetch.asked, 3,
-		"the proxy drives the transfer leg, so the operator asks it one question, and the two halves' metrics scrapes follow it")
+	assert.Len(t, fetch.asked, 1,
+		"the proxy drives the transfer leg, so the operator asks it one question, and an SGLang pair scrapes no metrics")
 	assert.Equal(t, "http://"+probeHost(1, 0)+"/v1/chat/completions", fetch.asked[0].URL,
 		"the front door is the port the Service targets, not the engine's port behind it")
 	assert.Equal(t, probeHost(0, 0),

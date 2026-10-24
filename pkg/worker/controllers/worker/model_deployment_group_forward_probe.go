@@ -707,6 +707,9 @@ type modelDeploymentGroupForwardPairLeg struct {
 
 // modelDeploymentGroupForwardPairReply is what one leg's answer says.
 type modelDeploymentGroupForwardPairReply struct {
+	// Unreadable says the answer's body could not be read as the engine's own reply shape, so
+	// nothing in it can be judged, not even whether it carried the identifier.
+	Unreadable bool
 	// Bound says the answer carries this operator's own request identifier.
 	Bound bool
 	// Reason is the finish reason the engine recorded.
@@ -767,6 +770,10 @@ type modelDeploymentGroupForwardPairEngine struct {
 	// ChatFields are the fields beside the identifier and the messages that the engine's chat
 	// route reads.
 	ChatFields map[string]any
+	// Mooncake says the engine's transfer connector exports the mooncake series the observation
+	// records beside the pair. An engine without them is not scraped for them, so its observation
+	// carries no line about a connector it does not run.
+	Mooncake bool
 	// Heads renders the requests the two heads of one rank pair carry.
 	Heads func(in modelDeploymentGroupForwardPairInput) ([]modelDeploymentGroupForwardPairLeg, error)
 }
@@ -815,6 +822,7 @@ var modelDeploymentGroupForwardPairEngines = map[string]modelDeploymentGroupForw
 		RequestIDField: "request_id",
 		// The engine prefixes the identifier with the kind of completion it answered.
 		IDPrefix: "chatcmpl-",
+		Mooncake: true,
 		Heads: func(in modelDeploymentGroupForwardPairInput) ([]modelDeploymentGroupForwardPairLeg, error) {
 			// THE ENGINE ID OF THE PREFILLER'S RANK IS WHAT THE HANDSHAKE NAMES THE PREFILLER BY,
 			// and this operator does not read the prefiller's own registry to learn it. A pair that
@@ -1000,7 +1008,7 @@ func observeModelDeploymentGroupForwardPair(
 				// the room it joins the pair on and this operator never builds one there.
 				attempt.BootstrapRooms = append(attempt.BootstrapRooms, room)
 			}
-			if !mooncakeRead {
+			if !mooncakeRead && engine.Mooncake {
 				// THE MOONCAKE SERIES ARE READ FROM BOTH HALVES ONCE, after the first pair and while
 				// its transfer is fresh: the prefill half's exposition carries the push evidence, and
 				// the decode half's carries whatever its connector did about it. The halves' addresses
@@ -1079,6 +1087,10 @@ func modelDeploymentGroupForwardPairProbe(
 				"evidence, and it is not attributed to one side"
 		}
 		reply := replies[i]
+		if reply.Unreadable {
+			return "", 0, "the " + legs[i].Name + " leg answered, but its answer could not be read " +
+				"as the engine's reply shape, so nothing in it is evidence the pair carried one"
+		}
 		if !reply.Bound {
 			return "", 0, "the " + legs[i].Name + " leg answered, but not bound to this operator's own " +
 				"request, so the answer is not evidence that the pair carried one"
@@ -1091,9 +1103,9 @@ func modelDeploymentGroupForwardPairProbe(
 			}
 			continue
 		}
-		if reply.Reason != "stop" {
-			return "", 0, "the " + legs[i].Name + " leg answered, but it did not finish normally, so " +
-				"the answer is not evidence that the pair carried one"
+		if !modelDeploymentQualifyFinishRan(reply.Reason) {
+			return "", 0, "the " + legs[i].Name + " leg answered, but its finish reason reports " +
+				"the request did not complete, so the answer is not evidence that the pair carried one"
 		}
 		// THE COMPARE READS THE ANSWER'S VISIBLE TEXT. The chat template wraps its answer in a
 		// <think>…</think> block on this route whatever the thinking switch says -- case-9 run2's
@@ -1227,7 +1239,7 @@ func modelDeploymentGroupForwardPairChatRead(
 		} `json:"choices"`
 	}
 	if json.Unmarshal(body, &response) != nil {
-		return modelDeploymentGroupForwardPairReply{}
+		return modelDeploymentGroupForwardPairReply{Unreadable: true}
 	}
 
 	reply := modelDeploymentGroupForwardPairReply{Bound: response.ID == idPrefix+requestID}

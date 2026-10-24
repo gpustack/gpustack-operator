@@ -2098,6 +2098,10 @@ func validateModelDeploymentExternalDPRouter(md *workercore.ModelDeployment) fie
 		return nil
 	}
 
+	// Offenders are collected rather than returned at the first, so one apply names every role
+	// the user has to fix instead of surfacing them one refusal at a time.
+	offenders := make([]string, 0)
+
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		// THIS RULE'S OWN TAKE-OVER SKIP. A role that replaced its command line has no managed
@@ -2120,15 +2124,19 @@ func validateModelDeploymentExternalDPRouter(md *workercore.ModelDeployment) fie
 			continue
 		}
 
-		return field.ErrorList{field.Required(
-			field.NewPath("spec", "router"),
-			fmt.Sprintf("RouterRequired: the role %q declares external data parallelism, whose groups "+
-				"are served through a Router and need it to supervise them; declare one under spec.router",
-				role.Name),
-		)}
+		offenders = append(offenders, fmt.Sprintf("%q", role.Name))
 	}
 
-	return nil
+	if len(offenders) == 0 {
+		return nil
+	}
+
+	return field.ErrorList{field.Required(
+		field.NewPath("spec", "router"),
+		fmt.Sprintf("RouterRequired: the role %s declares external data parallelism, whose groups "+
+			"are served through a Router and need it to supervise them; declare one under spec.router",
+			strings.Join(offenders, ", ")),
+	)}
 }
 
 // modelDeploymentRoleOwnsItsCommandLine reports whether the operator replaced the role's command
