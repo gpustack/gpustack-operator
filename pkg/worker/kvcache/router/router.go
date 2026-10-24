@@ -73,12 +73,13 @@ type Input struct {
 	// carrying both is deliberate -- see Role.Selector for why a map rather than a string.
 	EndpointLabels map[string]string
 
-	// DataParallelSize is the deployment's data-parallel width, as the engine's own arguments
-	// declare it. The SGLang gateway renders --dp-aware at two or more, which is what makes it
-	// register one worker per dp member instead of one per group
+	// AttentionDataParallelSize is the deployment's attention-data-parallel width, as the engine's
+	// own arguments declare it -- the same width the External DP classifier reads. The SGLang
+	// gateway renders --dp-aware at two or more, which is what makes it register one worker per
+	// attention rank instead of one per group
 	// (pack/llm-router/patches/sglang-gateway/0003-attn-dp-aware-worker-registration.patch);
 	// zero or one renders nothing, and no other router reads the field.
-	DataParallelSize int32
+	AttentionDataParallelSize int32
 
 	// EligibleLabelKey names the label a stage filter must match when that role's eligibility
 	// requirement is carried per role rather than by the deployment-wide selector. A non-empty key

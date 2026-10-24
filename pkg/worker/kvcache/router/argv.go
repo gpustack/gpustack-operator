@@ -199,11 +199,13 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 			"a backend, so a deployment holding one needs a %s and a %s role beside it",
 			name, roleKindEncode, rolePrefill, roleKindDecode)
 	}
-	// THE EXTERNAL DP SHAPE IS WHERE ONE WORKER PER MEMBER IS THE CONTRACT. A dp width of two or
-	// more is the shape whose subordinate members the gateway would otherwise never register --
-	// the failure this program measured as one healthy worker where the contract is one endpoint
-	// per member -- and only the gateway carries the flag. Every other shape renders without it.
-	if name == SGLang && input.DataParallelSize >= 2 {
+	// THE EXTERNAL DP SHAPE IS WHERE ONE WORKER PER MEMBER IS THE CONTRACT. An attention width of
+	// two or more is the shape whose subordinate members the gateway would otherwise never
+	// register -- the failure this program measured as one healthy worker where the contract is
+	// one endpoint per member -- and only the gateway carries the flag. The width is the one the
+	// External DP classifier reads, so a shape the classifier admits is a shape the flag covers.
+	// Every other shape renders without it.
+	if name == SGLang && input.AttentionDataParallelSize >= 2 {
 		args = append(args, argvRouterDPAwareArg)
 	}
 	deployment := selectorArgs(argvRouterSelectorArg, input.EndpointLabels)

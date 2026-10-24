@@ -343,7 +343,7 @@ func renderModelDeploymentRouterObjects(
 				return ModelDeploymentRouterObjects{}, fmt.Errorf(
 					"read the external-dp width the router renders: %w", err)
 			}
-			routerInput.DataParallelSize = int32(reading.declared.DataParallel)
+			routerInput.AttentionDataParallelSize = int32(reading.declared.AttentionDataParallel)
 			break
 		}
 	}
