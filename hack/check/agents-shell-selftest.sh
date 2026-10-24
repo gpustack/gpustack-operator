@@ -47,7 +47,10 @@ export SHELLCHECK_BIN
 unset GPUSTACK_IMAGE_BUILD
 
 MINI="$(mktemp -d)"
-trap 'rm -rf "${MINI}"' EXIT
+# THE TEMPORARY TREE IS REMOVED FROM OUTSIDE IT. This script stands in the tree it made, and a
+# delete that refuses to remove a directory a process is standing in leaves the tree behind and
+# fails the run that created it.
+trap 'cd "${ROOT_DIR}"; rm -rf "${MINI}"' EXIT
 
 fails=0
 cases=0
