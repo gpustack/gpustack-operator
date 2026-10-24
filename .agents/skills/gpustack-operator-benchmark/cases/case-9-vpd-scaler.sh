@@ -24,6 +24,15 @@
 #              Qwen/Qwen3-8B), and an in-cluster default/bench-driver Pod carrying python3 and
 #              aiohttp. The pair starts at one replica per role and may reach two per role, so the
 #              peak is four GPUs.
+#              The shape this run was on is written to OUT_DIR/cluster-shape.txt: the context and
+#              the cluster, the namespace, the nodes, the InstanceType the case asked for, the
+#              accelerators on each node, the InstanceTypes the cluster carries, and the operator
+#              image with its digest.
+#              The cluster of record for this run: gpustack-sedp-0l578ap2 (ns gpustack-bench),
+#              platform gpu-h100-sxm 8xH100 non-preemptible with a cpu-e2 system node, 8
+#              accelerators on the one GPU node, InstanceType
+#              gpustack--nvidia-h100-80gb-hbm3-linux-amd64, operator
+#              thxcode/gpustack-operator:dev-6ddcf389.
 # Inputs:      The manifest is written by this script into OUT_DIR/vpd-scaler.yaml and the scaler
 #              into OUT_DIR/vpd-scaler-scaler.yaml. The operator stamps each replica's own
 #              address, so the manifest is identical for every replica.
@@ -84,6 +93,7 @@ MODEL="${VPD_MODEL:-Qwen/Qwen3-8B}"
 ARTIFACT="${VPD_ARTIFACT:-qwen3-8b}"
 IMAGE="${VPD_IMAGE:-gpustack/runner:cuda13.0-vllm0.32.0}"
 INSTANCE_TYPE="${VPD_INSTANCE_TYPE:-bench-gpu}"
+ROUTER_NAME="${VPD_ROUTER_NAME:-llm-d-router}"
 LOCAL_PORT_BASE="${LOCAL_PORT_BASE:-18400}"
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 SCALE_TIMEOUT="${SCALE_TIMEOUT:-900}"
@@ -104,12 +114,29 @@ SCALER_RESOURCE=modeldeploymentscalers.v1alpha1.worker.gpustack.ai
 # seconds to time a scale-out and a fall-back. The CRD answers with what is stored.
 MD_RESOURCE=modeldeployments.v1alpha1.worker.gpustack.ai
 PF_PIDS=""
+LOAD_PID=""
+SAMPLER_PID=""
 
 mkdir -p "$OUT"
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 
+# THE SHAPE OF THE CLUSTER BELONGS IN THE EVIDENCE, so the numbers this run produced can be
+# read against the machine that produced them.
+capture_cluster_shape "${OUT}/cluster-shape.txt"
+
 cleanup() {
   local pid
+  # THE BACKGROUND LOAD IS STOPPED FIRST. It is a child of this shell, and it drives traffic
+  # into the deployment that is about to be deleted, so it is ended before the teardown starts.
+  if [ -n "${LOAD_PID:-}" ]; then
+    kill "$LOAD_PID" 2>/dev/null || true
+    wait "$LOAD_PID" 2>/dev/null || true
+    LOAD_PID=""
+  fi
+  if [ -n "${SAMPLER_PID:-}" ]; then
+    kill "$SAMPLER_PID" 2>/dev/null || true
+    SAMPLER_PID=""
+  fi
   for pid in $PF_PIDS; do
     kill "$pid" 2>/dev/null || true
   done
@@ -277,14 +304,24 @@ pod_metrics_port() {
   kubectl -n "$NS" get pod "$1" -o jsonpath='{.metadata.annotations.prometheus\.io/port}' 2>/dev/null
 }
 
+# THE ROUTER POD IS FOUND BY THE LABELS THE OPERATOR RENDERS ON IT. The router is its own
+# Deployment, and its Pod template carries the deployment's instance label and the router's own
+# name label (pkg/worker/controllers/worker/model_deployment_router.go, the labels the router
+# objects are rendered with). It carries no component label, so a selector that asks for one
+# matches nothing, and the router's own metric page then reads as empty however many workers it
+# holds.
+router_pod() {
+  kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${DEPLOY},modeldeployment.gpustack.ai/router=${ROUTER_NAME}" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
+}
+
 # router_metrics_port reads the port the router serves its metrics on. The operator renders
 # --prometheus-port on every router it manages, and the llm-d picker listens on the operator's own
 # port by default, so the argument is read when it is there and the operator's port is used when
 # the router is configured by a document instead of by arguments.
 router_metrics_port() {
   local pod args
-  pod="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${DEPLOY},app.kubernetes.io/component=router" \
-    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  pod="$(router_pod)"
   [ -n "$pod" ] || return 1
   args="$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].args}' 2>/dev/null)"
   printf '%s' "$args" | sed -n 's/.*--prometheus-port=\([0-9][0-9]*\).*/\1/p' | head -1
@@ -293,8 +330,7 @@ router_metrics_port() {
 # scrape_router_metrics writes the router's own metric page.
 scrape_router_metrics() { # <tag>
   local tag="$1" pod port
-  pod="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${DEPLOY},app.kubernetes.io/component=router" \
-    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  pod="$(router_pod)"
   port="$(router_metrics_port || true)"
   [ -n "$port" ] || port=9090
   if [ -z "$pod" ]; then
@@ -417,6 +453,17 @@ wait_scaler_bound() {
 }
 
 # wait_replicas ROLE COUNT waits for a role to reach a replica count.
+# timeline_peak ROLE FIELD prints the largest value the sampler recorded for one role's field
+# while the load was on. The scaler drops its request counts from its status when they fall
+# back to zero, so the status read after the load has nothing left to report, and the peak the
+# sampler saw is the count that the comparison needs.
+timeline_peak() {
+  local role="$1" field="$2"
+  jq -s --arg r "$role" --arg f "$field" \
+    '[.[] | select(.phase == "load") | ((.[$f] // {})[$r] // 0)]
+      | map(select(type == "number")) | max // 0' "$TIMELINE" 2>/dev/null || echo 0
+}
+
 wait_replicas() {
   local role="$1" want="$2" deadline=$((SECONDS + SCALE_TIMEOUT)) got=0
   while [ "$SECONDS" -lt "$deadline" ]; do
@@ -638,10 +685,16 @@ SAMPLER_PID=$!
 # --- the load, and the rise -----------------------------------------------------------
 echo "load" > "$PHASE_FILE"
 log "Running the load for ${LOAD_SECONDS}s at concurrency ${LOAD_CONCURRENCY}"
-run_load "load" "$LOAD_SECONDS" "$LOAD_CONCURRENCY" || true
+#
+# THE LOAD RUNS IN THE BACKGROUND, and the readings below are taken WHILE IT IS ON. A load
+# that ran to completion before the case looked would let the role grow and fall back again
+# while nobody was watching, and the engine's counters would fall back with it. The scaler
+# drops its request counts from its status when they reach zero, so a status read after the
+# load finds nothing to compare the engine against.
+run_load "load" "$LOAD_SECONDS" "$LOAD_CONCURRENCY" &
+LOAD_PID=$!
 
-# THE RAW METRICS ARE READ WHILE THE LOAD IS STILL ON, because after it stops the counters fall
-# back and the scaler's recorded value would have nothing to agree with.
+sleep 20
 engine_metrics decode "under-load" || true
 engine_metrics prefill "under-load" || true
 scaler_json > "${OUT}/scaler-under-load.json" 2>/dev/null || true
@@ -649,8 +702,26 @@ deployment_json > "${OUT}/deployment-under-load.json" 2>/dev/null || true
 
 RAW_DECODE_RUNNING="$(metric_sum "${OUT}/engine-decode-under-load.txt" "vllm:num_requests_running")"
 RAW_PREFILL_RUNNING="$(metric_sum "${OUT}/engine-prefill-under-load.txt" "vllm:num_requests_running")"
-SCALER_DECODE_RUNNING="$(scaler_role_field decode runningRequests)"
-SCALER_PREFILL_RUNNING="$(scaler_role_field prefill runningRequests)"
+
+# THE ROLE COUNTS ARE READ WHILE THE LOAD IS ON. The scaler only asks for a second replica
+# while there is traffic to ask for it, so the count has to be read before the load ends.
+DECODE_REPLICAS="$(role_replicas decode)"
+PREFILL_REPLICAS="$(role_replicas prefill)"
+while kill -0 "$LOAD_PID" 2>/dev/null; do
+  decode_now="$(role_replicas decode)"
+  prefill_now="$(role_replicas prefill)"
+  [ "${decode_now:-0}" -ge 2 ] && DECODE_REPLICAS="$decode_now"
+  [ "${prefill_now:-0}" -ge 2 ] && PREFILL_REPLICAS="$prefill_now"
+  sleep 5
+done
+wait "$LOAD_PID" 2>/dev/null || true
+LOAD_PID=""
+
+# THE SCALER'S COUNT IS THE PEAK THE SAMPLER SAW WHILE THE LOAD WAS ON. The sampler has been
+# writing the scaler's status into the timeline since the load began, so the peak is the
+# largest count the scaler recorded while there was traffic for it to record.
+SCALER_DECODE_RUNNING="$(timeline_peak decode running_requests_by_role)"
+SCALER_PREFILL_RUNNING="$(timeline_peak prefill running_requests_by_role)"
 log "the engine's own running counter: decode=${RAW_DECODE_RUNNING} prefill=${RAW_PREFILL_RUNNING}"
 log "the scaler's recorded running count: decode=${SCALER_DECODE_RUNNING} prefill=${SCALER_PREFILL_RUNNING}"
 
@@ -677,8 +748,6 @@ else
     "the scaler recorded ${SCALER_DECODE_RUNNING} running requests on the decode role against the engine's ${RAW_DECODE_RUNNING}"
 fi
 
-DECODE_REPLICAS="$(wait_replicas decode 2 || true)"
-PREFILL_REPLICAS="$(wait_replicas prefill 2 || true)"
 log "after the load: decode=${DECODE_REPLICAS} prefill=${PREFILL_REPLICAS}"
 
 if [ "${DECODE_REPLICAS:-0}" -ge 2 ]; then
@@ -739,11 +808,23 @@ record PASS "the decode half counted the blocks it was handed" \
 scaler_json > "${OUT}/scaler.json" 2>/dev/null || true
 kubectl -n "$NS" get events --field-selector "involvedObject.name=${SCALER}" \
   -o json > "${OUT}/scaler-events.json" 2>/dev/null || true
-COMMIT_EVENTS="$(jq -r '[.items // [] | select(.reason == "ReplicaVectorCommitted")] | length' "${OUT}/scaler-events.json" 2>/dev/null || echo 0)"
+# THE COUNT IS READ WITH THE ELEMENTS SPREAD OUT. In jq, select tests its input, it does not
+# walk it, so "select(.reason == ...)" applied to the array of events asks the array for a
+# field named reason and jq fails. The expression that was here read the array, applied select
+# to the array itself, and the error was swallowed into a count of zero, so the cell reported
+# that the scaler had published no decision however many it had published. map walks the
+# array and select tests each element.
+COMMIT_EVENTS="$(jq -r '(.items // []) | map(select(.reason == "ReplicaVectorCommitted")) | length' "${OUT}/scaler-events.json" 2>/dev/null || echo 0)"
 COMMITTED_VECTOR="$(scaler_json | jq -c '.status.lastCommit.vector // {}' 2>/dev/null)"
 log "the scaler's events: ${COMMIT_EVENTS} committed vector(s); the last committed vector is ${COMMITTED_VECTOR}"
 
-if [ "${COMMIT_EVENTS:-0}" -gt 0 ]; then
+if [ ! -s "${OUT}/scaler-events.json" ]; then
+  record FAIL "the scaler published its decisions" \
+    "the scaler's events could not be read at all"
+elif ! jq -e 'type == "object" and (.items | type == "array")' "${OUT}/scaler-events.json" >/dev/null 2>&1; then
+  record FAIL "the scaler published its decisions" \
+    "the scaler's events did not read as an event list, so the count of its decisions cannot be trusted"
+elif [ "${COMMIT_EVENTS:-0}" -gt 0 ]; then
   record PASS "the scaler published its decisions" \
     "the scaler recorded ${COMMIT_EVENTS} ReplicaVectorCommitted event(s); the last committed vector is ${COMMITTED_VECTOR}"
 else

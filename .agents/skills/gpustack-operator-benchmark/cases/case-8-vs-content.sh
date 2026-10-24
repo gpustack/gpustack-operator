@@ -12,6 +12,15 @@
 # Environment: A cluster with 2 free GPUs on one InstanceType, NodeModelStore caching qwen3-8b. The
 #              model is Qwen/Qwen3-8B, served from the qwen3-8b artifact the store caches: one GPU
 #              per replica, two replicas = 2 GPUs.
+#              The shape this run was on is written to OUT_DIR/cluster-shape.txt: the context and
+#              the cluster, the namespace, the nodes, the InstanceType the case asked for, the
+#              accelerators on each node, the InstanceTypes the cluster carries, and the operator
+#              image with its digest.
+#              The cluster of record for this run: gpustack-sedp-0l578ap2 (ns gpustack-bench),
+#              platform gpu-h100-sxm 8xH100 non-preemptible with a cpu-e2 system node, 8
+#              accelerators on the one GPU node, InstanceType
+#              gpustack--nvidia-h100-80gb-hbm3-linux-amd64, operator
+#              thxcode/gpustack-operator:dev-6ddcf389.
 # Inputs:      The manifest is written by this script into OUT_DIR/vs-content.yaml. The operator
 #              stamps each replica's own address, so the manifest is identical for every replica.
 # Expected:    - the router answers all four content classes, and each answer is right;
@@ -50,10 +59,17 @@ MODEL="${VS_MODEL:-Qwen/Qwen3-8B}"
 # serves the weights from the delivery the artifact names and pins the served name below.
 ARTIFACT="${VS_ARTIFACT:-qwen3-8b}"
 IMAGE="${VS_IMAGE:-gpustack/runner:cuda13.0-vllm0.32.0}"
+# THE ROUTER'S NAME IS WRITTEN ONCE, because the manifest names the router and the Pod lookup
+# below selects on the label the operator renders from that same name.
+ROUTER_NAME="vllm-router"
 ROUTER_IMAGE="${VS_ROUTER_IMAGE:-gpustack/llm-router:v0.3.1}"
 INSTANCE_TYPE="${VS_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}"
 LOCAL_PORT_BASE="${LOCAL_PORT_BASE:-18300}"
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
+# THE SCALE WAIT NEEDS A BOUND. Without one the wait for the Router's worker set has no deadline
+# to reach, the wait returns nothing, and the cell sends its traffic into a Router that has not
+# finished growing.
+SCALE_TIMEOUT="${SCALE_TIMEOUT:-300}"
 # The spread probe sends this many cheap requests so the pinned policy has enough traffic to name
 # both replicas. Four requests could land on one replica and say nothing about the other.
 SPREAD_REQUESTS="${SPREAD_REQUESTS:-8}"
@@ -61,6 +77,10 @@ PF_PIDS=""
 
 mkdir -p "$OUT"
 log() { echo "[$(date +%H:%M:%S)] $*"; }
+
+# THE SHAPE OF THE CLUSTER BELONGS IN THE EVIDENCE, so the numbers this run produced can be
+# read against the machine that produced them.
+capture_cluster_shape "${OUT}/cluster-shape.txt"
 
 cleanup() {
   local pid
@@ -104,7 +124,7 @@ spec:
     name: vLLM
     image: ${IMAGE}
   router:
-    name: vllm-router
+    name: ${ROUTER_NAME}
     image: ${ROUTER_IMAGE}
     extraArgs:
       # THE POLICY IS PINNED so that the traffic spreads over both replicas. The default policy of
@@ -149,8 +169,14 @@ YAML
 }
 
 # router_pod prints the router Pod's name, or nothing when there is none.
+#
+# THE ROUTER POD IS FOUND BY THE LABELS THE OPERATOR RENDERS ON IT. The router is its own
+# Deployment, and its Pod template carries the deployment's instance label and the router's own
+# name label (pkg/worker/controllers/worker/model_deployment_router.go, the labels the router
+# objects are rendered with). It carries no component label, so a selector that asks for one
+# matches nothing.
 router_pod() {
-  kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${DEPLOY},app.kubernetes.io/component=router" \
+  kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${DEPLOY},modeldeployment.gpustack.ai/router=${ROUTER_NAME}" \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
 }
 
@@ -218,6 +244,118 @@ scrape_router_metrics() {
     || { echo "the metrics scrape failed" > "${OUT}/${name}.txt"; return 1; }
 }
 
+# scale_replicas COUNT LABEL patches the server role's replica count and verifies that it took.
+#
+# THE PATCH NAMES THE ONE FIELD IT CHANGES. A merge patch on spec.roles replaces the whole role
+# list, so the role comes back carrying only the two fields the patch carried and the API server
+# rejects the deployment for the role it no longer describes. A JSON patch changes the one number
+# and leaves the rest of the role alone.
+#
+# THE PATCH IS VERIFIED BEFORE ANYBODY LOOKS AT THE SCALE. A rejected patch leaves the deployment
+# at the size it already had, so a case that waits for the new size and then reads the worker set
+# watches an unscaled deployment and reports it as a scale. The exit status and the replica count
+# are therefore both read, and a patch that did not take ends the case.
+scale_replicas() {
+  local count="$1" label="$2" replicas
+  if ! kubectl -n "$NS" patch modeldeployment "$DEPLOY" --type=json \
+    -p "[{\"op\":\"add\",\"path\":\"/spec/roles/0/replicas\",\"value\":${count}}]" > "${OUT}/${label}.txt" 2>&1; then
+    record FAIL "the ${label} was accepted" \
+      "the patch was rejected: $(tr '\n' ' ' < "${OUT}/${label}.txt" 2>/dev/null)"
+    return 1
+  fi
+  replicas="$(kubectl -n "$NS" get modeldeployment "$DEPLOY" -o jsonpath='{.spec.roles[0].replicas}' 2>/dev/null || true)"
+  if [ "${replicas:-0}" != "${count}" ]; then
+    record FAIL "the ${label} was accepted" \
+      "the patch did not take effect: roles[0].replicas is ${replicas:-unknown}, not ${count}"
+    return 1
+  fi
+  record PASS "the ${label} was accepted" "roles[0].replicas is ${count}"
+  return 0
+}
+
+# router_active_workers FILE prints the number of workers the Router's own gauge holds.
+#
+# THE GAUGE IS THE WORKER SET. The vLLM router exposes vllm_router_active_workers from the moment
+# it starts, while the per-worker series it also exposes only appear once a worker has served a
+# request. The gauge is therefore the series that answers "how many workers does the Router
+# hold", and it is the series that shrinks when a worker is withdrawn.
+router_active_workers() {
+  local file="$1"
+  awk '/^vllm_router_active_workers / { print $2; found = 1 } END { if (!found) exit 1 }' \
+    "$file" 2>/dev/null || echo 0
+}
+
+# router_healthy_workers FILE prints the number of workers the Router names whose circuit
+# breaker is closed. A worker is named by the per-worker request counter, and its health is
+# stated by the per-worker circuit-breaker series: the state is 0 for a closed breaker and
+# non-zero for an open one. A worker that has never served a request is not named, so it is
+# not counted as healthy either.
+router_healthy_workers() {
+  local file="$1"
+  awk '
+    /^vllm_router_processed_requests_total\{/ {
+      match($0, /worker="[^"]*"/)
+      if (RSTART > 0) { w = substr($0, RSTART + 8, RLENGTH - 9); seen[w] = 1 }
+    }
+    /^vllm_router_cb_state\{/ {
+      match($0, /worker="[^"]*"/)
+      if (RSTART > 0) { w = substr($0, RSTART + 8, RLENGTH - 9); state[w] = $NF + 0 }
+    }
+    END { n = 0; for (w in seen) if (state[w] == 0) n++; print n + 0 }' "$file" 2>/dev/null || echo 0
+}
+
+# router_workers_that_grew BEFORE AFTER prints the workers whose request count grew between two
+# scrapes, and by how much.
+#
+# THE GROWTH IS THE PROOF THAT A WORKER SERVED. The per-worker request counters are cumulative
+# and the Router keeps the series of a worker it withdrew, so the number of workers NAMED says
+# nothing about who is serving now. A worker whose count grew inside the window is a worker
+# that served inside the window, and that is what the scaling leg has to show.
+router_workers_that_grew() {
+  local before="$1" after="$2"
+  awk '
+    FNR == NR {
+      if ($0 ~ /^vllm_router_processed_requests_total\{/) {
+        match($0, /worker="[^"]*"/)
+        if (RSTART > 0) { w = substr($0, RSTART + 8, RLENGTH - 9); before[w] = $NF + 0 }
+      }
+      next
+    }
+    /^vllm_router_processed_requests_total\{/ {
+      match($0, /worker="[^"]*"/)
+      if (RSTART > 0) {
+        w = substr($0, RSTART + 8, RLENGTH - 9)
+        now = $NF + 0
+        was = (w in before) ? before[w] : 0
+        if (now > was) grew[w] = now - was
+      }
+    }
+    END { for (w in grew) print w, grew[w] }' "$before" "$after" 2>/dev/null | sort
+}
+
+# wait_active_workers DIRECTION COUNT waits for the Router's worker set to reach COUNT.
+#
+# DIRECTION is "atleast" or "atmost". The set is read from the Router's own gauge, because the
+# per-worker request counters are cumulative and keep naming a worker the Router has withdrawn.
+wait_active_workers() {
+  local direction="$1" want="$2" tag="$3" deadline=$((SECONDS + SCALE_TIMEOUT)) got=0
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    scrape_router_metrics "router-workers-${tag}" >/dev/null 2>&1 || true
+    got="$(router_active_workers "${OUT}/router-workers-${tag}.txt")"
+    if [ "$direction" = "atleast" ] && [ "${got:-0}" -ge "$want" ]; then
+      printf '%s' "$got"
+      return 0
+    fi
+    if [ "$direction" = "atmost" ] && [ "${got:-0}" -le "$want" ]; then
+      printf '%s' "$got"
+      return 0
+    fi
+    sleep 5
+  done
+  printf '%s' "${got:-0}"
+  return 1
+}
+
 # request_body PROMPT MAX_TOKENS [EXTRA_JSON] prints one chat request body.
 #
 # THE THINKING SWITCH IS PINNED HERE, and it is the operator's own recipe: the group-forward probe
@@ -241,28 +379,40 @@ chat_request() {
 }
 
 # sse_chunks FILE prints the data chunks of an SSE body, one per line, without the [DONE] marker.
+#
+# THE FRAMES ARE NOT WRAPPED IN AN ARRAY. The brackets collected the whole list into ONE value,
+# and every reader of that value then indexed an array with a field name, which jq refuses. Each
+# reader therefore answered empty while the stream itself was whole, and the case reported a
+# broken stream that the router had served correctly. One frame per line is what the readers
+# below slurp back, so each of them gets one frame per element.
+#
+# THE FRAME IS A CHAT COMPLETION CHUNK. The router answers a chat completion, so the answer
+# arrives as choices[0].delta.content, and the last frame of the stream carries no choice at
+# all, only the usage. The readers below therefore read every field as absent when it is
+# absent, instead of failing on the frame that has none.
 sse_chunks() {
-  jq -R -s '
-    [ split("\n")
+  jq -R -s -c '
+    split("\n")
       | map(select(startswith("data: ")))
       | map(sub("^data: "; ""))
       | map(select(. != "[DONE]"))
-      | map(fromjson? // empty) ] | .[]' "$1" 2>/dev/null
+      | map(fromjson? // empty)
+      | .[]' "$1" 2>/dev/null
 }
 
 # sse_content_chunks FILE counts the SSE chunks that carry a content delta.
 sse_content_chunks() {
-  sse_chunks "$1" | jq -s '[.[] | select((.choices[0].delta.content // "") != "")] | length' 2>/dev/null || echo 0
+  sse_chunks "$1" | jq -s '[.[] | select((.choices[0].delta.content? // "") != "")] | length' 2>/dev/null || echo 0
 }
 
 # sse_text FILE prints the content the SSE deltas carry, reassembled.
 sse_text() {
-  sse_chunks "$1" | jq -rs '[.[] | (.choices[0].delta.content // "")] | join("")' 2>/dev/null || true
+  sse_chunks "$1" | jq -rs '[.[] | (.choices[0].delta.content? // "")] | join("")' 2>/dev/null || true
 }
 
 # sse_finish_reason FILE prints the finish reason the stream ended with.
 sse_finish_reason() {
-  sse_chunks "$1" | jq -rs '[.[] | (.choices[0].finish_reason // empty)] | map(select(. != "")) | last // ""' 2>/dev/null || true
+  sse_chunks "$1" | jq -rs '[.[] | (.choices[0].finish_reason? // empty)] | map(select(. != "")) | last // ""' 2>/dev/null || true
 }
 
 # answer_of FILE prints the answer a chat response carries.
@@ -283,6 +433,13 @@ ARITHMETIC_EXPECT="391"
 CHINESE_PROMPT="请只输出下面这句话，不要添加任何其他内容：今天天气很好。"
 CHINESE_EXPECT="今天天气很好"
 JSON_PROMPT="Return a JSON object with the key name and the value gpu."
+
+# THE TOKEN BUDGET CARRIES HEADROOM, because the answer must arrive whatever the thinking switch
+# did. The switch is pinned on every request, but a model that reasons out loud puts that
+# reasoning in its own field and answers after it, so a budget that fits the answer alone cuts the
+# answer off before it is written. The switch is recorded as its own row below and must not fail
+# the case, so the budget cannot let it fail the case either.
+CONTENT_MAX_TOKENS=256
 
 log "The model is ${MODEL}, served as /models from the artifact ${ARTIFACT}"
 log "Writing the manifest into ${OUT}/vs-content.yaml"
@@ -326,7 +483,7 @@ ROUTER_BEFORE="$(serving_sum "$(cat "${OUT}/router-metrics-before.txt" 2>/dev/nu
 log "The router's own counter ${ROUTER_SERIES} before: ${ROUTER_BEFORE}"
 
 # --- the four content classes, through the router ------------------------------
-request_body "$ARITHMETIC_PROMPT" 32 > "${OUT}/body-arithmetic.json"
+request_body "$ARITHMETIC_PROMPT" "$CONTENT_MAX_TOKENS" > "${OUT}/body-arithmetic.json"
 chat_request "${LOCAL_PORT_BASE}" "${OUT}/body-arithmetic.json" "${OUT}/router-arithmetic.json"
 answer="$(answer_of "${OUT}/router-arithmetic.json")"
 case "$answer" in
@@ -338,7 +495,7 @@ case "$answer" in
     ;;
 esac
 
-request_body "$ARITHMETIC_PROMPT" 32 '{"stream":true,"stream_options":{"include_usage":true}}' > "${OUT}/body-sse.json"
+request_body "$ARITHMETIC_PROMPT" "$CONTENT_MAX_TOKENS" '{"stream":true,"stream_options":{"include_usage":true}}' > "${OUT}/body-sse.json"
 chat_request "${LOCAL_PORT_BASE}" "${OUT}/body-sse.json" "${OUT}/router-sse.txt"
 segments="$(sse_content_chunks "${OUT}/router-sse.txt")"
 stream_text="$(sse_text "${OUT}/router-sse.txt")"
@@ -367,7 +524,7 @@ else
   record FAIL "the stream is closed" "the stream carried no [DONE] marker"
 fi
 
-request_body "$CHINESE_PROMPT" 64 > "${OUT}/body-chinese.json"
+request_body "$CHINESE_PROMPT" "$CONTENT_MAX_TOKENS" > "${OUT}/body-chinese.json"
 chat_request "${LOCAL_PORT_BASE}" "${OUT}/body-chinese.json" "${OUT}/router-chinese.json"
 answer="$(answer_of "${OUT}/router-chinese.json")"
 case "$answer" in
@@ -379,10 +536,17 @@ case "$answer" in
     ;;
 esac
 
-request_body "$JSON_PROMPT" 64 '{"response_format":{"type":"json_object"}}' > "${OUT}/body-json.json"
+request_body "$JSON_PROMPT" "$CONTENT_MAX_TOKENS" '{"response_format":{"type":"json_object"}}' > "${OUT}/body-json.json"
 chat_request "${LOCAL_PORT_BASE}" "${OUT}/body-json.json" "${OUT}/router-json.json"
 answer="$(answer_of "${OUT}/router-json.json")"
-if printf '%s' "$answer" | jq -e 'fromjson? | select(type == "object") | (.name // "") | ascii_downcase == "gpu"' >/dev/null 2>&1; then
+# THE ANSWER TEXT IS READ OUT OF THE ENVELOPE AND PARSED AFTERWARDS. The router answers a chat
+# completion, so the JSON the model produced is a document inside choices[0].message.content and
+# not the response itself. Handing that text to jq as its input makes jq read the text as the
+# document, and fromjson then refuses to parse a document that is already an object. So the
+# field goes through jq's filter first and the answer is parsed second, the way case-6 reads
+# the field of a completion.
+if jq -e '.choices[0].message.content | fromjson | type == "object" and ((.name // "") | ascii_downcase) == "gpu"' \
+  "${OUT}/router-json.json" >/dev/null 2>&1; then
   record PASS "the router answers the structured JSON class" "the answer is a JSON object whose name is gpu: ${answer}"
 else
   record FAIL "the router answers the structured JSON class" "the answer is not a JSON object with name=gpu: ${answer}"
@@ -425,7 +589,7 @@ if [ "${ROUTER_AFTER:-0}" -eq "${ROUTER_BEFORE:-0}" ] && [ "${SENT}" -gt 0 ]; th
     "the counter ${ROUTER_SERIES} stayed at ${ROUTER_AFTER} over ${SENT} requests, so the answers did not come through this router"
 else
   record PASS "the router counted every request of this case" \
-    "the counter ${ROUTER_SERIES} moved from ${ROUTER_BEFORE} to ${ROUTER_AFTER} over ${SENT} requests"
+    "the counter ${ROUTER_SERIES} moved from $(counter_before_display "$ROUTER_SERIES" "$ROUTER_BEFORE" "${OUT}/router-metrics-before.txt") to ${ROUTER_AFTER} over ${SENT} requests"
 fi
 
 # The per-worker counter names each worker the router sent a request to. The selection series do
@@ -440,6 +604,124 @@ else
     "the per-worker counter named ${WORKER_COUNT:-0} worker(s): ${WORKERS:-none}"
 fi
 grep '^vllm_router_policy_decisions_total' "${OUT}/router-metrics-after.txt" > "${OUT}/router-policy-decisions.txt" 2>/dev/null || true
+
+# --- the manual scaling leg --------------------------------------------------------------
+#
+# THE LEG IS OPTIONAL, and the gate is off by default. The content classes above are this
+# case's standing contract; the manual 1 -> 2 -> 1 cycle is a cell of its own, and it runs the
+# same case with VS_MANUAL_SCALE=1.
+#
+# THE CYCLE STARTS BY GOING DOWN TO ONE. The deployment is rendered with two replicas, so the
+# cycle's first move is the scale back to one, and the two moves after it are the scale up to
+# two and the scale back to one again.
+if [ "${VS_MANUAL_SCALE:-0}" = "1" ]; then
+  log "The manual scaling leg: one -> two -> one"
+
+  if ! scale_replicas 1 "scale-down-to-one-patch"; then
+    stop_forwards
+    cat "${OUT}/content-verdicts.txt" 2>/dev/null
+    exit 1
+  fi
+  ACTIVE_ONE="$(wait_active_workers atmost 1 "down-one" || true)"
+  log "The Router's worker set after the scale down to one: ${ACTIVE_ONE}"
+  if [ "${ACTIVE_ONE:-0}" -le 1 ]; then
+    record PASS "the Router's worker set came down to one" \
+      "the Router's gauge holds ${ACTIVE_ONE} worker(s)"
+  else
+    record FAIL "the Router's worker set came down to one" \
+      "the Router's gauge still holds ${ACTIVE_ONE:-0} worker(s)"
+  fi
+
+  if ! scale_replicas 2 "scale-up-to-two-patch"; then
+    stop_forwards
+    cat "${OUT}/content-verdicts.txt" 2>/dev/null
+    exit 1
+  fi
+  ACTIVE_TWO="$(wait_active_workers atleast 2 "up-two" || true)"
+  log "The Router's worker set after the scale up to two: ${ACTIVE_TWO}"
+  if [ "${ACTIVE_TWO:-0}" -ge 2 ]; then
+    record PASS "the Router's worker set grew to two" \
+      "the Router's gauge holds ${ACTIVE_TWO} worker(s)"
+  else
+    record FAIL "the Router's worker set grew to two" \
+      "the Router's gauge holds ${ACTIVE_TWO:-0} worker(s)"
+  fi
+
+  # THE REQUEST IS SERVED ACROSS BOTH WORKERS. The counters are read before the traffic and
+  # again after it, and the workers whose count GREW inside that window are the workers that
+  # served inside it. The Router keeps the series of a worker it withdrew, so the number of
+  # workers named says nothing about who served.
+  scrape_router_metrics "router-metrics-before-scale-traffic" || true
+  SCALE_REQUESTS="${VS_SCALE_REQUESTS:-16}"
+  log "Sending ${SCALE_REQUESTS} requests through the Router at two replicas"
+  index=1
+  while [ "$index" -le "$SCALE_REQUESTS" ]; do
+    body="$(jq -nc --arg model "/models" --arg i "$index" \
+      '{model: $model, messages: [{role: "user", content: ("Reply with the word blue only. Scale check " + $i + ".")}], max_tokens: 8, temperature: 0}')"
+    curl -sf --max-time 120 "http://127.0.0.1:${LOCAL_PORT_BASE}/v1/chat/completions" \
+      -H 'Content-Type: application/json' --data-binary "$body" \
+      -o "${OUT}/scale-spread-${index}.json" 2>"${OUT}/scale-spread-${index}.err" || true
+    index=$((index + 1))
+  done
+  scrape_router_metrics "router-metrics-after-scale-traffic" || true
+  GREW="$(router_workers_that_grew "${OUT}/router-metrics-before-scale-traffic.txt" \
+    "${OUT}/router-metrics-after-scale-traffic.txt")"
+  GREW_COUNT="$(printf '%s' "$GREW" | grep -c . || true)"
+  log "The workers that served inside the window: $(printf '%s' "$GREW" | tr '\n' ' ')"
+  if [ "${GREW_COUNT:-0}" -ge 2 ]; then
+    record PASS "a request was served across both workers" \
+      "the workers whose request count grew are: $(printf '%s' "$GREW" | tr '\n' ' ')"
+  else
+    record FAIL "a request was served across both workers" \
+      "the workers whose request count grew are: $(printf '%s' "$GREW" | tr '\n' ' ')"
+  fi
+
+  HEALTHY_TWO="$(router_healthy_workers "${OUT}/router-metrics-after-scale-traffic.txt")"
+  if [ "${HEALTHY_TWO:-0}" -ge 2 ]; then
+    record PASS "both workers were healthy at two replicas" \
+      "${HEALTHY_TWO} worker(s) are named with a closed circuit breaker"
+  else
+    record FAIL "both workers were healthy at two replicas" \
+      "${HEALTHY_TWO:-0} worker(s) are named with a closed circuit breaker"
+  fi
+
+  if ! scale_replicas 1 "scale-down-to-one-patch"; then
+    stop_forwards
+    cat "${OUT}/content-verdicts.txt" 2>/dev/null
+    exit 1
+  fi
+  ACTIVE_ONE_AGAIN="$(wait_active_workers atmost 1 "down-one-again" || true)"
+  log "The Router's worker set after the scale back to one: ${ACTIVE_ONE_AGAIN}"
+  if [ "${ACTIVE_ONE_AGAIN:-0}" -le 1 ]; then
+    record PASS "the Router's worker set came back to one" \
+      "the Router's gauge holds ${ACTIVE_ONE_AGAIN} worker(s)"
+  else
+    record FAIL "the Router's worker set came back to one" \
+      "the Router's gauge still holds ${ACTIVE_ONE_AGAIN:-0} worker(s)"
+  fi
+
+  # THE ROUTER STILL SERVES AFTER THE SCALE DOWN. The answer has to come back, and the counter
+  # the Router keeps for its own requests has to move.
+  ROUTER_BEFORE_LAST="$(serving_sum "$(cat "${OUT}/router-metrics-after-scale-traffic.txt" 2>/dev/null || true)" "$ROUTER_SERIES" || echo 0)"
+  body="$(jq -nc --arg model "/models" \
+    '{model: $model, messages: [{role: "user", content: "Reply with the word blue only. After the scale."}], max_tokens: 8, temperature: 0}')"
+  curl -sf --max-time 120 "http://127.0.0.1:${LOCAL_PORT_BASE}/v1/chat/completions" \
+    -H 'Content-Type: application/json' --data-binary "$body" \
+    -o "${OUT}/after-scale-request.json" 2>"${OUT}/after-scale-request.err" || true
+  scrape_router_metrics "router-metrics-after-final-request" || true
+  ROUTER_AFTER_LAST="$(serving_sum "$(cat "${OUT}/router-metrics-after-final-request.txt" 2>/dev/null || true)" "$ROUTER_SERIES" || echo 0)"
+  FINAL_ANSWER="$(answer_of "${OUT}/after-scale-request.json" 2>/dev/null || true)"
+  if [ -n "${FINAL_ANSWER}" ] && [ "${ROUTER_AFTER_LAST:-0}" -gt "${ROUTER_BEFORE_LAST:-0}" ]; then
+    record PASS "the Router still served after the scale back to one" \
+      "the counter ${ROUTER_SERIES} moved from $(counter_before_display "$ROUTER_SERIES" "$ROUTER_BEFORE_LAST" "${OUT}/router-metrics-after-scale-traffic.txt") to ${ROUTER_AFTER_LAST} and the answer was: ${FINAL_ANSWER}"
+  else
+    record FAIL "the Router still served after the scale back to one" \
+      "the counter ${ROUTER_SERIES} moved from ${ROUTER_BEFORE_LAST} to ${ROUTER_AFTER_LAST} and the answer was: ${FINAL_ANSWER:-none}"
+  fi
+
+  kubectl -n "$NS" get modeldeployment "$DEPLOY" -o json \
+    | jq '.status.roles[] | {name, ready, parallelism, endpoints}' > "${OUT}/roles-after-scaling.json" 2>/dev/null || true
+fi
 
 stop_forwards
 cat "${OUT}/content-verdicts.txt" 2>/dev/null

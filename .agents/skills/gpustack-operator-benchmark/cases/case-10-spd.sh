@@ -32,6 +32,15 @@
 #              Qwen/Qwen3-8B), and an in-cluster default/bench-driver Pod carrying python3 and
 #              aiohttp. The pair starts at one replica per role and the Scaler phase may take
 #              each role to two, so the peak is four GPUs.
+#              The shape this run was on is written to OUT_DIR/cluster-shape.txt: the context and
+#              the cluster, the namespace, the nodes, the InstanceType the case asked for, the
+#              accelerators on each node, the InstanceTypes the cluster carries, and the operator
+#              image with its digest.
+#              The cluster of record for this run: gpustack-sedp-0l578ap2 (ns gpustack-bench),
+#              platform gpu-h100-sxm 8xH100 non-preemptible with a cpu-e2 system node, 8
+#              accelerators on the one GPU node, InstanceType
+#              gpustack--nvidia-h100-80gb-hbm3-linux-amd64, operator
+#              thxcode/gpustack-operator:dev-6ddcf389.
 # Inputs:      The manifest is written by this script into OUT_DIR/spd.yaml and the scaler into
 #              OUT_DIR/spd-scaler.yaml. The operator stamps each replica's own address, so the
 #              manifest is identical for every replica.
@@ -73,6 +82,7 @@ MODEL="${SPD_MODEL:-Qwen/Qwen3-8B}"
 ARTIFACT="${SPD_ARTIFACT:-qwen3-8b}"
 IMAGE="${SPD_IMAGE:-gpustack/runner:cuda13.0-sglang0.5.22}"
 ROUTER_IMAGE="${SPD_ROUTER_IMAGE:-gpustack/llm-router:v0.3.1}"
+ROUTER_NAME="${SPD_ROUTER_NAME:-sglang-gateway}"
 INSTANCE_TYPE="${SPD_INSTANCE_TYPE:-bench-gpu}"
 LOCAL_PORT_BASE="${LOCAL_PORT_BASE:-18500}"
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
@@ -86,12 +96,24 @@ COOLDOWN_SECONDS="${SPD_COOLDOWN_SECONDS:-240}"
 SCALER_RESOURCE=modeldeploymentscalers.v1alpha1.worker.gpustack.ai
 MD_RESOURCE=modeldeployments.v1alpha1.worker.gpustack.ai
 PF_PIDS=""
+LOAD_PID=""
 
 mkdir -p "$OUT"
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 
+# THE SHAPE OF THE CLUSTER BELONGS IN THE EVIDENCE, so the numbers this run produced can be
+# read against the machine that produced them.
+capture_cluster_shape "${OUT}/cluster-shape.txt"
+
 cleanup() {
   local pid
+  # THE BACKGROUND LOAD IS STOPPED FIRST. It is a child of this shell, and it drives traffic
+  # into the deployment that is about to be deleted, so it is ended before the teardown starts.
+  if [ -n "${LOAD_PID:-}" ]; then
+    kill "$LOAD_PID" 2>/dev/null || true
+    wait "$LOAD_PID" 2>/dev/null || true
+    LOAD_PID=""
+  fi
   for pid in $PF_PIDS; do
     kill "$pid" 2>/dev/null || true
   done
@@ -182,6 +204,20 @@ YAML
 # The scaler of the second phase. Every role of the target has a bound and a target, and the
 # algorithm and the windows are the ones case 9 uses, tuned the same way: a short test cannot
 # wait out a five-minute scale-down window.
+#
+# THE METRIC IS THE QUEUE DEPTH, NOT THE RUNNING COUNT. The SGLang engine reports the requests
+# it is running in sglang:num_running_reqs, and under this load that counter reads 1 while the
+# requests it is NOT running wait in sglang:num_queue_reqs and in the decode half's
+# sglang:num_decode_transfer_queue_reqs. A scaler that reads only the running count therefore
+# sees one request against a target of four, sits inside the tolerance band, and never asks for
+# a second replica: the role cannot grow, and the case cannot observe a rise it is waiting for.
+# QueueDepth is the running count plus the waiting count, both read from the engine's own
+# counters (pkg/worker/scaling/algorithm/proportional.go, the QueueDepth metric), so the
+# scaler sees the load the engine is actually carrying.
+#
+# The reading of that load is taken WHILE THE LOAD IS ON. The scaler drops its request counts
+# from its status when they fall back to zero, so a reading taken after the load has ended
+# finds no count at all and has nothing to compare the engine against.
 write_scaler_manifest() {
   cat > "${OUT}/spd-scaler.yaml" <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -205,7 +241,7 @@ spec:
   algorithm:
     type: Proportional
     proportional:
-      metric: RunningRequests
+      metric: QueueDepth
       tolerance: "0.1"
       roleTargets:
         - name: prefill
@@ -249,11 +285,21 @@ rendered_arg() { # <role> <flag>
     END { if (!found) exit 1 }'
 }
 
+# THE ROUTER POD IS FOUND BY THE LABELS THE OPERATOR RENDERS ON IT. The router is its own
+# Deployment, and its Pod template carries the deployment's instance label and the router's own
+# name label (pkg/worker/controllers/worker/model_deployment_router.go, the labels the router
+# objects are rendered with). It carries no component label, so a selector that asks for one
+# matches nothing, and the gateway's worker pool then reads as empty however many workers the
+# gateway holds.
+router_pod() {
+  kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${DEPLOY},modeldeployment.gpustack.ai/router=${ROUTER_NAME}" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
+}
+
 # router_metrics_port reads the port the gateway serves its metrics on.
 router_metrics_port() {
   local pod args
-  pod="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${DEPLOY},app.kubernetes.io/component=router" \
-    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  pod="$(router_pod)"
   [ -n "$pod" ] || return 1
   args="$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].args}' 2>/dev/null)"
   printf '%s' "$args" | sed -n 's/.*--prometheus-port=\([0-9][0-9]*\).*/\1/p' | head -1
@@ -262,8 +308,7 @@ router_metrics_port() {
 # scrape_router_metrics writes the gateway's own metric page.
 scrape_router_metrics() { # <tag>
   local tag="$1" pod port
-  pod="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${DEPLOY},app.kubernetes.io/component=router" \
-    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  pod="$(router_pod)"
   port="$(router_metrics_port || true)"
   [ -n "$port" ] || port=9090
   if [ -z "$pod" ]; then
@@ -466,28 +511,41 @@ chat_request() {
 }
 
 # sse_chunks FILE prints the data chunks of an SSE body, one per line, without the [DONE] marker.
+#
+# THE FRAMES COME OUT ONE PER LINE. The brackets used to close after the last map, so the
+# pipeline built an array of frames, the brackets wrapped that array into an array of one, and
+# ".[]" yielded the inner array as a single value. Every reader below then received one JSON
+# array where it expected a list of frames, indexed it with the field name "choices", and jq
+# refused. The stream was whole and the parser was blind to it, so the case reported a broken
+# stream that the gateway had served correctly.
+#
+# THE FRAME IS A CHAT COMPLETION CHUNK. The gateway answers a chat completion, so the answer
+# arrives as choices[0].delta.content, and the last frame of the stream carries no choice at
+# all, only the usage. The readers below therefore read every field as absent when it is
+# absent, instead of failing on the frame that has none.
 sse_chunks() {
-  jq -R -s '
-    [ split("\n")
+  jq -R -s -c '
+    split("\n")
       | map(select(startswith("data: ")))
       | map(sub("^data: "; ""))
       | map(select(. != "[DONE]"))
-      | map(fromjson? // empty) ] | .[]' "$1" 2>/dev/null
+      | map(fromjson? // empty)
+      | .[]' "$1" 2>/dev/null
 }
 
 # sse_content_chunks FILE counts the SSE chunks that carry a content delta.
 sse_content_chunks() {
-  sse_chunks "$1" | jq -s '[.[] | select((.choices[0].delta.content // "") != "")] | length' 2>/dev/null || echo 0
+  sse_chunks "$1" | jq -s '[.[] | select((.choices[0].delta.content? // "") != "")] | length' 2>/dev/null || echo 0
 }
 
 # sse_text FILE prints the content the SSE deltas carry, reassembled.
 sse_text() {
-  sse_chunks "$1" | jq -rs '[.[] | (.choices[0].delta.content // "")] | join("")' 2>/dev/null || true
+  sse_chunks "$1" | jq -rs '[.[] | (.choices[0].delta.content? // "")] | join("")' 2>/dev/null || true
 }
 
 # sse_finish_reason FILE prints the finish reason the stream ended with.
 sse_finish_reason() {
-  sse_chunks "$1" | jq -rs '[.[] | (.choices[0].finish_reason // empty)] | map(select(. != "")) | last // ""' 2>/dev/null || true
+  sse_chunks "$1" | jq -rs '[.[] | (.choices[0].finish_reason? // empty)] | map(select(. != "")) | last // ""' 2>/dev/null || true
 }
 
 # answer_of FILE prints the answer a chat response carries.
@@ -568,7 +626,14 @@ check_content_classes() { # <tag>
   request_body "$JSON_PROMPT" 64 '{"response_format":{"type":"json_object"}}' > "${OUT}/body-${tag}-json.json"
   chat_request "${LOCAL_PORT_BASE}" "${OUT}/body-${tag}-json.json" "${OUT}/${tag}-json.json"
   answer="$(answer_of "${OUT}/${tag}-json.json")"
-  if printf '%s' "$answer" | jq -e 'fromjson? | select(type == "object") | (.name // "") | ascii_downcase == "gpu"' >/dev/null 2>&1; then
+  # THE ANSWER TEXT IS READ OUT OF THE ENVELOPE AND PARSED AFTERWARDS. The gateway answers a
+  # chat completion, so the JSON the model produced is a document inside
+  # choices[0].message.content and not the response itself. Handing that text to jq as its
+  # input makes jq read the text as the document, and fromjson then refuses to parse a
+  # document that is already an object. So the field goes through jq's filter first and the
+  # answer is parsed second, the way case-6 reads the field of a completion.
+  if jq -e '.choices[0].message.content | fromjson | type == "object" and ((.name // "") | ascii_downcase) == "gpu"' \
+    "${OUT}/${tag}-json.json" >/dev/null 2>&1; then
     record PASS "the gateway answers the structured JSON class" "the answer is a JSON object whose name is gpu: ${answer}"
   else
     record FAIL "the gateway answers the structured JSON class" "the answer is not a JSON object with name=gpu: ${answer}"
@@ -684,8 +749,7 @@ fi
 
 # --- the content classes through the gateway ----------------------------------------------
 log "Opening the gateway's door"
-kubectl -n "$NS" port-forward "pod/$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${DEPLOY},app.kubernetes.io/component=router" \
-  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)" "${LOCAL_PORT_BASE}:8000" \
+kubectl -n "$NS" port-forward "pod/$(router_pod)" "${LOCAL_PORT_BASE}:8000" \
   > "${OUT}/pf-gateway.log" 2>&1 &
 PF_PIDS="$PF_PIDS $!"
 GATEWAY_UP=0
@@ -772,18 +836,65 @@ fi
 record PASS "the scaler bound to the target and acts" "the scaler reports Bound=True and Active=True"
 
 log "Running the load for ${LOAD_SECONDS}s at concurrency ${LOAD_CONCURRENCY}"
-run_load "load" "$LOAD_SECONDS" "$LOAD_CONCURRENCY" || true
+#
+# THE LOAD RUNS IN THE BACKGROUND, and everything the phase observes is observed WHILE IT IS ON.
+# A load that ran to completion before the case looked would let the role grow and fall back
+# again while nobody was watching, and the scaler's own request counts would be gone from its
+# status by the time they were read. The scaler samples every 10s and the engine's counters move
+# under the load, so the readings that count are the largest ones the case saw.
+run_load "load" "$LOAD_SECONDS" "$LOAD_CONCURRENCY" &
+LOAD_PID=$!
 
+sleep 20
 engine_metrics decode "under-load" || true
 engine_metrics prefill "under-load" || true
+
+SCALER_DECODE_RUNNING=0
+SCALER_DECODE_WAITING=0
+SCALER_PREFILL_RUNNING=0
+SCALER_PREFILL_WAITING=0
+DECODE_REPLICAS="$(role_replicas decode)"
+PREFILL_REPLICAS="$(role_replicas prefill)"
+: > "${OUT}/scaler-samples.jsonl"
+while kill -0 "$LOAD_PID" 2>/dev/null; do
+  sc="$(scaler_json 2>/dev/null || true)"
+  [ -n "$sc" ] || sc='{}'
+  d_run="$(jq -r '[(.status.roles // [])[] | select(.name == "decode") | .runningRequests] | .[0] // 0' <<<"${sc}" 2>/dev/null || echo 0)"
+  d_wait="$(jq -r '[(.status.roles // [])[] | select(.name == "decode") | .waitingRequests] | .[0] // 0' <<<"${sc}" 2>/dev/null || echo 0)"
+  p_run="$(jq -r '[(.status.roles // [])[] | select(.name == "prefill") | .runningRequests] | .[0] // 0' <<<"${sc}" 2>/dev/null || echo 0)"
+  p_wait="$(jq -r '[(.status.roles // [])[] | select(.name == "prefill") | .waitingRequests] | .[0] // 0' <<<"${sc}" 2>/dev/null || echo 0)"
+  case "$d_run" in ''|*[!0-9]*) d_run=0 ;; esac
+  case "$d_wait" in ''|*[!0-9]*) d_wait=0 ;; esac
+  case "$p_run" in ''|*[!0-9]*) p_run=0 ;; esac
+  case "$p_wait" in ''|*[!0-9]*) p_wait=0 ;; esac
+  [ "$d_run" -gt "$SCALER_DECODE_RUNNING" ] && SCALER_DECODE_RUNNING="$d_run"
+  [ "$d_wait" -gt "$SCALER_DECODE_WAITING" ] && SCALER_DECODE_WAITING="$d_wait"
+  [ "$p_run" -gt "$SCALER_PREFILL_RUNNING" ] && SCALER_PREFILL_RUNNING="$p_run"
+  [ "$p_wait" -gt "$SCALER_PREFILL_WAITING" ] && SCALER_PREFILL_WAITING="$p_wait"
+  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson decode_run "$d_run" --argjson decode_wait "$d_wait" \
+    --argjson prefill_run "$p_run" --argjson prefill_wait "$p_wait" \
+    '{ts: $ts, decode: {running: $decode_run, waiting: $decode_wait},
+      prefill: {running: $prefill_run, waiting: $prefill_wait}}' \
+    >> "${OUT}/scaler-samples.jsonl" 2>/dev/null || true
+  decode_now="$(role_replicas decode)"
+  prefill_now="$(role_replicas prefill)"
+  [ "${decode_now:-0}" -ge 2 ] && DECODE_REPLICAS="$decode_now"
+  [ "${prefill_now:-0}" -ge 2 ] && PREFILL_REPLICAS="$prefill_now"
+  sleep 5
+done
+wait "$LOAD_PID" 2>/dev/null || true
+LOAD_PID=""
+
 scaler_json > "${OUT}/scaler-under-load.json" 2>/dev/null || true
 
 RAW_DECODE_RUNNING="$(metric_sum "${OUT}/engine-decode-under-load.txt" "sglang:num_running_reqs")"
 RAW_PREFILL_RUNNING="$(metric_sum "${OUT}/engine-prefill-under-load.txt" "sglang:num_running_reqs")"
-SCALER_DECODE_RUNNING="$(scaler_role_field decode runningRequests)"
-SCALER_PREFILL_RUNNING="$(scaler_role_field prefill runningRequests)"
+RAW_DECODE_QUEUE="$(metric_sum "${OUT}/engine-decode-under-load.txt" "sglang:num_queue_reqs")"
+RAW_DECODE_TRANSFER_QUEUE="$(metric_sum "${OUT}/engine-decode-under-load.txt" "sglang:num_decode_transfer_queue_reqs")"
 log "the engine's own running counter: decode=${RAW_DECODE_RUNNING} prefill=${RAW_PREFILL_RUNNING}"
-log "the scaler's recorded running count: decode=${SCALER_DECODE_RUNNING} prefill=${SCALER_PREFILL_RUNNING}"
+log "the engine's own queue: decode=${RAW_DECODE_QUEUE} decode_transfer_waiting=${RAW_DECODE_TRANSFER_QUEUE}"
+log "the scaler's recorded counts: decode running=${SCALER_DECODE_RUNNING} waiting=${SCALER_DECODE_WAITING}; prefill running=${SCALER_PREFILL_RUNNING} waiting=${SCALER_PREFILL_WAITING}"
 
 if [ "${SCALER_DECODE_RUNNING:-0}" -gt 0 ]; then
   record PASS "the scaler read the SGLang engine's running-request counter" \
@@ -793,8 +904,17 @@ else
     "the scaler recorded ${SCALER_DECODE_RUNNING} running requests on the decode role against the engine's ${RAW_DECODE_RUNNING}"
 fi
 
-DECODE_REPLICAS="$(wait_replicas decode 2 || true)"
-PREFILL_REPLICAS="$(wait_replicas prefill 2 || true)"
+# The running counter alone does not describe the load the SGLang decode half is carrying: the
+# engine runs one request at a time and the rest wait. The queue is the load, so the scaler's
+# queue-depth reading is compared against the engine's own queue counters.
+if [ "${SCALER_DECODE_WAITING:-0}" -gt 0 ]; then
+  record PASS "the scaler read the SGLang engine's waiting-request counter" \
+    "the engine reported ${RAW_DECODE_QUEUE} queued and ${RAW_DECODE_TRANSFER_QUEUE} waiting on a transfer; the scaler recorded ${SCALER_DECODE_WAITING} waiting requests on the decode role"
+else
+  record WARN "the scaler read the SGLang engine's waiting-request counter" \
+    "the scaler recorded ${SCALER_DECODE_WAITING} waiting requests on the decode role against the engine's ${RAW_DECODE_QUEUE} queued and ${RAW_DECODE_TRANSFER_QUEUE} waiting on a transfer"
+fi
+
 log "after the load: decode=${DECODE_REPLICAS} prefill=${PREFILL_REPLICAS}"
 
 if [ "${DECODE_REPLICAS:-0}" -ge 2 ]; then
@@ -806,7 +926,7 @@ if [ "${PREFILL_REPLICAS:-0}" -ge 2 ]; then
   record PASS "the prefill role grew under the scaler" "the prefill role holds ${PREFILL_REPLICAS} replicas"
 else
   record WARN "the prefill role grew under the scaler" \
-    "the prefill role holds ${PREFILL_REPLICAS} replicas; its own running-request signal was ${SCALER_PREFILL_RUNNING} against a target of 4"
+    "the prefill role holds ${PREFILL_REPLICAS} replicas; its own queue-depth signal was $((SCALER_PREFILL_RUNNING + SCALER_PREFILL_WAITING)) against a target of 4"
 fi
 
 log "Stopping the load and waiting for the fall-back"
@@ -833,8 +953,22 @@ fi
 
 kubectl -n "$NS" get events --field-selector "involvedObject.name=${SCALER}" \
   -o json > "${OUT}/scaler-events.json" 2>/dev/null || true
-COMMIT_EVENTS="$(jq -r '[.items // [] | select(.reason == "ReplicaVectorCommitted")] | length' "${OUT}/scaler-events.json" 2>/dev/null || echo 0)"
-if [ "${COMMIT_EVENTS:-0}" -gt 0 ]; then
+# THE COUNT IS READ WITH THE ELEMENTS SPREAD OUT. In jq, select tests its input, it does not
+# walk it, so "select(.reason == ...)" applied to the array of events asks the array for a
+# field named reason and jq fails. The expression that was here read the array, applied select
+# to the array itself, and the error was swallowed into a count of zero, so the cell reported
+# that the scaler had published no decision however many it had published. map walks the
+# array and select tests each element.
+COMMIT_EVENTS="$(jq -r '(.items // []) | map(select(.reason == "ReplicaVectorCommitted")) | length' "${OUT}/scaler-events.json" 2>/dev/null || echo 0)"
+
+# THE COUNT IS NOT ALLOWED TO BE A JQ FAILURE DISGUISED AS A ZERO. A jq that cannot read the
+# file says nothing about the scaler, so the file is read once more without the error hidden,
+# and a read that still fails ends the case instead of reporting an absence.
+if [ ! -s "${OUT}/scaler-events.json" ]; then
+  record FAIL "the scaler published its decisions" "the scaler's events could not be read at all"
+elif ! jq -e 'type == "object" and (.items | type == "array")' "${OUT}/scaler-events.json" >/dev/null 2>&1; then
+  record FAIL "the scaler published its decisions" "the scaler's events did not read as an event list, so the count of its decisions cannot be trusted"
+elif [ "${COMMIT_EVENTS:-0}" -gt 0 ]; then
   record PASS "the scaler published its decisions" "the scaler recorded ${COMMIT_EVENTS} ReplicaVectorCommitted event(s)"
 else
   record FAIL "the scaler published its decisions" "the scaler recorded no ReplicaVectorCommitted event"
