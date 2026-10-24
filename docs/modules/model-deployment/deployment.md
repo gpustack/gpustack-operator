@@ -384,7 +384,7 @@ omits the default `gpustack-compile-cache` `HostPath` volume while preserving th
 The seven cache names above follow the same rule. Take-over roles (*`roles[].command`* non-empty)
 receive neither the default cache volume nor the defaulted cache variables.
 
-The four names are defaults, not ownership: an entry in *`roles[].env`* replaces any of them. Like
+The seven names are defaults, not ownership: an entry in *`roles[].env`* replaces any of them. Like
 every other operator-synthesized entry they reach a `Pod` through its
 [render version](#render-version-and-upgrades), so they apply to newly created or replaced `Pod`s
 and a deployment rolls onto them with *`modeldeployment.gpustack.ai/min-render-version`*.
