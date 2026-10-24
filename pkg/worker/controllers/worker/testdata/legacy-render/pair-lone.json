@@ -20,7 +20,7 @@
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "prefill",
         "modeldeployment.gpustack.ai/pod-spec-hash": "90e7371e146f2cde16f638876d6285b6a53d61b5dafa44b10948f16650bfa3a8",
-        "modeldeployment.gpustack.ai/render-version": "2",
+        "modeldeployment.gpustack.ai/render-version": "3",
         "note.gpustack.ai/role": "prefill",
         "prometheus.io/path": "/metrics",
         "prometheus.io/port": "8000",
@@ -81,8 +81,16 @@
               "value": "/var/lib/gpustack/cache"
             },
             {
-              "name": "XDG_CACHE_HOME",
-              "value": "/var/lib/gpustack/cache/xdg"
+              "name": "HF_HUB_CACHE",
+              "value": "/var/lib/gpustack/cache/hf-hub"
+            },
+            {
+              "name": "PIP_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/pip"
+            },
+            {
+              "name": "TORCH_HOME",
+              "value": "/var/lib/gpustack/cache/torch"
             },
             {
               "name": "FLASHINFER_WORKSPACE_BASE",
@@ -193,7 +201,7 @@
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "decode",
         "modeldeployment.gpustack.ai/pod-spec-hash": "aa0d008ae187a42bf0830c587b495c0011936b58393b142763744a6436bc16e4",
-        "modeldeployment.gpustack.ai/render-version": "2",
+        "modeldeployment.gpustack.ai/render-version": "3",
         "note.gpustack.ai/role": "decode",
         "prometheus.io/path": "/metrics",
         "prometheus.io/port": "8000",
@@ -254,8 +262,16 @@
               "value": "/var/lib/gpustack/cache"
             },
             {
-              "name": "XDG_CACHE_HOME",
-              "value": "/var/lib/gpustack/cache/xdg"
+              "name": "HF_HUB_CACHE",
+              "value": "/var/lib/gpustack/cache/hf-hub"
+            },
+            {
+              "name": "PIP_CACHE_DIR",
+              "value": "/var/lib/gpustack/cache/pip"
+            },
+            {
+              "name": "TORCH_HOME",
+              "value": "/var/lib/gpustack/cache/torch"
             },
             {
               "name": "FLASHINFER_WORKSPACE_BASE",

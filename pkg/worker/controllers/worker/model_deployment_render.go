@@ -105,7 +105,7 @@ const (
 
 	// modelDeploymentRenderVersion is the current operator Pod rendering baseline. Bump this
 	// constant whenever a change modifies the rendered Pod output of any ModelDeployment shape.
-	modelDeploymentRenderVersion = 2
+	modelDeploymentRenderVersion = 3
 	// modelDeploymentMinSupportedRenderVersion is the lowest render version that remains compatible
 	// with the current controller without replacing running Pods.
 	modelDeploymentMinSupportedRenderVersion = 1

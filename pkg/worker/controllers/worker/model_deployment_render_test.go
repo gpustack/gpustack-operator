@@ -2752,22 +2752,26 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // cache-root entries that keep an engine's startup caches on the mounted cache instead of on the
 // container's writable layer, and the take-over case's digest stayed where it was for the same
 // reason the sixth left it: a role that brings its own command line is told nothing about a cache
-// it does not have. Each case renders ORDINAL ZERO -- the
+// it does not have. The eighth re-baselining moves every digest, the take-over case's included: the
+// runtime-cache update was narrowed from one XDG root to the scoped cache names huggingface_hub,
+// pip and torch read, so the Hub token and the datasets and Xet caches stay on the container's own
+// filesystem instead of a host-backed mount, and the render-version annotation every Pod carries
+// advanced to 3 with that change. Each case renders ORDINAL ZERO -- the
 // composite's zero value -- which is the
 // one ordinal a digest can name without the table growing a dimension. To re-baseline after an
 // intended rendering change: empty the table, run this case, and pin the digests the failures
 // print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "7cbb1777daa3d8bd6d4433c2ada94330737d2eece7baa9e86e85acde5ea63162",
-		"a sole server role with a synthesized cache connector":                              "cfd73e8ec6fa0d681f7d659ab30ac24dfe0dccc0e7dcba38e0909938abb59249",
-		"a take-over role carrying a connector it must be given no part of":                  "a47172918092a6af5fb088797871069347e8f03aabf4464e1dbebbc94577451b",
-		"a direct decoder with a native routing sidecar":                                     "236a53dea58d7f7266e7bff4eada243c1a251d867fc488f5907e4b39ace4169f",
-		"a direct decoder with a classic routing sidecar":                                    "9654c42fe87ff3786b1ccf5b94623b74053dedf5c7961d0b5e91bf281ee4665c",
-		"a role naming no image, which runs the engine's image":                              "7cbb1777daa3d8bd6d4433c2ada94330737d2eece7baa9e86e85acde5ea63162",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "b8e69b7871b9efc3fb4af039458443e39557592243f987b0dcf85e681853444a",
-		"the prefill role of a two-role deployment":                                          "577151b24f690093503919cc8f6e19ae0c4787b36eec6dcb4f1745996bd3363a",
-		"the decode role of a two-role deployment":                                           "51a28f4bfd83faf87d9ce74ef424f980c7030f786abcf89237b90116509f0fa7",
+		"a sole server role": "2f1bc75cc918f9634d3605ccc753ffb3f1a8b75d16eba3c5f019947cae44e8df",
+		"a sole server role with a synthesized cache connector":                              "929159f54fdc7b8bee4383a7824beb94f27113b617daf4f511f9eb8890b2eae2",
+		"a take-over role carrying a connector it must be given no part of":                  "0c82c9eb81c5cbc3ed24d694eddb025ce9facf7702475926fe6232b95eb83241",
+		"a direct decoder with a native routing sidecar":                                     "b96f1baf60f580030c51993de93a47d31b051e0da4a5d57456628743b9659089",
+		"a direct decoder with a classic routing sidecar":                                    "ea5867ed736cc8a07ad3f9a8267573069b64e6a1b8a526b45bd0edcc53c0df70",
+		"a role naming no image, which runs the engine's image":                              "2f1bc75cc918f9634d3605ccc753ffb3f1a8b75d16eba3c5f019947cae44e8df",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "62e519b90c6b8c1ad0d0a87a66336b8f764ffe6bc796d2a1e20772209a028d8c",
+		"the prefill role of a two-role deployment":                                          "9f8a285b0b7cf3919dfa06ab079f2ceb56b80e3fbe8bc1e16d83d86ca6386434",
+		"the decode role of a two-role deployment":                                           "117ec4529a546a573d3ae9a7a08ee3c1d7f009425db0676872327cbd7b60c642",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its

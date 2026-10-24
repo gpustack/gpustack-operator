@@ -364,11 +364,15 @@ on the node, and defaults `VLLM_CACHE_ROOT=/var/lib/gpustack/cache` (`vLLM`) or
 
 The same mount carries the engine's other startup caches, because each of them otherwise defaults
 to the container's writable layer and the pod's ephemeral-storage limit measures that layer. The
-operator defaults four more names into it:
+operator defaults six more names into it. Each names a byte-heavy cache subtree alone: the Hugging
+Face token and its datasets and Xet caches stay under `HF_HOME` on the container's own filesystem,
+because the mount is a host-backed directory every pod mounting the same path can read:
 
 | Name | Points at | Holds |
 |---|---|---|
-| `XDG_CACHE_HOME` | `/var/lib/gpustack/cache/xdg` | The Hugging Face hub cache, the tokenizer files, the Hub token and the Xet cache, plus the torch hub directory and the pip cache: the Hugging Face library derives its own home from this name, so one entry moves that whole tree |
+| `HF_HUB_CACHE` | `/var/lib/gpustack/cache/hf-hub` | The model weights and tokenizer files huggingface_hub downloads, the cache whose growth onto the writable layer drove the recorded evictions |
+| `PIP_CACHE_DIR` | `/var/lib/gpustack/cache/pip` | pip's download and wheel cache |
+| `TORCH_HOME` | `/var/lib/gpustack/cache/torch` | torch's hub checkpoints and cached state |
 | `FLASHINFER_WORKSPACE_BASE` | `/var/lib/gpustack/cache/flashinfer` | The FlashInfer JIT workspace, which holds the generated sources and the compiled kernels of the attention backend. FlashInfer appends its own `.cache/flashinfer` to the base, so the tree lands under `/var/lib/gpustack/cache/flashinfer/.cache/flashinfer` |
 | `TORCHINDUCTOR_CACHE_DIR` | `/var/lib/gpustack/cache/inductor` | The kernels torch's inductor compiles, whose default is a directory under the temporary directory |
 | `TRITON_CACHE_DIR` | `/var/lib/gpustack/cache/triton` | triton's compiled kernels, whose default is under the home directory |
@@ -376,7 +380,7 @@ operator defaults four more names into it:
 An explicit `/var/lib/gpustack/cache` mount in *`additionalVolumes`* takes precedence: the operator
 omits the default `gpustack-compile-cache` `HostPath` volume while preserving the defaulted
 `VLLM_CACHE_ROOT` or `SGLANG_CACHE_DIR` environment variable unless overridden in *`roles[].env`*.
-The four cache names above follow the same rule. Take-over roles (*`roles[].command`* non-empty)
+The six cache names above follow the same rule. Take-over roles (*`roles[].command`* non-empty)
 receive neither the default cache volume nor the defaulted cache variables.
 
 The four names are defaults, not ownership: an entry in *`roles[].env`* replaces any of them. Like
@@ -426,8 +430,9 @@ So are `MC_FORCE_TCP` [on a `tcp` path](prefill-decode.md#direct-transfer-transp
 [SGLang's two cache switches](../kv-cache/injection.md#sglang-host-memory-tier), and the compilation
 cache root (`VLLM_CACHE_ROOT` on `vLLM`, `SGLANG_CACHE_DIR` on `SGLang`).
 
-So are the four runtime cache names (`XDG_CACHE_HOME`, `FLASHINFER_WORKSPACE_BASE`,
-`TORCHINDUCTOR_CACHE_DIR`, `TRITON_CACHE_DIR`), which keep an engine's startup caches on the
+So are the six runtime cache names (`HF_HUB_CACHE`, `PIP_CACHE_DIR`, `TORCH_HOME`,
+`FLASHINFER_WORKSPACE_BASE`, `TORCHINDUCTOR_CACHE_DIR`, `TRITON_CACHE_DIR`), which keep an
+engine's startup caches on the
 mounted cache rather than on the container's writable layer, and are
 [defaulted the same way](#compilation-cache-and-timeout).
 
