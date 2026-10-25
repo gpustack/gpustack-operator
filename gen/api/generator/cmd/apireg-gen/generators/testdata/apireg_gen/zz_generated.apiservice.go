@@ -8,7 +8,7 @@
 package apireg_gen
 
 import (
-	"bytes"
+	bytes "bytes"
 
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"

@@ -9,7 +9,7 @@ import (
 	admreg "k8s.io/api/admissionregistration/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/gengo/types"
+	"k8s.io/gengo/v2/types"
 	klog "k8s.io/klog/v2"
 
 	"gpustack.ai/gpustack/gen/api/generator/utils"

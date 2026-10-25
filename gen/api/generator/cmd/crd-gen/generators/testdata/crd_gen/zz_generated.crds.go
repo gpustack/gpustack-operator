@@ -51,7 +51,7 @@ func crd_crd_gen_generators_testdata_crd_gen_Dummy() *v1.CustomResourceDefinitio
 					Storage: true,
 					Schema: &v1.CustomResourceValidation{
 						OpenAPIV3Schema: &v1.JSONSchemaProps{
-							Description: "Dummy is the schema for the projects API.\nThe print columns are here for what they carry rather than for themselves. Priority is an int32\nand has to be emitted BARE: quoted, it produced a string constant in an int32 field and the\ngenerated file did not compile — which no test could catch while no type in this repository used\nthe marker. One column leaves priority at its default and one sets it, so the expected output pins\nboth forms.\nThe third pins a jsonPath FILTER, whose value contains \"=\" twice. The marker parser splits on \"=\",\nso the filter has to survive being a value that looks like more key/value pairs — it once came\nback split across two junk entries as well as its own, which nothing noticed because unknown keys\nwere dropped in silence.\nThe fourth pins the \"date\" TYPE. It is the type kubectl's default Age column uses, and it was\nmissing from the generator's accepted set: every date column was dropped, and dropped QUIETLY —\nthe unknown type was logged and the column skipped, so `make generate` still succeeded and no\ngolden file moved. Nothing here would notice it being dropped again without a date column to pin.",
+							Description: "Dummy is the schema for the projects API.\nThe print column above sits in a comment block of its own, separated from\nthe doc comment by an empty line. gengo keeps such a block as the second\nclosest comment of the type, and the generator reads the markers of both\ncomment blocks, so a marker that sits there has to reach the schema just\nlike one that sits inside the doc comment.\nThe print columns are here for what they carry rather than for themselves. Priority is an int32\nand has to be emitted BARE: quoted, it produced a string constant in an int32 field and the\ngenerated file did not compile — which no test could catch while no type in this repository used\nthe marker. One column leaves priority at its default and one sets it, so the expected output pins\nboth forms.\nThe third pins a jsonPath FILTER, whose value contains \"=\" twice. The marker parser splits on \"=\",\nso the filter has to survive being a value that looks like more key/value pairs — it once came\nback split across two junk entries as well as its own, which nothing noticed because unknown keys\nwere dropped in silence.\nThe fourth pins the \"date\" TYPE. It is the type kubectl's default Age column uses, and it was\nmissing from the generator's accepted set: every date column was dropped, and dropped QUIETLY —\nthe unknown type was logged and the column skipped, so `make generate` still succeeded and no\ngolden file moved. Nothing here would notice it being dropped again without a date column to pin.",
 							Type:        "object",
 							Properties: map[string]v1.JSONSchemaProps{
 								"apiVersion": {
@@ -74,6 +74,23 @@ func crd_crd_gen_generators_testdata_crd_gen_Dummy() *v1.CustomResourceDefinitio
 										"container",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
+										"aliasBytes": {
+											Type:     "string",
+											Format:   "byte",
+											Nullable: true,
+										},
+										"aliasTargetAlias": {
+											Description: "Alias.\nA type alias has to resolve to the type it aliases: an alias of a named\nstruct has the schema of that struct, and an alias of a byte slice has\nthe schema of a byte slice. A defined type over an alias resolves the\nsame way. An alias that did not resolve would show up as an object\npreserving unknown fields, and no field of this repository uses one, so\nnothing would notice it without these fields.",
+											Type:        "object",
+											Required: []string{
+												"field",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"field": {
+													Type: "string",
+												},
+											},
+										},
 										"arrayObject": {
 											Type:     "object",
 											MaxItems: ptr.To[int64](3),
@@ -1612,6 +1629,11 @@ func crd_crd_gen_generators_testdata_crd_gen_Dummy() *v1.CustomResourceDefinitio
 												},
 											},
 										},
+										"definedAliasBytes": {
+											Type:     "string",
+											Format:   "byte",
+											Nullable: true,
+										},
 										"dummyX": {
 											Type: "object",
 											Required: []string{
@@ -1843,6 +1865,17 @@ func crd_crd_gen_generators_testdata_crd_gen_Dummy() *v1.CustomResourceDefinitio
 												},
 											},
 											Nullable: true,
+										},
+										"markerAlias": {
+											Type: "object",
+											Required: []string{
+												"field",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"field": {
+													Type: "string",
+												},
+											},
 										},
 										"microTime": {
 											Type:   "string",
@@ -2093,6 +2126,14 @@ func crd_crd_gen_generators_testdata_crd_gen_Dummy() *v1.CustomResourceDefinitio
 						Status: &v1.CustomResourceSubresourceStatus{},
 					},
 					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Detached",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.detachedString",
+						},
 						{
 							Name:        "String",
 							Type:        "string",

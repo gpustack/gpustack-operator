@@ -12,7 +12,7 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/code-generator/third_party/forked/golang/reflect"
-	"k8s.io/gengo/types"
+	"k8s.io/gengo/v2/types"
 	klog "k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 

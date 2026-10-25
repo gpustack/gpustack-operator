@@ -11,7 +11,7 @@ package worker
 import (
 	v1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
+	ptr "k8s.io/utils/ptr"
 )
 
 func GetWebhookConfigurations(np string, c v1.WebhookClientConfig) (*v1.ValidatingWebhookConfiguration, *v1.MutatingWebhookConfiguration) {

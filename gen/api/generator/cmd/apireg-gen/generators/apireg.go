@@ -6,16 +6,16 @@ import (
 	"strings"
 
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/gengo/generator"
-	"k8s.io/gengo/namer"
-	"k8s.io/gengo/types"
+	"k8s.io/gengo/v2/generator"
+	"k8s.io/gengo/v2/namer"
+	"k8s.io/gengo/v2/types"
 	apireg "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 )
 
-func NewAPIRegGen(sanitizedName, outputPackage string) generator.Generator {
+func NewAPIRegGen(outputFile, outputPackage string) generator.Generator {
 	return &apiRegGen{
-		DefaultGen: generator.DefaultGen{
-			OptionalName: sanitizedName,
+		GoGenerator: generator.GoGenerator{
+			OutputFilename: outputFile,
 		},
 		outputPackage: outputPackage,
 		imports:       generator.NewImportTrackerForPackage(outputPackage),
@@ -36,7 +36,7 @@ type (
 )
 
 type apiRegGen struct {
-	generator.DefaultGen
+	generator.GoGenerator
 
 	outputPackage string
 	imports       namer.ImportTracker
@@ -146,7 +146,7 @@ func (g *apiRegGen) Init(c *generator.Context, w io.Writer) error {
 	sw.Do("Group: \"$.SPEC.Group$\",\n", args)
 	sw.Do("Version: \"$.SPEC.Version$\",\n", args)
 	sw.Do("InsecureSkipTLSVerify: len(ca) == 0,\n", args)
-	sw.Do("CABundle: $.BytesClone$(ca),\n", args)
+	sw.Do("CABundle: $.BytesClone|raw$(ca),\n", args)
 	sw.Do("GroupPriorityMinimum: $.SPEC.GroupPriorityMinimum$,\n", args)
 	sw.Do("VersionPriority: $.SPEC.VersionPriority$,\n", args)
 	sw.Do("},\n", nil)
