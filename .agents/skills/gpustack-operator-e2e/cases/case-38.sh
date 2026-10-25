@@ -1414,10 +1414,7 @@ verdict $? "no accelerator is over-committed" \
 
 echo
 echo "== CASE 38 — AMD accelerator claims over both carriers: exclusive whole cards, logical slices, and the Instance metrics array =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 
 if [ "$FAILS" -ne 0 ]; then
   echo

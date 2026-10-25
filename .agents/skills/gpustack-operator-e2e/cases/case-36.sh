@@ -93,10 +93,7 @@ trap 'ssh_cleanup; restore' EXIT
 print_and_exit() {
   echo
   echo "== CASE 36 — Node-pinned Instance with additional volumes, and the host-access gates =="
-  {
-    echo "STATUS|CHECK|OBJECT"
-    printf '%s\n' "${ROWS[@]}"
-  } | column -t -s '|'
+  print_rows
   if [ "$FAILS" -ne 0 ]; then
     echo
     echo "FAILED ${FAILS} check(s)."

@@ -14,6 +14,15 @@
 
 # kvha_wait_for <ns> <kind> <name> <path> <want> [secs] polls one jsonpath until it equals what is
 # wanted, and prints the LAST value seen, so a timeout says what the object was doing.
+#
+# The family's own jsonpath poller, self-contained on purpose, for the two reasons the sibling
+# family in _kvcache-inject-lib.sh gives: `wait_for` is a replaceable global - cases 50, 66, 68 and
+# 70 each define their own with another signature - and forwarding this family's kind/name/path/want
+# calls through it would run them against that incompatible signature. The argument order differs as
+# well: this family passes the namespace FIRST and the shared poller takes it LAST, so the two
+# cannot be called with the same arguments even when the global is the shared one. The
+# consolidation review rejected a poller forwarded through a replaceable global for exactly this
+# reason; this file keeps the implementation whole rather than aliasing it.
 kvha_wait_for() {
   local ns="$1" kind="$2" name="$3" path="$4" want="$5" secs="${6:-180}"
   local got="" i

@@ -77,6 +77,9 @@ ROUTER_READY=case70-router-ready
 ROUTER_SETTLE="${E2E_ROUTER_SETTLE:-180}"
 STABLE="${E2E_ROUTER_STABLE:-30}"
 
+# This case's own poller: the shared one in _rows-lib.sh takes a kind/name/path/want and reads one
+# jsonpath, while this case waits on a predicate the caller supplies, so the two cannot be called
+# with the same arguments.
 wait_for() {
   local deadline=$((SECONDS + $1)); shift
   while [ "$SECONDS" -lt "$deadline" ]; do

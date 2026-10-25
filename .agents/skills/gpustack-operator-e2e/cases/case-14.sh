@@ -302,10 +302,7 @@ fi
 
 echo
 echo "== CASE 14 — Multiple slices coexist on one physical card within budget =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). Diagnose: kubectl -n default get instances,pods;"

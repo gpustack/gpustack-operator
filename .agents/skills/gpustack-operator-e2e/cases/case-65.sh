@@ -150,18 +150,6 @@ teardown() {
 }
 trap teardown EXIT
 
-wait_for() {
-  local kind="$1" name="$2" path="$3" want="$4" secs="${5:-180}"
-  local got="" i
-  for ((i = 0; i < secs; i += 3)); do
-    got="$(kubectl -n "$NS" get "$kind" "$name" -o "jsonpath=$path" 2>/dev/null)"
-    [ "$got" = "$want" ] && { echo "$got"; return 0; }
-    sleep 3
-  done
-  echo "$got"
-  return 1
-}
-
 # ------------------------------------------------- 0. the host directory is really there
 
 if [ -z "$NODES" ]; then
@@ -226,7 +214,10 @@ spec:
               capacity: 4Gi
 YAML
 
-if ! wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 300 >/dev/null; then
+# The poller is the shared one from _rows-lib.sh, which takes the namespace last. This case reads
+# one object in one namespace, so the namespace is passed at the call rather than baked into a
+# second copy of the loop.
+if ! wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 300 "$NS" >/dev/null; then
   record FAIL "the backend with a disk tier reaches Ready" \
     "phase never became Ready in 300s: $(kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phaseMessage}' 2>/dev/null | cut -c1-160)"
   results; exit 1

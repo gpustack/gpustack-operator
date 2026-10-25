@@ -924,10 +924,7 @@ verdict $? "no claim landed on an accelerator that was not idle beforehand" \
 
 echo
 echo "== CASE 39 — T-Head PPU: a pinned claim lands exactly where it was told, and a logical slice is capped inside the container =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 
 if [ "$FAILS" -ne 0 ]; then
   echo

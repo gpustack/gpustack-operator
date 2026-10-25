@@ -261,10 +261,7 @@ trap - EXIT
 
 echo
 echo "== CASE 19 — CPU-manufacturer awareness enriches the accelerated InstanceType; a real GPU Instance runs on it =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 
 if [ "$FAILS" -ne 0 ]; then
   echo
