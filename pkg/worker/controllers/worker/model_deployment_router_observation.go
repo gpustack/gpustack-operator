@@ -1169,6 +1169,21 @@ func modelDeploymentGroupFact(
 		expected[member.UID] = true
 	}
 
+	// THE RETENTION FACT: every answering member carries the eligibility label, and the eligibility
+	// annotation on those members names the group's CURRENT complete membership generation. It is
+	// proved by the fresh membership rather than by the view, so it is computed before the view is
+	// judged: a partial view is an observation loss about half the group, and the retention is
+	// exactly what carries an already-eligible group of an unchanged generation through one.
+	fact.Retained = true
+	for _, member := range answering {
+		carried, known := members[member.UID]
+		if !known || !carried.Eligible || carried.Generation != generation {
+			fact.Retained = false
+
+			break
+		}
+	}
+
 	// THE ENDPOINTS THE ROUTER HOLDS FOR THIS GROUP, against the ones it is expected to hold.
 	observed := make(map[types.UID]bool, len(view.Members))
 	endpoints := int32(0)
@@ -1210,20 +1225,6 @@ func modelDeploymentGroupFact(
 			"the router's view of the group is partial: it holds %d of the group's %d expected "+
 				"endpoints, so the group's serving cannot be confirmed",
 			heldExpected, len(expected))
-
-		return fact
-	}
-
-	// THE RETENTION FACT: every answering member carries the eligibility label, and the eligibility
-	// annotation on those members names the group's CURRENT complete membership generation.
-	fact.Retained = true
-	for _, member := range answering {
-		carried, known := members[member.UID]
-		if !known || !carried.Eligible || carried.Generation != generation {
-			fact.Retained = false
-
-			break
-		}
 	}
 
 	return fact
