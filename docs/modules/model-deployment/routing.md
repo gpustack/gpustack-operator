@@ -27,8 +27,9 @@ request lands on, and a policy such as `round_robin` never changes the selector.
 | *Elastic EP* collective | The collective's one endpoint, its master. |
 | *Encode* group | Excluded from answering candidates and the deployment-wide `Service`. |
 
-How each router forwards traffic within a mode. `vllm-router` serves vLLM deployments only and
-`sglang-gateway` SGLang only, so each of their cells is that engine's own pairing:
+The table below records how each router forwards traffic within a mode. `vllm-router` serves vLLM
+deployments only and `sglang-gateway` SGLang only, so each of their cells is that engine's own
+pairing:
 
 | Mode | `llm-d-router` | `vllm-router` | `sglang-gateway` |
 |---|---|---|---|
@@ -41,7 +42,8 @@ How each router forwards traffic within a mode. `vllm-router` serves vLLM deploy
 `llm-d-router`'s profile is not configurable — no policy flag, no settable weights
 ([No policy flag](#no-policy-flag)) — so where even spread matters, above all multi-replica *Server*
 and *External DP*, prefer the engine's own router: `vllm-router` on vLLM and `sglang-gateway` on
-SGLang.
+SGLang. The matrix's counts were recorded on vLLM `0.29.0` and SGLang `0.5.18` behind the routers
+of `gpustack/llm-router:v0.3.1`; newer builds must be re-verified before they inherit a claim.
 
 *Encode* `Pod`s are never part of the deployment's answering set. Under `llm-d-router` they are
 discovered for stage routing, and under `vllm-router` their `Service` endpoint is passed through

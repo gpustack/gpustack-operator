@@ -1,8 +1,9 @@
 # External DP
 
 *External data parallelism (External DP)* runs one fixed group in which every rank exposes its own HTTP endpoint,
-and no rank is a leader, so a Router in front is **required** — admission refuses the deployment
-without *`spec.router`*, naming the rule `RouterRequired`. For captured commands and results, follow the
+and no rank is a leader, so a Router in front is **required** — admission refuses a role that
+declares external data parallelism without *`spec.router`*, naming the rule `RouterRequired`. For
+the vLLM captured commands and results, follow the
 [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md).
 
 The recorded runs apply to two combinations, and they are the two the engine-match rule
@@ -413,10 +414,9 @@ ordinary, JSON, Chinese and streaming requests through each member's own listene
 both runs. The scale-down held the disaggregated handoff grace window, the withdrawn group's
 workers leaving the gateway's worker set after 482 s in one run and 310 s in the other.
 
-The gateway registers at most one worker per group on `gpustack/llm-router:v0.3.1`, and on
-`v0.4.0` without the rendered flag: each group's subordinate member times out inside the
-gateway's 10 s discovery step, and the two-group runs presented two healthy workers in one
-run and one in the other.
+The gateway's worker set covered at most one worker per group in both runs — two healthy
+workers for two groups in one run and one in the other; the registration boundary and its image
+floor are under [Routing](routing.md#which-pods-receive-traffic).
 
 After the scale-down the surviving group never republished `Eligible` within the case's 900 s
 budget while the retired group read `Withdrawn`, so a surviving group's recovery from a
