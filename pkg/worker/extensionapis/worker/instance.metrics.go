@@ -335,8 +335,8 @@ func (h *InstanceMetricsHandler) listNodeDeviceManagerPods(ctx context.Context, 
 // transport per process instead of one leaked per request.
 var _monitorSnapshotClient = &http.Client{
 	Transport: httpx.Transport(httpx.TransportOptions().WithoutProxy().WithTLSClientConfig(
-		&tls.Config{InsecureSkipVerify: true},
-	)), // nolint: gosec
+		&tls.Config{InsecureSkipVerify: true}, // nolint: gosec
+	)),
 }
 
 // fetchMonitorSnapshot GETs and decodes the monitor snapshot readout of a device manager pod.
