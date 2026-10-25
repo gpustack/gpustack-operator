@@ -33,16 +33,6 @@ An External DP role is admitted only with a Router: `spec.router` is required, a
 members reachable. The rule does not reach a role that took its command line over, and it does not
 reach a shape read from anywhere but the role's own extra arguments.
 
-SGLang's engine-internal *DP attention* differs from *External DP*. On the SGLang External DP shape
-the operator renders `--dp-aware`, and the gateway registers one worker per attention-DP rank — see
-[Routing](routing.md#which-pods-receive-traffic).
-
-For a *PD* pair, the tested container combination ran one `sglang-gateway` with `--pd-disaggregation`
-and **without** `--dp-aware`: combining the two flags produced an invalid *decode* destination. That
-combination was verified as a single-host container run only — it does not validate a Kubernetes
-**`ModelDeployment`**, multi-host networking, or rank-failure withdrawal and recovery — so treat a
-split *decode* group as an experimental topology until those checks run.
-
 With the managed `llm-d-router`, the connector a native vLLM role runs depends on whether
 *`spec.kvCache`* is set; the two settings render two different connector documents, not one document
 with a field toggled:
