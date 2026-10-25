@@ -34,7 +34,7 @@ pairing:
 | Mode | `llm-d-router` | `vllm-router` | `sglang-gateway` |
 |---|---|---|---|
 | Multi-replica *Server* | One fixed scoring profile — prefix match, queue depth, KV utilization — with no policy switch; measured 187/170 on vLLM and 375/0, every request on one replica, on SGLang | `cache_aware` by default; `--policy round_robin` spreads evenly, measured 60 per replica | The same policies as `vllm-router`; `round_robin` measured 60 per replica |
-| *PD* pair | The disaggregated pairing's own router: the token-counted prefill/decode split, per-role connector documents, the decode sidecar | Its own *PD* mode over the pair | Native `--pd-disaggregation` |
+| *PD* pair | The disaggregated pairing's own router: the token-counted prefill/decode split, per-role connector documents, the decode sidecar | Its own *PD* mode over the pair | Native `--pd-disaggregation`; combining it with `--dp-aware` produced an invalid *decode* destination in the recorded container run, so the operator never renders the two together |
 | *EPD* | An `encode` scheduling profile beside the pair; the decode sidecar coordinates the encoder transfer | Drives encode, prefill and decode itself through operator-owned `--epd-config`, no sidecar | Routes the pair natively; the prefiller reaches the encoder through `--encoder-urls` |
 | *Elastic EP* | The engine's own internal load balancing spreads work inside the collective, and the deployment publishes one endpoint, so a router is not how this mode balances | Same | Same |
 | *External DP* | Admitted, but no `--policy` to spread the ranks evenly and no recorded run — use the engine's own router | Every rank endpoint behind `--policy round_robin` (recorded) | Per-member endpoints; the registration boundary is the paragraph below |
