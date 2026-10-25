@@ -710,3 +710,148 @@ func TestModelDeploymentRoleStatusSchemaValidation(t *testing.T) {
 		})
 	}
 }
+
+// modelDeploymentGroupStatusFixture is one published group: a group waiting on a Router
+// observation, with a member that claims a seat and a member that claims none.
+func modelDeploymentGroupStatusFixture(now meta.Time) *ModelDeploymentStatus {
+	seat := int32(0)
+
+	return &ModelDeploymentStatus{
+		Roles: []ModelDeploymentRoleStatus{{
+			Name: "prefill",
+			Groups: []ModelDeploymentGroupStatus{{
+				Role:       "prefill",
+				Ordinal:    0,
+				Generation: "uid-a,uid-b",
+				State:      ModelDeploymentGroupStateAwaitingObservation,
+				Reason:     "the Router's view could not be read",
+				Members: []ModelDeploymentGroupMemberStatus{
+					{Name: "prefill-0", UID: "uid-a", Seat: &seat, Ready: meta.ConditionUnknown},
+					{Name: "prefill-1", UID: "uid-b", Ready: meta.ConditionTrue},
+				},
+				LastQualificationTime: now.DeepCopy(),
+				Serving: ModelDeploymentServingStatus{
+					State: ModelDeploymentServingStateUnknown,
+				},
+				ServingReason: "the Router's view could not be read",
+			}},
+		}},
+	}
+}
+
+// TestModelDeploymentGroupStatusWireSurvivesJSONRoundTrip pins the distinctions the group entry
+// keeps on the JSON wire: a seat that is absent from a seat that is zero, a readiness that is
+// Unknown from a readiness that is False, a serving answer with no count and a reason of its own.
+func TestModelDeploymentGroupStatusWireSurvivesJSONRoundTrip(t *testing.T) {
+	now := meta.Now().Rfc3339Copy()
+
+	raw, err := json.Marshal(modelDeploymentGroupStatusFixture(now))
+	require.NoError(t, err)
+
+	got := &ModelDeploymentStatus{}
+	require.NoError(t, json.Unmarshal(raw, got))
+
+	require.Len(t, got.Roles[0].Groups, 1)
+	group := got.Roles[0].Groups[0]
+	assert.Equal(t, "prefill", group.Role)
+	assert.Equal(t, int32(0), group.Ordinal)
+	assert.Equal(t, "uid-a,uid-b", group.Generation)
+	assert.Equal(t, ModelDeploymentGroupStateAwaitingObservation, group.State)
+	assert.Equal(t, "the Router's view could not be read", group.Reason)
+
+	require.Len(t, group.Members, 2)
+	require.NotNil(t, group.Members[0].Seat)
+	assert.Equal(t, int32(0), *group.Members[0].Seat,
+		"a seat of zero is a real seat and must not read as an absent one")
+	assert.Equal(t, meta.ConditionUnknown, group.Members[0].Ready)
+	assert.Nil(t, group.Members[1].Seat,
+		"a member that claims no seat must not acquire one on the wire")
+	assert.Equal(t, meta.ConditionTrue, group.Members[1].Ready)
+
+	require.NotNil(t, group.LastQualificationTime)
+	assert.Equal(t, now.UTC(), group.LastQualificationTime.UTC())
+	assert.Equal(t, ModelDeploymentServingStateUnknown, group.Serving.State)
+	assert.Nil(t, group.Serving.Value,
+		"an unobserved serving answer carries no count, and an absent one is not a zero")
+	assert.Equal(t, "the Router's view could not be read", group.ServingReason)
+}
+
+// TestModelDeploymentGroupStatusWireSurvivesProtoRoundTrip pins the same distinctions on the
+// protobuf rendering, which clients reading generated types go through.
+func TestModelDeploymentGroupStatusWireSurvivesProtoRoundTrip(t *testing.T) {
+	now := meta.Now().Rfc3339Copy()
+	deployment := &ModelDeployment{Status: *modelDeploymentGroupStatusFixture(now)}
+
+	raw, err := deployment.Marshal()
+	require.NoError(t, err)
+
+	got := &ModelDeployment{}
+	require.NoError(t, got.Unmarshal(raw))
+
+	require.Len(t, got.Status.Roles[0].Groups, 1)
+	group := got.Status.Roles[0].Groups[0]
+	assert.Equal(t, "prefill", group.Role)
+	assert.Equal(t, int32(0), group.Ordinal)
+	assert.Equal(t, "uid-a,uid-b", group.Generation)
+	assert.Equal(t, ModelDeploymentGroupStateAwaitingObservation, group.State)
+	require.Len(t, group.Members, 2)
+	require.NotNil(t, group.Members[0].Seat)
+	assert.Equal(t, int32(0), *group.Members[0].Seat)
+	assert.Equal(t, meta.ConditionUnknown, group.Members[0].Ready)
+	assert.Nil(t, group.Members[1].Seat)
+	require.NotNil(t, group.LastQualificationTime)
+	assert.Equal(t, now.UTC(), group.LastQualificationTime.UTC())
+	assert.Equal(t, ModelDeploymentServingStateUnknown, group.Serving.State)
+	assert.Equal(t, "the Router's view could not be read", group.ServingReason)
+}
+
+// TestModelDeploymentGroupStatusDeepCopyCutsReferenceFields pins that a copied status shares no
+// backing arrays with the original: the group list and the member list inside it are views a later
+// writer could move underneath the stored object.
+func TestModelDeploymentGroupStatusDeepCopyCutsReferenceFields(t *testing.T) {
+	status := modelDeploymentGroupStatusFixture(meta.Now().Rfc3339Copy())
+
+	got := status.DeepCopy()
+	got.Roles[0].Groups[0].Role = "mutated"
+	got.Roles[0].Groups[0].Members[0].Name = "mutated"
+	got.Roles[0].Groups[0].Members = append(got.Roles[0].Groups[0].Members,
+		ModelDeploymentGroupMemberStatus{Name: "added"})
+
+	assert.Equal(t, "prefill", status.Roles[0].Groups[0].Role)
+	assert.Equal(t, "prefill-0", status.Roles[0].Groups[0].Members[0].Name)
+	assert.Len(t, status.Roles[0].Groups[0].Members, 2)
+}
+
+// TestModelDeploymentGroupStatusSchema pins the generated schema to the contract: the eight group
+// states, the three readiness values, and a group list that is an ordinary atomic list.
+//
+// A NEW GROUP STATE IS A WRITER THAT THE API SERVER MAY REFUSE, so the enum in the schema and the
+// constants in the code have to agree: a state the writer can produce and the schema does not name
+// is a status write that takes every other figure on the object down with it.
+func TestModelDeploymentGroupStatusSchema(t *testing.T) {
+	crd := GetCustomResourceDefinitions()["ModelDeployment"]
+	require.NotNil(t, crd, "ModelDeployment is not registered")
+	require.Len(t, crd.Spec.Versions, 1)
+
+	schema := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["status"]
+	roles := schema.Properties["roles"].Items.Schema
+	groups, ok := roles.Properties["groups"]
+	require.True(t, ok, "the schema has no status.roles[].groups")
+	assert.Equal(t, "array", groups.Type)
+	require.NotNil(t, groups.XListType, "the group list carries a list type")
+	assert.Equal(t, "atomic", *groups.XListType)
+
+	group := groups.Items.Schema
+	assert.ElementsMatch(t,
+		[]string{
+			`"Eligible"`, `"Withdrawn"`, `"AwaitingMembers"`, `"AwaitingReady"`,
+			`"AwaitingProbe"`, `"AwaitingObservation"`, `"Unsupported"`, `"Unknown"`,
+		},
+		enumValues(t, *group, "state"))
+
+	members, ok := group.Properties["members"]
+	require.True(t, ok, "the schema has no status.roles[].groups[].members")
+	assert.ElementsMatch(t,
+		[]string{`"True"`, `"False"`, `"Unknown"`},
+		enumValues(t, *members.Items.Schema, "ready"))
+}

@@ -39,10 +39,16 @@ type ModelDeploymentDeclaredParallelism struct {
 	PrefillContextParallel int
 	DecodeContextParallel  int
 	// ExpertParallel is SGLang's degree. vLLM's same-named concept is a mode, so it lands in
-	// Modes instead -- the two spellings are never merged into one field. The three after it
+	// Modes instead -- the two spellings are never merged into one field. The four after it
 	// are SGLang's remaining degrees: the size check branches on their presence, a future
 	// consumer on their values.
-	ExpertParallel           int
+	ExpertParallel int
+	// AttentionDataParallel is SGLang's attention-DP width: the number of attention groups
+	// inside the TP group, one scheduler each, while the FFN stays tensor-parallel across
+	// them. It is NOT a data-parallel multiplier, and the size check does not multiply by it:
+	// the groups share one model, so the width they occupy is the TP width, already counted.
+	// One means no explicit --attn-dp-size declaration.
+	AttentionDataParallel    int
 	AttentionContextParallel int
 	MoEDataParallel          int
 	DWDPSize                 int
@@ -123,6 +129,7 @@ var modelDeploymentParallelFlags = map[string][]modelDeploymentParallelFlag{
 		{names: []string{"--tp-size", "--tensor-parallel-size"}, degree: true, min: 1},
 		{names: []string{"--pp-size", "--pipeline-parallel-size"}, degree: true, min: 1},
 		{names: []string{"--dp-size", "--data-parallel-size"}, degree: true, min: 1},
+		{names: []string{"--attn-dp-size", "--attention-data-parallel-size"}, degree: true, min: 1},
 		{names: []string{"--ep-size", "--expert-parallel-size", "--ep"}, degree: true, min: 1},
 		{names: []string{"--dcp-size", "--decode-context-parallel-size"}, degree: true, min: 1},
 		{names: []string{"--attn-cp-size", "--attention-context-parallel-size"}, degree: true, min: 1},
@@ -199,6 +206,7 @@ func scanModelDeploymentParallelism(
 		PrefillContextParallel:   1,
 		DecodeContextParallel:    1,
 		ExpertParallel:           1,
+		AttentionDataParallel:    1,
 		AttentionContextParallel: 1,
 		MoEDataParallel:          1,
 		DWDPSize:                 1,
@@ -280,6 +288,11 @@ func scanModelDeploymentParallelism(
 			case "--data-parallel-size", "--dp-size":
 				declared.DataParallel = degree
 				reading.present[modelDeploymentSlotDataParallel] = true
+			case "--attn-dp-size", "--attention-data-parallel-size":
+				// THE ATTENTION WIDTH IS NOT A STATUS DEGREE. It has no slot in the
+				// transfer document, so it is carried for the balance vote alone and
+				// never enters the size check's multiplication.
+				declared.AttentionDataParallel = degree
 			case "--data-parallel-size-local":
 				declared.DataParallelLocal = degree
 				reading.present[modelDeploymentSlotDataParallelLocal] = true
@@ -446,7 +459,8 @@ func ReadModelDeploymentRoleParallelism(
 		return modelDeploymentParallelismUnreadable(overflow)
 	}
 
-	loadBalance, balanceReason := modelDeploymentLoadBalance(reading.declared)
+	loadBalance, balanceReason := modelDeploymentLoadBalance(engine,
+		ModelDeploymentEffectiveRoleKind(role), role.Env, reading.declared)
 
 	return workercore.ModelDeploymentRoleParallelismStatus{
 		Declared:    declared,
@@ -483,12 +497,77 @@ var modelDeploymentBalanceShapes = map[string]workercore.ModelDeploymentLoadBala
 	"--data-parallel-multi-port-external-lb": workercore.ModelDeploymentLoadBalanceMultiPort,
 }
 
+// modelDeploymentSGLangRustServerEnv is the variable that puts SGLang in Rust-server mode, where
+// every attention-DP group hosts a listener of its own.
+const modelDeploymentSGLangRustServerEnv = "SGLANG_RUST_SERVER"
+
+// modelDeploymentSGLangExternalDP reports whether an SGLang role declares the external
+// attention-data-parallel shape: an attention-DP launch across members under the Rust server.
+//
+// THE THREE FACTS ARE ONE SHAPE AND EACH IS NECESSARY. An attention width above one is what
+// makes more than one attention group; a node count above one is what puts those groups on
+// different members; the Rust server is what gives every group a listener of its own, so the
+// group can be reached from outside. Without the Rust server the groups share one frontend and
+// the group is balanced inside itself.
+//
+// THE ROLE MUST BE A SERVER ROLE. A prefill or decode role is served through its own leg, and
+// the balance of that leg is the leg's own business: a launch that reads externally on a server
+// role says nothing about how a prefill is balanced, so a disaggregated role stays unclassified.
+//
+// THE VALUE IS READ THE ENGINE'S WAY, because the engine refuses a value it cannot parse and an
+// operator that voted on such a value would only be guessing. A value the engine would refuse
+// votes nothing, and the engine stops the launch itself.
+func modelDeploymentSGLangExternalDP(
+	engine string, kind workercore.ModelDeploymentRoleKind,
+	env []workercore.ModelDeploymentEnvVar, declared ModelDeploymentDeclaredParallelism,
+) bool {
+	if engine != workercore.ModelDeploymentEngineSGLang {
+		return false
+	}
+	if kind != workercore.ModelDeploymentRoleKindServer {
+		return false
+	}
+	if declared.AttentionDataParallel < 2 || declared.NodeCount < 2 {
+		return false
+	}
+	value, ok := modelDeploymentEnvValue(env, modelDeploymentSGLangRustServerEnv)
+	if !ok {
+		return false
+	}
+	return modelDeploymentEngineBool(value)
+}
+
+// modelDeploymentEngineBool reads a boolean the way SGLang's own environment reader reads it:
+// only the spellings that reader accepts as true, compared without regard to case. Every other
+// value is false, which is the same silence the engine itself answers an unknown spelling with.
+func modelDeploymentEngineBool(value string) bool {
+	switch strings.ToLower(value) {
+	case modelDeploymentTrueValue, "1":
+		return true
+	default:
+		return false
+	}
+}
+
 // modelDeploymentLoadBalance derives the balance shape from the stream's wiring flags. Flags
 // voting one shape agree (an assigned rank alongside an external balancer is still External);
 // flags voting different shapes are not derivable and name their disagreement.
+//
+// THE SGLANG VOTE IS A SOURCE OF ITS OWN, because SGLang's balance is not a flag but a shape the
+// launch declares. The table above cannot see it: SGLang's wiring flags are not in it, and its
+// own flags never vote in it, so the two sources cannot disagree about one engine.
+//
+// THE KIND IS PART OF THE ANSWER, because a shape that means one thing for a server role means
+// another for a disaggregated one: a prefill or decode role is served through its own leg, and
+// a launch that would balance externally on a server role says nothing about how that leg is
+// served.
 func modelDeploymentLoadBalance(
-	declared ModelDeploymentDeclaredParallelism,
+	engine string, kind workercore.ModelDeploymentRoleKind,
+	env []workercore.ModelDeploymentEnvVar, declared ModelDeploymentDeclaredParallelism,
 ) (workercore.ModelDeploymentLoadBalance, string) {
+	if modelDeploymentSGLangExternalDP(engine, kind, env, declared) {
+		return workercore.ModelDeploymentLoadBalanceExternal, ""
+	}
 	wiring := declared.Wiring
 	shapes := map[workercore.ModelDeploymentLoadBalance][]string{}
 	for _, flag := range wiring {

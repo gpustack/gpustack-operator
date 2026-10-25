@@ -496,6 +496,16 @@ func (in ModelDeploymentEnvVar) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentGroupMemberStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentGroupMemberStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentGroupStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentGroupStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentKVCache) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentKVCache"
 }

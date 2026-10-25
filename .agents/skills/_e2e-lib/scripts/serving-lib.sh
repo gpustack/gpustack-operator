@@ -138,3 +138,74 @@ serving_sum() {
     substr($1, length(name) + 1, 1) == "{") { total += $2; found = 1 }
     END { if (!found) exit 1; printf "%.10g\n", total }' <<<"$1"
 }
+
+# counter_before_display SERIES VALUE FILE prints the before-value a counter row should show.
+#
+# THE ABSENCE OF THE SERIES IS NOT A ZERO THE ROUTER WROTE. A Prometheus counter series appears
+# in an exposition only once the exporter has registered it, so a before-scrape taken ahead of
+# the first request can carry no line for the series at all. A row that prints that absence as a
+# bare 0 states a number the router never published; the row prints what the scrape shows, and
+# the arithmetic keeps using the zero the absence implies.
+counter_before_display() {
+  local series="$1" value="$2" file="$3"
+  if [ -s "$file" ] && awk -v name="$series" '
+      index($1, name) == 1 && (length($1) == length(name) ||
+      substr($1, length(name) + 1, 1) == "{") { found = 1 }
+      END { exit found ? 0 : 1 }' "$file" >/dev/null 2>&1; then
+    printf '%s' "$value"
+  else
+    printf '%s' "absent (0 implied)"
+  fi
+}
+
+# capture_cluster_shape OUT_DIR records the shape of the cluster a case run is on.
+#
+# THE SHAPE BELONGS IN THE EVIDENCE. A number that depends on the machine — the node a case ran
+# on, the InstanceType it asked for, how many accelerators it had, and the operator build that
+# made the decision — is only readable later if the run left it behind. A case that says "the
+# decode role grew to two" says nothing about the cluster unless the reader can see what the
+# cluster was.
+#
+# THE FILE IS THE CASE'S OWN ACCOUNT OF ITS ENVIRONMENT, taken from the cluster at the moment
+# the run started. Nothing here is transcribed by hand: every value is read from the cluster.
+capture_cluster_shape() {
+  local out="$1"
+  local context cluster
+  context="$(kubectl config current-context 2>/dev/null || echo unknown)"
+  cluster="$(kubectl config view -o jsonpath="{.contexts[?(@.name=='${context}')].context.cluster}" 2>/dev/null || echo unknown)"
+  mkdir -p "$(dirname "${out}")" 2>/dev/null || true
+  {
+    echo "captured_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "context=${context}"
+    echo "cluster=${cluster}"
+    echo "namespace=${NS:-unknown}"
+    echo "instance_type=${INSTANCE_TYPE:-unknown}"
+    echo "platform=${BENCH_PLATFORM:-undeclared}"
+    echo
+    echo "=== kubectl get nodes -o wide ==="
+    kubectl get nodes -o wide 2>&1
+    echo
+    echo "=== per-node accelerators and InstanceTypes ==="
+    kubectl get nodes -o json 2>/dev/null | jq -r '.items[] | .metadata.name as $n
+      | "node: \($n)"
+      + "  accelerators=" + ((.status.capacity["nvidia.com/gpu"] // "0") | tostring)
+      + "  gpu-partitionable=" + ((.status.capacity["nvidia.com/gpu.partitioned"] // "0") | tostring)
+      + "  gpu-sliced=" + ((.status.capacity["nvidia.com/gpu.sliced"] // "0") | tostring)'
+    echo
+    echo "=== InstanceTypes the cluster carries ==="
+    kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null \
+      | jq -r '.items[] | "\(.metadata.name)  phase=\(.status.phase // "?")  detail=\(.status.detail // {})"'
+    echo
+    echo "=== operator image and digest ==="
+    kubectl -n gpustack-system get deploy gpustack-operator-worker -o json 2>/dev/null \
+      | jq -r '.spec.template.spec.containers[] | "image=\(.image)"'
+    kubectl -n gpustack-system get pod -l app.kubernetes.io/name=gpustack-operator-worker -o json 2>/dev/null \
+      | jq -r '.items[0].status.containerStatuses[]? | "image_id=\(.imageID)"'
+    echo
+    echo "=== the accelerator devices of the node ==="
+    kubectl get devices -o json 2>/dev/null \
+      | jq -r '.items[] | .metadata.name as $n
+        | "node: \($n)  groups=\((.status.groups // []) | length)"
+        + "  accelerators=" + (((.status.groups // [])[0].accelerators // []) | length | tostring)'
+  } > "${out}" 2>&1
+}

@@ -71,8 +71,6 @@ order:
     - operations
   /docs/modules/model-deployment/:
     - deployment
-    - scaling
-    - scaling-benchmark
     - engine-versions
     - prefill-decode
     - prefill-decode-benchmark
@@ -82,6 +80,8 @@ order:
     - elastic-ep-benchmark
     - external-dp
     - external-dp-benchmark
+    - scaling
+    - scaling-benchmark
     - routing
     - metrics
     - status

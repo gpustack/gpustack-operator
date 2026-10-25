@@ -42,7 +42,7 @@ spec:
   roles:
     - name: server
       replicas: 4
-      instanceType: gpustack-nvidia-a10g-linux-amd64
+      instanceType: gpustack--nvidia-a10g-linux-amd64
       resources:
         accelerator: 2  # cards per Pod
 ```
@@ -141,14 +141,14 @@ admission check this operator runs, which holds every group until the whole set 
     - name: prefill
       kind: Prefill  # Server (default), Prefill, Decode or Encode
       replicas: 2
-      instanceType: gpustack-nvidia-h20-linux-amd64
+      instanceType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
     - name: decode
       kind: Decode
       replicas: 2
       # may use different hardware from the prefill role
-      instanceType: gpustack-nvidia-h20-linux-amd64
+      instanceType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
 ```
@@ -362,11 +362,32 @@ backed by `/var/lib/gpustack/cache/<manufacturer>-<engine>/<model-identity>/tp<T
 on the node, and defaults `VLLM_CACHE_ROOT=/var/lib/gpustack/cache` (`vLLM`) or
 `SGLANG_CACHE_DIR=/var/lib/gpustack/cache` (`SGLang`).
 
+The same mount carries the engine's other startup caches, because each of them otherwise defaults
+to the container's writable layer and the pod's ephemeral-storage limit measures that layer. The
+operator defaults seven more names into it. Each names a byte-heavy cache subtree alone: the Hugging
+Face token and its datasets cache stay under `HF_HOME` on the container's own filesystem, because
+the mount is a host-backed directory every pod mounting the same path can read:
+
+| Name | Points at | Holds |
+|---|---|---|
+| `HF_HUB_CACHE` | `/var/lib/gpustack/cache/hf-hub` | The model weights and tokenizer files huggingface_hub downloads, the cache whose growth onto the writable layer drove the recorded evictions |
+| `HF_XET_CACHE` | `/var/lib/gpustack/cache/xet` | The Xet chunk cache, which hf_xet reads ahead of `HF_HOME` so the chunks join the hub cache on the mount while the token stays local |
+| `PIP_CACHE_DIR` | `/var/lib/gpustack/cache/pip` | pip's download and wheel cache |
+| `TORCH_HOME` | `/var/lib/gpustack/cache/torch` | torch's hub checkpoints and cached state |
+| `FLASHINFER_WORKSPACE_BASE` | `/var/lib/gpustack/cache/flashinfer` | The FlashInfer JIT workspace, which holds the generated sources and the compiled kernels of the attention backend. FlashInfer appends its own `.cache/flashinfer` to the base, so the tree lands under `/var/lib/gpustack/cache/flashinfer/.cache/flashinfer` |
+| `TORCHINDUCTOR_CACHE_DIR` | `/var/lib/gpustack/cache/inductor` | The kernels torch's inductor compiles, whose default is a directory under the temporary directory |
+| `TRITON_CACHE_DIR` | `/var/lib/gpustack/cache/triton` | triton's compiled kernels, whose default is under the home directory |
+
 An explicit `/var/lib/gpustack/cache` mount in *`additionalVolumes`* takes precedence: the operator
 omits the default `gpustack-compile-cache` `HostPath` volume while preserving the defaulted
 `VLLM_CACHE_ROOT` or `SGLANG_CACHE_DIR` environment variable unless overridden in *`roles[].env`*.
-Take-over roles (*`roles[].command`* non-empty) receive neither the default cache volume nor the
-defaulted cache variable.
+The seven cache names above follow the same rule. Take-over roles (*`roles[].command`* non-empty)
+receive neither the default cache volume nor the defaulted cache variables.
+
+The seven names are defaults, not ownership: an entry in *`roles[].env`* replaces any of them. Like
+every other operator-synthesized entry they reach a `Pod` through its
+[render version](#render-version-and-upgrades), so they apply to newly created or replaced `Pod`s
+and a deployment rolls onto them with *`modeldeployment.gpustack.ai/min-render-version`*.
 
 *`spec.roles[].startupTimeoutSeconds`* sets the role's startup budget in seconds (default `1800`,
 range `10`..`86400`), scaling *`startupProbe.failureThreshold`* as `ceil(startupTimeoutSeconds / 10)`
@@ -409,6 +430,12 @@ which the hit rate this design rests on cannot be measured at all.
 So are `MC_FORCE_TCP` [on a `tcp` path](prefill-decode.md#direct-transfer-transport),
 [SGLang's two cache switches](../kv-cache/injection.md#sglang-host-memory-tier), and the compilation
 cache root (`VLLM_CACHE_ROOT` on `vLLM`, `SGLANG_CACHE_DIR` on `SGLang`).
+
+So are the seven runtime cache names (`HF_HUB_CACHE`, `HF_XET_CACHE`, `PIP_CACHE_DIR`,
+`TORCH_HOME`, `FLASHINFER_WORKSPACE_BASE`, `TORCHINDUCTOR_CACHE_DIR`, `TRITON_CACHE_DIR`), which
+keep an engine's startup caches on the
+mounted cache rather than on the container's writable layer, and are
+[defaulted the same way](#compilation-cache-and-timeout).
 
 Two of SGLang's owned keys are owned for what a user entry would **destroy** rather than duplicate,
 and the operator does not set either of them:
@@ -599,7 +626,7 @@ rendering changes are evaluated separately:
 | Annotation | Scope | What changes it | Default rollout behavior |
 |---|---|---|---|
 | `modeldeployment.gpustack.ai/pod-spec-hash` (on `Pod`) | explicit `ModelDeployment` fields (`model`, *`engine`*, *`router`*, *`kvCache.poolRef`*, *`kvTransfer`*, and the role's configuration) plus resolved external bindings (`InstanceType` entrance/manufacturer/resources, `KVCachePoolBinding` endpoint/domain/dtype, `ModelArtifact` source/digest, fabric interface key, `RuntimeClassName`, and seat `ordinal`/`member`) | editing any covered `ModelDeployment` field or changing a bound external resource | rolls affected replicas one per role per pass |
-| `modeldeployment.gpustack.ai/render-version` (on `Pod`) | operator-synthesized flags (`--host`, `--port`, `--served-model-name`, connector flags), probes, `preStop` drain hook, sidecars (`routing-proxy`, `wait-for-worker`), implicit labels/annotations, and worker `Setting` values | upgrading to an operator release with a newer rendering baseline | keeps running replicas in place while `render-version` meets the effective minimum floor; applies to newly created or replaced `Pod`s |
+| `modeldeployment.gpustack.ai/render-version` (on `Pod`) | operator-synthesized flags (`--host`, `--port`, `--served-model-name`, connector flags), defaulted environment entries, probes, `preStop` drain hook, sidecars (`routing-proxy`, `wait-for-worker`), implicit labels/annotations, and worker `Setting` values | upgrading to an operator release with a newer rendering baseline | keeps running replicas in place while `render-version` meets the effective minimum floor; applies to newly created or replaced `Pod`s |
 | `modeldeployment.gpustack.ai/min-render-version` (on `ModelDeployment`) | per-deployment render-version floor, clamped to `[minSupportedRenderVersion, currentRenderVersion]` | setting or raising the annotation on `ModelDeployment.metadata.annotations` | rolls replicas whose `render-version` is below the effective floor, one per role per pass |
 
 Set `modeldeployment.gpustack.ai/min-render-version` on the `ModelDeployment` to roll running
@@ -624,7 +651,7 @@ spec:
   roles:
     - name: server
       replicas: 4
-      instanceType: gpustack-nvidia-a10g-linux-amd64
+      instanceType: gpustack--nvidia-a10g-linux-amd64
       resources:
         accelerator: 2
 ```

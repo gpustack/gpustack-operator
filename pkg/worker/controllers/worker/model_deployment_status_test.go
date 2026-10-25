@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1184,7 +1185,8 @@ func TestSyncModelDeploymentStatus_RebuiltWholesale(t *testing.T) {
 	cli := newModelDeploymentClient(md, newRenderInstanceType())
 	r := &ModelDeploymentReconciler{Client: cli}
 
-	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil, nil))
+	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil,
+		modelDeploymentPassObservation{}))
 
 	stored := getModelDeployment(t, cli)
 	assert.Equal(t, ModelDeploymentPhaseDegraded, stored.Status.Phase)
@@ -1208,10 +1210,12 @@ func TestSyncModelDeploymentStatus_WritesNothingWhenUnchanged(t *testing.T) {
 	r := &ModelDeploymentReconciler{Client: cli}
 
 	pods := []core.Pod{*readyReplica(md, 0, true), *readyReplica(md, 1, true)}
-	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil, nil))
+	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil,
+		modelDeploymentPassObservation{}))
 	require.Equal(t, 1, writes.statusUpdates)
 
-	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil, nil))
+	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil,
+		modelDeploymentPassObservation{}))
 	assert.Equal(t, 1, writes.statusUpdates, "an unchanged status must not be written again")
 }
 
@@ -1247,14 +1251,16 @@ func TestSyncModelDeploymentStatus_AFailingListWritesNoStatus(t *testing.T) {
 		Build()
 
 	stuck := &ModelDeploymentReconciler{Client: failing}
-	require.Error(t, stuck.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil, nil))
+	require.Error(t, stuck.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil,
+		modelDeploymentPassObservation{}))
 
 	stored := getModelDeployment(t, failing)
 	require.Empty(t, stored.Status.Roles,
 		"a failed Workload list writes no status at all, rather than a zero that reads as observed")
 
 	healthy := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
-	require.NoError(t, healthy.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil, nil))
+	require.NoError(t, healthy.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil,
+		modelDeploymentPassObservation{}))
 
 	stored = getModelDeployment(t, healthy.Client)
 	require.Len(t, stored.Status.Roles, 1)
@@ -2929,4 +2935,63 @@ func TestEligibilityDecisionMirrorsTheRecordedCondition(t *testing.T) {
 				"from the raw qualifications")
 		})
 	}
+}
+
+// TestSyncModelDeploymentStatusPublishesThePrecollectedAnswer pins the seam the status and the
+// restoration share: the status publishes the answer the pass collected, and it collects nothing of
+// its own.
+//
+// THE RECONCILER CAN READ THE ROUTERS, so a status that collected its own would publish the
+// collection's answer instead of the one it was handed. That is the whole point of the carrier.
+func TestSyncModelDeploymentStatusPublishesThePrecollectedAnswer(t *testing.T) {
+	t.Parallel()
+
+	md := newRenderDeployment()
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	pods := []core.Pod{*readyReplica(md, 0, true)}
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+
+	observation := modelDeploymentPassObservation{
+		Serving: ServingAnswer{
+			State:  workercore.ModelDeploymentServingStateConfirmed,
+			Value:  ptr.To(int32(1)),
+			ByRole: map[string]int32{md.Spec.Roles[0].Name: 1},
+			// THE COLLECTION INSTANT IS PART OF THE ANSWER, because a confirmation that has grown
+			// stale is not published as one.
+			CollectedAt: time.Now(),
+		},
+	}
+	require.NoError(t, r.syncModelDeploymentStatus(
+		context.Background(), md, pods, nil, nil, nil, observation))
+
+	stored := getModelDeployment(t, cli)
+	require.Len(t, stored.Status.Roles, 1)
+	assert.Equal(t, workercore.ModelDeploymentServingStateConfirmed,
+		stored.Status.Roles[0].Endpoints.Serving.State,
+		"the status publishes the answer the pass collected")
+	require.NotNil(t, stored.Status.Roles[0].Endpoints.Serving.Value)
+	assert.Equal(t, int32(1), *stored.Status.Roles[0].Endpoints.Serving.Value)
+}
+
+// TestSyncModelDeploymentStatusNeverPublishesAnEmptyServingState pins that a path which observed
+// nothing publishes a real state, because the empty string is not a serving state at all.
+func TestSyncModelDeploymentStatusNeverPublishesAnEmptyServingState(t *testing.T) {
+	t.Parallel()
+
+	md := newRenderDeployment()
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	pods := []core.Pod{*readyReplica(md, 0, true)}
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+
+	require.NoError(t, r.syncModelDeploymentStatus(
+		context.Background(), md, pods, nil, nil, nil, modelDeploymentPassObservation{}))
+
+	stored := getModelDeployment(t, cli)
+	require.Len(t, stored.Status.Roles, 1)
+	assert.NotEqual(t, "", string(stored.Status.Roles[0].Endpoints.Serving.State),
+		"an unobserved answer is a state, never the empty string")
+	assert.Equal(t, workercore.ModelDeploymentServingStateUnknown,
+		stored.Status.Roles[0].Endpoints.Serving.State)
 }

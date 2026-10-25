@@ -111,6 +111,22 @@ needs to not undo it.
 Full routing, including what does **not** belong on a page, is in
 [references/page-map.md](references/page-map.md).
 
+## Tested facts and configuration combinations
+
+REQUIRED: a page states only what a recorded run or the source establishes. Do not write about
+behaviour nobody has tested: no untested scenarios, no "should" or "would" narrations, no PoC
+anecdotes standing in for verified results. When a capability is unverified, either say so in the
+page's Summary or Limitations with the versions that were verified, or leave the topic out.
+
+REQUIRED: a feature whose value comes from a combination of configurable parts — engines paired
+with routers, backends with protocols, modes with policies — is documented as the whole
+combination set or not at all. Writing one combination and omitting its siblings misleads a
+reader into thinking the written one is the supported one. Two exceptions admit a partial write:
+when the operator renders and owns every choice inline, the page says so in one sentence and
+lists no user steps; and when a feature activates only when the user supplies a specific value,
+the page documents exactly that value and the field it activates, marked as the special case it
+is.
+
 ## Public API versions
 
 User-facing manifests and API calls use `worker.gpustack.ai/v1`. The `v1alpha1` types are internal

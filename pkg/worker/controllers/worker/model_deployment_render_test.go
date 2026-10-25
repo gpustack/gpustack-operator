@@ -2731,7 +2731,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 //
 // THE ORIGINAL DIGESTS WERE CAPTURED FROM THE RENDERER AS IT STOOD BEFORE IT WAS SPLIT into a
 // template half and a stamp half, and that split had to reproduce every one of them exactly. The
-// table has been RE-BASELINED six times since, each time for a rendering change that was
+// table has been RE-BASELINED seven times since, each time for a rendering change that was
 // intended: once for the per-replica groups, where the stamp began naming a (role, ordinal) group,
 // declaring a total of one and writing the ordinal label; once when the ordinal label's key took the
 // modeldeployment prefix the role-kind label and the spec-hash annotation already carry, so that one
@@ -2748,22 +2748,30 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // the setting's value the same way the router table does. The sixth re-baselining is the
 // compilation-cache and startup-probe update: every managed Pod gained the compilation cache
 // volume, mount and cache-root entry alongside a wider probe timeout, leaving the take-over case's
-// digest unchanged. Each case renders ORDINAL ZERO -- the
+// digest unchanged. The seventh is the runtime-cache update: every managed Pod gained the four
+// cache-root entries that keep an engine's startup caches on the mounted cache instead of on the
+// container's writable layer, and the take-over case's digest stayed where it was for the same
+// reason the sixth left it: a role that brings its own command line is told nothing about a cache
+// it does not have. The eighth re-baselining moves every digest, the take-over case's included: the
+// runtime-cache update was narrowed from one XDG root to the scoped cache names huggingface_hub,
+// hf_xet, pip and torch read, so the Hub token and the datasets cache stay on the container's own
+// filesystem instead of a host-backed mount, and the render-version annotation every Pod carries
+// advanced to 4 with that change. Each case renders ORDINAL ZERO -- the
 // composite's zero value -- which is the
 // one ordinal a digest can name without the table growing a dimension. To re-baseline after an
 // intended rendering change: empty the table, run this case, and pin the digests the failures
 // print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "6e2178d73a9d589fa70dfdc3cecd33651946f0838d15b7357d31544079aac765",
-		"a sole server role with a synthesized cache connector":                              "bd54141fa2e3f3bf6344b22f6edcd301933c5b18c8aa29a9a671eb9b6a93fcc9",
-		"a take-over role carrying a connector it must be given no part of":                  "951e69e8ca2b9eaf7be4e2d413296a86f6948f91f5cd2811a8ea9b39fb495177",
-		"a direct decoder with a native routing sidecar":                                     "f2ca7ac882a09b402f2fb666e5396e9f9925966426fac2af43a86ad1827804a2",
-		"a direct decoder with a classic routing sidecar":                                    "1e4511f8b0dfa320b8a715995c136f9545c140d5f2ebb056e8d83d0638807698",
-		"a role naming no image, which runs the engine's image":                              "6e2178d73a9d589fa70dfdc3cecd33651946f0838d15b7357d31544079aac765",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "633a10aa7ffce8ba5cb528c51ff0413f48be8cff56d777f3ac8f9dc05420dd96",
-		"the prefill role of a two-role deployment":                                          "af62e508ee1ebdc522e00479c59fb56ec6635b7f8ec6bffdc3f6181fdf9f693d",
-		"the decode role of a two-role deployment":                                           "92b8c1de832f782c35b8635196ef48418cd882f184801cf365a8c38a564ecbaa",
+		"a sole server role": "fc211da18f5ea497d6e3183240d5404148c85fc592345ca3711887bb26ce4646",
+		"a sole server role with a synthesized cache connector":                              "ca98b111146f53cb2dff41c2064390b5790eb825aa4615df91091dd38578c37b",
+		"a take-over role carrying a connector it must be given no part of":                  "26412e32bc6c8e07bcf9304a4d503194c236cae02f011547cba1339f8385c6da",
+		"a direct decoder with a native routing sidecar":                                     "b9aac7bdc1b6ecdb1bdff2d4c078c58eee508995ece768e2d5e5cc02dcf53595",
+		"a direct decoder with a classic routing sidecar":                                    "cd785db1c9c7ecf9bc3f00893f46a30b24560c7da8afaf2f068497d4e746a467",
+		"a role naming no image, which runs the engine's image":                              "fc211da18f5ea497d6e3183240d5404148c85fc592345ca3711887bb26ce4646",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "abb84875ce2cfb57fcb2d7d6b14e9951c685432894357720e5c93245c15957e6",
+		"the prefill role of a two-role deployment":                                          "5959729d41a52776894ac12b5ca2034b2cc36d5eebbeec6a9a522ae685fc8f44",
+		"the decode role of a two-role deployment":                                           "b3ecf0dc46dcc2ad9e39c736cd2df2790ce58318c724453f5240e8c2d72cd9c0",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its

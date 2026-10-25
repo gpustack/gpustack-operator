@@ -47,6 +47,37 @@ func modelDeploymentElasticMasters(md *workercore.ModelDeployment, pods []core.P
 	return masters
 }
 
+// modelDeploymentElasticCollectiveMembers is the elastic deployment's logical group: every current
+// GPU worker of the elastic role, the master included.
+//
+// A WORKER ON ITS WAY OUT IS NOT A MEMBER, because it is leaving the collective, and the ancillary
+// Ray head is not a worker at all: its component label is the head's own name, so the role's workers
+// exclude it by construction.
+//
+// THE LIST IS THE ONE THE PASS ALREADY FETCHED AND CHECKED, so this costs no second fetch and no
+// probe.
+func modelDeploymentElasticCollectiveMembers(
+	md *workercore.ModelDeployment, pods []core.Pod,
+) []core.Pod {
+	role := ModelDeploymentElasticRole(md)
+	if role == nil {
+		return nil
+	}
+	members := make([]core.Pod, 0, len(pods))
+	for i := range pods {
+		pod := &pods[i]
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if modelDeploymentPodRole(pod) != role.Name {
+			continue
+		}
+		members = append(members, *pod)
+	}
+
+	return members
+}
+
 func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context.Context, md *workercore.ModelDeployment,
 	connection *ModelDeploymentConnectorInput, protocols []string, weights *modelArtifactWeights,
 ) (map[string]map[int][]*core.Pod, error) {
@@ -255,12 +286,18 @@ func (r *ModelDeploymentReconciler) deleteModelDeploymentTerminalPods(
 	return r.deleteModelDeploymentGroupWorkload(ctx, md, terminal)
 }
 
+// convergeModelDeploymentElastic realizes an elastic deployment and returns the pass's observation.
+//
+// THE OBSERVATION COMES BACK BECAUSE THE STATUS PUBLISHES IT AND THE ELIGIBILITY WRITE ACTS ON IT,
+// and both must read the same one: a second collection would be a second answer about a second
+// moment, and a second qualification would be a second verdict about a second grouping of the same
+// Pods.
 func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.Context, md *workercore.ModelDeployment,
 	actual []core.Pod, desired map[string]map[int][]*core.Pod, weights *modelArtifactWeights,
-) (bool, error) {
+) (bool, modelDeploymentPassObservation, error) {
 	role := ModelDeploymentElasticRole(md)
 	if role == nil {
-		return false, nil
+		return false, modelDeploymentPassObservation{}, nil
 	}
 	// A TERMINAL MEMBER IS A DEPARTURE THIS OPERATOR DID NOT INITIATE, and the elastic path is the
 	// only path that can leave one behind: the fixed desired-set comparison below, which deletes
@@ -271,7 +308,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 	// again and again, so the slot never heals. The delete and the Workload that releases the
 	// group's finalizer and quota are issued here instead, on the same terms the fixed path uses.
 	if err := r.deleteModelDeploymentTerminalPods(ctx, md, actual); err != nil {
-		return true, err
+		return true, modelDeploymentPassObservation{}, err
 	}
 	// A MEMBER ALREADY ON ITS WAY OUT IS THE OTHER DEPARTURE NOTHING HERE SENT AWAY, and the fixed
 	// path's stranded sweep never reaches this branch, so the sweep runs here. Its Workload is what
@@ -279,15 +316,15 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 	// path's condition: a Workload that also owns a member still standing is left alone, because
 	// Kueue answers a deleted Workload by stopping the whole group.
 	if err := r.releaseModelDeploymentStrandedWorkloads(ctx, md, actual); err != nil {
-		return true, err
+		return true, modelDeploymentPassObservation{}, err
 	}
 	if len(desired) == 0 {
-		return true, r.reconcileModelDeploymentElasticResize(ctx, md)
+		return true, modelDeploymentPassObservation{}, r.reconcileModelDeploymentElasticResize(ctx, md)
 	}
 	for name, ordinals := range desired {
 		taken, err := r.modelDeploymentTakenGroups(ctx, md, name, false)
 		if err != nil {
-			return true, err
+			return true, modelDeploymentPassObservation{}, err
 		}
 		gpuCount := 0
 		for i := range actual {
@@ -320,7 +357,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 				injectModelArtifactAffinity(pod, weights.Affinity)
 			}
 			if err := r.Client.Create(ctx, pod); err != nil {
-				return true, err
+				return true, modelDeploymentPassObservation{}, err
 			}
 			if name == role.Name {
 				gpuCount++
@@ -328,7 +365,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 		}
 	}
 	if err := r.reconcileModelDeploymentElasticResize(ctx, md); err != nil {
-		return true, err
+		return true, modelDeploymentPassObservation{}, err
 	}
 	if r.APIReader != nil {
 		live, err := r.elasticLiveMembers(ctx, md)
@@ -339,11 +376,13 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 			// The deployment moved under this pass. The writes below would label the master, patch
 			// the Service and rewrite router state from a member list this pass can no longer vouch
 			// for, so the pass stops here. The spec watch requeues the deployment.
-			return true, nil
+			return true, modelDeploymentPassObservation{
+				Serving: modelDeploymentServingUnobserved(md, "the deployment moved under this pass"),
+			}, nil
 		default:
 			// A read that failed is not a member list. Refuse the writes rather than converge from
 			// the caller's list, which is the one path that could confirm what it never observed.
-			return true, err
+			return true, modelDeploymentPassObservation{}, err
 		}
 	}
 	fetch := r.groupForwardFetch
@@ -353,12 +392,25 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 	masters := modelDeploymentElasticMasters(md, actual)
 	qualifications := qualifyModelDeploymentInstances(ctx, md, masters, modelDeploymentPendingReplacement{}, fetch)
 	byMember := modelDeploymentQualificationsByMember(qualifications)
-	if err := r.convergeModelDeploymentEndpointEligibility(ctx, md, actual, byMember, nil); err != nil {
-		return true, err
+
+	// THE PASS'S OBSERVATION IS COLLECTED HERE, AFTER THE QUALIFICATION AND BEFORE THE LABEL WRITE.
+	// The qualification can spend a whole probe, and a collection taken before it would be stale by
+	// the time the restore decision reads it.
+	serving := r.observeModelDeploymentServing(ctx, md)
+	observation := modelDeploymentPassObservation{
+		Serving:        serving,
+		Qualifications: qualifications,
+		// THE COLLECTIVE'S MEMBERSHIP IS THE LIST THIS PASS ALREADY READ, and the head is
+		// excluded by construction. The status publishes the collective's own entry from it.
+		CollectiveMembers: modelDeploymentElasticCollectiveMembers(md, actual),
+	}
+	if err := r.convergeModelDeploymentEndpointEligibility(
+		ctx, md, actual, byMember, nil, observation); err != nil {
+		return true, observation, err
 	}
 	decided := modelDeploymentQualificationsDecided(qualifications)
 	if err := r.syncModelDeploymentService(ctx, md, decided, actual); err != nil {
-		return true, err
+		return true, observation, err
 	}
-	return true, r.syncModelDeploymentRouter(ctx, md, decided)
+	return true, observation, r.syncModelDeploymentRouter(ctx, md, decided)
 }

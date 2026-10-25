@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -499,13 +500,17 @@ func TestReplacementRenderVersion_PartialGroupAndSlotCurrency(t *testing.T) {
 
 	t.Run("replacementMembersMatch enforces render-version floor and uniformity", func(t *testing.T) {
 		standing := []*core.Pod{want[0].DeepCopy(), want[1].DeepCopy()}
-		assert.Empty(t, replacementMembersMatch(want, standing, 1))
-		assert.Contains(t, replacementMembersMatch(want, standing, 2), "does not carry the render")
+		assert.Empty(t, replacementMembersMatch(want, standing, modelDeploymentMinSupportedRenderVersion))
+		assert.Contains(t,
+			replacementMembersMatch(want, standing, modelDeploymentRenderVersion+1),
+			"does not carry the render")
 
 		mixed := []*core.Pod{want[0].DeepCopy(), want[1].DeepCopy()}
-		mixed[0].Annotations[modelDeploymentRenderVersionAnnotation] = "1"
-		mixed[1].Annotations[modelDeploymentRenderVersionAnnotation] = "2"
-		assert.Contains(t, replacementMembersMatch(want, mixed, 1), "carry different render versions")
+		mixed[0].Annotations[modelDeploymentRenderVersionAnnotation] = strconv.Itoa(modelDeploymentRenderVersion)
+		mixed[1].Annotations[modelDeploymentRenderVersionAnnotation] = strconv.Itoa(modelDeploymentRenderVersion + 1)
+		assert.Contains(t,
+			replacementMembersMatch(want, mixed, modelDeploymentMinSupportedRenderVersion),
+			"carry different render versions")
 	})
 
 	t.Run("resolveReplacementSlot keeps compatible complete replacement and cleans up below-floor replacement", func(t *testing.T) {

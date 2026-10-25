@@ -618,7 +618,11 @@ func ModelDeploymentServedModelNames(engine string, args []string) ([]string, bo
 // image whose engine spells the variable differently, must be able to say so. An entry in
 // role.Env wins over the rendered one, and asking for a name this operator does not render is not
 // a conflict to refuse.
-var modelDeploymentDefaultedEnvNames = []string{
+//
+// The runtime cache names are defaulted for the same reason and for one more: each of them is
+// where an engine keeps a cache that grows while it starts, and the rendered value moves that
+// growth onto the mounted cache, which the pod's ephemeral-storage limit does not measure.
+var modelDeploymentDefaultedEnvNames = slices.Concat([]string{
 	"MC_TE_METRIC",
 	inject.MooncakeForceTCPEnv,
 	inject.MooncakeTCPMaxQueuedTransfersPerPeerEnv,
@@ -627,7 +631,7 @@ var modelDeploymentDefaultedEnvNames = []string{
 	inject.MooncakeTCPAdmissionTimeoutMsEnv,
 	"VLLM_CACHE_ROOT",
 	"SGLANG_CACHE_DIR",
-}
+}, modelDeploymentRuntimeCacheEnvNames)
 
 // ModelDeploymentOwnsArg reports whether the named argument belongs to the operator on this engine.
 //
@@ -914,6 +918,27 @@ func ModelDeploymentRoleUpstreamKind(kind workercore.ModelDeploymentRoleKind) (s
 		return "encode", true
 	default:
 		return "", false
+	}
+}
+
+// modelDeploymentRoleKindFromUpstream reads the kind a Pod's role-kind label names. The label
+// carries the upstream spelling, so this is the reading that turns it back into the API kind.
+//
+// AN UNREADABLE LABEL IS NO KIND, not the server kind: a Pod whose label this reader cannot
+// place has said nothing about what it is, and a reader that answered "server" would let such
+// a Pod into the server-only shapes.
+func modelDeploymentRoleKindFromUpstream(upstream string) workercore.ModelDeploymentRoleKind {
+	switch upstream {
+	case "server":
+		return workercore.ModelDeploymentRoleKindServer
+	case "prefill":
+		return workercore.ModelDeploymentRoleKindPrefill
+	case "decode":
+		return workercore.ModelDeploymentRoleKindDecode
+	case "encode":
+		return workercore.ModelDeploymentRoleKindEncode
+	default:
+		return ""
 	}
 }
 

@@ -161,7 +161,9 @@ func (c *modelDeploymentDrainCollector) Drain(
 			fmt.Sprintf("member %s has no container %q", pod.Name, target.Container)), nil
 	}
 
-	if reason, unsupported := modelDeploymentDrainParallelismUnreadable(target.Engine, container); unsupported {
+	if reason, unsupported := modelDeploymentDrainParallelismUnreadable(target.Engine,
+		modelDeploymentRoleKindFromUpstream(pod.Labels[modelDeploymentLabelKeyRoleKind]),
+		container); unsupported {
 		return modelDeploymentDrainHold(modelDeploymentDrainUnsupported, reason), nil
 	}
 
@@ -869,14 +871,17 @@ func modelDeploymentDrainURL(pod *corev1.Pod) (string, bool) {
 }
 
 // modelDeploymentDrainParallelismUnreadable refuses parallelism declarations the controller cannot read.
-func modelDeploymentDrainParallelismUnreadable(engine string, container *corev1.Container) (string, bool) {
+func modelDeploymentDrainParallelismUnreadable(
+	engine string, kind workercore.ModelDeploymentRoleKind, container *corev1.Container,
+) (string, bool) {
 	reading, err := scanModelDeploymentParallelism(engine, container.Command,
 		modelDeploymentContainerEnv(container))
 	if err != nil {
 		return fmt.Sprintf("the member's parallelism could not be read: %v", err), true
 	}
 
-	if shape, reason := modelDeploymentLoadBalance(reading.declared); shape == workercore.ModelDeploymentLoadBalanceUnknown {
+	if shape, reason := modelDeploymentLoadBalance(engine, kind,
+		modelDeploymentContainerEnv(container), reading.declared); shape == workercore.ModelDeploymentLoadBalanceUnknown {
 		return reason, true
 	}
 

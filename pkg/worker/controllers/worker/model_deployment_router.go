@@ -58,6 +58,22 @@ type ModelDeploymentRouterObjects struct {
 	Contract workercore.ModelDeploymentRouterStatus
 }
 
+// modelDeploymentRouterProtectedRole reports whether any of the deployment's roles is a managed
+// protected group.
+//
+// THE ROUTER AND THE SERVICE MUST AGREE, or a request would reach an endpoint the Service does not
+// front. A protected group names the eligible endpoints from the first enable, decided or not,
+// because a surface without the term does not read the eligibility labels at all.
+func modelDeploymentRouterProtectedRole(md *workercore.ModelDeployment) bool {
+	for i := range md.Spec.Roles {
+		if modelDeploymentProtectedRole(md, &md.Spec.Roles[i]) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func renderModelDeploymentRouterObjects(
 	ctx context.Context, md *workercore.ModelDeployment, manufacturers map[string]string,
 	retainedEligibility bool,
@@ -158,6 +174,19 @@ func renderModelDeploymentRouterObjects(
 		}
 		contract.Roles = append(contract.Roles, roleStatus)
 	}
+	// THE ROLES WHOSE ELIGIBILITY THE OPERATOR CONTROLS, AND THE ROLES IT CANNOT JUDGE. It is the
+	// stable effective policy and not the pass's verdict: a role the operator can never ask about
+	// carries no eligibility label and never will, and a role it can ask about may be qualified or
+	// withdrawn. One selector is one AND of every term, so a deployment holding both cannot say
+	// "required of this role and not of that one", and the candidate marker is what names them.
+	controllable, unjudgeable := 0, 0
+	for i := range md.Spec.Roles {
+		if modelDeploymentRoleJudged(md, &md.Spec.Roles[i]) {
+			controllable++
+		} else {
+			unjudgeable++
+		}
+	}
 	// Start with legacy leader-only discovery. Qualified External-DP roles use the
 	// eligibility label instead, which also excludes internal followers in mixed roles.
 	// Derive every selector form from these equalities so all routers discover the same set.
@@ -207,8 +236,42 @@ func renderModelDeploymentRouterObjects(
 	// pass would ever satisfy would hand the router zero endpoints and call it discovery — while
 	// a deployment whose roles all can keeps it, because once activation is possible the
 	// observation states govern the per-pod label, not this selector.
-	if endpointActivatable && !stageFiltered &&
-		(modelDeploymentEligibilityDecided(md) || retainedEligibility) {
+	//
+	// THE FIRST-ENABLE NARROWING REACHES THE DISCOVERY SELECTOR ONLY WHEN THE DEPLOYMENT'S ROLES
+	// AGREE. One selector is one AND of every term, so a deployment whose roles disagree cannot hold
+	// their requirements apart here, and narrowing it would withhold the roles that can be eligible.
+	// Such a deployment renders as it always did.
+	//
+	// WHERE NO TERM IS RENDERED AND A ROLE REQUIRES ONE, THE CANDIDATE MARKER STANDS IN. It names
+	// the members that may be discovered, which is the eligible members of the protected roles and
+	// the members of the compatibility roles alike, and it is what a mixed union needs: the
+	// eligibility term would withhold the roles that carry no requirement, and the marker withholds
+	// the protected members that are not eligible, which is the whole point of the requirement.
+	//
+	// IT STANDS IN ONLY WHERE THE ELIGIBILITY TERM IS NOT RENDERED AT ALL. A deployment that renders
+	// it deployment-wide already withholds the roles that carry no requirement, and that is today's
+	// behavior and stays it.
+	markerBacked := false
+	switch {
+	case controllable > 0 && unjudgeable > 0:
+		// THE MIXED UNION. One role's eligibility the operator controls and one role it cannot judge
+		// stand in one deployment, so the eligibility term cannot name them: it would withhold the
+		// role that carries no requirement, and it would admit the members of the role it does that
+		// were withdrawn.
+		//
+		// THE CANDIDATE MARKER NAMES THE MEMBERS THAT MAY BE DISCOVERED, which is the eligible
+		// members of the roles the operator judges and the members of the role it cannot alike.
+		//
+		endpointLabels[modelDeploymentRouterCandidateLabel] = modelDeploymentEndpointEligibleValue
+		// THE MEMBER INDEX IS DROPPED, and this is the shape's own rule and not a narrowing of
+		// it: the member index is what selects one member of a replica, and a replica whose
+		// members all answer must be discovered whole. The marker says which members may be
+		// discovered, so the index has nothing left to say.
+		delete(endpointLabels, modelDeploymentMemberIndexLabel)
+		markerBacked = true
+	case endpointActivatable && !stageFiltered &&
+		(modelDeploymentEligibilityDecided(md) || retainedEligibility ||
+			(everyActivatable && modelDeploymentRouterProtectedRole(md))):
 		endpointLabels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
 		for i := range md.Spec.Roles {
 			if modelDeploymentRoleExternalDP(md, &md.Spec.Roles[i]) {
@@ -236,6 +299,10 @@ func renderModelDeploymentRouterObjects(
 		endpointSelectorTerms = append(endpointSelectorTerms,
 			modelDeploymentLabelKeyEndpointEligible+"="+endpointLabels[modelDeploymentLabelKeyEndpointEligible])
 	}
+	if len(endpointLabels[modelDeploymentRouterCandidateLabel]) > 0 {
+		endpointSelectorTerms = append(endpointSelectorTerms,
+			modelDeploymentRouterCandidateLabel+"="+endpointLabels[modelDeploymentRouterCandidateLabel])
+	}
 	endpointSelectorTerms = append(endpointSelectorTerms, "!"+modelDeploymentRouterLabelKey)
 	// An engine that reaches its encoder by address has its prefiller dial the encoder itself, so
 	// the router never sends it a request. The encoder is kept out of the candidate set rather than
@@ -262,8 +329,36 @@ func renderModelDeploymentRouterObjects(
 		RequestTimeoutSeconds:   md.Spec.Router.RequestTimeoutSeconds,
 		DisaggregationThreshold: md.Spec.Router.DisaggregationThresholdTokens,
 	}
+	// THE SGLANG EXTERNAL DP SHAPE NAMES ITS WIDTH TO THE GATEWAY. The gateway's --dp-aware fans
+	// its worker registration out per dp member, which is the one-worker-per-member contract the
+	// shape is held to; a width under two renders nothing, and so does every other engine. The
+	// first external role the declaration carries decides the width: a deployment declaring more
+	// than one such role is outside the validated shapes, and the later roles are not read.
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang {
+		for i := range md.Spec.Roles {
+			if !modelDeploymentRoleExternalDP(md, &md.Spec.Roles[i]) {
+				continue
+			}
+			reading, err := scanModelDeploymentParallelism(
+				md.Spec.Engine.Name, md.Spec.Roles[i].ExtraArgs, md.Spec.Roles[i].Env)
+			if err != nil {
+				return ModelDeploymentRouterObjects{}, fmt.Errorf(
+					"read the external-dp width the router renders: %w", err)
+			}
+			routerInput.AttentionDataParallelSize = int32(reading.declared.AttentionDataParallel)
+			break
+		}
+	}
 	if stageFiltered {
 		routerInput.EligibleLabelKey = modelDeploymentLabelKeyEndpointEligible
+	}
+	if markerBacked {
+		// THE MARKER-BACKED DISCOVERY NAMES THE CANDIDATES OF EVERY KIND, and a per-kind filter
+		// that demanded one role's eligibility would withhold the compatibility candidates of that
+		// kind. The candidate term is the one every candidate of the kind carries, so the filter
+		// admits the kind's safe union without choosing a role.
+		routerInput.CandidateLabelKey = modelDeploymentRouterCandidateLabel
+		routerInput.CandidateLabelValue = modelDeploymentEndpointEligibleValue
 	}
 	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
 		engine, _ := ModelDeploymentEngineUpstreamName(md.Spec.Engine.Name)
@@ -612,15 +707,24 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 		// the user chose can be the very string of this label, and reading that as a demand would
 		// activate a gate on a deployment that never decided one.
 		needle := modelDeploymentLabelKeyEndpointEligible + "=" + modelDeploymentEndpointEligibleValue
+		// THE MARKER IS THE OTHER NAME THE REQUIREMENT TRAVELS UNDER, and a deployment whose roles
+		// disagree carries it instead of the eligibility term. A quiet pass must find the
+		// requirement wherever it was published, or it would conclude the gate had never fired and
+		// put back the endpoints the fault withdrew.
+		candidateNeedle := modelDeploymentRouterCandidateLabel + "=" + modelDeploymentEndpointEligibleValue
 		retained := false
 		liveConfig := new(core.ConfigMap)
 		err := r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}, liveConfig)
 		switch {
 		case err == nil:
 			retained = strings.Contains(liveConfig.Data[modelDeploymentRouterSelectorKey], needle) ||
+				strings.Contains(liveConfig.Data[modelDeploymentRouterSelectorKey], candidateNeedle) ||
 				router.DocumentStageFilterDemands(
 					liveConfig.Data[modelDeploymentRouterConfigKey],
-					modelDeploymentLabelKeyEndpointEligible, modelDeploymentEndpointEligibleValue)
+					modelDeploymentLabelKeyEndpointEligible, modelDeploymentEndpointEligibleValue) ||
+				router.DocumentStageFilterDemands(
+					liveConfig.Data[modelDeploymentRouterConfigKey],
+					modelDeploymentRouterCandidateLabel, modelDeploymentEndpointEligibleValue)
 		case apierrors.IsNotFound(err):
 		default:
 			return err
@@ -632,12 +736,12 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 			case err == nil:
 				for _, container := range liveDeployment.Spec.Template.Spec.Containers {
 					for _, arg := range container.Args {
-						if strings.Contains(arg, needle) {
+						if strings.Contains(arg, needle) || strings.Contains(arg, candidateNeedle) {
 							retained = true
 						}
 					}
 					for _, env := range container.Env {
-						if strings.Contains(env.Value, needle) {
+						if strings.Contains(env.Value, needle) || strings.Contains(env.Value, candidateNeedle) {
 							retained = true
 						}
 					}

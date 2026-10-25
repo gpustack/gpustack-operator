@@ -85,6 +85,19 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// It is optional like parallelism, and for the same reason: a role stored before this view
 	// existed carries neither object, and absence must not reject its next write.
 	Endpoints *ModelDeploymentRoleEndpointsStatusApplyConfiguration `json:"endpoints,omitempty"`
+	// Groups is one entry per group of this role, ordered by replica ordinal.
+	//
+	// IT ANSWERS WHAT THE COUNTS ABOVE CANNOT. Those counts say how many instances the role has
+	// and how many are Ready; a group entry says which members form one scheduling group, what
+	// state that group stands in, and whether the Router confirms it is being served. A reader
+	// asking which replica failed, or which one the Router stopped selecting, needs the entry and
+	// cannot get it from the counts.
+	//
+	// IT IS AN ORDINARY LIST, NOT A MAP, because a group's generation changes whenever a member is
+	// replaced. A map keyed on the generation would replace the whole entry on every membership
+	// change, and a map keyed on the ordinal alone would let a reader match a stale entry to a new
+	// membership. The identity is carried in the entry instead.
+	Groups []ModelDeploymentGroupStatusApplyConfiguration `json:"groups,omitempty"`
 }
 
 // ModelDeploymentRoleStatusApplyConfiguration constructs a declarative configuration of the ModelDeploymentRoleStatus type for use with
@@ -164,5 +177,18 @@ func (b *ModelDeploymentRoleStatusApplyConfiguration) WithParallelism(value *Mod
 // If called multiple times, the Endpoints field is set to the value of the last call.
 func (b *ModelDeploymentRoleStatusApplyConfiguration) WithEndpoints(value *ModelDeploymentRoleEndpointsStatusApplyConfiguration) *ModelDeploymentRoleStatusApplyConfiguration {
 	b.Endpoints = value
+	return b
+}
+
+// WithGroups adds the given value to the Groups field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Groups field.
+func (b *ModelDeploymentRoleStatusApplyConfiguration) WithGroups(values ...*ModelDeploymentGroupStatusApplyConfiguration) *ModelDeploymentRoleStatusApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithGroups")
+		}
+		b.Groups = append(b.Groups, *values[i])
+	}
 	return b
 }

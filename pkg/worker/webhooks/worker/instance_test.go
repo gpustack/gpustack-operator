@@ -1661,7 +1661,7 @@ func TestInstanceWebhook_AdmitsAUserStopOfACrashLoopingInstance(t *testing.T) {
 					Controller: ptr.To(true),
 				}},
 			},
-			Spec:       core.PodSpec{NodeName: "node-1"},
+			Spec: core.PodSpec{NodeName: "node-1"},
 			Status: core.PodStatus{
 				Phase: core.PodRunning,
 				Conditions: []core.PodCondition{

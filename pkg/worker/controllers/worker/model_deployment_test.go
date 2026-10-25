@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2712,7 +2713,7 @@ func TestModelDeploymentReconciler_MultiMemberRenderVersionUniformity(t *testing
 		pods := replicaPods(t, cli)
 		require.Len(t, pods, 2)
 		mixed := pods[1].DeepCopy()
-		mixed.Annotations[modelDeploymentRenderVersionAnnotation] = "2"
+		mixed.Annotations[modelDeploymentRenderVersionAnnotation] = strconv.Itoa(modelDeploymentRenderVersion + 1)
 		require.NoError(t, cli.Update(ctx, mixed))
 
 		_, err = reconcileModelDeployment(t, cli)
@@ -2864,4 +2865,673 @@ func TestModelDeploymentReconciler_MultiRenderVersionCoexistence(t *testing.T) {
 		assert.Empty(t, rolled[i].Annotations[cohortMarker],
 			"explicit spec change replaces replicas from every render-version cohort")
 	}
+}
+
+// setEndpointEligibilityPodsReadinessAt writes one readiness answer on the member at one index of
+// every replica, so a case can place exactly one member of a group in one state.
+//
+// AN UNKNOWN ANSWER IS WRITTEN AS ONE rather than as an absent condition, because Kubernetes writes
+// PodReady=Unknown and the two are different facts about the cluster.
+func setEndpointEligibilityPodsReadinessAt(
+	t *testing.T, cli ctrlcli.Client, member string, status core.ConditionStatus,
+) {
+	t.Helper()
+
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		if pod.Labels[modelDeploymentMemberIndexLabel] != member {
+			continue
+		}
+		pod.Status.Conditions = []core.PodCondition{{Type: core.PodReady, Status: status}}
+		require.NoError(t, cli.Status().Update(context.Background(), pod))
+	}
+}
+
+// removeEndpointEligibilityPodsMemberAt deletes the member at one index of every replica, so a case
+// can leave a group short of a member.
+func removeEndpointEligibilityPodsMemberAt(t *testing.T, cli ctrlcli.Client, member string) {
+	t.Helper()
+
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		if pod.Labels[modelDeploymentMemberIndexLabel] != member {
+			continue
+		}
+		require.NoError(t, cli.Delete(context.Background(), pod))
+	}
+}
+
+// TestModelDeploymentReconciler_AnUnsafeMemberWithdrawsTheWholeGroup is the fail-closed member
+// result, read through the reconciler.
+//
+// A GROUP WHOSE MEMBER IS NOT Ready=True IS UNSAFE, and an unsafe group is withdrawn: the key goes
+// off every endpoint of the group, the healthy sibling included, whether the group was activated
+// before or never was. The cases are the three ways a member can stop being safe: it reports
+// Unknown, it reports nothing at all, and it is gone.
+func TestModelDeploymentReconciler_AnUnsafeMemberWithdrawsTheWholeGroup(t *testing.T) {
+	testCases := []struct {
+		name string
+		// replicaSize is the size of the replica under test.
+		replicaSize int32
+		// unsafe places one member of the group in an unsafe state.
+		unsafe func(t *testing.T, cli ctrlcli.Client)
+	}{
+		{
+			name:        "a sibling's readiness is unknown",
+			replicaSize: 2,
+			unsafe: func(t *testing.T, cli ctrlcli.Client) {
+				setEndpointEligibilityPodsReadinessAt(t, cli, "1", core.ConditionUnknown)
+			},
+		},
+		{
+			name:        "a sibling reports nothing at all",
+			replicaSize: 2,
+			unsafe: func(t *testing.T, cli ctrlcli.Client) {
+				for _, pod := range endpointEligibilityPods(t, cli) {
+					if pod.Labels[modelDeploymentMemberIndexLabel] != "1" {
+						continue
+					}
+					pod.Status.Conditions = nil
+					require.NoError(t, cli.Status().Update(context.Background(), pod))
+				}
+			},
+		},
+		{
+			name:        "a sibling is missing",
+			replicaSize: 2,
+			unsafe: func(t *testing.T, cli ctrlcli.Client) {
+				removeEndpointEligibilityPodsMemberAt(t, cli, "1")
+			},
+		},
+		{
+			name:        "a single member replica's member goes unknown",
+			replicaSize: 1,
+			unsafe: func(t *testing.T, cli ctrlcli.Client) {
+				setEndpointEligibilityPodsReadinessAt(t, cli, "0", core.ConditionUnknown)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Replicas = 1
+				md.Spec.Roles[0].ReplicaSize = tc.replicaSize
+			})
+			cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+			endpointEligibilityTestSeed(t, cli, md)
+			setEndpointEligibilityPodsReady(t, cli, true)
+			// The key is put on by hand, because otherwise there would be nothing to withdraw and
+			// the case would pass for the wrong reason.
+			setEndpointEligibilityLabelOnPods(t, cli, true)
+
+			tc.unsafe(t, cli)
+
+			before := endpointEligibilityPods(t, cli)
+			require.NotEmpty(t, before)
+
+			_, err := reconcileModelDeployment(t, cli)
+			require.NoError(t, err)
+
+			// EVERY ENDPOINT OF THE GROUP THAT SURVIVED LOSES THE KEY. A GROUP LEFT SHORT OF A
+			// MEMBER IS TAKEN AWAY WHOLESALE BY THE REPLICA CONTROLLER, so a member of such a
+			// group may not be there at all to check, and that is the withdrawal in its strongest
+			// form.
+			for _, pod := range endpointEligibilityPods(t, cli) {
+				assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible,
+					"%s lost the key: a group whose member is not Ready=True is unsafe, and an "+
+						"unsafe group is withdrawn whatever else is true of it", pod.Name)
+			}
+		})
+	}
+}
+
+// TestModelDeploymentReconciler_RecoveryRestoresTheGroupAfterAFreshProbe is the recovery half of the
+// qualification: a group that was held is restored by a fresh observation, and no healthy engine is
+// restarted to make that happen.
+func TestModelDeploymentReconciler_RecoveryRestoresTheGroupAfterAFreshProbe(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	// The members are given an address, because a member with no address is a member the
+	// observation cannot be asked at, and the point of the case is the observation.
+	for i, pod := range endpointEligibilityPods(t, cli) {
+		pod.Status.PodIP = "10.0.0." + strconv.Itoa(1+i)
+		require.NoError(t, cli.Status().Update(context.Background(), pod))
+	}
+
+	// The first pass cannot observe the group, so it is held and no member is selectable.
+	_, err := reconcileModelDeploymentWith(t, &ModelDeploymentReconciler{
+		Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
+		groupForwardFetch: func(context.Context, string, []byte) ([]byte, error) {
+			return nil, errors.New("the engine did not answer")
+		},
+	})
+	require.NoError(t, err)
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible,
+			"%s is not selectable while the group is held", pod.Name)
+	}
+
+	before := map[string]types.UID{}
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		before[pod.Name] = pod.UID
+	}
+
+	// The second pass observes the group and restores it.
+	_, err = reconcileModelDeploymentActivated(t, cli)
+	require.NoError(t, err)
+
+	members := endpointEligibilityPods(t, cli)
+	require.Len(t, members, 2)
+	// A REPLICA OF TWO MEMBERS IS LEADER-SERVED, so one member carries the key and the follower
+	// does not. The group's being restored is what the leader's key says.
+	leaders := 0
+	for _, pod := range members {
+		if pod.Labels[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue {
+			leaders++
+		}
+		assert.Equal(t, before[pod.Name], pod.UID,
+			"%s was not restarted to make the recovery happen", pod.Name)
+	}
+	assert.Equal(t, 1, leaders, "the restored group answers on one member")
+}
+
+// modelDeploymentTestQualification is the health answer of a group, which the restore decision
+// reads beside the Router's.
+//
+// IT IS BUILT RATHER THAN PROBED, because the cases under test are what the two answers together
+// decide, and a probe would put a third thing between them. A group that passes every leg is the
+// ordinary case; a refuted one carries a definite fault, which withdraws whatever an answer would
+// otherwise retain.
+func modelDeploymentTestQualification(
+	pods []*core.Pod, generation modelDeploymentMembershipGeneration, refuted bool,
+) modelDeploymentInstanceQualification {
+	members := make([]*core.Pod, 0, len(pods))
+	members = append(members, pods...)
+	qualification := modelDeploymentInstanceQualification{
+		View: modelDeploymentReplicaView{
+			Role: "server", Ordinal: 0, Seated: true, Members: members,
+		},
+		Generation: generation,
+		GroupForward: modelDeploymentGroupForward{
+			State:      modelDeploymentGroupForwardNotApplicable,
+			Reason:     "the group has no cross-member path to observe",
+			Generation: generation,
+		},
+		Observed: true,
+	}
+	for _, name := range modelDeploymentQualificationLegOrder {
+		leg := modelDeploymentQualificationLeg{
+			Name: name, Verdict: modelDeploymentLegVerified, Reason: "the leg verified",
+		}
+		if refuted && name == modelDeploymentLegMembersReady {
+			leg = modelDeploymentQualificationLeg{
+				Name: name, Verdict: modelDeploymentLegFailed, Reason: "a member reported not ready",
+			}
+		}
+		qualification.Legs = append(qualification.Legs, leg)
+	}
+
+	return qualification
+}
+
+// TestModelDeploymentRestorationIsGatedOnTheGroupsObservation pins the restoration decision of the
+// eligibility label for a group a Router observes.
+//
+// A PROTECTED GROUP OF A DEPLOYMENT THAT DECLARES A ROUTER IS RESTORED ONLY ON A FRESH, COMPLETE
+// AND COHERENT OBSERVATION OF ITSELF. An already eligible group whose generation is unchanged keeps
+// what it has while the observation is lost, a group whose membership moved is withdrawn rather than
+// kept on the strength of the group it replaced, and a known fault withdraws either way.
+func TestModelDeploymentRestorationIsGatedOnTheGroupsObservation(t *testing.T) {
+	// A DEPLOYMENT THAT DECLARES A ROUTER, so the group it holds is a protected one and the
+	// restoration decision reads the Router's answer.
+	newDeployment := func() *workercore.ModelDeployment {
+		return newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Replicas = 1
+			md.Spec.Roles[0].ReplicaSize = 2
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		})
+	}
+
+	// THE GENERATION OF A GROUP, spelled out as its member UIDs joined with slashes rather than read
+	// from the helper that writes it, because the annotation under test is compared against it.
+	generationOf := func(pods []*core.Pod) modelDeploymentMembershipGeneration {
+		uids := make([]string, 0, len(pods))
+		for _, pod := range pods {
+			uids = append(uids, string(pod.UID))
+		}
+		slices.Sort(uids)
+
+		return modelDeploymentMembershipGeneration(strings.Join(uids, "/"))
+	}
+
+	// THE HEALTH ANSWER OF A GROUP, which the decision reads beside the Router's.
+	qualificationOf := func(pods []*core.Pod, refuted bool) modelDeploymentInstanceQualification {
+		return modelDeploymentTestQualification(pods, generationOf(pods), refuted)
+	}
+
+	for _, tc := range []struct {
+		name string
+		// what the answering member carries before the pass
+		carried               bool
+		carriedCurrent        bool
+		carriedOlder          bool
+		observed              bool
+		fact                  modelDeploymentGroupServing
+		age                   time.Duration
+		refuted               bool
+		wantLabel             bool
+		wantCurrentGeneration bool
+	}{
+		{
+			name: "a group the Router did not answer is not restored",
+		},
+		{
+			name:     "a fresh and coherent answer restores the group",
+			observed: true,
+			fact: modelDeploymentGroupServing{
+				SnapshotValid: true,
+				State:         workercore.ModelDeploymentServingStateConfirmed,
+				Endpoints:     1,
+				Members:       2,
+				Expected:      2,
+			},
+			wantLabel:             true,
+			wantCurrentGeneration: true,
+		},
+		{
+			name:                  "an already eligible group of the unchanged generation keeps what it has",
+			carried:               true,
+			carriedCurrent:        true,
+			observed:              true,
+			fact:                  modelDeploymentGroupServing{Retained: true, InvalidReason: "the Router could not be read"},
+			wantLabel:             true,
+			wantCurrentGeneration: true,
+		},
+		{
+			// THE COLLECTION FAILED AS A WHOLE, so the answer carries the group's fact with the
+			// failure in it: the view was never read, and the fact says so.
+			//
+			// THE GROUP DID NOT MOVE. Its carried annotation names the generation this pass read, so
+			// this is the group that was qualified and not one that replaced it, and the member
+			// carries the eligibility label from that qualification.
+			//
+			// THE FACT IS WHAT HOLDS THE GROUP OPEN, AND IT IS AN EXPLICIT ONE. An answer that
+			// carries no fact at all knows nothing, and nothing holds a group open.
+			name:           "an already eligible group of the unchanged generation keeps what it has when the collection fails",
+			carried:        true,
+			carriedCurrent: true,
+			observed:       true,
+			fact: modelDeploymentGroupServing{
+				SnapshotValid: false,
+				InvalidReason: "the routers' processes changed while the routers were being observed",
+				State:         workercore.ModelDeploymentServingStateUnknown,
+				Retained:      true,
+			},
+			wantLabel:             true,
+			wantCurrentGeneration: true,
+		},
+		{
+			name:         "a group whose membership moved is withdrawn rather than kept on the old generation",
+			carried:      true,
+			carriedOlder: true,
+			observed:     true,
+			fact:         modelDeploymentGroupServing{Retained: false},
+		},
+		{
+			name:     "a stale answer permits no new restoration",
+			observed: true,
+			fact: modelDeploymentGroupServing{
+				SnapshotValid: true,
+				State:         workercore.ModelDeploymentServingStateConfirmed,
+				Endpoints:     1,
+				Members:       2,
+				Expected:      2,
+			},
+			age: modelDeploymentServingFreshness + time.Second,
+		},
+		{
+			name:           "a known fault withdraws what an answer would otherwise retain",
+			carried:        true,
+			carriedCurrent: true,
+			observed:       true,
+			fact:           modelDeploymentGroupServing{SnapshotValid: true, Retained: true},
+			refuted:        true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newDeployment()
+			cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+			endpointEligibilityTestSeed(t, cli, md)
+			setEndpointEligibilityPodsReady(t, cli, true)
+
+			pods := endpointEligibilityPods(t, cli)
+			require.Len(t, pods, 2)
+			generation := generationOf(pods)
+			var leader *core.Pod
+			for _, pod := range pods {
+				if pod.Labels[modelDeploymentMemberIndexLabel] == "0" {
+					leader = pod
+				}
+			}
+			require.NotNil(t, leader, "the group has a leader")
+
+			// WHAT THE ANSWERING MEMBER CARRIES BEFORE THE PASS.
+			if tc.carried {
+				leader.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+			}
+			switch {
+			case tc.carriedCurrent:
+				leader.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = string(generation)
+			case tc.carriedOlder:
+				leader.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = "uid-old/uid-older"
+			}
+			require.NoError(t, cli.Update(context.Background(), leader))
+
+			now := time.Now()
+			r := &ModelDeploymentReconciler{
+				Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
+				clock: func() time.Time { return now },
+			}
+			qualification := qualificationOf(pods, tc.refuted)
+			byMember := make(map[types.UID]modelDeploymentInstanceQualification, len(pods))
+			for _, pod := range pods {
+				byMember[pod.UID] = qualification
+			}
+			answer := ServingAnswer{
+				State:       workercore.ModelDeploymentServingStateUnknown,
+				CollectedAt: now.Add(-tc.age),
+			}
+			if tc.observed {
+				answer.Groups = map[modelDeploymentGroupKey]modelDeploymentGroupServing{
+					{Role: "server", Ordinal: 0, Generation: generation}: tc.fact,
+				}
+			}
+			actual := make([]core.Pod, 0, len(pods))
+			for _, pod := range pods {
+				actual = append(actual, *pod)
+			}
+			require.NoError(t, r.convergeModelDeploymentEndpointEligibility(
+				context.Background(), md, actual, byMember, nil,
+				modelDeploymentPassObservation{Serving: answer}))
+
+			for _, pod := range endpointEligibilityPods(t, cli) {
+				if pod.Labels[modelDeploymentMemberIndexLabel] != "0" {
+					assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible,
+						"%s is a follower and never carries the key", pod.Name)
+					continue
+				}
+				if tc.wantLabel {
+					assert.Equal(t, modelDeploymentEndpointEligibleValue,
+						pod.Labels[modelDeploymentLabelKeyEndpointEligible], "%s", pod.Name)
+				} else {
+					assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible, "%s", pod.Name)
+				}
+				if tc.wantCurrentGeneration {
+					assert.Equal(t, string(generation),
+						pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration], "%s", pod.Name)
+				} else {
+					assert.NotContains(t, pod.Annotations, modelDeploymentAnnotationKeyEndpointEligibleGeneration,
+						"%s", pod.Name)
+				}
+			}
+		})
+	}
+}
+
+// mixedRouterCandidateDeployment is the smallest shape whose deployment-wide discovery names
+// candidates: one role the operator judges beside one it cannot judge.
+//
+// THE MANAGED ROLE IS A SINGLE MEMBER, so the operator judges it without waiting for an
+// observation of it: a group of one has no cross-member path. The custom role took its command
+// line over, so the operator knows no route to ask about it and never will.
+func mixedRouterCandidateDeployment() *workercore.ModelDeployment {
+	ports := []workercore.ModelDeploymentPort{{Port: 8000, Protocol: core.ProtocolTCP}}
+
+	return newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.KVCache = nil
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		md.Spec.Roles[0].Name = "managed"
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 1
+		md.Spec.Roles[0].Ports = ports
+		md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+			Name:         "custom",
+			Replicas:     1,
+			ReplicaSize:  2,
+			InstanceType: "h20-8x",
+			Image:        "vllm/vllm-openai:v0.25.1",
+			Command:      []string{"python3", "-m", "vllm.entrypoints.openai.api_server"},
+			Ports:        ports,
+		})
+	})
+}
+
+// legacyBroadDiscoverySelector is the discovery selector a deployment published before the
+// eligibility term reached it: the leader of every replica, whatever its eligibility.
+//
+// IT IS BUILT FROM THE LABEL KEYS THE RENDER USES, so it names what the render names, and it
+// differs from the render only in the terms the marker replaced.
+func legacyBroadDiscoverySelector(md *workercore.ModelDeployment) string {
+	return strings.Join([]string{
+		modelDeploymentLabelKeyName + "=" + modelDeploymentLabelValueName,
+		modelDeploymentLabelKeyInstance + "=" + md.Name,
+		modelDeploymentMemberIndexLabel + "=0",
+		"!" + modelDeploymentRouterLabelKey,
+	}, ",")
+}
+
+// routerConfigWriteIntercept watches the Router's configuration write.
+//
+// IT RECORDS THE STANDING MEMBERS' LABELS AS THEY STOOD AT THE MOMENT OF THE WRITE, because that
+// moment is the only place the order between the label write and the configuration publish is
+// visible from the inside: a pass that published the configuration before the labels reached this
+// point with the members unmarked.
+//
+// IT REFUSES THE WRITE WHILE IT IS ARMED, so the published configuration stays where it was.
+type routerConfigWriteIntercept struct {
+	armed bool
+	err   error
+	// attempts holds one entry per intercepted write, in the order the writes were issued.
+	attempts []routerConfigWriteAttempt
+}
+
+// routerConfigWriteAttempt is one intercepted write: the selector it published and the labels the
+// standing members carried when it was issued.
+type routerConfigWriteAttempt struct {
+	selector string
+	members  map[string]map[string]string
+}
+
+// routerConfigWriteInterceptor records and refuses the writes of the Router's configuration.
+//
+// ONLY THE CONFIGMAP OF THE ROUTER IS WATCHED, and only by name: the reconciler writes other
+// objects in the same pass, and a control that watched the wrong write would be proving nothing
+// about the order between the labels and the configuration.
+func routerConfigWriteInterceptor(
+	intercept *routerConfigWriteIntercept, routerName string,
+) ctrlinterceptor.Funcs {
+	watch := func(ctx context.Context, next ctrlcli.WithWatch, obj ctrlcli.Object) error {
+		cm, ok := obj.(*core.ConfigMap)
+		if !ok || cm.Name != routerName {
+			return nil
+		}
+		intercept.attempts = append(intercept.attempts, routerConfigWriteAttempt{
+			selector: cm.Data[modelDeploymentRouterSelectorKey],
+			members:  routerStandingMemberLabels(ctx, next, cm.Namespace),
+		})
+		if intercept.armed {
+			return intercept.err
+		}
+
+		return nil
+	}
+
+	return ctrlinterceptor.Funcs{
+		Create: func(ctx context.Context, next ctrlcli.WithWatch, obj ctrlcli.Object,
+			opts ...ctrlcli.CreateOption,
+		) error {
+			if err := watch(ctx, next, obj); err != nil {
+				return err
+			}
+
+			return next.Create(ctx, obj, opts...)
+		},
+		Update: func(ctx context.Context, next ctrlcli.WithWatch, obj ctrlcli.Object,
+			opts ...ctrlcli.UpdateOption,
+		) error {
+			if err := watch(ctx, next, obj); err != nil {
+				return err
+			}
+
+			return next.Update(ctx, obj, opts...)
+		},
+	}
+}
+
+// routerStandingMemberLabels reads the labels the deployment's own members carried.
+//
+// THE ROUTER'S OWN PROCESS IS NOT A MEMBER: it is owned by the workload Deployment and not by the
+// deployment, so it never enters a group's membership.
+func routerStandingMemberLabels(
+	ctx context.Context, next ctrlcli.WithWatch, namespace string,
+) map[string]map[string]string {
+	list := new(core.PodList)
+	if err := next.List(ctx, list, ctrlcli.InNamespace(namespace)); err != nil {
+		return nil
+	}
+	members := map[string]map[string]string{}
+	for i := range list.Items {
+		pod := &list.Items[i]
+		if pod.Labels[modelDeploymentLabelKeyName] != modelDeploymentLabelValueName {
+			continue
+		}
+		if _, router := pod.Labels[modelDeploymentRouterLabelKey]; router {
+			continue
+		}
+		members[pod.Name] = maps.Clone(pod.Labels)
+	}
+
+	return members
+}
+
+// TestModelDeploymentRouterCandidate_TheLabelsAreCommittedBeforeTheConfigurationIsPublished
+// measures the order between the two writes from the inside of one pass.
+//
+// THE CONFIGURATION NAMES THE CANDIDATES, and the members carry the marker only once the pass has
+// written it. A configuration published before that write would name candidates nobody carries, and
+// the deployment would be discovered by nothing until the next pass.
+//
+// SO THE ORDER IS OBSERVED AT THE WRITE ITSELF. The intercept reads the standing members as they
+// stood when the configuration was published, and the pass under test is the one that publishes it:
+// a pass that published the configuration first would reach the intercept with the member it
+// restored still unmarked, and this control fails there. An agreement between the published
+// configuration and the labels would not catch it, because the published configuration is the same
+// either way.
+//
+// THE REFUSED WRITE IS NOT A CRASH. What the failure shows is that a refused configuration write
+// leaves the published configuration alone while the labels stay committed, and that the retry
+// publishes a discovery that admits exactly the members the pass marked. A crash of the process
+// between the two writes is a different claim, and no unit control observes it.
+func TestModelDeploymentRouterCandidate_TheLabelsAreCommittedBeforeTheConfigurationIsPublished(t *testing.T) {
+	md := mixedRouterCandidateDeployment()
+	base := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+
+	// THE SEED PASS: the members stand and the Router's own objects exist.
+	_, err := reconcileModelDeploymentActivated(t, base)
+	require.NoError(t, err)
+
+	// THE CONFIGURATION AS A PASS BEFORE THE MARKER PUBLISHED IT: the broad discovery selector,
+	// which names the leader of every replica whatever its eligibility. The document is the
+	// render's own, so the only difference between the seeded configuration and the one the pass
+	// under test publishes is the discovery selector the marker replaced.
+	published := new(core.ConfigMap)
+	require.NoError(t, base.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}, published))
+	published.Data[modelDeploymentRouterSelectorKey] = legacyBroadDiscoverySelector(md)
+	require.NoError(t, base.Update(context.Background(), published))
+	seeded := maps.Clone(published.Data)
+
+	// THE MEMBERS ARE READY, so the qualification may restore the managed one on the pass under
+	// test.
+	setEndpointEligibilityPodsReady(t, base, true)
+
+	intercept := &routerConfigWriteIntercept{
+		err: errors.New("the router configuration write was refused"),
+	}
+	cli := ctrlinterceptor.NewClient(base.(ctrlcli.WithWatch),
+		routerConfigWriteInterceptor(intercept, md.Name+"-router"))
+
+	// THE PASS UNDER TEST, WITH THE CONFIGURATION WRITE REFUSED.
+	intercept.armed = true
+	_, err = reconcileModelDeploymentActivated(t, cli)
+	require.Error(t, err, "the refused write is what the pass reports")
+	assert.ErrorIs(t, err, intercept.err)
+
+	// THE ORDER, OBSERVED AT THE WRITE.
+	require.Len(t, intercept.attempts, 1, "the pass issued one configuration write")
+	attempt := intercept.attempts[0]
+	assert.Contains(t, attempt.selector, modelDeploymentRouterCandidateLabel+"=",
+		"the configuration being published names the candidates")
+	managed := ""
+	for name, carried := range attempt.members {
+		if carried[modelDeploymentLabelKeyComponent] == "managed" {
+			managed = name
+		}
+	}
+	require.NotEmpty(t, managed, "the managed member stood at the write")
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		attempt.members[managed][modelDeploymentRouterCandidateLabel],
+		"the member the pass restored was already a routing candidate when the configuration was published")
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		attempt.members[managed][modelDeploymentLabelKeyEndpointEligible],
+		"and it was already eligible, so the labels were committed before the configuration was published")
+
+	// THE REFUSED WRITE LEFT THE PUBLISHED CONFIGURATION ALONE.
+	held := new(core.ConfigMap)
+	require.NoError(t, base.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}, held))
+	assert.Equal(t, seeded, held.Data,
+		"the configuration the refused write would have published is not published")
+
+	// THE RETRY: the write is allowed, and the published discovery must admit exactly the members
+	// the pass marked.
+	intercept.armed = false
+	_, err = reconcileModelDeploymentActivated(t, cli)
+	require.NoError(t, err)
+
+	retry := new(core.ConfigMap)
+	require.NoError(t, base.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}, retry))
+	assert.NotEqual(t, seeded[modelDeploymentRouterSelectorKey], retry.Data[modelDeploymentRouterSelectorKey],
+		"the retry published the marker-backed discovery selector")
+	assert.Equal(t, seeded[modelDeploymentRouterConfigKey], retry.Data[modelDeploymentRouterConfigKey],
+		"and nothing else about the configuration moved")
+
+	// THE PUBLISHED DISCOVERY, PARSED, AGAINST THE LABELS THE TREE HOLDS.
+	discovery, err := labels.Parse(retry.Data[modelDeploymentRouterSelectorKey])
+	require.NoError(t, err)
+	live := routerStandingMemberLabels(context.Background(), base.(ctrlcli.WithWatch), md.Namespace)
+	var admitted, refused, candidates []string
+	for name, carried := range live {
+		if carried[modelDeploymentRouterCandidateLabel] == modelDeploymentEndpointEligibleValue {
+			candidates = append(candidates, name)
+		}
+		if discovery.Matches(labels.Set(carried)) {
+			admitted = append(admitted, name)
+		} else {
+			refused = append(refused, name)
+		}
+	}
+	slices.Sort(admitted)
+	slices.Sort(refused)
+	slices.Sort(candidates)
+
+	assert.Equal(t, candidates, admitted,
+		"the published discovery admits exactly the members the pass marked")
+	assert.Len(t, candidates, 2, "the restored member and the compatibility leader are the candidates")
+	assert.Len(t, refused, 1, "the follower that answers nothing stays out")
 }

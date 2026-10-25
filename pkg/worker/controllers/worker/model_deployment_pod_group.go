@@ -108,6 +108,14 @@ const (
 	// modelDeploymentAPIAnsweringValue is the only value the answering key carries, for the same
 	// reason the eligibility key has one.
 	modelDeploymentAPIAnsweringValue = "true"
+
+	// modelDeploymentTrueValue is the spelling a boolean takes in this package: in the
+	// annotations the reconciler writes and in the environments the operator reads.
+	//
+	// IT IS NAMED ONCE BECAUSE THE SPELLING IS ONE THING, and the package reads it in more
+	// than one place: a comparison that spelled it out again would be a second answer to what
+	// "true" means here, and the two could drift apart.
+	modelDeploymentTrueValue = "true"
 )
 
 // ModelDeploymentPodGroupMeta is the Kueue group metadata one replica's Pod carries.
@@ -329,7 +337,9 @@ func modelDeploymentMembersExternalDP(members []*core.Pod, engine string) (exter
 		if err != nil {
 			continue
 		}
-		shape, _ := modelDeploymentLoadBalance(reading.declared)
+		shape, _ := modelDeploymentLoadBalance(engine,
+			modelDeploymentRoleKindFromUpstream(member.Labels[modelDeploymentLabelKeyRoleKind]),
+			modelDeploymentDeclaredEnv(container.Env), reading.declared)
 
 		return shape != workercore.ModelDeploymentLoadBalanceInternal &&
 			shape != workercore.ModelDeploymentLoadBalanceUnknown, true

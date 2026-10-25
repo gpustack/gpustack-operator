@@ -972,6 +972,7 @@ func validateModelDeployment(
 	errs = append(errs, validateModelDeploymentRoleKinds(md)...)
 	errs = append(errs, validateModelDeploymentRoleTopology(md)...)
 	errs = append(errs, validateModelDeploymentRouter(md)...)
+	errs = append(errs, validateModelDeploymentExternalDPRouter(md)...)
 
 	return errs
 }
@@ -2077,6 +2078,93 @@ func validateModelDeploymentRoleLoadBalance(
 			"MultiPort load balancing is unsupported; managed roles require one HTTP endpoint per Pod")}
 	}
 	return nil
+}
+
+// validateModelDeploymentExternalDPRouter refuses a role whose external data parallelism has no
+// Router to supervise it.
+//
+// THE REFUSAL NAMES SUPERVISION, NOT REACHABILITY. A member Pod is reachable by its Pod IP whatever
+// the Router does, so saying the endpoints are only addressable through a Router overstates what
+// Pod networking enforces. What the Router provides is the supervision the group failure and
+// recovery barrier needs: the operator withdraws a group's members from the Router's selection
+// when the group is not healthy, and the Router's view of that selection is what tells a reader
+// whether the group is really being served.
+//
+// THE SHAPE COMES FROM THE PARALLELISM PARSER, which is the source of truth for what a role
+// declares. Unknown and MultiPort are left to the rule above, which already refuses them: a defect
+// another rule owns is not refused twice.
+func validateModelDeploymentExternalDPRouter(md *workercore.ModelDeployment) field.ErrorList {
+	if md.Spec.Router != nil {
+		return nil
+	}
+
+	// Offenders are collected rather than returned at the first, so one apply names every role
+	// the user has to fix instead of surfacing them one refusal at a time.
+	offenders := make([]string, 0)
+
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		// THIS RULE'S OWN TAKE-OVER SKIP. A role that replaced its command line has no managed
+		// shape: the operator wrote the whole line, so the degree the engine would run is the
+		// operator's own and not the one the managed flags declare. The status reads no shape for
+		// such a role either, so a rule about a managed shape has nothing to say about it.
+		if modelDeploymentRoleOwnsItsCommandLine(role) {
+			continue
+		}
+		status := workerctrl.ReadModelDeploymentRoleParallelism(md.Spec.Engine.Name, role)
+		// THIS RULE'S OWN SOURCE SKIP. The reading must have come from the role's own extra
+		// arguments, because those are the only ones this operator rendered. A reading from
+		// anywhere else describes an argv the operator did not write, and an unreadable stream is
+		// the degree parser's refusal rather than this rule's.
+		if !modelDeploymentRoleShapeCameFromExtraArgs(status) {
+			continue
+		}
+		if status.LoadBalance != workercore.ModelDeploymentLoadBalanceExternal &&
+			status.LoadBalance != workercore.ModelDeploymentLoadBalanceHybrid {
+			continue
+		}
+
+		offenders = append(offenders, fmt.Sprintf("%q", role.Name))
+	}
+
+	if len(offenders) == 0 {
+		return nil
+	}
+
+	subject, verb := "the role", "declares"
+	if len(offenders) > 1 {
+		subject, verb = "the roles", "declare"
+	}
+
+	return field.ErrorList{field.Required(
+		field.NewPath("spec", "router"),
+		fmt.Sprintf("RouterRequired: %s %s %s external data parallelism, whose groups "+
+			"are served through a Router and need it to supervise them; declare one under spec.router",
+			subject, strings.Join(offenders, ", "), verb),
+	)}
+}
+
+// modelDeploymentRoleOwnsItsCommandLine reports whether the operator replaced the role's command
+// line.
+//
+// A ROLE THAT REPLACED ITS LINE HAS NO MANAGED SHAPE: the operator wrote the whole line, so the
+// degree the engine would run is the operator's own and not the one the managed flags declare. The
+// status reads no shape for such a role either, so a rule about a managed shape has nothing to say
+// about it.
+func modelDeploymentRoleOwnsItsCommandLine(role *workercore.ModelDeploymentRole) bool {
+	return len(role.Command) > 0
+}
+
+// modelDeploymentRoleShapeCameFromExtraArgs reports whether the reading of the role's parallelism
+// came from the role's own extra arguments.
+//
+// A READING FROM ANYWHERE ELSE IS NOT THIS RULE'S TO READ: the degrees the engine would run are
+// then the operator's own, and an unreadable stream is the degree parser's refusal rather than
+// this rule's.
+func modelDeploymentRoleShapeCameFromExtraArgs(
+	status workercore.ModelDeploymentRoleParallelismStatus,
+) bool {
+	return status.Source.Kind == workercore.ModelDeploymentParallelismSourceKindExtraArgs
 }
 
 // validateModelDeploymentRoleParallelWidth is the first check that ever ties a role's declared

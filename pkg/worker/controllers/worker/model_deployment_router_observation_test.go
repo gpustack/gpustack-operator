@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,9 +22,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	ctrlrecord "k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
@@ -105,7 +108,942 @@ func observationLivePod(name, ip string, uid types.UID, running bool) *corev1.Po
 	return pod
 }
 
-// TestParseRouterObservationView pins the schema-strict parse: a payload the observer
+// seedRouterProcess gives a deployment a Router process whose live controlling chain the
+// collection can verify.
+//
+// THE ROUTER DEPLOYMENT IS THE ONE THE RECONCILE ALREADY RENDERED, because the chain is built
+// around that object rather than around a second Deployment of the same name: the collection
+// verifies every hop live, and a Deployment of the same name under another identity is a process
+// it cannot place.
+func seedRouterProcess(
+	t *testing.T, cli ctrlcli.Client, md *workercore.ModelDeployment, name, ip string,
+) {
+	t.Helper()
+
+	routerDeployment := new(appsv1.Deployment)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name + "-router"}, routerDeployment))
+	controller := true
+	replicaSet := &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name + "-rs", Namespace: md.Namespace, UID: types.UID("rs-uid-" + name),
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: appsv1.SchemeGroupVersion.String(), Kind: "Deployment",
+				Name: routerDeployment.Name, UID: routerDeployment.UID, Controller: &controller,
+			}},
+		},
+	}
+	routerPod := retirementRouterPod(name, ip)
+	routerPod.OwnerReferences = []metav1.OwnerReference{{
+		APIVersion: appsv1.SchemeGroupVersion.String(), Kind: "ReplicaSet",
+		Name: replicaSet.Name, UID: replicaSet.UID, Controller: &controller,
+	}}
+	require.NoError(t, cli.Create(context.Background(), replicaSet))
+	require.NoError(t, cli.Create(context.Background(), routerPod))
+}
+
+// TestTheRealCollectorDrivesTheRestoreAcrossAnEmptyAndAPopulatedRegistry drives the real collector
+// and the real label writer over one group.
+//
+// A COHERENT EMPTY REGISTRY IS NOT A FAULT. The Router says it is not serving this group, which is
+// a fact about the Router and not a verdict on the group, and it must not block a restore: a
+// deployment whose Router has not registered its worker yet would otherwise never come up.
+//
+// THE POPULATED REGISTRY IS THE SAME GROUP SEEN AGAIN, and it restores what the carried label alone
+// could not prove: the member's eligibility generation annotation is removed by hand before that
+// pass, so the group is no longer retained, and the populated registry is what puts the annotation
+// back.
+//
+// BOTH FACTS ARE READ BY THE PRODUCTION COLLECTOR, so a case that built the answer by hand would be
+// proving the shape of an answer rather than the collection of it.
+func TestTheRealCollectorDrivesTheRestoreAcrossAnEmptyAndAPopulatedRegistry(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	// THE MEMBERS ARRIVE OVER PASSES, because a group is composed and its members admitted one at a
+	// time. A case that wanted one member would not notice, and the retention rules differ between
+	// a leader-only group and a collective one.
+	endpointEligibilityTestSeed(t, cli, md)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	require.Len(t, replicaPods(t, cli), 2)
+
+	// THE ROUTER IS DECLARED AFTER THE GROUP IS STANDING, so the Router's own objects are rendered
+	// by a real pass and the process below has a rendered Deployment to be owned by. The stored
+	// object is read first, because the passes above moved it.
+	stored := new(workercore.ModelDeployment)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name}, stored))
+	stored.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	require.NoError(t, cli.Update(context.Background(), stored))
+	md.Spec.Router = stored.Spec.Router
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	// THE KNOWN STARTING STATE: THE GROUP CARRIES NO ELIGIBILITY, so a label written below was
+	// written by the pass under test.
+	setEndpointEligibilityLabelOnPods(t, cli, false)
+
+	// THE ROUTER PROCESS AND ITS CHAIN, because the collection verifies every hop of it through the
+	// uncached reader before it reads a byte, and holds a process it cannot place.
+	seedRouterProcess(t, cli, md, "router-zero", "10.0.9.1")
+
+	// THE DEPLOYMENT'S OWN PODS. The Router process is discovered by the collection but is not one
+	// of them: it is owned by the workload Deployment, not by the deployment, so it never enters a
+	// group's membership.
+	members := func() []*corev1.Pod {
+		live := replicaPods(t, cli)
+		owned := make([]*corev1.Pod, 0, len(live))
+		for i := range live {
+			owned = append(owned, &live[i])
+		}
+
+		return owned
+	}
+
+	// THE MEMBERS' ADDRESSES, because the collection binds an observed worker to the Pod its address
+	// resolves to, and refuses a view it cannot bind.
+	for i, pod := range members() {
+		pod.Status.PodIP = "10.0.0." + strconv.Itoa(1+i)
+		pod.Status.Phase = corev1.PodRunning
+		require.NoError(t, cli.Status().Update(context.Background(), pod))
+	}
+
+	now := time.Now()
+	serving := []string{}
+	r := &ModelDeploymentReconciler{
+		Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock: func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			live := members()
+			values := make([]corev1.Pod, 0, len(live))
+			for _, pod := range live {
+				values = append(values, *pod)
+			}
+
+			return retirementRouterView(serving, values), nil
+		},
+	}
+
+	pods := members()
+	require.Len(t, pods, 2)
+	uids := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		uids = append(uids, string(pod.UID))
+	}
+	slices.Sort(uids)
+	generation := modelDeploymentMembershipGeneration(strings.Join(uids, "/"))
+	key := modelDeploymentGroupKey{Role: "server", Ordinal: 0, Generation: generation}
+
+	write := func(observation modelDeploymentPassObservation) {
+		t.Helper()
+
+		live := members()
+		qualification := modelDeploymentTestQualification(live, generation, false)
+		byMember := make(map[types.UID]modelDeploymentInstanceQualification, len(live))
+		actual := make([]corev1.Pod, 0, len(live))
+		for _, pod := range live {
+			byMember[pod.UID] = qualification
+			actual = append(actual, *pod)
+		}
+		require.NoError(t, r.convergeModelDeploymentEndpointEligibility(
+			context.Background(), md, actual, byMember, nil, observation))
+	}
+	leaderOf := func() *corev1.Pod {
+		t.Helper()
+
+		for _, pod := range members() {
+			if pod.Labels[modelDeploymentMemberIndexLabel] == "0" {
+				return pod
+			}
+		}
+
+		return nil
+	}
+
+	// THE FIRST COLLECTION: THE REGISTRY IS EMPTY, AND THAT IS A FACT ABOUT THE ROUTER.
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), md),
+	}
+	fact, observed := observation.Serving.Groups[key]
+	require.True(t, observed, "the collector read the group")
+	assert.True(t, fact.SnapshotValid, "a coherent zero is not a fault")
+	assert.Equal(t, workercore.ModelDeploymentServingStateConfirmed, fact.State, fact.InvalidReason)
+	assert.EqualValues(t, 0, fact.Endpoints, "the router holds none of the group's endpoints")
+
+	write(observation)
+
+	// THE COHERENT ZERO RESTORED THE GROUP.
+	leader := leaderOf()
+	require.NotNil(t, leader)
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		leader.Labels[modelDeploymentLabelKeyEndpointEligible],
+		"a coherent empty registry does not block a restore")
+	assert.Equal(t, string(generation),
+		leader.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration],
+		"the restored member names the generation the label belongs to")
+
+	// THE SECOND COLLECTION: THE SAME GROUP, POPULATED. The member's annotation is removed first, so
+	// the group is no longer retained and the populated registry is what restores it.
+	delete(leader.Annotations, modelDeploymentAnnotationKeyEndpointEligibleGeneration)
+	require.NoError(t, cli.Update(context.Background(), leader))
+	serving = []string{string(leader.UID)}
+	observation = modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), md),
+	}
+	fact, observed = observation.Serving.Groups[key]
+	require.True(t, observed)
+	assert.True(t, fact.SnapshotValid, "the router holds the group's whole answering set")
+	assert.Equal(t, workercore.ModelDeploymentServingStateConfirmed, fact.State, fact.InvalidReason)
+	assert.EqualValues(t, 1, fact.Endpoints, "the router holds the group's one expected endpoint")
+	assert.False(t, fact.Retained, "the annotation is gone, so the group is no longer retained")
+
+	write(observation)
+
+	leader = leaderOf()
+	require.NotNil(t, leader)
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		leader.Labels[modelDeploymentLabelKeyEndpointEligible],
+		"a populated registry keeps the group restored")
+	assert.Equal(t, string(generation),
+		leader.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration],
+		"the populated registry restores the annotation the carried label could not prove")
+}
+
+// routerListFailureClient refuses to list the Router processes, so the collection loses the
+// Router's side of the answer while the deployment's own membership is still read fresh.
+//
+// IT FAILS ONLY THE ROUTER LISTING. The membership listing is left alone, so the case has the
+// fresh members the retention rests on.
+type routerListFailureClient struct {
+	ctrlcli.Reader
+}
+
+func (c *routerListFailureClient) List(
+	ctx context.Context, list ctrlcli.ObjectList, opts ...ctrlcli.ListOption,
+) error {
+	if modelDeploymentListSelectsRouters(opts) {
+		return fmt.Errorf("the router's pods could not be listed: the apiserver refused")
+	}
+
+	return c.Reader.List(ctx, list, opts...)
+}
+
+// memberListFailureClient refuses to list the deployment's own members, so the collection has no
+// fresh membership to judge a group on.
+//
+// IT FAILS ONLY THE MEMBERSHIP LISTING. The Router listing is left alone, so the case fails
+// exactly where the evidence the retention rests on is missing.
+type memberListFailureClient struct {
+	ctrlcli.Reader
+}
+
+func (c *memberListFailureClient) List(
+	ctx context.Context, list ctrlcli.ObjectList, opts ...ctrlcli.ListOption,
+) error {
+	if !modelDeploymentListSelectsRouters(opts) {
+		return fmt.Errorf("the deployment's pods could not be listed uncached: the apiserver refused")
+	}
+
+	return c.Reader.List(ctx, list, opts...)
+}
+
+// modelDeploymentListSelectsRouters reports whether a listing is the collection's Router listing.
+//
+// THE ROUTER LISTING IS THE ONE THAT REQUIRES THE ROUTER LABEL, and every other listing in the
+// collection asks for the deployment's own members by their identity labels alone.
+func modelDeploymentListSelectsRouters(opts []ctrlcli.ListOption) bool {
+	options := &ctrlcli.ListOptions{}
+	for _, opt := range opts {
+		opt.ApplyToList(options)
+	}
+
+	_, requiresRouter := options.LabelSelector.RequiresExactMatch(modelDeploymentRouterLabelKey)
+
+	return requiresRouter
+}
+
+// nthListFailureClient refuses the Nth Pod listing of one kind, so a case can arrange that an
+// earlier read succeeded and a later one failed.
+//
+// THE COUNT IS OVER THE POD LISTINGS OF ONE KIND, because the collection lists the deployment's
+// members twice and the Router processes three times. The first member listing is the collection's
+// own fresh read and the second is the closing bookend's; the first Router listing is the opening
+// bookend's, the second is the collection's own, and the third is the closing bookend's.
+//
+// A CLIENT THAT REFUSED EVERY LISTING OF ITS KIND COULD NOT EXPRESS THE CASES THAT MATTER HERE,
+// because the closing bookend is the one that has to fail after the evidence was already read.
+type nthListFailureClient struct {
+	ctrlcli.Reader
+	routers bool
+	failAt  int
+	seen    int
+}
+
+func (c *nthListFailureClient) List(
+	ctx context.Context, list ctrlcli.ObjectList, opts ...ctrlcli.ListOption,
+) error {
+	if _, isPod := list.(*corev1.PodList); !isPod {
+		return c.Reader.List(ctx, list, opts...)
+	}
+	if modelDeploymentListSelectsRouters(opts) != c.routers {
+		return c.Reader.List(ctx, list, opts...)
+	}
+	c.seen++
+	if c.seen == c.failAt {
+		return fmt.Errorf("the apiserver refused the listing")
+	}
+
+	return c.Reader.List(ctx, list, opts...)
+}
+
+// unreadyMemberClient reports one member as not ready on the uncached read, while the caller's
+// cached copy of the same Pod still says ready.
+//
+// THE TWO READS DISAGREE ON PURPOSE. The readiness the qualification reads is the caller's, and
+// the readiness the retention is proved by is the fresh one, so a case that wants the fresh word to
+// dominate has to make the two disagree.
+type unreadyMemberClient struct {
+	ctrlcli.Reader
+	uid types.UID
+}
+
+func (c *unreadyMemberClient) List(
+	ctx context.Context, list ctrlcli.ObjectList, opts ...ctrlcli.ListOption,
+) error {
+	if err := c.Reader.List(ctx, list, opts...); err != nil {
+		return err
+	}
+	pods, isPod := list.(*corev1.PodList)
+	if !isPod {
+		return nil
+	}
+	for i := range pods.Items {
+		if pods.Items[i].UID != c.uid {
+			continue
+		}
+		pods.Items[i].Status.Conditions = []corev1.PodCondition{
+			{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+		}
+	}
+
+	return nil
+}
+
+// qualifiedGroupFixture builds a deployment whose single group is already qualified at its current
+// membership generation, with the Router it would be served through.
+//
+// THE GROUP IS QUALIFIED BY HAND, because the subject of every case here is what a collection that
+// failed does to a group that was already qualified, and a group the operator qualified on its own
+// is the only honest starting point for that.
+type qualifiedGroupFixture struct {
+	md         *workercore.ModelDeployment
+	cli        ctrlcli.Client
+	generation modelDeploymentMembershipGeneration
+	key        modelDeploymentGroupKey
+	members    []*corev1.Pod
+}
+
+func newQualifiedGroupFixture(t *testing.T) qualifiedGroupFixture {
+	t.Helper()
+
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	require.Len(t, replicaPods(t, cli), 2)
+
+	// THE ROUTER IS DECLARED AND RENDERED, so the collection has a process it would read.
+	stored := new(workercore.ModelDeployment)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name}, stored))
+	stored.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	require.NoError(t, cli.Update(context.Background(), stored))
+	md.Spec.Router = stored.Spec.Router
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	seedRouterProcess(t, cli, md, "router-zero", "10.0.9.1")
+
+	members := func() []*corev1.Pod {
+		live := replicaPods(t, cli)
+		owned := make([]*corev1.Pod, 0, len(live))
+		for i := range live {
+			owned = append(owned, &live[i])
+		}
+
+		return owned
+	}
+	for i, pod := range members() {
+		pod.Status.PodIP = "10.0.0." + strconv.Itoa(1+i)
+		pod.Status.Phase = corev1.PodRunning
+		require.NoError(t, cli.Status().Update(context.Background(), pod))
+	}
+
+	live := members()
+	require.Len(t, live, 2)
+	uids := make([]string, 0, len(live))
+	for _, pod := range live {
+		uids = append(uids, string(pod.UID))
+	}
+	slices.Sort(uids)
+	generation := modelDeploymentMembershipGeneration(strings.Join(uids, "/"))
+
+	var leader *corev1.Pod
+	for _, pod := range live {
+		if pod.Labels[modelDeploymentMemberIndexLabel] == "0" {
+			leader = pod
+		}
+	}
+	require.NotNil(t, leader, "the group has a leader")
+	leader.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+	leader.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = string(generation)
+	require.NoError(t, cli.Update(context.Background(), leader))
+
+	return qualifiedGroupFixture{
+		md:         md,
+		cli:        cli,
+		generation: generation,
+		key:        modelDeploymentGroupKey{Role: "server", Ordinal: 0, Generation: generation},
+		members:    live,
+	}
+}
+
+// leaderName reads the name of the group's leader, which is the member a case has to make unready
+// when it wants the fresh readiness to contradict the cached one.
+func (f qualifiedGroupFixture) leaderName(t *testing.T) string {
+	t.Helper()
+
+	for _, pod := range f.members {
+		if pod.Labels[modelDeploymentMemberIndexLabel] == "0" {
+			return pod.Name
+		}
+	}
+
+	t.Fatal("the group has no leader")
+
+	return ""
+}
+
+// write runs the eligibility write the way the reconciler runs it, with the group's members
+// qualified and the observation the collection produced.
+func (f qualifiedGroupFixture) write(
+	t *testing.T, r *ModelDeploymentReconciler, observation modelDeploymentPassObservation,
+) {
+	t.Helper()
+
+	qualification := modelDeploymentTestQualification(f.members, f.generation, false)
+	byMember := make(map[types.UID]modelDeploymentInstanceQualification, len(f.members))
+	actual := make([]corev1.Pod, 0, len(f.members))
+	for _, pod := range f.members {
+		byMember[pod.UID] = qualification
+		actual = append(actual, *pod)
+	}
+	require.NoError(t, r.convergeModelDeploymentEndpointEligibility(
+		context.Background(), f.md, actual, byMember, nil, observation))
+}
+
+// leaderLabel reads the eligibility key off the group's leader.
+func (f qualifiedGroupFixture) leaderLabel(t *testing.T) string {
+	t.Helper()
+
+	for _, pod := range replicaPods(t, f.cli) {
+		if pod.Labels[modelDeploymentMemberIndexLabel] == "0" {
+			return pod.Labels[modelDeploymentLabelKeyEndpointEligible]
+		}
+	}
+
+	return ""
+}
+
+// leaderUID reads the UID of the group's leader, which is the member a case has to make unready
+// when it wants the fresh readiness to contradict the cached one.
+func (f qualifiedGroupFixture) leaderUID(t *testing.T) types.UID {
+	t.Helper()
+
+	for _, pod := range replicaPods(t, f.cli) {
+		if pod.Labels[modelDeploymentMemberIndexLabel] == "0" {
+			return pod.UID
+		}
+	}
+
+	t.Fatal("the group has no leader")
+
+	return ""
+}
+
+// TestACollectionThatCannotListTheRoutersKeepsTheFreshlyQualifiedGroup pins the retention the
+// spec promises, at the collector rather than at the decision that reads the collector's answer.
+//
+// A COLLECTION THAT LOSES THE ROUTER HAS NOT LOST THE GROUP. The group's members were read fresh
+// before the collection failed, every one of them carries the eligibility label, and the
+// eligibility annotation on them names the group's current complete membership generation: this
+// is the group that was qualified, and the loss is the Router's.
+//
+// THE ANSWER STILL CARRIES THE GROUP'S FACT, and the fact is what holds the group open. An answer
+// that carries no fact at all knows nothing, and nothing holds a group.
+func TestACollectionThatCannotListTheRoutersKeepsTheFreshlyQualifiedGroup(t *testing.T) {
+	fixture := newQualifiedGroupFixture(t)
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		Client: fixture.cli, APIReader: &routerListFailureClient{Reader: fixture.cli},
+		Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock:    func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), fixture.md),
+	}
+	fact, observed := observation.Serving.Groups[fixture.key]
+	require.True(t, observed,
+		"the collection lost the Router, not the group: the members were read fresh")
+	assert.False(t, fact.SnapshotValid, "no view was read, so the snapshot is not valid")
+	assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, fact.State, fact.InvalidReason)
+	assert.True(t, fact.Retained,
+		"every member carries the label and the annotation names the current generation")
+	assert.EqualValues(t, 0, fact.Endpoints, "a lost view confirms no endpoint count")
+
+	// THE WRITE KEEPS THE KEY. The group was qualified before the loss and nothing has been found
+	// wrong with it since, so the key is left exactly as it was.
+	fixture.write(t, r, observation)
+	assert.Equal(t, modelDeploymentEndpointEligibleValue, fixture.leaderLabel(t),
+		"a group that was already qualified keeps its eligibility while the collection is lost")
+}
+
+// TestACollectionThatCannotListTheMembersClosesTheGroup pins the other half of the rule: a
+// collection that cannot read the deployment's own members has no evidence about the group at all.
+//
+// IT IS NOT AN OBSERVATION LOSS. Nothing was observed and nothing is known to have changed, and
+// the difference matters: a group that is merely unobserved keeps what it had, while a group this
+// operator cannot place is closed until a collection can place it.
+func TestACollectionThatCannotListTheMembersClosesTheGroup(t *testing.T) {
+	fixture := newQualifiedGroupFixture(t)
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		Client: fixture.cli, APIReader: &memberListFailureClient{Reader: fixture.cli},
+		Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock:    func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), fixture.md),
+	}
+	_, observed := observation.Serving.Groups[fixture.key]
+	assert.False(t, observed,
+		"a collection with no fresh membership knows nothing about the group, and a fact is what "+
+			"holds a group open")
+
+	fixture.write(t, r, observation)
+	assert.Empty(t, fixture.leaderLabel(t),
+		"a group this operator cannot place is closed until a collection can place it")
+}
+
+// TestACollectionThatProvesTheMembershipMovedClosesTheGroup is the control for the retention: a
+// collection that PROVES the group moved closes it, because a group that is no longer the group
+// that was qualified must not keep its eligibility.
+//
+// THE PROOF IS A CHANGE UNDER THE COLLECTION, made from inside the fetch, because that is the
+// window the guard exists to close. The members are read fresh, so the freshness alone proves
+// nothing: what closes the group is that the membership the guard bookends is not the membership
+// the group was qualified under.
+func TestACollectionThatProvesTheMembershipMovedClosesTheGroup(t *testing.T) {
+	fixture := newQualifiedGroupFixture(t)
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		Client: fixture.cli, APIReader: fixture.cli, Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock: func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			// THE MEMBERSHIP MOVES UNDER THE COLLECTION: a member leaves while the views are read.
+			// The follower goes, so the group keeps its leader and loses a member.
+			for _, pod := range fixture.members {
+				if pod.Labels[modelDeploymentMemberIndexLabel] == "0" {
+					continue
+				}
+				err := fixture.cli.Delete(context.Background(), &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
+				})
+				if err != nil && !apierrors.IsNotFound(err) {
+					return nil, err
+				}
+			}
+
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), fixture.md),
+	}
+	fact, observed := observation.Serving.Groups[fixture.key]
+	if observed {
+		assert.False(t, fact.Retained,
+			"a group whose membership moved is not the group that was qualified")
+	}
+
+	fixture.write(t, r, observation)
+	assert.Empty(t, fixture.leaderLabel(t),
+		"a group whose membership moved is withdrawn rather than kept on the old generation")
+}
+
+// TestACollectionThatProvesTheDeploymentMovedClosesTheGroup is the second control: a collection
+// that proves the deployment itself moved closes the group, because the eligibility rule derives
+// from the deployment's own spec.
+func TestACollectionThatProvesTheDeploymentMovedClosesTheGroup(t *testing.T) {
+	fixture := newQualifiedGroupFixture(t)
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		Client: fixture.cli, APIReader: fixture.cli, Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock: func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			// THE DEPLOYMENT MOVES UNDER THE COLLECTION: its generation changes while the views
+			// are read.
+			live := new(workercore.ModelDeployment)
+			require.NoError(t, fixture.cli.Get(context.Background(),
+				ctrlcli.ObjectKeyFromObject(fixture.md), live))
+			live.Generation++
+			require.NoError(t, fixture.cli.Update(context.Background(), live))
+
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), fixture.md),
+	}
+	fact, observed := observation.Serving.Groups[fixture.key]
+	if observed {
+		assert.False(t, fact.Retained,
+			"a group whose deployment moved is not the group that was qualified")
+	}
+
+	fixture.write(t, r, observation)
+	assert.Empty(t, fixture.leaderLabel(t),
+		"a group whose deployment moved is withdrawn rather than kept on the old generation")
+}
+
+// TestACollectionThatLostTheClosingReadWithoutAChangeKeepsTheFreshlyQualifiedGroup is the
+// positive control for the closing bookend.
+//
+// THE CLOSING BOOKEND EXISTS TO PROVE A CHANGE, and a read that failed proves nothing. When
+// nothing moved and the closing read could not be read, the group keeps what it had: the fresh
+// membership is in hand and it says the group is still the group that was qualified.
+//
+// IT IS THE CONTROL FOR THE TWO CASES BESIDE IT. A rule that closed a group because a later read
+// failed would close this one too, and this one must not close.
+func TestACollectionThatLostTheClosingReadWithoutAChangeKeepsTheFreshlyQualifiedGroup(t *testing.T) {
+	fixture := newQualifiedGroupFixture(t)
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		// THE THIRD ROUTER LISTING FAILS: the first is the opening bookend's, the second is the
+		// collection's own, and the third is the closing bookend's.
+		Client: fixture.cli, APIReader: &nthListFailureClient{
+			Reader: fixture.cli, routers: true, failAt: 3,
+		},
+		Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock:    func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), fixture.md),
+	}
+	fact, observed := observation.Serving.Groups[fixture.key]
+	require.True(t, observed, "the collection lost the closing read, not the group")
+	assert.True(t, fact.Retained,
+		"nothing moved, so the group is still the group that was qualified")
+
+	fixture.write(t, r, observation)
+	assert.Equal(t, modelDeploymentEndpointEligibleValue, fixture.leaderLabel(t),
+		"a closing read that proved nothing leaves the group as it was")
+}
+
+// TestACollectionThatProvesTheDeploymentChangedAndThenLostTheMembershipClosesTheGroup is the
+// first mixed case: the closing bookend learned that the deployment moved, and a later read then
+// failed.
+//
+// A KNOWN CHANGE DOMINATES A LATER UNCERTAINTY. The deployment's own generation is the thing the
+// eligibility rule derives from, the closing bookend read it, and a membership listing that failed
+// afterwards does not unmake it. Closing the group is what the change requires, and the failure
+// afterwards is only a failure.
+func TestACollectionThatProvesTheDeploymentChangedAndThenLostTheMembershipClosesTheGroup(t *testing.T) {
+	fixture := newQualifiedGroupFixture(t)
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		// THE SECOND MEMBER LISTING FAILS: the first is the collection's own fresh read and the
+		// second is the closing bookend's.
+		Client: fixture.cli, APIReader: &nthListFailureClient{
+			Reader: fixture.cli, routers: false, failAt: 2,
+		},
+		Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock:    func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			// THE DEPLOYMENT MOVES UNDER THE COLLECTION, so the closing bookend reads a
+			// generation the opening one did not see.
+			live := new(workercore.ModelDeployment)
+			require.NoError(t, fixture.cli.Get(context.Background(),
+				ctrlcli.ObjectKeyFromObject(fixture.md), live))
+			live.Generation++
+			require.NoError(t, fixture.cli.Update(context.Background(), live))
+
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), fixture.md),
+	}
+	fact, observed := observation.Serving.Groups[fixture.key]
+	if observed {
+		assert.False(t, fact.Retained,
+			"a group whose deployment moved is not the group that was qualified")
+	}
+
+	fixture.write(t, r, observation)
+	assert.Empty(t, fixture.leaderLabel(t),
+		"the change the closing bookend proved survives the read that failed after it")
+}
+
+// TestACollectionThatProvesTheMembershipChangedAndThenLostTheRoutersClosesTheGroup is the
+// second mixed case: the closing bookend learned that the membership moved, and the Router
+// listing then failed.
+//
+// THE MEMBERSHIP IS THE GROUP. A member that left under the collection means the group is not the
+// group that was qualified, and the Router processes it would have been served through are a
+// different question that was never answered.
+func TestACollectionThatProvesTheMembershipChangedAndThenLostTheRoutersClosesTheGroup(t *testing.T) {
+	fixture := newQualifiedGroupFixture(t)
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		// THE THIRD ROUTER LISTING FAILS, so the closing bookend reads the membership and then
+		// cannot read the routers.
+		Client: fixture.cli, APIReader: &nthListFailureClient{
+			Reader: fixture.cli, routers: true, failAt: 3,
+		},
+		Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock:    func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			// THE MEMBERSHIP MOVES UNDER THE COLLECTION, so the closing bookend reads a
+			// membership the opening one did not see.
+			for _, pod := range fixture.members {
+				if pod.Labels[modelDeploymentMemberIndexLabel] == "0" {
+					continue
+				}
+				err := fixture.cli.Delete(context.Background(), &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
+				})
+				if err != nil && !apierrors.IsNotFound(err) {
+					return nil, err
+				}
+			}
+
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), fixture.md),
+	}
+	fact, observed := observation.Serving.Groups[fixture.key]
+	if observed {
+		assert.False(t, fact.Retained,
+			"a group whose membership moved is not the group that was qualified")
+	}
+
+	fixture.write(t, r, observation)
+	assert.Empty(t, fixture.leaderLabel(t),
+		"the change the closing bookend proved survives the read that failed after it")
+}
+
+// TestACollectionThatReadAFreshlyUnreadyMemberClosesTheGroup is the third case: the fresh
+// membership says a member is not ready, while the caller's cached copy of the same Pod still says
+// ready.
+//
+// THE FRESH READ IS THE AUTHORITY. The qualification's own readiness legs read the caller's list,
+// and a list that is behind the API server cannot say that a member is ready. A group with an
+// unready member is not a group that may be served, and no acceptance path may open for it: not
+// the retention, and not the fresh restore either.
+func TestACollectionThatReadAFreshlyUnreadyMemberClosesTheGroup(t *testing.T) {
+	fixture := newQualifiedGroupFixture(t)
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		Client: fixture.cli, APIReader: &routerListFailureClient{
+			Reader: &unreadyMemberClient{Reader: fixture.cli, uid: fixture.leaderUID(t)},
+		},
+		Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock:    func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), fixture.md),
+	}
+	fact, observed := observation.Serving.Groups[fixture.key]
+	require.True(t, observed, "the collection lost the Router, not the group")
+	assert.False(t, fact.Retained,
+		"a group with a member the fresh read says is not ready is not a group that may be served")
+	assert.False(t, fact.SnapshotValid, "an unsafe group has no valid observation to restore from")
+	assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, fact.State, fact.InvalidReason)
+	assert.EqualValues(t, 0, fact.Endpoints, "unsafe evidence carries no endpoint count")
+	assert.True(t, fact.MemberNotReady,
+		"the fresh read found a member that is not ready, and a known fact is not a missing one")
+	assert.Contains(t, fact.InvalidReason, fixture.leaderName(t),
+		"the fact names the member the fresh read found not ready")
+
+	fixture.write(t, r, observation)
+	assert.Empty(t, fixture.leaderLabel(t),
+		"a group with an unready member leaves the pool even while the collection is lost")
+}
+
+// TestACollectionThatConfirmedTheGroupButReadAFreshlyUnreadyMemberClosesTheGroup is the same
+// unsafe evidence on the path where the collection SUCCEEDED.
+//
+// THE FRESH RESTORE BRANCH IS A SEPARATE ACCEPTANCE PATH. A collection that read the whole
+// answering set confirms the Router's view of the group, and the restore that follows would open
+// the group on that confirmation alone. The fresh membership's word about readiness still has to
+// close it, because the cached list the qualification read cannot say that a member is ready.
+func TestACollectionThatConfirmedTheGroupButReadAFreshlyUnreadyMemberClosesTheGroup(t *testing.T) {
+	fixture := newQualifiedGroupFixture(t)
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		Client: fixture.cli, APIReader: &unreadyMemberClient{
+			Reader: fixture.cli, uid: fixture.leaderUID(t),
+		},
+		Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock:    func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), fixture.md),
+	}
+	fact, observed := observation.Serving.Groups[fixture.key]
+	require.True(t, observed, "the collection read the group")
+	assert.False(t, fact.SnapshotValid,
+		"a group with a member the fresh read says is not ready is not confirmed")
+	assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, fact.State, fact.InvalidReason)
+	assert.EqualValues(t, 0, fact.Endpoints, "unsafe evidence carries no endpoint count")
+	assert.True(t, fact.MemberNotReady,
+		"the fresh read found a member that is not ready, and a known fact is not a missing one")
+	assert.Contains(t, fact.InvalidReason, fixture.leaderName(t),
+		"the fact names the member the fresh read found not ready")
+
+	fixture.write(t, r, observation)
+	assert.Empty(t, fixture.leaderLabel(t),
+		"a confirmed view of an unsafe group does not restore it")
+}
+
+// TestACollectionThatLostTheRouterDoesNotKeepAGroupThatWasNeverQualified is the other half of
+// the retention rule: a group that was never qualified is not a group the retention can hold open.
+//
+// THE RETENTION IS ABOUT A GROUP THAT WAS QUALIFIED. A group whose members carry no eligibility
+// label was never in the pool, and a collection that lost the Router does not put it there.
+func TestACollectionThatLostTheRouterDoesNotKeepAGroupThatWasNeverQualified(t *testing.T) {
+	fixture := newQualifiedGroupFixture(t)
+
+	// THE GROUP WAS NEVER QUALIFIED, so its members carry no eligibility label.
+	for _, pod := range fixture.members {
+		pod.Labels[modelDeploymentLabelKeyEndpointEligible] = ""
+		require.NoError(t, fixture.cli.Update(context.Background(), pod))
+	}
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		Client: fixture.cli, APIReader: &routerListFailureClient{Reader: fixture.cli},
+		Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock:    func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), fixture.md),
+	}
+	fact, observed := observation.Serving.Groups[fixture.key]
+	require.True(t, observed, "the collection lost the Router, not the group")
+	assert.False(t, fact.Retained, "a group that was never qualified is not retained")
+
+	fixture.write(t, r, observation)
+	assert.Empty(t, fixture.leaderLabel(t),
+		"a group that was never qualified stays out of the pool")
+}
+
+// TestTheRealCollectorReadsTheMembershipItBindsAgainst pins that the group facts are computed
+// against the membership the collection re-read, and that the Router process is not part of it.
+//
+// THE ROUTER PROCESS IS DISCOVERED BUT NEVER A MEMBER. It is owned by the workload Deployment rather
+// than by the deployment, so it enters no group's membership and its UID enters no group's
+// generation. A generation that named it would never be written on any Pod, and the retention rule
+// that compares a member's annotation against the group's generation could then never hold.
+func TestTheRealCollectorReadsTheMembershipItBindsAgainst(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+
+	seedRouterProcess(t, cli, md, "router-zero", "10.0.9.1")
+
+	live := replicaPods(t, cli)
+	require.Len(t, live, 2)
+	for i := range live {
+		live[i].Status.PodIP = "10.0.0." + strconv.Itoa(1+i)
+		live[i].Status.Phase = corev1.PodRunning
+		require.NoError(t, cli.Status().Update(context.Background(), &live[i]))
+	}
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock: func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			return retirementRouterView(nil, live), nil
+		},
+	}
+
+	answer := r.observeModelDeploymentServing(context.Background(), md)
+	require.Len(t, answer.Groups, 1)
+	for key, fact := range answer.Groups {
+		assert.Equal(t, "server", key.Role)
+		assert.Equal(t, 0, key.Ordinal)
+		assert.True(t, fact.SnapshotValid, "the empty registry is coherent")
+		assert.NotContains(t, string(key.Generation), "router-uid-router-zero",
+			"the router process is not a member of any group")
+		assert.EqualValues(t, 2, fact.Members, "the group holds its own two members")
+	}
+}
+
 // patches serve parses fully, and anything else — an unknown field, a missing router
 // block, an unsupported per-plugin dump — is an error the caller reports as an unusable
 // view, never as an empty one.
@@ -621,23 +1559,29 @@ func TestCollectModelDeploymentServingView(t *testing.T) {
 // is made under it, so a second Router cannot start fresh and a slow first one cannot be paid for
 // twice. A caller's own deadline is kept when it has one, because the collection is part of a
 // larger pass and must not outlive it.
+//
+// THE BOUND A READ GETS IS ITS OWN. An unlimited caller is given the per-fetch deadline and not the
+// collection's budget, and a caller's deadline that is earlier still wins over that one.
 func TestOneCollectionBoundsEveryRouterUnderOneDeadline(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		caller    func() (context.Context, context.CancelFunc)
-		wantBound bool
+		name       string
+		caller     func() (context.Context, context.CancelFunc)
+		wantBound  bool
+		wantWithin time.Duration
 	}{
 		{
-			name:      "an unlimited caller is still given a finite deadline",
-			caller:    func() (context.Context, context.CancelFunc) { return context.Background(), func() {} },
-			wantBound: true,
+			name:       "an unlimited caller is still given a finite deadline",
+			caller:     func() (context.Context, context.CancelFunc) { return context.Background(), func() {} },
+			wantBound:  true,
+			wantWithin: modelDeploymentServingFetchTimeout,
 		},
 		{
-			name: "a caller's own deadline is kept",
+			name: "a caller's own earlier deadline is kept",
 			caller: func() (context.Context, context.CancelFunc) {
-				return context.WithTimeout(context.Background(), 3*time.Second)
+				return context.WithTimeout(context.Background(), time.Second)
 			},
-			wantBound: true,
+			wantBound:  true,
+			wantWithin: time.Second,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -655,6 +1599,8 @@ func TestOneCollectionBoundsEveryRouterUnderOneDeadline(t *testing.T) {
 			assert.True(t, deadline.After(before), "the deadline is in the future")
 			assert.True(t, deadline.Before(before.Add(modelDeploymentServingFreshness)),
 				"and inside the window the aggregator will still call fresh")
+			assert.True(t, deadline.Before(before.Add(tc.wantWithin+time.Second)),
+				"and inside the bound this case names")
 		})
 	}
 }
@@ -725,6 +1671,81 @@ func TestTheObserverTransportRefusesABodyItShouldNot(t *testing.T) {
 	}
 }
 
+// TestTheObserverTransportBoundsOneFetch measures the deadline the transport puts on a single read.
+//
+// A COLLECTION IS A SUM OF ITS READS, so a read that inherits only the collection's budget can spend
+// all of it on one Router that never answers. The transport bounds one read on its own, and the
+// caller's own context still governs it: an earlier deadline wins over the per-fetch bound, and a
+// canceled caller ends the read at once.
+//
+// THE READER ANSWERS LATE ON PURPOSE, so the deadline is the only thing that can end the request.
+// Under a transport that waits for the collection's budget the first case reads the answer back
+// instead of failing, and the case fails on the missing error.
+func TestTheObserverTransportBoundsOneFetch(t *testing.T) {
+	const lateAnswer = 3 * time.Second
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(lateAnswer)
+		_, _ = w.Write([]byte(`{"router":{"boot_generation":1700000000000,"now_ms":1700000001000},` +
+			`"registry_revision":7,"workers":[]}`))
+	}))
+	defer server.Close()
+
+	for _, tc := range []struct {
+		name      string
+		caller    func() (context.Context, context.CancelFunc)
+		wantErr   error
+		wantShort bool
+	}{
+		{
+			name:    "an unlimited caller is bounded by the per-fetch deadline",
+			caller:  func() (context.Context, context.CancelFunc) { return context.Background(), func() {} },
+			wantErr: context.DeadlineExceeded,
+		},
+		{
+			name: "a caller's earlier deadline wins over the per-fetch bound",
+			caller: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 200*time.Millisecond)
+			},
+			wantErr:   context.DeadlineExceeded,
+			wantShort: true,
+		},
+		{
+			name: "a cancelled caller ends the read at once",
+			caller: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+
+				return ctx, func() {}
+			},
+			wantErr:   context.Canceled,
+			wantShort: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := tc.caller()
+			defer cancel()
+
+			before := time.Now()
+			_, err := defaultServingViewFetch(ctx, server.URL)
+			elapsed := time.Since(before)
+
+			require.Error(t, err, "a read that outlives its deadline must fail")
+			assert.ErrorIs(t, err, tc.wantErr)
+			if tc.wantShort {
+				assert.Less(t, elapsed, modelDeploymentServingFetchTimeout,
+					"the caller's own deadline ended the read")
+
+				return
+			}
+			assert.GreaterOrEqual(t, elapsed, modelDeploymentServingFetchTimeout-time.Second/10,
+				"the read waited for the per-fetch deadline")
+			assert.Less(t, elapsed, 2*modelDeploymentServingFetchTimeout,
+				"and not for the collection's budget, which is far longer")
+		})
+	}
+}
+
 // observationDeadlineTransport answers like a Router and records the deadline of every request, so
 // the collection's shared budget can be observed rather than inferred.
 type observationDeadlineTransport struct {
@@ -760,6 +1781,12 @@ func (transport *observationDeadlineTransport) RoundTrip(
 // still call the transport with the caller's own context. Here two Router Pods are read through the
 // production transport, and both requests must carry the same bounded deadline. A second Router that
 // started fresh would be a pass whose length is the sum of the Routers' choices.
+//
+// THE CALLER'S DEADLINE IS EARLIER THAN THE PER-FETCH BOUND, so the deadline the requests carry is
+// the collection's one. A read bounds itself as well, and a read that bounds itself carries its own
+// deadline rather than the collection's, so the shared deadline is observed where it is still
+// visible: under a caller whose own deadline is the earlier of the two. That bound is measured by
+// TestTheObserverTransportBoundsOneFetch.
 func TestEveryRouterOfOneCollectionSharesOneDeadline(t *testing.T) {
 	md, _ := retirementRouterFixture(newRenderDeployment())
 	md.Generation = 1
@@ -789,14 +1816,23 @@ func TestEveryRouterOfOneCollectionSharesOneDeadline(t *testing.T) {
 		Build()
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
+	// The caller's own deadline is earlier than the per-fetch bound, so the deadline the requests
+	// carry is the collection's and not a read's own.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	callerDeadline, ok := ctx.Deadline()
+	require.True(t, ok)
+
 	observations, failure := r.collectModelDeploymentRouterObservations(
-		context.Background(), md, []*corev1.Pod{observationLivePod("server-0", "10.0.0.5", "pod-uid-1", true)})
+		ctx, md, []*corev1.Pod{observationLivePod("server-0", "10.0.0.5", "pod-uid-1", true)})
 	require.Empty(t, failure, "both routers answer the same view: %s", failure)
 	require.Len(t, observations, 2, "both routers are read")
 
 	require.Len(t, transport.deadlines, 2, "each router is read once")
 	for _, deadline := range transport.deadlines {
 		require.False(t, deadline.IsZero(), "every outbound request carries a deadline")
+		assert.WithinDuration(t, callerDeadline, deadline, time.Millisecond,
+			"and the deadline is the collection's, so a caller that must not outlive its own deadline is obeyed")
 	}
 	assert.Equal(t, transport.deadlines[0], transport.deadlines[1],
 		"both routers run under one derived deadline, not one each")
@@ -2352,4 +3388,633 @@ func TestTheRouterOwningChainSurvivesASameOwnerReplicaSetWrite(t *testing.T) {
 	require.True(t, touched, "the case did not touch the replica set, so it controls nothing")
 	require.Empty(t, failure, "an owner that did not change hands is not a moved chain")
 	require.Len(t, observations, 3)
+}
+
+// servingGroupMember builds one member of a group the per-group facts can read.
+//
+// THE IDENTITY IS WHAT THE READERS NEED: the workload labels name the role and the seat, the group
+// total annotation declares the group's size, and the serving-port annotation marks a command line
+// this operator built, which is what makes the member's shape readable at all.
+//
+// THE MEMBER IS READY, because a group with an unready member is not a group that may be served,
+// and the facts read the readiness off the fresh membership. A case that wants an unsafe group
+// says so by making the member unready.
+func servingGroupMember(
+	role string, ordinal, seat, total int, uid types.UID, externalDP bool,
+) *corev1.Pod {
+	name := fmt.Sprintf("%s-%d-%d", role, ordinal, seat)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "team-a",
+			UID:       uid,
+			Labels: map[string]string{
+				modelDeploymentLabelKeyName:        modelDeploymentLabelValueName,
+				modelDeploymentLabelKeyInstance:    "qwen",
+				modelDeploymentLabelKeyComponent:   role,
+				modelDeploymentReplicaOrdinalLabel: strconv.Itoa(ordinal),
+				modelDeploymentMemberIndexLabel:    strconv.Itoa(seat),
+			},
+			Annotations: map[string]string{
+				kueuepodconst.GroupTotalCountAnnotation: strconv.Itoa(total),
+				"prometheus.io/port":                    "8000",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name:    modelDeploymentMainContainerName,
+			Command: []string{"python", "-m", "vllm.entrypoints.openai.api_server"},
+			Ports:   []corev1.ContainerPort{{Name: "http", ContainerPort: observationMemberPort}},
+		}}},
+		Status: corev1.PodStatus{
+			Phase:      corev1.PodRunning,
+			PodIP:      "10.0.0.5",
+			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
+		},
+	}
+	if externalDP {
+		pod.Spec.Containers[0].Args = []string{
+			"--data-parallel-size", strconv.Itoa(total),
+			"--data-parallel-rank", strconv.Itoa(seat),
+		}
+	}
+
+	return pod
+}
+
+// servingObservation builds one Router process's observation over the members it holds.
+func servingObservation(serving ...types.UID) RouterServingObservation {
+	bound := make([]ServingEndpoint, 0, len(serving))
+	for _, uid := range serving {
+		bound = append(bound, ServingEndpoint{
+			PodUID:   uid,
+			Listener: observationMemberPort,
+			Serving:  true,
+		})
+	}
+
+	return RouterServingObservation{
+		View:        RouterServingView{RouterPodUID: "router-a", RouterBootGeneration: 1},
+		CollectedAt: time.Now(),
+		Bound:       bound,
+	}
+}
+
+// TestModelDeploymentServingGroups pins the per-group facts: the group identity is the role, the
+// ordinal and the CURRENT membership generation; the counts are members and Router endpoints and
+// never the same thing; a partial view is not a confirmation; a coherent zero is; and the retention
+// fact is about the answering set and not about the membership.
+// servingGroupFacts computes the group facts from a collection, with the collection's own verdict
+// gating them, exactly as the reconcile does: a collection that was incomplete confirms no group.
+func servingGroupFacts(
+	md *workercore.ModelDeployment, members []*corev1.Pod, observations []RouterServingObservation,
+) (map[modelDeploymentGroupKey]modelDeploymentGroupServing, map[types.UID]modelDeploymentMemberServing) {
+	return modelDeploymentServingGroups(md, members, observations,
+		aggregateModelDeploymentServing(true, observations, modelDeploymentServingFreshness))
+}
+
+func TestModelDeploymentServingGroups(t *testing.T) {
+	t.Parallel()
+
+	md := &workercore.ModelDeployment{}
+	md.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
+	md.Spec.Roles = []workercore.ModelDeploymentRole{{Name: "regular", Replicas: 1, ReplicaSize: 3}}
+
+	// THE GENERATION OF A THREE-MEMBER GROUP, spelled out rather than derived, because the key is
+	// the fact under test and a fixture that computed it with the code under test would prove
+	// nothing about it.
+	const leaderGroupGeneration = "uid-a/uid-b/uid-c"
+
+	leader := servingGroupMember("regular", 0, 0, 3, "uid-a", false)
+	followerOne := servingGroupMember("regular", 0, 1, 3, "uid-b", false)
+	followerTwo := servingGroupMember("regular", 0, 2, 3, "uid-c", false)
+
+	t.Run("a leader-served group is complete when the router holds its leader alone", func(t *testing.T) {
+		t.Parallel()
+
+		members := []*corev1.Pod{leader, followerOne, followerTwo}
+		groups, _ := servingGroupFacts(md, members, []RouterServingObservation{
+			servingObservation("uid-a"),
+		})
+
+		fact, found := groups[modelDeploymentGroupKey{
+			Role:       "regular",
+			Ordinal:    0,
+			Generation: modelDeploymentMembershipGeneration(leaderGroupGeneration),
+		}]
+		require.True(t, found, "the group is keyed by its current membership generation")
+		assert.True(t, fact.SnapshotValid, "the group's view is complete")
+		assert.Equal(t, workercore.ModelDeploymentServingStateConfirmed, fact.State)
+		assert.Equal(t, int32(1), fact.Endpoints, "one router endpoint, not three members")
+		assert.Equal(t, int32(3), fact.Members)
+		assert.Equal(t, int32(3), fact.Expected)
+		assert.False(t, fact.Retained, "no member carries the eligibility label yet")
+	})
+
+	t.Run("an external dp group the router holds one rank of is not a confirmation", func(t *testing.T) {
+		t.Parallel()
+
+		rankZero := servingGroupMember("regular", 0, 0, 2, "uid-a", true)
+		rankOne := servingGroupMember("regular", 0, 1, 2, "uid-b", true)
+		groups, _ := servingGroupFacts(md, []*corev1.Pod{rankZero, rankOne},
+			[]RouterServingObservation{servingObservation("uid-a")})
+
+		fact, found := groups[modelDeploymentGroupKey{
+			Role:       "regular",
+			Ordinal:    0,
+			Generation: modelDeploymentMembershipGeneration("uid-a/uid-b"),
+		}]
+		require.True(t, found, "a partial view still yields an entry")
+		assert.False(t, fact.SnapshotValid, "a group seen half is not a group seen")
+		assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, fact.State)
+		assert.Contains(t, fact.InvalidReason, "partial")
+	})
+
+	t.Run("a group the router holds none of is valid and observed as empty", func(t *testing.T) {
+		t.Parallel()
+
+		members := []*corev1.Pod{leader, followerOne, followerTwo}
+		groups, _ := servingGroupFacts(md, members, []RouterServingObservation{
+			servingObservation(),
+		})
+
+		fact, found := groups[modelDeploymentGroupKey{
+			Role:       "regular",
+			Ordinal:    0,
+			Generation: modelDeploymentMembershipGeneration(leaderGroupGeneration),
+		}]
+		require.True(t, found)
+		assert.True(t, fact.SnapshotValid, "a coherent zero is not a fault")
+		assert.Equal(t, workercore.ModelDeploymentServingStateConfirmed, fact.State)
+		assert.Equal(t, int32(0), fact.Endpoints)
+	})
+
+	t.Run("the retention fact is about the answering set and the current generation", func(t *testing.T) {
+		t.Parallel()
+
+		eligible := servingGroupMember("regular", 0, 0, 3, "uid-a", false)
+		eligible.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		eligible.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = leaderGroupGeneration
+		others := []*corev1.Pod{
+			servingGroupMember("regular", 0, 1, 3, "uid-b", false),
+			servingGroupMember("regular", 0, 2, 3, "uid-c", false),
+		}
+
+		groups, carried := servingGroupFacts(md, append([]*corev1.Pod{eligible}, others...),
+			[]RouterServingObservation{servingObservation("uid-a")})
+		key := modelDeploymentGroupKey{
+			Role:       "regular",
+			Ordinal:    0,
+			Generation: modelDeploymentMembershipGeneration(leaderGroupGeneration),
+		}
+		fact, found := groups[key]
+		require.True(t, found)
+		assert.True(t, fact.Retained,
+			"the answering member carries the label and the annotation names the current generation")
+		assert.True(t, carried[eligible.UID].Eligible)
+		assert.Equal(t, modelDeploymentMembershipGeneration(leaderGroupGeneration),
+			carried[eligible.UID].Generation)
+
+		// THE SAME GROUP UNDER AN OLDER GENERATION IS NOT RETAINED, and the followers that carry
+		// no label at all do not withdraw it either.
+		older := servingGroupMember("regular", 0, 0, 3, "uid-a", false)
+		older.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		older.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = "uid-a/uid-b"
+		groups, _ = servingGroupFacts(md, append([]*corev1.Pod{older}, others...),
+			[]RouterServingObservation{servingObservation("uid-a")})
+		fact, found = groups[key]
+		require.True(t, found)
+		assert.False(t, fact.Retained, "an annotation naming an earlier generation proves nothing")
+	})
+}
+
+// modelDeploymentGroupFixture is a Router-bearing deployment whose group is standing, with the
+// pieces a boundary case needs to drive the real collector and the real label writer.
+//
+// THE COLLECTOR AND THE WRITER ARE THE PRODUCTION ONES. A case that built the answer or the label
+// by hand would be proving the shape of the rule rather than the rule.
+type modelDeploymentGroupFixture struct {
+	md      *workercore.ModelDeployment
+	cli     ctrlcli.Client
+	members func() []*corev1.Pod
+	serving *[]string
+	fail    *bool
+	failIP  string
+	now     *time.Time
+	router  *ModelDeploymentReconciler
+}
+
+// newModelDeploymentGroupFixture stands up a two-member group and a Router process the collection
+// can place. The group answers as an External DP group, where every rank answers, or as an ordinary
+// one, where only the leader does.
+func newModelDeploymentGroupFixture(t *testing.T, externalDP bool) *modelDeploymentGroupFixture {
+	t.Helper()
+
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 2
+		if externalDP {
+			md.Spec.Roles[0].ExtraArgs = []string{"--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)"}
+		}
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	setEndpointEligibilityPodsReady(t, cli, true)
+
+	stored := new(workercore.ModelDeployment)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Name}, stored))
+	stored.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	require.NoError(t, cli.Update(context.Background(), stored))
+	md.Spec.Router = stored.Spec.Router
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	seedRouterProcess(t, cli, md, "router-zero", "10.0.9.1")
+	seedRouterProcess(t, cli, md, "router-one", "10.0.9.2")
+
+	fail := false
+	fixture := &modelDeploymentGroupFixture{md: md, cli: cli, serving: &[]string{}, fail: &fail}
+	fixture.members = func() []*corev1.Pod {
+		live := replicaPods(t, cli)
+		owned := make([]*corev1.Pod, 0, len(live))
+		for i := range live {
+			owned = append(owned, &live[i])
+		}
+
+		return owned
+	}
+	for i, pod := range fixture.members() {
+		pod.Status.PodIP = "10.0.0." + strconv.Itoa(1+i)
+		pod.Status.Phase = corev1.PodRunning
+		require.NoError(t, cli.Status().Update(context.Background(), pod))
+	}
+	now := time.Now()
+	fixture.now = &now
+	fixture.router = &ModelDeploymentReconciler{
+		Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
+		clock: func() time.Time { return *fixture.now },
+		servingViewFetch: func(_ context.Context, url string) ([]byte, error) {
+			if *fixture.fail {
+				return nil, errors.New("the router did not answer")
+			}
+			if fixture.failIP != "" && strings.Contains(url, fixture.failIP) {
+				return nil, errors.New("the router did not answer")
+			}
+			live := fixture.members()
+			values := make([]corev1.Pod, 0, len(live))
+			for _, pod := range live {
+				values = append(values, *pod)
+			}
+
+			return retirementRouterView(*fixture.serving, values), nil
+		},
+	}
+
+	return fixture
+}
+
+// generation is the membership generation of the group's current members.
+func (f *modelDeploymentGroupFixture) generation() modelDeploymentMembershipGeneration {
+	uids := make([]string, 0, len(f.members()))
+	for _, pod := range f.members() {
+		uids = append(uids, string(pod.UID))
+	}
+	slices.Sort(uids)
+
+	return modelDeploymentMembershipGeneration(strings.Join(uids, "/"))
+}
+
+// answering is the set of members the Router reports as serving.
+func (f *modelDeploymentGroupFixture) answering(externalDP bool) []string {
+	ids := []string{}
+	for _, pod := range f.members() {
+		if externalDP || pod.Labels[modelDeploymentMemberIndexLabel] == "0" {
+			ids = append(ids, string(pod.UID))
+		}
+	}
+
+	return ids
+}
+
+// collect reads the group with the real collector.
+func (f *modelDeploymentGroupFixture) collect() modelDeploymentPassObservation {
+	return modelDeploymentPassObservation{
+		Serving: f.router.observeModelDeploymentServing(context.Background(), f.md),
+	}
+}
+
+// write applies the answer with the real label writer.
+func (f *modelDeploymentGroupFixture) write(t *testing.T, observation modelDeploymentPassObservation, refuted bool) {
+	t.Helper()
+
+	live := f.members()
+	generation := f.generation()
+	qualification := modelDeploymentTestQualification(live, generation, refuted)
+	byMember := make(map[types.UID]modelDeploymentInstanceQualification, len(live))
+	actual := make([]corev1.Pod, 0, len(live))
+	for _, pod := range live {
+		byMember[pod.UID] = qualification
+		actual = append(actual, *pod)
+	}
+	require.NoError(t, f.router.convergeModelDeploymentEndpointEligibility(
+		context.Background(), f.md, actual, byMember, nil, observation))
+}
+
+// replaceMember puts a new member in the group's place, so the membership generation moves.
+func (f *modelDeploymentGroupFixture) replaceMember(t *testing.T, index string) {
+	t.Helper()
+
+	old := f.member(index)
+	require.NotNil(t, old)
+	replacement := old.DeepCopy()
+	replacement.UID = types.UID("replaced-" + index + "-" + old.Name)
+	replacement.Name = old.Name + "-replaced"
+	replacement.ResourceVersion = ""
+	require.NoError(t, f.cli.Delete(context.Background(), old))
+	require.NoError(t, f.cli.Create(context.Background(), replacement))
+}
+
+// member is the group's member carrying the given member index.
+func (f *modelDeploymentGroupFixture) member(index string) *corev1.Pod {
+	for _, pod := range f.members() {
+		if pod.Labels[modelDeploymentMemberIndexLabel] == index {
+			return pod
+		}
+	}
+
+	return nil
+}
+
+// TestTheRestoreDecisionOverTheMembershipAndFreshnessBoundaries pins the boundaries the closure
+// names, against the real collector and the real label writer.
+//
+// A CHANGED MEMBERSHIP GENERATION IS HELD ACROSS TWO CONSECUTIVE UNKNOWN PASSES. The group is not
+// restored on a pass that could not see it, and no label or annotation acquires the new generation
+// while it is held; a later valid observation restores it and names the generation it belongs to.
+//
+// AN EXTERNAL DP GROUP RETAINS ONLY WHEN EVERY ANSWERING RANK CARRIES THE LABEL. A follower
+// replaced inside such a group is an answering rank that carries nothing, so the group is no longer
+// retained; a follower that is merely a follower of an ordinary group never answers, so its silence
+// is not a reason to withhold the group.
+//
+// A NEAR-EXPIRED SNAPSHOT CANNOT GAIN A FRESH LEASE FROM A LATER COLLECTION TIMESTAMP. The answer
+// carries the OLDEST view's stamp, so the snapshot is judged on that stamp, and a later collection is
+// what makes a new answer rather than a lease on the old one.
+func TestTheRestoreDecisionOverTheMembershipAndFreshnessBoundaries(t *testing.T) {
+	t.Run("a changed membership is held across two unknown passes and restored by a valid one", func(t *testing.T) {
+		fixture := newModelDeploymentGroupFixture(t, false)
+		*fixture.serving = fixture.answering(false)
+
+		// THE GROUP IS RESTORED AT ITS CURRENT GENERATION.
+		observation := fixture.collect()
+		fixture.write(t, observation, false)
+		first := fixture.generation()
+		leader := fixture.member("0")
+		require.NotNil(t, leader)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			leader.Labels[modelDeploymentLabelKeyEndpointEligible])
+		assert.Equal(t, string(first),
+			leader.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration])
+
+		// A MEMBER IS REPLACED, SO THE GROUP'S GENERATION MOVES.
+		fixture.replaceMember(t, "1")
+		second := fixture.generation()
+		require.NotEqual(t, first, second, "the membership generation moved")
+
+		// TWO CONSECUTIVE PASSES THAT COULD NOT SEE THE GROUP HOLD IT.
+		*fixture.fail = true
+		for pass := range 2 {
+			observation = fixture.collect()
+			assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, observation.Serving.State,
+				"pass %d could not see the group", pass)
+			fixture.write(t, observation, false)
+			leader = fixture.member("0")
+			require.NotNil(t, leader)
+			assert.NotContains(t, leader.Labels, modelDeploymentLabelKeyEndpointEligible,
+				"pass %d restored a group it could not see", pass)
+			assert.NotContains(t, leader.Annotations, modelDeploymentAnnotationKeyEndpointEligibleGeneration,
+				"pass %d stamped the new generation while the group was held", pass)
+		}
+
+		// A LATER VALID OBSERVATION RESTORES THE NEW GENERATION.
+		*fixture.fail = false
+		*fixture.serving = fixture.answering(false)
+		observation = fixture.collect()
+		fixture.write(t, observation, false)
+		leader = fixture.member("0")
+		require.NotNil(t, leader)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			leader.Labels[modelDeploymentLabelKeyEndpointEligible])
+		assert.Equal(t, string(second),
+			leader.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration],
+			"the restored member names the generation it belongs to")
+	})
+
+	t.Run("an external DP group retains only when every answering rank carries the label", func(t *testing.T) {
+		fixture := newModelDeploymentGroupFixture(t, true)
+		*fixture.serving = fixture.answering(true)
+
+		// EVERY RANK ANSWERS, AND EVERY RANK IS RESTORED.
+		observation := fixture.collect()
+		fixture.write(t, observation, false)
+		generation := fixture.generation()
+		for _, index := range []string{"0", "1"} {
+			rank := fixture.member(index)
+			require.NotNil(t, rank, "rank %s", index)
+			assert.Equal(t, modelDeploymentEndpointEligibleValue,
+				rank.Labels[modelDeploymentLabelKeyEndpointEligible], "rank %s", index)
+			assert.Equal(t, string(generation),
+				rank.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration], "rank %s", index)
+		}
+
+		// THE OBSERVATION IS LOST, AND EVERY RANK STILL CARRIES THE LABEL AND THE GENERATION, SO THE
+		// GROUP IS RETAINED.
+		*fixture.fail = true
+		observation = fixture.collect()
+		fixture.write(t, observation, false)
+		for _, index := range []string{"0", "1"} {
+			rank := fixture.member(index)
+			require.NotNil(t, rank, "rank %s", index)
+			assert.Equal(t, modelDeploymentEndpointEligibleValue,
+				rank.Labels[modelDeploymentLabelKeyEndpointEligible],
+				"rank %s is retained while the answer is lost", index)
+		}
+
+		// A FOLLOWER LOSES THE LABEL WITHOUT THE MEMBERSHIP MOVING, SO THE GENERATION IS UNCHANGED
+		// AND THE LEADER IS STILL FINE. THE GROUP IS NOT RETAINED, BECAUSE THE RETENTION FACT CHECKS
+		// EVERY ANSWERING RANK AND NOT THE LEADER ALONE.
+		//
+		// THE LOSS HAPPENS BEFORE THE COLLECTION, because the retention fact is read from the
+		// membership the collection re-read: a member relabelled after that read is not one the
+		// answer saw, and the fact says so.
+		follower := fixture.member("1")
+		require.NotNil(t, follower)
+		delete(follower.Labels, modelDeploymentLabelKeyEndpointEligible)
+		require.NoError(t, fixture.cli.Update(context.Background(), follower))
+		observation = fixture.collect()
+		fixture.write(t, observation, false)
+		for _, index := range []string{"0", "1"} {
+			rank := fixture.member(index)
+			require.NotNil(t, rank, "rank %s", index)
+			assert.NotContains(t, rank.Labels, modelDeploymentLabelKeyEndpointEligible,
+				"rank %s: an answering rank that carries nothing is not a retained group", index)
+		}
+
+		// A VALID ANSWER RESTORES EVERY RANK, AND A FOLLOWER REPLACED AFTERWARDS MOVES THE
+		// GENERATION, WHICH IS ANOTHER WAY FOR THE GROUP TO STOP BEING RETAINED.
+		*fixture.fail = false
+		*fixture.serving = fixture.answering(true)
+		observation = fixture.collect()
+		fixture.write(t, observation, false)
+		for _, index := range []string{"0", "1"} {
+			rank := fixture.member(index)
+			require.NotNil(t, rank, "rank %s", index)
+			assert.Equal(t, modelDeploymentEndpointEligibleValue,
+				rank.Labels[modelDeploymentLabelKeyEndpointEligible], "rank %s", index)
+		}
+
+		fixture.replaceMember(t, "1")
+		*fixture.fail = true
+		observation = fixture.collect()
+		fixture.write(t, observation, false)
+		for _, index := range []string{"0", "1"} {
+			rank := fixture.member(index)
+			require.NotNil(t, rank, "rank %s", index)
+			assert.NotContains(t, rank.Labels, modelDeploymentLabelKeyEndpointEligible,
+				"rank %s: a replaced rank moves the generation and the group is not retained", index)
+		}
+	})
+
+	t.Run("a leader-only group retains with unlabelled collective followers", func(t *testing.T) {
+		fixture := newModelDeploymentGroupFixture(t, false)
+		*fixture.serving = fixture.answering(false)
+
+		// THE GROUP IS RESTORED, AND ONLY THE LEADER CARRIES THE LABEL: THE FOLLOWER NEVER ANSWERS.
+		observation := fixture.collect()
+		fixture.write(t, observation, false)
+		leader := fixture.member("0")
+		follower := fixture.member("1")
+		require.NotNil(t, leader)
+		require.NotNil(t, follower)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			leader.Labels[modelDeploymentLabelKeyEndpointEligible])
+		assert.NotContains(t, follower.Labels, modelDeploymentLabelKeyEndpointEligible,
+			"a follower never answers and never carries the key")
+
+		// THE OBSERVATION IS LOST, AND THE UNLABELLED FOLLOWER IS NOT A REASON TO WITHHOLD THE
+		// GROUP: ONLY THE ANSWERING MEMBER HAS TO CARRY IT.
+		*fixture.fail = true
+		observation = fixture.collect()
+		fixture.write(t, observation, false)
+		leader = fixture.member("0")
+		require.NotNil(t, leader)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			leader.Labels[modelDeploymentLabelKeyEndpointEligible],
+			"the group is retained by its answering member alone")
+	})
+
+	t.Run("one unusable router does not let the other's view restore the group", func(t *testing.T) {
+		fixture := newModelDeploymentGroupFixture(t, false)
+		*fixture.serving = fixture.answering(false)
+		// THE SECOND ROUTER DOES NOT ANSWER, so the collection is INCOMPLETE while the first one's
+		// view is a coherent one. The answer's stamp is the first view's, so the freshness gate is
+		// satisfied, and the group's own fact is coherent: what stops the restore is the
+		// COLLECTION'S VERDICT, not the age of its evidence.
+		fixture.failIP = "10.0.9.2"
+
+		observation := fixture.collect()
+		assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, observation.Serving.State,
+			"a collection that lost a read is not a confirmed answer")
+		require.False(t, observation.Serving.CollectedAt.IsZero(),
+			"the answer still carries the oldest view's stamp")
+
+		fixture.write(t, observation, false)
+		for _, pod := range fixture.members() {
+			if pod.Labels[modelDeploymentMemberIndexLabel] != "0" {
+				continue
+			}
+			assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible,
+				"a group whose observation is unusable is not restored")
+			assert.NotContains(t, pod.Annotations, modelDeploymentAnnotationKeyEndpointEligibleGeneration,
+				"a group whose observation is unusable acquires no generation")
+		}
+	})
+
+	t.Run("a near-expired snapshot cannot gain a fresh lease from a later collection", func(t *testing.T) {
+		fixture := newModelDeploymentGroupFixture(t, false)
+		*fixture.serving = fixture.answering(false)
+
+		observation := fixture.collect()
+		collected := observation.Serving.CollectedAt
+		require.False(t, collected.IsZero(), "the answer carries the oldest view's stamp")
+
+		// NEARLY EXPIRED AND STILL HONORED.
+		*fixture.now = collected.Add(modelDeploymentServingFreshness - time.Second)
+		fixture.write(t, observation, false)
+		leader := fixture.member("0")
+		require.NotNil(t, leader)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			leader.Labels[modelDeploymentLabelKeyEndpointEligible],
+			"a snapshot inside the freshness window is honored")
+
+		// THE GROUP IS NO LONGER RETAINED, SO AN EXPIRED ANSWER HAS NOTHING TO RESTORE.
+		leader = fixture.member("0")
+		delete(leader.Labels, modelDeploymentLabelKeyEndpointEligible)
+		delete(leader.Annotations, modelDeploymentAnnotationKeyEndpointEligibleGeneration)
+		require.NoError(t, fixture.cli.Update(context.Background(), leader))
+
+		*fixture.now = collected.Add(modelDeploymentServingFreshness + time.Second)
+		fixture.write(t, observation, false)
+		leader = fixture.member("0")
+		require.NotNil(t, leader)
+		assert.NotContains(t, leader.Labels, modelDeploymentLabelKeyEndpointEligible,
+			"an expired answer restores nothing")
+
+		// A LATER COLLECTION IS WHAT MAKES A FRESH ANSWER, NOT A LEASE ON THE OLD ONE.
+		*fixture.now = collected.Add(modelDeploymentServingFreshness + 2*time.Second)
+		fresh := fixture.collect()
+		assert.True(t, fresh.Serving.CollectedAt.After(collected),
+			"a new collection carries a new stamp")
+		fixture.write(t, fresh, false)
+		leader = fixture.member("0")
+		require.NotNil(t, leader)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			leader.Labels[modelDeploymentLabelKeyEndpointEligible],
+			"the new answer restores the group")
+	})
+
+	t.Run("a view that was already old when the answer was assembled cannot restore the group", func(t *testing.T) {
+		fixture := newModelDeploymentGroupFixture(t, false)
+		*fixture.serving = fixture.answering(false)
+
+		// THE VIEW'S STAMP COMES FROM THE INJECTABLE CLOCK AND THE AGGREGATE JUDGES ITS AGE ON
+		// THE WALL CLOCK. In production both are the same clock, so a view is old when the answer
+		// is assembled when the collection itself took longer than the freshness window. Placing
+		// the stamp in the past states the same thing in the fixture's terms, and it is the only
+		// way to reach the aggregate's own staleness verdict from here.
+		*fixture.now = time.Now().Add(-modelDeploymentServingFreshness - time.Second)
+		observation := fixture.collect()
+		assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, observation.Serving.State,
+			"a view that was already old makes the answer Unknown")
+		assert.Contains(t, observation.Serving.Reason, "stale",
+			"the answer says which view was stale")
+
+		// THE GROUP CARRIES NOTHING TO RETAIN, so only a restore could give it the label.
+		leader := fixture.member("0")
+		require.NotNil(t, leader)
+		delete(leader.Labels, modelDeploymentLabelKeyEndpointEligible)
+		delete(leader.Annotations, modelDeploymentAnnotationKeyEndpointEligibleGeneration)
+		require.NoError(t, fixture.cli.Update(context.Background(), leader))
+
+		// THE WRITE'S OWN FRESHNESS CHECK PASSES HERE, because the injected clock has not moved
+		// since the collection. Only the aggregate's verdict can be the reason nothing is restored,
+		// which is what this case discriminates.
+		fixture.write(t, observation, false)
+		leader = fixture.member("0")
+		require.NotNil(t, leader)
+		assert.NotContains(t, leader.Labels, modelDeploymentLabelKeyEndpointEligible,
+			"an answer assembled from an old view restores nothing")
+	})
 }

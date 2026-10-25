@@ -54,19 +54,19 @@ spec:
     - name: encode
       kind: Encode
       replicas: 1
-      instanceType: gpustack-nvidia-h100-80gb-hbm3-linux-amd64
+      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
         accelerator: "1"  # defaults to 1 on an accelerated InstanceType when omitted
     - name: prefill
       kind: Prefill
       replicas: 1
-      instanceType: gpustack-nvidia-h100-80gb-hbm3-linux-amd64
+      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
         accelerator: "1"
     - name: decode
       kind: Decode
       replicas: 1
-      instanceType: gpustack-nvidia-h100-80gb-hbm3-linux-amd64
+      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
         accelerator: "1"
 ```

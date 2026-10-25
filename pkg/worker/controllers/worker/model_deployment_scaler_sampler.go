@@ -331,8 +331,15 @@ func (s *modelDeploymentScalerSampler) observeRole(
 		}
 		observation.RunningRequests += read.sample.running
 		observation.WaitingRequests += read.sample.waiting
+		// THE ROLE'S OWN QUEUE IS ADDED TO THE WAITING QUEUE. A decode role waits for the
+		// requests a prefiller hands it, and a prefill role waits for the requests it has
+		// accepted and not yet scheduled. Neither queue is the ordinary waiting queue, and a
+		// reader of the ordinary queue alone calls a busy role idle.
 		if observation.Kind == algorithm.DecodeRole {
 			observation.WaitingRequests += read.sample.decodeTransfer
+		}
+		if observation.Kind == algorithm.PrefillRole {
+			observation.WaitingRequests += read.sample.prefillInflight
 		}
 		if read.sample.kvUsageFound {
 			kvUsage += read.sample.kvUsage
@@ -356,8 +363,12 @@ func (s *modelDeploymentScalerSampler) observeRole(
 			reasons = append(reasons, "an engine pod did not report its token counters")
 		}
 		if !window.latencyReadable {
+			// THE LATENCY HISTOGRAM'S ABSENCE IS NOT A SIGN OF TROUBLE. A replica that was
+			// added and never received a request exports no histogram, and a reader that
+			// takes the histogram's presence as trouble holds the whole role above its
+			// floor for ever. The signal stays missing, so the algorithms that measure
+			// latency are still held by it.
 			latencyState = algorithm.SignalMissing
-			idle = false
 			reasons = append(reasons, "an engine pod did not report its latency histograms")
 		}
 		switch window.state {
@@ -396,7 +407,15 @@ func (s *modelDeploymentScalerSampler) observeRole(
 	if idle && observation.RunningRequests == 0 && observation.WaitingRequests == 0 {
 		observation.GaugeState = algorithm.SignalIdle
 		observation.ThroughputState = algorithm.SignalIdle
-		observation.LatencyState = algorithm.SignalIdle
+		// THE LATENCY SIGNAL KEEPS ITS OWN STATE. A role that served nothing has no latency
+		// samples, and that is not a gap in the reading, but a missing latency signal still
+		// holds the algorithms that measure latency, and only the gauge path may read the
+		// role as idle.
+		if latencyState == algorithm.SignalFresh {
+			observation.LatencyState = algorithm.SignalIdle
+		} else {
+			observation.LatencyState = latencyState
+		}
 		observation.PromptTokensPerSecond = 0
 		observation.GenerationTokensPerSecond = 0
 		observation.TTFTMilliseconds = 0
@@ -419,8 +438,11 @@ func (s *modelDeploymentScalerSampler) observeRole(
 		}
 	}
 
+	// AN IDLE ROLE IS FULLY COVERED. It was read and it was quiet, and a coverage rule that
+	// holds a quiet role above its floor holds it there for ever, which is the same defect as
+	// reading the absence of a latency histogram as trouble.
 	observation.CompleteCoverage = len(windows) == len(asked) && !capped &&
-		throughputState == algorithm.SignalFresh && latencyState == algorithm.SignalFresh
+		((throughputState == algorithm.SignalFresh && latencyState == algorithm.SignalFresh) || idle)
 
 	sample.Observation = observation
 	sample.Reasons = reasons
