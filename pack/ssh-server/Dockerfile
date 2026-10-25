@@ -1,5 +1,5 @@
-ARG GO_VERSION="1.26.4"
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS sftp-server
+ARG GO_VERSION="1.27.3"
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine3.24 AS sftp-server
 
 # Build a fully static SFTP server. The sidecar is musl/Alpine, but `main` is often
 # glibc; a musl sftp-server cannot exec inside main's glibc chroot, and OpenSSH's
@@ -46,7 +46,7 @@ GO
         go build -trimpath -ldflags='-s -w' -o /gpustack-sftp-server .
 EOF
 
-FROM alpine:3.23.4
+FROM alpine:3.24.3
 SHELL ["/bin/sh", "-c"]
 
 ARG TARGETPLATFORM
@@ -75,9 +75,9 @@ RUN <<EOF
     echo "ForceCommand /chroot.sh" >> /etc/ssh/sshd_config
 
     # Enable TCP and stream-local forwarding and pin the sftp subsystem to a known
-    # path. Alpine ships an active `AllowTcpForwarding no` and `Subsystem sftp
-    # internal-sftp`; sshd honours the first value of a keyword and rejects a duplicate
-    # Subsystem, so drop the shipped active lines before writing ours.
+    # path. The distro's sshd_config may carry these keywords, active or commented
+    # out, and sshd honours the first value of a keyword and rejects a duplicate
+    # Subsystem, so remove any active line for them before appending ours.
     sed -i -E '/^[[:space:]]*(AllowTcpForwarding|AllowStreamLocalForwarding|Subsystem[[:space:]]+sftp)[[:space:]]/d' /etc/ssh/sshd_config
     echo "AllowTcpForwarding yes" >> /etc/ssh/sshd_config
     echo "AllowStreamLocalForwarding yes" >> /etc/ssh/sshd_config
