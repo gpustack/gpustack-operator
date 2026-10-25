@@ -117,13 +117,13 @@ spec:
     - name: prefill
       kind: Prefill
       replicas: 2
-      instanceType: gpustack-nvidia-h20-linux-amd64
+      instanceType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
     - name: decode
       kind: Decode
       replicas: 2
-      instanceType: gpustack-nvidia-h20-linux-amd64
+      instanceType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
 ```

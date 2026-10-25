@@ -42,7 +42,7 @@ spec:
   roles:
     - name: server
       replicas: 4
-      instanceType: gpustack-nvidia-a10g-linux-amd64
+      instanceType: gpustack--nvidia-a10g-linux-amd64
       resources:
         accelerator: 2  # cards per Pod
 ```
@@ -141,14 +141,14 @@ admission check this operator runs, which holds every group until the whole set 
     - name: prefill
       kind: Prefill  # Server (default), Prefill, Decode or Encode
       replicas: 2
-      instanceType: gpustack-nvidia-h20-linux-amd64
+      instanceType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
     - name: decode
       kind: Decode
       replicas: 2
       # may use different hardware from the prefill role
-      instanceType: gpustack-nvidia-h20-linux-amd64
+      instanceType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
 ```
@@ -651,7 +651,7 @@ spec:
   roles:
     - name: server
       replicas: 4
-      instanceType: gpustack-nvidia-a10g-linux-amd64
+      instanceType: gpustack--nvidia-a10g-linux-amd64
       resources:
         accelerator: 2
 ```
