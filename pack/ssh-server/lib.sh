@@ -52,10 +52,16 @@ function port_accepts() {
 # container_has_output <container>: whether the container has produced any output. The
 # entrypoint writes its configuration before it starts the daemon, and the daemon is what
 # writes the output, so output at all means the entrypoint has finished what it writes.
+#
+# Docker's own error text is not the container's output, so a docker that cannot read the
+# container is not ready either. The stderr is still merged into the output because the
+# container's own stderr is output too, and the exit status is what tells the two apart.
 function container_has_output() {
   local container="$1"
   local output
-  output="$(docker logs "$container" 2>&1 || true)"
+  if ! output="$(docker logs "$container" 2>&1)"; then
+    return 1
+  fi
   [[ -n "$output" ]]
 }
 
