@@ -305,8 +305,8 @@ before release completes. Kubernetes can display a deleting `Pod` as `Terminatin
 `Terminating` is not a retirement state. The captures do not include every transition, and zero client
 errors in the two scale-down phases do not prove every in-flight request survives every retirement.
 
-Two later runtime-acceptance runs measured the same contracts on an eight-GPU *H100* node with
-the scaler active.
+Three later runtime-acceptance runs, each with the scaler active, measured the same contracts
+on an eight-GPU *H100* node.
 
 The first scaled a *vLLM* multi-Server deployment by hand through one to two to one replicas. The
 Router's worker set followed every edit, the pinned `round_robin` policy split sixteen requests
@@ -322,8 +322,17 @@ seconds after the patch, past the 60-second disaggregated handoff grace window, 
 retirement honored. Eight checks passed; the one failing row had timed the endpoint withdrawal
 against that window, a measurement defect in the case rather than a product finding.
 
-Both runs cover one node, one shape each and one recorded cycle. They do not establish multi-node
-behavior or a general scaling claim.
+The third drove a *SGLang* *PD* deployment of one *prefill* and one *decode* replica with the
+scaler active: 29 checks passed with zero failures, warnings or blocked rows. The four content
+classes served through the `sglang-gateway`, and the Mooncake transfer over the direct leg moved
+54 MB across six transfers with zero failures.
+
+The scaler read the engine's waiting-request counter during a transfer and recorded 24 waiting
+requests on the *decode* role; under load the *decode* role grew to two replicas, and both roles
+returned to their floor of one with no retirement outstanding.
+
+The three runs cover one node, one shape each and one recorded cycle. They do not establish
+multi-node behavior or a general scaling claim.
 
 ## Benefits
 

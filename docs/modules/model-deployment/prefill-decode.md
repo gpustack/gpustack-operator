@@ -4,9 +4,9 @@ A *prefill/decode (PD)* deployment with *Prefill* and *Decode* roles is admitted
 operator connects them through a router and a transfer path. [Prefill and
 decode](deployment.md#prefill-and-decode) describes the role fields and admission rules.
 
-The recorded runs apply to vLLM `v0.30.0` and SGLang `0.5.22` behind the routers' pinned builds
-(`vllm-router` `v0.1.16.1`, the `sglang-gateway` binary of `gpustack/llm-router:v0.3.1`, `llm-d-router` `v0.11.0`). Other
-versions must be re-verified before they inherit a claim on this page.
+The recorded runs apply to vLLM `v0.30.0` and SGLang `0.5.22` behind the routers of
+`gpustack/llm-router:v0.3.1` (`vllm-router` `v0.1.16.1`, `sglang-gateway`, `llm-d-router`
+`v0.11.0`). Other versions must be re-verified before they inherit a claim on this page.
 
 ## Contents
 

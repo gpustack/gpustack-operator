@@ -4,9 +4,11 @@
 and the Router balances requests across all of them. For captured commands and results, follow the
 [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md).
 
-The recorded runs apply to vLLM `v0.30.0` on NVIDIA *H100*; the SGLang shape is stated against
-SGLang `0.5.22` with the `sglang-gateway` binary of `gpustack/llm-router:v0.3.1`. Other versions must be re-verified before
-they inherit a claim on this page.
+The recorded runs apply to two combinations, and they are the two the engine-match rule
+admits: vLLM `v0.30.0` on NVIDIA *H100* behind the `vllm-router` binary of
+`gpustack/llm-router:v0.3.1` under `--policy round_robin`, and SGLang `0.5.22` behind the
+`sglang-gateway` binary of `gpustack/llm-router:v0.3.1`. Other versions must be re-verified
+before they inherit a claim on this page.
 
 ## Contents
 
