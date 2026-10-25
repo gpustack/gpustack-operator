@@ -5,7 +5,7 @@ disable-model-invocation: true
 allowed-tools: "Read, Agent, Bash(bash .claude/skills/_e2e-lib/scripts/preflight.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/assert-core.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/cluster-auth.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/kube-context.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/build-load.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/deploy.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/provision.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/teardown.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/destroy.sh*), Bash(bash .claude/skills/gpustack-operator-e2e/cases/*), Bash(kubectl get*), Bash(kubectl describe*), Bash(kubectl logs*), Bash(kubectl cluster-info*), Bash(kubectl version*), Bash(kubectl config current-context), Bash(kubectl config get-contexts*), Bash(git diff*), Bash(git rev-parse*), Bash(command -v*), Bash(date*), Bash(mkdir -p .claude/reports/*), Bash(tee .claude/reports/*)"
 ---
 
-# GPUStack Operator — local E2E verification
+# GPUStack Operator — E2E verification
 
 Use [the shared module map](../../../docs/README.md#module-map) to locate the relevant guides,
 owning specs, code entry points and related modules. [AGENTS.md](../../../AGENTS.md#finding-sources)
