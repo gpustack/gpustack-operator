@@ -25,13 +25,9 @@ nothing pairs the two roles.
 
 For a multi-`Pod` *PD* replica, managed HTTP routing selects its leader (`member-index=0`).
 A router policy such as `round_robin` chooses among those leaders; it does not add non-HTTP members.
-*External data parallelism (External DP)* inside a *Prefill* or *Decode* role has not been validated.
+*External data parallelism (External DP)* inside a *Prefill* or *Decode* role has not been validated;
+the shape's own contract, including its Router requirement, is on [External DP](external-dp.md).
 [Issue #754](https://github.com/gpustack/gpustack-operator/issues/754) tracks that deferred combination.
-
-An External DP role is admitted only with a Router: `spec.router` is required, and the refusal names
-`RouterRequired`. The Router is what supervises the group's failure and recovery, not what makes its
-members reachable. The rule does not reach a role that took its command line over, and it does not
-reach a shape read from anywhere but the role's own extra arguments.
 
 With the managed `llm-d-router`, the connector a native vLLM role runs depends on whether
 *`spec.kvCache`* is set; the two settings render two different connector documents, not one document

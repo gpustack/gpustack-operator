@@ -325,7 +325,7 @@ scale-down held the handoff grace window. The measured numbers and the open boun
 recorded in the module page's [results](../../modules/model-deployment/external-dp.md#results).
 
 The shape being exercised is described in
-[SGLang External DP](../../modules/model-deployment/external-dp.md#sglang-external-dp). This
+[SGLang External DP](../../modules/model-deployment/external-dp.md#sglang-shape). This
 section carries the procedure; that page carries the contract.
 
 ### The manifest

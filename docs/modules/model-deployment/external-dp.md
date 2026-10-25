@@ -1,7 +1,8 @@
 # External DP
 
 *External data parallelism (External DP)* runs one fixed group in which every rank exposes its own HTTP endpoint,
-and the Router balances requests across all of them. For captured commands and results, follow the
+and no rank is a leader, so a Router in front is **required** — admission refuses the deployment
+without *`spec.router`*, naming the rule `RouterRequired`. For captured commands and results, follow the
 [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md).
 
 The recorded runs apply to two combinations, and they are the two the engine-match rule
@@ -14,11 +15,12 @@ before they inherit a claim on this page.
 
 - [Overview and selection](#overview-and-selection)
 - [Configuration](#configuration)
-- [SGLang External DP](#sglang-external-dp)
 - [Load-balancing derivation](#load-balancing-derivation)
 - [Per-rank Pod identity](#per-rank-pod-identity)
 - [Port allocation](#port-allocation)
 - [Endpoint selection](#endpoint-selection)
+- [Probe and health](#probe-and-health)
+- [Limits](#limits)
 - [Admission constraints](#admission-constraints)
 - [Results](#results)
 
@@ -101,20 +103,18 @@ spec:
 When the cluster provides an *RDMA* fabric, add `interface: "2"` under *`resources`* so cross-`Pod`
 expert collectives run over InfiniBand or RoCE instead of TCP.
 
-## SGLang External DP
+### SGLang shape
 
-*SGLang External DP* is the same serving shape on the SGLang engine: one instance is **one SGLang
-distributed launch spanning `size` member `Pod`s**, with **one attention-DP group per member
-`Pod`**. Under `SGLANG_RUST_SERVER=1` every attention-DP group hosts an HTTP listener of its own,
-so each member `Pod` answers on the base port of its own `Pod` IP and the Router balances across
-the members.
+The SGLang configuration is the same shape on the SGLang engine, declared through SGLang's own
+launch arguments. One instance is **one SGLang distributed launch spanning `size` member `Pod`s**,
+with **one attention-DP group per member `Pod`**: under `SGLANG_RUST_SERVER=1` every attention-DP
+group hosts an HTTP listener of its own, so each member `Pod` answers on the base port of its own
+`Pod` IP and the Router balances across the members.
 
-### Shape and example
-
-The launch spans the members, so the *TP* width counts every member's GPU while the attention width
-counts the groups. With two members and one GPU each, `--tp-size 2 --attn-dp-size 2 --nnodes 2`
-gives each member one attention-DP group of one scheduler, with the *FFN* tensor-parallel group
-spanning both members.
+The launch spans the members, so the *TP* width counts every member's GPU while the attention
+width counts the groups: with two members and one GPU each, `--tp-size 2 --attn-dp-size 2
+--nnodes 2` gives each member one attention-DP group of one scheduler, with the *FFN*
+tensor-parallel group spanning both members.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -170,6 +170,19 @@ resolves to the same attention width, but the operator reads `--attn-dp-size` an
 `--attention-data-parallel-size`, and the deprecated pair is not what the classification contract
 below is stated in.
 
+Where the vLLM shape runs one independent engine per rank, the SGLang shape is one launch with a
+collective in it: attention runs per member and the *FFN* tensor-parallel group spans the members.
+Three consequences follow, and they are the honest cost of the shape:
+
+- **A member fault stalls the survivor's in-flight requests** until the collective aborts, instead
+  of failing fast. The group is withdrawn as a unit; the survivor is not left serving a collective
+  whose peer is gone.
+- **Capacity is the group, not the member count.** Two members of one GPU each serve one model's
+  attention width, not two independent models' worth of capacity.
+- **Withdrawal is group-atomic**, under the same supervisor contract the vLLM shape's groups use:
+  a fault in any member withdraws every candidate endpoint of that group, and the group returns
+  only when every member is qualified again.
+
 ### Classification contract
 
 An SGLang role derives *External* only when **all** of these hold:
@@ -186,46 +199,6 @@ data parallelism* and is not this shape; an attention-DP launch behind the Pytho
 this shape either, because the groups share one frontend and the group is balanced inside itself.
 The vote reads the environment value the way SGLang's own environment reader reads it, and a role
 that declares a value SGLang would refuse is left to the engine to refuse.
-
-### Difference from vLLM
-
-vLLM *External DP* members are **independent engines**. SGLang members **share the *FFN*
-tensor-parallel collective**: attention runs per member, *FFN* runs across members. Three
-consequences follow, and they are the honest cost of the shape:
-
-- **A member fault stalls the survivor's in-flight requests** until the collective aborts, instead
-  of failing fast. The group is withdrawn as a unit; the survivor is not left serving a collective
-  whose peer is gone.
-- **Capacity is the group, not the member count.** Two members of one GPU each serve one model's
-  attention width, not two independent models' worth of capacity.
-- **Withdrawal is group-atomic**, under the same supervisor contract vLLM *External DP* groups use:
-  a fault in any member withdraws every candidate endpoint of that group, and the group returns
-  only when every member is qualified again.
-
-Scale-down runs the **disaggregated handoff grace window (60 s)** before the member gauge reads,
-so expect **at least 60 s of scale-down latency** on top of the drain itself. The group is
-`Draining` during that window; that is the contract, not a stall.
-
-### Limits
-
-- **A Router is required.** An *External* group has one endpoint per member and no leader, so the
-  Router is what balances them. Admission refuses a role that declares external data parallelism
-  with no `spec.router`, naming the rule `RouterRequired`.
-- **Single-role deployments only.** A deployment that mixes an *SGLang External DP* role with other
-  roles is out of scope for this round.
-- **Dense text models only.** The Rust server's pipeline refuses multimodal models.
-- **`--load-balance-method` is not rendered.** Under the Rust server it is inert; the group's own
-  balance is the Router's. This is recorded, not relied on.
-
-### Probe and health
-
-A member's `/health` is **blind to its peer**: it reports that member's own scheduler, not that the
-collective is whole. The qualification guard is the **group-forward probe** — a real generation
-posted to *every* member, each of which crosses the *FFN* collective.
-
-A passing probe on member *i* therefore proves the collective served a real generation through
-member *i*'s own listener, which is a stronger qualification than an independent replica's. A
-member that answers `/health` while its peer is gone is not a healthy group.
 
 ## Load-balancing derivation
 
@@ -252,7 +225,7 @@ The derived mode is reported per role as `.status.roles[].parallelism.loadBalanc
 `Hybrid`, `Internal`, `MultiPort`, or `Unknown`), beside the declared degrees (*`dataParallel`*,
 *`dataParallelLocal`*, *`expertParallel`*) and modes (*`expertParallel`* from `--enable-expert-parallel`).
 SGLang declares its degrees through `--dp-size`, `--ep-size` and `--attn-dp-size`, and reaches
-*External* through its own contract — see [SGLang External DP](#sglang-external-dp).
+*External* through its own contract — see [SGLang shape](#sglang-shape).
 
 ## Per-rank Pod identity
 
@@ -353,6 +326,31 @@ The Router's registry and per-worker counters are the end-to-end evidence; a suc
 through the Router alone does not prove all ranks are selected.
 See [Status](status.md) and [Routing](routing.md).
 
+## Probe and health
+
+A member's `/health` answers for that member alone: on the vLLM shape it says nothing about the
+other ranks, and on the SGLang shape it is blind to its peer in the shared *FFN* collective. The
+qualification guard is the **group-forward probe** — a real generation posted to *every* member,
+each of which crosses the group's collective.
+
+A passing probe on member *i* therefore proves the group served a real generation through member
+*i*'s own listener, which is a stronger qualification than an independent replica's. A member that
+answers `/health` while its group is broken is not a healthy group.
+
+## Limits
+
+- **A Router is required.** An *External* group has one endpoint per member and no leader, so the
+  Router is what balances them; admission refuses a role that declares external data parallelism
+  with no *`spec.router`*, naming the rule `RouterRequired`.
+- **Scale-down waits out the disaggregated handoff grace window (60 s)** before the member gauge
+  reads, so total scale-down latency is at least 60 s on top of the drain itself. The group reads
+  `Draining` during that window; that is the contract, not a stall.
+- **Single-role deployments only on the SGLang shape.** A deployment that mixes an *SGLang
+  External DP* role with other roles is out of scope for this round.
+- **Dense text models only on SGLang.** The Rust server's pipeline refuses multimodal models.
+- **`--load-balance-method` is not rendered on SGLang.** Under the Rust server it is inert; the
+  group's own balance is the Router's. This is recorded, not relied on.
+
 ## Admission constraints
 
 Admission enforces these boundaries on managed roles:
@@ -361,7 +359,9 @@ Admission enforces these boundaries on managed roles:
   endpoint per `Pod`.
 - An unreadable balance (`Unknown`) is refused with the parse's stated reason.
 - An *External* role with no `spec.router` is refused with the rule named `RouterRequired`: an
-  external group has one endpoint per member and no leader, so the Router is what balances it.
+  external group has one endpoint per member and no leader, so the Router is what balances it. The
+  refusal reads the role's own extra arguments, so it does not reach a role that took its command
+  line over.
 - The *Encode* role is refused beside External and Hybrid load balance: an encoder has one producer
   and one output key, so there is no per-member endpoint to balance across.
 - *Prefill* and *Decode* roles beside *External DP* are not refused, but the combination is unvalidated
