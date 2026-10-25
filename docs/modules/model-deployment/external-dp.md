@@ -418,9 +418,6 @@ The gateway registers at most one worker per group on `gpustack/llm-router:v0.3.
 gateway's 10 s discovery step, and the two-group runs presented two healthy workers in one
 run and one in the other.
 
-Router coverage of every member therefore waits on `gpustack/llm-router:v0.4.0` and later
-under the rendered `--dp-aware`, a combination no runtime run has exercised yet.
-
 After the scale-down the surviving group never republished `Eligible` within the case's 900 s
 budget while the retired group read `Withdrawn`, so a surviving group's recovery from a
 scale-down is unverified.
