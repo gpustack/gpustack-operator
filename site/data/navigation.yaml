@@ -103,6 +103,7 @@ order:
   /docs/contribute/:
     - development
     - internals
+    - local-api-testing
 overview_labels:
   /docs/walkthroughs/model-deployment/: Preparation and Choices
 children:
@@ -188,3 +189,4 @@ labels:
   /docs/reference/instance-metrics/: Instance Metrics
   /docs/contribute/development/: Development
   /docs/contribute/internals/: Internals
+  /docs/contribute/local-api-testing/: Local API Testing

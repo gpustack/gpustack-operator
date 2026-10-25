@@ -151,8 +151,8 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `development`
 - Use for: build, lint, test and codegen commands; commit and PR conventions; contributor invariants; release steps; site publication and translations.
 - Aliases: `make`, `lint`, `codegen`, `vendored dependencies`, `staging`, `Hugo`, `GitHub Pages`
-- Guides: commands and targets in [Development](contribute/development.md); startup invariants in [Internals](contribute/internals.md); orientation in [Architecture](getting-started/architecture.md).
-- Code: [Makefile](../Makefile) and the scripts behind it in [hack](../hack/) · site publication in [Site workflow](../.github/workflows/site.yml) and [publisher](../hack/site/publish.py) · patched modules in [staging](../staging/) · generators in [gen](../gen/)
+- Guides: commands and targets in [Development](contribute/development.md); startup invariants in [Internals](contribute/internals.md); orientation in [Architecture](getting-started/architecture.md); the disposable local cluster recipe in [Local API Testing](contribute/local-api-testing.md).
+- Code: [Makefile](../Makefile) and the scripts behind it in [hack](../hack/) · site publication in [Site workflow](../.github/workflows/site.yml) and [publisher](../hack/site/publish.py) · patched modules in [staging](../staging/) · generators in [gen](../gen/) · the local cluster recipe in [testing/infra/local_worker](../testing/infra/local_worker/)
 - Related: [API Changes](#api-changes) (what `make generate` owns) · [Installation](#installation) (chart targets and vendoring)
 - Skills: [gpustack-operator-overview](../.agents/skills/gpustack-operator-overview/SKILL.md) (codebase tour) · [gpustack-operator-docs](../.agents/skills/gpustack-operator-docs/SKILL.md) (documentation changes) · [gpustack-operator-code-review](../.agents/skills/gpustack-operator-code-review/SKILL.md) (PR review criteria) · [gpustack-operator-issue-pr](../.agents/skills/gpustack-operator-issue-pr/SKILL.md) (issue and PR titles) · [gpustack-operator-release](../.agents/skills/gpustack-operator-release/SKILL.md) (cut a release) · [gpustack-operator-generate](../.agents/skills/gpustack-operator-generate/SKILL.md) (API codegen)
 
@@ -292,6 +292,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 |---|---|
 | [Development](contribute/development.md) | Build, generate and lint the project. |
 | [Internals](contribute/internals.md) | Review startup and naming constraints. |
+| [Local API Testing](contribute/local-api-testing.md) | Create a disposable local cluster and probe the worker path. |
 
 ## Conventions
 
