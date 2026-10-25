@@ -305,15 +305,13 @@ before release completes. Kubernetes can display a deleting `Pod` as `Terminatin
 `Terminating` is not a retirement state. The captures do not include every transition, and zero client
 errors in the two scale-down phases do not prove every in-flight request survives every retirement.
 
-Three later runtime-acceptance runs, each with the scaler active, measured the same contracts
-on an eight-GPU *H100* node.
-
-The first scaled a *vLLM* multi-Server deployment by hand through one to two to one replicas. The
+A first later runtime-acceptance run scaled a *vLLM* multi-Server deployment by hand through one to
+two to one replicas. The
 Router's worker set followed every edit, the pinned `round_robin` policy split sixteen requests
 eight and eight across the two workers at two replicas, both workers stayed healthy, and the
 deployment still served after the scale-back. The run completed 21 checks with zero failures.
 
-The second retired one of two replica groups of a *vLLM* [External DP](external-dp.md) deployment
+A second run retired one of two replica groups of a *vLLM* [External DP](external-dp.md) deployment
 at data parallelism 2. The Router's worker set held every member throughout — two workers for one
 group of two, four for two groups of two, and two again after the scale-down.
 
@@ -322,7 +320,7 @@ seconds after the patch, past the 60-second disaggregated handoff grace window, 
 retirement honored. Eight checks passed; the one failing row had timed the endpoint withdrawal
 against that window, a measurement defect in the case rather than a product finding.
 
-The third drove a *SGLang* *PD* deployment of one *prefill* and one *decode* replica with the
+A third run drove a *SGLang* *PD* deployment of one *prefill* and one *decode* replica with the
 scaler active: 29 checks passed with zero failures, warnings or blocked rows. The four content
 classes served through the `sglang-gateway`, and the Mooncake transfer over the direct leg moved
 54 MB across six transfers with zero failures.

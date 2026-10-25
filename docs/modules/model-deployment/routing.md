@@ -16,15 +16,32 @@ endpoint selection and SGLang's tested DP routing modes.
 
 ## Which Pods receive traffic
 
-The engine's *load balancing (LB)* mode determines the candidate endpoints. The Router policy chooses among those candidates.
-`round_robin` does not change the endpoint selector.
+The serving mode decides which `Pod`s are candidates; the router decides which candidate a
+request lands on, and a policy such as `round_robin` never changes the selector.
 
-| Serving configuration | HTTP candidates |
+| Serving mode | HTTP candidates |
 |---|---|
-| Internal Server group | Member 0 of each replica. |
-| Qualified External Server group | Every qualified member; each member serves one *data parallelism (DP)* rank. |
+| Internal *Server* group | Member 0 of each replica. |
+| Qualified External *Server* group | Every qualified member; each member serves one *data parallelism (DP)* rank. |
 | *Prefill* or *Decode* group | Member 0 of each replica, including groups with `size > 1`. |
+| *Elastic EP* collective | The collective's one endpoint, its master. |
 | *Encode* group | Excluded from answering candidates and the deployment-wide `Service`. |
+
+How each router forwards traffic within a mode. `vllm-router` serves vLLM deployments only and
+`sglang-gateway` SGLang only, so each of their cells is that engine's own pairing:
+
+| Mode | `llm-d-router` | `vllm-router` | `sglang-gateway` |
+|---|---|---|---|
+| Multi-replica *Server* | One fixed scoring profile — prefix match, queue depth, KV utilization — with no policy switch; measured 187/170 on vLLM and 375/0, every request on one replica, on SGLang | `cache_aware` by default; `--policy round_robin` spreads evenly, measured 60 per replica | The same policies as `vllm-router`; `round_robin` measured 60 per replica |
+| *PD* pair | The disaggregated pairing's own router: the token-counted prefill/decode split, per-role connector documents, the decode sidecar | Its own *PD* mode over the pair | Native `--pd-disaggregation` |
+| *EPD* | An `encode` scheduling profile beside the pair; the decode sidecar coordinates the encoder transfer | Drives encode, prefill and decode itself through operator-owned `--epd-config`, no sidecar | Routes the pair natively; the prefiller reaches the encoder through `--encoder-urls` |
+| *Elastic EP* | The engine's own internal load balancing spreads work inside the collective, and the deployment publishes one endpoint, so a router is not how this mode balances | Same | Same |
+| *External DP* | Admitted, but no `--policy` to spread the ranks evenly and no recorded run — use the engine's own router | Every rank endpoint behind `--policy round_robin` (recorded) | Per-member endpoints; the registration boundary is the paragraph below |
+
+`llm-d-router`'s profile is not configurable — no policy flag, no settable weights
+([No policy flag](#no-policy-flag)) — so where even spread matters, above all multi-replica *Server*
+and *External DP*, prefer the engine's own router: `vllm-router` on vLLM and `sglang-gateway` on
+SGLang.
 
 *Encode* `Pod`s are never part of the deployment's answering set. Under `llm-d-router` they are
 discovered for stage routing, and under `vllm-router` their `Service` endpoint is passed through
