@@ -5,6 +5,7 @@
 #
 #   case-88.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia|amd|ascend|cambricon|hygon|iluvatar|metax|mthreads|thead; cluster=real; inputs=E2E_MD_IMAGE
 # Goal:        Prove the operator's TAS and per-card admission paths agree on the same accelerator
 #              node. A node-label TopologySource gives one free accelerator node a region/zone
 #              profile; the existing accelerated ClusterQueue migrates to that profile without a

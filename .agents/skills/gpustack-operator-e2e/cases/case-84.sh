@@ -7,6 +7,7 @@
 #
 # <NS> is the operator's own namespace. The test Pods run in `default` (or RDMA_TEST_NS).
 #
+# Prerequisites: nodes=1; gpu=none; features=rdma; cluster=real
 # Goal:        Whether what an allocation injects is everything an InfiniBand transport needs.
 #              WHAT DOES NOT COUNT, and is the reason this case gates so hard:
 #                - a pass on a RoCE or EFA adapter. Those run the verbs layer over Ethernet and open

@@ -5,6 +5,7 @@
 #   case-39.sh <NS>                            # when run on the accelerator node itself
 #   PPU_NODE_SSH=<user@host> case-39.sh <NS>   # otherwise
 #
+# Prerequisites: nodes=1; gpu=thead; cluster=real; inputs=E2E_SLICE_IMAGE,PPU_NODE_SSH,PPU_NODE_SSH_OPTS,PPU_SMI,PPU_IDLE_MIB
 # Goal:        ASSERTS two contracts on real T-Head PPU hardware, each proven from BOTH sides —
 #              what the operator recorded, and what the container can see:
 #                (1) PINNING. A claim carrying the preferred-accelerator-id annotation lands on

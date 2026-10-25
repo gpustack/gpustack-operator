@@ -6,6 +6,7 @@
 #
 #   case-100.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=any; features=mooncake-store; cluster=real; inputs=E2E_C100_ENGINE_URL,E2E_C100_IMAGE,E2E_C100_IT,E2E_C100_MEMBER_NODE,E2E_C100_READY_BOUND
 # Goal:        Prove at runtime that cache_prefix isolates weights: two commits of
 #              HuggingFaceTB/SmolLM-135M-Instruct share a tokenizer and a served name and differ in
 #              their weights, which without the prefix was measured to put both on the same store

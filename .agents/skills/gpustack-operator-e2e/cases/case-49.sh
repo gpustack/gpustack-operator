@@ -6,6 +6,7 @@
 #
 #   case-49.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_MD_BINDING,E2E_MD_DELETE_BOUND,E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE,E2E_SVC_RECREATE_BOUND
 # Goal:        Two contracts of the ModelDeployment controller, read on a live Kueue and on a live
 #              Service watch.
 #

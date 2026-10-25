@@ -7,6 +7,7 @@
 #
 #   case-113.sh <NS>
 #
+# Prerequisites: nodes=2; gpu=none; features=multi-host; cluster=any
 # Goal:        Prove the second hub end to end against the real ModelScope API: a branch resolves
 #              to the commit git also names, its files materialize on a cold node and hash to the
 #              hub's own sha256, a second node's copy comes from the first node's published tree,

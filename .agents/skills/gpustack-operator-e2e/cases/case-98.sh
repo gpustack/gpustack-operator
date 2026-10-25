@@ -7,6 +7,7 @@
 #
 #   case-98.sh <NS>
 #
+# Prerequisites: nodes=2; gpu=none; features=multi-host; cluster=any; inputs=E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE,E2E_SYSTEM_NS
 # Goal:        Prove the consumer side of the ModelArtifact contract and the placement rules an
 #              Instance's persistent claims follow, on a real API server, scheduler, kubelet and
 #              Kueue: the bound PV's required node affinity reaches every Pod and TAS places it on

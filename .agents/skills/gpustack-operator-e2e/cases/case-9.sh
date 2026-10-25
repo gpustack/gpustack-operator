@@ -4,6 +4,7 @@
 #
 #   case-9.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any
 # Goal:        Two admin scenarios on the general pool —
 #              Q1: a RUNNING Instance whose unit spec shrank can still be STOPPED and DELETED. That
 #                  state cannot be entered: an InstanceType's spec is immutable apart from

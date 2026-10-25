@@ -5,6 +5,7 @@
 #
 #   case-75.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; features=mooncake-store; cluster=any
 # Goal:        Three contracts on one HA KVCacheBackend. First, the store's snapshot is not offered:
 #              restoring one can make the cache serve another key's bytes instead of a miss, so the
 #              webhook must refuse the snapshot switches in the leader's extraArgs -- on create and

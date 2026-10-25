@@ -6,6 +6,7 @@
 #
 #   MIG_NODE_SSH=<user@host> case-29.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; features=partition; cluster=real; inputs=MIG_NODE_SSH,MIG_RECLAIM_BOUND
 # Goal:        Three contracts of the hardware-partition path, read on one card in one run, in the
 #              order they can be read on.
 #

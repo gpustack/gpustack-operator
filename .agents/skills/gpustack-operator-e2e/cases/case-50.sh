@@ -6,6 +6,7 @@
 #
 #   case-50.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_C50_MAX_REPLICAS,E2E_MD_BINDING,E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE,E2E_MD_SETTLE,E2E_SYSTEM_NS
 # Goal:        Three claims about a pool too small for the whole set, told on one shortage.
 #
 #              THE FIRST IS THE BARRIER. When the pool cannot hold every role, NOTHING starts: not

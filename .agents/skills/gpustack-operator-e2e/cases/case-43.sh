@@ -8,6 +8,7 @@
 # <NS> is the operator's own namespace, as everywhere in this suite. The KVCacheBackend and the
 # KVCachePool are cluster-scoped; the Bindings live in two namespaces this case creates and removes.
 #
+# Prerequisites: nodes=1; gpu=none; features=mooncake-store; cluster=any; inputs=E2E_MOONCAKE_IMAGE
 # Goal:        A KVCachePool is the quota domain over one KVCacheBackend, and a KVCachePoolBinding is
 #              a namespace's authorization to use it under one reuse domain. This proves the four
 #              things that only a real master can answer:

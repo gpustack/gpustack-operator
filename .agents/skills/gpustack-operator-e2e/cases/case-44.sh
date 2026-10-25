@@ -7,6 +7,7 @@
 #
 #   case-44.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; features=mooncake-store; cluster=any; inputs=E2E_MOONCAKE_IMAGE
 # Goal:        Two contracts of one multi-tenant master, proven against ONE backend, ONE probe Pod
 #              and ONE client:
 #                (1) WHAT A GRANT ENFORCES. A write past the grant is refused while every object

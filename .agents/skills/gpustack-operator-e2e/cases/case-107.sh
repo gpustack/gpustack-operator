@@ -7,6 +7,7 @@
 #
 #   case-107.sh <NS>
 #
+# Prerequisites: nodes=2; gpu=none; features=kind,multi-host; cluster=kind; inputs=E2E_C107_FULL_TRIALS,E2E_C107_SEED,E2E_C107_TRIALS,E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE
 # Goal:        Prove the placement preference end to end through Kueue's topology-aware scheduling:
 #              a replica lands on the node holding its digest when that node has room, measured
 #              against an exact chance baseline; it is admitted on another node without waiting when

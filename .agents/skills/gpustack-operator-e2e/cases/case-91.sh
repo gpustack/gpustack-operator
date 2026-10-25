@@ -5,6 +5,7 @@
 #
 # case-91.sh <NS> <MODEL_DEPLOYMENT>
 #
+# Prerequisites: nodes=2; gpu=any; features=multi-host; cluster=real; inputs=E2E_PD_MODEL,E2E_PD_PROBE_IMAGE,E2E_PD_REQUESTS,E2E_PD_VLLM_VERSION
 # Goal:        Every routed request completes while the prefill half counts transfers it sent, the
 #              decode half counts blocks it was handed, and no half counts a failed transfer — on
 #              the transport the operator pinned rather than one the manifest set. With a store

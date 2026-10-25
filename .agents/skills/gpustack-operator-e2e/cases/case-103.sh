@@ -10,6 +10,7 @@
 #
 #   case-103.sh <NS>
 #
+# Prerequisites: nodes=2; gpu=none; features=kind,multi-host; cluster=kind; inputs=E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE,MH_PYTHON
 # Goal:        Prove the parts of node delivery that only a running plugin, a real kubelet and time
 #              can show: a rolling restart of the plugin DaemonSet does not disturb a Pod reading its
 #              mounted files, and a mount asked for during the roll succeeds after it; the collector

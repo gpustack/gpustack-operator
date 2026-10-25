@@ -4,6 +4,7 @@
 #
 #   case-16.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any
 # Goal:        On the general (CPU) pool, prove the queue-ownership split (InstanceTypeReconciler owns the
 #              CQ's existence + schedule labels + teardown; NodeQueueReconciler owns its quota /
 #              StopPolicy; NodeFlavorReconciler authors the derived type) and the shape of the

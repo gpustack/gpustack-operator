@@ -7,6 +7,7 @@
 #
 #   case-121.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=ascend; cluster=real; inputs=E2E_C121_CARDS,E2E_C121_CLAIM,E2E_C121_IMAGE,E2E_C121_IMAGE_URL,E2E_C121_INSTANCE_TYPE,E2E_C121_MAX_TOKENS,E2E_C121_MODEL,E2E_C121_MOUNT,E2E_C121_PROBE_IMAGE,E2E_C121_READY_BOUND,E2E_C121_ROUTER_IMAGE,E2E_C121_SETTLE_BOUND,E2E_C121_SIDECAR_IMAGE,E2E_C121_TP,E2E_C121_WEIGHTS,E2E_SYSTEM_NS
 # Goal:        This is the functional reading of the admitted matrix row
 #              llm-d-router + vLLM + Ascend + ECExampleConnector, and the only case that measures
 #              the row the whole design calls mounted-directory. Case 119 proved the two roles

@@ -4,6 +4,7 @@
 #
 #   case-38.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=amd; cluster=real; inputs=E2E_AMD_CORES_PCT,E2E_AMD_CO_A_CORES_PCT,E2E_AMD_CO_A_MEM_PCT,E2E_AMD_CO_B_CORES_PCT,E2E_AMD_CO_B_MEM_PCT,E2E_AMD_IMAGE,E2E_AMD_MEM_MIB,E2E_AMD_MEM_PCT,E2E_AMD_RUN_TRIES
 # Goal:        ASSERTS the AMD claim matrix end to end, and asserts every row TWICE — once from what
 #              the operator recorded (the allocation annotation, the per-card ledger, the Instance
 #              metrics subresource) and once from INSIDE the container with AMD's own tooling. The two

@@ -6,6 +6,7 @@
 #
 #   case-99.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=any; cluster=real; inputs=E2E_C99_GATED,E2E_C99_GATED_COMMIT,E2E_C99_IT,E2E_C99_READY_BOUND,E2E_C99_SGLANG_IMAGE,E2E_C99_VLLM_IMAGE,E2E_PD_PROBE_IMAGE,HF_TOKEN_READONLY
 # Goal:        Prove both deliveries serve on real engines: a claim is loaded from its read-only
 #              local path and served under spec.model.name, so the router's token producer, the
 #              served-model list and the metrics' model label agree; a gated repository is downloaded

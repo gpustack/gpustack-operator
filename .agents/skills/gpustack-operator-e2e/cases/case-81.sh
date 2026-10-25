@@ -7,6 +7,7 @@
 #
 # <NS> is the operator's own namespace. The test Pods run in `default` (or RDMA_TEST_NS).
 #
+# Prerequisites: nodes=1; gpu=none; features=rdma; cluster=real; inputs=E2E_RDMA_IMAGE,E2E_RDMA_WORKLOAD_IMAGE
 # Goal:        The mount is not the permission. A container that asks for an RDMA endpoint and
 #              mounts nothing by hand gets the endpoint's character device and can open() it; the
 #              same container without the request cannot. That second half is the whole point: the

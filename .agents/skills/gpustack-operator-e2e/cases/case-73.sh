@@ -4,6 +4,7 @@
 #
 #   case-73.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=any; features=mooncake-store; cluster=real; inputs=E2E_MOONCAKE_IMAGE,E2E_VB_ENGINE_IMAGE,E2E_VB_EXISTING_BACKEND,E2E_VB_EXISTING_DOMAIN,E2E_VB_EXISTING_SERVICES,E2E_VB_GPU_MEM_UTIL,E2E_VB_INSTANCE_TYPE,E2E_VB_MODEL,E2E_VB_WEIGHTS
 # Goal:        Two halves of the store-reuse chain, in different states, so they are proven separately. The WRITE half is real and guarded here: drive one engine
 #              replica with more distinct prefixes than its local KV cache holds, and the connector sinks the evicted blocks to the shared store. The READ half does
 #              not work, and this case carries it as a KNOWN-FAILURE DETECTOR: replay the written prefixes at the OTHER replica and every hit carrier stays at zero

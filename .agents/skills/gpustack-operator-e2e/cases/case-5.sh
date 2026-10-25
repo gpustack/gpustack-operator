@@ -4,6 +4,7 @@
 #
 #   case-5.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any
 # Goal:        The Pod mutating webhook (objectSelector on kueue.x-k8s.io/queue-name, failurePolicy
 #              Fail) folds a per-container .sliced.memory-percentage into per-card .sliced.units
 #              (× M/100 = ×16000) and defaults an absent .sliced.cores-percentage to 100; the

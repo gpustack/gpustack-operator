@@ -4,6 +4,7 @@
 #
 #   case-1.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any
 # Goal:        Prove the general (CPU-only) scheduling chain materializes end to end and
 #              that NO Cohort is created — exactly one isolated ClusterQueue per pool.
 # Environment: Any cluster with a materialized general pool (operator core healthy, NFD +

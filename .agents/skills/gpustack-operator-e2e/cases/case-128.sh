@@ -7,6 +7,7 @@
 #
 #   case-128.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_C128_BOUND,E2E_MD_IMAGE
 # Goal:        A scaler is a planner that owns the replica count of the deployment it names, so
 #              three things have to be true of it before it may move anything. First, the values it
 #              omits are filled in: the webhook judges the object as it will be stored, so a

@@ -8,6 +8,7 @@
 #
 #   case-126.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE,E2E_SYSTEM_NS
 # Goal:        Two contracts, both answered at admission, both about the same object.
 #
 #              THE ENGINE IMAGE IS A SCHEMA OBLIGATION. spec.engine.image is a REQUIRED field: the

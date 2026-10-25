@@ -6,6 +6,7 @@
 #
 # case-94.sh <NS> <MODEL_DEPLOYMENT> <router|prefill|decode|server>
 #
+# Prerequisites: nodes=1; gpu=any; cluster=real; inputs=E2E_PD_MODEL,E2E_PD_PROBE_IMAGE,E2E_SCALE_LOG_DIR,E2E_SCALE_READY_BOUND,E2E_SCALE_SETTLE
 # Goal:        A replica added while requests keep arriving is found by the router and does real
 #              work, and removing it again fails no request in flight. Final replica counts alone
 #              say nothing about either, so the rows read the traffic and the new Pod's own

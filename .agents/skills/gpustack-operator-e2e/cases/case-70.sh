@@ -6,6 +6,7 @@
 #
 #   case-70.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; features=mooncake-store; cluster=any; inputs=E2E_KUBE_CONTEXT,E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE,E2E_MD_SETTLE,E2E_ROUTER_SETTLE,E2E_ROUTER_STABLE,E2E_ROUTER_UNPULLABLE_IMAGE
 # Goal:        A routed deployment owns exactly one complete router object set through both router
 #              transitions, its status reports every cache-event publication state observable from
 #              the cluster, and a ready router becomes the published endpoint.

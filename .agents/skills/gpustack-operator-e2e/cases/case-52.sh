@@ -7,6 +7,7 @@
 #
 # <NS> is the operator's own namespace, where the device manager pods live.
 #
+# Prerequisites: nodes=1; gpu=none; cluster=real
 # Goal:        Every node the device manager profiles publishes its network interfaces on
 #              `Devices.spec.interfaces`; the published record does not change on a pass that found
 #              nothing new — asserted through `.metadata.generation`, which a status subresource

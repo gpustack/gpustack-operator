@@ -6,6 +6,7 @@
 #
 #   case-111.sh <NS>
 #
+# Prerequisites: nodes=2; gpu=none; features=multi-host; cluster=any
 # Goal:        Prove the node-to-node path end to end: a seed node pulls the content from the hub
 #              and publishes it; a cold node's mount pulls the same digest from the seed and
 #              reports source=Peer with its hub byte counter at zero; killing the seed's plugin

@@ -5,6 +5,7 @@
 #
 # case-89.sh <NS> <MODEL_DEPLOYMENT> <ROLE> <COUNT> <KEY|none>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_EXPECT_PURE_PD,E2E_REJECT_MANIFEST
 # Goal:        Read the actual main-container limits of every owned Pod for one role. Run once for
 #              absent or zero, RDMA one, RDMA multiple, EFA, and a pure P/D fixture. A rejected
 #              mixed-fabric manifest can be checked with E2E_REJECT_MANIFEST.

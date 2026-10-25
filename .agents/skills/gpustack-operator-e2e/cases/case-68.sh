@@ -6,6 +6,7 @@
 #
 #   case-68.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_KUBE_CONTEXT,E2E_MD_BINDING,E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE,E2E_MD_SETTLE
 # Goal:        Roles on two InstanceTypes used to be refused outright, because one Kueue Workload
 #              carries one queueName and the atomicity the shape needs came entirely from Kueue's
 #              intra-group rule. The replacement is one pod group per InstanceType plus an

@@ -5,6 +5,7 @@
 #
 #   MIG_NODE_SSH=<user@host> case-32.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; features=mig; cluster=real; inputs=MIG_NODE_SSH,MIG_OOB_WINDOW
 # Goal:        RECORD what a managed node does when an administrator carves a hardware partition by
 #              hand. Every node-level number — the per-profile capacity, the partition token health and
 #              the admission check — is derived from the annotations the device plugin writes, and a

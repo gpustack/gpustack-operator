@@ -10,6 +10,7 @@
 # cluster-scoped; the Deployment, Service, Lease, ServiceAccounts, Roles and RoleBindings it renders
 # all live in <NS>.
 #
+# Prerequisites: nodes=1; gpu=none; features=mooncake-store; cluster=any; inputs=E2E_MOONCAKE_IMAGE
 # Goal:        With leader.replicas=3 and leader.electionBackend=Kubernetes, three leader processes run and
 #              exactly one serves, elected through a Kubernetes Lease. This proves on a real API
 #              server what rendered objects and unit tests cannot:

@@ -9,6 +9,7 @@
 # <NS> is the operator's own namespace, where the device manager DaemonSet lives. The preflight Pod
 # runs in `default` (or RDMA_TEST_NS).
 #
+# Prerequisites: nodes=1; gpu=none; cluster=real
 # Goal:        The policy decides whether the NUMA hint this operator publishes changes any
 #              admission at all, and an operator reads it out of preflight. So preflight has to
 #              report the policy the kubelet is RUNNING, not the one a file it happened to look at

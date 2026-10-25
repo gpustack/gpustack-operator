@@ -8,6 +8,7 @@
 #
 # <NS> is the operator's own namespace. The test Pods run in `default` (or RDMA_TEST_NS).
 #
+# Prerequisites: nodes=1; gpu=any; features=rdma; cluster=real; inputs=E2E_RDMA_WORKLOAD_IMAGE
 # Goal:        The feature's headline promise, measured at its boundary rather than at a point. A
 #              container asking for whole accelerators and one RDMA endpoint together is admitted
 #              while the pair fits on one NUMA node, and REFUSED by the kubelet the moment it does

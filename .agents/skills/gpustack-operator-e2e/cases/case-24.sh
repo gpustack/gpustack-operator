@@ -6,6 +6,7 @@
 #
 #   MIG_NODE_SSH=<user@host> case-24.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; features=partition; cluster=real; inputs=MIG_MIXED_INDEXES,MIG_MIXED_ROUNDS
 # Goal:        On ONE node whose cards of a single model are deliberately mixed — some put into a
 #              hardware partitioning mode, the rest left whole — every partition request lands on a
 #              partitionable card and every logical-slice request on an unpartitioned one, with ZERO

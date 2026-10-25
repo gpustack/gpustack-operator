@@ -4,6 +4,7 @@
 #
 #   case-8.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=any; cluster=real; inputs=E2E_SLICE_BASE,E2E_SLICE_IMAGE,E2E_SLICE_MANUF,E2E_SLICE_MEM_ENV,E2E_SLICE_MEM_ENV_UNIT,E2E_SLICE_SMI,E2E_SLICE_SMI_MEM_RE,E2E_SLICE_SM_ENV
 # Goal:        On one real logically sliceable accelerator pool, three contracts hold at once —
 #              1. a sliced workload is capped at runtime to its share of a real card — by memory
 #                 percentage, by memory MiB and by compute (SM) percentage — through the vendor's

@@ -4,6 +4,7 @@
 #
 #   case-65.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; features=mooncake-store; cluster=real; inputs=E2E_LOCALDISK_HOST_PATH,E2E_MOONCAKE_IMAGE
 # Goal:        A published local disk tier is not a written byte: a key's bytes move to disk at eviction time, never
 #              at put time. This case forces eviction - one member's capacity beyond the aggregate memory of the
 #              running members - and then asks what only real bytes answer.

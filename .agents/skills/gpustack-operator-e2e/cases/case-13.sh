@@ -5,6 +5,7 @@
 #
 #   case-13.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=any; cluster=real
 # Goal:        A sliced SSH-enabled Instance renders a two-container Pod (main = workload, sshd = Alpine
 #              sidecar that nsenter+chroots into main) that co-locates the sliced accelerator + HAMI
 #              artifacts + workload on `main` and gives `sshd` only the device-only

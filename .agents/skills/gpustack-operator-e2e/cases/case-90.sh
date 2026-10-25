@@ -5,6 +5,7 @@
 #
 # case-90.sh <NS> <MODEL_DEPLOYMENT>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_EXPECT_PARTIAL,E2E_MD_PROBE_IMAGE
 # Goal:        Read the aggregated metrics object twice and fetch every advertised native endpoint
 #              from another Pod. This distinguishes a valid annotation from an unreachable port.
 # Environment: An explicitly selected cluster and namespace with a serving ModelDeployment, its

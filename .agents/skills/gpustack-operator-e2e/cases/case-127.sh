@@ -7,6 +7,7 @@
 #
 #   case-127.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_C127_ENGINE_IMAGE,E2E_C127_HOLD,E2E_C127_MODEL,E2E_C127_PROBE_IMAGE,E2E_C127_READY_BOUND,E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE
 # Goal:        A managed role's replica mounts its OWN subdirectory of one host compilation cache,
 #              always at the same path inside the container, so the engine can be pointed at the
 #              cache by a single defaulted variable without the render knowing which weights,

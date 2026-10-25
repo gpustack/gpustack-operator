@@ -5,6 +5,7 @@
 #
 #   case-36.sh <NS>
 #
+# Prerequisites: nodes=2; gpu=none; features=multi-host; cluster=any
 # Goal:        An Instance pinned to a named node lands there through a node SELECTOR rather than a
 #              direct pod assignment, and still passes through Kueue; the volumes it asks for beside
 #              its workspace are mounted into the workload container with readOnly and subPath

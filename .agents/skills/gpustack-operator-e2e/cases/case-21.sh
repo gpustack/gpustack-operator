@@ -5,6 +5,7 @@
 #
 #   case-21.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any
 # Goal:        An SSH-enabled Instance must behave like a stock SSH server on the exec channel: a
 #              non-interactive `ssh host '<cmd>'` runs the command inside `main` and returns only the
 #              command's output — no login banner — while a plain interactive `ssh host` still prints

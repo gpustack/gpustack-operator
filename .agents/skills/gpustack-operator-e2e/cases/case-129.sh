@@ -10,6 +10,7 @@
 #   deploys the target into another namespace (the benchmark's manifests carry their own) can
 #   point the case at it without moving the target.
 #
+# Prerequisites: nodes=1; gpu=ascend|nvidia|amd; cluster=real; inputs=E2E_C129_ENGINE_IMAGE,E2E_C129_MD,E2E_C129_MODEL,E2E_C129_NS,E2E_C129_PHASES,E2E_C129_PROBE_IMAGE,E2E_C129_PROBE_URL,E2E_C129_READY_BOUND,E2E_C129_RETIRE_BOUND,E2E_C129_ROLE,E2E_C129_STEP_BOUND,E2E_C129_WEIGHTS
 # Goal:        A scaler that is allowed to act does so through a chain of observable steps, and
 #              this case walks the chain against a deployment that really serves. The scaler reads
 #              the engine's own Prometheus counters from the pods of its target, divides what it

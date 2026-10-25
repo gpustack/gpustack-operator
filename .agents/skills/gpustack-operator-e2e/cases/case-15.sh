@@ -5,6 +5,7 @@
 #
 #   case-15.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=any; cluster=real
 # Goal:        The co-location + capability-drop change must not break the non-sliced SSH path — an
 #              exclusive (whole-card) SSH-enabled Instance places the accelerator on `main` and the
 #              device-only `.visibility` resource on `sshd`, and through a real SSH login the shell sees

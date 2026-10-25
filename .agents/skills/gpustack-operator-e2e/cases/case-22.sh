@@ -5,6 +5,7 @@
 #
 #   case-22.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=any; cluster=real
 # Goal:        Whole-card exclusive, shared, and LOGICAL-slice claims are mutually exclusive on the SAME
 #              physical card. These three families share one substrate — every UNPARTITIONED card can serve
 #              all three — which is why health, not advertisement scope, is the mechanism here. A card in a
