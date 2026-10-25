@@ -13,12 +13,16 @@ package v1alpha1
 type NodeModelStoreSpecApplyConfiguration struct {
 	// PeerSync, when nil, defaults to enabled: the node's plugin may pull content the other
 	// nodes' plugins hold published.
+	//
 	PeerSyncEnabled *bool `json:"peerSyncEnabled,omitempty"`
 	// Watermarks bound the cache filesystem's usage.
+	//
 	Watermarks *NodeModelStoreWatermarksApplyConfiguration `json:"watermarks,omitempty"`
 	// Download limits the node's downloads.
+	//
 	Download *NodeModelStoreDownloadApplyConfiguration `json:"download,omitempty"`
 	// Hub is how the node reaches the model hub.
+	//
 	Hub *NodeModelStoreHubApplyConfiguration `json:"hub,omitempty"`
 	// Kubelet is the node's effective kubelet thresholds the cache's cap derives from, as the worker
 	// read them from kubelet's configz endpoint, which merges kubelet's flags, configuration file and
@@ -31,16 +35,19 @@ type NodeModelStoreSpecApplyConfiguration struct {
 	// reaches every kubelet endpoint. Nothing reconciles toward it as a desired state: the worker
 	// refreshes the reading and writes what it read, so a hand edit holds only until the next
 	// reading.
+	//
 	Kubelet *NodeModelStoreKubeletApplyConfiguration `json:"kubelet,omitempty"`
 	// Store names the ModelStore whose per-pool policy this node's effective configuration carries:
 	// the alphabetically first store whose selector matches the node when two match, and empty when
 	// none does, so the cluster defaults apply. The worker writes it; nothing else does.
+	//
 	Store *string `json:"store,omitempty"`
 	// Pinned lists the manifest digests the node must retain: the union of the prefetches whose
 	// retention pins them and whose target set holds this node. A pinned digest is never a
 	// collection candidate, though it still counts toward usage. The prefetch controller writes
 	// the field and the configuration reconciler carries it over untouched, so the two never
 	// overwrite each other's work on the same object.
+	//
 	Pinned []string `json:"pinned,omitempty"`
 }
 

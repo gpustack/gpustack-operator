@@ -205,11 +205,20 @@ K8S_MODULES=(
 # mismatch and not a difference of cadence. When the module is present it
 # joins the release cohort.
 #
+# k8s.io/cri-streaming and k8s.io/streaming are published in the Kubernetes
+# release line too. The CRI streaming server left the kubelet module in the
+# 1.36 line and moved into its own module, so a graph that reaches the server
+# carries both of them. They are listed here rather than with the required
+# modules, because a graph that does not reach the server does not carry them
+# and must still pass.
+#
 # k8s.io/gengo v1 is published on its own cadence and the repository is
 # moving off it, so the graph may drop it. When it is still there its version
 # is its own and is not compared with the release line.
 OPTIONAL_RELEASE_MODULES=(
+  k8s.io/cri-streaming
   k8s.io/csi-translation-lib
+  k8s.io/streaming
 )
 
 OPTIONAL_OWN_CADENCE_MODULES=(
@@ -1175,6 +1184,35 @@ modules_case_setup() {
       # belongs to the module and not to the line.
       fixture_move_line "${dir}" "36"
       ;;
+    cri-streaming-mismatch)
+      # The graph carries the release line at v0.36 and the module that hosts
+      # the CRI streaming server, which the release line published, is still on
+      # an older one.
+      fixture_move_line "${dir}" "36"
+      printf 'k8s.io/cri-streaming|v0.32.5||\n' >>"${dir}/modules.txt"
+      ;;
+    cri-streaming-valid)
+      # The same module on the line the graph carries, so nothing is reported.
+      fixture_move_line "${dir}" "36"
+      printf 'k8s.io/cri-streaming|v0.36.5||\n' >>"${dir}/modules.txt"
+      ;;
+    cri-streaming-absent)
+      # The same graph without the module, so a graph that does not reach the
+      # CRI streaming server still passes.
+      fixture_move_line "${dir}" "36"
+      ;;
+    streaming-mismatch)
+      # The module the CRI streaming server is built on, on an older line.
+      fixture_move_line "${dir}" "36"
+      printf 'k8s.io/streaming|v0.32.5||\n' >>"${dir}/modules.txt"
+      ;;
+    streaming-valid)
+      fixture_move_line "${dir}" "36"
+      printf 'k8s.io/streaming|v0.36.5||\n' >>"${dir}/modules.txt"
+      ;;
+    streaming-absent)
+      fixture_move_line "${dir}" "36"
+      ;;
     gengo-v1-absent)
       # The graph after the move to gengo v2, where the old module is gone.
       sed -i.bak '/^k8s\.io\/gengo|/d' "${dir}/modules.txt"
@@ -1466,6 +1504,12 @@ self_test() {
     "minor-mismatch|newly covered minor mismatch|1|ERROR: Kubernetes minor versions disagree: k8s.io/kubectl is v0.36 but k8s.io/api is v0.35"
     "csi-mismatch|csi translation lib on an older line|1|ERROR: Kubernetes minor versions disagree: k8s.io/csi-translation-lib is v0.32 but k8s.io/api is v0.36"
     "csi-absent|csi translation lib absent from the graph|0|module check passed"
+    "cri-streaming-mismatch|cri streaming module on an older line|1|ERROR: Kubernetes minor versions disagree: k8s.io/cri-streaming is v0.32 but k8s.io/api is v0.36"
+    "cri-streaming-valid|cri streaming module on the graph's line|0|module check passed"
+    "cri-streaming-absent|cri streaming module absent from the graph|0|module check passed"
+    "streaming-mismatch|streaming module on an older line|1|ERROR: Kubernetes minor versions disagree: k8s.io/streaming is v0.32 but k8s.io/api is v0.36"
+    "streaming-valid|streaming module on the graph's line|0|module check passed"
+    "streaming-absent|streaming module absent from the graph|0|module check passed"
     "gengo-v1-absent|gengo v1 dropped from the graph|0|module check passed"
     "missing-gengo-v2|missing required gengo v2|1|ERROR: required module missing from the graph: k8s.io/gengo/v2"
     "depth3-logr-stamp|drifted stamp on a depth-3 copy|1|ERROR: staged module github.com/go-logr/logr is stamped v9.9.9 but the graph pins github.com/go-logr/logr at v1.4.3"

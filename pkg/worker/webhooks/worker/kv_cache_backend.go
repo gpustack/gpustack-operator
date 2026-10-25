@@ -151,7 +151,8 @@ func warnKVCacheBackendIdleFabricInterfaceCount(kvcb, old *workercore.KVCacheBac
 			"%s has no effect: the group's effective protocol is neither RDMA nor EFA, so no "+
 				"fabric device is requested; remove it, or it applies again if the group moves "+
 				"to RDMA or EFA",
-			membersPath.Index(i).Child("fabricInterfaceCount")))
+			membersPath.Index(i).Child("fabricInterfaceCount"),
+		))
 	}
 
 	return warnings
@@ -181,13 +182,15 @@ func validateKVCacheBackendSpec(
 	errs := validateKVCacheBackendName(kvcb)
 	errs = append(errs, validateKVCacheBackendImage(ctx, kvcb, checkFallback, specPath.Child("image"))...)
 	errs = append(errs, validateKVCacheBackendPullSecrets(
-		kvcb.Spec.ImagePullSecrets, specPath.Child("imagePullSecrets"))...)
+		kvcb.Spec.ImagePullSecrets, specPath.Child("imagePullSecrets"),
+	)...)
 	var oldSpec *workercore.KVCacheBackendSpec
 	if old != nil {
 		oldSpec = &old.Spec
 	}
 	errs = append(errs, validateKVCacheBackendConnection(
-		&kvcb.Spec, oldSpec, specPath.Child("connection"))...)
+		&kvcb.Spec, oldSpec, specPath.Child("connection"),
+	)...)
 
 	return errs
 }
@@ -310,7 +313,8 @@ func validateKVCacheBackendImage(
 	if strings.TrimSpace(settings.KVCacheBackendImage.ShouldValue(ctx)) == "" {
 		return field.ErrorList{field.Required(fldPath, fmt.Sprintf(
 			"an image must be named either here or in the %q setting, and neither carries one",
-			"kv-cache-backend-image"))}
+			"kv-cache-backend-image",
+		))}
 	}
 
 	return nil
@@ -360,7 +364,8 @@ func validateKVCacheBackendExternal(
 		if err := checkHostPort(endpoint.Address); err != nil {
 			errs = append(errs, field.Invalid(endpointsPath.Index(i).Child("address"),
 				endpoint.Address, fmt.Sprintf(
-					"must be host:port, and this operator dials it as given: %v", err)))
+					"must be host:port, and this operator dials it as given: %v", err,
+				)))
 		}
 	}
 
@@ -378,7 +383,8 @@ func validateKVCacheBackendExternal(
 				"so an external backend naming only one leaves either the scrape or every engine "+
 				"with no address",
 			role, workercore.KVCacheBackendEndpointNameAdmin,
-			workercore.KVCacheBackendEndpointNameClient)))
+			workercore.KVCacheBackendEndpointNameClient,
+		)))
 	}
 
 	return errs
@@ -573,7 +579,8 @@ func validateKVCacheBackendLocalDiskUniqueness(
 			fldPath.Child("members").Index(withDisk[1]).Child("localDisks"),
 			fmt.Sprintf("only one member group may declare localDisks, and groups %v do: "+
 				"the leader reports every disk tier through one pair of gauges, so status.capacity "+
-				"could not say which figure belonged to which group", withDisk))}
+				"could not say which figure belonged to which group", withDisk),
+		)}
 	}
 
 	return nil
@@ -608,7 +615,8 @@ func validateKVCacheBackendScaleIn(
 		errs = append(errs, field.Invalid(gracePath, scaleIn.GracePeriodSeconds, fmt.Sprintf(
 			"must not exceed %d: the member's own endpoint refuses a larger grace with a 400, so "+
 				"this would render a shutdown hook that fails every time it runs",
-			mooncake.MemberMaxGracePeriodSeconds)))
+			mooncake.MemberMaxGracePeriodSeconds,
+		)))
 	}
 	if scaleIn.GracePeriodSeconds < 0 {
 		errs = append(errs, field.Invalid(gracePath, scaleIn.GracePeriodSeconds,
@@ -681,7 +689,8 @@ func validateKVCacheBackendMember(
 				"must be at least %s for a group declaring localDisks: that is one bucket, the unit the "+
 					"tier is written in, and its bytes are held in this segment until the bucket is "+
 					"complete — so a smaller segment leaves the tier empty under every workload, with "+
-					"nothing reporting it", memberBucketSize.String())))
+					"nothing reporting it", memberBucketSize.String(),
+			)))
 	}
 	if member.LocalBufferSize.CmpInt64(0) < 0 {
 		errs = append(errs, field.Invalid(fldPath.Child("localBufferSize"),
@@ -791,7 +800,8 @@ func validateKVCacheBackendMemberHostPaths(
 			errs = append(errs, field.Invalid(mountPathPath, mountPath, fmt.Sprintf(
 				"overlaps the mount path of hostPaths[%d] (%s): a container carrying overlapping "+
 					"paths leaves which mount wins to the runtime, and reports nothing either way",
-				prior, member.HostPaths[prior].MountPath)))
+				prior, member.HostPaths[prior].MountPath,
+			)))
 			continue
 		}
 
@@ -935,7 +945,8 @@ func validateKVCacheBackendLocalDisk(
 			"must not overlap %s, where a host fabric's device plugin injects the granted device "+
 				"nodes into the same container: the tier would shadow them or be shadowed, and "+
 				"the transport can be switched to one after this path is set",
-			mooncake.RDMADevicePath)))
+			mooncake.RDMADevicePath,
+		)))
 	}
 
 	// The capacity is a resource.Quantity, so it is a string in the schema and no marker can bound
@@ -1020,7 +1031,8 @@ func validateKVCacheBackendLocalDiskEviction(
 		// exactly like one that has not been reached yet.
 		errs = append(errs, field.Required(diskPath.Child("capacity"), fmt.Sprintf(
 			"a capacity is required when %s is set: the marks are a percentage of it, and without one "+
-				"the store evicts nothing while the band reads as configured", watermarkPath)))
+				"the store evicts nothing while the band reads as configured", watermarkPath,
+		)))
 	}
 
 	if eviction.Watermark.Low >= eviction.Watermark.High {
@@ -1117,7 +1129,8 @@ func validateExtraArgs(
 		if _, dup := seen[key]; dup {
 			errs = append(errs, field.Invalid(entryPath, entry, fmt.Sprintf(
 				"carries the key %q a second time: a list does not say which of two entries the "+
-					"artifact reads, and neither does anything on this object", key)))
+					"artifact reads, and neither does anything on this object", key,
+			)))
 			continue
 		}
 		seen[key] = i
@@ -1198,7 +1211,8 @@ func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend
 		}
 		errs = append(errs, validateKVCacheBackendLocalDiskImmutable(
 			oldMembers[i].LocalDisks, newMembers[i].LocalDisks,
-			membersPath.Index(i).Child("localDisks"))...)
+			membersPath.Index(i).Child("localDisks"),
+		)...)
 	}
 
 	return errs
@@ -1279,7 +1293,8 @@ func validateKVCacheBackendMembersNotMoved(
 					"at this position keeps its name, its selector and its port, so its members would "+
 					"be rebuilt against another group's spec and the cache they hold would go with "+
 					"them. Append groups at the end and remove them from the end; to take a group out "+
-					"of service in place, narrow its nodeSelector until it matches no node", j))}
+					"of service in place, narrow its nodeSelector until it matches no node", j,
+			))}
 		}
 	}
 
@@ -1348,7 +1363,8 @@ func validateKVCacheBackendMultiTenancyWithdrawal(
 			"would hold no tenant ledger, every request would fall into one default tenant where two "+
 			"reuse domains read each other's blocks, and the quota each consumer registered could no "+
 			"longer be released — which leaves them undeletable. Remove them first",
-			consumers))}
+			consumers),
+	)}
 }
 
 // validateKVCacheBackendLocalDiskImmutable freezes whether a group has a disk tier and where it

@@ -13,8 +13,10 @@ import (
 // ModelDeploymentScalerDemandSample is one observation the predictor has seen.
 type ModelDeploymentScalerDemandSampleApplyConfiguration struct {
 	// Timestamp is when the observation was made.
+	//
 	Timestamp *v1.Time `json:"timestamp,omitempty"`
 	// TokensPerSecond is the demand that was observed.
+	//
 	TokensPerSecond *resource.Quantity `json:"tokensPerSecond,omitempty"`
 }
 

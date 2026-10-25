@@ -22,25 +22,31 @@ var (
 		admreg.Create,
 		admreg.Delete,
 		admreg.Update,
-		admreg.Connect)
+		admreg.Connect,
+	)
 	knownScopes = sets.New(
 		admreg.NamespacedScope,
 		admreg.ClusterScope,
-		admreg.AllScopes)
+		admreg.AllScopes,
+	)
 	knownFailurePolicies = sets.New(
 		admreg.Fail,
-		admreg.Ignore)
+		admreg.Ignore,
+	)
 	knownMatchPolicies = sets.New(
 		admreg.Exact,
-		admreg.Equivalent)
+		admreg.Equivalent,
+	)
 	knownSideEffects = sets.New(
 		admreg.SideEffectClassUnknown,
 		admreg.SideEffectClassSome,
 		admreg.SideEffectClassNone,
-		admreg.SideEffectClassNoneOnDryRun)
+		admreg.SideEffectClassNoneOnDryRun,
+	)
 	knownReinvocationPolicies = sets.New(
 		admreg.NeverReinvocationPolicy,
-		admreg.IfNeededReinvocationPolicy)
+		admreg.IfNeededReinvocationPolicy,
+	)
 )
 
 // reflectType reflects the type into a WebhookTypeDefinition,

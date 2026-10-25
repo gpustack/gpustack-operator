@@ -63,7 +63,8 @@ func modelStoreTable(reader ctrlcli.Reader) (rest.TableConvertor, error) {
 	columns, err := extensionapi.NewJSONPathTemplateTableConvertor(
 		extensionapi.JSONPathTemplateColumn("Nodes", "{.status.nodes}"),
 		extensionapi.JSONPathTemplateColumn("High", "{.spec.watermarks.highPercent}"),
-		extensionapi.JSONPathTemplateColumn("Low", "{.spec.watermarks.lowPercent}"))
+		extensionapi.JSONPathTemplateColumn("Low", "{.spec.watermarks.lowPercent}"),
+	)
 	if err != nil {
 		return nil, err
 	}

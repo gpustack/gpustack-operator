@@ -425,7 +425,8 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentElasticAllocation(
 			func(rebuilt, published workercore.DevicesStatus) (string, bool) {
 				for _, claim := range seated {
 					cardReason, agreed := releaseCardsAgree(
-						claim.cards, rebuilt, published)
+						claim.cards, rebuilt, published,
+					)
 					if !agreed {
 						claim.refusal = cardReason
 					}

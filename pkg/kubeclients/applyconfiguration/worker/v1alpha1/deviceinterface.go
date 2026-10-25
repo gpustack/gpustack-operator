@@ -29,6 +29,7 @@ type DeviceInterfaceApplyConfiguration struct {
 	// PciSwitches is the upstream PCI bridge/switch path, innermost first — the same
 	// coordinate DeviceTopology carries, so an accelerator and an interface can be compared
 	// without a translation layer. Absent for a non-PCI interface.
+	//
 	PciSwitches []string `json:"pciSwitches,omitempty"`
 	// PciVendor and PciDevice are the raw hex PCI ids, deliberately not resolved to a model
 	// name: resolving one reads a host data file a minimal image may not carry, and a name
@@ -62,6 +63,7 @@ type DeviceInterfaceApplyConfiguration struct {
 	// VirtualFunctions are this physical function's virtual functions, NESTED here rather
 	// than listed as siblings: a PF with eight VFs is one entry with eight nested, never nine
 	// top-level entries. Ordered by bus id, so two consecutive reads are byte-identical.
+	//
 	VirtualFunctions []DeviceInterfaceVirtualFunctionApplyConfiguration `json:"virtualFunctions,omitempty"`
 	// Link is the result of verifying that this interface's RDMA link is usable. Nil when
 	// there is no RDMA link to verify.

@@ -18,36 +18,47 @@ import (
 // resets a phase that was already running.
 type ModelDeploymentRetirementStatusApplyConfiguration struct {
 	// RoleName is the role whose replica is retiring.
+	//
 	RoleName *string `json:"roleName,omitempty"`
 	// ReplicaOrdinal is the ordinal of the retiring replica within its role. Zero is a real
 	// position, the first replica, and is always encoded rather than omitted.
+	//
 	ReplicaOrdinal *int32 `json:"replicaOrdinal,omitempty"`
 	// ObservedGeneration is the metadata.generation whose intent this reservation was admitted
 	// against.
+	//
 	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
 	// TargetMemberUIDs are the UIDs of the member Pods the reservation holds. A deletion of one
 	// of them carries its UID as a precondition, so a same-name replacement is never deleted in
 	// the target's place.
+	//
 	TargetMemberUIDs []string `json:"targetMemberUIDs,omitempty"`
 	// TargetWorkloadUID is the UID of the Workload the reservation holds.
+	//
 	TargetWorkloadUID *string `json:"targetWorkloadUID,omitempty"`
 	// State is the protocol step the reservation sits at. Aborted names a budget exhausted
 	// before deletion, where every member and the Workload were retained; it is retained state,
 	// not a rollback.
+	//
 	State *workerv1alpha1.ModelDeploymentRetirementState `json:"state,omitempty"`
 	// Reason names what put the reservation at its state, e.g. which step a budget exhausted at.
+	//
 	Reason *string `json:"reason,omitempty"`
 	// StartedAt is when the operation was admitted.
+	//
 	StartedAt *v1.Time `json:"startedAt,omitempty"`
 	// Deadline is the overall budget. A phase ends at min(deadline, its own start plus its
 	// budget), so no phase outlives the operation.
+	//
 	Deadline *v1.Time `json:"deadline,omitempty"`
 	// PhaseStartedAt is when the current phase began. It is persisted so a controller restart
 	// never resets a phase budget that was already running.
+	//
 	PhaseStartedAt *v1.Time `json:"phaseStartedAt,omitempty"`
 	// LastConsumedRetryToken is the retry directive token this reservation last consumed. It is
 	// persisted before the annotation that carried the token is cleared, so a crash between the
 	// two leaves the token consumed and any replay a no-op. Empty means none was consumed.
+	//
 	LastConsumedRetryToken *string `json:"lastConsumedRetryToken,omitempty"`
 }
 

@@ -35,11 +35,11 @@ function mod_staging() {
     fi
   done < <(
     cat <<EOF
-https://github.com/kubernetes/code-generator v0.35.3 ${staging_dir}/k8s.io/code-generator
-https://github.com/kubernetes/api v0.35.3 ${staging_dir}/k8s.io/api
-https://github.com/kubernetes/apimachinery v0.35.3 ${staging_dir}/k8s.io/apimachinery
-https://github.com/kubernetes/kube-aggregator v0.35.3 ${staging_dir}/k8s.io/kube-aggregator
-https://github.com/kubernetes/apiextensions-apiserver v0.35.3 ${staging_dir}/k8s.io/apiextensions-apiserver
+https://github.com/kubernetes/code-generator v0.36.5 ${staging_dir}/k8s.io/code-generator
+https://github.com/kubernetes/api v0.36.5 ${staging_dir}/k8s.io/api
+https://github.com/kubernetes/apimachinery v0.36.5 ${staging_dir}/k8s.io/apimachinery
+https://github.com/kubernetes/kube-aggregator v0.36.5 ${staging_dir}/k8s.io/kube-aggregator
+https://github.com/kubernetes/apiextensions-apiserver v0.36.5 ${staging_dir}/k8s.io/apiextensions-apiserver
 https://github.com/kubernetes/klog v2.140.0 ${staging_dir}/k8s.io/klog
 https://github.com/go-logr/logr v1.4.3 ${staging_dir}/github.com/go-logr/logr
 https://github.com/gogo/protobuf v1.3.2 ${staging_dir}/github.com/gogo/protobuf

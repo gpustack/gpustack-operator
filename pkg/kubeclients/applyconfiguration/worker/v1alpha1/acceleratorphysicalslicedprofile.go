@@ -29,6 +29,7 @@ type AcceleratorPhysicalSlicedProfileApplyConfiguration struct {
 	// full empty-accelerator set makes the subtraction correct regardless of whether the
 	// manufacturer's possible-placements query is itself occupancy-aware. Empty for an
 	// accelerator with no physical-slice profiles.
+	//
 	Placements []AcceleratorPlacementApplyConfiguration `json:"placements,omitempty"`
 }
 

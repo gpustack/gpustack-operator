@@ -84,7 +84,8 @@ func (h *InstanceTypeHandler) SetupHandler(
 				"{.status.acceleratorPartitioned.onceMaxRequest}/{.status.acceleratorPartitioned.remaining}"),
 		partitions,
 		extensionapi.JSONPathTemplateColumn("CPU", "{.status.cpu.onceMaxRequest}/{.status.cpu.remaining}"),
-		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"))
+		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"),
+	)
 	if err != nil {
 		return gvr, srs, err
 	}

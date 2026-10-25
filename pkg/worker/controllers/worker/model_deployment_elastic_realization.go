@@ -405,7 +405,8 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 		CollectiveMembers: modelDeploymentElasticCollectiveMembers(md, actual),
 	}
 	if err := r.convergeModelDeploymentEndpointEligibility(
-		ctx, md, actual, byMember, nil, observation); err != nil {
+		ctx, md, actual, byMember, nil, observation,
+	); err != nil {
 		return true, observation, err
 	}
 	decided := modelDeploymentQualificationsDecided(qualifications)

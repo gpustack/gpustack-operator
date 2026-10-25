@@ -5,13 +5,13 @@
 # following variables:
 #
 # GOIMPORT_REVISER_VERSION  -  The Goimports-reviser version, default is v3.12.6.
-#    GOLANGCI_LINT_VERSION  -  The Golangci-lint version, default is v2.11.4.
+#    GOLANGCI_LINT_VERSION  -  The Golangci-lint version, default is v2.15.0.
 #        COMMITSAR_VERSION  -  The Commitsar version, default is v1.0.2.
 #         GOIMPORT_VERSION  -  The Goimports version, default is master.
 #       SHELLCHECK_VERSION  -  The Shellcheck version, default is v0.10.0.
 
 goimports_reviser_version=${GOIMPORT_REVISER_VERSION:-"v3.12.6"}
-golangci_lint_version=${GOLANGCI_LINT_VERSION:-"v2.11.4"}
+golangci_lint_version=${GOLANGCI_LINT_VERSION:-"v2.15.0"}
 commitsar_version=${COMMITSAR_VERSION:-"v1.0.3"}
 # LIMITED: pinned, not "latest". hack/generate.sh validates goimports before the
 # generators run, so its output is inside the baseline the API drift gate compares
@@ -24,9 +24,51 @@ goimports_version=${GOIMPORT_VERSION:-"v0.49.0"}
 # hack/check/agents-shell-selftest.sh asserts the two literals agree. Bump both together.
 shellcheck_version=${SHELLCHECK_VERSION:-"v0.10.0"}
 
+# The upstream installer resolves the release checksum by matching the file name as a
+# substring. A release that also ships an SBOM makes that match ambiguous, because the
+# SBOM's file name contains the tarball's, and the verification then fails on an
+# artifact the release itself published. The tarball is therefore fetched here and
+# checked against the exact entry the release publishes for it, which is the guarantee
+# the upstream installer was providing.
 function gpustack::lint::golangci_lint::install() {
+  local os arch version tarball release_url archive checksums want got
+  os="$(gpustack::util::get_raw_os)"
+  arch="$(gpustack::util::get_raw_arch)"
+  version="${golangci_lint_version#v}"
+  tarball="golangci-lint-${version}-${os}-${arch}.tar.gz"
+  release_url="https://github.com/golangci/golangci-lint/releases/download/v${version}"
+  archive="$(mktemp "${TMPDIR:-/tmp}/gpustack-golangci-lint.XXXXXXXX")"
+  checksums="$(mktemp "${TMPDIR:-/tmp}/gpustack-golangci-lint-checksums.XXXXXXXX")"
+
   curl --retry 3 --retry-all-errors --retry-delay 3 \
-    -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "${ROOT_DIR}/.sbin" "${golangci_lint_version}"
+    -sSfL -o "${archive}" "${release_url}/${tarball}"
+  curl --retry 3 --retry-all-errors --retry-delay 3 \
+    -sSfL -o "${checksums}" "${release_url}/golangci-lint-${version}-checksums.txt"
+
+  want="$(awk -v name="${tarball}" '$2 == name { print $1 }' "${checksums}")"
+  if [[ -z "${want}" ]]; then
+    gpustack::log::error "no checksum published for ${tarball}"
+    rm -f "${archive}" "${checksums}"
+    return 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    got="$(sha256sum "${archive}" | cut -d ' ' -f 1)"
+  else
+    got="$(shasum -a 256 "${archive}" | cut -d ' ' -f 1)"
+  fi
+  if [[ "${want}" != "${got}" ]]; then
+    gpustack::log::error "checksum for ${tarball} does not verify: ${want} vs ${got}"
+    rm -f "${archive}" "${checksums}"
+    return 1
+  fi
+
+  tar -xzf "${archive}" \
+    --directory "${ROOT_DIR}/.sbin" \
+    --strip-components 1 \
+    --no-same-owner \
+    "golangci-lint-${version}-${os}-${arch}/golangci-lint"
+  chmod a+x "${ROOT_DIR}/.sbin/golangci-lint"
+  rm -f "${archive}" "${checksums}"
 }
 
 function gpustack::lint::golangci_lint::validate() {

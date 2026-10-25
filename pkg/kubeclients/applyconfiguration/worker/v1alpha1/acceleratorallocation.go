@@ -35,11 +35,13 @@ type AcceleratorAllocationApplyConfiguration struct {
 	//
 	// AllocatedProfiles lists, by profile name, how many instances are currently created
 	// and bound on this accelerator (the count of the Pods' recorded placements).
+	//
 	AllocatedProfiles []AcceleratorProfileCountApplyConfiguration `json:"allocatedProfiles,omitempty"`
 	// RemainingProfiles lists, by profile name, how many more instances of each profile can
 	// still be created given the accelerator's occupied placement slots — the placement-aware
 	// remaining capacity (the per-profile analog of the scalar Remaining) the
 	// AdmissionCheck gates on.
+	//
 	RemainingProfiles []AcceleratorProfileCountApplyConfiguration `json:"remainingProfiles,omitempty"`
 	// AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation
 	// TRANSPORT the reconciler consumes to build the ledger above — not status output. The
@@ -55,6 +57,7 @@ type AcceleratorAllocationApplyConfiguration struct {
 	// AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies
 	// on this accelerator. The reconciler unions these across the node's Pods to derive
 	// RemainingProfiles.
+	//
 	AllocatedPhysicalPlacements []AcceleratorPlacementApplyConfiguration `json:"allocatedPhysicalPlacements,omitempty"`
 	// AllocatedPhysicalID is the partition's own identifier, as the driver named it at the moment
 	// it was created (an NVIDIA MIG UUID, a T-Head PPU MIG UUID). Part of the same annotation
@@ -78,6 +81,7 @@ type AcceleratorAllocationApplyConfiguration struct {
 	// HSA_CU_MASK). The device-plugin Allocate records it so a later placement decision reads
 	// what the node's live slices already occupy. Empty (omitted) in the aggregated
 	// Devices.Status, and for a manufacturer whose logical slice has no position.
+	//
 	AllocatedLogicalPlacements []AcceleratorPlacementApplyConfiguration `json:"allocatedLogicalPlacements,omitempty"`
 }
 

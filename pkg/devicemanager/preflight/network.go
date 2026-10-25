@@ -123,7 +123,8 @@ func networkReport(
 			"none of the %d interfaces on this node, nor any of their %d virtual functions, has an "+
 				"RDMA device bound, so there is no link to check; this is an answer about the "+
 				"hardware, not a check that was skipped",
-			len(interfaces), virtualFunctions)
+			len(interfaces), virtualFunctions,
+		)
 	}
 
 	return report

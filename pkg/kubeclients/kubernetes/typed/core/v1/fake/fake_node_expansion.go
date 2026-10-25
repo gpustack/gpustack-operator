@@ -29,7 +29,8 @@ func (c *fakeNodes) PatchStatus(_ context.Context, nodeName string, data []byte)
 	// TODO: Should be configurable to support additional patch strategies.
 	pt := types.StrategicMergePatchType
 	obj, err := c.Fake.Invokes(
-		core.NewRootPatchSubresourceAction(c.Resource(), nodeName, pt, data, "status"), &v1.Node{})
+		core.NewRootPatchSubresourceAction(c.Resource(), nodeName, pt, data, "status"), &v1.Node{},
+	)
 	if obj == nil {
 		return nil, err
 	}

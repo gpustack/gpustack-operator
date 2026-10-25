@@ -253,7 +253,8 @@ func TestRenderVLLMAscend_NoOwnedKeyOnTheAscendLegIsNew(t *testing.T) {
 // pass by leaving these fields empty on the composed Result only.
 func TestRenderVLLMAscend_TheEncoderStageDeclaresNoPortOrVolume(t *testing.T) {
 	result, err := renderVLLMWithEncoderCache(
-		Input{Engine: EngineVLLMAscend, Role: RoleEncode}, sharedLeg())
+		Input{Engine: EngineVLLMAscend, Role: RoleEncode}, sharedLeg(),
+	)
 	require.NoError(t, err)
 
 	assert.Empty(t, result.Ports, "the shared-directory leg moves nothing over the network")

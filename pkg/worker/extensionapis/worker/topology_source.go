@@ -31,7 +31,8 @@ func (h *TopologySourceHandler) SetupHandler(
 	table, err := extensionapi.NewJSONPathTemplateTableConvertor(
 		extensionapi.JSONPathTemplateColumn("Kind", "{.status.sourceKind}"),
 		extensionapi.JSONPathTemplateColumn("Revision", "{.status.lastSuccessfulRevision}"),
-		extensionapi.JSONPathTemplateColumn("Ready", "{.status.conditions[?(@.type=='Ready')].status}"))
+		extensionapi.JSONPathTemplateColumn("Ready", "{.status.conditions[?(@.type=='Ready')].status}"),
+	)
 	if err != nil {
 		return gvr, nil, err
 	}

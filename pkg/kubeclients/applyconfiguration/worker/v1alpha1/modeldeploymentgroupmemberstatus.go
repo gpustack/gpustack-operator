@@ -12,9 +12,11 @@ import (
 // ModelDeploymentGroupMemberStatus is one member of a group, as it currently stands.
 type ModelDeploymentGroupMemberStatusApplyConfiguration struct {
 	// Name is the member Pod's name.
+	//
 	Name *string `json:"name,omitempty"`
 	// UID is the member Pod's identity. A replaced member is a different UID, which is what makes a
 	// replaced membership a different generation.
+	//
 	UID *string `json:"uid,omitempty"`
 	// Seat is the seat the member claims, absent when the member claims none or one that cannot be
 	// read. The group's reason names that defect.
@@ -24,12 +26,14 @@ type ModelDeploymentGroupMemberStatusApplyConfiguration struct {
 	// at all. The ordinal is the operator's own fact and not the engine's runtime rank: which
 	// member holds which rank is the engine's business, and the operator's numbering never implies
 	// it.
+	//
 	Seat *int32 `json:"seat,omitempty"`
 	// Ready is the member's readiness, one of True, False or Unknown.
 	//
 	// A member whose Ready condition has never been reported is Unknown, not False: a member nobody
 	// has reported on is not a member that was observed and found not ready, and a diagnosis that
 	// cannot tell those two apart cannot say which one happened.
+	//
 	Ready *v1.ConditionStatus `json:"ready,omitempty"`
 }
 

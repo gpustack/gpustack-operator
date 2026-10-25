@@ -51,7 +51,8 @@ func TestDecodeTenantQuotaMetrics_AByteCountIsReadExactly(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := DecodeTenantQuotaMetrics([]byte(fmt.Sprintf(
-				"%s{tenant_id=\"team-a\"} %s\n", metricTenantUsedBytes, tc.value)))
+				"%s{tenant_id=\"team-a\"} %s\n", metricTenantUsedBytes, tc.value,
+			)))
 			require.NoError(t, err)
 
 			sample, ok := got.Tenant("team-a")
@@ -163,7 +164,8 @@ func TestDecodeTenantQuotaMetrics_ReadsBothGenerations(t *testing.T) {
 	t.Run("a document carrying both prefers the figure that excludes reservations", func(t *testing.T) {
 		got, err := DecodeTenantQuotaMetrics([]byte(
 			metricTenantUsedBytes + `{tenant_id="team-a"} 100` + "\n" +
-				metricTenantChargedBytes + `{tenant_id="team-a"} 900` + "\n"))
+				metricTenantChargedBytes + `{tenant_id="team-a"} 900` + "\n",
+		))
 		require.NoError(t, err)
 
 		sample, _ := got.Tenant("team-a")
@@ -175,7 +177,8 @@ func TestDecodeTenantQuotaMetrics_ReadsBothGenerations(t *testing.T) {
 
 	t.Run("a tenant with neither series reports no occupancy rather than zero", func(t *testing.T) {
 		got, err := DecodeTenantQuotaMetrics([]byte(
-			metricTenantRequestedBytes + `{tenant_id="team-a"} 1073741824` + "\n"))
+			metricTenantRequestedBytes + `{tenant_id="team-a"} 1073741824` + "\n",
+		))
 		require.NoError(t, err)
 
 		sample, _ := got.Tenant("team-a")
@@ -215,7 +218,8 @@ func TestDecodeTenantQuotaMetrics_AbsentIsNeverZero(t *testing.T) {
 // only some of its eight series — and the ones it did not carry stay nil rather than becoming zero.
 func TestDecodeTenantQuotaMetrics_AFamilyThatNeverFiredIsAbsentToo(t *testing.T) {
 	got, err := DecodeTenantQuotaMetrics([]byte(
-		metricTenantRequestedBytes + `{tenant_id="team-a"} 1073741824` + "\n"))
+		metricTenantRequestedBytes + `{tenant_id="team-a"} 1073741824` + "\n",
+	))
 	require.NoError(t, err)
 
 	sample, ok := got.Tenant("team-a")
@@ -231,7 +235,8 @@ func TestDecodeTenantQuotaMetrics_AFamilyThatNeverFiredIsAbsentToo(t *testing.T)
 // the capacity the pool then reports comes off master_total_capacity_bytes.
 func TestDecodeTenantQuotaMetrics_TheMasterWideGaugeIsReadToo(t *testing.T) {
 	got, err := DecodeTenantQuotaMetrics([]byte(
-		"master_total_capacity_bytes 2147483648\nmaster_allocated_bytes 0\n"))
+		"master_total_capacity_bytes 2147483648\nmaster_allocated_bytes 0\n",
+	))
 	require.NoError(t, err)
 
 	require.NotNil(t, got.TotalCapacityBytes)
@@ -336,7 +341,8 @@ func TestDecodeTenantQuotaMetrics_MalformedIsAnErrorNotAPartialSampleSet(t *test
 func TestDecodeTenantQuotaMetrics_ReadsWhatAValidDocumentSpells(t *testing.T) {
 	t.Run("an optional timestamp is ignored, not concatenated into the value", func(t *testing.T) {
 		got, err := DecodeTenantQuotaMetrics([]byte(
-			metricTenantRequestedBytes + `{tenant_id="team-a"} 1073741824 1720000000000` + "\n"))
+			metricTenantRequestedBytes + `{tenant_id="team-a"} 1073741824 1720000000000` + "\n",
+		))
 		require.NoError(t, err)
 
 		sample, ok := got.Tenant("team-a")
@@ -349,7 +355,8 @@ func TestDecodeTenantQuotaMetrics_ReadsWhatAValidDocumentSpells(t *testing.T) {
 		// A Prometheus exposition writes gauges through %g, so a figure at cache scale arrives this
 		// way — 500Gi is 5.36870912e+11 — and it is a whole number however it is spelled.
 		got, err := DecodeTenantQuotaMetrics([]byte(
-			metricTenantRequestedBytesSum + " 5.36870912e+11\n"))
+			metricTenantRequestedBytesSum + " 5.36870912e+11\n",
+		))
 		require.NoError(t, err)
 
 		assert.Equal(t, ptr.To[int64](536870912000), got.RequestedBytesSum)

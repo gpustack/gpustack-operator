@@ -351,7 +351,8 @@ func TestPreflightResponder_RedirectsTheHamiLockDirectoryAndPutsItBack(t *testin
 
 	injection := deviceplugin.DefaultInjectionResolver(injectionConfig)
 	pod, container, devs, allocated := modeAllocation(
-		workercore.DeviceAllocationModeSliced, "lockdir")
+		workercore.DeviceAllocationModeSliced, "lockdir",
+	)
 
 	p := &preflighter{logger: klog.Background(), mig: newFakeMigDriver(), injection: injection}
 	responder, restore, err := p.PreflightResponder(workercore.DeviceAllocationModeSliced)

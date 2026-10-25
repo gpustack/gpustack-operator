@@ -13,12 +13,15 @@ import (
 // InstanceSpec defines the desired state of Instance.
 type InstanceSpecApplyConfiguration struct {
 	// DisplayName is the display name of the Instance.
+	//
 	DisplayName *string `json:"displayName,omitempty"`
 	// Description is the description of the Instance.
+	//
 	Description *string `json:"description,omitempty"`
 	// Type is the name of InstanceType that provisions corresponding resources.
 	//
 	// Immutable after creation.
+	//
 	Type *string `json:"type,omitempty"`
 	// InstanceTemplate is the template for the Instance to run.
 	//
@@ -27,6 +30,7 @@ type InstanceSpecApplyConfiguration struct {
 	// Volume is the volume to mount in the Instance.
 	//
 	// Immutable after creation.
+	//
 	Volume *InstanceVolumeApplyConfiguration `json:"volume,omitempty"`
 	// SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.
 	//
@@ -41,6 +45,7 @@ type InstanceSpecApplyConfiguration struct {
 	// InstanceType leaves the Pod Pending rather than being refused. Empty means no pinning.
 	//
 	// Immutable unless the Instance is stopped.
+	//
 	NodeName *string `json:"nodeName,omitempty"`
 }
 

@@ -49,7 +49,8 @@ func modelPrefetchTable() (rest.TableConvertor, error) {
 		}),
 		extensionapi.JSONPathTemplateColumn("Ready", "{.status.readyNodes}"),
 		extensionapi.JSONPathTemplateColumn("Desired", "{.status.desiredNodes}"),
-		extensionapi.JSONPathTemplateColumn("Available", "{.status.conditions[?(@.type=='Available')].status}"))
+		extensionapi.JSONPathTemplateColumn("Available", "{.status.conditions[?(@.type=='Available')].status}"),
+	)
 }
 
 func (h *ModelPrefetchHandler) New() runtime.Object     { return &worker.ModelPrefetch{} }

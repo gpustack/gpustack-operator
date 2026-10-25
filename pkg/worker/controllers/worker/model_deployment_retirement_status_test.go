@@ -36,7 +36,8 @@ func retirementSchemaValidator(t *testing.T) *apiextensions.JSONSchemaProps {
 	schema := new(apiextensions.JSONSchemaProps)
 	require.NoError(t,
 		extension.Convert_v1_JSONSchemaProps_To_apiextensions_JSONSchemaProps(
-			crd.Spec.Versions[0].Schema.OpenAPIV3Schema, schema, nil))
+			crd.Spec.Versions[0].Schema.OpenAPIV3Schema, schema, nil,
+		))
 
 	return schema
 }
@@ -123,7 +124,8 @@ func TestRetirementStatusWriteStaysValidAgainstAStoredLegacyObject(t *testing.T)
 			var control map[string]any
 			require.NoError(t, json.Unmarshal(stored, &control))
 			require.Empty(t, apiservervalidation.ValidateCustomResource(
-				field.NewPath("object"), control, validator), "the raw stored object is valid")
+				field.NewPath("object"), control, validator,
+			), "the raw stored object is valid")
 
 			// The writer's own view of the object, and the reservation it is about to assert.
 			md := new(workercore.ModelDeployment)
@@ -151,7 +153,8 @@ func TestRetirementStatusWriteStaysValidAgainstAStoredLegacyObject(t *testing.T)
 			})
 			r := &ModelDeploymentReconciler{Client: counting, APIReader: counting}
 			require.NoError(t, r.writeModelDeploymentRetirement(
-				context.Background(), md, previous, next))
+				context.Background(), md, previous, next,
+			))
 			require.NotEmpty(t, emitted, "the writer must actually emit a patch")
 
 			// The emitted delta carries the reservation and the version, and nothing else. A
@@ -171,7 +174,8 @@ func TestRetirementStatusWriteStaysValidAgainstAStoredLegacyObject(t *testing.T)
 			var merged map[string]any
 			require.NoError(t, json.Unmarshal(merge, &merged))
 			require.Empty(t, apiservervalidation.ValidateCustomResource(
-				field.NewPath("object"), merged, validator),
+				field.NewPath("object"), merged, validator,
+			),
 				"the merged object must be accepted by the real generated CRD validator")
 			require.Equal(t, "Deleting",
 				merged["status"].(map[string]any)["retirement"].(map[string]any)["state"])
@@ -325,7 +329,8 @@ func TestRetirementStatusWriteIsARealOptimisticLock(t *testing.T) {
 		})
 		landed := &ModelDeploymentReconciler{Client: counting, APIReader: counting}
 		require.NoError(t, landed.writeModelDeploymentRetirement(
-			context.Background(), md, previous, next))
+			context.Background(), md, previous, next,
+		))
 
 		require.NotEmpty(t, wire)
 		after := storedRetirementObject(t, r.Client, md)
@@ -369,7 +374,8 @@ func TestRetirementStatusWriteIsSilentWhenNothingChanged(t *testing.T) {
 			})
 			r := &ModelDeploymentReconciler{Client: counting, APIReader: counting}
 			require.NoError(t, r.writeModelDeploymentRetirement(
-				context.Background(), md, tc.previous, tc.next))
+				context.Background(), md, tc.previous, tc.next,
+			))
 
 			assert.Zero(t, writes, "a pass that asserts nothing new writes nothing")
 			after := storedRetirementObject(t, cli, md)
@@ -475,7 +481,8 @@ func convergeRetirementLedger(t *testing.T, f *retirementGPUProtocolFixture) {
 	require.NoError(t, f.client.Get(context.Background(),
 		ctrlcli.ObjectKey{Name: f.target.Spec.NodeName}, devs))
 	status, _, err := deviceplugin.BuildDesiredStatusStrict(
-		ctrllogDiscard(), devs, &core.PodList{})
+		ctrllogDiscard(), devs, &core.PodList{},
+	)
 	require.NoError(t, err)
 	devs.Status = status
 	require.NoError(t, f.client.Status().Update(context.Background(), devs))
@@ -504,7 +511,8 @@ func assertValidRetirementDelta(
 	var object map[string]any
 	require.NoError(t, json.Unmarshal(merged, &object))
 	require.Empty(t, apiservervalidation.ValidateCustomResource(
-		field.NewPath("object"), object, validator),
+		field.NewPath("object"), object, validator,
+	),
 		"the stored object must stay acceptable to the real generated CRD schema after the write")
 }
 
@@ -522,7 +530,8 @@ func TestTheConsumedRetryDirectiveWritesThroughTheSameWriter(t *testing.T) {
 		}
 	})
 	md = reserve(md, retirementReservation(
-		workercore.ModelDeploymentRetirementStateAborted, "server", 1, []string{"member-1"}))
+		workercore.ModelDeploymentRetirementStateAborted, "server", 1, []string{"member-1"},
+	))
 	cli := newModelDeploymentClient(md.DeepCopy())
 	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
 	stored := getModelDeployment(t, cli)
@@ -644,7 +653,8 @@ func TestTheConsumedRetryDirectiveSurvivesAConflictedStatusWrite(t *testing.T) {
 			}
 		})
 		md = reserve(md, retirementReservation(
-			workercore.ModelDeploymentRetirementStateAborted, "server", 1, []string{"member-1"}))
+			workercore.ModelDeploymentRetirementStateAborted, "server", 1, []string{"member-1"},
+		))
 
 		return newModelDeploymentClient(md.DeepCopy())
 	}

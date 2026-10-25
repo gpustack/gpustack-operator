@@ -42,6 +42,7 @@ type KVCacheBackendScaleInApplyConfiguration struct {
 	// make a grace apply to a shrink, change only this field and wait for the members to be
 	// recreated with it — their pod-spec-hash annotation moves — then narrow the selector.
 	// - The upper bound is the entrypoint's own, which refuses a larger value with HTTP 400.
+	//
 	GracePeriodSeconds *int32 `json:"gracePeriodSeconds,omitempty"`
 }
 

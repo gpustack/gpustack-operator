@@ -31,6 +31,7 @@ type ModelDeploymentRouterRoleStatusApplyConfiguration struct {
 	Selector map[string]string `json:"selector,omitempty"`
 	// Endpoint is this role's own address, which stays reachable whether or not a router fronts the
 	// deployment, so that one half of a pair can be addressed directly while debugging.
+	//
 	Endpoint *string `json:"endpoint,omitempty"`
 	// KVEvents is where this role publishes its cache events, absent on a role configured not to
 	// publish.

@@ -27,6 +27,7 @@ type KVCachePoolBindingQuotaApplyConfiguration struct {
 	// has no default policy and refuses a tenant it holds no policy for, so a Binding without
 	// this field would pass admission, report Ready and refuse every byte its workloads wrote.
 	// - A value that is not positive is refused at admission.
+	//
 	Ceiling *resource.Quantity `json:"ceiling,omitempty"`
 }
 

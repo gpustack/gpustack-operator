@@ -90,7 +90,8 @@ func topologyReport(root string, now time.Time) TopologyReport {
 		return unknownTopology(now, fmt.Sprintf(
 			"the kubelet configuration search under %s could not run, so which topology "+
 				"manager policy its kubelet runs is unknown rather than defaulted: %s",
-			reading.UnsearchablePattern, reading.UnsearchableErr))
+			reading.UnsearchablePattern, reading.UnsearchableErr,
+		))
 	case reading.UnreadableErr != nil:
 		// These patterns name the kubelet's own configuration paths, so a match that cannot be
 		// read may be the one that decides. Reporting the generic unknown would claim every file
@@ -98,7 +99,8 @@ func topologyReport(root string, now time.Time) TopologyReport {
 		return unknownTopology(now, fmt.Sprintf(
 			"this host carries a kubelet configuration at %s that could not be read, so "+
 				"which topology manager policy its kubelet runs is unknown rather than "+
-				"defaulted: %s", reading.UnreadablePath, reading.UnreadableErr))
+				"defaulted: %s", reading.UnreadablePath, reading.UnreadableErr,
+		))
 
 	case reading.Conflict != nil:
 		// Two distribution trees on one machine are two configurations, and only one of them
@@ -108,7 +110,8 @@ func topologyReport(root string, now time.Time) TopologyReport {
 			"the kubelet configuration under %s names more than one topology manager policy "+
 				"(%s), and only one of them belongs to the kubelet that is running, so no "+
 				"policy is reported rather than a guessed one",
-			reading.ConflictPattern, strings.Join(reading.Conflict, ", ")))
+			reading.ConflictPattern, strings.Join(reading.Conflict, ", "),
+		))
 
 	case reading.Found:
 		return TopologyReport{
@@ -126,13 +129,15 @@ func topologyReport(root string, now time.Time) TopologyReport {
 			return unknownTopology(now, fmt.Sprintf(
 				"nothing this node's kubelet reads its configuration from (%s) names a topology "+
 					"manager policy, so its default is not reported either: that would be a "+
-					"value nobody read", places))
+					"value nobody read", places,
+			))
 		}
 		return unknownTopology(now, fmt.Sprintf(
 			"no kubelet is running here to name where its configuration is, and none of the "+
 				"places one is kept (%s, the last one walked) names a topology manager policy; a "+
 				"kubelet started here may still be given one on its command line, so its default "+
-				"is not reported either: that would be a value nobody read", places))
+				"is not reported either: that would be a value nobody read", places,
+		))
 	}
 }
 

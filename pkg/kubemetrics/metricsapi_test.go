@@ -101,7 +101,8 @@ func TestParsePodMetricsUsage(t *testing.T) {
 
 	t.Run("reports an empty container list as unserved", func(t *testing.T) {
 		cpu, memory, ts, err := parsePodMetricsUsage(
-			[]byte(`{"kind":"PodMetrics","timestamp":"2026-08-07T01:02:03Z","containers":[]}`))
+			[]byte(`{"kind":"PodMetrics","timestamp":"2026-08-07T01:02:03Z","containers":[]}`),
+		)
 		require.NoError(t, err)
 		assert.Nil(t, cpu, "no containers means no measurement, not a genuine zero")
 		assert.Nil(t, memory)
@@ -112,7 +113,8 @@ func TestParsePodMetricsUsage(t *testing.T) {
 		// The caller rejects an entry that predates the pod, so it has to tell an untimed
 		// measurement apart from one it can date.
 		_, _, ts, err := parsePodMetricsUsage(
-			[]byte(`{"kind":"PodMetrics","containers":[{"name":"main","usage":{"cpu":"1"}}]}`))
+			[]byte(`{"kind":"PodMetrics","containers":[{"name":"main","usage":{"cpu":"1"}}]}`),
+		)
 		require.NoError(t, err)
 		assert.Nil(t, ts)
 	})

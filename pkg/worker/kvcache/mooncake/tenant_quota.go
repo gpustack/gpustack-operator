@@ -422,7 +422,8 @@ func (c *AdminClient) tenantQuotaDo(
 			return nil, false, fmt.Errorf(
 				"request %s %s: the master answered 404 without OBJECT_NOT_FOUND, so this is a "+
 					"route that does not exist rather than a tenant that does not: %s",
-				method, adminPathTenantQuotas, excerpt(body))
+				method, adminPathTenantQuotas, excerpt(body),
+			)
 		}
 		return nil, false, nil
 	case http.StatusServiceUnavailable:

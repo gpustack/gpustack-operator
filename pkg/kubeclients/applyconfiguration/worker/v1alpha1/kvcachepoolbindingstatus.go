@@ -26,6 +26,7 @@ type KVCachePoolBindingStatusApplyConfiguration struct {
 	// PhaseMessage carries the reason for the phase.
 	PhaseMessage *string `json:"phaseMessage,omitempty"`
 	// Conditions is the finer view, one condition per axis.
+	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	// RequestedQuota is what the operator asked the pool for on this namespace's behalf: the
 	// requested quota it wrote for this Binding's one tenant. It is absent, with a Condition saying
@@ -72,6 +73,7 @@ type KVCachePoolBindingStatusApplyConfiguration struct {
 	Blocks *int64 `json:"blocks,omitempty"`
 	// HitRate is a ratio held as a STRING with a pattern, never a float. See the pool's own HitRate
 	// for why a pattern is safe on a computed ratio and what it obliges of whoever writes it.
+	//
 	HitRate *string `json:"hitRate,omitempty"`
 	// UsedBy names the workloads in THIS namespace that hold the pool through this Binding — always a
 	// single-scope query, and a non-empty UsedBy is what the finalizer refuses deletion on.
@@ -80,6 +82,7 @@ type KVCachePoolBindingStatusApplyConfiguration struct {
 	// enforces on it. The kind that writes it is ModelDeployment, whose spec.kvCache.poolRef names a
 	// Binding in its own namespace, so an empty list is not evidence that nobody holds the pool.
 	// Entries leave Namespace empty, everything that can appear being in this Binding's own namespace.
+	//
 	UsedBy []KVCacheObjectReferenceApplyConfiguration `json:"usedBy,omitempty"`
 }
 

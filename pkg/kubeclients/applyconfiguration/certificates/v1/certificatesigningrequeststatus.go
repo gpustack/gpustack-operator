@@ -36,6 +36,7 @@ type CertificateSigningRequestStatusApplyConfiguration struct {
 	// ...
 	// -----END CERTIFICATE-----
 	// )
+	//
 	Certificate []byte `json:"certificate,omitempty"`
 }
 

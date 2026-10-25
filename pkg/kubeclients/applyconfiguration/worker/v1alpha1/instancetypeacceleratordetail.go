@@ -41,6 +41,7 @@ type InstanceTypeAcceleratorDetailApplyConfiguration struct {
 	// A consumer reads disagreement as len() > 1 and the skipped versions as the tail. That is a
 	// length comparison rather than a second copy of the aggregation, which is the whole reason
 	// this is published instead of being recomputed from the Devices ledger downstream.
+	//
 	RuntimeVersions []string `json:"runtimeVersions,omitempty"`
 	// SlicedDetail is the pool's aggregated slicing capability for this accelerator group.
 	SlicedDetail *AcceleratorSlicedDetailApplyConfiguration `json:"slicedDetail,omitempty"`

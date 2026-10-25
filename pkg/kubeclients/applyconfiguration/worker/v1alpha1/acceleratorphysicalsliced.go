@@ -9,6 +9,7 @@ package v1alpha1
 type AcceleratorPhysicalSlicedApplyConfiguration struct {
 	// Profiles is empty when the accelerator does not support, or has not enabled, hard
 	// slicing.
+	//
 	Profiles []AcceleratorPhysicalSlicedProfileApplyConfiguration `json:"profiles,omitempty"`
 	// Count is the accelerator's physical-slice ceiling — the largest Count across Profiles
 	// (e.g. 7 on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".partitioned"

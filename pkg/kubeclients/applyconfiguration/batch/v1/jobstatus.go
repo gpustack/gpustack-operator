@@ -32,6 +32,7 @@ type JobStatusApplyConfiguration struct {
 	//
 	// Once set, the field can only be removed when the job is suspended.
 	// The field cannot be modified while the job is unsuspended or finished.
+	//
 	StartTime *metav1.Time `json:"startTime,omitempty"`
 	// Represents time when the job was completed. It is not guaranteed to
 	// be set in happens-before order across separate operations.
@@ -74,6 +75,7 @@ type JobStatusApplyConfiguration struct {
 	// For example, if the failed indexes are 1, 3, 4, 5 and 7, they are
 	// represented as "1,3-5,7".
 	// The set of failed indexes cannot overlap with the set of completed indexes.
+	//
 	FailedIndexes *string `json:"failedIndexes,omitempty"`
 	// uncountedTerminatedPods holds the UIDs of Pods that have terminated but
 	// the job controller hasn't yet accounted for in the status counters.

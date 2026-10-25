@@ -611,7 +611,8 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 
 		snapshot := metricsTestSnapshot()
 		snapshot.Slices = metricsTestSliceSection(
-			metricsTestSliceUsage(ptr.To[uint64](6144), ptr.To[uint32](18)))
+			metricsTestSliceUsage(ptr.To[uint64](6144), ptr.To[uint32](18)),
+		)
 		dmSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			bs, _ := json.Marshal(snapshot)

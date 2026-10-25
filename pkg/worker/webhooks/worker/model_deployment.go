@@ -612,7 +612,8 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 		}
 		if old != nil {
 			judge, err := r.modelDeploymentRoleNeedsInterfaceRejudge(
-				ctx, old, md, stored[md.Spec.Roles[i].Name], &md.Spec.Roles[i], i)
+				ctx, old, md, stored[md.Spec.Roles[i].Name], &md.Spec.Roles[i], i,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -819,7 +820,8 @@ func validateModelDeploymentRouterName(md, old *workercore.ModelDeployment) fiel
 	}
 
 	return field.ErrorList{field.Invalid(
-		field.NewPath("spec", "router", "name"), md.Spec.Router.Name, "field is immutable")}
+		field.NewPath("spec", "router", "name"), md.Spec.Router.Name, "field is immutable",
+	)}
 }
 
 // validateModelDeploymentIdentity refuses an update that changes what the deployment IS, and admits
@@ -857,15 +859,18 @@ func validateModelDeploymentIdentity(md, old *workercore.ModelDeployment) field.
 	var errs field.ErrorList
 	if !kubemeta.DeepEqual(md.Spec.Model, old.Spec.Model) {
 		errs = append(errs, field.Invalid(
-			specPath.Child("model"), md.Spec.Model, modelDeploymentIdentityMessage))
+			specPath.Child("model"), md.Spec.Model, modelDeploymentIdentityMessage,
+		))
 	}
 	if md.Spec.Engine.Name != old.Spec.Engine.Name {
 		errs = append(errs, field.Invalid(
-			specPath.Child("engine", "name"), md.Spec.Engine.Name, modelDeploymentIdentityMessage))
+			specPath.Child("engine", "name"), md.Spec.Engine.Name, modelDeploymentIdentityMessage,
+		))
 	}
 	if !kubemeta.DeepEqual(md.Spec.KVCache, old.Spec.KVCache) {
 		errs = append(errs, field.Invalid(
-			specPath.Child("kvCache"), md.Spec.KVCache, modelDeploymentIdentityMessage))
+			specPath.Child("kvCache"), md.Spec.KVCache, modelDeploymentIdentityMessage,
+		))
 	}
 
 	return append(errs, validateModelDeploymentRoleIdentity(md, old)...)
@@ -895,7 +900,8 @@ func validateModelDeploymentRoleIdentity(md, old *workercore.ModelDeployment) fi
 		was, ok := stored[role.Name]
 		if !ok {
 			errs = append(errs, field.Invalid(
-				rolesPath.Index(i).Child("name"), role.Name, modelDeploymentIdentityMessage))
+				rolesPath.Index(i).Child("name"), role.Name, modelDeploymentIdentityMessage,
+			))
 
 			continue
 		}
@@ -925,7 +931,8 @@ func validateModelDeploymentRoleIdentityFields(
 	var errs field.ErrorList
 	if role.Kind != was.Kind {
 		errs = append(errs, field.Invalid(
-			rolePath.Child("kind"), role.Kind, modelDeploymentIdentityMessage))
+			rolePath.Child("kind"), role.Kind, modelDeploymentIdentityMessage,
+		))
 	}
 
 	return errs
@@ -1095,7 +1102,8 @@ func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorLi
 		}
 		errs = append(errs, field.Invalid(argsPath.Index(i), arg, fmt.Sprintf(
 			"%q is set by the operator for router %q and must not be supplied here, because two "+
-				"values for it cannot be told apart", name, md.Spec.Router.Name)))
+				"values for it cannot be told apart", name, md.Spec.Router.Name,
+		)))
 	}
 
 	// THE THRESHOLD IS REFUSED RATHER THAN IGNORED on the routers that have no concept for it. A
@@ -1109,7 +1117,8 @@ func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorLi
 			*md.Spec.Router.DisaggregationThresholdTokens,
 			fmt.Sprintf("router %q has no prompt-token threshold to set; it is meaningful under %q "+
 				"alone, whose scheduler decides per request whether to split one",
-				md.Spec.Router.Name, workercore.ModelDeploymentRouterLLMD)))
+				md.Spec.Router.Name, workercore.ModelDeploymentRouterLLMD),
+		))
 	}
 
 	if engines, known := modelDeploymentRouterEngines[md.Spec.Router.Name]; known &&
@@ -1431,7 +1440,8 @@ func validateModelDeploymentRoleNames(md *workercore.ModelDeployment) field.Erro
 				"a role's name is part of the Kueue group each of its replicas joins, so this does "+
 					"not collide with %s — it puts the two roles' same-numbered replicas into one "+
 					"group that declares a single member, and Kueue deletes whichever arrived later",
-				rolesPath.Index(first).Child("name"))))
+				rolesPath.Index(first).Child("name"),
+			)))
 	}
 
 	return errs
@@ -1481,7 +1491,9 @@ func validateModelDeploymentRoleServiceNames(
 			rolesPath.Index(i).Child("name"), role, fmt.Sprintf(
 				"this role is fronted by a Service named %q (%d characters), which is not a valid "+
 					"Service name: %s. Shorten or rename this role, or the deployment",
-				name, len(name), strings.Join(why, "; "))))
+				name, len(name), strings.Join(why, "; "),
+			),
+		))
 	}
 
 	return errs
@@ -1548,7 +1560,9 @@ func validateModelDeploymentServiceNamesAreDistinct(md *workercore.ModelDeployme
 						"%s would be named %q, and so would %s. One name is one object, and the "+
 							"two need different shapes, so whichever is written last leaves the "+
 							"other without the addresses it publishes. Rename this role",
-						describes[j], name, by)))
+						describes[j], name, by,
+					),
+				))
 
 				continue
 			}
@@ -1614,7 +1628,9 @@ func validateModelDeploymentRoleMemberNames(md *workercore.ModelDeployment) fiel
 				"a replica of this role is addressed by naming each of its Pods, and the longest "+
 					"such name would be %q (%d characters), which cannot be a hostname: %s. "+
 					"Shorten the role or the deployment, or declare fewer replicas or members",
-				name, len(name), strings.Join(why, "; "))))
+				name, len(name), strings.Join(why, "; "),
+			),
+		))
 	}
 
 	return errs
@@ -1795,7 +1811,8 @@ func validateModelDeploymentRoleAdditionalVolumes(
 				errs = append(errs, field.Required(avPath.Child("persistentVolumeClaim", "claimName"),
 					fmt.Sprintf(
 						"the claim name must not be empty: it names a claim in namespace %q, and an "+
-							"empty reference names none", namespace)))
+							"empty reference names none", namespace,
+					)))
 			}
 			for _, other := range []struct {
 				field string
@@ -1810,7 +1827,8 @@ func validateModelDeploymentRoleAdditionalVolumes(
 						fmt.Sprintf(
 							"%q is set beside persistentVolumeClaim on the same entry: one entry "+
 								"mounts one volume, and two sources leave the renderer to pick",
-							other.field)))
+							other.field,
+						)))
 				}
 			}
 		}
@@ -2000,7 +2018,8 @@ func validateModelDeploymentRoleReservedMountPaths(
 			}
 			errs = append(errs, field.Invalid(rolePath.Child("additionalVolumes").Index(i).Child("mountPath"),
 				av.MountPath, fmt.Sprintf(
-					"overlaps %q, where the operator mounts the weights spec.model.artifactRef names", reserved)))
+					"overlaps %q, where the operator mounts the weights spec.model.artifactRef names", reserved,
+				)))
 			break
 		}
 	}
@@ -2049,7 +2068,8 @@ func validateModelDeploymentRoleExtraArgs(
 	}
 
 	if _, err := workerctrl.ParseModelDeploymentDeclaredParallelism(
-		engine, workerctrl.ModelDeploymentRoleArgs(role), role.Env); err != nil {
+		engine, workerctrl.ModelDeploymentRoleArgs(role), role.Env,
+	); err != nil {
 		errs = append(errs, field.Invalid(rolePath, role.Name, fmt.Sprintf(
 			"declares parallelism the KV transfer document must follow but cannot read: %s", err,
 		)))
@@ -2195,7 +2215,8 @@ func validateModelDeploymentRoleParallelWidth(
 	}
 
 	declared, err := workerctrl.ParseModelDeploymentDeclaredParallelism(
-		engine, workerctrl.ModelDeploymentRoleArgs(role), role.Env)
+		engine, workerctrl.ModelDeploymentRoleArgs(role), role.Env,
+	)
 	if err != nil || len(declared.Wiring) > 0 {
 		return nil
 	}
@@ -2275,7 +2296,8 @@ func validateModelDeploymentRoleParallelWidth(
 			"%d cards cannot hold the width the role declares (%s): the engine needs %s per "+
 				"member, and the width is per member, so %s does not rescue it",
 			cards, strings.Join(factors, ", "), needs, rolePath.Child("size"),
-		))}
+		),
+	)}
 }
 
 // validateModelDeploymentRoleEnv refuses an environment entry the operator owns.
@@ -2433,11 +2455,13 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 		// to wait, which a field error does not say.
 		if slicingRequestNotReady(instType, roleInstanceResources(role.Resources)) {
 			return nil, kerrors.NewInternalError(
-				fmt.Errorf("instance type %s is not ready yet; retry", instType.Name))
+				fmt.Errorf("instance type %s is not ready yet; retry", instType.Name),
+			)
 		}
 
 		errs = append(errs, validateRoleResourcesAgainstInstanceType(
-			instType, role.Resources, rolesPath.Index(i).Child("resources"))...)
+			instType, role.Resources, rolesPath.Index(i).Child("resources"),
+		)...)
 	}
 
 	errs = append(errs, validateModelDeploymentZeroAcceleratorInMultiRoleGroup(md, seen, rolesPath)...)
@@ -2632,7 +2656,8 @@ func validateRoleResourcesAgainstInstanceType(
 		if !instType.Status.Detail.IsLogicallySliceable() {
 			errs = append(errs, field.Forbidden(
 				ressPath.Child("acceleratorSlicedMemoryPercentage"),
-				fmt.Sprintf("instance type %s does not offer logical slicing", instType.Name)))
+				fmt.Sprintf("instance type %s does not offer logical slicing", instType.Name),
+			))
 		}
 		errs = append(errs, validateRoleSingleCardRequest(ress, "sliced", ressPath)...)
 	default:
@@ -2669,7 +2694,8 @@ func validateRoleResourcesAgainstInstanceType(
 				errs = append(errs, field.Invalid(
 					ressPath.Child("accelerator"), ress.Accelerator.String(),
 					fmt.Sprintf("instance type %s has at most %s whole accelerator(s) in its pool",
-						instType.Name, ceiling.String())))
+						instType.Name, ceiling.String()),
+				))
 			}
 		}
 	}
@@ -2704,7 +2730,8 @@ func validateRoleSingleCardRequest(
 
 	return field.ErrorList{field.Invalid(
 		ressPath.Child("accelerator"), got,
-		fmt.Sprintf("accelerator request must be exactly 1 for a %s request", kind))}
+		fmt.Sprintf("accelerator request must be exactly 1 for a %s request", kind),
+	)}
 }
 
 // validateRolePartitionProfileOffered checks a partition request against the profiles the pool
@@ -2784,7 +2811,8 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentScalerFence(
 			field.NewPath("metadata", "annotations").Key(workercore.ModelDeploymentScalerBindingAnnotationKey),
 			md.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey],
 			"the binding of this deployment cannot be read, so nothing may be written under it: "+
-				newErr.Error()))
+				newErr.Error(),
+		))
 	}
 
 	bindingChanged := modelDeploymentScalerBindingChanged(old, md)
@@ -2792,7 +2820,8 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentScalerFence(
 	if r.isOperatorRequest(ctx) {
 		return append(errs, r.validateModelDeploymentScalerOperatorFence(
 			oldBinding, oldHasBinding, newBinding, newHasBinding, bindingChanged,
-			replicasChanged, md)...)
+			replicasChanged, md,
+		)...)
 	}
 
 	if oldErr != nil {
@@ -2800,11 +2829,13 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentScalerFence(
 			field.NewPath("metadata", "annotations").Key(workercore.ModelDeploymentScalerBindingAnnotationKey),
 			old.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey],
 			"the binding of this deployment cannot be read, so nothing may be written under it: "+
-				oldErr.Error()))
+				oldErr.Error(),
+		))
 	}
 
 	return append(errs, r.validateModelDeploymentScalerUserFence(
-		ctx, oldBinding, oldHasBinding, newHasBinding, replicasChanged, old, md)...)
+		ctx, oldBinding, oldHasBinding, newHasBinding, replicasChanged, old, md,
+	)...)
 }
 
 // validateModelDeploymentScalerOperatorFence holds the rules that apply to this operator's own
@@ -2831,20 +2862,23 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentScalerOperatorFence(
 			errs = append(errs, field.Invalid(
 				annotationsPath.Key(workercore.ModelDeploymentScalerBindingAnnotationKey),
 				md.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey],
-				"a binding must name both scalerName and scalerUID"))
+				"a binding must name both scalerName and scalerUID",
+			))
 		}
 		if newBinding.Term < 1 {
 			errs = append(errs, field.Invalid(
 				annotationsPath.Key(workercore.ModelDeploymentScalerBindingAnnotationKey),
 				newBinding.Term,
-				modelDeploymentFenceRuleTerm+": a binding term starts at one"))
+				modelDeploymentFenceRuleTerm+": a binding term starts at one",
+			))
 		}
 		if oldHasBinding && newBinding.Term < oldBinding.Term {
 			errs = append(errs, field.Invalid(
 				annotationsPath.Key(workercore.ModelDeploymentScalerBindingAnnotationKey),
 				newBinding.Term,
 				fmt.Sprintf("%s: the term of this binding is %d, and the one it replaces is %d",
-					modelDeploymentFenceRuleTerm, newBinding.Term, oldBinding.Term)))
+					modelDeploymentFenceRuleTerm, newBinding.Term, oldBinding.Term),
+			))
 		}
 	}
 
@@ -2852,7 +2886,8 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentScalerOperatorFence(
 		if !newHasBinding {
 			errs = append(errs, field.Invalid(
 				annotationsPath.Key(workercore.ModelDeploymentScalerBindingAnnotationKey), "",
-				modelDeploymentFenceRuleDecision))
+				modelDeploymentFenceRuleDecision,
+			))
 			return errs
 		}
 		decision, hasDecision, err := modelDeploymentScalerDecisionOf(md)
@@ -2860,13 +2895,15 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentScalerOperatorFence(
 			errs = append(errs, field.Invalid(
 				annotationsPath.Key(workercore.ModelDeploymentScalerDecisionAnnotationKey),
 				md.Annotations[workercore.ModelDeploymentScalerDecisionAnnotationKey],
-				"the decision of this deployment cannot be read: "+err.Error()))
+				"the decision of this deployment cannot be read: "+err.Error(),
+			))
 			return errs
 		}
 		if !hasDecision {
 			errs = append(errs, field.Invalid(
 				annotationsPath.Key(workercore.ModelDeploymentScalerDecisionAnnotationKey), "",
-				modelDeploymentFenceRuleDecision))
+				modelDeploymentFenceRuleDecision,
+			))
 			return errs
 		}
 		if decision.Term != newBinding.Term {
@@ -2874,7 +2911,8 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentScalerOperatorFence(
 				annotationsPath.Key(workercore.ModelDeploymentScalerDecisionAnnotationKey),
 				decision.Term,
 				fmt.Sprintf("%s: the decision is written under term %d, and the binding is under "+
-					"term %d", modelDeploymentFenceRuleDecision, decision.Term, newBinding.Term)))
+					"term %d", modelDeploymentFenceRuleDecision, decision.Term, newBinding.Term),
+			))
 		}
 	}
 
@@ -2929,10 +2967,12 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentScalerUserFence(
 	if oldHasBinding && !newHasBinding {
 		if modelDeploymentScalerRoleSetChanged(old, md) {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec", "roles"), modelDeploymentFenceRuleRoleSet))
+				field.NewPath("spec", "roles"), modelDeploymentFenceRuleRoleSet,
+			))
 		} else if replicasChanged {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec", "roles"), modelDeploymentFenceRuleReplicaCount))
+				field.NewPath("spec", "roles"), modelDeploymentFenceRuleReplicaCount,
+			))
 		}
 		if decisionChanged && !decisionRemoved {
 			errs = append(errs, field.Forbidden(decisionKey, modelDeploymentFenceRuleAnnotation))
@@ -2953,10 +2993,12 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentScalerUserFence(
 	}
 	if modelDeploymentScalerRoleSetChanged(old, md) {
 		errs = append(errs, field.Forbidden(
-			field.NewPath("spec", "roles"), modelDeploymentFenceRuleRoleSet))
+			field.NewPath("spec", "roles"), modelDeploymentFenceRuleRoleSet,
+		))
 	} else if replicasChanged {
 		errs = append(errs, field.Forbidden(
-			field.NewPath("spec", "roles"), modelDeploymentFenceRuleReplicaCount))
+			field.NewPath("spec", "roles"), modelDeploymentFenceRuleReplicaCount,
+		))
 	}
 
 	return errs
@@ -3023,7 +3065,8 @@ func modelDeploymentScalerBindingOf(
 	binding := workercore.ModelDeploymentScalerBinding{}
 	if err := json.Unmarshal([]byte(raw), &binding); err != nil {
 		return workercore.ModelDeploymentScalerBinding{}, false, fmt.Errorf(
-			"the binding annotation is not a binding: %w", err)
+			"the binding annotation is not a binding: %w", err,
+		)
 	}
 
 	return binding, true, nil
@@ -3041,7 +3084,8 @@ func modelDeploymentScalerDecisionOf(
 	decision := workercore.ModelDeploymentScalerDecision{}
 	if err := json.Unmarshal([]byte(raw), &decision); err != nil {
 		return workercore.ModelDeploymentScalerDecision{}, false, fmt.Errorf(
-			"the decision annotation is not a decision: %w", err)
+			"the decision annotation is not a decision: %w", err,
+		)
 	}
 
 	return decision, true, nil

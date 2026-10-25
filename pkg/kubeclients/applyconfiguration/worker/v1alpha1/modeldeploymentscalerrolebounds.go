@@ -8,10 +8,13 @@ package v1alpha1
 // ModelDeploymentScalerRoleBounds are the bounds one role stays inside.
 type ModelDeploymentScalerRoleBoundsApplyConfiguration struct {
 	// Name is the name of the role on the target.
+	//
 	Name *string `json:"name,omitempty"`
 	// MinReplicas is the fewest replicas this role may have.
+	//
 	MinReplicas *int32 `json:"minReplicas,omitempty"`
 	// MaxReplicas is the most replicas this role may have.
+	//
 	MaxReplicas *int32 `json:"maxReplicas,omitempty"`
 }
 

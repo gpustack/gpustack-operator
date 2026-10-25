@@ -79,7 +79,8 @@ func deriveSlicedProfiles(
 		if len(placements) == 0 || placements[0].Length <= 0 {
 			errs = append(errs, fmt.Errorf(
 				"profile %d named %q: driver enumerated no legal placement, so its memory-slice span is unknown",
-				info.Id, name))
+				info.Id, name,
+			))
 			continue
 		}
 

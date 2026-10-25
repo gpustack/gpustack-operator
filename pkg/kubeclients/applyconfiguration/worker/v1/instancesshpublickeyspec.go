@@ -6,8 +6,10 @@ package v1
 // with apply.
 type InstanceSSHPublicKeySpecApplyConfiguration struct {
 	// DisplayName is the display name of the InstanceSSHPublicKey.
+	//
 	DisplayName *string `json:"displayName,omitempty"`
 	// Description is the description of the InstanceSSHPublicKey.
+	//
 	Description *string `json:"description,omitempty"`
 	// Data is the SSH public key data.
 	Data *string `json:"data,omitempty"`

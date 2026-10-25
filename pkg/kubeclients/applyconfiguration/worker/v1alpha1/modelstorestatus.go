@@ -16,9 +16,11 @@ import (
 // another store's selector also matches at least one of them.
 type ModelStoreStatusApplyConfiguration struct {
 	// Nodes is the number of nodes the selector currently matches.
+	//
 	Nodes *int32 `json:"nodes,omitempty"`
 	// Capacity sums the matched nodes' NodeModelStore capacity readings. It is absent while no
 	// matched node has reported one.
+	//
 	Capacity   *ModelStoreCapacityApplyConfiguration `json:"capacity,omitempty"`
 	Conditions []v1.ConditionApplyConfiguration      `json:"conditions,omitempty"`
 }

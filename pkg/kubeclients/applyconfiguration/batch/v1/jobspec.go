@@ -39,12 +39,14 @@ type JobSpecApplyConfiguration struct {
 	// represented by the jobs's .status.failed field, is incremented and it is
 	// checked against the backoffLimit. This field cannot be used in combination
 	// with restartPolicy=OnFailure.
+	//
 	PodFailurePolicy *PodFailurePolicyApplyConfiguration `json:"podFailurePolicy,omitempty"`
 	// successPolicy specifies the policy when the Job can be declared as succeeded.
 	// If empty, the default behavior applies - the Job is declared as succeeded
 	// only when the number of succeeded pods equals to the completions.
 	// When the field is specified, it must be immutable and works only for the Indexed Jobs.
 	// Once the Job meets the SuccessPolicy, the lingering pods are terminated.
+	//
 	SuccessPolicy *SuccessPolicyApplyConfiguration `json:"successPolicy,omitempty"`
 	// Specifies the number of retries before marking this job failed.
 	// Defaults to 6, unless backoffLimitPerIndex (only Indexed Job) is specified.
@@ -123,6 +125,7 @@ type JobSpecApplyConfiguration struct {
 	// with this Job. Users must design their workload to gracefully handle this.
 	// Suspending a Job will reset the StartTime field of the Job, effectively
 	// resetting the ActiveDeadlineSeconds timer too. Defaults to false.
+	//
 	Suspend *bool `json:"suspend,omitempty"`
 	// podReplacementPolicy specifies when to create replacement Pods.
 	// Possible values are:

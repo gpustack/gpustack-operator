@@ -20,6 +20,7 @@ type ModelDeploymentRoleElasticEPApplyConfiguration struct {
 	// engine world the engine is told to run, not a Pod count and not a rank mapping: which
 	// member holds which rank is the engine's own runtime fact and is never implied by this
 	// number.
+	//
 	Width *int32 `json:"width,omitempty"`
 }
 

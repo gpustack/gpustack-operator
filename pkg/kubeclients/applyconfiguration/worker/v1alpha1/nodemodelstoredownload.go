@@ -10,8 +10,10 @@ type NodeModelStoreDownloadApplyConfiguration struct {
 	// Concurrency is how many HTTP requests the node runs at once. A large file is fetched as byte
 	// ranges that share this budget, because one connection per file was measured to set a whole
 	// download's wall time.
+	//
 	Concurrency *int32 `json:"concurrency,omitempty"`
 	// BytesPerSecond is the node's download rate limit; 0 is unlimited.
+	//
 	BytesPerSecond *int64 `json:"bytesPerSecond,omitempty"`
 }
 

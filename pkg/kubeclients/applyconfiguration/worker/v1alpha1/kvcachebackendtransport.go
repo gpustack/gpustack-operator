@@ -60,6 +60,7 @@ type KVCacheBackendTransportApplyConfiguration struct {
 	// intended refusal: a cluster that cannot serve the fabric is one whose backend should say
 	// TCP, and saying so here beats discovering it later in a store log that reports no error
 	// while installing TCP under an object that reads RDMA.
+	//
 	Protocol *string `json:"protocol,omitempty"`
 }
 

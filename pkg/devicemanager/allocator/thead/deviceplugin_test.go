@@ -528,7 +528,8 @@ func TestGetContainerAllocateResponse(t *testing.T) {
 			pod, ctr := partitionPod("pod-a")
 
 			got, err := s.GetContainerAllocateResponse(
-				context.Background(), pod, ctr, devs, allocatedOn(c.allocated...))
+				context.Background(), pod, ctr, devs, allocatedOn(c.allocated...),
+			)
 			if c.wantErr != "" {
 				require.Error(t, err, "an incomplete device set must fail the allocation, never shorten the response")
 				assert.Nil(t, got)
@@ -570,7 +571,8 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	pod, ctr := slicedPod("pod-a", 10, 25, 0)
 
 	got, err := newSlicedServer(t).GetContainerAllocateResponse(
-		context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0))
+		context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0),
+	)
 	require.NoError(t, err)
 
 	// The device set is the whole-accelerator one, unchanged: the slice is enforced inside the container,
@@ -766,7 +768,8 @@ func TestGetSlicedContainerAllocateResponseQuota(t *testing.T) {
 			pod, ctr := slicedPod("pod-"+strconv.Itoa(len(c.name)), c.coresPercent, c.memPercent, c.memMib)
 
 			got, err := newSlicedServer(t).GetContainerAllocateResponse(
-				context.Background(), pod, ctr, devs, allocated)
+				context.Background(), pod, ctr, devs, allocated,
+			)
 			if c.wantErr != "" {
 				require.Error(t, err, "a figure that cannot be derived must fail the allocation")
 				assert.Nil(t, got)
@@ -797,7 +800,8 @@ func TestGetSlicedContainerAllocateResponseRespectsContainerLogLevel(t *testing.
 	ctr.Env = []core.EnvVar{{Name: "LIBHGGC_LOG_LEVEL", Value: "2"}}
 
 	got, err := newSlicedServer(t).GetContainerAllocateResponse(
-		context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0))
+		context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0),
+	)
 	require.NoError(t, err)
 
 	_, injected := got.Envs["LIBHGGC_LOG_LEVEL"]
@@ -816,7 +820,8 @@ func TestActuatePhysicalSliced(t *testing.T) {
 	pod, ctr := partitionPod("pod-a")
 
 	got, err := s.ActuatePhysicalSliced(
-		context.Background(), pod, ctr, partitionDevices(testPPUUUID0), allocatedOn(testPPUUUID0), testProfile)
+		context.Background(), pod, ctr, partitionDevices(testPPUUUID0), allocatedOn(testPPUUUID0), testProfile,
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, testProfile, got.Profile)
@@ -864,7 +869,8 @@ func TestActuatePhysicalSlicedVendorExample(t *testing.T) {
 	pod, ctr := partitionPod("pod-a")
 
 	got, err := s.ActuatePhysicalSliced(
-		context.Background(), pod, ctr, partitionDevices(testPPUUUID0), allocatedOn(testPPUUUID0), testProfile)
+		context.Background(), pod, ctr, partitionDevices(testPPUUUID0), allocatedOn(testPPUUUID0), testProfile,
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{
@@ -1024,7 +1030,8 @@ func TestActuatePhysicalSlicedRequiredNodes(t *testing.T) {
 			pod, ctr := partitionPod("pod-a")
 
 			got, err := s.ActuatePhysicalSliced(
-				context.Background(), pod, ctr, partitionDevices(testPPUUUID0), allocatedOn(testPPUUUID0), testProfile)
+				context.Background(), pod, ctr, partitionDevices(testPPUUUID0), allocatedOn(testPPUUUID0), testProfile,
+			)
 			require.Error(t, err, "an incomplete device set must fail the allocation, never shorten the response")
 			assert.Nil(t, got)
 			assert.Contains(t, err.Error(), c.wantErr)
@@ -1122,7 +1129,8 @@ func TestActuatePhysicalSlicedCardAddressingGuard(t *testing.T) {
 			pod, ctr := partitionPod("pod-a")
 
 			got, err := s.ActuatePhysicalSliced(
-				context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0), testProfile)
+				context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0), testProfile,
+			)
 			if c.wantErr == "" {
 				require.NoError(t, err, "an unallocated card is never addressed, so its record is never needed")
 				assert.Equal(t, 1, drv.createCalls)
@@ -1173,7 +1181,8 @@ func TestActuatePhysicalSlicedAddressesTheNodeTheOrdinalNames(t *testing.T) {
 	pod, ctr := partitionPod("pod-a")
 
 	got, err := s.ActuatePhysicalSliced(
-		context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0), testProfile)
+		context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0), testProfile,
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{
@@ -1314,7 +1323,8 @@ func TestActuatePhysicalSlicedRefusals(t *testing.T) {
 			pod, ctr := partitionPod("pod-a")
 
 			got, err := s.ActuatePhysicalSliced(
-				context.Background(), pod, ctr, partitionDevices(testPPUUUID0), c.allocated, c.profile)
+				context.Background(), pod, ctr, partitionDevices(testPPUUUID0), c.allocated, c.profile,
+			)
 			require.Error(t, err)
 			assert.Nil(t, got)
 			assert.Contains(t, err.Error(), c.wantErr)

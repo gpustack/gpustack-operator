@@ -52,7 +52,8 @@ func (Embedded) Start(ctx context.Context) error {
 		if !osx.ExistsFile("/sys/fs/cgroup/init/cgroup.procs") {
 			err := osx.Copy(
 				"/sys/fs/cgroup/cgroup.procs",
-				"/sys/fs/cgroup/init/cgroup.procs")
+				"/sys/fs/cgroup/init/cgroup.procs",
+			)
 			if err != nil {
 				return fmt.Errorf("error moving processes to root init group: %w", err)
 			}
@@ -69,7 +70,8 @@ func (Embedded) Start(ctx context.Context) error {
 				s := "+" + stringx.Join(" +", cs...)
 
 				return stringx.ToBytes(&s), nil
-			}))
+			}),
+		)
 		if err != nil {
 			return fmt.Errorf("error enabling root group controllers: %w", err)
 		}
@@ -95,7 +97,8 @@ func (Embedded) Start(ctx context.Context) error {
 				s := "+" + stringx.Join(" +", cs...)
 
 				return stringx.ToBytes(&s), nil
-			}))
+			}),
+		)
 		if err != nil {
 			return fmt.Errorf("error enabling %q group controllers: %w", cgroupRoot, err)
 		}
@@ -114,7 +117,8 @@ func (Embedded) Start(ctx context.Context) error {
 			imgConfDir,
 			k3sAgentImageDir,
 			osx.LinkEvenIfNotFound(false, 0o766),
-			osx.LinkInReplace())
+			osx.LinkInReplace(),
+		)
 		if err != nil {
 			return fmt.Errorf("error link agent image: %w", err)
 		}

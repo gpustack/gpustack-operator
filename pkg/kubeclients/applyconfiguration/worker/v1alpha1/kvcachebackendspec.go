@@ -17,6 +17,7 @@ type KVCacheBackendSpecApplyConfiguration struct {
 	//
 	// One value ships, spelled out rather than assumed, so a second implementation widens an enum
 	// instead of reinterpreting an absent field.
+	//
 	Type *string `json:"type,omitempty"`
 	// Image is the container image every role of this backend runs.
 	//
@@ -27,6 +28,7 @@ type KVCacheBackendSpecApplyConfiguration struct {
 	// - It is never DERIVED from the operator's own image the way the Device Manager's is: the
 	// master and the engine client can be builds against different accelerator generations, so
 	// a derived image would silently pair a master with a runtime it cannot load.
+	//
 	Image *string `json:"image,omitempty"`
 	// ImagePullPolicy is the policy every role of this backend pulls its image with.
 	//
@@ -37,6 +39,7 @@ type KVCacheBackendSpecApplyConfiguration struct {
 	// comparable against it.
 	// - It does NOT inherit the cluster-wide "image-pull-policy" Setting, which is a value of the
 	// bundled-application chart install and reaches nothing a controller renders.
+	//
 	ImagePullPolicy *v1.PullPolicy `json:"imagePullPolicy,omitempty"`
 	// ImagePullSecrets names the secrets that pull this backend's images, on every role. They live
 	// in the namespace the workloads run in, which is this operator's own.
@@ -46,15 +49,18 @@ type KVCacheBackendSpecApplyConfiguration struct {
 	// the bundled-application chart.
 	// - The list is ATOMIC, replaced whole rather than merged. A structural schema keys a list
 	// only by a required, non-nullable field, and LocalObjectReference's name is neither.
+	//
 	ImagePullSecrets []corev1.LocalObjectReferenceApplyConfiguration `json:"imagePullSecrets,omitempty"`
 	// Connection describes how this backend is reached: managed by this operator, or external.
 	// Exactly one is set, enforced by the webhook.
+	//
 	Connection *KVCacheBackendConnectionApplyConfiguration `json:"connection,omitempty"`
 	// Transport describes the data plane the members use.
 	//
 	// The empty object is the default, and it has to be: structural-schema defaulting does not
 	// descend into an ABSENT object, so a spec that never mentions a transport would store no
 	// protocol at all and protocol's own default would silently not apply.
+	//
 	Transport *KVCacheBackendTransportApplyConfiguration `json:"transport,omitempty"`
 }
 

@@ -23,7 +23,11 @@ protoc_gen_go_version=${PROTOC_GEN_GO_VERSION:-"v1.36.11"}
 #   - its last tag (v1.3.2, 2020) predates commits this repository depends on.
 # As with goimports, a floating "master" would move the drift gate baseline.
 protoc_gen_gogo_version=${PROTOC_GEN_GOGO_VERSION:-"f67b8970b736"}
-protoc_gen_go_grpc_version=${PROTOC_GEN_GO_GRPC_VERSION:-"v1.78.0"}
+# The plugin is published as a module of its own, on a version line of its own.
+# The version of the gRPC library it is built from does not name a version of
+# the plugin, and a version of the library here resolves to a module that does
+# not carry the plugin at all.
+protoc_gen_go_grpc_version=${PROTOC_GEN_GO_GRPC_VERSION:-"v1.6.2"}
 protoc_gen_validate_version=${PROTOC_GEN_VALIDATE_VERSION:-"v1.3.0"}
 protoc_gen_grpc_gateway_version=${PROTOC_GEN_GRPC_GATEWAY_VERSION:-"v2.27.7"}
 

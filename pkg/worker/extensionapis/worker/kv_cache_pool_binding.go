@@ -40,7 +40,8 @@ func (h *KVCachePoolBindingHandler) SetupHandler(
 		extensionapi.JSONPathTemplateColumn("Dtype", "{.spec.domain.dtype}"),
 		extensionapi.JSONPathTemplateColumn("Effective", "{.status.effectiveQuota}"),
 		extensionapi.JSONPathTemplateColumn("Usage", "{.status.usage}"),
-		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"))
+		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"),
+	)
 	if err != nil {
 		return gvr, nil, err
 	}

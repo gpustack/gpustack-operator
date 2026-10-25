@@ -15,6 +15,7 @@ type ModelStoreBindingQuotaApplyConfiguration struct {
 	// own size, per digest and per node holding it, so a tree two namespaces share counts fully
 	// against each of them — conservative, and impossible to game by warming what another tenant
 	// already warmed. An increase passes admission; a decrease is refused.
+	//
 	Bytes *resource.Quantity `json:"bytes,omitempty"`
 }
 

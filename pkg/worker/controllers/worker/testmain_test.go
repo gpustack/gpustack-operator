@@ -19,7 +19,8 @@ import (
 // their defaults.
 func TestMain(m *testing.M) {
 	system.LoopbackCtrlClient.Configure(
-		ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build())
+		ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build(),
+	)
 	system.LoopbackKubeClient.Configure(kubefake.NewSimpleClientset())
 	// Reconciler-level render assertions are written against the native sidecar shape, which a
 	// version at the floor unlocks; the classic shape is asserted at render level instead.

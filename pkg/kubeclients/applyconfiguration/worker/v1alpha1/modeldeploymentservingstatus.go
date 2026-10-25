@@ -15,9 +15,11 @@ import (
 type ModelDeploymentServingStatusApplyConfiguration struct {
 	// State is the confirmation answer. Only Confirmed means the union was observed; the other
 	// states differ in WHY no number is offered, and none of them encodes one.
+	//
 	State *workerv1alpha1.ModelDeploymentServingState `json:"state,omitempty"`
 	// Value is the confirmed serving count, present only when State is Confirmed, with an
 	// explicit zero as real as any other number.
+	//
 	Value *int32 `json:"value,omitempty"`
 }
 

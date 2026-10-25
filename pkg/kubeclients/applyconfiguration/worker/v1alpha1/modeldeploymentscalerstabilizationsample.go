@@ -12,8 +12,10 @@ import (
 // ModelDeploymentScalerStabilizationSample is one recommendation a role received.
 type ModelDeploymentScalerStabilizationSampleApplyConfiguration struct {
 	// Timestamp is when the recommendation was made.
+	//
 	Timestamp *v1.Time `json:"timestamp,omitempty"`
 	// Replicas is the replica count the recommendation asked for.
+	//
 	Replicas *int32 `json:"replicas,omitempty"`
 }
 

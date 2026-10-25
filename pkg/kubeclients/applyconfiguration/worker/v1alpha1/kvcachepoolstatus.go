@@ -16,6 +16,7 @@ type KVCachePoolStatusApplyConfiguration struct {
 	// PhaseMessage carries the reason for the phase.
 	PhaseMessage *string `json:"phaseMessage,omitempty"`
 	// Conditions is the finer view, one condition per axis.
+	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	// ClientEndpoint is the address an inference engine connects to, echoed from the backend's
 	// Client endpoint.
@@ -27,6 +28,7 @@ type KVCachePoolStatusApplyConfiguration struct {
 	// The backend's ADMIN address is deliberately republished NOWHERE. That one port serves the
 	// Prometheus exposition and the HTTP admin API both, so it is the write face of the quota ledger,
 	// while this object is cluster-scoped and readable by anyone holding a pool RBAC rule.
+	//
 	ClientEndpoint *string `json:"clientEndpoint,omitempty"`
 	// Usage is what this pool's own tenants are holding. It is ABSENT until a scrape succeeds, and
 	// absent is not the same as reporting zero.
@@ -36,6 +38,7 @@ type KVCachePoolStatusApplyConfiguration struct {
 	// It is AUTHORITATIVE rather than advisory: an entry exists because a Binding declares it, not
 	// because a workload announced itself, so assembling it is one pass over the Binding index and
 	// needs no watch on any workload kind.
+	//
 	Domains []KVCachePoolDomainApplyConfiguration `json:"domains,omitempty"`
 	// UsedBy names the Bindings that hold this pool. A non-empty UsedBy is what the finalizer
 	// refuses deletion on, so the field is the enforcement input and not a display.
@@ -43,6 +46,7 @@ type KVCachePoolStatusApplyConfiguration struct {
 	// Unlike the Binding's own list, THIS one is written by this API's reconciler, which already
 	// lists the Bindings of a pool through its index. The two levels of usedBy therefore have
 	// different writers, and only this one is self-contained.
+	//
 	UsedBy []KVCacheObjectReferenceApplyConfiguration `json:"usedBy,omitempty"`
 }
 

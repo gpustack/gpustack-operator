@@ -129,10 +129,12 @@ func TestRenderVLLM_EncodeCarriesTheEncoderCacheArmAndNoKVKey(t *testing.T) {
 // carrying both paths' keys would still satisfy a comparison written on the one key under test.
 func TestRenderVLLM_EncoderConfigCarriesNoKeyFromTheOtherConnector(t *testing.T) {
 	nixl, err := renderVLLMEncoderCache(
-		Input{Engine: EngineVLLM, Role: RoleEncode}, nixlLeg())
+		Input{Engine: EngineVLLM, Role: RoleEncode}, nixlLeg(),
+	)
 	require.NoError(t, err)
 	shared, err := renderVLLMEncoderCache(
-		Input{Engine: EngineVLLM, Role: RoleEncode}, sharedLeg())
+		Input{Engine: EngineVLLM, Role: RoleEncode}, sharedLeg(),
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]any{
@@ -573,7 +575,8 @@ func TestRenderVLLM_AnEncoderStageAlwaysDeclaresItsLeg(t *testing.T) {
 	for _, leg := range []EncoderCache{nixlLeg(), sharedLeg()} {
 		t.Run(leg.Connector, func(t *testing.T) {
 			result, err := renderVLLMWithEncoderCache(
-				Input{Engine: EngineVLLM, Role: RoleEncode}, leg)
+				Input{Engine: EngineVLLM, Role: RoleEncode}, leg,
+			)
 			require.NoError(t, err, "a declared leg is what makes the role renderable")
 			assert.NotEmpty(t, result.Args)
 		})

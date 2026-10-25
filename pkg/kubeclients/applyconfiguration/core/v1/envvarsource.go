@@ -19,6 +19,7 @@ type EnvVarSourceApplyConfiguration struct {
 	SecretKeyRef *SecretKeySelectorApplyConfiguration `json:"secretKeyRef,omitempty"`
 	// FileKeyRef selects a key of the env file.
 	// Requires the EnvFiles feature gate to be enabled.
+	//
 	FileKeyRef *FileKeySelectorApplyConfiguration `json:"fileKeyRef,omitempty"`
 }
 

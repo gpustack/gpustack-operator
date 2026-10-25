@@ -12,21 +12,27 @@ import (
 // ModelDeploymentScalerScaleDownStatus is the outcome of the last scale-down.
 type ModelDeploymentScalerScaleDownStatusApplyConfiguration struct {
 	// Role is the role the scale-down removed a replica from.
+	//
 	Role *string `json:"role,omitempty"`
 	// Ordinal is the replica the scale-down removed.
+	//
 	Ordinal *int32 `json:"ordinal,omitempty"`
 	// PreScaleDownVector is the replica count per role before the scale-down.
 	//
 	// It is the vector the scaler restores when the retirement aborts.
+	//
 	PreScaleDownVector map[string]int32 `json:"preScaleDownVector,omitempty"`
 	// Outcome is how the scale-down ended.
 	//
 	// It is Committed while the retirement runs and Aborted when the retirement failed and the
 	// scaler restored the vector.
+	//
 	Outcome *string `json:"outcome,omitempty"`
 	// AbortedAt is when the retirement aborted.
+	//
 	AbortedAt *v1.Time `json:"abortedAt,omitempty"`
 	// CooldownUntil is when the role may shrink again.
+	//
 	CooldownUntil *v1.Time `json:"cooldownUntil,omitempty"`
 }
 

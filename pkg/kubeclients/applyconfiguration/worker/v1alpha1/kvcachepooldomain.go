@@ -9,9 +9,11 @@ package v1alpha1
 // and what the master reports about it.
 type KVCachePoolDomainApplyConfiguration struct {
 	// Name is the reuse identity, and it is the storage layer's tenant_id.
+	//
 	Name *string `json:"name,omitempty"`
 	// Binding is the object that declared this domain. It is the only place a domain can be
 	// declared, which is what keeps naming one a privileged act.
+	//
 	Binding *KVCachePoolBindingReferenceApplyConfiguration `json:"binding,omitempty"`
 	// BlockSize and Dtype are echoed from the Binding that registered the domain, so a reader of
 	// the registry does not have to fetch every Binding to learn what a domain's blocks are.
@@ -23,6 +25,7 @@ type KVCachePoolDomainApplyConfiguration struct {
 	//
 	// Dtype is spelled to match its JSON name exactly. DType would not, and the openapi generator
 	// records every such mismatch as a checked-in API rule violation.
+	//
 	BlockSize *int32  `json:"blockSize,omitempty"`
 	Dtype     *string `json:"dtype,omitempty"`
 	// Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not
@@ -37,6 +40,7 @@ type KVCachePoolDomainApplyConfiguration struct {
 	// value would not be, because this ratio is COMPUTED by this operator. It does oblige whoever
 	// writes it to format to this shape: a value that fails the pattern fails the WHOLE status write,
 	// freezing every other field at its last value, not just this one.
+	//
 	HitRate *string `json:"hitRate,omitempty"`
 }
 

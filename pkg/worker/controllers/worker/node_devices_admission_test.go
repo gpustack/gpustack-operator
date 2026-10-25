@@ -1342,7 +1342,7 @@ func failOnce(err error) func() error {
 // an error log. Any other failure is still returned and logged, and the next reconcile writes the
 // verdict in every case.
 func TestNodeDevicesAdmission_ExpectedWriteFailuresAreQuiet(t *testing.T) {
-	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "workloads"}
+	gr := schema.GroupResource{Group: kueue.SchemeGroupVersion.Group, Resource: "workloads"}
 	testCases := []struct {
 		name       string
 		getErr     error
@@ -1421,7 +1421,7 @@ func TestNodeDevicesAdmission_ExpectedWriteFailuresAreQuiet(t *testing.T) {
 // without an error and without an error log, any other failure is returned and logged, and the next
 // reconcile marks the check Active in every case.
 func TestNodeDevicesAdmissionCheckReconciler_ExpectedWriteFailuresAreQuiet(t *testing.T) {
-	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "admissionchecks"}
+	gr := schema.GroupResource{Group: kueue.SchemeGroupVersion.Group, Resource: "admissionchecks"}
 	testCases := []struct {
 		name       string
 		getErr     error
@@ -1687,7 +1687,8 @@ func TestVerdictMessageNamesTheRoles(t *testing.T) {
 // are not answering Retry merely because nothing covers them.
 func TestNodeDevicesAdmission_ReconcilePerRole(t *testing.T) {
 	base := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive,
+	)
 	whole := int32(nodefeature.ResourceMaxUnits)
 
 	// Two model-level flavors of one manufacturer in one pool, exactly as a cross-model pool
@@ -1791,7 +1792,8 @@ func TestNodeDevicesAdmission_ReconcilePerRole(t *testing.T) {
 // test: a false negative reached by an indirect test, and it is stated for the same reason.
 func TestNodeDevicesAdmission_UnassignedFlavorIsHeldExplicitly(t *testing.T) {
 	base := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive,
+	)
 	whole := int32(nodefeature.ResourceMaxUnits)
 
 	podSet := func(name string, accelerated bool) kueue.PodSet {
@@ -1939,7 +1941,8 @@ func TestNodeDevicesAdmission_UnassignedFlavorIsHeldExplicitly(t *testing.T) {
 // reading it would otherwise be told to wait for an assignment that has already arrived.
 func TestNodeDevicesAdmission_RefreshesTheMessageWhenTheCauseChanges(t *testing.T) {
 	base := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive,
+	)
 	poolLabels := map[string]string{
 		"feature.gpustack.ai/nvidia":                  "true",
 		"acceleratable.feature.gpustack.ai/nvidia-g0": "true",
@@ -2031,7 +2034,8 @@ func TestNodeDevicesAdmission_RefreshesTheMessageWhenTheCauseChanges(t *testing.
 // whether the flavor reached any node, not by whether a key was resolved.
 func TestNodeDevicesAdmission_UnresolvedFlavorIsHeldExplicitly(t *testing.T) {
 	base := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive,
+	)
 	whole := int32(nodefeature.ResourceMaxUnits)
 
 	cases := []struct {
@@ -2145,7 +2149,8 @@ func TestNodeDevicesAdmission_UnresolvedFlavorIsHeldExplicitly(t *testing.T) {
 // delay dropped — the only state from which the guard can be observed to skip at all.
 func TestNodeDevicesAdmission_RestoresAMissingRetryDelay(t *testing.T) {
 	base := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive,
+	)
 	poolLabels := map[string]string{
 		"feature.gpustack.ai/nvidia":                  "true",
 		"acceleratable.feature.gpustack.ai/nvidia-g0": "true",
@@ -2375,7 +2380,8 @@ func TestNodeDevicesFeasibilityScopesEveryDemandToItsNodeBatch(t *testing.T) {
 //     prefill/decode deployment needs named.
 func TestVerdictOmitsTheRoleClauseForASingleRole(t *testing.T) {
 	base := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive,
+	)
 	whole := int32(nodefeature.ResourceMaxUnits)
 	poolLabels := map[string]string{
 		"feature.gpustack.ai/nvidia":                  "true",

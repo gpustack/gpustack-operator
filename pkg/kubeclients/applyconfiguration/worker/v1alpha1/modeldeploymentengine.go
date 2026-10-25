@@ -16,6 +16,7 @@ type ModelDeploymentEngineApplyConfiguration struct {
 	// It is the deployment's identity and is frozen after creation, while Image answers which
 	// build runs and stays editable — stated here because one object reading otherwise would
 	// freeze the pair together.
+	//
 	Name *string `json:"name,omitempty"`
 	// Image is the container image every role of this deployment runs in by default.
 	//
@@ -27,6 +28,7 @@ type ModelDeploymentEngineApplyConfiguration struct {
 	// satisfied by the key merely being present, and this object is re-marshaled by the
 	// mutating webhook: Engine is a value type and this field has no omitempty, so a patch
 	// taken from a request that named no image still carries an empty one.
+	//
 	Image *string `json:"image,omitempty"`
 }
 

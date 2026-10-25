@@ -750,7 +750,8 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 	// the one error that finds the allocation already durable, and is compensated instead of reordered.
 	if ctrResp == nil {
 		if ctrResp, err = s.Responder.GetContainerAllocateResponse(
-			ctx, decision.Pod, decision.Container, decision.Devices, decision.Allocation); err != nil {
+			ctx, decision.Pod, decision.Container, decision.Devices, decision.Allocation,
+		); err != nil {
 			s.releaseAllocation(ctx, &decision, physical)
 			s.Logger.Error(err, "get container allocate response")
 			return nil, err
@@ -1520,7 +1521,8 @@ func (s *ResourceServer) placeLogicalSlice(
 	}
 
 	placements, err := logicalPlacer.PlaceLogicalSliced(
-		ctx, d.Pod, d.Container, d.Devices, d.Allocation, occupiedLogical)
+		ctx, d.Pod, d.Container, d.Devices, d.Allocation, occupiedLogical,
+	)
 	if err != nil {
 		s.Logger.Error(err, "place logical slice for allocation",
 			"pod", kubemeta.GetNamespacedNameKey(d.Pod), "container", d.Container.Name)
@@ -1611,7 +1613,8 @@ func (s *ResourceServer) actuatePartition(
 	}
 
 	physical, err := actuator.ActuatePhysicalSliced(
-		ctx, d.Pod, d.Container, d.Devices, d.Allocation, d.Profile)
+		ctx, d.Pod, d.Container, d.Devices, d.Allocation, d.Profile,
+	)
 	if err != nil {
 		s.Reconciler.releaseReservation(d.Pod.UID, d.Container.Name)
 		s.Logger.Error(err, "actuate partition for allocation", "pod", kubemeta.GetNamespacedNameKey(d.Pod))
@@ -1655,7 +1658,8 @@ func (s *ResourceServer) renderPrePatchResponse(
 		// The placement is consumed, never recomputed: what the container is told must be what the
 		// ledger recorded, and only one of the two can be authoritative.
 		ctrResp, err := logicalPlacer.GetLogicalSlicedResponse(
-			ctx, d.Pod, d.Container, d.Devices, d.Allocation, d.LogicalPlacements)
+			ctx, d.Pod, d.Container, d.Devices, d.Allocation, d.LogicalPlacements,
+		)
 		if err != nil {
 			s.Reconciler.releaseReservation(d.Pod.UID, d.Container.Name)
 			s.Logger.Error(err, "get logical sliced response")
@@ -1890,7 +1894,8 @@ func (s *ResourceServer) coAllocatedAccelerators(
 	allocations, err := AllocatedAcceleratorsOf(pod)
 	if err != nil {
 		return workercore.DevicesStatus{}, "", fmt.Errorf(
-			"read the allocation annotation of pod %s: %w", kubemeta.GetNamespacedNameKey(pod), err)
+			"read the allocation annotation of pod %s: %w", kubemeta.GetNamespacedNameKey(pod), err,
+		)
 	}
 	names := make([]string, 0, len(allocations))
 	for name := range allocations {

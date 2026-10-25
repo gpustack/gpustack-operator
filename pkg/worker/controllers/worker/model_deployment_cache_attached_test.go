@@ -488,7 +488,8 @@ func TestModelDeploymentCacheAttached_UnreadableExecutionIsNeverTrue(t *testing.
 	// disagreement rather than because the domain is unusable: same domain, same replicas.
 	assert.Equal(t, "True",
 		ModelDeploymentConditionCacheAttached.GetStatus(
-			cacheAttachedOf(t, md, readyPods(md, 1), domain, nil)),
+			cacheAttachedOf(t, md, readyPods(md, 1), domain, nil),
+		),
 		"the corroborating signal is usable, so a refusal below is about the replicas")
 
 	// ONE GROUP OF TWO, hand-built because readyReplica names each Pod for itself and two members

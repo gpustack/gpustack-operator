@@ -497,7 +497,8 @@ func RenderMemberDaemonSet(
 					// Under HA the default Service address does not use this token. An
 					// explicit Lease address does, so the member account stays mounted.
 					AutomountServiceAccountToken: ptr.To(leaderNeedsAPIAccess(
-						kvcb.Spec.Connection.Managed.Leader)),
+						kvcb.Spec.Connection.Managed.Leader,
+					)),
 					ServiceAccountName: memberServiceAccountName(kvcb),
 					ImagePullSecrets:   kvcb.Spec.ImagePullSecrets,
 					Containers: []core.Container{
@@ -1260,7 +1261,8 @@ func memberLocalDiskSurveyContainer(image, path string) core.Container {
 			`ls -A %[1]s >/dev/null 2>&1 || t=-1; `+
 			`printf 'entries=%%s control=%%s' "${t:-}" "${c:-}" > /dev/termination-log 2>/dev/null; `+
 			`exit 0`,
-		shellQuote(path))
+		shellQuote(path),
+	)
 	return core.Container{
 		Name:                     MemberLocalDiskSurveyContainerName,
 		Image:                    image,
@@ -1310,7 +1312,8 @@ func memberUnmountLocalDiskHook(graceSeconds, restPort int32) *core.LifecycleHan
 			`data=json.dumps({"grace_period_seconds":%d}).encode(),`+
 			`headers={"Content-Type":"application/json"},method="POST"),timeout=%d)`,
 		restPort, memberUnmountLocalDiskPath, graceSeconds,
-		int64(graceSeconds)+memberHookTimeoutMarginSeconds)
+		int64(graceSeconds)+memberHookTimeoutMarginSeconds,
+	)
 
 	return &core.LifecycleHandler{
 		Exec: &core.ExecAction{Command: []string{"python3", "-c", script}},

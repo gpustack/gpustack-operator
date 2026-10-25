@@ -651,13 +651,15 @@ func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToDeleting(
 	record, err := r.captureModelDeploymentRetirementRelease(ctx, md, plan)
 	if err != nil {
 		r.holdModelDeploymentRetirementBeforeDelete(plan, now, encode, fmt.Sprintf(
-			"the target's release cannot be recorded, so nothing is deleted: %v", err))
+			"the target's release cannot be recorded, so nothing is deleted: %v", err,
+		))
 
 		return
 	}
 	if err := r.persistModelDeploymentRetirementRelease(ctx, md, record); err != nil {
 		r.holdModelDeploymentRetirementBeforeDelete(plan, now, encode, fmt.Sprintf(
-			"the target's release could not be written, so nothing is deleted: %v", err))
+			"the target's release could not be written, so nothing is deleted: %v", err,
+		))
 
 		return
 	}
@@ -665,7 +667,8 @@ func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToDeleting(
 	// stops here rather than being discovered missing once the delete is committed.
 	if _, err := r.loadModelDeploymentRetirementRelease(md, plan); err != nil {
 		r.holdModelDeploymentRetirementBeforeDelete(plan, now, encode, fmt.Sprintf(
-			"the target's release was not recorded for this operation, so nothing is deleted: %v", err))
+			"the target's release was not recorded for this operation, so nothing is deleted: %v", err,
+		))
 
 		return
 	}
@@ -762,7 +765,8 @@ func (r *ModelDeploymentReconciler) advanceModelDeploymentRetirementToCompleted(
 	if !released {
 		if modelDeploymentRetirementBudgetSpent(plan.Reservation, modelDeploymentRetirementSettleBudget, now) {
 			plan.Reservation.Reason = fmt.Sprintf(
-				"the settle budget was exhausted and the release has not been observed: %s", reason)
+				"the settle budget was exhausted and the release has not been observed: %s", reason,
+			)
 		} else {
 			plan.Reservation.Reason = reason
 		}
@@ -1181,7 +1185,8 @@ func modelDeploymentRetirementDisaggregated(md *workercore.ModelDeployment, memb
 			for i := range md.Spec.Roles {
 				if md.Spec.Roles[i].Name == roleName {
 					if k, ok := ModelDeploymentRoleUpstreamKind(
-						ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i])); ok {
+						ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i]),
+					); ok {
 						kind = k
 					}
 					break
@@ -1711,7 +1716,8 @@ func (r *ModelDeploymentReconciler) clearModelDeploymentRetirementRetry(
 	patched := md.DeepCopy()
 	delete(patched.Annotations, modelDeploymentRetirementRetryAnnotation)
 	if err := r.Client.Patch(ctx, patched, ctrlcli.MergeFromWithOptions(
-		md, ctrlcli.MergeFromWithOptimisticLock{})); err != nil {
+		md, ctrlcli.MergeFromWithOptimisticLock{},
+	)); err != nil {
 		return fmt.Errorf("clear the retirement retry directive: %w", err)
 	}
 	md.Annotations = patched.Annotations
@@ -1746,7 +1752,8 @@ func parseModelDeploymentRetirementRetry(directive string) (string, int, string,
 // can name it. It holds the removal rather than declining it, because the only way to be sure the
 // removal is safe is to have an identity to check it against.
 var errModelDeploymentReservationUnnameable = errors.New(
-	"the target has no uid, so a reservation cannot name it")
+	"the target has no uid, so a reservation cannot name it",
+)
 
 // refuseModelDeploymentRemoval is the admission leg: it decides, at the moment a path is about to
 // delete a replica it no longer wants, whether the retirement protocol may take that deletion over.

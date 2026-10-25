@@ -240,7 +240,8 @@ func (s *modelDeploymentScalerSampler) observe(
 		role := &md.Spec.Roles[i]
 		roleCtx, cancel := context.WithTimeout(ctx, samplerPassTimeout)
 		observation, read, sample := s.observeRole(
-			roleCtx, role, engine, ready[role.Name], previous, now, freshness)
+			roleCtx, role, engine, ready[role.Name], previous, now, freshness,
+		)
 		cancel()
 		observations[role.Name] = observation
 		roles[role.Name] = sample
@@ -287,13 +288,15 @@ func (s *modelDeploymentScalerSampler) observeRole(
 		asked = ready[:maxSamplerPodsPerRole]
 		reasons = append(reasons, fmt.Sprintf(
 			"the role has %d ready engine pods and the sampler asks about %d of them",
-			len(ready), maxSamplerPodsPerRole))
+			len(ready), maxSamplerPodsPerRole,
+		))
 	}
 
 	reads, passErr := s.scrapePods(ctx, asked, engine, now)
 	if passErr != nil {
 		reasons = append(reasons, fmt.Sprintf(
-			"the engine pods could not all be read: %v", passErr))
+			"the engine pods could not all be read: %v", passErr,
+		))
 	}
 	samples := make(map[string]modelDeploymentScalerPodSample, len(reads))
 	windows := make([]modelDeploymentScalerWindow, 0, len(reads))
@@ -326,7 +329,8 @@ func (s *modelDeploymentScalerSampler) observeRole(
 			latencyState = algorithm.SignalMissing
 			idle = false
 			reasons = append(reasons, fmt.Sprintf(
-				"the engine pod %s did not answer: %v", read.pod.Name, read.err))
+				"the engine pod %s did not answer: %v", read.pod.Name, read.err,
+			))
 			continue
 		}
 		observation.RunningRequests += read.sample.running
@@ -745,7 +749,8 @@ func (s *modelDeploymentScalerSampler) roleWindow(
 	if !ok {
 		window = &modelDeploymentScalerRoleWindow{
 			stabilization: datax.NewRingBuffer[workercore.ModelDeploymentScalerStabilizationSample](
-				modelDeploymentScalerMaxStabilizationSamples),
+				modelDeploymentScalerMaxStabilizationSamples,
+			),
 		}
 		ring.windows[role] = window
 	}

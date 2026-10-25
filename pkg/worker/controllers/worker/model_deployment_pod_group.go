@@ -417,7 +417,8 @@ func modelDeploymentAnsweringMembers(
 	default:
 		return nil, fmt.Sprintf(
 			"a leader-served replica of several Pods has %d members carrying the leader index, "+
-				"so no member can answer for it", len(leaders))
+				"so no member can answer for it", len(leaders),
+		)
 	}
 }
 
@@ -755,7 +756,8 @@ func modelDeploymentReplicaGroupName(
 	md *workercore.ModelDeployment, role string, ordinal int,
 ) string {
 	return modelDeploymentPodGroupNamePrefix + stringx.SumByFNV64a(
-		md.Namespace, "/", md.Name, "/", role, "/", strconvx.Itoa(ordinal))
+		md.Namespace, "/", md.Name, "/", role, "/", strconvx.Itoa(ordinal),
+	)
 }
 
 // modelDeploymentReplicaServiceName is the headless Service that publishes one replica's members,

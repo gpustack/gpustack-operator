@@ -114,7 +114,8 @@ func (f *flakyUpdates) react(action k8stesting.Action) (bool, runtime.Object, er
 				Resource: f.resource,
 			},
 			action.GetResource().Resource,
-			errors.New("the object has been modified"))
+			errors.New("the object has been modified"),
+		)
 	}
 
 	return false, nil, nil

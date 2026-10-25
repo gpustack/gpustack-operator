@@ -1895,7 +1895,8 @@ func TestModelDeploymentReconciler_ExpectedBindingClaimFailuresAreQuiet(t *testi
 						}
 						return c.SubResource(sub).Update(ctx, obj, opts...)
 					},
-				})
+				},
+			)
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64)}
 			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}}
 
@@ -1963,7 +1964,8 @@ func TestModelDeploymentReconciler_ExpectedStatusWriteFailuresAreQuiet(t *testin
 						}
 						return c.SubResource(sub).Update(ctx, obj, opts...)
 					},
-				})
+				},
+			)
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64)}
 			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}}
 
@@ -2568,7 +2570,8 @@ func TestModelDeploymentReconciler_TheGateIsPerReplicaAndDoesNotStopBackfill(t *
 	byRole := map[string][]*core.Pod{}
 	for _, pod := range endpointEligibilityPods(t, cli) {
 		byRole[pod.Labels[modelDeploymentLabelKeyComponent]] = append(
-			byRole[pod.Labels[modelDeploymentLabelKeyComponent]], pod)
+			byRole[pod.Labels[modelDeploymentLabelKeyComponent]], pod,
+		)
 	}
 	require.Len(t, byRole["paired"], 2)
 	require.Len(t, byRole["solo"], 1)
@@ -3256,7 +3259,8 @@ func TestModelDeploymentRestorationIsGatedOnTheGroupsObservation(t *testing.T) {
 			}
 			require.NoError(t, r.convergeModelDeploymentEndpointEligibility(
 				context.Background(), md, actual, byMember, nil,
-				modelDeploymentPassObservation{Serving: answer}))
+				modelDeploymentPassObservation{Serving: answer},
+			))
 
 			for _, pod := range endpointEligibilityPods(t, cli) {
 				if pod.Labels[modelDeploymentMemberIndexLabel] != "0" {

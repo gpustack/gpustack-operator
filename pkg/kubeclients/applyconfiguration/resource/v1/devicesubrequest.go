@@ -23,6 +23,7 @@ type DeviceSubRequestApplyConfiguration struct {
 	// format <main request>/<subrequest>.
 	//
 	// Must be a DNS label.
+	//
 	Name *string `json:"name,omitempty"`
 	// DeviceClassName references a specific DeviceClass, which can define
 	// additional configuration and selectors to be inherited by this
@@ -35,11 +36,13 @@ type DeviceSubRequestApplyConfiguration struct {
 	// devices. If users are free to request anything without restrictions,
 	// then administrators can create an empty DeviceClass for users
 	// to reference.
+	//
 	DeviceClassName *string `json:"deviceClassName,omitempty"`
 	// Selectors define criteria which must be satisfied by a specific
 	// device in order for that device to be considered for this
 	// subrequest. All selectors must be satisfied for a device to be
 	// considered.
+	//
 	Selectors []DeviceSelectorApplyConfiguration `json:"selectors,omitempty"`
 	// AllocationMode and its related fields define how devices are allocated
 	// to satisfy this subrequest. Supported values are:
@@ -58,9 +61,11 @@ type DeviceSubRequestApplyConfiguration struct {
 	//
 	// More modes may get added in the future. Clients must refuse to handle
 	// requests with unknown modes.
+	//
 	AllocationMode *resourcev1.DeviceAllocationMode `json:"allocationMode,omitempty"`
 	// Count is used only when the count mode is "ExactCount". Must be greater than zero.
 	// If AllocationMode is ExactCount and this field is not specified, the default is one.
+	//
 	Count *int64 `json:"count,omitempty"`
 	// If specified, the request's tolerations.
 	//
@@ -77,8 +82,9 @@ type DeviceSubRequestApplyConfiguration struct {
 	//
 	// The maximum number of tolerations is 16.
 	//
-	// This is an alpha field and requires enabling the DRADeviceTaints
+	// This is a beta field and requires enabling the DRADeviceTaints
 	// feature gate.
+	//
 	Tolerations []DeviceTolerationApplyConfiguration `json:"tolerations,omitempty"`
 	// Capacity define resource requirements against each capacity.
 	//
@@ -92,6 +98,7 @@ type DeviceSubRequestApplyConfiguration struct {
 	// If AllocationMode is set to All,
 	// the request fails if there are devices that otherwise match the request,
 	// and have this capacity, with a value >= the requested amount, but which cannot be allocated to this request.
+	//
 	Capacity *CapacityRequirementsApplyConfiguration `json:"capacity,omitempty"`
 }
 

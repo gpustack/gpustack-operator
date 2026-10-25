@@ -782,7 +782,8 @@ func TestModelDeploymentWebhook_EncoderServingTheSideChannelPortIsRefused(t *tes
 			md := epdNetworkRowDeployment(tc.serving)
 
 			_, err := newModelDeploymentWebhookWith(epdPlatformTypes()).ValidateCreate(
-				context.Background(), md)
+				context.Background(), md,
+			)
 			require.Error(t, err,
 				"the encoder and its side channel would contend for one number in one container")
 			assert.Contains(t, err.Error(), "side channel",

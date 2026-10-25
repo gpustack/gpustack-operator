@@ -16,6 +16,7 @@ package v1alpha1
 type ModelDeploymentRouterMetricsApplyConfiguration struct {
 	// Port is the port the metrics are served on. The lower bound is not decoration: unlike the names
 	// beside it, this is a number a consumer dials, and a zero would fail only at connect time.
+	//
 	Port *int32 `json:"port,omitempty"`
 	// QueuedRequests names the metric holding requests waiting to be admitted by the engine.
 	QueuedRequests *string `json:"queuedRequests,omitempty"`

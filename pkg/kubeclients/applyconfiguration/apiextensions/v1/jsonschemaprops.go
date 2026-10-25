@@ -115,6 +115,7 @@ type JSONSchemaPropsApplyConfiguration struct {
 	//
 	// The properties specified must either be required or have a default value,
 	// to ensure those properties are present for all list items.
+	//
 	XListMapKeys []string `json:"x-kubernetes-list-map-keys,omitempty"`
 	// x-kubernetes-list-type annotates an array to further describe its topology.
 	// This extension must only be used on lists and may have 3 possible values:

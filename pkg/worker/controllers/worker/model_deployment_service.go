@@ -121,7 +121,8 @@ func renderModelDeploymentReplicaService(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, ordinal int,
 ) *core.Service {
 	svc := renderModelDeploymentServiceFor(
-		md, role, modelDeploymentReplicaServiceName(md, role.Name, ordinal))
+		md, role, modelDeploymentReplicaServiceName(md, role.Name, ordinal),
+	)
 
 	svc.Spec.ClusterIP = core.ClusterIPNone
 	svc.Spec.PublishNotReadyAddresses = true
@@ -283,7 +284,8 @@ func modelDeploymentNeedsDeployedRouting(
 		}
 		// A member whose parallelism cannot be read says nothing about the routing it was built with.
 		if external, known := modelDeploymentMembersExternalDP(
-			[]*core.Pod{pod}, md.Spec.Engine.Name); known && external != desiredExternal {
+			[]*core.Pod{pod}, md.Spec.Engine.Name,
+		); known && external != desiredExternal {
 			return true
 		}
 	}
@@ -744,7 +746,8 @@ func ModelDeploymentRoleServingPort(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) int32 {
 	return modelDeploymentTargetPort(
-		md.Spec.Engine.Name, role, ModelDeploymentRoleFrontedByProxy(md, role)).ContainerPort
+		md.Spec.Engine.Name, role, ModelDeploymentRoleFrontedByProxy(md, role),
+	).ContainerPort
 }
 
 // ModelDeploymentRoleServingProtocol returns the protocol a role's Service publishes.

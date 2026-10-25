@@ -8,6 +8,7 @@ package v1
 // S3InstancePersistentVolumeSource defines the source of S3.
 type S3InstancePersistentVolumeSourceApplyConfiguration struct {
 	// Endpoint is the endpoint of the S3-compatible object storage service.
+	//
 	Endpoint *string `json:"endpoint,omitempty"`
 	// Region is the region of the S3-compatible object storage service.
 	// For AWS, the region is required to generate the presigned URL for the S3-compatible object storage service.
@@ -47,6 +48,7 @@ type S3InstancePersistentVolumeSourceApplyConfiguration struct {
 	// It is used to specify the mounter for [GeeseFS](https://github.com/yandex-cloud/geesefs).
 	//
 	// Immutable after creation.
+	//
 	Mounter *string `json:"mounter,omitempty"`
 	// MountOptions is the mount options for [GeeseFS](https://github.com/yandex-cloud/geesefs).
 	//
@@ -73,6 +75,7 @@ type S3InstancePersistentVolumeSourceApplyConfiguration struct {
 	//
 	// For non-Yandex S3-compatible object storage service:
 	// ["--list-type=2","--no-specials"]
+	//
 	MountOptions []string `json:"mountOptions,omitempty"`
 }
 

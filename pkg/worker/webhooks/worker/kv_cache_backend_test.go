@@ -1344,7 +1344,8 @@ func TestKVCacheBackendWebhook_ASubBucketGroupCannotAcquireATier(t *testing.T) {
 			}},
 		}
 		newKvcb.Spec.Connection.Managed.Members = append(
-			newKvcb.Spec.Connection.Managed.Members, appended)
+			newKvcb.Spec.Connection.Managed.Members, appended,
+		)
 
 		_, err := (&KVCacheBackendWebhook{}).ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		require.Error(t, err)
@@ -1376,38 +1377,46 @@ func TestKVCacheBackendWebhook_DiskTierEviction(t *testing.T) {
 	runKVCacheBackendCases(t, []kvCacheBackendCase{
 		{"no eviction block at all", withDiskTier(), ""},
 		{"an empty block, which the schema reads as enabled", withEviction(
-			func(*workercore.KVCacheBackendMemberLocalDiskEviction) {}), ""},
+			func(*workercore.KVCacheBackendMemberLocalDiskEviction) {},
+		), ""},
 		{"a policy on its own", withEviction(
-			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) { e.Policy = "LRU" }), ""},
+			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) { e.Policy = "LRU" },
+		), ""},
 
 		// Disabled: the two settings that would read as taken.
 		{"disabled on its own", withEviction(
-			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) { e.Enabled = ptr.To(false) }), ""},
+			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) { e.Enabled = ptr.To(false) },
+		), ""},
 		{"disabled with a policy", withEviction(
 			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
 				e.Enabled, e.Policy = ptr.To(false), "FIFO"
-			}), "no order in which nothing leaves"},
+			},
+		), "no order in which nothing leaves"},
 		{"disabled with a watermark", withEviction(
 			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
 				e.Enabled = ptr.To(false)
 				e.Watermark = &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{High: 90, Low: 80}
-			}), "nothing for these marks to start and stop"},
+			},
+		), "nothing for these marks to start and stop"},
 		// Enabled explicitly, which must not trip either of the two rules above.
 		{"enabled with both", withEviction(
 			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
 				e.Enabled, e.Policy = ptr.To(true), "FIFO"
 				e.Watermark = &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{High: 90, Low: 80}
-			}), ""},
+			},
+		), ""},
 
 		// The band itself.
 		{"marks in the wrong order", withEviction(
 			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
 				e.Watermark = &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{High: 70, Low: 80}
-			}), "must be below high"},
+			},
+		), "must be below high"},
 		{"equal marks", withEviction(
 			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
 				e.Watermark = &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{High: 80, Low: 80}
-			}), "must be below high"},
+			},
+		), "must be below high"},
 
 		// The band is a percentage OF the capacity, and the store's own quota default is a value its
 		// eviction path reads as switched off — so a band without one would never fire while reading

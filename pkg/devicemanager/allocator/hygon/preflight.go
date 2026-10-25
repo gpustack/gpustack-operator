@@ -113,7 +113,8 @@ func (d *recordingMigDriver) CreateInstance(
 ) (migInstance, error) {
 	d.creates = append(d.creates, recordedMigCreate{pciBusID: pciBusID, profile: profile, slot: slot})
 	return migInstance{}, fmt.Errorf(
-		"hygon preflight: refusing to create a partition through the simulated responder")
+		"hygon preflight: refusing to create a partition through the simulated responder",
+	)
 }
 
 func (d *recordingMigDriver) DestroyInstance(_ string, inst migInstance) error {

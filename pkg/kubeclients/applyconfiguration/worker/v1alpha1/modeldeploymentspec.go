@@ -8,6 +8,7 @@ package v1alpha1
 // ModelDeploymentSpec defines the desired state of ModelDeployment.
 type ModelDeploymentSpecApplyConfiguration struct {
 	// Model names what the engine serves.
+	//
 	Model *ModelDeploymentModelApplyConfiguration `json:"model,omitempty"`
 	// Engine is the inference engine this deployment runs, which decides which argument keys the
 	// operator owns and which carrier the transfer configuration arrives on. Ownership is per
@@ -16,10 +17,12 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// It does NOT decide the connector, which follows the role's hardware instead: the connector is
 	// a property of the accelerator backend, so an Ascend pool and an NVIDIA pool running this
 	// engine get different ones.
+	//
 	Engine *ModelDeploymentEngineApplyConfiguration `json:"engine,omitempty"`
 	// KVCache optionally attaches the deployment to a shared KV cache pool. A managed vLLM
 	// prefill/decode deployment without it still uses its router's point-to-point connector; it does
 	// not render the shared-store connector or its client configuration.
+	//
 	KVCache *ModelDeploymentKVCacheApplyConfiguration `json:"kvCache,omitempty"`
 	// Roles are the engine roles this deployment runs. A single-role deployment names one; a
 	// prefill/decode deployment names several, which is why this is a LIST FROM THE FIRST VERSION.
@@ -28,6 +31,7 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// on Workload.spec.podSets, so the refusal can name whose limit it is, and following that number
 	// is a webhook edit rather than a schema change every stored object must survive. The figure is
 	// not restated here, because the one that binds is in the Kueue the cluster runs.
+	//
 	Roles []ModelDeploymentRoleApplyConfiguration `json:"roles,omitempty"`
 	// Router optionally puts a request router in front of the roles.
 	//
@@ -48,6 +52,7 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
 	// individually addressable through their own Services either way, so a deployment written before
 	// this field existed serves exactly as it did.
+	//
 	Router *ModelDeploymentRouterApplyConfiguration `json:"router,omitempty"`
 	// KVTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
 	// pair.
@@ -65,6 +70,7 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// one is engine to engine, and the two planes declare separately. A deployment can render
 	// this leg with no pool attached at all, which is another reason the field cannot live under
 	// KVCache.
+	//
 	KVTransfer *ModelDeploymentKVTransferApplyConfiguration `json:"kvTransfer,omitempty"`
 }
 

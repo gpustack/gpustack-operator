@@ -29,6 +29,7 @@ type LimitedPriorityLevelConfigurationApplyConfiguration struct {
 	//
 	// Setting this field to zero supports the construction of a
 	// "jail" for this priority level that is used to hold some request(s)
+	//
 	NominalConcurrencyShares *int32 `json:"nominalConcurrencyShares,omitempty"`
 	// `limitResponse` indicates what to do with requests that can not be executed right now
 	LimitResponse *LimitResponseApplyConfiguration `json:"limitResponse,omitempty"`
@@ -39,6 +40,7 @@ type LimitedPriorityLevelConfigurationApplyConfiguration struct {
 	// as this level's LendableConcurrencyLimit (LendableCL), is defined as follows.
 	//
 	// LendableCL(i) = round( NominalCL(i) * lendablePercent(i)/100.0 )
+	//
 	LendablePercent *int32 `json:"lendablePercent,omitempty"`
 	// `borrowingLimitPercent`, if present, configures a limit on how many
 	// seats this priority level can borrow from other priority levels.

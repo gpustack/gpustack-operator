@@ -726,7 +726,8 @@ func (h *hostExec) kubeletCRIEndpoint() (endpoint string, found bool, err error)
 		return "", false, fmt.Errorf(
 			"the kubelet configuration search under %s could not run, so which runtime its "+
 				"kubelet talks to cannot be established: %w",
-			reading.UnsearchablePattern, reading.UnsearchableErr)
+			reading.UnsearchablePattern, reading.UnsearchableErr,
+		)
 	case reading.UnreadableErr != nil:
 		// The same answer a conflict gets, for the same reason. These patterns name the kubelet's
 		// own configuration paths rather than a general tree, so a match that cannot be read may
@@ -737,12 +738,14 @@ func (h *hostExec) kubeletCRIEndpoint() (endpoint string, found bool, err error)
 		return "", false, fmt.Errorf(
 			"this host carries a kubelet configuration at %s that could not be read, so "+
 				"which runtime its kubelet talks to cannot be established: %w",
-			reading.UnreadablePath, reading.UnreadableErr)
+			reading.UnreadablePath, reading.UnreadableErr,
+		)
 	case reading.Conflict != nil:
 		return "", false, fmt.Errorf(
 			"this host names more than one kubelet CRI endpoint under %s (%s), and only one of them "+
 				"belongs to the kubelet that is running: name the runtime with --runtime",
-			reading.ConflictPattern, strings.Join(reading.Conflict, ", "))
+			reading.ConflictPattern, strings.Join(reading.Conflict, ", "),
+		)
 	default:
 		return reading.Value, reading.Found, nil
 	}

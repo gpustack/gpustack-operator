@@ -235,7 +235,8 @@ func (eo *elasticOperation) validate() error {
 	}
 	if eo.Width.Old <= 0 || eo.Width.Target <= 0 {
 		return fmt.Errorf(
-			"%w: widths %d to %d are not a resize", errElasticOperation, eo.Width.Old, eo.Width.Target)
+			"%w: widths %d to %d are not a resize", errElasticOperation, eo.Width.Old, eo.Width.Target,
+		)
 	}
 	if eo.Width.Old == eo.Width.Target {
 		return fmt.Errorf("%w: the target width equals the old one", errElasticOperation)
@@ -411,12 +412,14 @@ func (s *elasticOperationStore) Read(
 	if op.DeploymentUID != "" && op.DeploymentUID != owner.UID {
 		return nil, fmt.Errorf(
 			"%w: the record inside names deployment %s while its owner is %s",
-			errElasticOperation, op.DeploymentUID, owner.UID)
+			errElasticOperation, op.DeploymentUID, owner.UID,
+		)
 	}
 	if op.Name != "" && op.Name != owner.Name {
 		return nil, fmt.Errorf(
 			"%w: the record inside names %s while its owner is %s",
-			errElasticOperation, op.Name, owner.Name)
+			errElasticOperation, op.Name, owner.Name,
+		)
 	}
 	op.Namespace = stored.Namespace
 	op.ResourceVersion = stored.ResourceVersion
@@ -427,7 +430,8 @@ func (s *elasticOperationStore) Read(
 	if op.DeploymentUID != deploymentUID {
 		return nil, fmt.Errorf(
 			"%w: the record inside is bound to %s rather than %s",
-			errElasticOperation, op.DeploymentUID, deploymentUID)
+			errElasticOperation, op.DeploymentUID, deploymentUID,
+		)
 	}
 
 	return op, nil
@@ -443,7 +447,8 @@ func (s *elasticOperationStore) Read(
 func elasticControllingOwnerIs(stored *corev1.ConfigMap, name string, deploymentUID types.UID) error {
 	if name == "" || deploymentUID == "" {
 		return fmt.Errorf(
-			"%w: no expected deployment identity was given to match the stored owner", errElasticOperation)
+			"%w: no expected deployment identity was given to match the stored owner", errElasticOperation,
+		)
 	}
 
 	owner := metav1.GetControllerOf(stored)
@@ -453,22 +458,26 @@ func elasticControllingOwnerIs(stored *corev1.ConfigMap, name string, deployment
 	if owner.Kind != "ModelDeployment" {
 		return fmt.Errorf(
 			"%w: the stored record is owned by a %s rather than a ModelDeployment",
-			errElasticOperation, owner.Kind)
+			errElasticOperation, owner.Kind,
+		)
 	}
 	if owner.APIVersion != workercore.GroupVersion.String() {
 		return fmt.Errorf(
 			"%w: the stored record's owner is %s rather than %s",
-			errElasticOperation, owner.APIVersion, workercore.GroupVersion.String())
+			errElasticOperation, owner.APIVersion, workercore.GroupVersion.String(),
+		)
 	}
 	if owner.Name != name {
 		return fmt.Errorf(
 			"%w: the stored record is owned by %s rather than the expected %s",
-			errElasticOperation, owner.Name, name)
+			errElasticOperation, owner.Name, name,
+		)
 	}
 	if owner.UID != deploymentUID {
 		return fmt.Errorf(
 			"%w: the stored record is owned by %s rather than %s",
-			errElasticOperation, owner.UID, deploymentUID)
+			errElasticOperation, owner.UID, deploymentUID,
+		)
 	}
 
 	return nil
@@ -498,12 +507,14 @@ func (s *elasticOperationStore) Update(ctx context.Context, op *elasticOperation
 	// is the overwrite the optimistic write exists to prevent.
 	if op.ResourceVersion == "" {
 		return fmt.Errorf(
-			"%w: the record was not read, so it carries no version to write against", errElasticOperation)
+			"%w: the record was not read, so it carries no version to write against", errElasticOperation,
+		)
 	}
 	if stored.ResourceVersion != op.ResourceVersion {
 		return apierrors.NewConflict(
 			corev1.Resource("configmaps"), elasticOperationRecordName(op.DeploymentUID),
-			fmt.Errorf("the record moved from %s to %s", op.ResourceVersion, stored.ResourceVersion))
+			fmt.Errorf("the record moved from %s to %s", op.ResourceVersion, stored.ResourceVersion),
+		)
 	}
 
 	// THE OWNER IS RE-READ AND RE-CHECKED, NOT ASSUMED FROM THE READ THAT PRODUCED THIS OPERATION.
@@ -578,12 +589,14 @@ func (s *elasticOperationStore) RecoverInterrupted(
 	}
 	if current.ResourceVersion == "" {
 		return fmt.Errorf(
-			"%w: the record was not read, so it carries no version to write against", errElasticOperation)
+			"%w: the record was not read, so it carries no version to write against", errElasticOperation,
+		)
 	}
 	if stored.ResourceVersion != current.ResourceVersion {
 		return apierrors.NewConflict(
 			corev1.Resource("configmaps"), elasticOperationRecordName(current.DeploymentUID),
-			fmt.Errorf("the record moved from %s to %s", current.ResourceVersion, stored.ResourceVersion))
+			fmt.Errorf("the record moved from %s to %s", current.ResourceVersion, stored.ResourceVersion),
+		)
 	}
 	if err := elasticControllingOwnerIs(stored, current.Name, current.DeploymentUID); err != nil {
 		return err

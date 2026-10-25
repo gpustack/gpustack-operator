@@ -48,7 +48,8 @@ func TestTenantQuotaDecode_UnmeasuredFieldsAreNeitherRequiredNorInvented(t *test
 			`"tenant_id":"team-a","requested_quota_bytes":1073741824,"effective_quota_bytes":0,` +
 			`"used_bytes":0,"reserved_bytes":0,"committed_count":0,"metadata_object_count":0,` +
 			`"over_quota":false,"has_explicit_policy":true,` +
-			`"charged_bytes":4096,"admission_closed":true}}`))
+			`"charged_bytes":4096,"admission_closed":true}}`,
+	))
 	require.NoError(t, err, "a build that does send them is not an error either")
 
 	assert.Equal(t, measured, withExtras,
@@ -279,7 +280,8 @@ func TestTenantQuotaClient_ARefusalIsNamedByItsCodeNotItsMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(
-			`{"success":false,"error_code":-1702,"error_message":"tenant team-a still owns 3 objects"}`))
+			`{"success":false,"error_code":-1702,"error_message":"tenant team-a still owns 3 objects"}`,
+		))
 	}))
 	defer srv.Close()
 

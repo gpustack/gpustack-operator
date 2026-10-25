@@ -33,6 +33,7 @@ type KVCacheBackendExternalApplyConfiguration struct {
 	//
 	// Today the list therefore holds exactly two entries, one Client and one Admin: entries are keyed
 	// by name, the name has two values, and admission refuses a list missing either.
+	//
 	Endpoints []KVCacheBackendEndpointApplyConfiguration `json:"endpoints,omitempty"`
 }
 

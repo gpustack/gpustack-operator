@@ -249,7 +249,8 @@ func TestLeaderWorkload_UpdateStrategyInvertsWithStandbys(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			deploy := RenderLeaderDeployment(
-				haBackend(withLeaderReplicas(c.replicas)), "mooncake:v0.3.13")
+				haBackend(withLeaderReplicas(c.replicas)), "mooncake:v0.3.13",
+			)
 
 			require.NotNil(t, deploy.Spec.Replicas)
 			assert.Equal(t, c.replicas, *deploy.Spec.Replicas)

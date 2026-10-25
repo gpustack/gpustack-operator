@@ -26,6 +26,7 @@ type ResourceRequirementsApplyConfiguration struct {
 	// DynamicResourceAllocation feature gate.
 	//
 	// This field is immutable. It can only be set for containers.
+	//
 	Claims []ResourceClaimApplyConfiguration `json:"claims,omitempty"`
 }
 

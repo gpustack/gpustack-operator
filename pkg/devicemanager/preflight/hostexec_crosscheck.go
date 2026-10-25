@@ -150,7 +150,8 @@ func crossCheckHost(
 	detection.Reason = fmt.Sprintf(
 		"the host's own %s reports %d accelerator(s) where this container detected %d, so what is "+
 			"missing is this container's access to them rather than the hardware",
-		cli.name, view.Accelerators, detection.Accelerators)
+		cli.name, view.Accelerators, detection.Accelerators,
+	)
 }
 
 // unresolvableLibDir reports that a manufacturer's library directory is here and still cannot be

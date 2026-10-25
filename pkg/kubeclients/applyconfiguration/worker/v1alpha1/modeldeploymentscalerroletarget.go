@@ -12,11 +12,13 @@ import (
 // ModelDeploymentScalerRoleTarget is the signal one replica of a role is expected to carry.
 type ModelDeploymentScalerRoleTargetApplyConfiguration struct {
 	// Name is the role this target belongs to.
+	//
 	Name *string `json:"name,omitempty"`
 	// Target is the signal one replica of this role is expected to carry.
 	//
 	// It is a quantity, so a rate is written as a quantity per second and a count as a plain
 	// number.
+	//
 	Target *resource.Quantity `json:"target,omitempty"`
 }
 

@@ -12,10 +12,13 @@ import (
 // InstanceResources defines the resource requirements for the Instance.
 type InstanceResourcesApplyConfiguration struct {
 	// CPU is the CPU resource requirement for the Instance, e.g. "4", "8".
+	//
 	CPU *resource.Quantity `json:"cpu,omitempty"`
 	// RAM is the RAM resource requirement for the Instance, e.g. "40G", "16G".
+	//
 	RAM *resource.Quantity `json:"ram,omitempty"`
 	// LocalStorage is the local storage resource requirement for the Instance, e.g. "100G", "500G".
+	//
 	LocalStorage *resource.Quantity `json:"localStorage,omitempty"`
 	// Accelerator is the accelerator resource requirement for the Instance, e.g. "1", "2".
 	Accelerator *resource.Quantity `json:"accelerator,omitempty"`
@@ -23,17 +26,20 @@ type InstanceResourcesApplyConfiguration struct {
 	// sliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request
 	// becomes an exclusive whole-accelerator request). The Pod webhook folds it into the
 	// normalized .sliced.units; it is ignored by non-sliced requests.
+	//
 	AcceleratorSlicedMemoryPercentage *int32 `json:"acceleratorSlicedMemoryPercentage,omitempty"`
 	// AcceleratorSlicedCoresPercentage is the per-accelerator compute (SM) budget requested on
 	// a sliced InstanceType, as a percentage in [0,100]. It is independent of
 	// AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook
 	// copies it to the other. It is ignored by non-sliced requests.
+	//
 	AcceleratorSlicedCoresPercentage *int32 `json:"acceleratorSlicedCoresPercentage,omitempty"`
 	// AcceleratorPartitionedProfile is the hardware partition profile requested on a
 	// partition-offering InstanceType, e.g. "3g.40gb". A non-empty value makes this a
 	// request for one hardware partition of that shape, which is mutually exclusive with
 	// the two slice percentages above: hardware partitioning and software slicing cannot
 	// both apply to one accelerator. It is ignored by InstanceTypes offering no partition.
+	//
 	AcceleratorPartitionedProfile *string `json:"acceleratorPartitionedProfile,omitempty"`
 }
 

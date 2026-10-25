@@ -599,7 +599,8 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			resolved, resolveErr := r.resolveReplacementSlot(ctx, md, slot, role, want[slot.Ordinal])
 			if resolveErr != nil {
 				return objectWriteResult(
-					logger, resolveErr, "resolve the replacement slot", _requeueAfterConflict)
+					logger, resolveErr, "resolve the replacement slot", _requeueAfterConflict,
+				)
 			}
 			if resolved.cleared {
 				// THE CLEARING IS PERSISTED, not just dropped from this pass's view: a slot left on
@@ -607,7 +608,8 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				// the same unresolved replacement this one just resolved.
 				if err = r.endReplacementSlot(ctx, md, role.Name); err != nil {
 					return objectWriteResult(
-						logger, err, "clear the replacement slot", _requeueAfterConflict)
+						logger, err, "clear the replacement slot", _requeueAfterConflict,
+					)
 				}
 				slots = slots.clearRole(role.Name)
 			} else {
@@ -1120,7 +1122,8 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 					}, workloads)
 					if err = r.beginReplacementSlot(ctx, md, slot); err != nil {
 						return objectWriteResult(
-							logger, err, "record the replacement slot", _requeueAfterConflict)
+							logger, err, "record the replacement slot", _requeueAfterConflict,
+						)
 					}
 					slots = slots.setSlot(slot)
 
@@ -1421,7 +1424,8 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	}
 
 	if err = r.convergeModelDeploymentEndpointEligibility(
-		ctx, md, actual, qualificationByMember, replacedByRole, observation); err != nil {
+		ctx, md, actual, qualificationByMember, replacedByRole, observation,
+	); err != nil {
 		logger.Error(err, "converge endpoint eligibility")
 		return ctrl.Result{}, err
 	}
@@ -1590,13 +1594,17 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 			pod.Labels[modelDeploymentRouterCandidateLabel] == modelDeploymentEndpointEligibleValue)
 		patched := pod.DeepCopy()
 		changed := modelDeploymentApplyLabel(
-			patched, modelDeploymentLabelKeyEndpointEligible, eligible)
+			patched, modelDeploymentLabelKeyEndpointEligible, eligible,
+		)
 		changed = modelDeploymentApplyLabel(
-			patched, modelDeploymentLabelKeyAPIAnswering, answering) || changed
+			patched, modelDeploymentLabelKeyAPIAnswering, answering,
+		) || changed
 		changed = modelDeploymentApplyGenerationAnnotation(
-			patched, eligible, decision.Generation) || changed
+			patched, eligible, decision.Generation,
+		) || changed
 		changed = modelDeploymentApplyLabel(
-			patched, modelDeploymentRouterCandidateLabel, candidate) || changed
+			patched, modelDeploymentRouterCandidateLabel, candidate,
+		) || changed
 		if !changed {
 			continue
 		}
@@ -1626,13 +1634,17 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 		}
 		rewritten := fresh.DeepCopy()
 		modelDeploymentApplyLabel(
-			rewritten, modelDeploymentLabelKeyEndpointEligible, eligible)
+			rewritten, modelDeploymentLabelKeyEndpointEligible, eligible,
+		)
 		modelDeploymentApplyLabel(
-			rewritten, modelDeploymentLabelKeyAPIAnswering, answering)
+			rewritten, modelDeploymentLabelKeyAPIAnswering, answering,
+		)
 		modelDeploymentApplyGenerationAnnotation(
-			rewritten, eligible, decision.Generation)
+			rewritten, eligible, decision.Generation,
+		)
 		modelDeploymentApplyLabel(
-			rewritten, modelDeploymentRouterCandidateLabel, candidate)
+			rewritten, modelDeploymentRouterCandidateLabel, candidate,
+		)
 		if err := r.Client.Patch(ctx, rewritten, ctrlcli.MergeFromWithOptions(fresh,
 			ctrlcli.MergeFromWithOptimisticLock{})); err != nil && !kerrors.IsNotFound(err) {
 			return err
@@ -2380,7 +2392,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 		// row this deployment runs under. Empty renders no flag, which is what a deployment
 		// declaring no encoder role gets.
 		in.ECConnector = ModelDeploymentECSidecarConnector(
-			modelDeploymentEPDConnector(md, instType.Status.Detail.Manufacturer))
+			modelDeploymentEPDConnector(md, instType.Status.Detail.Manufacturer),
+		)
 		if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
 			count, whole := role.Resources.Interface.AsInt64()
 			if !whole {
@@ -2464,7 +2477,8 @@ func modelDeploymentDeclaredParallelismPair(md *workercore.ModelDeployment) (inj
 		}
 
 		declared, err := ParseModelDeploymentDeclaredParallelism(
-			md.Spec.Engine.Name, ModelDeploymentRoleArgs(role), role.Env)
+			md.Spec.Engine.Name, ModelDeploymentRoleArgs(role), role.Env,
+		)
 		if err != nil {
 			return pair, fmt.Errorf("role %q declares parallelism the operator cannot read: %w", role.Name, err)
 		}
@@ -2672,7 +2686,8 @@ func modelDeploymentSurplusReplicas(
 			continue
 		}
 		bySeat[seat{ordinal, modelDeploymentPodMemberIndex(pod)}] = append(
-			bySeat[seat{ordinal, modelDeploymentPodMemberIndex(pod)}], pod)
+			bySeat[seat{ordinal, modelDeploymentPodMemberIndex(pod)}], pod,
+		)
 	}
 
 	for at, occupants := range bySeat {

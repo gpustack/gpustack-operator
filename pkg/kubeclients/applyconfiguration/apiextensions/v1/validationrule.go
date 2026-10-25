@@ -122,6 +122,7 @@ type ValidationRuleApplyConfiguration struct {
 	// https://pkg.go.dev/github.com/google/cel-go/cel#OptionalTypes
 	//
 	// May not be set unless `oldSelf` is used in `rule`.
+	//
 	OptionalOldSelf *bool `json:"optionalOldSelf,omitempty"`
 }
 

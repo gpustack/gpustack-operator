@@ -107,11 +107,13 @@ func (c *Config) Apply(ctx context.Context) (*Worker, error) {
 		api.GetOpenAPIDefinitions,
 	)
 	apiSrvCfg.OpenAPIConfig = genericapiserver.DefaultOpenAPIConfig(
-		openapiDefinitionsGetter, openapinamer.NewDefinitionNamer(extensionapis.Scheme))
+		openapiDefinitionsGetter, openapinamer.NewDefinitionNamer(extensionapis.Scheme),
+	)
 	apiSrvCfg.OpenAPIConfig.Info.Title = title
 	apiSrvCfg.OpenAPIConfig.Info.Version = fullVersion
 	apiSrvCfg.OpenAPIV3Config = genericapiserver.DefaultOpenAPIV3Config(
-		openapiDefinitionsGetter, openapinamer.NewDefinitionNamer(extensionapis.Scheme))
+		openapiDefinitionsGetter, openapinamer.NewDefinitionNamer(extensionapis.Scheme),
+	)
 	apiSrvCfg.OpenAPIV3Config.Info.Title = title
 	apiSrvCfg.OpenAPIV3Config.Info.Version = fullVersion
 

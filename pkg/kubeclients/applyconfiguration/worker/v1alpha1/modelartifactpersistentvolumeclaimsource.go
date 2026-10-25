@@ -9,10 +9,12 @@ package v1alpha1
 type ModelArtifactPersistentVolumeClaimSourceApplyConfiguration struct {
 	// ClaimName names a PersistentVolumeClaim in this namespace. It need not exist at admission; a
 	// missing one is reported in status.
+	//
 	ClaimName *string `json:"claimName,omitempty"`
 	// Path is the directory inside the volume, relative to its root. Empty is the root. It must not
 	// be absolute and must not contain a ".." element; the second half is admission's, because this
 	// schema's patterns cannot express it.
+	//
 	Path *string `json:"path,omitempty"`
 }
 

@@ -1098,7 +1098,8 @@ func TestNodeQueueReconciler_ReferencesTheJointCheckFromEveryQueue(t *testing.T)
 			rf := newNodesFlavor("gpustack-"+key+"-linux-amd64-1d", key, 1, 4, opts...)
 
 			cli := buildNodeQueueClient(
-				newInstanceTypeQueue(key, c.acceleratable), rf, nodeDevicesCheck(true), jointCheck(true))
+				newInstanceTypeQueue(key, c.acceleratable), rf, nodeDevicesCheck(true), jointCheck(true),
+			)
 
 			reconcileNodeQueueN(t, cli, name, 2)
 
@@ -1677,7 +1678,7 @@ func TestNodeQueueReconciler_WaitsForCurrentQueueStatusBeforeDroppingFlavor(t *t
 // event may follow it. Any other failure is still returned and logged, and the next reconcile
 // completes the write in every case.
 func TestNodeQueueReconciler_ExpectedWriteFailuresAreQuiet(t *testing.T) {
-	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "clusterqueues"}
+	gr := schema.GroupResource{Group: kueue.SchemeGroupVersion.Group, Resource: "clusterqueues"}
 	key := "generic"
 	name := nodeQueueName(key)
 	testCases := []struct {

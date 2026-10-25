@@ -263,11 +263,13 @@ func (c *modelDeploymentDrainCollector) Drain(
 	// operation no longer holds, so the captured identity is checked again on the live object.
 	if drift := modelDeploymentDrainExpectedIdentity(after, target, target.Container); drift != "" {
 		return modelDeploymentDrainHold(modelDeploymentDrainUnknown, fmt.Sprintf(
-			"member is no longer the member this read began on: %s", drift)), nil
+			"member is no longer the member this read began on: %s", drift,
+		)), nil
 	}
 	if drift := c.verifyModelDeploymentIdentity(ctx, after, target); drift != "" {
 		return modelDeploymentDrainHold(modelDeploymentDrainUnknown, fmt.Sprintf(
-			"the operation's deployment changed while it was being read: %s", drift)), nil
+			"the operation's deployment changed while it was being read: %s", drift,
+		)), nil
 	}
 
 	return modelDeploymentDrainAnswerFromBody(body, expected), nil
@@ -419,7 +421,8 @@ func modelDeploymentDrainContainerRunning(pod *corev1.Pod, name string) (bool, s
 	if status.State.Running == nil {
 		return false, fmt.Sprintf(
 			"member %s reports container %q in state %q rather than running",
-			pod.Name, name, status.State)
+			pod.Name, name, status.State,
+		)
 	}
 
 	return true, ""
@@ -438,7 +441,8 @@ func (c *modelDeploymentDrainCollector) verifyModelDeploymentIdentity(
 	controller := metav1.GetControllerOf(pod)
 	if controller == nil {
 		return fmt.Sprintf(
-			"member %s has no controlling owner to read the operation's deployment from", pod.Name)
+			"member %s has no controlling owner to read the operation's deployment from", pod.Name,
+		)
 	}
 
 	if c.fresh == nil {

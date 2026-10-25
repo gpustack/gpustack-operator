@@ -145,7 +145,8 @@ func TestTheKernelWithholdsTheCommandUntilItsCapacityExists(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			op := elasticTestOperation(
-				elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+				elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+			)
 			facts := elasticFactsWithLayers(4, tc.admitted, tc.admittedNo,
 				tc.allocated, tc.allocNo, tc.ray, tc.rayNo)
 
@@ -198,7 +199,8 @@ func TestTheFourLayersAreIndependentStates(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			op := elasticTestOperation(
-				elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+				elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+			)
 			facts := elasticCompleteFacts(4)
 			switch tc.layer {
 			case "desired":
@@ -273,7 +275,8 @@ func TestACommandThatHasLeftIsNeverSentAgain(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			op := elasticTestOperation(
-				elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+				elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+			)
 			// The command left and the record says so, which is what every one of these cases shares.
 			op.State = elasticStateCommandSent
 			op.CommandSent = true
@@ -303,7 +306,8 @@ func TestACommandThatHasLeftIsNeverSentAgain(t *testing.T) {
 func TestARecordedRefusalIsRetriedWithinItsBound(t *testing.T) {
 	refused := func() *elasticOperation {
 		op := elasticTestOperation(
-			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+		)
 		op.State = elasticStateCommandSent
 		op.CommandSent = true
 		op.ScaleAttempts = 1
@@ -432,7 +436,8 @@ func TestARecordFromBeforeTheRetryBoundStillReads(t *testing.T) {
 
 	t.Run("a refusal-free record writes none of the retry fields", func(t *testing.T) {
 		op := elasticTestOperation(
-			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+		)
 		op.State = elasticStateCommandSent
 		op.CommandSent = true
 		op.CommandIntent = "scale to 4"
@@ -453,7 +458,8 @@ func TestNothingIsRemovedUntilEveryWorkerIsProvenActorFree(t *testing.T) {
 	// whose serving side has confirmed the narrowing. Everything that remains is about the workers.
 	settled := func() *elasticOperation {
 		op := elasticTestOperation(
-			elasticWidth{Old: 4, Target: 2}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+			elasticWidth{Old: 4, Target: 2}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+		)
 		op.State = elasticStateWithdrawn
 		op.CommandSent = true
 
@@ -585,7 +591,8 @@ func TestNothingIsRemovedUntilEveryWorkerIsProvenActorFree(t *testing.T) {
 // release, and a released operation is not finished until the ledger and the quota say so.
 func TestAReleaseIsNotCompleteUntilItIsObserved(t *testing.T) {
 	op := elasticTestOperation(
-		elasticWidth{Old: 4, Target: 2}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+		elasticWidth{Old: 4, Target: 2}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+	)
 	op.State = elasticStateReleased
 	op.CommandSent = true
 
@@ -619,14 +626,16 @@ func TestTheStoreKeepsTheRecordUnderTheDeployment(t *testing.T) {
 		cli := elasticTestClient()
 		store := newElasticOperationStore(cli)
 		op := elasticTestOperation(
-			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+		)
 
 		stored, err := store.Create(context.Background(), op)
 		require.NoError(t, err)
 		require.NotEmpty(t, stored.ResourceVersion, "a stored record carries the object's version")
 
 		read, err := store.Read(
-			context.Background(), elasticTestNamespace, elasticTestDeployNm, elasticTestDeployUID)
+			context.Background(), elasticTestNamespace, elasticTestDeployNm, elasticTestDeployUID,
+		)
 		require.NoError(t, err)
 		assert.Equal(t, op.Width, read.Width)
 		assert.Equal(t, op.Workers, read.Workers)
@@ -637,7 +646,8 @@ func TestTheStoreKeepsTheRecordUnderTheDeployment(t *testing.T) {
 		cli := elasticTestClient()
 		store := newElasticOperationStore(cli)
 		_, err := store.Create(context.Background(), elasticTestOperation(
-			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree))
+			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+		))
 		require.NoError(t, err)
 
 		stored := new(corev1.ConfigMap)
@@ -655,7 +665,8 @@ func TestTheStoreKeepsTheRecordUnderTheDeployment(t *testing.T) {
 		cli := elasticTestClient()
 		store := newElasticOperationStore(cli)
 		_, err := store.Create(context.Background(), elasticTestOperation(
-			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree))
+			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+		))
 		require.NoError(t, err)
 
 		_, err = store.Read(context.Background(), elasticTestNamespace, elasticTestDeployNm,
@@ -719,7 +730,8 @@ func TestTheStoreRefusesAnythingThatIsNotAUsableRecord(t *testing.T) {
 			cli := elasticTestClient()
 			store := newElasticOperationStore(cli)
 			_, err := store.Create(context.Background(), elasticTestOperation(
-				elasticWidth{Old: 2, Target: 4}, elasticWorkerOne))
+				elasticWidth{Old: 2, Target: 4}, elasticWorkerOne,
+			))
 			require.NoError(t, err)
 
 			stored := new(corev1.ConfigMap)
@@ -734,7 +746,8 @@ func TestTheStoreRefusesAnythingThatIsNotAUsableRecord(t *testing.T) {
 			require.NoError(t, cli.Update(context.Background(), stored))
 
 			_, err = store.Read(
-				context.Background(), elasticTestNamespace, elasticTestDeployNm, elasticTestDeployUID)
+				context.Background(), elasticTestNamespace, elasticTestDeployNm, elasticTestDeployUID,
+			)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.reason)
 		})
@@ -747,7 +760,8 @@ func TestAWriteAgainstAMovedRecordChangesNothing(t *testing.T) {
 	cli := elasticTestClient()
 	store := newElasticOperationStore(cli)
 	op, err := store.Create(context.Background(), elasticTestOperation(
-		elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree))
+		elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+	))
 	require.NoError(t, err)
 	readVersion := op.ResourceVersion
 
@@ -779,7 +793,8 @@ func TestAWriteAgainstAMovedRecordChangesNothing(t *testing.T) {
 		"a failed write leaves the caller's version exactly as it was")
 
 	after, err := store.Read(
-		context.Background(), elasticTestNamespace, elasticTestDeployNm, elasticTestDeployUID)
+		context.Background(), elasticTestNamespace, elasticTestDeployNm, elasticTestDeployUID,
+	)
 	require.NoError(t, err)
 	assert.Equal(t, elasticStateCommandSent, after.State, "the other writer's record is intact")
 	assert.True(t, after.CommandSent)
@@ -846,7 +861,8 @@ func TestANewRecordValidatesItsIdentityAndWidths(t *testing.T) {
 // TestFactsAboutAnotherDeploymentDecideNothing is the isolation rule, in one place.
 func TestFactsAboutAnotherDeploymentDecideNothing(t *testing.T) {
 	op := elasticTestOperation(
-		elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+		elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+	)
 	facts := elasticCompleteFacts(4)
 	facts.DeploymentUID = types.UID("another-deployment")
 
@@ -928,7 +944,8 @@ func TestTheStoreRefusesARecordThatIsNoLongerThisDeployments(t *testing.T) {
 			require.NoError(t, err)
 
 			got, err := store.Read(
-				context.Background(), elasticTestNamespace, tc.expected, elasticTestDeployUID)
+				context.Background(), elasticTestNamespace, tc.expected, elasticTestDeployUID,
+			)
 
 			if tc.reject {
 				require.Error(t, err)
@@ -1019,12 +1036,14 @@ func TestAWriteAgainstTheRightOwnerStillWrites(t *testing.T) {
 // retires it into at the proven old width.
 func elasticRecoveryRecords() (current, recovered *elasticOperation) {
 	current = elasticTestOperation(
-		elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+		elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+	)
 	current.State = elasticStateCommandSent
 	current.CommandSent = true
 
 	recovered = elasticTestOperation(
-		elasticWidth{Old: 4, Target: 2}, elasticWorkerTwo, elasticWorkerThree)
+		elasticWidth{Old: 4, Target: 2}, elasticWorkerTwo, elasticWorkerThree,
+	)
 	recovered.State = elasticStateReleased
 	recovered.CommandSent = true
 	recovered.CommandIntent = "recovered at already observed native width 2"
@@ -1049,7 +1068,8 @@ func TestTheRecoverySwapIsOneAtomicWrite(t *testing.T) {
 		client := elasticTestClient()
 		store := newElasticOperationStore(client)
 		current, err := store.Create(ctx, elasticTestOperation(
-			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree))
+			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+		))
 		require.NoError(t, err)
 		_, recovered := elasticRecoveryRecords()
 		before := new(corev1.ConfigMap)
@@ -1111,7 +1131,8 @@ func TestTheRecoverySwapIsOneAtomicWrite(t *testing.T) {
 		client := elasticTestClient()
 		store := newElasticOperationStore(client)
 		current, err := store.Create(ctx, elasticTestOperation(
-			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree))
+			elasticWidth{Old: 2, Target: 4}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+		))
 		require.NoError(t, err)
 
 		// The stored record is rewritten to a different operation under the same name, and the
@@ -1120,7 +1141,8 @@ func TestTheRecoverySwapIsOneAtomicWrite(t *testing.T) {
 		stored := new(corev1.ConfigMap)
 		require.NoError(t, client.Get(ctx, recordKey, stored))
 		moved := elasticTestOperation(
-			elasticWidth{Old: 4, Target: 6}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree)
+			elasticWidth{Old: 4, Target: 6}, elasticWorkerOne, elasticWorkerTwo, elasticWorkerThree,
+		)
 		moved.State = elasticStateCommandSent
 		moved.CommandSent = true
 		raw, err := json.Marshal(moved)

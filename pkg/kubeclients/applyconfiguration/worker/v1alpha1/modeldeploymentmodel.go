@@ -24,6 +24,7 @@ type ModelDeploymentModelApplyConfiguration struct {
 	// It stays the SERVED NAME whether or not ArtifactRef is set: routers, the router's tokenizer
 	// calls and the metrics' model label all match on it, so a managed role's own
 	// --served-model-name must equal it, admission-enforced.
+	//
 	Name *string `json:"name,omitempty"`
 	// ArtifactRef names a ModelArtifact IN THIS NAMESPACE holding the weights. The type is a
 	// LocalObjectReference so that reaching another namespace is unrepresentable rather than
@@ -37,6 +38,7 @@ type ModelDeploymentModelApplyConfiguration struct {
 	// - With it, every managed role's engine gets the weights at a fixed local path (a claim) or
 	// the repository pinned to the resolved commit (a hub), and, with spec.kvCache, a weight
 	// identity in its store key prefix, so different weights never share KV blocks.
+	//
 	ArtifactRef *v1.LocalObjectReferenceApplyConfiguration `json:"artifactRef,omitempty"`
 }
 

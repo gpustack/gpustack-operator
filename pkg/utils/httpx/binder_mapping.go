@@ -42,7 +42,7 @@ func mapFormByTag(ptr any, form map[string][]string, tag string) error {
 
 	var pointed any
 
-	if ptrVal.Kind() == reflect.Ptr {
+	if ptrVal.Kind() == reflect.Pointer {
 		ptrVal = ptrVal.Elem()
 		pointed = ptrVal.Interface()
 	}
@@ -99,7 +99,7 @@ func mapping(value reflect.Value, field reflect.StructField, setter setter, tag 
 
 	vKind := value.Kind()
 
-	if vKind == reflect.Ptr {
+	if vKind == reflect.Pointer {
 		var isNew bool
 		vPtr := value
 

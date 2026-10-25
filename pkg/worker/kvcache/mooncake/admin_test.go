@@ -246,7 +246,8 @@ func TestAdminDecodeCapacity_ANumberThatIsNotAByteCountIsMalformed(t *testing.T)
 	// perfectly valid exposition can carry two numbers where this parser reads one. Refusing it
 	// would make capacity disappear against a leader doing nothing wrong.
 	capacity, err = DecodeLeaderCapacity(
-		[]byte("master_total_capacity_bytes 1082331758592 1720000000000\n"))
+		[]byte("master_total_capacity_bytes 1082331758592 1720000000000\n"),
+	)
 	require.NoError(t, err)
 	require.NotNil(t, capacity.TotalBytes)
 	assert.Equal(t, int64(1082331758592), *capacity.TotalBytes,
@@ -349,7 +350,8 @@ func TestAdminDecodeSegments(t *testing.T) {
 func TestAdminDecodeSegments_RequiresPublishableIdentity(t *testing.T) {
 	t.Run("a segment with no id", func(t *testing.T) {
 		_, err := DecodeSegmentListing([]byte(
-			`{"total_segments":1,"segments":[{"client_id":"client-1","segment_name":"n7","te_endpoint":"n7:1","status":"OK"}]}`))
+			`{"total_segments":1,"segments":[{"client_id":"client-1","segment_name":"n7","te_endpoint":"n7:1","status":"OK"}]}`,
+		))
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrMalformedBody)
@@ -358,7 +360,8 @@ func TestAdminDecodeSegments_RequiresPublishableIdentity(t *testing.T) {
 
 	t.Run("a segment with no client id", func(t *testing.T) {
 		_, err := DecodeSegmentListing([]byte(
-			`{"total_segments":1,"segments":[{"segment_id":"segment-1","segment_name":"n7","te_endpoint":"n7:1","status":"OK"}]}`))
+			`{"total_segments":1,"segments":[{"segment_id":"segment-1","segment_name":"n7","te_endpoint":"n7:1","status":"OK"}]}`,
+		))
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrMalformedBody)
@@ -367,7 +370,8 @@ func TestAdminDecodeSegments_RequiresPublishableIdentity(t *testing.T) {
 
 	t.Run("a segment with no name", func(t *testing.T) {
 		_, err := DecodeSegmentListing([]byte(
-			`{"total_segments":1,"segments":[{"segment_id":"segment-1","client_id":"client-1","segment_name":"","te_endpoint":"n7:1","status":"OK"}]}`))
+			`{"total_segments":1,"segments":[{"segment_id":"segment-1","client_id":"client-1","segment_name":"","te_endpoint":"n7:1","status":"OK"}]}`,
+		))
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrMalformedBody)
@@ -378,7 +382,8 @@ func TestAdminDecodeSegments_RequiresPublishableIdentity(t *testing.T) {
 		_, err := DecodeSegmentListing([]byte(
 			`{"total_segments":2,"segments":[` +
 				`{"segment_id":"segment-1","client_id":"client-1","segment_name":"n7","te_endpoint":"n7:15380","status":"OK"},` +
-				`{"segment_id":"segment-1","client_id":"client-2","segment_name":"n7","te_endpoint":"n7:15381","status":"OK"}]}`))
+				`{"segment_id":"segment-1","client_id":"client-2","segment_name":"n7","te_endpoint":"n7:15381","status":"OK"}]}`,
+		))
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrMalformedBody)
@@ -390,7 +395,8 @@ func TestAdminDecodeSegments_DuplicateNamesAreValid(t *testing.T) {
 	got, err := DecodeSegmentListing([]byte(
 		`{"total_segments":2,"segments":[` +
 			`{"segment_id":"segment-1","client_id":"client-1","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15380","status":"OK"},` +
-			`{"segment_id":"segment-2","client_id":"client-2","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15381","status":"OK"}]}`))
+			`{"segment_id":"segment-2","client_id":"client-2","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15381","status":"OK"}]}`,
+	))
 
 	require.NoError(t, err)
 	require.Len(t, got, 2)
@@ -478,7 +484,8 @@ func TestAdminClient_BoundsWhatItReadsAndWhatItQuotes(t *testing.T) {
 			`{"total_segments":2,"segments":[`+
 				`{"segment_id":%q,"client_id":"client-1","segment_name":"a","te_endpoint":"a:1","protocol":"tcp","status":"OK"},`+
 				`{"segment_id":%q,"client_id":"client-2","segment_name":"a","te_endpoint":"a:2","protocol":"tcp","status":"OK"}]}`,
-			huge, huge)
+			huge, huge,
+		)
 
 		_, err = DecodeSegmentListing([]byte(listing))
 		require.Error(t, err)

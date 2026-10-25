@@ -38,6 +38,7 @@ type DeviceTopologyApplyConfiguration struct {
 	//
 	// Absent for a device with no PCI path at all, never an empty-but-present marker. Ordered
 	// by construction, so two consecutive reads of unchanged hardware are byte-identical.
+	//
 	PciSwitches []string `json:"pciSwitches,omitempty"`
 	// Fabric is the scale-up interconnect domain this device belongs to. Absent on a device
 	// whose generation has no such fabric, and on one whose driver has never answered any of

@@ -965,7 +965,8 @@ func (r *InstanceReconciler) resolveInstanceModelVolumes(
 				return nil, "", fmt.Errorf("read node %q: %w", inst.Spec.NodeName, err)
 			}
 			if unsupported := modelImageRuntimeUnsupported(
-				nd.Status.NodeInfo.KubeletVersion, nd.Status.NodeInfo.ContainerRuntimeVersion); unsupported != "" {
+				nd.Status.NodeInfo.KubeletVersion, nd.Status.NodeInfo.ContainerRuntimeVersion,
+			); unsupported != "" {
 				return nil, fmt.Sprintf("ModelArtifact %q is delivered as an image volume, and node %q cannot run one: "+
 					"%s; pin another node or upgrade it", av.Model.ArtifactRef.Name, inst.Spec.NodeName, unsupported), nil
 			}

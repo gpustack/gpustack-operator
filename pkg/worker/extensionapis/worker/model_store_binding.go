@@ -33,7 +33,8 @@ func (h *ModelStoreBindingHandler) SetupHandler(
 		extensionapi.JSONPathTemplateColumn("Quota", "{.spec.quota.bytes}"),
 		extensionapi.JSONPathTemplateColumn("AllowPinned", "{.spec.allowPinned}"),
 		extensionapi.JSONPathTemplateColumn("Used", "{.status.usedBytes}"),
-		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"))
+		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"),
+	)
 	if err != nil {
 		return gvr, nil, err
 	}
@@ -48,6 +49,7 @@ func (h *ModelStoreBindingHandler) SetupHandler(
 func (h *ModelStoreBindingHandler) New() runtime.Object     { return &worker.ModelStoreBinding{} }
 func (h *ModelStoreBindingHandler) Destroy()                {}
 func (h *ModelStoreBindingHandler) NewList() runtime.Object { return &worker.ModelStoreBindingList{} }
+
 func (h *ModelStoreBindingHandler) NewListForProxy() runtime.Object {
 	return &workercore.ModelStoreBindingList{}
 }

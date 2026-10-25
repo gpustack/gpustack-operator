@@ -841,7 +841,8 @@ func (l ComputeInstanceProfileInfoHandler) V1() (ComputeInstanceProfileInfo_v3, 
 		l.gpuInstance,
 		l.gpuInstanceProfileId,
 		l.computeInstanceProfileId,
-		&info)
+		&info,
+	)
 	return ComputeInstanceProfileInfo_v3{
 		Id:                    info.Id,
 		SliceCount:            info.SliceCount,
@@ -866,7 +867,8 @@ func (l ComputeInstanceProfileInfoHandler) V2() (ComputeInstanceProfileInfo_v3, 
 		l.gpuInstance,
 		l.gpuInstanceProfileId,
 		l.computeInstanceProfileId,
-		&info)
+		&info,
+	)
 	return ComputeInstanceProfileInfo_v3{
 		Version:               info.Version,
 		Id:                    info.Id,
@@ -951,10 +953,12 @@ func (l Device) gpuInstancePossiblePlacements(symbol string, call gpuInstancePos
 // fallback, mirroring the V1/V2/V3 profile-info handlers.
 func (l Device) GetGpuInstancePossiblePlacements(profileId uint32) ([]GpuInstancePlacement, Return) {
 	placements, ret := l.gpuInstancePossiblePlacements(
-		"hgmlDeviceGetGpuInstancePossiblePlacements_v2", hgmlDeviceGetGpuInstancePossiblePlacements_v2, profileId)
+		"hgmlDeviceGetGpuInstancePossiblePlacements_v2", hgmlDeviceGetGpuInstancePossiblePlacements_v2, profileId,
+	)
 	if ret == ERROR_FUNCTION_NOT_FOUND {
 		return l.gpuInstancePossiblePlacements(
-			"hgmlDeviceGetGpuInstancePossiblePlacements", hgmlDeviceGetGpuInstancePossiblePlacements, profileId)
+			"hgmlDeviceGetGpuInstancePossiblePlacements", hgmlDeviceGetGpuInstancePossiblePlacements, profileId,
+		)
 	}
 	return placements, ret
 }
@@ -1071,7 +1075,8 @@ func (l GpuInstance) GetComputeInstances(ciProfileIndex uint32) ([]ComputeInstan
 	// (see GetGpuInstances) so the library is never handed a zero-capacity buffer.
 	count := uint32(len(handles))
 	if ret := hgmlGpuInstanceGetComputeInstances(
-		l.gpuInstance, profileInfo.Id, &handles[0], &count); !ret.IsSuccess() {
+		l.gpuInstance, profileInfo.Id, &handles[0], &count,
+	); !ret.IsSuccess() {
 		return nil, ret
 	}
 	// Bound the library's out-count by the buffer it was given (see GetGpuInstances).

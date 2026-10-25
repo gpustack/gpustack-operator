@@ -9,10 +9,12 @@ package v1alpha1
 type ModelDeploymentKVCacheDomainApplyConfiguration struct {
 	// Name is the reuse identity, and it is the storage layer's tenant. Two deployments echoing the
 	// same name share KV; two echoing different names do not.
+	//
 	Name *string `json:"name,omitempty"`
 	// BlockSize and Dtype are what this domain's blocks are made of. They are echoed rather than
 	// validated here: the Binding requires and freezes both, so an entry missing one could only be
 	// a writer bug.
+	//
 	BlockSize *int32  `json:"blockSize,omitempty"`
 	Dtype     *string `json:"dtype,omitempty"`
 }

@@ -48,7 +48,8 @@ func (h *NodeModelStoreHandler) SetupHandler(
 				}
 			}
 			return strconv.Itoa(n)
-		}))
+		}),
+	)
 	if err != nil {
 		return gvr, nil, err
 	}

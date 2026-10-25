@@ -811,9 +811,11 @@ func TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain(t *testing.T
 	r := &InstanceReconciler{Client: cli, APIReader: cli}
 
 	slicedCard := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced,
+	)
 	visRes := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility,
+	)
 
 	acc := qty("1")
 	inst := &workercore.Instance{
@@ -2037,7 +2039,8 @@ func TestInstanceReconciler_DeletingInstanceDeletesServiceAndPod(t *testing.T) {
 			_, err = reconcileInstance(t, cli, "default", "inst")
 			require.NoError(t, err)
 			assert.True(t, kerrors.IsNotFound(
-				cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, &workercore.Instance{})),
+				cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, &workercore.Instance{}),
+			),
 				"the Instance is released once nothing it owns is left")
 		})
 	}

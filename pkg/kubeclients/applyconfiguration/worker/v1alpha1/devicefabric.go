@@ -96,6 +96,7 @@ type DeviceFabricApplyConfiguration struct {
 	// only the vendor may change.
 	//
 	// Ordered by construction, so two consecutive reads of unchanged hardware are byte-identical.
+	//
 	Endpoints []string `json:"endpoints,omitempty"`
 }
 

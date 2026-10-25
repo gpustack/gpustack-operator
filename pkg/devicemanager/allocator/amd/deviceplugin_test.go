@@ -254,7 +254,8 @@ func TestGetContainerAllocateResponse(t *testing.T) {
 	s := &server{}
 	resp, err := s.GetContainerAllocateResponse(
 		context.Background(), testPod(), testContainer(0, 0),
-		testDevices(testCardUUID, testCardUUID2), testAllocated(testCardUUID2))
+		testDevices(testCardUUID, testCardUUID2), testAllocated(testCardUUID2),
+	)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"AMD_VISIBLE_DEVICES": "none"}, resp.Envs)
 	assert.Empty(t, resp.Mounts)
@@ -296,7 +297,8 @@ func TestDeviceSetPerAllocationMode(t *testing.T) {
 				s := &server{ResourceServer: deviceplugin.ResourceServer{AllocationMode: mode}}
 				resp, err := s.GetContainerAllocateResponse(
 					context.Background(), testPod(), testContainer(0, 0),
-					testDevices(testCardUUID, testCardUUID2), testAllocated(c.granted...))
+					testDevices(testCardUUID, testCardUUID2), testAllocated(c.granted...),
+				)
 				require.NoError(t, err)
 				assert.Equal(t, testDeviceSpecs(c.wantDRM...), resp.Devices)
 			})
@@ -374,7 +376,8 @@ func TestDeviceSetRefusals(t *testing.T) {
 
 			s := &server{}
 			resp, err := s.GetContainerAllocateResponse(
-				context.Background(), testPod(), testContainer(0, 0), devs, testAllocated(c.granted...))
+				context.Background(), testPod(), testContainer(0, 0), devs, testAllocated(c.granted...),
+			)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), c.wantErr)
 			assert.Nil(t, resp)
@@ -394,7 +397,8 @@ func TestGetContainerAllocateResponseRefusesAnIdentitylessAccelerator(t *testing
 	s := &server{}
 	resp, err := s.GetContainerAllocateResponse(
 		context.Background(), testPod(), testContainer(0, 0),
-		devs, testAllocated(""))
+		devs, testAllocated(""),
+	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no unique id")
 	assert.Nil(t, resp)
@@ -452,7 +456,8 @@ func TestPlaceLogicalSliced(t *testing.T) {
 			placed, err := s.PlaceLogicalSliced(
 				context.Background(), testPod(), testContainer(c.coresPct, 50),
 				testDevices(testCardUUID), testAllocated(testCardUUID),
-				deviceplugin.Placements{testResource(testCardUUID): c.occupied})
+				deviceplugin.Placements{testResource(testCardUUID): c.occupied},
+			)
 
 			if c.wantErr != "" {
 				require.ErrorContains(t, err, c.wantErr)
@@ -477,7 +482,8 @@ func TestPlaceLogicalSliced_RefusesACardWithNoIdentity(t *testing.T) {
 
 	_, err := s.PlaceLogicalSliced(
 		context.Background(), testPod(), testContainer(25, 50),
-		testDevices(""), testAllocated(""), nil)
+		testDevices(""), testAllocated(""), nil,
+	)
 	require.ErrorContains(t, err, "reports no unique id")
 }
 
@@ -491,7 +497,8 @@ func TestGetLogicalSlicedResponse_SingleCard(t *testing.T) {
 
 	resp, err := s.GetLogicalSlicedResponse(
 		context.Background(), pod, ctr, testDevices(testCardUUID), testAllocated(testCardUUID),
-		deviceplugin.Placements{testResource(testCardUUID): {{Start: 0, Length: 12}}})
+		deviceplugin.Placements{testResource(testCardUUID): {{Start: 0, Length: 12}}},
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]string{
@@ -533,7 +540,8 @@ func TestGetLogicalSlicedResponse_MultiCard(t *testing.T) {
 		deviceplugin.Placements{
 			testResource(testCardUUID):  {{Start: 0, Length: 12}},
 			testResource(testCardUUID2): {{Start: 12, Length: 12}},
-		})
+		},
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, testCardUUID+","+testCardUUID2, resp.Envs["ROCR_VISIBLE_DEVICES"])
@@ -578,7 +586,8 @@ func TestGetLogicalSlicedResponse_Rejections(t *testing.T) {
 			s := &server{}
 			_, err := s.GetLogicalSlicedResponse(
 				context.Background(), testPod(), c.ctr,
-				testDevices(testCardUUID), testAllocated(testCardUUID), c.placements)
+				testDevices(testCardUUID), testAllocated(testCardUUID), c.placements,
+			)
 			require.ErrorContains(t, err, c.wantErr)
 		})
 	}
@@ -596,7 +605,8 @@ func TestGetLogicalSlicedResponse_KeepsADeclaredLogLevel(t *testing.T) {
 		context.Background(), testPod(),
 		testContainer(25, 50, core.EnvVar{Name: "LIBVROCM_LOG_LEVEL", Value: "2"}),
 		testDevices(testCardUUID), testAllocated(testCardUUID),
-		deviceplugin.Placements{testResource(testCardUUID): {{Start: 0, Length: 12}}})
+		deviceplugin.Placements{testResource(testCardUUID): {{Start: 0, Length: 12}}},
+	)
 	require.NoError(t, err)
 	assert.NotContains(t, resp.Envs, "LIBVROCM_LOG_LEVEL")
 }

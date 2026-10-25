@@ -158,7 +158,8 @@ func TestModelPlacementImagePreference(t *testing.T) {
 		var objs []ctrlcli.Object
 		for i := 0; i < modelPlacementMaxNodes+2; i++ {
 			objs = append(objs, node(
-				strings.Repeat("n", 1)+strconv.Itoa(i), "host-"+strconv.Itoa(modelPlacementMaxNodes+1-i), testImageReference))
+				strings.Repeat("n", 1)+strconv.Itoa(i), "host-"+strconv.Itoa(modelPlacementMaxNodes+1-i), testImageReference,
+			))
 		}
 		objs = append(objs, node("unrelated", "host-x", other))
 		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(objs...).Build()

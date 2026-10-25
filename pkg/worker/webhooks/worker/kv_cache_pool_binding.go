@@ -72,7 +72,8 @@ func (r *KVCachePoolBindingWebhook) ValidateCreate(
 
 	errs := validateKVCachePoolBindingSpec(kvcpb)
 	errs = append(errs, validateKVCachePoolBindingDtypeBinds(
-		kvcpb, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx))...)
+		kvcpb, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx),
+	)...)
 	// The cross-object questions are asked only once the object's own shape holds. A malformed
 	// domain name would otherwise be reported alongside "no other Binding claims it", which is true
 	// and useless.
@@ -140,14 +141,16 @@ func validateKVCachePoolBindingSpec(kvcpb *workercore.KVCachePoolBinding) field.
 	}
 
 	errs = append(errs, validateKVCachePoolBindingDomain(
-		&kvcpb.Spec.Domain, specPath.Child("domain"))...)
+		&kvcpb.Spec.Domain, specPath.Child("domain"),
+	)...)
 
 	// Only the shape, here. Whether it fits the pool is a cross-object question, asked where the pool
 	// can be read.
 	// Asked unconditionally: the schema guarantees the key is there, so what is left to judge is the
 	// value, and the master's own rule is what judges it.
 	errs = append(errs, mooncake.ValidateQuotaPolicyQuota(
-		kvcpb.Spec.Quota.Ceiling, specPath.Child("quota", "ceiling"))...)
+		kvcpb.Spec.Quota.Ceiling, specPath.Child("quota", "ceiling"),
+	)...)
 
 	return errs
 }
@@ -169,7 +172,8 @@ func validateKVCachePoolBindingDomain(
 			errs = append(errs, field.Invalid(namePath, domain.Name, fmt.Sprintf(
 				"a reuse domain is named like a Kubernetes object, so nobody learns a second naming "+
 					"rule, and it travels to the storage layer as the tenant id verbatim: %s",
-				strings.Join(msgs, "; "))))
+				strings.Join(msgs, "; "),
+			)))
 		}
 	}
 
@@ -286,7 +290,8 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsUnclaimed(
 			"older engine build may ignore the injected tenant and write under that literal name, "+
 			"but the master still keeps only one ledger entry for it",
 		kvcpb.Spec.Domain.Name, holder.Namespace, holder.Name,
-		strings.Join(shared, " and ")))}
+		strings.Join(shared, " and "),
+	))}
 }
 
 // validateKVCachePoolBindingDomainIsSeparable judges a reuse domain that is DISTINCT from one already
@@ -342,7 +347,8 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsSeparable(
 
 			for _, backend := range shared {
 				separates, err := r.masterSeparatesDomains(
-					ctx, backend, kvcpb.Spec.PoolRef.Name, holder.Spec.PoolRef.Name)
+					ctx, backend, kvcpb.Spec.PoolRef.Name, holder.Spec.PoolRef.Name,
+				)
 				if err != nil {
 					return true, err
 				}
@@ -361,7 +367,8 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsSeparable(
 						"spec.connection.managed.leader.multiTenancy on a managed one or by starting "+
 						"an external one's master with multi-tenancy on, or point this Binding at a "+
 						"pool on another backend",
-					holder.Namespace, holder.Name, holder.Spec.Domain.Name, backend))}
+					holder.Namespace, holder.Name, holder.Spec.Domain.Name, backend,
+				))}
 				return true, nil
 			}
 
@@ -393,7 +400,8 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsSeparable(
 			"that name rather than on this one. Each injected Pod carries a stamp recording which "+
 			"happened for it",
 		kvcpb.Spec.Domain.Name, first.Spec.Domain.Name, first.Namespace, first.Name,
-		strings.Join(firstShared, " and "))}, nil
+		strings.Join(firstShared, " and "),
+	)}, nil
 }
 
 // masterSeparatesDomains reports whether the master behind one backend can hold two reuse domains

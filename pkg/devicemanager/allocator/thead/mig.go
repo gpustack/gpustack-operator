@@ -241,7 +241,8 @@ func parseMarker(path string) (migMarker, error) {
 	}
 	if card, ok := cardFromMarkerPath(path); !ok || card != m.Card {
 		return migMarker{}, fmt.Errorf(
-			"marker %q records card %q, not the card its file name names: fail closed", path, m.Card)
+			"marker %q records card %q, not the card its file name names: fail closed", path, m.Card,
+		)
 	}
 	return m, nil
 }
@@ -498,7 +499,8 @@ func reserveMigInstance(
 	if m, perr := parseMarker(self); perr == nil {
 		if m.Profile != profile {
 			return migInstance{}, migRebound, fmt.Errorf(
-				"marker %q mismatches request (profile=%s): fail closed", self, profile)
+				"marker %q mismatches request (profile=%s): fail closed", self, profile,
+			)
 		}
 		state, serr := drv.CardState(cardUUID, profile, computeSlices, memorySlices)
 		if serr != nil {
@@ -507,7 +509,8 @@ func reserveMigInstance(
 		liveInst, ok := findLiveInstance(state, m.GiID)
 		if !ok {
 			return migInstance{}, migRebound, fmt.Errorf(
-				"marker %q references missing gpu instance %d on card %s: fail closed", self, m.GiID, cardUUID)
+				"marker %q references missing gpu instance %d on card %s: fail closed", self, m.GiID, cardUUID,
+			)
 		}
 		// Guard against GPU-instance id reuse: a destroyed instance's id can be reassigned to a
 		// different partition, so verify the live instance's identity still matches the marker
@@ -515,7 +518,8 @@ func reserveMigInstance(
 		if liveInst.UUID != m.MigUUID {
 			return migInstance{}, migRebound, fmt.Errorf(
 				"marker %q gpu instance %d uuid %q no longer matches live uuid %q (id reused): fail closed",
-				self, m.GiID, m.MigUUID, liveInst.UUID)
+				self, m.GiID, m.MigUUID, liveInst.UUID,
+			)
 		}
 		return m.instance(), migRebound, nil
 	} else if !os.IsNotExist(perr) {
@@ -546,7 +550,8 @@ func reserveMigInstance(
 		slot, ok := pickPlacement(state.Possible, occupied)
 		if !ok {
 			return migInstance{}, migCreated, fmt.Errorf(
-				"card %s has no free placement for profile %s", cardUUID, profile)
+				"card %s has no free placement for profile %s", cardUUID, profile,
+			)
 		}
 		inst, err = drv.CreateInstance(cardUUID, profile, computeSlices, memorySlices, slot)
 		if err != nil {
@@ -849,7 +854,8 @@ func requireCardNode(devs *workercore.Devices, cardUUID string) (uint32, *device
 			}
 			if len(acc.PhysicalIndexes) == 0 {
 				return 0, nil, fmt.Errorf(
-					"card %s: no recorded minor number to prove its device node addresses it: fail closed", cardUUID)
+					"card %s: no recorded minor number to prove its device node addresses it: fail closed", cardUUID,
+				)
 			}
 			spec, err := requireNumberedDeviceNode(cardNodePath(acc.Index), acc.PhysicalIndexes[0])
 			if err != nil {
@@ -995,7 +1001,8 @@ func (s *server) ActuatePhysicalSliced(
 
 		unlock := lockCard(cardUUID)
 		inst, outcome, err := reserveMigInstance(
-			s.mig, deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, cardUUID, profile, computeSlices, memorySlices)
+			s.mig, deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, cardUUID, profile, computeSlices, memorySlices,
+		)
 		unlock()
 		if err != nil {
 			rollback()

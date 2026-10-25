@@ -65,7 +65,8 @@ func (r *KVCacheBackendReconciler) reportRolloutComplete(
 	case err != nil:
 		KVCacheBackendConditionRolloutComplete.Unknown(holder, "WorkloadUnreadable", fmt.Sprintf(
 			"the leader's deployment %q could not be read: %v",
-			deployName, clipFaultDetail(err.Error())))
+			deployName, clipFaultDetail(err.Error()),
+		))
 
 	case deploy.Status.ObservedGeneration < deploy.Generation:
 		// The workload controller has not looked at the spec this operator just wrote, so every
@@ -73,7 +74,8 @@ func (r *KVCacheBackendReconciler) reportRolloutComplete(
 		// reads as a finished new one.
 		KVCacheBackendConditionRolloutComplete.Unknown(holder, "UpdateNotObserved", fmt.Sprintf(
 			"the deployment controller has not observed generation %d of %q yet, so its replica "+
-				"counts still describe the update before it", deploy.Generation, deployName))
+				"counts still describe the update before it", deploy.Generation, deployName,
+		))
 
 	case ptr.Deref(deploy.Spec.Replicas, 1) != mooncake.LeaderReplicas(kvcb.Spec.Connection.Managed.Leader):
 		// Raising an unelected leader past one is two writes, and between them the Deployment runs one
@@ -84,7 +86,8 @@ func (r *KVCacheBackendReconciler) reportRolloutComplete(
 			"the deployment %q runs %d leader replicas and this backend asks for %d; the count is "+
 				"raised once no replica of the previous template is left",
 			deployName, ptr.Deref(deploy.Spec.Replicas, 1),
-			mooncake.LeaderReplicas(kvcb.Spec.Connection.Managed.Leader)))
+			mooncake.LeaderReplicas(kvcb.Spec.Connection.Managed.Leader),
+		))
 
 	default:
 		desired := int32(1)
@@ -94,13 +97,15 @@ func (r *KVCacheBackendReconciler) reportRolloutComplete(
 		if deploy.Status.UpdatedReplicas == desired && deploy.Status.Replicas == desired {
 			KVCacheBackendConditionRolloutComplete.True(holder, "Complete", fmt.Sprintf(
 				"all %d leader replicas run the current template, and none of the previous one is "+
-					"left", desired))
+					"left", desired,
+			))
 			return
 		}
 		KVCacheBackendConditionRolloutComplete.False(holder, "Progressing", fmt.Sprintf(
 			"%d of %d leader replicas run the current template and %d replicas exist in total; a "+
 				"rollout that stays here is one that will not finish on its own, because this "+
 				"workload disables the deadline that would otherwise say so",
-			deploy.Status.UpdatedReplicas, desired, deploy.Status.Replicas))
+			deploy.Status.UpdatedReplicas, desired, deploy.Status.Replicas,
+		))
 	}
 }

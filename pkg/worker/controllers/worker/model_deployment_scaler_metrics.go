@@ -299,7 +299,8 @@ func modelDeploymentScalerReadSGLang(
 	// accepted and not yet scheduled in the inflight queue, and its ordinary waiting queue is
 	// empty while that queue is not. A reader of the ordinary queue alone calls a busy role idle.
 	sample.prefillInflight, _ = modelDeploymentScalerSum(
-		families, "sglang:num_prefill_inflight_queue_reqs", nil)
+		families, "sglang:num_prefill_inflight_queue_reqs", nil,
+	)
 
 	prompt, promptFound := modelDeploymentScalerSum(families, "sglang:prompt_tokens_total", nil)
 	generation, generationFound := modelDeploymentScalerSum(families, "sglang:generation_tokens_total", nil)
@@ -309,7 +310,8 @@ func modelDeploymentScalerReadSGLang(
 
 	const effective = "sglang:prefill_effective_tokens_total"
 	sample.effectiveInput, sample.effectiveInputFound = modelDeploymentScalerSum(
-		families, effective, map[string]string{"mode": "input"})
+		families, effective, map[string]string{"mode": "input"},
+	)
 	device, deviceFound := modelDeploymentScalerSum(families, effective, map[string]string{"mode": "device_hit"})
 	host, hostFound := modelDeploymentScalerSum(families, effective, map[string]string{"mode": "host_hit"})
 	storage, storageFound := modelDeploymentScalerSum(families, effective, map[string]string{"mode": "storage_hit"})

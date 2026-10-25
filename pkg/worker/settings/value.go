@@ -66,7 +66,8 @@ var (
 				"model-deployment-router-image,"+
 				"model-deployment-router-proxy-image,"+
 				"model-deployment-routing-sidecar-image,"+
-				"model-prefetch-warmup-image"),
+				"model-prefetch-warmup-image",
+		),
 		setting.AllowBlank(),
 		setting.DisallowListWith(setting.DefaultTrackingName),
 	)

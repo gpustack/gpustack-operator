@@ -237,7 +237,8 @@ func TestMigPlacementsByProfile(t *testing.T) {
 				func(profileID uint32) ([]dmi.GpuInstancePlacement, dmi.Return) {
 					a := tc.answers[profileID]
 					return a.slots, a.ret
-				})
+				},
+			)
 
 			gotIDs := make([]uint32, 0, len(answered))
 			for _, info := range answered {

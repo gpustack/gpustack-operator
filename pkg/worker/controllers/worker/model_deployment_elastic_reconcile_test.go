@@ -428,7 +428,8 @@ func TestElasticConvergenceCompletesTwoFourTwo(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, int32(2), f.scaleCalls.Load())
 				_, err = newElasticOperationStore(f.reconciler.Client).Read(
-					context.Background(), f.md.Namespace, f.md.Name, f.md.UID)
+					context.Background(), f.md.Namespace, f.md.Name, f.md.UID,
+				)
 				require.NoError(t, err, "unreturned accelerator accounting retains the old intent")
 				require.Equal(t, 4, f.observation(t).StableWidth)
 			}
@@ -568,7 +569,8 @@ func TestElasticConvergenceHoldsUnresolvedOperation(t *testing.T) {
 				require.True(t, f.observation(t).Effective.Known)
 				require.Equal(t, 2, f.observation(t).StableWidth)
 				_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-					ctx, f.md.Namespace, f.md.Name, f.md.UID)
+					ctx, f.md.Namespace, f.md.Name, f.md.UID,
+				)
 				require.True(t, apierrors.IsNotFound(readErr))
 				return
 			}
@@ -578,7 +580,8 @@ func TestElasticConvergenceHoldsUnresolvedOperation(t *testing.T) {
 				require.False(t, f.observation(t).Effective.Known)
 			}
 			_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-				ctx, f.md.Namespace, f.md.Name, f.md.UID)
+				ctx, f.md.Namespace, f.md.Name, f.md.UID,
+			)
 			require.NoError(t, readErr)
 		})
 	}
@@ -662,7 +665,8 @@ func TestElasticGenerationDriftReconstructs(t *testing.T) {
 
 			if failure.desiredOld {
 				recovered, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-					ctx, f.md.Namespace, f.md.Name, f.md.UID)
+					ctx, f.md.Namespace, f.md.Name, f.md.UID,
+				)
 				require.NoError(t, readErr)
 				require.Equal(t, elasticStateReleased, recovered.State)
 				require.Equal(t, elasticWidth{Old: 4, Target: 2}, recovered.Width)
@@ -684,7 +688,8 @@ func TestElasticGenerationDriftReconstructs(t *testing.T) {
 			require.Len(t, after, len(before))
 
 			_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-				ctx, f.md.Namespace, f.md.Name, f.md.UID)
+				ctx, f.md.Namespace, f.md.Name, f.md.UID,
+			)
 			if failure.retire {
 				observed := f.observation(t)
 				require.True(t, apierrors.IsNotFound(readErr), observed.Reason,
@@ -759,7 +764,8 @@ func TestRecoveryWithoutExcessMembersRetiresTheStaleRecord(t *testing.T) {
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.True(t, apierrors.IsNotFound(readErr))
 	observed := f.observation(t)
 	require.Equal(t, 2, observed.StableWidth)
@@ -813,7 +819,8 @@ func TestTheRecoveryRetirementSurvivesAFailedObservationWrite(t *testing.T) {
 				"the write the pass could not make is the recovery exit's own claim")
 
 			op, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-				ctx, f.md.Namespace, f.md.Name, f.md.UID)
+				ctx, f.md.Namespace, f.md.Name, f.md.UID,
+			)
 			require.NoError(t, readErr, "a failed proof leaves the record holding the deployment")
 			require.Equal(t, elasticStateCommandSent, op.State)
 			require.Equal(t, elasticWidth{Old: 2, Target: 4}, op.Width)
@@ -845,7 +852,8 @@ func TestTheRecoverySwapIsRetryableWhenItsWriteFails(t *testing.T) {
 	require.Error(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	op, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.NoError(t, readErr, "the stale record survives a failed swap")
 	require.Equal(t, elasticStateCommandSent, op.State)
 	require.Equal(t, elasticWidth{Old: 2, Target: 4}, op.Width)
@@ -856,7 +864,8 @@ func TestTheRecoverySwapIsRetryableWhenItsWriteFails(t *testing.T) {
 	f.reconciler.Client = plain
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 	recovered, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.NoError(t, readErr)
 	require.Equal(t, elasticStateReleased, recovered.State)
 	require.Equal(t, elasticWidth{Old: 4, Target: 2}, recovered.Width)
@@ -890,7 +899,8 @@ func TestANodeLossRecoversFromTheLiveWorldInsteadOfHolding(t *testing.T) {
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.True(t, apierrors.IsNotFound(readErr),
 		"a record whose members are all gone must retire, not hold: %v", f.observation(t).Reason)
 	observed := f.observation(t)
@@ -947,7 +957,8 @@ func TestTheSameGenerationMemberDriftStillHolds(t *testing.T) {
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	held, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.NoError(t, readErr, "a same-generation drift keeps the record")
 	require.Equal(t, elasticStateCommandSent, held.State)
 	require.Equal(t, "a captured member identity no longer matches; the operation holds",
@@ -1143,7 +1154,8 @@ func TestAPartialNodeLossStillHolds(t *testing.T) {
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	held, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.NoError(t, readErr, "a partial survival keeps the record")
 	require.Equal(t, elasticStateCommandSent, held.State)
 	require.Equal(t, "a captured member identity no longer matches; the operation holds",
@@ -1191,7 +1203,8 @@ func TestALostRecordOverAWiderLiveWorldCreatesTheDownscale(t *testing.T) {
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	op, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.NoError(t, readErr, "the pass must create the corrective downscale; observation says: %s",
 		f.observation(t).Reason)
 	require.Equal(t, elasticStateRecorded, op.State)
@@ -1214,7 +1227,8 @@ func TestOpNilAtTheBookkeepingWidthStillConverges(t *testing.T) {
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.True(t, apierrors.IsNotFound(readErr))
 	observed := f.observation(t)
 	require.Equal(t, "native ranks and forwards agree", observed.Reason)
@@ -1259,7 +1273,8 @@ func TestOpNilUnderANarrowerLiveWorldKeepsHolding(t *testing.T) {
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.True(t, apierrors.IsNotFound(readErr),
 		"a narrower live world synthesizes no corrective operation")
 	require.Equal(t, "native rank identities are unknown", f.observation(t).Reason)
@@ -1279,7 +1294,8 @@ func TestTheLiveWidthReprobeStillOwesTheForwardProof(t *testing.T) {
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.True(t, apierrors.IsNotFound(readErr),
 		"a live width that fails its forward proof synthesizes no operation")
 	require.Positive(t, f.forwardCalls.Load(),
@@ -1316,7 +1332,8 @@ func TestTheReprobeDoesNotDependOnTheObservationBooks(t *testing.T) {
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	op, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.NoError(t, readErr, "the re-prove must not depend on the observation books: %s",
 		f.observation(t).Reason)
 	require.Equal(t, elasticWidth{Old: 4, Target: 2}, op.Width)
@@ -1335,7 +1352,8 @@ func TestAnUnreadableRayWorldStillCreatesNoOperation(t *testing.T) {
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.True(t, apierrors.IsNotFound(readErr),
 		"an unprovable Ray world synthesizes no operation")
 	require.Equal(t, "native rank identities are unknown", f.observation(t).Reason)
@@ -1381,7 +1399,8 @@ func TestAnUnprovableWorldSurfacesTheBlockedDrive(t *testing.T) {
 			require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 			_, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-				ctx, f.md.Namespace, f.md.Name, f.md.UID)
+				ctx, f.md.Namespace, f.md.Name, f.md.UID,
+			)
 			require.True(t, apierrors.IsNotFound(readErr),
 				"an unprovable world synthesizes no operation")
 			require.Equal(t, scalesBefore, f.scaleCalls.Load(),
@@ -1428,7 +1447,8 @@ func TestTheBlockedDriveLevelsBackOnceTheWorldProves(t *testing.T) {
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 
 	op, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.NoError(t, readErr, "a proven world reaches the ordinary corrective block: %s",
 		f.observation(t).Reason)
 	require.Equal(t, elasticStateRecorded, op.State)
@@ -1787,7 +1807,8 @@ func TestElasticConvergenceRetriesARefusedScaleCommand(t *testing.T) {
 	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
 	require.NoError(t, err)
 	recovered, readErr := newElasticOperationStore(f.reconciler.Client).Read(
-		ctx, f.md.Namespace, f.md.Name, f.md.UID)
+		ctx, f.md.Namespace, f.md.Name, f.md.UID,
+	)
 	require.NoError(t, readErr, "recovery keeps the retirement the excess members owe: %v",
 		f.observation(t).Reason)
 	require.Equal(t, elasticStateReleased, recovered.State)

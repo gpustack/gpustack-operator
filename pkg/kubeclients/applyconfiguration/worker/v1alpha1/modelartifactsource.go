@@ -8,6 +8,7 @@ package v1alpha1
 // ModelArtifactSource is a tagged union: exactly one member is set, webhook-enforced.
 type ModelArtifactSourceApplyConfiguration struct {
 	// HuggingFace is a Hugging Face model repository at one revision.
+	//
 	HuggingFace *ModelArtifactHubSourceApplyConfiguration `json:"huggingFace,omitempty"`
 	// ModelScope is a second hub. Its repository and revision rules are the Hugging Face ones,
 	// the revision defaults to "master", and the patterns apply to it the same way. What
@@ -15,10 +16,12 @@ type ModelArtifactSourceApplyConfiguration struct {
 	// through the commits API and cross-checked against git, the file listing re-lists per
 	// directory at the API's silent truncation point, and the engine's runner needs a
 	// ModelScope SDK that accepts a commit as the revision.
+	//
 	ModelScope *ModelArtifactHubSourceApplyConfiguration `json:"modelScope,omitempty"`
 	// PersistentVolumeClaim is a directory inside a claim in this namespace. The operator never
 	// reads the claim's content, so the artifact has no revision and no digest, and what the
 	// directory holds, and any change to it, is the user's.
+	//
 	PersistentVolumeClaim *ModelArtifactPersistentVolumeClaimSourceApplyConfiguration `json:"persistentVolumeClaim,omitempty"`
 	// Image is an OCI image reference holding the weights. The reference must pin a digest:
 	// "registry/repository@sha256:<64 hex>". A tag is mutable, so one artifact could deliver
@@ -30,6 +33,7 @@ type ModelArtifactSourceApplyConfiguration struct {
 	// mounts the image root read-only through a Kubernetes image volume, which needs an apiserver
 	// and kubelet at 1.35 or above and containerd at 2.1 or above; admission refuses the source
 	// on an older apiserver.
+	//
 	Image *ModelArtifactImageSourceApplyConfiguration `json:"image,omitempty"`
 }
 

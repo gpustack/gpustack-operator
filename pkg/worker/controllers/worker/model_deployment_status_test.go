@@ -287,7 +287,8 @@ func TestProjectModelDeploymentRouterStatus_FollowsTheRender(t *testing.T) {
 	objects.Contract.Roles[0].KVEvents.Topic = "perturbed-topic"
 
 	status := projectModelDeploymentRouterStatus(
-		&objects.Contract, "tcp://perturbed-pool.test:50051")
+		&objects.Contract, "tcp://perturbed-pool.test:50051",
+	)
 
 	assert.Equal(t, objects.Contract.Endpoint, status.Endpoint)
 	assert.Equal(t, objects.Contract.Metrics.QueuedRequests, status.Metrics.QueuedRequests)
@@ -418,7 +419,8 @@ func TestComputeModelDeploymentStatus_Unmanaged(t *testing.T) {
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(managed, newRenderInstanceType())}
 
 	status, err := r.computeModelDeploymentStatusWithQualifications(
-		context.Background(), managed, readyPods(managed, 1), nil, nil, nil, nil)
+		context.Background(), managed, readyPods(managed, 1), nil, nil, nil, nil,
+	)
 	require.NoError(t, err)
 	require.Len(t, status.Roles, 1)
 	assert.False(t, status.Roles[0].Unmanaged,
@@ -436,7 +438,8 @@ func TestComputeModelDeploymentStatus_UnmanagedIsObservedNotDeclared(t *testing.
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
 
 	status, err := r.computeModelDeploymentStatusWithQualifications(
-		context.Background(), md, takeoverPods(md, 1), nil, nil, nil, nil)
+		context.Background(), md, takeoverPods(md, 1), nil, nil, nil, nil,
+	)
 	require.NoError(t, err)
 	require.Len(t, status.Roles, 1)
 	assert.True(t, status.Roles[0].Unmanaged,
@@ -1389,7 +1392,8 @@ func TestFindModelDeploymentGroupWorkload_MatchesAPlainOwnerReference(t *testing
 				Client: ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(wl).Build(),
 			}
 			got, err := r.findModelDeploymentGroupWorkloads(
-				context.Background(), md, []core.Pod{*ours})
+				context.Background(), md, []core.Pod{*ours},
+			)
 			require.NoError(t, err)
 
 			if !tc.found {
@@ -2963,7 +2967,8 @@ func TestSyncModelDeploymentStatusPublishesThePrecollectedAnswer(t *testing.T) {
 		},
 	}
 	require.NoError(t, r.syncModelDeploymentStatus(
-		context.Background(), md, pods, nil, nil, nil, observation))
+		context.Background(), md, pods, nil, nil, nil, observation,
+	))
 
 	stored := getModelDeployment(t, cli)
 	require.Len(t, stored.Status.Roles, 1)
@@ -2986,7 +2991,8 @@ func TestSyncModelDeploymentStatusNeverPublishesAnEmptyServingState(t *testing.T
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
 	require.NoError(t, r.syncModelDeploymentStatus(
-		context.Background(), md, pods, nil, nil, nil, modelDeploymentPassObservation{}))
+		context.Background(), md, pods, nil, nil, nil, modelDeploymentPassObservation{},
+	))
 
 	stored := getModelDeployment(t, cli)
 	require.Len(t, stored.Status.Roles, 1)

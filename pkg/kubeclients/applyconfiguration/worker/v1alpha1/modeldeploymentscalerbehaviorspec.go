@@ -9,8 +9,10 @@ package v1alpha1
 // waits after a failure.
 type ModelDeploymentScalerBehaviorSpecApplyConfiguration struct {
 	// ScaleUp tunes how fast a role may grow.
+	//
 	ScaleUp *ModelDeploymentScalerScaleUpRulesApplyConfiguration `json:"scaleUp,omitempty"`
 	// ScaleDown tunes how fast a role may shrink and what happens after an aborted retirement.
+	//
 	ScaleDown *ModelDeploymentScalerScaleDownRulesApplyConfiguration `json:"scaleDown,omitempty"`
 }
 

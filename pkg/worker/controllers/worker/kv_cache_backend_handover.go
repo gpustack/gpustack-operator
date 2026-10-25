@@ -192,25 +192,29 @@ func (r *KVCacheBackendReconciler) reportElectionObserved(
 	switch {
 	case leaseErr != nil && !kerrors.IsNotFound(leaseErr):
 		KVCacheBackendConditionElectionObserved.Unknown(holder, "LeaseUnreadable", fmt.Sprintf(
-			"the lease %q could not be read: %v", leaseName, clipFaultDetail(leaseErr.Error())))
+			"the lease %q could not be read: %v", leaseName, clipFaultDetail(leaseErr.Error()),
+		))
 
 	case leaseErr == nil && lease != nil && leaseHolderIdentity(lease) != "":
 		KVCacheBackendConditionElectionObserved.True(holder, "Electing", fmt.Sprintf(
-			"the lease %q names a holder, so an election has taken place", leaseName))
+			"the lease %q names a holder, so an election has taken place", leaseName,
+		))
 
 	case !r.leaderPodIsReady(ctx, kvcb):
 		// The same observation with no information in it. A leader that has not become ready has
 		// not had the chance to campaign, so the absence says nothing about whether it can.
 		KVCacheBackendConditionElectionObserved.Unknown(holder, "LeaderStarting", fmt.Sprintf(
 			"no replica of the leader is ready yet, so the lease %q says nothing about whether an "+
-				"election can happen", leaseName))
+				"election can happen", leaseName,
+		))
 
 	default:
 		KVCacheBackendConditionElectionObserved.False(holder, "NoHolder", fmt.Sprintf(
 			"a replica of the leader is ready while the lease %q names no holder. A store image "+
 				"built without the Kubernetes leadership backend, a role binding for it that has not "+
 				"been applied, and a process that is serving without having finished its first "+
-				"campaign all produce this", leaseName))
+				"campaign all produce this", leaseName,
+		))
 	}
 }
 

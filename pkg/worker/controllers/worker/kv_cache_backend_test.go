@@ -548,7 +548,8 @@ func TestKVCacheBackendReconciler_DeletesTheWorkloadsBeforeReleasingTheLock(t *t
 	require.NoError(t, err)
 
 	assert.True(t, kerrors.IsNotFound(
-		cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, new(workercore.KVCacheBackend))),
+		cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, new(workercore.KVCacheBackend)),
+	),
 		"and only then does the object itself go")
 }
 
@@ -709,7 +710,8 @@ func TestKVCacheBackendReconciler_TeardownSparesObjectsItDidNotRender(t *testing
 	// And the backend still lets go: the strangers are not this backend's to wait for either, so
 	// counting them as outstanding would wedge the teardown forever.
 	assert.True(t, kerrors.IsNotFound(
-		cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, new(workercore.KVCacheBackend))),
+		cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, new(workercore.KVCacheBackend)),
+	),
 		"an object it will never delete must not hold the finalizer")
 }
 
@@ -757,7 +759,8 @@ func TestKVCacheBackendReconciler_ExternalTeardownDeletesNothing(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, kerrors.IsNotFound(
-		cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, new(workercore.KVCacheBackend))),
+		cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, new(workercore.KVCacheBackend)),
+	),
 		"the lock is released on the same pass, since there is nothing to wait for")
 }
 
@@ -1037,7 +1040,8 @@ func TestKVCacheBackendReconciler_WithoutAnImage(t *testing.T) {
 			assert.Positive(t, res.RequeueAfter, "and the observation timer keeps running")
 
 			assert.True(t, kerrors.IsNotFound(
-				cli.Get(ctx, leaderObjectKey(kvcb), new(apps.Deployment))),
+				cli.Get(ctx, leaderObjectKey(kvcb), new(apps.Deployment)),
+			),
 				"nothing is rendered from an unresolved image, in either case")
 
 			got := new(workercore.KVCacheBackend)
@@ -2577,7 +2581,8 @@ func TestKVCacheBackendScale_PruningProvesOwnership(t *testing.T) {
 			Name:      mooncake.MemberObjectName(kvcb, 1),
 			Namespace: kuberess.SystemNamespaceName,
 			Labels: systemmeta.GetResourcesLabelSetOfType[map[string]string](
-				kvcache.ResourceType),
+				kvcache.ResourceType,
+			),
 		},
 	}
 
@@ -3561,7 +3566,8 @@ func TestKVCacheBackendStatus_AListingTooLargeToPublishIsWithheld(t *testing.T) 
 	for i := range kvCacheBackendMaxMembers + 1 {
 		entries = append(entries, fmt.Sprintf(
 			`{"segment_id":"segment-%d","client_id":"client-%d","segment_name":"n%d-dram","te_endpoint":"10.42.%d.%d:15002","protocol":"tcp","status":"OK"}`,
-			i, i, i, i/256, i%256))
+			i, i, i, i/256, i%256,
+		))
 	}
 	oversized := fmt.Sprintf(`{"total_segments":%d,"segments":[%s]}`,
 		len(entries), strings.Join(entries, ","))
@@ -3755,7 +3761,8 @@ func TestKVCacheBackendStatus_AnOversizedHealthFieldIsBounded(t *testing.T) {
 			got := reconcileWithAdmin(t, newKVCacheBackendObject(), map[string]adminResponse{
 				"/health": {body: fmt.Sprintf(
 					`{"status":"ok","role":%q,"ha_state":%q,"service_ready":%t}`,
-					huge, huge, c.serviceReady)},
+					huge, huge, c.serviceReady,
+				)},
 				"/metrics":             {body: metricsPopulated},
 				"/get_segments_detail": {body: segmentsEmpty},
 			})
@@ -4810,7 +4817,8 @@ func TestKVCacheBackendWatch_OnlyALeadersPodMapsBack(t *testing.T) {
 			}}
 			assert.Equal(t, c.want, r.enqueueKVCacheBackendWhenLeaderPodChanged(ctx, pod))
 			assert.Equal(t, c.watched, kvCacheBackendLeaderPodPredicate().Create(
-				ctrlevent.CreateEvent{Object: pod}),
+				ctrlevent.CreateEvent{Object: pod},
+			),
 				"the predicate runs first, so what it admits is what the mapper is ever asked about")
 		})
 	}

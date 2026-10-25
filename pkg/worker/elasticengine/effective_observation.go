@@ -197,7 +197,8 @@ func (c *Client) observePost(
 	}
 
 	request, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, c.baseURL+completionPath, strings.NewReader(string(encoded)))
+		ctx, http.MethodPost, c.baseURL+completionPath, strings.NewReader(string(encoded)),
+	)
 	if err != nil {
 		return 0, nil, &Error{
 			Kind: KindInvalidInput, Op: op,

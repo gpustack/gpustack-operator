@@ -134,7 +134,8 @@ func TestPodKVCacheDefault_UnoptedPodIsUntouched(t *testing.T) {
 // would silently reverse it. This test is what makes that reversal harmless rather than unnoticed.
 func TestPodWebhooks_AreOrderIndependent(t *testing.T) {
 	nvidiaBase := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive,
+	)
 	names := logicalResourceNamesForBase(nvidiaBase)
 
 	// A Pod in both worlds: routed to a GPUStack queue with a sliced request, and opted into a cache.

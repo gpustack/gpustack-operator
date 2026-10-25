@@ -12,16 +12,21 @@ import (
 // ModelDeploymentScalerPendingCohortStatus is the scale-up the scaler is waiting on.
 type ModelDeploymentScalerPendingCohortStatusApplyConfiguration struct {
 	// DecisionID identifies the decision that added the cohort.
+	//
 	DecisionID *string `json:"decisionID,omitempty"`
 	// Term is the binding term the decision was written under.
+	//
 	Term *int64 `json:"term,omitempty"`
 	// BaselineVector is the replica count per role before the cohort was added.
 	//
 	// It is the vector the scaler restores when the cohort is retracted.
+	//
 	BaselineVector map[string]int32 `json:"baselineVector,omitempty"`
 	// TargetVector is the replica count per role the cohort asked for.
+	//
 	TargetVector map[string]int32 `json:"targetVector,omitempty"`
 	// StartedAt is when the cohort was committed.
+	//
 	StartedAt *v1.Time `json:"startedAt,omitempty"`
 }
 

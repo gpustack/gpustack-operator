@@ -168,7 +168,8 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 			devs := migDevices(visProfile, 1, 2, c.cards...)
 			resp, err := s.GetPhysicalSlicedVisibilityResponse(
 				context.Background(), visibilityPod(), &core.Container{Name: visSidecar},
-				devs, allocatedCardSet(devs, c.cards), visOwner)
+				devs, allocatedCardSet(devs, c.cards), visOwner,
+			)
 
 			if c.wantErr != "" {
 				require.Error(t, err)
@@ -193,7 +194,8 @@ func TestGetPhysicalSlicedVisibilityResponse_NoDriver(t *testing.T) {
 
 	resp, err := s.GetPhysicalSlicedVisibilityResponse(
 		context.Background(), visibilityPod(), &core.Container{Name: visSidecar},
-		devs, allocatedCardSet(devs, []string{testGPUUUID0}), visOwner)
+		devs, allocatedCardSet(devs, []string{testGPUUUID0}), visOwner,
+	)
 	require.Error(t, err)
 	assert.Nil(t, resp)
 }

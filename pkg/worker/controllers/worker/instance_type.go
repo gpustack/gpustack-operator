@@ -679,7 +679,8 @@ func instanceTypeScheduleLabels(ctx context.Context, it *workercore.InstanceType
 	return nodefeature.PoolScheduleLabels(
 		it.Spec.Acceleratable, cpuAware,
 		it.Spec.GeneralGroup, it.Spec.AcceleratorGroup,
-		it.Spec.OS, it.Spec.Arch)
+		it.Spec.OS, it.Spec.Arch,
+	)
 }
 
 // listFlavorPoolDevices reads the Devices ledgers of every managed node backing the

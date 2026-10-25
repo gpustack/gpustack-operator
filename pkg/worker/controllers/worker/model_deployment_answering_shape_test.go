@@ -163,7 +163,8 @@ func planFor(
 		uids = append(uids, string(pods[i].UID))
 	}
 	md = reserve(md, retirementReservation(
-		workercore.ModelDeploymentRetirementStateDraining, "server", 1, uids))
+		workercore.ModelDeploymentRetirementStateDraining, "server", 1, uids,
+	))
 	// The reconciler patches THIS object when it writes the release record, and that write is a
 	// real optimistic lock, so it compares against a resource version. A server always hands one
 	// out; a fixture that seeds the object but leaves the caller's copy without it describes a
@@ -663,7 +664,8 @@ func TestDrainReasonsNameTheShape(t *testing.T) {
 	other := shapeMember(1, 2, "m-2", shapePlainCommand...)
 
 	_, reason := modelDeploymentAnsweringMembers(
-		modelDeploymentAnsweringLeader, []*core.Pod{&followerOnly, &other})
+		modelDeploymentAnsweringLeader, []*core.Pod{&followerOnly, &other},
+	)
 
 	assert.True(t, strings.Contains(reason, "leader-served"),
 		"the reason names the shape, not just the symptom: %q", reason)

@@ -20,6 +20,7 @@ type SuccessPolicyRuleApplyConfiguration struct {
 	// represented as "1,3-5,7".
 	// When this field is null, this field doesn't default to any value
 	// and is never evaluated at any time.
+	//
 	SucceededIndexes *string `json:"succeededIndexes,omitempty"`
 	// succeededCount specifies the minimal required size of the actual set of the succeeded indexes
 	// for the Job. When succeededCount is used along with succeededIndexes, the check is
@@ -30,6 +31,7 @@ type SuccessPolicyRuleApplyConfiguration struct {
 	// When this field is null, this doesn't default to any value and
 	// is never evaluated at any time.
 	// When specified it needs to be a positive integer.
+	//
 	SucceededCount *int32 `json:"succeededCount,omitempty"`
 }
 

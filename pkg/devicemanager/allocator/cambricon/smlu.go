@@ -308,7 +308,8 @@ func ensureSMLUModeEnabled(driver smluDriver, card string, ordinal int, logger k
 	return fmt.Errorf(
 		"card %s (device index %d): enable sMLU mode: %w; to enable it on the host for the card "+
 			"at this PCI address run `cnmon set -c %d -smlu on`, confirming the ordinal with `cnmon`",
-		card, ordinal, err, ordinal)
+		card, ordinal, err, ordinal,
+	)
 }
 
 // reserveInstance is the Allocate core. Under allocMu it: (1) reuses an existing
@@ -330,7 +331,8 @@ func reserveInstance(driver smluDriver, podUID, container, card string, ordinal,
 		if m.Card != card || m.CoresPct != coresPct || m.MemMiB != memMiB {
 			return smluInstance{}, fmt.Errorf(
 				"marker %q mismatches request (card=%s cores=%d mem=%d): fail closed",
-				self, card, coresPct, memMiB)
+				self, card, coresPct, memMiB,
+			)
 		}
 		list, err := driver.ListInstances()
 		if err != nil {

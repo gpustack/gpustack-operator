@@ -44,6 +44,7 @@ type PodAffinityTermApplyConfiguration struct {
 	// pod labels will be ignored. The default value is empty.
 	// The same key is forbidden to exist in both matchLabelKeys and labelSelector.
 	// Also, matchLabelKeys cannot be set when labelSelector isn't set.
+	//
 	MatchLabelKeys []string `json:"matchLabelKeys,omitempty"`
 	// MismatchLabelKeys is a set of pod label keys to select which pods will
 	// be taken into consideration. The keys are used to lookup values from the
@@ -53,6 +54,7 @@ type PodAffinityTermApplyConfiguration struct {
 	// pod labels will be ignored. The default value is empty.
 	// The same key is forbidden to exist in both mismatchLabelKeys and labelSelector.
 	// Also, mismatchLabelKeys cannot be set when labelSelector isn't set.
+	//
 	MismatchLabelKeys []string `json:"mismatchLabelKeys,omitempty"`
 }
 

@@ -11,10 +11,13 @@ type ModelDeploymentScalerBindingStatusApplyConfiguration struct {
 	//
 	// A target that was deleted and recreated carries a different UID, so the binding tells the
 	// two apart.
+	//
 	TargetUID *string `json:"targetUID,omitempty"`
 	// TargetName is the name of the bound target.
+	//
 	TargetName *string `json:"targetName,omitempty"`
 	// Term is the binding term the scaler writes under.
+	//
 	Term *int64 `json:"term,omitempty"`
 }
 

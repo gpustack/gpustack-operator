@@ -447,7 +447,8 @@ func (m *Materializer) fromSource(
 	if manifest.Digest != "sha256:"+j.hex {
 		return &download.Error{Reason: download.ReasonIntegrityMismatch, Message: fmt.Sprintf(
 			"the hub lists %s at commit %s as %s, the artifact's digest is sha256:%s",
-			src.repository, src.commit, manifest.Digest, j.hex), Detail: "the hub lists " + manifest.Digest}
+			src.repository, src.commit, manifest.Digest, j.hex,
+		), Detail: "the hub lists " + manifest.Digest}
 	}
 
 	return m.fetchTree(ctx, j, a, manifest, hub, dl, src)

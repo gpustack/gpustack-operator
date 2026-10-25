@@ -38,14 +38,14 @@ func newTestConfigurationsGetter() ConfigurationsGetter {
 		*admreg.MutatingWebhookConfiguration,
 	) {
 		return &admreg.ValidatingWebhookConfiguration{
-				Webhooks: []admreg.ValidatingWebhook{
-					newTestValidatingWebhook(cc),
-				},
-			}, &admreg.MutatingWebhookConfiguration{
-				Webhooks: []admreg.MutatingWebhook{
-					newTestMutatingWebhook(cc),
-				},
-			}
+			Webhooks: []admreg.ValidatingWebhook{
+				newTestValidatingWebhook(cc),
+			},
+		}, &admreg.MutatingWebhookConfiguration{
+			Webhooks: []admreg.MutatingWebhook{
+				newTestMutatingWebhook(cc),
+			},
+		}
 	}
 }
 
@@ -103,7 +103,8 @@ func (f *flakyUpdates) react(action k8stesting.Action) (bool, runtime.Object, er
 				Resource: f.resource,
 			},
 			f.resource,
-			errors.New("the object has been modified"))
+			errors.New("the object has been modified"),
+		)
 	}
 
 	return false, nil, nil

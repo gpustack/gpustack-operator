@@ -15,25 +15,34 @@ import (
 // token throughput result while it has not seen enough points yet.
 type ModelDeploymentScalerPredictiveSpecApplyConfiguration struct {
 	// TokenThroughput holds the parameters the predictor falls back to.
+	//
 	TokenThroughput *ModelDeploymentScalerTokenThroughputSpecApplyConfiguration `json:"tokenThroughput,omitempty"`
 	// HorizonSeconds is how far ahead the demand is forecast.
+	//
 	HorizonSeconds *int32 `json:"horizonSeconds,omitempty"`
 	// PrefillTokenCapacityPerReplica is the prompt-token rate one Prefill replica sustains.
+	//
 	PrefillTokenCapacityPerReplica *resource.Quantity `json:"prefillTokenCapacityPerReplica,omitempty"`
 	// DecodeTokenCapacityPerReplica is the generation-token rate one Decode replica sustains.
+	//
 	DecodeTokenCapacityPerReplica *resource.Quantity `json:"decodeTokenCapacityPerReplica,omitempty"`
 	// ServerTokenCapacityPerReplica is the token rate one Server replica sustains.
+	//
 	ServerTokenCapacityPerReplica *resource.Quantity `json:"serverTokenCapacityPerReplica,omitempty"`
 	// QLevel is how much the level of the forecast follows each new observation.
+	//
 	QLevel *resource.Quantity `json:"qLevel,omitempty"`
 	// QTrend is how much the trend of the forecast follows each new observation.
+	//
 	QTrend *resource.Quantity `json:"qTrend,omitempty"`
 	// MeasurementNoise is how much the forecast trusts each new observation.
+	//
 	MeasurementNoise *resource.Quantity `json:"measurementNoise,omitempty"`
 	// MinPoints is how many observations the predictor needs before it forecasts.
 	//
 	// Until it has them, the algorithm reports that it is warming up and returns the token
 	// throughput result.
+	//
 	MinPoints *int32 `json:"minPoints,omitempty"`
 }
 

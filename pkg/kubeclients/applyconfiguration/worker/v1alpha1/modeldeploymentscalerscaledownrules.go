@@ -11,17 +11,21 @@ type ModelDeploymentScalerScaleDownRulesApplyConfiguration struct {
 	//
 	// The largest recommendation in that window is the floor a scale-down may go to, so a role
 	// that was asked to grow does not shrink again right away.
+	//
 	StabilizationWindowSeconds *int32 `json:"stabilizationWindowSeconds,omitempty"`
 	// CooldownAfterAbortSeconds is how long a role is held after an aborted retirement.
+	//
 	CooldownAfterAbortSeconds *int32 `json:"cooldownAfterAbortSeconds,omitempty"`
 	// DecodePostScaleUpGraceSeconds is how long a Decode role is held after it grew.
 	//
 	// A Decode role that just grew does not shrink again inside this window, because a pair that
 	// oscillates costs more than it saves.
+	//
 	DecodePostScaleUpGraceSeconds *int32 `json:"decodePostScaleUpGraceSeconds,omitempty"`
 	// StepPolicy is a step bound stated in one unit.
 	//
 	// It replaces the default of removing at most one replica per role per pass.
+	//
 	StepPolicy *ModelDeploymentScalerStepPolicyApplyConfiguration `json:"stepPolicy,omitempty"`
 }
 

@@ -13,21 +13,28 @@ import (
 // InstanceTemplate defines the template for the Instance to run.
 type InstanceTemplateApplyConfiguration struct {
 	// Image is the container image to run.
+	//
 	Image *string `json:"image,omitempty"`
 	// ImagePullPolicy is the image pull policy to use.
+	//
 	ImagePullPolicy *v1.PullPolicy `json:"imagePullPolicy,omitempty"`
 	// Command is the command to run in the Instance,
 	// which should overwrite the default command in the container image CMD.
+	//
 	Command []string `json:"command,omitempty"`
 	// Privileged indicates whether the container should run in privileged mode.
+	//
 	Privileged *bool `json:"privileged,omitempty"`
 	// Ports is the list of ports to expose from the Instance.
+	//
 	Ports []InstancePortApplyConfiguration `json:"ports,omitempty"`
 	// Env is the list of environment variables to set in the Instance.
+	//
 	Env []InstanceEnvVarApplyConfiguration `json:"env,omitempty"`
 	// Resources is the resource requirements for the Instance.
 	Resources *InstanceResourcesApplyConfiguration `json:"resources,omitempty"`
 	// VolumeMount is a path to mount the volume in the Instance.
+	//
 	VolumeMount *string `json:"volumeMount,omitempty"`
 	// ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.
 	ImagePullSecret *corev1.LocalObjectReferenceApplyConfiguration `json:"imagePullSecret,omitempty"`
@@ -36,6 +43,7 @@ type InstanceTemplateApplyConfiguration struct {
 	// the SSH server also observes.
 	//
 	// Immutable unless the Instance is stopped.
+	//
 	AdditionalVolumes []InstanceAdditionalVolumeApplyConfiguration `json:"additionalVolumes,omitempty"`
 }
 

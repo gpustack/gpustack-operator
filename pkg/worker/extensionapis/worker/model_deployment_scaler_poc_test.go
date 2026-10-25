@@ -451,7 +451,8 @@ func TestModelDeploymentScalerPoC_TensorParallelRankDeduplication(t *testing.T) 
 	assert.Equal(t, 40.0, storageDelta)
 	assert.Equal(t, 8400.0, scalerPoCCacheMissedPromptTokens(
 		scalerPoCCounterDelta(t, first, second, "sglang:prompt_tokens_total", scalerPoCRankZero),
-		deviceDelta+hostDelta+storageDelta, inputDelta, true),
+		deviceDelta+hostDelta+storageDelta, inputDelta, true,
+	),
 		"the effective prefill counter is the answer of an engine that exports it")
 
 	// The subresource sums every rank of the same series, so a sampler that reads its sums
@@ -494,7 +495,8 @@ func TestModelDeploymentScalerPoC_CacheMissedPromptTokens(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := scalerPoCCacheMissedPromptTokens(
-				tc.promptDelta, tc.hitsDelta, tc.effectiveInput, tc.hasEffectiveInput)
+				tc.promptDelta, tc.hitsDelta, tc.effectiveInput, tc.hasEffectiveInput,
+			)
 			assert.Equal(t, tc.want, got)
 		})
 	}

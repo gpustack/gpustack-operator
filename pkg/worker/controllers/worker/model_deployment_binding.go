@@ -91,7 +91,8 @@ func (r *ModelDeploymentReconciler) resolveModelDeploymentDomain(
 			Message: fmt.Sprintf(
 				"kv cache pool binding %q does not exist in namespace %q; an admin creates it, and "+
 					"creating one is what grants this namespace access to the pool",
-				name, md.Namespace),
+				name, md.Namespace,
+			),
 		}, nil
 	}
 
@@ -137,24 +138,28 @@ func modelDeploymentBindingUsable(kvcpb *workercore.KVCachePoolBinding) (bool, s
 		return false, modelDeploymentReasonBindingDeleting, fmt.Sprintf(
 			"kv cache pool binding %q is being deleted; the replicas keep serving and this deployment "+
 				"still holds it, so the deletion waits until the deployment goes away",
-			kvcpb.Name)
+			kvcpb.Name,
+		)
 	}
 
 	if kvcpb.Status.Phase != KVCachePoolPhaseReady {
 		return false, modelDeploymentReasonBindingNotReady, fmt.Sprintf(
 			"kv cache pool binding %q is %s: %s",
-			kvcpb.Name, modelDeploymentBindingPhase(kvcpb), kvcpb.Status.PhaseMessage)
+			kvcpb.Name, modelDeploymentBindingPhase(kvcpb), kvcpb.Status.PhaseMessage,
+		)
 	}
 
 	if !KVCachePoolBindingConditionQuotaGranted.IsTrue(kvcpb) {
 		return false, modelDeploymentReasonBindingNotReady, fmt.Sprintf(
 			"kv cache pool binding %q reports itself ready but has no quota to write into: %s",
-			kvcpb.Name, KVCachePoolBindingConditionQuotaGranted.GetMessage(kvcpb))
+			kvcpb.Name, KVCachePoolBindingConditionQuotaGranted.GetMessage(kvcpb),
+		)
 	}
 
 	return true, modelDeploymentReasonRegistered, fmt.Sprintf(
 		"reuse domain %q is registered through kv cache pool binding %q on pool %q",
-		kvcpb.Spec.Domain.Name, kvcpb.Name, kvcpb.Spec.PoolRef.Name)
+		kvcpb.Spec.Domain.Name, kvcpb.Name, kvcpb.Spec.PoolRef.Name,
+	)
 }
 
 // modelDeploymentBindingPhase spells the phase for a message, including the one case where there is

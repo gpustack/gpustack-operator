@@ -32,6 +32,7 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// WeightsReady reports whether every engine role's weights are available: a claim artifact
 	// mounted, or an engine's own download of a hub artifact finished. While it is False for a
 	// reason other than a Pod still starting, no replica is created and none that runs is touched.
+	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	// Endpoint is the address clients use. Without a router it is the deployment-wide Service, in the
 	// form <scheme>://<name>.<namespace>.svc:<port>. With a router it is the router's Service and is
@@ -40,8 +41,10 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// A role endpoint uses https where that role's own arguments put its listener on TLS. The managed
 	// router endpoint uses the router's own transport instead, which is http. A client reads the
 	// selected value from here rather than assuming either one.
+	//
 	Endpoint *string `json:"endpoint,omitempty"`
 	// Roles is one entry per declared role.
+	//
 	Roles []ModelDeploymentRoleStatusApplyConfiguration `json:"roles,omitempty"`
 	// KVCache is the reuse domain this deployment actually attached to, read from the Binding, so
 	// that telling a cache-sharing misconfiguration from a cache that is merely cold takes one object
@@ -75,6 +78,7 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// Its identity binds the admitting metadata.generation, the role, the replica ordinal and
 	// the target member and Workload UIDs, so a controller restart resumes it and a conflicting
 	// operation cannot silently adopt it.
+	//
 	Retirement *ModelDeploymentRetirementStatusApplyConfiguration `json:"retirement,omitempty"`
 }
 

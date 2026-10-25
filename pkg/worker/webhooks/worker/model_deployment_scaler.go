@@ -337,7 +337,8 @@ func validateModelDeploymentScalerTargetRef(s *workercore.ModelDeploymentScaler)
 		errs = append(errs, field.Required(
 			field.NewPath("spec", "targetRef", "name"),
 			"this scaler plans for the ModelDeployment it names, and a scaler that names none "+
-				"plans for nothing"))
+				"plans for nothing",
+		))
 	}
 
 	return errs
@@ -362,7 +363,8 @@ func validateModelDeploymentScalerTargetRefImmutable(
 		field.NewPath("spec", "targetRef", "name"), s.Spec.TargetRef.Name,
 		"the target of a scaler is fixed once it is set: a different target is a different "+
 			"scaler, because the binding follows the target and the old one would be left "+
-			"holding a binding nobody may write"))
+			"holding a binding nobody may write",
+	))
 
 	return errs
 }
@@ -376,13 +378,15 @@ func validateModelDeploymentScalerSampling(s *workercore.ModelDeploymentScaler) 
 		errs = append(errs, field.Invalid(
 			path.Child("intervalSeconds"), s.Spec.Sampling.IntervalSeconds,
 			"the interval is how often the scaler looks at its target and how often it writes, "+
-				"so it is between 5 and 300 seconds"))
+				"so it is between 5 and 300 seconds",
+		))
 	}
 	if s.Spec.Sampling.PendingTimeoutSeconds < 60 || s.Spec.Sampling.PendingTimeoutSeconds > 1200 {
 		errs = append(errs, field.Invalid(
 			path.Child("pendingTimeoutSeconds"), s.Spec.Sampling.PendingTimeoutSeconds,
 			"the pending timeout is how long a committed scale-up may stay unadmitted before it "+
-				"is retracted, so it is between 60 and 1200 seconds"))
+				"is retracted, so it is between 60 and 1200 seconds",
+		))
 	}
 
 	return errs
@@ -486,13 +490,16 @@ func validateModelDeploymentScalerRatioQuantities(
 
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		ratioPath.Child("target"), ratio.Target, "the target of a ratio is how many replicas the "+
-			"numerator role holds per replica of the denominator role")...)
+			"numerator role holds per replica of the denominator role",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		ratioPath.Child("min"), ratio.Min, "the lower bound of a ratio is how few replicas the "+
-			"numerator role may hold per replica of the denominator role")...)
+			"numerator role may hold per replica of the denominator role",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		ratioPath.Child("max"), ratio.Max, "the upper bound of a ratio is how many replicas the "+
-			"numerator role may hold per replica of the denominator role")...)
+			"numerator role may hold per replica of the denominator role",
+	)...)
 
 	minimum, minimumSet := modelDeploymentScalerRatioValue(ratio.Min)
 	maximum, maximumSet := modelDeploymentScalerRatioValue(ratio.Max)
@@ -568,11 +575,13 @@ func validateModelDeploymentScalerBehavior(s *workercore.ModelDeploymentScaler) 
 			s.Spec.Behavior.ScaleUp.MaxStepPercent, "a step cap in percent is between 0 and 1000"))
 	}
 	errs = append(errs, validateModelDeploymentScalerStepPolicy(
-		path.Child("stepPolicy"), s.Spec.Behavior.ScaleUp.StepPolicy)...)
+		path.Child("stepPolicy"), s.Spec.Behavior.ScaleUp.StepPolicy,
+	)...)
 
 	downPath := field.NewPath("spec", "behavior", "scaleDown")
 	errs = append(errs, validateModelDeploymentScalerStepPolicy(
-		downPath.Child("stepPolicy"), s.Spec.Behavior.ScaleDown.StepPolicy)...)
+		downPath.Child("stepPolicy"), s.Spec.Behavior.ScaleDown.StepPolicy,
+	)...)
 
 	return errs
 }
@@ -755,7 +764,8 @@ func validateModelDeploymentScalerProportional(s *workercore.ModelDeploymentScal
 
 		errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 			targetPath.Child("target"), &target.Target,
-			"the target of a role is the signal one replica of it is expected to carry")...)
+			"the target of a role is the signal one replica of it is expected to carry",
+		)...)
 	}
 
 	return errs
@@ -773,7 +783,8 @@ func validateModelDeploymentScalerTokenThroughput(s *workercore.ModelDeploymentS
 	if predictive := s.Spec.Algorithm.Predictive; predictive != nil {
 		errs = append(errs, validateModelDeploymentScalerTokenThroughputSpec(
 			field.NewPath("spec", "algorithm", "predictive", "tokenThroughput"),
-			&predictive.TokenThroughput)...)
+			&predictive.TokenThroughput,
+		)...)
 	}
 
 	return errs
@@ -788,31 +799,39 @@ func validateModelDeploymentScalerTokenThroughputSpec(
 
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("prefillTargetTokensPerSecond"), tt.PrefillTargetTokensPerSecond,
-		"the prefill target is the prompt-token rate one prefill replica sustains")...)
+		"the prefill target is the prompt-token rate one prefill replica sustains",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("decodeTargetTokensPerSecond"), tt.DecodeTargetTokensPerSecond,
-		"the decode target is the generation-token rate one decode replica sustains")...)
+		"the decode target is the generation-token rate one decode replica sustains",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("serverTargetTokensPerSecond"), tt.ServerTargetTokensPerSecond,
-		"the server target is the token rate one server replica sustains")...)
+		"the server target is the token rate one server replica sustains",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("panicThreshold"), tt.PanicThreshold,
-		"the panic threshold is the growth rate over the ready replicas that starts a panic")...)
+		"the panic threshold is the growth rate over the ready replicas that starts a panic",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("ttftTargetMilliseconds"), tt.TTFTTargetMilliseconds,
-		"the time to first token target is the latency a role is expected to keep under")...)
+		"the time to first token target is the latency a role is expected to keep under",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("itlTargetMilliseconds"), tt.ITLTargetMilliseconds,
-		"the inter-token latency target is the latency a role is expected to keep under")...)
+		"the inter-token latency target is the latency a role is expected to keep under",
+	)...)
 	if tt.StableWindowSeconds != 0 && (tt.StableWindowSeconds < 30 || tt.StableWindowSeconds > 600) {
 		errs = append(errs, field.Invalid(
 			path.Child("stableWindowSeconds"), tt.StableWindowSeconds,
-			"the stable window is between 30 and 600 seconds"))
+			"the stable window is between 30 and 600 seconds",
+		))
 	}
 	if tt.PanicWindowSeconds != 0 && (tt.PanicWindowSeconds < 10 || tt.PanicWindowSeconds > 300) {
 		errs = append(errs, field.Invalid(
 			path.Child("panicWindowSeconds"), tt.PanicWindowSeconds,
-			"the panic window is between 10 and 300 seconds"))
+			"the panic window is between 10 and 300 seconds",
+		))
 	}
 
 	return errs
@@ -830,22 +849,28 @@ func validateModelDeploymentScalerPredictive(s *workercore.ModelDeploymentScaler
 	path := field.NewPath("spec", "algorithm", "predictive")
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("prefillTokenCapacityPerReplica"), predictive.PrefillTokenCapacityPerReplica,
-		"the prefill capacity is the prompt tokens one Prefill replica holds")...)
+		"the prefill capacity is the prompt tokens one Prefill replica holds",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("decodeTokenCapacityPerReplica"), predictive.DecodeTokenCapacityPerReplica,
-		"the decode capacity is the generation tokens one Decode replica holds")...)
+		"the decode capacity is the generation tokens one Decode replica holds",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("serverTokenCapacityPerReplica"), predictive.ServerTokenCapacityPerReplica,
-		"the server capacity is the tokens one Server replica holds")...)
+		"the server capacity is the tokens one Server replica holds",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("qLevel"), predictive.QLevel,
-		"qLevel is the level process noise")...)
+		"qLevel is the level process noise",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("qTrend"), predictive.QTrend,
-		"qTrend is the trend process noise")...)
+		"qTrend is the trend process noise",
+	)...)
 	errs = append(errs, validateModelDeploymentScalerPositiveQuantity(
 		path.Child("measurementNoise"), predictive.MeasurementNoise,
-		"measurementNoise is the observation noise")...)
+		"measurementNoise is the observation noise",
+	)...)
 
 	return errs
 }
@@ -878,7 +903,8 @@ func validateModelDeploymentScalerRatioFeasibility(s *workercore.ModelDeployment
 		errs = append(errs, field.Invalid(
 			field.NewPath("spec", "roles"), component.roleNames(),
 			"no replica vector inside these bounds satisfies every ratio at the same time, so "+
-				"this scaler could never commit anything"))
+				"this scaler could never commit anything",
+		))
 	}
 
 	return errs

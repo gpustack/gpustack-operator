@@ -13,8 +13,10 @@ import (
 // InstancePersistentVolumeSpec defines the desired state of InstancePersistentVolume.
 type InstancePersistentVolumeSpecApplyConfiguration struct {
 	// DisplayName is the display name of the InstancePersistentVolume.
+	//
 	DisplayName *string `json:"displayName,omitempty"`
 	// Description is the description of the InstancePersistentVolume.
+	//
 	Description *string `json:"description,omitempty"`
 	// Type is the name of Kubernetes StorageClass that provisions corresponding Kubernetes PersistentVolume.
 	//
@@ -23,10 +25,12 @@ type InstancePersistentVolumeSpecApplyConfiguration struct {
 	// Capacity is the capacity of the InstanceVolume.
 	//
 	// Immutable after creation.
+	//
 	Capacity *resource.Quantity `json:"capacity,omitempty"`
 	// AccessMode is the access mode of the InstanceVolume.
 	//
 	// Immutable after creation.
+	//
 	AccessMode *corev1.PersistentVolumeAccessMode `json:"accessMode,omitempty"`
 }
 

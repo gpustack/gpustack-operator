@@ -457,7 +457,8 @@ func TestDevicesReconciler_PendingRelease(t *testing.T) {
 				"follows it fails, this give-back is still the only thing that frees the accelerator")
 
 		require.NoError(t, f.rec.patchAllocatingPod(
-			context.Background(), f.pod, container, claim.Devices, claim.DeviceIDs))
+			context.Background(), f.pod, container, claim.Devices, claim.DeviceIDs,
+		))
 		assert.Empty(t, pendingReleaseKeys(f.rec),
 			"a claim that landed supersedes the give-back that would have taken it back")
 	})
@@ -472,7 +473,8 @@ func TestDevicesReconciler_PendingRelease(t *testing.T) {
 		f.rec.reserveDevices("uid-p", container, other.Devices, other.DeviceIDs)
 		f.failing = true
 		require.Error(t, f.rec.patchAllocatingPod(
-			context.Background(), f.pod, container, other.Devices, other.DeviceIDs))
+			context.Background(), f.pod, container, other.Devices, other.DeviceIDs,
+		))
 		f.rec.releaseReservation("uid-p", container)
 		require.NotEmpty(t, pendingReleaseKeys(f.rec), "nothing else is left to free that accelerator")
 
@@ -775,9 +777,11 @@ func TestDevicesReconciler_ReconcileNotifier_Unsubscribes(t *testing.T) {
 	r := &DevicesReconciler{}
 
 	_, releaseSliced := r.getReconcileNotifier(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced,
+	)
 	_, releaseShared := r.getReconcileNotifier(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeShared)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeShared,
+	)
 	require.Len(t, r.notifiers, 2)
 
 	releaseSliced()

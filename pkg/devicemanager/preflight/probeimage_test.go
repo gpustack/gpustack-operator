@@ -18,7 +18,8 @@ const _ProbeImageDockerfilePath = "../../../pack/gpustack-operator/Dockerfile"
 // _ProbeImageStageRE matches the xbuild stage headers those tables mirror, capturing the vendor
 // image a stage builds against and the suffix naming the stage.
 var _ProbeImageStageRE = regexp.MustCompile(
-	`(?m)^FROM (\S+) AS xbuild-(ascend-cann-\S+|nvidia-cuda-\S+)$`)
+	`(?m)^FROM (\S+) AS xbuild-(ascend-cann-\S+|nvidia-cuda-\S+)$`,
+)
 
 // A probe container runs the manufacturer's preload libraries, and each of those was compiled
 // against one specific vendor image: the xbuild stage the final image stages it from. Nothing but

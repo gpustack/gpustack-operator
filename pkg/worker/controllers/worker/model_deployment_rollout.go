@@ -156,7 +156,8 @@ func observeModelDeploymentRollout(
 				"rebuild every replica whenever the store blinks. Until it resolves, an edit that "+
 				"changes a running replica's rendered Pod waits with them -- withheld rather than "+
 				"dropped, and it rolls out once the connection returns",
-			rollout.held, rollout.outdated))
+			rollout.held, rollout.outdated,
+		))
 	case rollout.heldByWeights > 0:
 		// The same hold with the other cause, and the cause is what the reader acts on: a message
 		// naming the cache would point a deployment that declares none at a store it never used.
@@ -170,7 +171,8 @@ func observeModelDeploymentRollout(
 				"serving replicas. WeightsReady says what blocks them. Until it is True, an edit that "+
 				"changes a running replica's rendered Pod waits with them -- withheld rather than "+
 				"dropped, and it rolls out once the weights are available",
-			rollout.heldByWeights, rollout.outdated))
+			rollout.heldByWeights, rollout.outdated,
+		))
 	case rollout.outdated > 0:
 		// DELETED, NOT ALL OF THEM AT ONCE. The rollout turns over one replica per role per pass,
 		// never beside a deficit and never beside a surplus this pass already shed, so a count of
@@ -181,7 +183,8 @@ func observeModelDeploymentRollout(
 		ModelDeploymentConditionReplicasUpToDate.False(holder, modelDeploymentReasonRolloutInProgress, fmt.Sprintf(
 			"%d replicas differ from what this pass rendered and turn over one per role per pass: "+
 				"this pass deleted at most one replica per role, and the pass that finds it gone "+
-				"creates the replacement", rollout.outdated))
+				"creates the replacement", rollout.outdated,
+		))
 	case missing > 0 && modelDeploymentRolloutWasInProgress(holder):
 		// THE GAP A ROLLOUT OPENS IS STILL THE ROLLOUT'S. The pass that deletes the last outdated
 		// replica leaves nothing outdated behind it and the replacement not yet created, so the pass
@@ -198,7 +201,8 @@ func observeModelDeploymentRollout(
 			"%d of the declared replicas are being replaced by the rollout in flight: %s. The last "+
 				"replica built from the earlier spec has gone, and the pass that finds it gone "+
 				"creates its replacement",
-			missing, strings.Join(missingWhere, "; ")))
+			missing, strings.Join(missingWhere, "; "),
+		))
 	case missing > 0:
 		// NOTHING THIS PASS COMPARED DIFFERED, so the shortfall is not a rollout this pass can see,
 		// and the message has to say that much, because the alternative readings both misdirect:
@@ -226,14 +230,16 @@ func observeModelDeploymentRollout(
 				"matched what it rendered, so no rollout is in flight. What removed them is not "+
 				"this condition's to say -- a preemption reports itself on the quota condition -- "+
 				"and each replacement is created once its ordinal holds no member",
-			missing, strings.Join(missingWhere, "; ")))
+			missing, strings.Join(missingWhere, "; "),
+		))
 	default:
 		if rollout.olderRenderVersion > 0 {
 			ModelDeploymentConditionReplicasUpToDate.True(holder, modelDeploymentReasonUpToDate, fmt.Sprintf(
 				"every replica matches the declared spec (%d running on an older compatible render version; "+
 					"current render version is %d, set annotation %s=%d to roll them)",
 				rollout.olderRenderVersion, modelDeploymentRenderVersion,
-				modelDeploymentMinRenderVersionAnnotation, modelDeploymentRenderVersion))
+				modelDeploymentMinRenderVersionAnnotation, modelDeploymentRenderVersion,
+			))
 
 			return
 		}

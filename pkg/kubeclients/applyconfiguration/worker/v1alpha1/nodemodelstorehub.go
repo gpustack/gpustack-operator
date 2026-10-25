@@ -9,18 +9,23 @@ package v1alpha1
 // controller and an engine download reach it.
 type NodeModelStoreHubApplyConfiguration struct {
 	// HuggingFaceEndpoint is the Hugging Face Hub's base URL.
+	//
 	HuggingFaceEndpoint *string `json:"huggingFaceEndpoint,omitempty"`
 	// HTTPSProxy is the proxy downloads go through, an http or https URL without credentials.
+	//
 	HTTPSProxy *string `json:"httpsProxy,omitempty"`
 	// NoProxy is the comma-separated host list that bypasses HTTPSProxy.
+	//
 	NoProxy *string `json:"noProxy,omitempty"`
 	// CABundleConfigMap names a ConfigMap in the operator's namespace whose "ca.crt" holds PEM
 	// certificates trusted beside the system pool. The name travels rather than the certificates,
 	// because a bundle can be larger than this object may be.
+	//
 	CABundleConfigMap *string `json:"caBundleConfigMap,omitempty"`
 	// ModelScopeEndpoint is the ModelScope hub's base URL. It is empty in a spec an older worker
 	// wrote, and a ModelScope artifact on such a node waits with that named rather than being
 	// resolved against another hub.
+	//
 	ModelScopeEndpoint *string `json:"modelScopeEndpoint,omitempty"`
 }
 

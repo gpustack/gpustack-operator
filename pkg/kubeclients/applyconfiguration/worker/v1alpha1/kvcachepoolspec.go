@@ -17,8 +17,10 @@ type KVCachePoolSpecApplyConfiguration struct {
 	// tenant quota on the old master's ledger with nothing left to delete them with.
 	// - The reverse is NOT exclusive: one backend may be referenced by several pools, which is why
 	// the ledger and the rendered policy converge per MASTER rather than per pool.
+	//
 	Backends []string `json:"backends,omitempty"`
 	// Quota is the ceiling this pool declares over its backend.
+	//
 	Quota *KVCachePoolQuotaApplyConfiguration `json:"quota,omitempty"`
 }
 

@@ -463,7 +463,8 @@ func (r *ModelDeploymentReconciler) recoverElasticUnsentMemberDrift(
 	status.State = elasticStateCompleted
 	status.Reason = fmt.Sprintf(
 		"the unsent operation held replaced member identities; the current native world proves width %d and the stale record is retired",
-		currentWidth)
+		currentWidth,
+	)
 	if err := r.persistElasticObservation(ctx, md, *status); err != nil {
 		return false, err
 	}
@@ -892,7 +893,8 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 		if wait := elasticScaleRetryDue(op, r.modelDeploymentNow()); wait > 0 {
 			return finish(fmt.Sprintf(
 				"the engine refused the scale command to width %d; the next attempt backs off %s; the recorded refusal: %s",
-				op.Width.Target, wait.Truncate(time.Second), op.ScaleLastError))
+				op.Width.Target, wait.Truncate(time.Second), op.ScaleLastError,
+			))
 		}
 		if err := client.Scale(ctx, op.Width.Target, 120*time.Second); err != nil {
 			// The same single write after the answer as the first send. An answer that is not a

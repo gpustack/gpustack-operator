@@ -576,7 +576,8 @@ func TestReserveMigInstance(t *testing.T) {
 			}
 
 			inst, outcome, err := reserveMigInstance(
-				drv, podsDir, c.podUID, "c", testPPUUUID0, testProfile, 1, 2)
+				drv, podsDir, c.podUID, "c", testPPUUUID0, testProfile, 1, 2,
+			)
 
 			assert.Equal(t, c.wantCreateCalls, drv.createCalls)
 			if c.wantErr != "" {
@@ -764,7 +765,8 @@ func TestReserveMigInstanceConcurrentSameCard(t *testing.T) {
 			unlock := lockCard(testPPUUUID0)
 			defer unlock()
 			inst, outcome, err := reserveMigInstance(
-				drv, podsDir, fmt.Sprintf("pod-%d", i), "c", testPPUUUID0, testProfile, 1, 2)
+				drv, podsDir, fmt.Sprintf("pod-%d", i), "c", testPPUUUID0, testProfile, 1, 2,
+			)
 			require.NoError(t, err)
 			require.Equal(t, migCreated, outcome)
 			starts[i] = inst.Placement.Start

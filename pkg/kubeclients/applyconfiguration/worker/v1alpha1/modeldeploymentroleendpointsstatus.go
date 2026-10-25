@@ -15,8 +15,10 @@ package v1alpha1
 type ModelDeploymentRoleEndpointsStatusApplyConfiguration struct {
 	// Eligible is how many endpoints the role's qualification list holds, set only when that
 	// list is complete. It is named for eligibility and never presents itself as serving.
+	//
 	Eligible *int32 `json:"eligible,omitempty"`
 	// Serving is the actual serving confirmation taken over the role's endpoints.
+	//
 	Serving *ModelDeploymentServingStatusApplyConfiguration `json:"serving,omitempty"`
 }
 

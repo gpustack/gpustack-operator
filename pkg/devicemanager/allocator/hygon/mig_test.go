@@ -369,7 +369,8 @@ func TestReserveMigInstance(t *testing.T) {
 				PodUID: "other-pod", Container: "other-ctr", Card: testCard().UUID, PciBusID: testCard().PciBusID, Profile: profile,
 				ProfileID: 3, GiID: 7, MigUUID: "held",
 				ConfPath: "/etc/dmi_mig_config/ci/dev0gi7ci0.conf", Start: 2, Length: 1,
-			}))
+			},
+		))
 
 		inst, outcome, err := reserveMigInstance(drv, podsDir, "pod", "ctr", testCard(), profile)
 
@@ -408,7 +409,8 @@ func TestReserveMigInstance(t *testing.T) {
 			migMarker{
 				PodUID: "other", Container: "ctr", Card: testCard().UUID, PciBusID: testCard().PciBusID, Profile: "8g.63gb",
 				GiID: 1, MigUUID: "big", ConfPath: "/x", Start: 0, Length: 4,
-			}))
+			},
+		))
 
 		_, _, err := reserveMigInstance(drv, podsDir, "pod", "ctr", testCard(), profile)
 
@@ -587,7 +589,8 @@ func TestMigReclaimerReconcile(t *testing.T) {
 				ProfileID: 3, GiID: giID, MigUUID: fmt.Sprintf("u%d", giID),
 				ConfPath: fmt.Sprintf("/etc/dmi_mig_config/ci/dev0gi%dci0.conf", giID),
 				Start:    int32(giID), Length: 1,
-			}))
+			},
+		))
 	}
 	instance := func(giID uint32) migLiveInstance {
 		return migLiveInstance{PciBusID: bdf, Instance: migInstance{
@@ -717,7 +720,8 @@ func TestMigReclaimerDoesNotCollectAPartitionClaimedMidSweep(t *testing.T) {
 				PodUID: "just-admitted", Container: "main", Card: card, PciBusID: bdf,
 				Profile: "2g.15gb", ProfileID: 3, GiID: 4, MigUUID: "u4",
 				ConfPath: "/etc/dmi_mig_config/ci/dev0gi4ci0.conf", Start: 1, Length: 1,
-			}))
+			},
+		))
 	}
 
 	agedReclaimer(drv, podsDir).reconcile([]string{"just-admitted"})
@@ -802,7 +806,8 @@ func TestMigReclaimerLeavesAFreshRecordAlone(t *testing.T) {
 			PodUID: "just-admitted", Container: "main", Card: card, PciBusID: bdf,
 			Profile: "2g.15gb", ProfileID: 3, GiID: 4, MigUUID: "u4",
 			ConfPath: "/etc/dmi_mig_config/ci/dev0gi4ci0.conf", Start: 1, Length: 1,
-		}))
+		},
+	))
 	drv := &fakeMigDriver{listed: []migLiveInstance{{PciBusID: bdf, Instance: migInstance{
 		GiID: 4, ProfileID: 3, Placement: migPlacement{1, 1}, UUID: "u4",
 	}}}}

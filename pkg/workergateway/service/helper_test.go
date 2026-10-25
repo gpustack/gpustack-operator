@@ -461,7 +461,8 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		require.Len(t, item.Status.Tiers, 2)
 		assert.True(t,
 			item.Status.Tiers[0].OnceMaxRequest.Accelerator.Cmp(
-				item.Status.Tiers[1].OnceMaxRequest.Accelerator) < 0,
+				item.Status.Tiers[1].OnceMaxRequest.Accelerator,
+			) < 0,
 			"tiers must remain sorted ascending by accelerator after a new tier is appended")
 	})
 

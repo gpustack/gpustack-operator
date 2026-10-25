@@ -16,6 +16,7 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// NodeSelector selects the nodes that contribute this medium. One member runs per selected
 	// node; widening the selector adds members and the leader admits their segments into
 	// subsequent allocation immediately, with no leader or member restart.
+	//
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	// Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or
 	// device memory (VRAM).
@@ -37,6 +38,7 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// refused, the controller's finalizer removal included. The exposure is development clusters
 	// only, this type being absent from every tag through v0.8.6, so clearing it is the first
 	// shipping release's job — confirm no leftover object exists, or write a recovery procedure.
+	//
 	Medium *string `json:"medium,omitempty"`
 	// CapacityPerMember sizes ONE member, not one node. It becomes the member's global segment size
 	// and is counted into the member Pod's own resource request, so a member that does not fit stays
@@ -54,6 +56,7 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// nothing else on this path that consumes the NUMA affinity this operator already discovers.
 	// One group per NUMA domain is not the shape it would take — a group selects nodes through
 	// nodeSelector, while NUMA is a property inside a node rather than a label on one.
+	//
 	CapacityPerMember *resource.Quantity `json:"capacityPerMember,omitempty"`
 	// LocalBufferSize is the member client's local staging buffer, counted into the Pod's
 	// memory request beside CapacityPerMember.
@@ -68,6 +71,7 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// rendered into the member container's argv, readable by anyone who can reach the Pod or the
 	// DaemonSet, for the life of the object. A credential does not belong here, and since this
 	// operator renders no flag that carries one, this field is the only way one arrives.
+	//
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 	// ExtraEnv passes environment variables this API does not enumerate straight through to the
 	// member container.
@@ -88,6 +92,7 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// rendered into the member container's environment, readable by anyone who can reach the Pod or
 	// the DaemonSet, for the life of the object. A credential does not belong here, and since this
 	// operator renders no variable that carries one, this field is the only way one arrives.
+	//
 	ExtraEnv []InstanceEnvVarApplyConfiguration `json:"extraEnv,omitempty"`
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs
 	// the backend's Image.
@@ -97,6 +102,7 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// carrying the transports it was compiled with and the runtime it links. The vendor runtime is
 	// also the medium's: a VRAM group needs a build with VRAM segments compiled in, which the stock
 	// CPU default is not.
+	//
 	Image *string `json:"image,omitempty"`
 	// LocalDisks declares the local disk tiers this group's nodes contribute, one entry per host
 	// directory, and an empty list leaves the group memory only. Declaring an entry is what turns
@@ -120,6 +126,7 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// all — lift these together with that status shape or not at all.
 	//
 	// The list is keyed by path, and the schema refuses two entries naming one directory.
+	//
 	LocalDisks []KVCacheBackendMemberLocalDiskApplyConfiguration `json:"localDisks,omitempty"`
 	// Transport declares the data plane this group uses, overriding the backend's
 	// spec.transport.protocol for this group only. Left unset, the group inherits the backend's.
@@ -143,6 +150,7 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	//
 	// EFA capacity is node-specific. A count above the device plugin's advertised quantity leaves
 	// the member Pending, which makes an unavailable multi-interface request visible to the user.
+	//
 	FabricInterfaceCount *int32 `json:"fabricInterfaceCount,omitempty"`
 	// SecurityContext is the member container's security context, merged ONTO the one the renderer
 	// derives from the group's effective protocol rather than replacing it.
@@ -176,6 +184,7 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// LocalDisks above is not this field spelled differently: that list declares tier capacity the
 	// leader routes offload tasks to, with a deregistration hook and a grace period derived from
 	// its presence. A directory mounted here is a mount and nothing more.
+	//
 	HostPaths []KVCacheBackendMemberHostPathApplyConfiguration `json:"hostPaths,omitempty"`
 	// RuntimeClassName selects the container runtime the member's Pods run under, which is how a
 	// vendor runtime injects its driver libraries and device nodes without any of them being named
@@ -189,6 +198,7 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// A name no RuntimeClass on the cluster carries makes the API server REJECT the Pod outright,
 	// so the member group stops at admission of its own Pods rather than starting without the
 	// runtime. That is the loud failure, and it is the one wanted here.
+	//
 	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
 }
 

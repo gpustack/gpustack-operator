@@ -19,6 +19,7 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// that it does, and it is duplicated in the webhook on purpose: this one still holds when
 	// the webhook is not installed, which is when a second leader would be rendered rather than
 	// refused. Raise both together; widening a maximum is not a breaking change.
+	//
 	Replicas *int32 `json:"replicas,omitempty"`
 	// MemberAddressing selects how a member finds the master once an election runs. Both forms
 	// reach the serving leader by different routes. Changing this rolls every member group.
@@ -32,6 +33,7 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// within the noise of one run. Both first failed at 31.41 seconds and converged around 60.6
 	// seconds, so leader election dominated that comparison. Recheck after changing election timing.
 	// The Service route's endpoint transition was inferred from the result, not observed directly.
+	//
 	MemberAddressing *string `json:"memberAddressing,omitempty"`
 	// ElectionBackend selects the leader election backend. Kubernetes uses a Lease even with one replica,
 	// so scaling up does not change the first leader's startup flags. None is for a single leader
@@ -43,6 +45,7 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// a quota was raised applies the older, lower ceiling. An over-quota write evicts that tenant's
 	// own older objects, irreversibly and without moving any counter. The quota itself is not lost:
 	// the pool reconciler writes the difference back on its next pass.
+	//
 	ElectionBackend *string `json:"electionBackend,omitempty"`
 	// AllocationStrategy is how the leader picks which member takes a new write. Random spreads
 	// them; FreeRatioFirst biases toward the emptier member.
@@ -51,6 +54,7 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// artifact's flag accepts: the rest are specific to one medium or one locality model, are
 	// reachable through ExtraArgs, and would fix this API to one implementation's vocabulary.
 	// Widening the enum later is not a breaking change.
+	//
 	AllocationStrategy *string `json:"allocationStrategy,omitempty"`
 	// MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index
 	// behind it. Off, every request falls into one default tenant and the index degrades to a plain
@@ -73,6 +77,7 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// image older than Mooncake 0.3.12 does not recognize the switch and its master exits at
 	// startup, so a backend on such an image, including the 0.3.10.post2 variants this project
 	// also publishes, sets false here. Read it through KVCacheBackendLeader.MultiTenancyEnabled.
+	//
 	MultiTenancy *bool `json:"multiTenancy,omitempty"`
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
 	// the derived ones. Each entry is one flag token of its own, "-flag" or "-flag=value", and the
@@ -84,6 +89,7 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// rendered into the leader container's argv, readable by anyone who can reach the Pod or the
 	// Deployment, for the life of the object. A credential does not belong here, and since this
 	// operator renders no flag that carries one, this field is the only way one arrives.
+	//
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 	// ExtraEnv passes environment variables this API does not enumerate straight through to the
 	// leader container. The leader reads a handful of its settings from the environment rather
@@ -98,6 +104,7 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// rendered into the leader container's environment, readable by anyone who can reach the Pod
 	// or the Deployment, for the life of the object. A credential does not belong here, and since
 	// this operator renders no variable that carries one, this field is the only way one arrives.
+	//
 	ExtraEnv []InstanceEnvVarApplyConfiguration `json:"extraEnv,omitempty"`
 }
 

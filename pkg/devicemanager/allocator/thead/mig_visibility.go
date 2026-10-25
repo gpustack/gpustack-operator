@@ -138,7 +138,8 @@ func (s *server) liveOwnedInstance(devs *workercore.Devices, podUID, owner, card
 	if liveInst.UUID != m.MigUUID {
 		return migInstance{}, fmt.Errorf(
 			"marker %q gpu instance %d uuid %q no longer matches live uuid %q (id reused): fail closed",
-			path, m.GiID, m.MigUUID, liveInst.UUID)
+			path, m.GiID, m.MigUUID, liveInst.UUID,
+		)
 	}
 	return m.instance(), nil
 }

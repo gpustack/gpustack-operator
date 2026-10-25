@@ -230,7 +230,8 @@ func TestSlicedVirtualNPUIDAssignment(t *testing.T) {
 
 	readVNPU := func(uid, ctr string) int {
 		_, vnpu, ok := parseNPUInfoConfig(
-			filepath.Join(deviceplugin.PodWorkDir(uid, ctr), "etc/enpu/vcann-rt/npu_info.config"))
+			filepath.Join(deviceplugin.PodWorkDir(uid, ctr), "etc/enpu/vcann-rt/npu_info.config"),
+		)
 		require.True(t, ok)
 		return vnpu
 	}
@@ -390,7 +391,8 @@ func TestGetSlicedContainerAllocateResponse_A5EnvAndQuotaUseDifferentIDs(t *test
 	assert.Equal(t, "3", resp.Envs["ASCEND_VISIBLE_DEVICES"], "the runtime resolves the dcmi device id on A5")
 
 	body, err := os.ReadFile(filepath.Join(
-		deviceplugin.PodWorkDir("uid-a5-sliced", "train"), "etc/enpu/vcann-rt/npu_info.config"))
+		deviceplugin.PodWorkDir("uid-a5-sliced", "train"), "etc/enpu/vcann-rt/npu_info.config",
+	))
 	require.NoError(t, err)
 	assert.Contains(t, string(body), "physical-npu-id=7\n", "vcann-rt still keys its quota by the physical id")
 }

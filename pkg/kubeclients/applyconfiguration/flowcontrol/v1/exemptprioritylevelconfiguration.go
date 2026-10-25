@@ -32,6 +32,7 @@ type ExemptPriorityLevelConfigurationApplyConfiguration struct {
 	// as this level's LendableConcurrencyLimit (LendableCL), is defined as follows.
 	//
 	// LendableCL(i) = round( NominalCL(i) * lendablePercent(i)/100.0 )
+	//
 	LendablePercent *int32 `json:"lendablePercent,omitempty"`
 }
 

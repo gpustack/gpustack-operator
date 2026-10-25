@@ -812,7 +812,8 @@ func TestGroupForwardProbePDPairCarriesTheRequestOnBothHeads(t *testing.T) {
 	fetch := &probePairFetch{prefillHost: probeHost(0, 0)}
 
 	got := observeModelDeploymentGroupForwardPair(
-		context.Background(), md, prefill, decode, fetch.fetch)
+		context.Background(), md, prefill, decode, fetch.fetch,
+	)
 
 	assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
 		"a prefill group whose pairs all carried the request is verified")
@@ -877,7 +878,8 @@ func TestGroupForwardProbePDPairNamesTheAnswerItRejected(t *testing.T) {
 			},
 		}
 		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, fetch.fetch)
+			context.Background(), md, prefill, decode, fetch.fetch,
+		)
 
 		assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
 			"a decoder that did not carry the copy holds the pair")
@@ -894,7 +896,8 @@ func TestGroupForwardProbePDPairNamesTheAnswerItRejected(t *testing.T) {
 			},
 		}
 		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, fetch.fetch)
+			context.Background(), md, prefill, decode, fetch.fetch,
+		)
 
 		assert.Contains(t, got.Prefill.Reason, strings.Repeat("长", 200),
 			"the bound keeps the first two hundred characters")
@@ -928,7 +931,8 @@ func TestGroupForwardProbePDPairRecordsTheMooncakeCountersOfBothHalves(t *testin
 	}
 
 	got := observeModelDeploymentGroupForwardPair(
-		context.Background(), md, prefill, decode, fetch)
+		context.Background(), md, prefill, decode, fetch,
+	)
 
 	assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
 		"a pair that carried the request is still verified")
@@ -942,7 +946,8 @@ func TestGroupForwardProbePDPairRecordsTheMooncakeCountersOfBothHalves(t *testin
 	t.Run("an SGLang pair records no mooncake lines", func(t *testing.T) {
 		md := probePairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1, "")
 		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, fetch)
+			context.Background(), md, prefill, decode, fetch,
+		)
 
 		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
 			"the pair itself still verifies")
@@ -974,7 +979,8 @@ func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
 
 	t.Run("an empty wrapper ahead of the copy passes", func(t *testing.T) {
 		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, answer("<think></think>\n\n探测P0D0：星河春风。").fetch)
+			context.Background(), md, prefill, decode, answer("<think></think>\n\n探测P0D0：星河春风。").fetch,
+		)
 
 		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
 			"the wrapper is the chat template's noise; the copy behind it is the answer")
@@ -983,7 +989,8 @@ func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
 	t.Run("a reasoning block ahead of the copy passes", func(t *testing.T) {
 		got := observeModelDeploymentGroupForwardPair(
 			context.Background(), md, prefill, decode,
-			answer("<think>\nsome reasoning\n</think>\n探测P0D0：星河春风。").fetch)
+			answer("<think>\nsome reasoning\n</think>\n探测P0D0：星河春风。").fetch,
+		)
 
 		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
 			"the wrapper is stripped whatever it carries")
@@ -992,7 +999,8 @@ func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
 	t.Run("leading whitespace ahead of the wrapper still passes", func(t *testing.T) {
 		got := observeModelDeploymentGroupForwardPair(
 			context.Background(), md, prefill, decode,
-			answer("\n <think></think>\n\n探测P0D0：星河春风。").fetch)
+			answer("\n <think></think>\n\n探测P0D0：星河春风。").fetch,
+		)
 
 		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
 			"a template that opens with a newline or a space ahead of the wrapper is as noise as the wrapper")
@@ -1001,7 +1009,8 @@ func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
 	t.Run("a wrapper does not rescue a wrong copy", func(t *testing.T) {
 		fetch := answer("<think></think>\n\n别的文字")
 		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, fetch.fetch)
+			context.Background(), md, prefill, decode, fetch.fetch,
+		)
 
 		assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
 			"the visible text still has to be the copy")
@@ -1014,7 +1023,8 @@ func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
 	t.Run("the marker inside the wrapper is not the copy", func(t *testing.T) {
 		fetch := answer("<think>探测P0D0：星河春风。</think>\n\n别的文字")
 		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, fetch.fetch)
+			context.Background(), md, prefill, decode, fetch.fetch,
+		)
 
 		assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
 			"a copy the template swallowed is not a copy the decoder made")
@@ -1130,7 +1140,8 @@ func TestGroupForwardProbePDPairHoldsOnAnythingItCannotSee(t *testing.T) {
 			}
 
 			got := observeModelDeploymentGroupForwardPair(
-				context.Background(), md, prefill, decode, fetch.fetch)
+				context.Background(), md, prefill, decode, fetch.fetch,
+			)
 
 			assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
 				"a pair that could not be observed is held for the prefill role")
@@ -1155,7 +1166,8 @@ func TestGroupForwardProbePDPairIsUnsupportedOnAnEngineWithNoObservation(t *test
 	fetch := &probePairFetch{prefillHost: probeHost(0, 0)}
 
 	got := observeModelDeploymentGroupForwardPair(
-		context.Background(), md, prefill, decode, fetch.fetch)
+		context.Background(), md, prefill, decode, fetch.fetch,
+	)
 
 	assert.Equal(t, modelDeploymentGroupForwardUnsupported, got.Prefill.State)
 	assert.Equal(t, modelDeploymentGroupForwardUnsupported, got.Decode.State)
@@ -1171,7 +1183,8 @@ func TestGroupForwardProbePDPairHoldsWithNoTransport(t *testing.T) {
 	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
 
 	got := observeModelDeploymentGroupForwardPair(
-		context.Background(), md, prefill, decode, nil)
+		context.Background(), md, prefill, decode, nil,
+	)
 
 	assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
 		"a pair nobody could ask is held")
@@ -1212,13 +1225,15 @@ func TestGroupForwardProbePDPairNamesThePrefillerToTheRoutingProxy(t *testing.T)
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := probePairDeployment(
-				tc.engine, tc.prefillWidth, tc.decodeWidth, workercore.ModelDeploymentRouterLLMD)
+				tc.engine, tc.prefillWidth, tc.decodeWidth, workercore.ModelDeploymentRouterLLMD,
+			)
 			prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
 			decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
 			fetch := &probePairFetch{prefillHost: probeHost(0, 0)}
 
 			got := observeModelDeploymentGroupForwardPair(
-				context.Background(), md, prefill, decode, fetch.fetch)
+				context.Background(), md, prefill, decode, fetch.fetch,
+			)
 
 			assert.Equal(t, modelDeploymentGroupForwardVerified, got.Decode.State,
 				"a decode group whose pair carried the request is verified")
@@ -1281,13 +1296,15 @@ func TestGroupForwardProbePDPairAttemptRecordsTheShape(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := probePairDeployment(
-				workercore.ModelDeploymentEngineSGLang, 1, 1, tc.router)
+				workercore.ModelDeploymentEngineSGLang, 1, 1, tc.router,
+			)
 			prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
 			decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
 			fetch := &probePairFetch{prefillHost: probeHost(0, 0)}
 
 			got := observeModelDeploymentGroupForwardPair(
-				context.Background(), md, prefill, decode, fetch.fetch)
+				context.Background(), md, prefill, decode, fetch.fetch,
+			)
 
 			assert.Equal(t, modelDeploymentGroupForwardVerified, got.Decode.State)
 			assert.Equal(t, tc.wantShape, got.Attempt.Shape,
@@ -1316,7 +1333,8 @@ func TestGroupForwardProbePDPairAttemptRecordsTheShape(t *testing.T) {
 // wrong verdict and this case would fail. The front door is the only address that can verify.
 func TestGroupForwardProbePDPairAsksTheFrontedDecoderAtItsFrontDoor(t *testing.T) {
 	md := probePairDeployment(
-		workercore.ModelDeploymentEngineSGLang, 1, 1, workercore.ModelDeploymentRouterLLMD)
+		workercore.ModelDeploymentEngineSGLang, 1, 1, workercore.ModelDeploymentRouterLLMD,
+	)
 	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
 	decode := probePairView("decode", 0, probePairEnginePortMember(1, 0, "uid-d", "8200"))
 	fetch := &probePairFetch{
@@ -1328,7 +1346,8 @@ func TestGroupForwardProbePDPairAsksTheFrontedDecoderAtItsFrontDoor(t *testing.T
 	}
 
 	got := observeModelDeploymentGroupForwardPair(
-		context.Background(), md, prefill, decode, fetch.fetch)
+		context.Background(), md, prefill, decode, fetch.fetch,
+	)
 
 	assert.Equal(t, modelDeploymentGroupForwardVerified, got.Decode.State,
 		"the front door is the address the proxy answers on")
@@ -1376,7 +1395,8 @@ func TestGroupForwardProbePDPairNamesTheSideItCannotAsk(t *testing.T) {
 			fetch := &probePairFetch{prefillHost: probeHost(0, 0)}
 
 			got := observeModelDeploymentGroupForwardPair(
-				context.Background(), md, tc.prefill, tc.decode, fetch.fetch)
+				context.Background(), md, tc.prefill, tc.decode, fetch.fetch,
+			)
 
 			assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
 				"a group that could not be asked is held")
@@ -1399,24 +1419,28 @@ func TestGroupForwardProbePDPairWidthBoundIsTheRoomsOwn(t *testing.T) {
 	assert.Empty(t,
 		modelDeploymentGroupForwardPairWidthBound(
 			"prefill", modelDeploymentGroupForwardPairMaxWidth,
-			modelDeploymentGroupForwardPairShapeHeadToHead),
+			modelDeploymentGroupForwardPairShapeHeadToHead,
+		),
 		"the widest group the room can address is probed")
 	assert.Contains(t,
 		modelDeploymentGroupForwardPairWidthBound(
 			"prefill", modelDeploymentGroupForwardPairMaxWidth+1,
-			modelDeploymentGroupForwardPairShapeHeadToHead),
+			modelDeploymentGroupForwardPairShapeHeadToHead,
+		),
 		"above the bound of "+strconv.Itoa(modelDeploymentGroupForwardPairMaxWidth),
 		"the first width past the bound is held, and the reason names the bound")
 	assert.Contains(t,
 		modelDeploymentGroupForwardPairWidthBound(
 			"prefill", modelDeploymentGroupForwardPairMaxWidth+1,
-			modelDeploymentGroupForwardPairShapeViaRoutingProxy),
+			modelDeploymentGroupForwardPairShapeViaRoutingProxy,
+		),
 		"above this probe's supported limit of "+
 			strconv.Itoa(modelDeploymentGroupForwardPairMaxWidth),
 		"the proxy path's reason states the limit rather than a room this operator never builds")
 
 	md := probePairDeployment(
-		workercore.ModelDeploymentEngineSGLang, modelDeploymentGroupForwardPairMaxWidth+1, 1, "")
+		workercore.ModelDeploymentEngineSGLang, modelDeploymentGroupForwardPairMaxWidth+1, 1, "",
+	)
 	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
 	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
 	fetch := &probePairFetch{prefillHost: probeHost(0, 0)}
@@ -1437,7 +1461,8 @@ func TestGroupForwardProbePDPairWidthBoundIsTheRoomsOwn(t *testing.T) {
 func TestGroupForwardProbePDPairWidthBoundInTheProxyShape(t *testing.T) {
 	md := probePairDeployment(
 		workercore.ModelDeploymentEngineSGLang, modelDeploymentGroupForwardPairMaxWidth+1, 1,
-		workercore.ModelDeploymentRouterLLMD)
+		workercore.ModelDeploymentRouterLLMD,
+	)
 	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
 	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
 	fetch := &probePairFetch{prefillHost: probeHost(0, 0)}
@@ -1498,7 +1523,8 @@ func TestGroupForwardProbeNeverCallsADisaggregatedRoleNotApplicable(t *testing.T
 			}
 
 			got := observeModelDeploymentGroupForward(
-				context.Background(), md, role, view, fetch.fetch)
+				context.Background(), md, role, view, fetch.fetch,
+			)
 
 			assert.NotEqual(t, modelDeploymentGroupForwardNotApplicable, got.State,
 				"a disaggregated group always has a transfer to prove")
@@ -1572,7 +1598,8 @@ func TestGroupForwardProbeHoldsOnAnAbortedFinish(t *testing.T) {
 			}
 
 			got := observeModelDeploymentGroupForward(
-				context.Background(), md, role, view, fetch.fetch)
+				context.Background(), md, role, view, fetch.fetch,
+			)
 
 			assert.Equal(t, modelDeploymentGroupForwardUnknown, got.State,
 				"a request that was aborted is not evidence that the group forwarded one")

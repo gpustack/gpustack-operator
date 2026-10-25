@@ -1087,7 +1087,8 @@ func TestModelDeploymentJointAdmission_TheExemptionCountsRolesNotReplicas(t *tes
 	cli := newJointClient(
 		jointCheckObject(), md, reserved, waiting,
 		jointWorkload("wl-decode-0", true, reserved),
-		jointWorkload("wl-decode-1", false, waiting))
+		jointWorkload("wl-decode-1", false, waiting),
+	)
 
 	got := reconcileJoint(t, cli, "wl-decode-0")
 
@@ -1633,7 +1634,7 @@ func anyReplicaMidReplacement(t *testing.T, cli ctrlcli.Client) bool {
 // end the reconcile without an error and without an error log. Any other failure is still returned
 // and logged, and the next reconcile writes the verdict in every case.
 func TestModelDeploymentJointAdmission_ExpectedWriteFailuresAreQuiet(t *testing.T) {
-	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "workloads"}
+	gr := schema.GroupResource{Group: kueue.SchemeGroupVersion.Group, Resource: "workloads"}
 	testCases := []struct {
 		name       string
 		err        error
@@ -1670,7 +1671,8 @@ func TestModelDeploymentJointAdmission_ExpectedWriteFailuresAreQuiet(t *testing.
 						}
 						return c.SubResource(sub).Patch(ctx, obj, patch, opts...)
 					},
-				})
+				},
+			)
 			r := &ModelDeploymentJointAdmissionReconciler{Client: cli}
 			req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "team-a", Name: "wl"}}
 
@@ -1694,7 +1696,7 @@ func TestModelDeploymentJointAdmission_ExpectedWriteFailuresAreQuiet(t *testing.
 // check, so a conflict or a deleted object ends the reconcile without an error and without an error
 // log, any other failure is returned and logged, and the next reconcile marks the check Active.
 func TestModelDeploymentJointAdmissionCheckReconciler_ExpectedWriteFailuresAreQuiet(t *testing.T) {
-	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "admissionchecks"}
+	gr := schema.GroupResource{Group: kueue.SchemeGroupVersion.Group, Resource: "admissionchecks"}
 	testCases := []struct {
 		name       string
 		err        error

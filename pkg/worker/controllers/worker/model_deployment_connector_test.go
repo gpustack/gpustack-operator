@@ -284,7 +284,8 @@ func TestSynthesizeModelDeploymentConnector_RoleDiscriminator(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := SynthesizeModelDeploymentConnector(
-				connectorInputForKind(tc.engine, tc.manufacturer, tc.kind))
+				connectorInputForKind(tc.engine, tc.manufacturer, tc.kind),
+			)
 			require.NoError(t, err)
 
 			require.Len(t, got.Args, 2)
@@ -297,7 +298,8 @@ func TestSynthesizeModelDeploymentConnector_RoleDiscriminator(t *testing.T) {
 func TestSynthesizeModelDeploymentConnector_KVEventsPerRole(t *testing.T) {
 	prefillInput := connectorInputForKind(
 		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
-		workercore.ModelDeploymentRoleKindPrefill)
+		workercore.ModelDeploymentRoleKindPrefill,
+	)
 	prefillInput.PublishKVEvents = true
 	prefillInput.KVEventsHost = "qwen-prefill.team-a.svc"
 	prefill, err := SynthesizeModelDeploymentConnector(prefillInput)
@@ -315,7 +317,8 @@ func TestSynthesizeModelDeploymentConnector_KVEventsPerRole(t *testing.T) {
 
 	decode, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
 		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
-		workercore.ModelDeploymentRoleKindDecode))
+		workercore.ModelDeploymentRoleKindDecode,
+	))
 	require.NoError(t, err)
 	assert.Nil(t, decode.KVEvents)
 	assert.Empty(t, decode.Ports)
@@ -325,7 +328,8 @@ func TestSynthesizeModelDeploymentConnector_KVEventsPerRole(t *testing.T) {
 func TestSynthesizeModelDeploymentConnector_KVTransfer(t *testing.T) {
 	in := connectorInputForKind(
 		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
-		workercore.ModelDeploymentRoleKindPrefill)
+		workercore.ModelDeploymentRoleKindPrefill,
+	)
 	in.KVTransfer = true
 	in.PublishKVEvents = true
 	in.KVEventsHost = "qwen-prefill.team-a.svc"
@@ -355,7 +359,8 @@ func TestSynthesizeModelDeploymentConnector_KVTransfer(t *testing.T) {
 func TestSynthesizeModelDeploymentConnector_SGLangPureTransfer(t *testing.T) {
 	in := connectorInputForKind(
 		workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA,
-		workercore.ModelDeploymentRoleKindPrefill)
+		workercore.ModelDeploymentRoleKindPrefill,
+	)
 	in.Domain = ""
 	in.MasterServerAddress = ""
 	in.Protocols = nil
@@ -386,7 +391,8 @@ func TestSynthesizeModelDeploymentConnector_KVTransferProtocol(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			in := connectorInputForKind(
 				workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
-				workercore.ModelDeploymentRoleKindDecode)
+				workercore.ModelDeploymentRoleKindDecode,
+			)
 			in.KVTransfer = true
 			in.KVTransferProtocol = tc.protocol
 
@@ -620,7 +626,8 @@ func TestModelDeploymentUsesKVTransfer(t *testing.T) {
 		workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRoleKindPrefill)
 	unrouted.Spec.Router = nil
 	assert.False(t, modelDeploymentUsesKVTransfer(
-		unrouted, &unrouted.Spec.Roles[0], nodefeature.ManufacturerNVIDIA),
+		unrouted, &unrouted.Spec.Roles[0], nodefeature.ManufacturerNVIDIA,
+	),
 		"a half with nothing routing between the halves has nobody to pair with either")
 }
 
@@ -664,7 +671,8 @@ func TestModelDeploymentFrontsDecodeWithSidecar(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			md := connectorPredicateDeployment(c.router, c.engine, c.kind)
 			assert.Equal(t, c.want, modelDeploymentFrontsDecodeWithSidecar(
-				md, &md.Spec.Roles[0]))
+				md, &md.Spec.Roles[0],
+			))
 		})
 	}
 }
@@ -676,12 +684,14 @@ func TestModelDeploymentPublishesKVEvents(t *testing.T) {
 	})
 
 	assert.True(t, modelDeploymentPublishesKVEvents(
-		base, &base.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+		base, &base.Spec.Roles[0], nodefeature.ManufacturerNVIDIA,
+	))
 
 	// The consequence the shared gate exists for: on Ascend the render refuses the event
 	// publisher, so publishing must read false rather than error-loop the reconcile.
 	assert.False(t, modelDeploymentPublishesKVEvents(
-		base, &base.Spec.Roles[0], nodefeature.ManufacturerAscend))
+		base, &base.Spec.Roles[0], nodefeature.ManufacturerAscend,
+	))
 
 	// THE PUBLISHER IS THE ONE DECISION THAT DID NOT WIDEN, and these are the rows that say so.
 	// It feeds one router's prefix-cache data layer, which subscribes per Pod; the other two
@@ -697,7 +707,8 @@ func TestModelDeploymentPublishesKVEvents(t *testing.T) {
 			other.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 		}
 		assert.False(t, modelDeploymentPublishesKVEvents(
-			other, &other.Spec.Roles[0], nodefeature.ManufacturerNVIDIA),
+			other, &other.Spec.Roles[0], nodefeature.ManufacturerNVIDIA,
+		),
 			"%s scores on its own observations and subscribes to no publisher", name)
 	}
 
@@ -706,17 +717,20 @@ func TestModelDeploymentPublishesKVEvents(t *testing.T) {
 	otherEngine := base.DeepCopy()
 	otherEngine.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 	assert.False(t, modelDeploymentPublishesKVEvents(
-		otherEngine, &otherEngine.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+		otherEngine, &otherEngine.Spec.Roles[0], nodefeature.ManufacturerNVIDIA,
+	))
 
 	decode := base.DeepCopy()
 	decode.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
 	assert.False(t, modelDeploymentPublishesKVEvents(
-		decode, &decode.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+		decode, &decode.Spec.Roles[0], nodefeature.ManufacturerNVIDIA,
+	))
 
 	unmanaged := base.DeepCopy()
 	unmanaged.Spec.Roles[0].Command = []string{"/bin/my-server"}
 	assert.False(t, modelDeploymentPublishesKVEvents(
-		unmanaged, &unmanaged.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+		unmanaged, &unmanaged.Spec.Roles[0], nodefeature.ManufacturerNVIDIA,
+	))
 }
 
 // TestSynthesizeModelDeploymentConnector_ServerIsTheSingleRoleRender is the regression guard that
@@ -727,12 +741,14 @@ func TestModelDeploymentPublishesKVEvents(t *testing.T) {
 // configurations would roll every existing deployment the moment the field was defaulted.
 func TestSynthesizeModelDeploymentConnector_ServerIsTheSingleRoleRender(t *testing.T) {
 	unset, err := SynthesizeModelDeploymentConnector(
-		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
+		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA),
+	)
 	require.NoError(t, err)
 
 	server, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
 		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
-		workercore.ModelDeploymentRoleKindServer))
+		workercore.ModelDeploymentRoleKindServer,
+	))
 	require.NoError(t, err)
 
 	assert.Equal(t, unset, server, "an unset kind and an explicit server are one shape")
@@ -755,11 +771,13 @@ func TestSynthesizeModelDeploymentConnector_ServerIsTheSingleRoleRender(t *testi
 func TestSynthesizeModelDeploymentConnector_DiscriminatorTravelsInAnOwnedKey(t *testing.T) {
 	server, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
 		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
-		workercore.ModelDeploymentRoleKindServer))
+		workercore.ModelDeploymentRoleKindServer,
+	))
 	require.NoError(t, err)
 	prefill, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
 		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
-		workercore.ModelDeploymentRoleKindPrefill))
+		workercore.ModelDeploymentRoleKindPrefill,
+	))
 	require.NoError(t, err)
 
 	require.Equal(t, len(server.Args), len(prefill.Args),
@@ -807,7 +825,8 @@ func TestSynthesizeModelDeploymentConnector_TransportTheEngineCannotUse(t *testi
 	require.NoError(t, err, "the same accelerator on a pool that offers what it accepts still renders")
 
 	_, err = SynthesizeModelDeploymentConnector(
-		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
+		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA),
+	)
 	require.NoError(t, err, "and the transport that failed above is the ordinary one everywhere else")
 }
 
@@ -825,13 +844,15 @@ func TestSynthesizeModelDeploymentConnector_TransportTheEngineCannotUse(t *testi
 func TestSynthesizeModelDeploymentConnector_RoleTheEngineCannotBeTold(t *testing.T) {
 	render, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
 		workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA,
-		workercore.ModelDeploymentRoleKindPrefill))
+		workercore.ModelDeploymentRoleKindPrefill,
+	))
 	require.NoError(t, err, "sglang renders the prefill half as its disaggregation arguments")
 	require.Contains(t, render.Args, "--disaggregation-mode",
 		"the kind reaches the engine as the split it names, not as a label on a plain server")
 
 	_, err = SynthesizeModelDeploymentConnector(connectorInputForKind(
-		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, "router"))
+		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, "router",
+	))
 	require.ErrorContains(t, err, "router",
 		"a kind with no mapping is refused naming it, never rendered as a plain server")
 }
@@ -1141,7 +1162,8 @@ func TestModelDeploymentConnector_TakeOverCommandFillsItsHalf(t *testing.T) {
 // changed but not WHY it mattered. These carry the why.
 func TestSynthesizeModelDeploymentConnector_SGLangEnvironmentCarrier(t *testing.T) {
 	got, err := SynthesizeModelDeploymentConnector(
-		connectorInput(workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA))
+		connectorInput(workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA),
+	)
 	require.NoError(t, err)
 
 	// The engine resolves its config source in the order extra-config, then config path, then
@@ -1276,7 +1298,8 @@ func TestSynthesizeModelDeploymentConnector_FileCarrierDeclaresPureClient(t *tes
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := SynthesizeModelDeploymentConnector(
-				connectorInput(workercore.ModelDeploymentEngineVLLM, tc.manufacturer))
+				connectorInput(workercore.ModelDeploymentEngineVLLM, tc.manufacturer),
+			)
 			require.NoError(t, err)
 
 			cfg := clientConfigOf(t, got)
@@ -1309,7 +1332,8 @@ func TestSynthesizeModelDeploymentConnector_FileCarrierDeclaresPureClient(t *tes
 // only the file's applies to a rendered document.
 func TestSynthesizeModelDeploymentConnector_DeviceSpellingIsNotConfigurable(t *testing.T) {
 	got, err := SynthesizeModelDeploymentConnector(
-		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
+		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA),
+	)
 	require.NoError(t, err)
 
 	cfg := clientConfigOf(t, got)

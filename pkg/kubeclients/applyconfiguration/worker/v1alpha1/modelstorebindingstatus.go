@@ -22,10 +22,12 @@ type ModelStoreBindingStatusApplyConfiguration struct {
 	// PhaseMessage carries the reason for the phase.
 	PhaseMessage *string `json:"phaseMessage,omitempty"`
 	// Conditions is the finer view, one condition per axis.
+	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	// UsedBytes is what the namespace's prefetches occupy, the full size of every distinct digest
 	// any of them targets on any node holding it. It is absent while nothing has been measured,
 	// and zero is a measurement rather than the lack of one.
+	//
 	UsedBytes *resource.Quantity `json:"usedBytes,omitempty"`
 }
 

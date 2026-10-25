@@ -3,12 +3,12 @@ package kubeapp
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
 
-	"golang.org/x/exp/maps"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/rest"

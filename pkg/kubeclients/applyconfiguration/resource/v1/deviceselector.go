@@ -8,6 +8,7 @@ package v1
 // DeviceSelector must have exactly one field set.
 type DeviceSelectorApplyConfiguration struct {
 	// CEL contains a CEL expression for selecting a device.
+	//
 	CEL *CELDeviceSelectorApplyConfiguration `json:"cel,omitempty"`
 }
 

@@ -12,8 +12,10 @@ import (
 // ModelDeploymentScalerStepPolicy is a bound on how far one role may move in one pass.
 type ModelDeploymentScalerStepPolicyApplyConfiguration struct {
 	// Type is the unit of Value.
+	//
 	Type *workerv1alpha1.ModelDeploymentScalerStepPolicyType `json:"type,omitempty"`
 	// Value is the bound expressed in the unit Type names.
+	//
 	Value *int32 `json:"value,omitempty"`
 }
 

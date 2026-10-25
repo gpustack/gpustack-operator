@@ -50,7 +50,8 @@ func (in *nvidia) MonitorAcceleratorPartitions(
 		in.logger.Info("no nvidia pci devices found for allocated partitions",
 			"partitions", len(requests))
 		grp.Partitions = unreadAcceleratorPartitions(
-			requests, device.AcceleratorProcessReasonDriverError)
+			requests, device.AcceleratorProcessReasonDriverError,
+		)
 		return grp, nil
 	}
 
@@ -61,7 +62,8 @@ func (in *nvidia) MonitorAcceleratorPartitions(
 		in.logger.V(3).Error(ret, "failed to count devices for allocated partitions",
 			"count", cnt, "partitions", len(requests))
 		grp.Partitions = unreadAcceleratorPartitions(
-			requests, device.AcceleratorProcessReasonDriverError)
+			requests, device.AcceleratorProcessReasonDriverError,
+		)
 		return grp, nil
 	}
 
@@ -103,7 +105,8 @@ func (in *nvidia) MonitorAcceleratorPartitions(
 	// a card that has left the machine while an allocation still names a partition on it.
 	for _, cardRequests := range byCard {
 		grp.Partitions = append(grp.Partitions, unreadAcceleratorPartitions(
-			cardRequests, device.AcceleratorProcessReasonDriverError)...)
+			cardRequests, device.AcceleratorProcessReasonDriverError,
+		)...)
 	}
 
 	return grp, nil

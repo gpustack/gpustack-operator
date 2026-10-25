@@ -14,11 +14,13 @@ import (
 type InstanceAdditionalVolumeApplyConfiguration struct {
 	// MountPath is the absolute in-container path to mount the volume at. It must not duplicate
 	// another entry's path, nor the workspace's VolumeMount.
+	//
 	MountPath *string `json:"mountPath,omitempty"`
 	// ReadOnly mounts the volume read-only.
 	ReadOnly *bool `json:"readOnly,omitempty"`
 	// SubPath mounts a relative path inside the volume rather than its root.
 	// It must not be absolute nor contain a ".." element.
+	//
 	SubPath *string `json:"subPath,omitempty"`
 	// Persistent is the reference to the InstancePersistentVolume to mount, in the same namespace.
 	Persistent *v1.LocalObjectReferenceApplyConfiguration `json:"persistent,omitempty"`

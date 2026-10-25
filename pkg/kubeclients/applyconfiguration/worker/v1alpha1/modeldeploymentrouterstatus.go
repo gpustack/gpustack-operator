@@ -14,15 +14,19 @@ package v1alpha1
 type ModelDeploymentRouterStatusApplyConfiguration struct {
 	// Name echoes the spec, so that a reader holding only this object knows which implementation the
 	// contract below was shaped for.
+	//
 	Name *string `json:"name,omitempty"`
 	// Endpoint is the router's own address, present once the router's Service has one.
+	//
 	Endpoint *string `json:"endpoint,omitempty"`
 	// PoolEndpoint is the address of the KV cache pool this deployment attached to, in the form its
 	// client takes. A router that consults the pool needs it, and resolving it from the Binding is
 	// work this operator has already done.
+	//
 	PoolEndpoint *string `json:"poolEndpoint,omitempty"`
 	// Roles is one entry per declared role, and its key set EQUALS the role set. A router discovers
 	// live replicas for itself; what it cannot discover is which selector names which half of a pair.
+	//
 	Roles []ModelDeploymentRouterRoleStatusApplyConfiguration `json:"roles,omitempty"`
 	// Metrics are the serving metrics the roles expose and the port they are served on. They are
 	// deployment-wide because they are a property of the engine, which is a deployment-wide field.

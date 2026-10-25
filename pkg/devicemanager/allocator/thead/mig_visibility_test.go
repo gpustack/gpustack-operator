@@ -225,7 +225,8 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 			pod, ctr := visibilityPod()
 
 			resp, err := s.GetPhysicalSlicedVisibilityResponse(
-				context.Background(), pod, ctr, devs, allocatedOn(c.cards...), visOwner)
+				context.Background(), pod, ctr, devs, allocatedOn(c.cards...), visOwner,
+			)
 
 			if c.wantErr != "" {
 				require.Error(t, err)
@@ -271,7 +272,8 @@ func TestGetPhysicalSlicedVisibilityResponseMatchesOwner(t *testing.T) {
 	require.NoError(t, err)
 
 	resp, err := s.GetPhysicalSlicedVisibilityResponse(
-		context.Background(), pod, sidecar, devs, allocated, visOwner)
+		context.Background(), pod, sidecar, devs, allocated, visOwner,
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, devicePaths(ownerResp.Response), devicePaths(resp))
@@ -311,7 +313,8 @@ func TestGetPhysicalSlicedVisibilityResponseRefusals(t *testing.T) {
 			pod, ctr := visibilityPod()
 
 			resp, err := s.GetPhysicalSlicedVisibilityResponse(
-				context.Background(), pod, ctr, partitionDevices(testPPUUUID0), c.allocated, visOwner)
+				context.Background(), pod, ctr, partitionDevices(testPPUUUID0), c.allocated, visOwner,
+			)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), c.wantErr)
 			assert.Nil(t, resp)
@@ -331,7 +334,8 @@ func TestGetPhysicalSlicedVisibilityResponseCardStateError(t *testing.T) {
 	pod, ctr := visibilityPod()
 
 	resp, err := s.GetPhysicalSlicedVisibilityResponse(
-		context.Background(), pod, ctr, partitionDevices(testPPUUUID0), allocatedOn(testPPUUUID0), visOwner)
+		context.Background(), pod, ctr, partitionDevices(testPPUUUID0), allocatedOn(testPPUUUID0), visOwner,
+	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read card")
 	assert.Nil(t, resp)

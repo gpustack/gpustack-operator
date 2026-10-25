@@ -14,6 +14,7 @@ type ResourceClaimApplyConfiguration struct {
 	// Request is the name chosen for a request in the referenced claim.
 	// If empty, everything from the claim is made available, otherwise
 	// only the result of this request.
+	//
 	Request *string `json:"request,omitempty"`
 }
 

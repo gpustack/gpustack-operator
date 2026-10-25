@@ -12,18 +12,24 @@ import (
 // ModelDeploymentScalerPredictorStatus is the state of the predictor of one role.
 type ModelDeploymentScalerPredictorStatusApplyConfiguration struct {
 	// Name is the role this predictor belongs to.
+	//
 	Name *string `json:"name,omitempty"`
 	// Level is the demand the predictor currently believes in.
+	//
 	Level *resource.Quantity `json:"level,omitempty"`
 	// Trend is how fast the predictor believes the demand is moving.
+	//
 	Trend *resource.Quantity `json:"trend,omitempty"`
 	// Covariance is how much the predictor trusts its own estimate.
+	//
 	Covariance *ModelDeploymentScalerKalmanCovarianceApplyConfiguration `json:"covariance,omitempty"`
 	// SampleCount is how many observations the predictor has seen.
+	//
 	SampleCount *int32 `json:"sampleCount,omitempty"`
 	// History is the demand the predictor has seen.
 	//
 	// It is bounded, because the predictor only needs the recent past.
+	//
 	History []ModelDeploymentScalerDemandSampleApplyConfiguration `json:"history,omitempty"`
 }
 

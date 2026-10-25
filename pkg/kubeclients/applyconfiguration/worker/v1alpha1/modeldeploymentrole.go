@@ -55,6 +55,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// refuses a duplicate before any webhook runs; the webhook carries the same rule only as a
 	// backstop for that marker being dropped. Two roles sharing a name would collapse into one
 	// PodSet whose count is their sum, which is a silent merge rather than an error.
+	//
 	Name *string `json:"name,omitempty"`
 	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name
 	// is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable
@@ -64,6 +65,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// deployment declaring one would render a role no reader of the rendered configuration could
 	// reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
 	// so such a deployment renders exactly as it did.
+	//
 	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
 	// Replicas is how many independent serving instances this role runs. The instances are
 	// independent: each one starts, serves and is replaced on its own, and none of them depends on
@@ -78,6 +80,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// reconcile does; left open at the type's range, a single accepted field value is enough to
 	// exhaust the worker before the API server ever throttles the creates. The bound is set where no
 	// deployment anybody serves can reach it.
+	//
 	Replicas *int32 `json:"replicas,omitempty"`
 	// ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
 	// start together, they are replaced together, and none of them serves alone — the instance,
@@ -104,6 +107,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// how many Pods one instance is rendered as, so a pass renders replicas times this many before it
 	// writes any of them. It is set far above the sizes an accelerator topology makes sense at, and
 	// far below the range that turns one accepted field value into an out-of-memory worker.
+	//
 	ReplicaSize *int32 `json:"size,omitempty"`
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.
@@ -113,6 +117,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// against the queue the new type publishes before the next old replica may leave. Existing
 	// Pods keep the type they were admitted with until they are deleted. The elastic-EP profile
 	// freezes this field after creation.
+	//
 	InstanceType *string `json:"instanceType,omitempty"`
 	// Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED
 	// FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
@@ -135,22 +140,29 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// Image is the container image to run. Leaving it empty is the ordinary case: the role then
 	// runs the deployment's engine image. Set it to run a private build, to pin this one role to
 	// an image different from the engine's, or to name a repository the engine image does not.
+	//
 	Image *string `json:"image,omitempty"`
 	// ImagePullPolicy is the pull policy for Image.
+	//
 	ImagePullPolicy *v1.PullPolicy `json:"imagePullPolicy,omitempty"`
 	// ImagePullSecrets are the secrets used to pull Image.
+	//
 	ImagePullSecrets []corev1.LocalObjectReferenceApplyConfiguration `json:"imagePullSecrets,omitempty"`
 	// Privileged runs the container privileged.
+	//
 	Privileged *bool `json:"privileged,omitempty"`
 	// Ports are the container ports to expose in addition to the engine's own. They do not
 	// reserve or select the transfer engine's runtime port window.
+	//
 	Ports []ModelDeploymentPortApplyConfiguration `json:"ports,omitempty"`
 	// AdditionalVolumes are volumes mounted into the container alongside the operator's own.
+	//
 	AdditionalVolumes []ModelDeploymentAdditionalVolumeApplyConfiguration `json:"additionalVolumes,omitempty"`
 	// ShmSize limits the memory-backed /dev/shm volume in each role Pod. It must be positive.
 	// Omission renders 16Gi. An explicit /dev/shm mount in AdditionalVolumes takes precedence.
 	// Used shared memory counts toward the container's memory limit; this is not a reservation.
 	// Existing elastic members keep their mounts; new and replacement Pods use the current value.
+	//
 	ShmSize *resource.Quantity `json:"shmSize,omitempty"`
 	// Command replaces the whole argv, which is the TAKE-OVER tier: the user owns the whole
 	// command line, the operator synthesizes no engine argument and no client environment, the
@@ -163,6 +175,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// keep the mode they were created with until each is deleted for replacement, so during a
 	// rollout the role can hold both modes at once; cache injection and status read what is
 	// deployed. The elastic-EP profile freezes this field: the elastic renderer owns the argv.
+	//
 	Command []string `json:"command,omitempty"`
 	// ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the
 	// operator owns is REJECTED rather than merged: a silent merge produces two values for one
@@ -174,6 +187,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// THIS LIST IS NOT READ WHEN COMMAND IS SET: appending to an argv the role's author replaced
 	// would put words into a command line they own, so the take-over tier takes the whole line and
 	// this field does nothing beside it.
+	//
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 	// Env is appended the same way and refused on the same terms. Keys the operator merely defaults
 	// are not owned: a user's value wins there and no rejection follows.
@@ -181,10 +195,12 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// There is ONE list here rather than an overlay beside it: the former second tier was appended
 	// and refused for owned names on exactly the same terms, so the nesting expressed a precedence
 	// that never existed.
+	//
 	Env []ModelDeploymentEnvVarApplyConfiguration `json:"env,omitempty"`
 	// Topology optionally requires Kueue to place each replica's Pod group in one domain at this level.
 	// It applies to this role's independent replica group; it does not require other roles or replicas
 	// to share that domain.
+	//
 	Topology *ModelDeploymentRoleTopologyApplyConfiguration `json:"topology,omitempty"`
 	// TerminationGracePeriodSeconds is the whole time a departing replica of this role gets, from
 	// its Pod's delete to the kill, and it is written to each Pod's field of the same name. Unset
@@ -208,6 +224,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// idle reads the hook returns on. The upper bound is an hour, far past any request a replica
 	// serves; a request that needs longer needs a router that can move it, which no supported
 	// one does.
+	//
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
 	// ElasticEP opts this role into the managed elastic-EP profile: the operator then renders
 	// one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head
@@ -222,10 +239,12 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// and every Ray-only worker -- takes a complete TP group declared through ExtraArgs.
 	// All GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP.
 	// The auxiliary head requests no container resources and never counts toward Width.
+	//
 	ElasticEP *ModelDeploymentRoleElasticEPApplyConfiguration `json:"elasticEp,omitempty"`
 	// StartupTimeoutSeconds is the maximum time in seconds that a role replica's main container
 	// is given to pass its startup probe before kubelet restarts it. Unset defaults to 1800
 	// (30 minutes), which renders a startupProbe with periodSeconds 10 and failureThreshold 180.
+	//
 	StartupTimeoutSeconds *int32 `json:"startupTimeoutSeconds,omitempty"`
 }
 

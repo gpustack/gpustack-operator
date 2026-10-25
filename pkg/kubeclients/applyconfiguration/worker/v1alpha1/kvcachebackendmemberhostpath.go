@@ -17,15 +17,18 @@ import (
 // use here that is known, and a source added without one is a validation surface nobody exercises.
 type KVCacheBackendMemberHostPathApplyConfiguration struct {
 	// Path is the absolute path on the node.
+	//
 	Path *string `json:"path,omitempty"`
 	// MountPath is the absolute path inside the member container. It must duplicate neither another
 	// entry's mount path nor one the renderer owns.
+	//
 	MountPath *string `json:"mountPath,omitempty"`
 	// Type is the kubelet's host-path type check, applied before the mount.
 	//
 	// Left unset it is the EMPTY type, for which the kubelet's mounter returns immediately and looks
 	// at the path not at all — so a missing path becomes an empty directory in the container and the
 	// member starts anyway. Naming a type is what turns that into a FailedMount the Pod stops at.
+	//
 	Type *v1.HostPathType `json:"type,omitempty"`
 	// ReadOnly mounts it read-only. A driver tree is read by the member and written by nobody, so
 	// this is the right setting for one, and it is not the default because a device node under /dev

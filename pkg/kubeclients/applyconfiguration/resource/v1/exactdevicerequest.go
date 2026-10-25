@@ -22,11 +22,13 @@ type ExactDeviceRequestApplyConfiguration struct {
 	// devices. If users are free to request anything without restrictions,
 	// then administrators can create an empty DeviceClass for users
 	// to reference.
+	//
 	DeviceClassName *string `json:"deviceClassName,omitempty"`
 	// Selectors define criteria which must be satisfied by a specific
 	// device in order for that device to be considered for this
 	// request. All selectors must be satisfied for a device to be
 	// considered.
+	//
 	Selectors []DeviceSelectorApplyConfiguration `json:"selectors,omitempty"`
 	// AllocationMode and its related fields define how devices are allocated
 	// to satisfy this request. Supported values are:
@@ -46,9 +48,11 @@ type ExactDeviceRequestApplyConfiguration struct {
 	//
 	// More modes may get added in the future. Clients must refuse to handle
 	// requests with unknown modes.
+	//
 	AllocationMode *resourcev1.DeviceAllocationMode `json:"allocationMode,omitempty"`
 	// Count is used only when the count mode is "ExactCount". Must be greater than zero.
 	// If AllocationMode is ExactCount and this field is not specified, the default is one.
+	//
 	Count *int64 `json:"count,omitempty"`
 	// AdminAccess indicates that this is a claim for administrative access
 	// to the device(s). Claims with AdminAccess are expected to be used for
@@ -56,9 +60,9 @@ type ExactDeviceRequestApplyConfiguration struct {
 	// all ordinary claims to the device with respect to access modes and
 	// any resource allocations.
 	//
-	// This is an alpha field and requires enabling the DRAAdminAccess
-	// feature gate. Admin access is disabled if this field is unset or
+	// Admin access is disabled if this field is unset or
 	// set to false, otherwise it is enabled.
+	//
 	AdminAccess *bool `json:"adminAccess,omitempty"`
 	// If specified, the request's tolerations.
 	//
@@ -75,8 +79,9 @@ type ExactDeviceRequestApplyConfiguration struct {
 	//
 	// The maximum number of tolerations is 16.
 	//
-	// This is an alpha field and requires enabling the DRADeviceTaints
+	// This is a beta field and requires enabling the DRADeviceTaints
 	// feature gate.
+	//
 	Tolerations []DeviceTolerationApplyConfiguration `json:"tolerations,omitempty"`
 	// Capacity define resource requirements against each capacity.
 	//
@@ -90,6 +95,7 @@ type ExactDeviceRequestApplyConfiguration struct {
 	// If AllocationMode is set to All,
 	// the request fails if there are devices that otherwise match the request,
 	// and have this capacity, with a value >= the requested amount, but which cannot be allocated to this request.
+	//
 	Capacity *CapacityRequirementsApplyConfiguration `json:"capacity,omitempty"`
 }
 

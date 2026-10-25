@@ -10,12 +10,14 @@ type NFSInstancePersistentVolumeSourceApplyConfiguration struct {
 	// Server is the hostname or IP address of the NFS server.
 	//
 	// Immutable after creation.
+	//
 	Server *string `json:"server,omitempty"`
 	// Share is the path of NFS share from the server.
 	// For each InstancePersistentVolume,
 	// a corresponding subpath will be created in the NFS share.
 	//
 	// Immutable after creation.
+	//
 	Share *string `json:"share,omitempty"`
 	// SubDirectory is the subdirectory in the NFS share for each InstancePersistentVolume.
 	// If it is blank, the subdirectory will be the same as the volume ID of the InstancePersistentVolume.
@@ -35,6 +37,7 @@ type NFSInstancePersistentVolumeSourceApplyConfiguration struct {
 	// If it is non-zero, perform a chmod with the specified permissions after mounted.
 	MountPermissions *string `json:"mountPermissions,omitempty"`
 	// MountOptions is the mount options for the NFS share.
+	//
 	MountOptions []string `json:"mountOptions,omitempty"`
 }
 

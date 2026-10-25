@@ -248,7 +248,8 @@ func TestModelDeploymentWorkloadWatch_EnqueuesTheDeployment(t *testing.T) {
 			predicate := modelDeploymentWorkloadPredicate()
 			handler := ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentWorkload)
 			queue := workqueue.NewTypedRateLimitingQueue(
-				workqueue.DefaultTypedControllerRateLimiter[ctrlreconcile.Request]())
+				workqueue.DefaultTypedControllerRateLimiter[ctrlreconcile.Request](),
+			)
 			defer queue.ShutDown()
 
 			ctx := context.Background()
@@ -314,7 +315,8 @@ func TestModelDeploymentWorkloadWatch_ReleasesAHeldRollout(t *testing.T) {
 	predicate := modelDeploymentWorkloadPredicate()
 	handler := ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentWorkload)
 	queue := workqueue.NewTypedRateLimitingQueue(
-		workqueue.DefaultTypedControllerRateLimiter[ctrlreconcile.Request]())
+		workqueue.DefaultTypedControllerRateLimiter[ctrlreconcile.Request](),
+	)
 	defer queue.ShutDown()
 
 	wlList := new(kueue.WorkloadList)

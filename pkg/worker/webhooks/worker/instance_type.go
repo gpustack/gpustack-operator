@@ -121,7 +121,8 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 	sched := nodefeature.PoolScheduleLabels(
 		it.Spec.Acceleratable, cpuAware,
 		it.Spec.GeneralGroup, it.Spec.AcceleratorGroup,
-		it.Spec.OS, it.Spec.Arch)
+		it.Spec.OS, it.Spec.Arch,
+	)
 
 	// Stamp the schedule labels on the InstanceType so it is selectable by the same
 	// discriminators its Devices and ResourceFlavors carry. Drop a stale feature key left by a

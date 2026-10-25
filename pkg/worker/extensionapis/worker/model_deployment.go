@@ -42,7 +42,8 @@ func modelDeploymentTable() (rest.TableConvertor, error) {
 		extensionapi.JSONPathTemplateColumn("Engine", "{.spec.engine.name}"),
 		extensionapi.JSONPathTemplateColumn("Roles", "{.status.roleSummary}"),
 		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"),
-		extensionapi.JSONPathTemplateColumn("Endpoint", "{.status.endpoint}"))
+		extensionapi.JSONPathTemplateColumn("Endpoint", "{.status.endpoint}"),
+	)
 }
 
 func (h *ModelDeploymentHandler) New() runtime.Object     { return &worker.ModelDeployment{} }

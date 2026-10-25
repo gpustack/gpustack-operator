@@ -130,7 +130,8 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 
 		_, admitted := ModelDeploymentEPDRowFor(
 			workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentEngineVLLM,
-			nodefeature.ManufacturerAscend)
+			nodefeature.ManufacturerAscend,
+		)
 		assert.False(t, admitted, "vllm-router+vLLM is not admitted on ascend")
 	})
 
@@ -152,7 +153,8 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 	t.Run("the admitted rows are the ones the design names", func(t *testing.T) {
 		ascend, admitted := ModelDeploymentEPDRowFor(
 			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
-			nodefeature.ManufacturerAscend)
+			nodefeature.ManufacturerAscend,
+		)
 		require.True(t, admitted, "the Ascend row is admitted")
 		assert.Equal(t, ModelDeploymentECConnectorExample, ascend.Connector)
 		assert.True(t, ascend.SharedVolume, "the Ascend row carries the encoder leg through a claim")
@@ -168,7 +170,8 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 				nodefeature.ManufacturerNVIDIA,
 			} {
 				row, admitted := ModelDeploymentEPDRowFor(
-					router, workercore.ModelDeploymentEngineVLLM, platform)
+					router, workercore.ModelDeploymentEngineVLLM, platform,
+				)
 				require.True(t, admitted, "the %s+%s row on %s is admitted",
 					router, workercore.ModelDeploymentEngineVLLM, platform)
 				assert.Equal(t, ModelDeploymentECConnectorCPU, row.Connector)
@@ -193,7 +196,8 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 				nodefeature.ManufacturerAscend,
 			} {
 				row, admitted := ModelDeploymentEPDRowFor(
-					router, workercore.ModelDeploymentEngineSGLang, platform)
+					router, workercore.ModelDeploymentEngineSGLang, platform,
+				)
 				require.True(t, admitted, "the %s+%s row on %s is admitted",
 					router, workercore.ModelDeploymentEngineSGLang, platform)
 				assert.Equal(t, ModelDeploymentECConnectorSGLangURLs, row.Connector,
@@ -215,13 +219,15 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 	t.Run("the returned row is not the table", func(t *testing.T) {
 		admitted, found := ModelDeploymentEPDRowFor(
 			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
-			nodefeature.ManufacturerAscend)
+			nodefeature.ManufacturerAscend,
+		)
 		require.True(t, found)
 
 		admitted.Connector = "SomethingElseEntirely"
 		again, found := ModelDeploymentEPDRowFor(
 			workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentEngineVLLM,
-			nodefeature.ManufacturerAscend)
+			nodefeature.ManufacturerAscend,
+		)
 		require.True(t, found)
 		assert.Equal(t, ModelDeploymentECConnectorExample, again.Connector,
 			"writing to a returned row must not reach the admitted table")

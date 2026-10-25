@@ -869,7 +869,8 @@ func (l ComputeInstanceProfileInfoHandler) V1() (ComputeInstanceProfileInfo_v3, 
 		l.gpuInstance,
 		l.gpuInstanceProfileId,
 		l.computeInstanceProfileId,
-		&info)
+		&info,
+	)
 	return ComputeInstanceProfileInfo_v3{
 		Id:                    info.Id,
 		SliceCount:            info.SliceCount,
@@ -894,7 +895,8 @@ func (l ComputeInstanceProfileInfoHandler) V2() (ComputeInstanceProfileInfo_v3, 
 		l.gpuInstance,
 		l.gpuInstanceProfileId,
 		l.computeInstanceProfileId,
-		&info)
+		&info,
+	)
 	return ComputeInstanceProfileInfo_v3{
 		Version:               info.Version,
 		Id:                    info.Id,
@@ -980,10 +982,12 @@ func (l Device) gpuInstancePossiblePlacements(symbol string, call gpuInstancePos
 // fallback, mirroring the V1/V2/V3 profile-info handlers.
 func (l Device) GetGpuInstancePossiblePlacements(profileId uint32) ([]GpuInstancePlacement, Return) {
 	placements, ret := l.gpuInstancePossiblePlacements(
-		"nvmlDeviceGetGpuInstancePossiblePlacements_v2", nvmlDeviceGetGpuInstancePossiblePlacements_v2, profileId)
+		"nvmlDeviceGetGpuInstancePossiblePlacements_v2", nvmlDeviceGetGpuInstancePossiblePlacements_v2, profileId,
+	)
 	if ret == ERROR_FUNCTION_NOT_FOUND {
 		return l.gpuInstancePossiblePlacements(
-			"nvmlDeviceGetGpuInstancePossiblePlacements", nvmlDeviceGetGpuInstancePossiblePlacements, profileId)
+			"nvmlDeviceGetGpuInstancePossiblePlacements", nvmlDeviceGetGpuInstancePossiblePlacements, profileId,
+		)
 	}
 	return placements, ret
 }
@@ -1103,7 +1107,8 @@ func (l GpuInstance) GetComputeInstances(ciProfileIndex uint32) ([]ComputeInstan
 	// (see GetGpuInstances) so NVML is never handed a zero-capacity buffer.
 	count := uint32(len(handles))
 	if ret := nvmlGpuInstanceGetComputeInstances(
-		l.gpuInstance, profileInfo.Id, &handles[0], &count); !ret.IsSuccess() {
+		l.gpuInstance, profileInfo.Id, &handles[0], &count,
+	); !ret.IsSuccess() {
 		return nil, ret
 	}
 	// Bound NVML's out-count by the buffer it was given (see GetGpuInstances).

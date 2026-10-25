@@ -99,7 +99,8 @@ func reservedWorkload(r *DevicesReconciler, podUID types.UID) (workercore.Device
 func exclusiveMatch(skipReserved bool) _AllocationMatch {
 	return _AllocationMatch{
 		ResourceName: nodefeature.GetAcceleratableResourceName(
-			nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive),
+			nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive,
+		),
 		Quantity:     resource.MustParse("1"),
 		SkipReserved: skipReserved,
 	}
@@ -1106,13 +1107,15 @@ func TestPartitionProfileOf(t *testing.T) {
 		{
 			name: "a published key reads back as its manufacturer spells it",
 			key: nodefeature.GetAcceleratablePartitionedProfileResourceName(
-				nodefeature.ManufacturerTHead, "4g48gb"),
+				nodefeature.ManufacturerTHead, "4g48gb",
+			),
 			profile: "4g48gb", ok: true,
 		},
 		{
 			name: "a manufacturer writing the separator keeps it",
 			key: nodefeature.GetAcceleratablePartitionedProfileResourceName(
-				nodefeature.ManufacturerNVIDIA, "3g.40gb"),
+				nodefeature.ManufacturerNVIDIA, "3g.40gb",
+			),
 			profile: "3g.40gb", ok: true,
 		},
 		{
@@ -3040,7 +3043,8 @@ func TestResourceServer_Allocate_VisibilityDistinctPods(t *testing.T) {
 // partition-backed, so the sidecar keeps the accelerator-based response.
 var slicedOwnerLimits = core.ResourceList{
 	nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced): resource.MustParse("1"),
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced,
+	): resource.MustParse("1"),
 }
 
 // sshVisibilityPod builds an SSH-enabled Pod: a workload container holding the accelerator under
@@ -3049,7 +3053,8 @@ var slicedOwnerLimits = core.ResourceList{
 // request to decide whether it must name a partition.
 func sshVisibilityPod(nodeName, uid string, ownerLimits core.ResourceList, cards int) *core.Pod {
 	visName := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility,
+	)
 	return &core.Pod{
 		ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: types.UID(uid)},
 		Spec: core.PodSpec{
@@ -3428,7 +3433,8 @@ func TestResourceServer_PreferredAllocation_HintNamesAnAvailableToken(t *testing
 
 			resp, err := s.getContainerPreferredAllocationResponse(
 				&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
-				&core.Pod{}, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs})
+				&core.Pod{}, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs},
+			)
 			require.NoError(t, err)
 			require.NotEmpty(t, resp.GetDeviceIDs(), "a fitting card must yield a hint")
 
@@ -3520,7 +3526,8 @@ func TestResourceServer_PreferredAllocation_SlicedPacks(t *testing.T) {
 
 			resp, err := s.getContainerPreferredAllocationResponse(
 				&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
-				&core.Pod{}, slicedUnitsContainer(c.units), _SlicedRoom{devs: devs})
+				&core.Pod{}, slicedUnitsContainer(c.units), _SlicedRoom{devs: devs},
+			)
 			require.NoError(t, err)
 
 			if c.wantCard == "" {
@@ -3556,7 +3563,8 @@ func TestResourceServer_PreferredAllocation_SlicedPinnedCardThatCannotFit(t *tes
 
 	resp, err := s.getContainerPreferredAllocationResponse(
 		&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
-		pod, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs})
+		pod, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs},
+	)
 	require.NoError(t, err)
 	require.Len(t, resp.GetDeviceIDs(), 1)
 
@@ -3589,7 +3597,8 @@ func TestResourceServer_PreferredAllocation_SlicedMustIncludeComesFirst(t *testi
 			MustIncludeDeviceIDs: []string{"grp-0:dev-0:0000"},
 			AllocationSize:       1,
 		},
-		&core.Pod{}, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs})
+		&core.Pod{}, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs},
+	)
 	require.NoError(t, err)
 	require.Len(t, resp.GetDeviceIDs(), 1)
 
@@ -3624,7 +3633,8 @@ func TestResourceServer_PreferredAllocation_SlicedMustIncludeSurvivesAFullCard(t
 			MustIncludeDeviceIDs: []string{"grp-0:dev-0:0000"},
 			AllocationSize:       1,
 		},
-		&core.Pod{}, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs})
+		&core.Pod{}, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs},
+	)
 	require.NoError(t, err)
 	require.Len(t, resp.GetDeviceIDs(), 1)
 
@@ -3645,7 +3655,8 @@ func TestResourceServer_PreferredAllocation_SlicedMustIncludeSurvivesAFullCard(t
 // slicedPod builds a Pod requesting one logical slice on the workload container.
 func slicedPod(nodeName, name, uid string) *core.Pod {
 	resName := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced,
+	)
 	return &core.Pod{
 		ObjectMeta: meta.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(uid)},
 		Spec: core.PodSpec{
@@ -4011,7 +4022,8 @@ func TestResourceServer_PreferredAllocation_StalePreferredIDDoesNotPanic(t *test
 	// the third accelerator lands in the unselected list the fallback would have sliced.
 	resp, err := s.getContainerPreferredAllocationResponse(
 		&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
-		pod, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs})
+		pod, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs},
+	)
 	require.NoError(t, err)
 
 	offered := sets.New(availableDeviceIDs...)

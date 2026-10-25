@@ -9,18 +9,23 @@ package v1alpha1
 type ModelPrefetchSpecApplyConfiguration struct {
 	// ArtifactRef names the ModelArtifact in this namespace whose weights warm the target set. It
 	// must be resolved before any Pod is rendered: admission and delivery both read its digest.
+	//
 	ArtifactRef *ModelPrefetchArtifactReferenceApplyConfiguration `json:"artifactRef,omitempty"`
 	// BindingRef names the ModelStoreBinding in this namespace that pays for the bytes. It must
 	// grant a store covering the target set, and its budget bounds the prefetch at admission.
+	//
 	BindingRef *ModelPrefetchBindingReferenceApplyConfiguration `json:"bindingRef,omitempty"`
 	// Placement narrows the target set. InstanceTypes and NodeSelector are mutually exclusive;
 	// both set is refused, and both left out derives the target set from the namespace's own
 	// deployments that reference the artifact. The relational rules are webhook-enforced.
+	//
 	Placement *ModelPrefetchPlacementApplyConfiguration `json:"placement,omitempty"`
 	// MinReady is how many target nodes holding the content make the prefetch Available; 0 means
 	// all of them.
+	//
 	MinReady *int32 `json:"minReady,omitempty"`
 	// Retention decides what happens to the content after it has landed.
+	//
 	Retention *ModelPrefetchRetentionApplyConfiguration `json:"retention,omitempty"`
 }
 

@@ -115,7 +115,8 @@ func renderModelDeploymentRouterObjects(
 	ports = slices.Compact(ports)
 	if len(ports) != 1 {
 		return ModelDeploymentRouterObjects{}, fmt.Errorf(
-			"router requires every role to use the same serving port; got %v", ports)
+			"router requires every role to use the same serving port; got %v", ports,
+		)
 	}
 
 	contract := workercore.ModelDeploymentRouterStatus{
@@ -340,10 +341,12 @@ func renderModelDeploymentRouterObjects(
 				continue
 			}
 			reading, err := scanModelDeploymentParallelism(
-				md.Spec.Engine.Name, md.Spec.Roles[i].ExtraArgs, md.Spec.Roles[i].Env)
+				md.Spec.Engine.Name, md.Spec.Roles[i].ExtraArgs, md.Spec.Roles[i].Env,
+			)
 			if err != nil {
 				return ModelDeploymentRouterObjects{}, fmt.Errorf(
-					"read the external-dp width the router renders: %w", err)
+					"read the external-dp width the router renders: %w", err,
+				)
 			}
 			routerInput.AttentionDataParallelSize = int32(reading.declared.AttentionDataParallel)
 			break
@@ -605,7 +608,8 @@ func renderModelDeploymentLLMDRouterWorkload(
 		Config: map[string]string{
 			modelDeploymentRouterConfigKey: in.Rendered.Document,
 			modelDeploymentRouterEnvoyConfigKey: renderModelDeploymentRouterEnvoyConfig(
-				md.Spec.Router.RequestTimeoutSeconds),
+				md.Spec.Router.RequestTimeoutSeconds,
+			),
 			modelDeploymentRouterSelectorKey:    in.EndpointSelector,
 			modelDeploymentRouterTargetPortsKey: in.TargetPorts,
 			modelDeploymentRouterExtraArgsKey:   in.ExtraArgs,
@@ -721,10 +725,12 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 				strings.Contains(liveConfig.Data[modelDeploymentRouterSelectorKey], candidateNeedle) ||
 				router.DocumentStageFilterDemands(
 					liveConfig.Data[modelDeploymentRouterConfigKey],
-					modelDeploymentLabelKeyEndpointEligible, modelDeploymentEndpointEligibleValue) ||
+					modelDeploymentLabelKeyEndpointEligible, modelDeploymentEndpointEligibleValue,
+				) ||
 				router.DocumentStageFilterDemands(
 					liveConfig.Data[modelDeploymentRouterConfigKey],
-					modelDeploymentRouterCandidateLabel, modelDeploymentEndpointEligibleValue)
+					modelDeploymentRouterCandidateLabel, modelDeploymentEndpointEligibleValue,
+				)
 		case apierrors.IsNotFound(err):
 		default:
 			return err
@@ -753,7 +759,8 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 		}
 
 		rendered, err = renderModelDeploymentRouterObjects(
-			ctx, md, r.modelDeploymentRoleManufacturers(ctx, md), retained || eligibilityDecided)
+			ctx, md, r.modelDeploymentRoleManufacturers(ctx, md), retained || eligibilityDecided,
+		)
 		if err != nil {
 			return err
 		}

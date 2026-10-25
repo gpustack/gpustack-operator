@@ -15,15 +15,19 @@ import (
 // content a deployment serves takes one object rather than two.
 type ModelDeploymentModelStatusApplyConfiguration struct {
 	// Artifact is the ModelArtifact this deployment references, in this namespace.
+	//
 	Artifact *string `json:"artifact,omitempty"`
 	// Revision is the commit a hub artifact resolved to. Absent for a claim.
+	//
 	Revision *string `json:"revision,omitempty"`
 	// ManifestDigest is a hub artifact's content address. Absent for a claim.
+	//
 	ManifestDigest *string `json:"manifestDigest,omitempty"`
 	// Delivery is how the weights reach the engine: "PVC", the claim mounted read-only at a fixed
 	// path; "Engine", the engine downloading the pinned commit itself; "Node", the node's
 	// model-manager plugin materializing the verified files and mounting them read-only at the same
 	// fixed path; or "Image", kubelet pulling the pinned OCI image into a read-only image volume.
+	//
 	Delivery *workerv1alpha1.ModelDeploymentModelDelivery `json:"delivery,omitempty"`
 }
 

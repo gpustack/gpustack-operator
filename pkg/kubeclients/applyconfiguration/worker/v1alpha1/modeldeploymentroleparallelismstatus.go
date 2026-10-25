@@ -17,16 +17,20 @@ import (
 // honesty the counts above owe an unobserved figure.
 type ModelDeploymentRoleParallelismStatusApplyConfiguration struct {
 	// Declared carries the degrees the role's arguments declare.
+	//
 	Declared *ModelDeploymentParallelismDeclaredStatusApplyConfiguration `json:"declared,omitempty"`
 	// Modes are the parallelism modes present in the role's arguments, keyed by canonical
 	// engine mode. An observed mode carries its explicit boolean; the absence of a key is not
 	// false. Empty until the arguments have been read.
+	//
 	Modes map[string]bool `json:"modes,omitempty"`
 	// LoadBalance is the balance shape the declared degrees derive to. Unknown means not
 	// derivable from what the role declares; a support judgment is carried in reason fields,
 	// never as a mode value here.
+	//
 	LoadBalance *workerv1alpha1.ModelDeploymentLoadBalance `json:"loadBalance,omitempty"`
 	// Source is the provenance of this reading.
+	//
 	Source *ModelDeploymentParallelismSourceStatusApplyConfiguration `json:"source,omitempty"`
 }
 

@@ -22,6 +22,7 @@ type ModelDeploymentKVCacheApplyConfiguration struct {
 	// type is a LocalObjectReference rather than a namespaced one so that reaching another
 	// namespace — or naming the cluster-scoped pool, or a bare endpoint URL — is unrepresentable
 	// rather than merely rejected.
+	//
 	PoolRef *v1.LocalObjectReferenceApplyConfiguration `json:"poolRef,omitempty"`
 	// Connector names the connector implementation this deployment is configured for. The value is
 	// an identity the deployment carries, not a setting the operator derives: "Mooncake" says which
@@ -49,6 +50,7 @@ type ModelDeploymentKVCacheApplyConfiguration struct {
 	// is frozen after creation: an existing deployment is recreated onto a second connector rather
 	// than edited onto one. That is stated here because "widening the enum" otherwise reads as a
 	// migration path for deployments that are already running.
+	//
 	Connector *string `json:"connector,omitempty"`
 }
 

@@ -24,8 +24,10 @@ type KVCachePoolBindingDomainApplyConfiguration struct {
 	// what the master accepts as a tenant_id and is what a Kubernetes object name already looks
 	// like, so nobody learns a second naming rule. This is the ONLY place the shape is judged;
 	// every consumer downstream copies the name rather than re-judging it.
+	//
 	Name *string `json:"name,omitempty"`
 	// BlockSize is the number of tokens one cache block holds.
+	//
 	BlockSize *int32 `json:"blockSize,omitempty"`
 	// Dtype is the element type the cached tensors carry, in the engine's own lowercase spelling.
 	//
@@ -33,6 +35,7 @@ type KVCachePoolBindingDomainApplyConfiguration struct {
 	// that would make a new engine dtype an API change — and the webhook judges the syntactic form
 	// only. It is spelled to match its JSON name exactly; DType would not, and the openapi generator
 	// records every such mismatch as a checked-in API rule violation.
+	//
 	Dtype *string `json:"dtype,omitempty"`
 }
 

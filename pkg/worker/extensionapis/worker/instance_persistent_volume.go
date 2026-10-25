@@ -69,7 +69,8 @@ func (h *InstancePersistentVolumeHandler) SetupHandler(
 		extensionapi.JSONPathColumn("Capacity", ".spec.capacity"),
 		extensionapi.JSONPathColumn("Access-Mode", ".spec.accessMode"),
 		extensionapi.JSONPathColumn("Reclaim-Policy", ".spec.reclaimPolicy"),
-		extensionapi.JSONPathColumn("Phase", ".status.phase"))
+		extensionapi.JSONPathColumn("Phase", ".status.phase"),
+	)
 	if err != nil {
 		return gvr, srs, err
 	}
@@ -133,7 +134,8 @@ func (h *InstancePersistentVolumeHandler) OnCreate(ctx context.Context, obj runt
 			ctrlclix.WithoutQuorum)
 		if err != nil {
 			return nil, field.InternalError(
-				field.NewPath("spec.type"), fmt.Errorf("list storage classes: %w", err))
+				field.NewPath("spec.type"), fmt.Errorf("list storage classes: %w", err),
+			)
 		}
 		for i := range stgClassList.Items {
 			if len(stgClassList.Items[i].Annotations) == 0 {
@@ -147,7 +149,8 @@ func (h *InstancePersistentVolumeHandler) OnCreate(ctx context.Context, obj runt
 		}
 		if stgClass == nil {
 			return nil, field.Required(
-				field.NewPath("spec.type"), "type is required when there is no default storage class")
+				field.NewPath("spec.type"), "type is required when there is no default storage class",
+			)
 		}
 	} else {
 		stgClass = new(storage.StorageClass)
@@ -155,10 +158,12 @@ func (h *InstancePersistentVolumeHandler) OnCreate(ctx context.Context, obj runt
 		if err != nil {
 			if !kerrors.IsNotFound(err) {
 				return nil, field.InternalError(
-					field.NewPath("spec.type"), fmt.Errorf("get storage class: %w", err))
+					field.NewPath("spec.type"), fmt.Errorf("get storage class: %w", err),
+				)
 			}
 			return nil, field.NotFound(
-				field.NewPath("spec.type"), *instPV.Spec.Type)
+				field.NewPath("spec.type"), *instPV.Spec.Type,
+			)
 		}
 	}
 
@@ -308,15 +313,18 @@ func (h *InstancePersistentVolumeHandler) OnUpdate(
 	var errs field.ErrorList
 	if !ptr.Equal(instPV.Spec.Type, instPVOld.Spec.Type) {
 		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.type"), "field is immutable"))
+			field.NewPath("spec.type"), "field is immutable",
+		))
 	}
 	if !instPV.Spec.Capacity.Equal(instPVOld.Spec.Capacity) {
 		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.capacity"), "field is immutable"))
+			field.NewPath("spec.capacity"), "field is immutable",
+		))
 	}
 	if !ptr.Equal(instPV.Spec.AccessMode, instPVOld.Spec.AccessMode) {
 		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.accessMode"), "field is immutable"))
+			field.NewPath("spec.accessMode"), "field is immutable",
+		))
 	}
 	if len(errs) > 0 {
 		return nil, kerrors.NewInvalid(worker.Kind("InstancePersistentVolume"), instPV.Name, errs)

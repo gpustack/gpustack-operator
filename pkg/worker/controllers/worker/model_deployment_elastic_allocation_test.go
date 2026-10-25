@@ -112,7 +112,8 @@ func allocationMember(
 	pod.Annotations = map[string]string{
 		deviceplugin.AllocatedAcceleratorAnnoKey: allocationCardAnnotation(
 			t, modelDeploymentMainContainerName, "GPU-abc", 0,
-			workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits),
+			workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits,
+		),
 	}
 	for _, m := range mutate {
 		m(pod)
@@ -206,7 +207,8 @@ func TestObserveModelDeploymentElasticAllocation_WholeGPUMembers(t *testing.T) {
 	m3 := allocationMember(t, md, "m3", "uid-3", 3, func(pod *core.Pod) {
 		pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = allocationCardAnnotation(
 			t, modelDeploymentMainContainerName, "GPU-def", 1,
-			workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits)
+			workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits,
+		)
 	})
 	m4 := allocationMember(t, md, "m4", "uid-4", 4, func(pod *core.Pod) { pod.Annotations = nil })
 	foreign := allocationMember(t, md, "foreign", "uid-f", 5, func(pod *core.Pod) {
@@ -226,7 +228,8 @@ func TestObserveModelDeploymentElasticAllocation_WholeGPUMembers(t *testing.T) {
 
 	supplied := []core.Pod{*m1, *m2, *m3, *m4, *foreign, *unseated, *allocationHead(t, md)}
 	admitted, allocated := allocationReconciler(cli).observeModelDeploymentElasticAllocation(
-		context.Background(), md, supplied)
+		context.Background(), md, supplied,
+	)
 
 	// The quota layer holds exactly the two members an admitted group-of-one Workload names;
 	// the allocation layer holds exactly the two members a whole-card record and an agreeing
@@ -281,7 +284,8 @@ func TestObserveModelDeploymentElasticAllocation_Holds(t *testing.T) {
 			member: func(t *testing.T, pod *core.Pod) {
 				pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = allocationCardAnnotation(
 					t, "sidecar", "GPU-abc", 0,
-					workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits)
+					workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits,
+				)
 			},
 			noPublish:     true,
 			wantAdmitted:  knownLayer(1),
@@ -292,7 +296,8 @@ func TestObserveModelDeploymentElasticAllocation_Holds(t *testing.T) {
 			member: func(t *testing.T, pod *core.Pod) {
 				pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = allocationCardAnnotation(
 					t, modelDeploymentMainContainerName, "GPU-abc", 0,
-					workercore.DeviceAllocationModeSliced, nodefeature.ResourceMaxUnits/4)
+					workercore.DeviceAllocationModeSliced, nodefeature.ResourceMaxUnits/4,
+				)
 			},
 			wantAdmitted:  knownLayer(1),
 			wantAllocated: unknownLayer("non-exclusive"),
@@ -322,7 +327,8 @@ func TestObserveModelDeploymentElasticAllocation_Holds(t *testing.T) {
 			member: func(t *testing.T, pod *core.Pod) {
 				pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = allocationCardAnnotation(
 					t, modelDeploymentMainContainerName, "GPU-abc", 0,
-					workercore.DeviceAllocationModeExclusive, 160_000)
+					workercore.DeviceAllocationModeExclusive, 160_000,
+				)
 			},
 			wantAdmitted:  knownLayer(1),
 			wantAllocated: unknownLayer("not a whole card"),
@@ -357,7 +363,8 @@ func TestObserveModelDeploymentElasticAllocation_Holds(t *testing.T) {
 			member: func(t *testing.T, pod *core.Pod) {
 				pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = allocationCardAnnotation(
 					t, modelDeploymentMainContainerName, "GPU-xyz", 7,
-					workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits)
+					workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits,
+				)
 			},
 			noPublish:     true,
 			wantAdmitted:  knownLayer(1),
@@ -494,7 +501,8 @@ func TestObserveModelDeploymentElasticAllocation_Holds(t *testing.T) {
 			}
 
 			admitted, allocated := allocationReconciler(cli).observeModelDeploymentElasticAllocation(
-				context.Background(), md, []core.Pod{supplied})
+				context.Background(), md, []core.Pod{supplied},
+			)
 
 			assertLayer(t, "admitted", admitted, tc.wantAdmitted)
 			assertLayer(t, "allocated", allocated, tc.wantAllocated)
@@ -503,8 +511,10 @@ func TestObserveModelDeploymentElasticAllocation_Holds(t *testing.T) {
 
 	t.Run("a deployment without an elastic role holds both layers", func(t *testing.T) {
 		admitted, allocated := allocationReconciler(
-			newModelDeploymentClient()).observeModelDeploymentElasticAllocation(
-			context.Background(), newRenderDeployment(), nil)
+			newModelDeploymentClient(),
+		).observeModelDeploymentElasticAllocation(
+			context.Background(), newRenderDeployment(), nil,
+		)
 		assert.False(t, admitted.Known)
 		assert.Contains(t, admitted.Reason, "no elastic role")
 		assert.False(t, allocated.Known)
@@ -609,13 +619,15 @@ func TestObserveModelDeploymentElasticAllocation_PodSetShape(t *testing.T) {
 			allocationPublishLedger(t, cli, devs)
 
 			admitted, allocated := allocationReconciler(cli).observeModelDeploymentElasticAllocation(
-				context.Background(), md, []core.Pod{*member})
+				context.Background(), md, []core.Pod{*member},
+			)
 
 			assertLayer(t, "admitted", admitted, tc.wantAdmitted)
 			assertLayer(t, "allocated", allocated, knownLayer(1))
 
 			_, err := allocationReconciler(cli).captureModelDeploymentElasticRelease(
-				context.Background(), md, []core.Pod{*member})
+				context.Background(), md, []core.Pod{*member},
+			)
 			if tc.wantCapture == "" {
 				assert.NoError(t, err)
 			} else {
@@ -656,7 +668,8 @@ func TestCaptureModelDeploymentElasticRelease(t *testing.T) {
 		md, member, cli := newWorld(t)
 
 		record, err := allocationReconciler(cli).captureModelDeploymentElasticRelease(
-			context.Background(), md, []core.Pod{*member})
+			context.Background(), md, []core.Pod{*member},
+		)
 		require.NoError(t, err)
 		assert.Equal(t, allocationDeployUID, record.ModelDeploymentUID)
 		assert.Equal(t, allocationGeneration, record.ObservedGeneration)
@@ -823,7 +836,8 @@ func TestCaptureModelDeploymentElasticRelease(t *testing.T) {
 			}
 
 			_, err := allocationReconciler(cli).captureModelDeploymentElasticRelease(
-				context.Background(), md, tc.pods(t, md, member))
+				context.Background(), md, tc.pods(t, md, member),
+			)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
 		})
@@ -929,7 +943,8 @@ func allocationCardMember(
 	return allocationMember(t, md, name, uid, ordinal, func(pod *core.Pod) {
 		pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = allocationCardAnnotation(
 			t, modelDeploymentMainContainerName, cardID, index,
-			workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits)
+			workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits,
+		)
 		for _, m := range mutate {
 			m(pod)
 		}
@@ -1003,7 +1018,8 @@ func TestObserveModelDeploymentElasticAllocation_GroupedAccountingKeepsIndividua
 		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: "m4"}, held))
 	held.Annotations = map[string]string{claimKey: allocationCardAnnotation(
 		t, modelDeploymentMainContainerName, "GPU-sss", 9,
-		workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits)}
+		workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits,
+	)}
 	require.NoError(t, cli.Update(context.Background(), held))
 	// THE SUPPLIED MEMBERS ARE THE THREE THAT AGREED PLUS THE CLAIM THE SERVER NOW HOLDS. The
 	// latecomer fixture is the same Pod before its claim moved, so it is not supplied twice.
@@ -1094,7 +1110,8 @@ func TestObserveModelDeploymentElasticAllocation_GroupedReadsHoldWhenTheNodeMove
 				ctrlcli.ObjectKey{Namespace: md.Namespace, Name: "m2"}, live))
 			live.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = allocationCardAnnotation(
 				t, modelDeploymentMainContainerName, "GPU-jkl", 6,
-				workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits)
+				workercore.DeviceAllocationModeExclusive, nodefeature.ResourceMaxUnits,
+			)
 			require.NoError(t, cli.Update(context.Background(), live))
 		},
 	}

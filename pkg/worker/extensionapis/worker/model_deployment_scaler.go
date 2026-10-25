@@ -46,7 +46,8 @@ func modelDeploymentScalerTable() (rest.TableConvertor, error) {
 		extensionapi.JSONPathTemplateColumn("Algorithm", "{.spec.algorithm.type}"),
 		extensionapi.JSONPathTemplateColumn("Bound", "{.status.conditions[?(@.type=='Bound')].status}"),
 		extensionapi.JSONPathTemplateColumn("Active", "{.status.conditions[?(@.type=='Active')].status}"),
-		extensionapi.JSONPathTemplateColumn("Blocked", "{.status.conditions[?(@.type=='Blocked')].status}"))
+		extensionapi.JSONPathTemplateColumn("Blocked", "{.status.conditions[?(@.type=='Blocked')].status}"),
+	)
 }
 
 func (h *ModelDeploymentScalerHandler) New() runtime.Object { return &worker.ModelDeploymentScaler{} }

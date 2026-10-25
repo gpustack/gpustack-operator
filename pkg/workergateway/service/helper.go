@@ -400,7 +400,8 @@ func (in *AggregatedInstanceType) Recompute() {
 		newRemaining.AcceleratorShared.Add(tier.Remaining.AcceleratorShared)
 		newRemaining.AcceleratorSliced.Add(tier.Remaining.AcceleratorSliced)
 		newRemaining.AcceleratorPartitioned = sumProfileCounts(
-			newRemaining.AcceleratorPartitioned, tier.Remaining.AcceleratorPartitioned)
+			newRemaining.AcceleratorPartitioned, tier.Remaining.AcceleratorPartitioned,
+		)
 	}
 
 	in.Status.OnceMaxRequest = newOnceMaxRequest
@@ -490,7 +491,8 @@ func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool
 		newRemaining.AcceleratorShared.Add(candidate.AcceleratorShared.Remaining)
 		newRemaining.AcceleratorSliced.Add(candidate.AcceleratorSliced.Remaining)
 		newRemaining.AcceleratorPartitioned = sumProfileCounts(
-			newRemaining.AcceleratorPartitioned, candidate.AcceleratorPartitioned.RemainingProfiles)
+			newRemaining.AcceleratorPartitioned, candidate.AcceleratorPartitioned.RemainingProfiles,
+		)
 	}
 
 	in.OnceMaxRequest = newOnceMaxRequest

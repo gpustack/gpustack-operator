@@ -32,7 +32,8 @@ func (h *KVCacheBackendHandler) SetupHandler(
 		extensionapi.JSONPathTemplateColumn("Type", "{.spec.type}"),
 		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"),
 		extensionapi.JSONPathTemplateColumn("Endpoint", "{.status.endpoints[?(@.name=='Client')].address}"),
-		extensionapi.JSONPathTemplateColumn("Capacity", "{.status.capacity.total}"))
+		extensionapi.JSONPathTemplateColumn("Capacity", "{.status.capacity.total}"),
+	)
 	if err != nil {
 		return gvr, nil, err
 	}

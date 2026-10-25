@@ -11,6 +11,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
+// _32MiB is the largest request body a multipart form is read from.
 const _32MiB = 32 << 20
 
 var (
@@ -33,15 +34,63 @@ func BindForm(r *http.Request, rc any) error {
 	switch strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]) {
 	default:
 		return nil
-	case "multipart/form-data", "application/x-www-form-urlencoded":
+	case "multipart/form-data":
+		return bindMultipartForm(r, rc)
+	case "application/x-www-form-urlencoded":
 	}
 
+	// The body of an urlencoded form is read by the request's own parser,
+	// which caps its size. The cap is left in place: a smaller one here would
+	// only replace it.
 	if err := r.ParseForm(); err != nil {
 		return err
 	}
-	if err := r.ParseMultipartForm(_32MiB); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+
+	return MapFormWithTag(rc, r.Form, "form")
+}
+
+// bindMultipartForm binds the passed struct pointer using the values of a
+// multipart form.
+//
+// The parser reads the whole body before it hands any of it over, and the body
+// is of no known size, so the body it reads is bounded. The parser reads a
+// request built from the one it was given, carrying the state that request
+// already holds, and the state it finds is handed back.
+func bindMultipartForm(r *http.Request, rc any) error {
+	// The helper has no response writer to hand, so the reader cannot ask the
+	// server to close the connection; the limit is what bounds the work.
+	body := r.Body
+	if body == nil {
+		body = http.NoBody
+	}
+	body = http.MaxBytesReader(nil, body, _32MiB)
+
+	parsed := &http.Request{
+		Method:        r.Method,
+		Header:        r.Header,
+		URL:           r.URL,
+		Body:          body,
+		ContentLength: r.ContentLength,
+		Form:          r.Form,
+		PostForm:      r.PostForm,
+		MultipartForm: r.MultipartForm,
+	}
+
+	if err := parsed.ParseForm(); err != nil {
+		r.Form = parsed.Form
+		r.PostForm = parsed.PostForm
 		return err
 	}
+	if err := parsed.ParseMultipartForm(_32MiB); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		r.Form = parsed.Form
+		r.PostForm = parsed.PostForm
+		r.MultipartForm = parsed.MultipartForm
+		return err
+	}
+
+	r.Form = parsed.Form
+	r.PostForm = parsed.PostForm
+	r.MultipartForm = parsed.MultipartForm
 
 	return MapFormWithTag(rc, r.Form, "form")
 }
@@ -108,7 +157,7 @@ func Bind(r *http.Request, rc any) error {
 	}
 
 	rcv := reflect.ValueOf(rc)
-	if rcv.Kind() == reflect.Ptr {
+	if rcv.Kind() == reflect.Pointer {
 		rcv = rcv.Elem()
 	}
 	if rcv.Kind() == reflect.Map {

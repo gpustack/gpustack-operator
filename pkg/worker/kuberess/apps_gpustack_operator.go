@@ -134,7 +134,8 @@ func manufacturerIdentity(manufacturer string) map[string]string {
 	identity := map[string]string{
 		"pciVendorID": nodefeature.GetPciVendorID(manufacturer),
 		"resourceName": string(nodefeature.GetAcceleratableResourceName(
-			manufacturer, workercore.DeviceAllocationModeExclusive)),
+			manufacturer, workercore.DeviceAllocationModeExclusive,
+		)),
 	}
 	if partitionKind := nodefeature.GetPartitionKind(manufacturer); partitionKind != "" {
 		identity["partitionKind"] = partitionKind

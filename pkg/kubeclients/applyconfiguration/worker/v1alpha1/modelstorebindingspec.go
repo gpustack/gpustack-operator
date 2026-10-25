@@ -12,11 +12,14 @@ package v1alpha1
 type ModelStoreBindingSpecApplyConfiguration struct {
 	// StoreRefs names the ModelStores this namespace may prefetch into, at least one of them.
 	// Prefetch admission refuses a prefetch whose target set falls outside every granted store.
+	//
 	StoreRefs []ModelStoreBindingStoreReferenceApplyConfiguration `json:"storeRefs,omitempty"`
 	// Quota is the namespace's byte budget.
+	//
 	Quota *ModelStoreBindingQuotaApplyConfiguration `json:"quota,omitempty"`
 	// AllowPinned is whether prefetches in this namespace may pin. It defaults to false, and it is
 	// the only path to pinning: pinning is an admin-granted capability, never a tenant default.
+	//
 	AllowPinned *bool `json:"allowPinned,omitempty"`
 }
 

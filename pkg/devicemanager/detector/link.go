@@ -45,7 +45,8 @@ func interfacesChanged(
 	}
 	return !kubemeta.DeepEqual(
 		withoutLinkFirstSeen(triggersDetect(reported)),
-		withoutLinkFirstSeen(triggersDetect(detected)))
+		withoutLinkFirstSeen(triggersDetect(detected)),
+	)
 }
 
 // triggersDetect keeps the interfaces whose change is worth another detect round.

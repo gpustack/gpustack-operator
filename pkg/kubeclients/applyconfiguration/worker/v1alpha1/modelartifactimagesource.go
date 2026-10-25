@@ -11,6 +11,7 @@ type ModelArtifactImageSourceApplyConfiguration struct {
 	// "registry/repository@sha256:<64 lowercase hex>". The digest is the artifact's whole
 	// identity; status.resolved stays empty for an image source, as for a claim, and the
 	// reference in this immutable spec is the only record of what the artifact delivers.
+	//
 	Reference *string `json:"reference,omitempty"`
 }
 

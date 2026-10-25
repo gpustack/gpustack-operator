@@ -13,6 +13,7 @@ import (
 type ModelDeploymentParallelismSourceStatusApplyConfiguration struct {
 	// Kind is where the reading came from. An unreadable source is Unknown with complete=false
 	// and a reason, never a silently defaulted degree.
+	//
 	Kind *workerv1alpha1.ModelDeploymentParallelismSourceKind `json:"kind,omitempty"`
 	// Complete is whether the reading covered everything the contract reads. Only a complete
 	// reading is one the declared degrees above can be trusted from; an incomplete one keeps
@@ -21,6 +22,7 @@ type ModelDeploymentParallelismSourceStatusApplyConfiguration struct {
 	// UnreadableReason names what could not be established, e.g. a reading that has not happened
 	// yet, or a balance shape the declared flags disagree on. A complete reading can still carry
 	// one when the source was read in full but a derived fact is undecidable.
+	//
 	UnreadableReason *string `json:"unreadableReason,omitempty"`
 }
 

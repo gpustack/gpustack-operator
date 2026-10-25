@@ -13,35 +13,45 @@ import (
 // NodeModelStoreModel is one digest on the node.
 type NodeModelStoreModelApplyConfiguration struct {
 	// Digest is the manifest digest, the content's address.
+	//
 	Digest *string `json:"digest,omitempty"`
 	// State is Downloading, Ready or Failed.
+	//
 	State *workerv1alpha1.NodeModelStoreModelState `json:"state,omitempty"`
 	// SizeBytes is the content's size.
+	//
 	SizeBytes *int64 `json:"sizeBytes,omitempty"`
 	// DownloadedBytes is how much of a Downloading entry's content is on the node's disk, the bytes
 	// an earlier attempt left for a resume included, so it never goes back. It is written on
 	// thresholds, not at every byte: once the entry moved by 5% of SizeBytes and 30 seconds passed
 	// since the node's status was last written. Absent outside Downloading.
+	//
 	DownloadedBytes *int64 `json:"downloadedBytes,omitempty"`
 	// Source is where the content's bytes come from: Hub, the model hub, or Peer, the plugins of
 	// other nodes. It names no repository or endpoint. Content published before the field existed
 	// has none.
+	//
 	Source *workerv1alpha1.NodeModelStoreModelSource `json:"source,omitempty"`
 	// Referenced says some Pod mounts the content. Which Pod is never recorded.
+	//
 	Referenced *bool `json:"referenced,omitempty"`
 	// LastUsedTime is when the content was last mounted or unmounted, truncated to the hour so that
 	// use does not rewrite the object.
+	//
 	LastUsedTime *v1.Time `json:"lastUsedTime,omitempty"`
 	// Reason classifies a Failed entry: InvalidRequest, AccessDenied, SourceUnavailable,
 	// IntegrityMismatch, InsufficientCapacity or Canceled.
+	//
 	Reason *string `json:"reason,omitempty"`
 	// Message says why for people, in words that name no tenant: what the reason means and a detail
 	// such as the hub's HTTP status. The full error, with the file and the URL, is in the plugin's
 	// log. Nothing parses it, and it never carries a credential.
+	//
 	Message *string `json:"message,omitempty"`
 	// RetryTime is the earliest next attempt of a Failed entry. Until then a mount of the digest
 	// returns at once without downloading, because kubelet retries every failed mount and each
 	// retry would otherwise download everything again.
+	//
 	RetryTime *v1.Time `json:"retryTime,omitempty"`
 }
 

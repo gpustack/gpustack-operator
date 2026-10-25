@@ -23,16 +23,19 @@ type CapacityRequestPolicyRangeApplyConfiguration struct {
 	// Min must be greater than or equal to zero,
 	// and less than or equal to the capacity value.
 	// requestPolicy.default must be more than or equal to the minimum.
+	//
 	Min *resource.Quantity `json:"min,omitempty"`
 	// Max defines the upper limit for capacity that can be requested.
 	//
 	// Max must be less than or equal to the capacity value.
 	// Min and requestPolicy.default must be less than or equal to the maximum.
+	//
 	Max *resource.Quantity `json:"max,omitempty"`
 	// Step defines the step size between valid capacity amounts within the range.
 	//
 	// Max (if set) and requestPolicy.default must be a multiple of Step.
 	// Min + Step must be less than or equal to the capacity value.
+	//
 	Step *resource.Quantity `json:"step,omitempty"`
 }
 

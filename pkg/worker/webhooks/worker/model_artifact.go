@@ -231,7 +231,8 @@ func validateModelArtifactPatterns(spec *workercore.ModelArtifactSpec, specPath 
 			if p == "" || len(p) > modelArtifactMaxPatternLength ||
 				strings.ContainsFunc(p, unicode.IsControl) {
 				errs = append(errs, field.Invalid(path.Index(i), p, fmt.Sprintf(
-					"must be 1 to %d characters without control characters", modelArtifactMaxPatternLength)))
+					"must be 1 to %d characters without control characters", modelArtifactMaxPatternLength,
+				)))
 			}
 		}
 	}
@@ -306,7 +307,8 @@ func validateModelArtifactImageVolume(path *field.Path) field.ErrorList {
 		"this cluster's Kubernetes version %q does not serve image volumes: the ImageVolume feature is "+
 			"on by default from 1.35, and 1.33 or 1.34 would need the gate opened on the apiserver, which "+
 			"this version does not offer; deliver the weights from a hub or a PersistentVolumeClaim, or "+
-			"upgrade the cluster", version.GitVersion))}
+			"upgrade the cluster", version.GitVersion,
+	))}
 }
 
 // modelArtifactDigestPattern is the digest half of a pinned image reference: "sha256:" and 64

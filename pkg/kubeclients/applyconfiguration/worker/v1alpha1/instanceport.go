@@ -14,8 +14,10 @@ type InstancePortApplyConfiguration struct {
 	// Port is the port number to expose on the Instance.
 	Port *int32 `json:"port,omitempty"`
 	// Protocol is the protocol to use for the port.
+	//
 	Protocol *v1.Protocol `json:"protocol,omitempty"`
 	// Name is the name of the port.
+	//
 	Name *string `json:"name,omitempty"`
 }
 
