@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# CASE 37 — Instance metrics subresource serves the current instance-scoped utilization   (MUTATING, self-recovering)
+# CASE 37 — One Instance's utilization: served by the metrics subresource and published by the node's device manager
+#   (MUTATING, self-recovering; AUTO-SKIPS the exporter half without a device manager pod on the Instance's node)
 #
 #   case-37.sh <NS>
 #
@@ -8,15 +9,21 @@
 # go. The Instance lives in `default`: the Instance webhook rejects a reserved namespace, so
 # creating it in <NS> would be denied outright.
 #
-# Goal:        The aggregated API's instances/<name>/metrics subresource returns the Instance's own
-#              current CPU/memory/storage utilization as Total/Used pairs, the used side read in
-#              real time from the node kubelet through the API-server node proxy — no Prometheus
-#              or metrics-server involved on this path.
-# Environment: Any cluster with a materialized scheduling chain (run case-1 first). No GPU and no
-#              device manager required: this path reads the kubelet, and only the accelerator
-#              entries — which a CPU Instance has none of — come from a device manager.
-# Inputs:      All real, nothing mocked — reads the general InstanceType unit spec; a CPU Instance
-#              gpustack-e2e-metrics (alpine sleep + ephemeral volume) on the general pool.
+# Goal:        One Instance's own utilization is observable through both surfaces the operator
+#              offers: the aggregated API's instances/<name>/metrics subresource serves it straight
+#              from the node kubelet — no Prometheus or metrics-server on that path — and the
+#              device manager running on that node publishes the same Instance as Prometheus
+#              gauges labelled by the Instance's identity.
+# Environment: Any cluster with a materialized scheduling chain (run case-1 first). The subresource
+#              half needs no GPU and no device manager: it reads the kubelet, and only the
+#              accelerator entries — which a CPU Instance has none of — come from a device manager.
+#              The exporter half AUTO-SKIPS when the node the Instance landed on runs no Ready
+#              device manager pod: a node with no accelerators runs no device manager, and then
+#              that surface has nothing to publish.
+# Inputs:      All real, nothing mocked — reads the general InstanceType unit spec; one CPU
+#              Instance gpustack-e2e-metrics (alpine sleep + ephemeral volume) on the general pool.
+#              Reads /metrics through the API server's pod proxy, so nothing has to be installed in
+#              the device manager image.
 # Expected:    - GET .../instances/<name>/metrics returns one sample carrying timestamp and all
 #              three pairs: cpuTotalMilliCores/cpuUsedMilliCores, memoryTotalMiB/memoryUsedMiB,
 #              storageTotalMiB/storageUsedMiB;
@@ -26,15 +33,26 @@
 #              - once stopped, and so holding no Pod at all, the same call still answers: the declared
 #              totals with zero measurements rather than an error, since nothing has run;
 #              - a caller without the instances/metrics grant is denied
-#              (kubectl auth can-i ... --as an unprivileged identity says no).
-# Cleanup:     Trap deletes the test Instance.
+#              (kubectl auth can-i ... --as an unprivileged identity says no);
+#              - exactly ONE device manager target on the node carries the pod-level families, so a
+#              query never double-counts an Instance;
+#              - every pod-level family carries a series for the Instance, labelled by exactly
+#              namespace/instance_name/instance_uid/node, and its totals agree with the
+#              subresource's sample;
+#              - no series collides with Prometheus's own instance label, which Prometheus would
+#              rename to exported_instance;
+#              - accelerator families, where present, carry id, manufacturer and mode beside the
+#              Instance's labels;
+#              - every device manager target reports on its own sources.
+# Cleanup:     Trap deletes the test Instance; idempotent, runs on pass AND fail. The InstanceType
+#              is only read.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-37.sh <NS>}"
 INST=gpustack-e2e-metrics
@@ -49,19 +67,14 @@ restore() {
 }
 trap restore EXIT
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
-# shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
-
 # The derived general InstanceType is created with its unit spec, and that spec is immutable
 # afterwards, so there is nothing to set: read it as a precondition. The Instance webhook sizes the
 # Pod from it.
 unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
 [ -n "$unit_ram" ] || { echo "no unit spec on ${IT} — the Instance webhook needs unitRAM to size the Pod"; exit 1; }
 
-# 1. Create the Instance on the general pool.
+# 1. Create the Instance on the general pool. Both halves of this case read the SAME Instance: the
+#    subresource through the kubelet, the device manager through its own exporter.
 echo "[case-37] creating Instance ${INST} of type ${IT}"
 cat <<EOF | kubectl apply -f -
 apiVersion: worker.gpustack.ai/v1
@@ -196,10 +209,196 @@ else
   record FAIL "used figures track the backing pod" "cpuUsedMilliCores did not rise under load (before=${before} after=${after})"
 fi
 
-# 5. An Instance that has started nothing is answered, not refused. Stopping it takes its Pod away,
-# which is the same state as never-scheduled and as a previous incarnation's Pod: nothing has run, so
-# nothing has been used. The surface must serve its DECLARED totals with zero measurements rather than
-# an error — a console reading it should need no branch for an Instance that is merely stopped.
+# 5. The exporter half. The device manager on the Instance's node publishes the Instance as
+#    Prometheus gauges; the subresource half above read the very same Instance, so it must still
+#    be Ready here.
+phase=$(kubectl -n default get instance "$INST" -o jsonpath='{.status.phase}' 2>/dev/null)
+[ "$phase" = "Ready" ] || record FAIL "instance ready" "phase='${phase:-<EMPTY>}'"
+
+INST_UID=$(kubectl -n default get instance "$INST" -o jsonpath='{.metadata.uid}' 2>/dev/null)
+NODE=$(kubectl -n default get pod "$INST" -o jsonpath='{.spec.nodeName}' 2>/dev/null)
+
+# The device managers of THAT node, Ready ones only: a pod that is not Ready is not scraped, and
+# is not in the running to be the node's exporter either. A read loop rather than mapfile, which
+# bash 3.2 does not have.
+DM_PODS=()
+if [ -n "$NODE" ]; then
+  while IFS= read -r pod; do
+    [ -n "$pod" ] && DM_PODS+=("$pod")
+  done < <(kubectl -n "$NS" get pods \
+    -l app.kubernetes.io/component=device-manager \
+    --field-selector "spec.nodeName=${NODE},status.phase=Running" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' 2>/dev/null \
+    | awk '$2=="True"{print $1}')
+fi
+
+if [ -z "$NODE" ] || [ "${#DM_PODS[@]}" -eq 0 ]; then
+  echo "== CASE 37 — EXPORTER HALF SKIPPED =="
+  echo "No Ready device manager pod runs on ${NODE:-<no node>}, the node the test Instance landed on."
+  echo "The exporter lives in the device manager, so on a node without one this surface has nothing to"
+  echo "publish. The metrics subresource half still answers for the Instance. Run this case on a"
+  echo "cluster whose general pool includes a node carrying accelerators."
+else
+  echo "[case-37] node ${NODE} runs ${#DM_PODS[@]} Ready device manager pod(s): ${DM_PODS[*]}"
+
+  # scrape <pod> — that pod's /metrics, through the API server's pod proxy so the device manager image
+  # needs no client tooling. The port is the container's own, not a Service port.
+  scrape() {
+    local pod=$1 port
+    port=$(kubectl -n "$NS" get pod "$pod" \
+      -o jsonpath='{.spec.containers[0].ports[?(@.name=="https")].containerPort}' 2>/dev/null)
+    kubectl get --raw "/api/v1/namespaces/${NS}/pods/https:${pod}:${port:-32443}/proxy/metrics" 2>/dev/null
+  }
+
+  # Which target carries the pod-level families for this Instance. The poller samples on the
+  # monitor period, so the first scrape after the Instance goes Ready can legitimately miss it.
+  POD_FAMILIES="gpustack_instance_cpu_total_millicores gpustack_instance_cpu_used_millicores \
+gpustack_instance_memory_total_mib gpustack_instance_memory_used_mib \
+gpustack_instance_storage_total_mib gpustack_instance_storage_used_mib"
+
+  EXPORTING=()
+  SCRAPE=""
+  for _ in $(seq 1 12); do
+    EXPORTING=()
+    for pod in "${DM_PODS[@]}"; do
+      body=$(scrape "$pod")
+      [ -n "$body" ] || continue
+      if printf '%s' "$body" | grep -q "^gpustack_instance_cpu_total_millicores{.*instance_uid=\"${INST_UID}\""; then
+        EXPORTING+=("$pod")
+        SCRAPE=$body
+      fi
+    done
+    [ "${#EXPORTING[@]}" -ge 1 ] && break
+    sleep 5
+  done
+
+  if [ "${#EXPORTING[@]}" -eq 1 ]; then
+    record PASS "exactly one target carries the pod-level families" \
+      "${EXPORTING[0]} of ${#DM_PODS[@]} device manager pod(s) on ${NODE}"
+  elif [ "${#EXPORTING[@]}" -eq 0 ]; then
+    record FAIL "exactly one target carries the pod-level families" \
+      "no device manager pod on ${NODE} published instance_uid=${INST_UID} within 60s"
+  else
+    record FAIL "exactly one target carries the pod-level families" \
+      "${#EXPORTING[@]} pods published it (${EXPORTING[*]}) — the node's Instances are double-counted"
+  fi
+
+  # What the exporting target actually published for this Instance: every pod-level family
+  # present, labelled by exactly the four identifying labels with the Instance's own values, and
+  # carrying the same figures the subresource serves. One parse, three verdicts.
+  if [ -n "$SCRAPE" ]; then
+    sample=$(kubectl get --raw "$RAW" 2>/dev/null)
+    while IFS='|' read -r check state detail; do
+      [ -n "$check" ] && record "$state" "$check" "$detail"
+    done <<VERDICTS
+$(printf '%s' "$SCRAPE" | python3 -c '
+import json, re, sys
+
+families = sys.argv[1].split()
+identity = {"namespace": sys.argv[2], "instance_name": sys.argv[3],
+            "instance_uid": sys.argv[4], "node": sys.argv[5]}
+sample = (json.loads(sys.argv[6]) or {}).get("sample") or {}
+
+# The total families are declarations both surfaces derive from the same Pod, so they are the ones
+# that must match to the digit. A used figure is measured per read and legitimately moves between
+# the poll behind this scrape and the subresource call above.
+totals = {"gpustack_instance_cpu_total_millicores": "cpuTotalMilliCores",
+          "gpustack_instance_memory_total_mib": "memoryTotalMiB",
+          "gpustack_instance_storage_total_mib": "storageTotalMiB"}
+
+line = re.compile(r"^([a-z_]+)\{([^}]*)\}\s+([0-9.e+-]+)$")
+label = re.compile(r"([a-z_]+)=\"([^\"]*)\"")
+
+seen, wrong_labels, disagreed, compared = {}, [], [], []
+for raw in sys.stdin:
+    m = line.match(raw.strip())
+    if not m:
+        continue
+    name, labels, value = m.group(1), dict(label.findall(m.group(2))), m.group(3)
+    if name not in families or labels.get("instance_uid") != identity["instance_uid"]:
+        continue
+    seen[name] = value
+
+    if set(labels) != set(identity):
+        wrong_labels.append(name + ": " + ",".join(sorted(labels)))
+    else:
+        mismatched = [k for k, v in labels.items() if identity[k] != v]
+        if mismatched:
+            wrong_labels.append(name + ": " + ",".join(sorted(mismatched)) + " not this Instance")
+
+    if name in totals:
+        field = totals[name]
+        compared.append(field + "=" + str(sample.get(field)))
+        if float(value) != float(sample.get(field, -1)):
+            disagreed.append(name + "=" + value + " but sample." + field + "=" + str(sample.get(field)))
+
+def verdict(check, ok, detail):
+    print(check + "|" + ("PASS" if ok else "FAIL") + "|" + detail)
+
+missing = [f for f in families if f not in seen]
+verdict("every pod-level family carries the Instance", not missing,
+        ", ".join(sorted(k + "=" + v for k, v in seen.items())) if not missing
+        else "no series for: " + ", ".join(missing))
+verdict("their labels are exactly the four identifying ones", not wrong_labels,
+        ",".join(sorted(identity)) if not wrong_labels else "; ".join(wrong_labels))
+verdict("the totals agree with the subresource", bool(compared) and not disagreed,
+        ", ".join(sorted(compared)) if compared and not disagreed
+        else ("; ".join(disagreed) or "no total family matched the Instance"))
+' "$POD_FAMILIES" default "$INST" "$INST_UID" "$NODE" "${sample:-null}" 2>/dev/null)
+VERDICTS
+
+    # The reserved target label. `instance_name` exists precisely so the exposition never carries a
+    # bare `instance`, which Prometheus renames to exported_instance under honor_labels: false.
+    collide=$(printf '%s' "$SCRAPE" | grep -c "^gpustack_instance_.*[{,]instance=\"")
+    if [ "${collide:-1}" -eq 0 ]; then
+      record PASS "no series collides with Prometheus's own instance label" "no bare instance= on any gpustack_instance_ series"
+    else
+      record FAIL "no series collides with Prometheus's own instance label" "${collide} series carry a bare instance= label"
+    fi
+
+    # Accelerator families, when the node runs an accelerated Instance. A CPU-only node has none,
+    # which is not a failure of anything — say so rather than pass vacuously.
+    acc=$(printf '%s' "$SCRAPE" | grep -m1 "^gpustack_instance_accelerator_memory_total_mib{")
+    # mode is part of the set: every accelerator family reports the Instance's own grant and usage
+    # whatever the allocation did, and mode is what a query groups or filters by rather than what it
+    # picks a metric name with.
+    ACC_WANT="id,index,instance_name,instance_uid,manufacturer,mode,namespace,node"
+    if [ -z "$acc" ]; then
+      record SKIP "accelerator families carry id, index, manufacturer and mode" \
+        "no accelerator series on ${NODE}: no Instance here holds an accelerator, so there is none to label"
+    else
+      acc_labels=$(printf '%s' "$acc" | sed -e 's/^[^{]*{//' -e 's/}.*$//' \
+        | tr ',' '\n' | cut -d= -f1 | sort | tr '\n' ',')
+      if [ "${acc_labels%,}" = "$ACC_WANT" ]; then
+        record PASS "accelerator families carry id, index, manufacturer and mode" "${acc_labels%,}"
+      else
+        record FAIL "accelerator families carry id, index, manufacturer and mode" \
+          "label set is ${acc_labels%,}, expected ${ACC_WANT}"
+      fi
+    fi
+  fi
+
+  # Every target reports on its own sources, whichever of them is the exporter: a device manager
+  # whose kubelet read is failing must say so here rather than only in its log.
+  for pod in "${DM_PODS[@]}"; do
+    body=$(scrape "$pod")
+    ok=$(printf '%s' "$body" | grep -m1 '^gpustack_instance_metrics_collector_success{source="kubelet"}' | awk '{print $2}')
+    dur=$(printf '%s' "$body" | grep -m1 '^gpustack_instance_metrics_collector_duration_seconds{source="kubelet"}' | awk '{print $2}')
+    snap=$(printf '%s' "$body" | grep -m1 '^gpustack_instance_metrics_collector_success{source="snapshot"}' | awk '{print $2}')
+    if [ "$ok" = "1" ] && [ -n "$dur" ] && [ -n "$snap" ]; then
+      record PASS "${pod} reports on its own sources" "kubelet success=1 duration=${dur}s, snapshot success=${snap}"
+    else
+      record FAIL "${pod} reports on its own sources" \
+        "kubelet success='${ok:-<absent>}' duration='${dur:-<absent>}' snapshot success='${snap:-<absent>}'"
+    fi
+  done
+fi
+
+# 6. An Instance that has started nothing is answered, not refused. Stopping it takes its Pod away,
+#    which is the same state as never-scheduled and as a previous incarnation's Pod: nothing has run, so
+#    nothing has been used. The surface must serve its DECLARED totals with zero measurements rather than
+#    an error — a console reading it should need no branch for an Instance that is merely stopped.
+#    The stop comes last: it takes the backing Pod away, and the exporter half above reads that Pod.
 echo "[case-37] stopping ${INST} to read the no-Pod answer"
 # The field is spec.stop. A merge patch of a field the CRD does not have is accepted, pruned and
 # only WARNED about, so a wrong name here does not fail — the Instance simply keeps running, its Pod
@@ -250,7 +449,7 @@ print(("FAIL " + "; ".join(bad)) if bad else "PASS")
   esac
 fi
 
-# 6. Authorization: an unprivileged identity must not hold get on instances/metrics.
+# 7. Authorization: an unprivileged identity must not hold get on instances/metrics.
 deny=$(kubectl auth can-i get instances.worker.gpustack.ai/metrics -n default \
   --as system:serviceaccount:default:default 2>/dev/null)
 if [ "$deny" = "no" ]; then

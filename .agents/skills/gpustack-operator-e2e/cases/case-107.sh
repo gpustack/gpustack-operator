@@ -45,8 +45,8 @@
 #              and the deployments' namespace, and puts back the Settings it changed.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "${CASES_DIR}/_rows-lib.sh"
@@ -61,20 +61,10 @@ IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 TRIALS="${E2E_C107_TRIALS:-20}"
 FULL_TRIALS="${E2E_C107_FULL_TRIALS:-10}"
 SEED="${E2E_C107_SEED:-$(date +%s)}"
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 SCRATCH="$(mktemp -d)"
 
-KEYS="model-artifact-huggingface-endpoint model-artifact-delivery-mode"
-mkdir -p "$SCRATCH/orig"
-for k in $KEYS; do
-  kubectl -n "$SYSTEM_NS" get secret gpustack-settings -o jsonpath="{.data.$k}" >"$SCRATCH/orig/$k" 2>/dev/null
-done
-# restore KEY: the value KEY had before the case, or no value when it had none.
-restore() {
-  if [ -s "$SCRATCH/orig/$1" ]; then setting_set "$1" "$(base64 -d <"$SCRATCH/orig/$1")"; else setting_unset "$1"; fi
-}
+# Remember what the store carried before the case touched it, so the cleanup puts every key back.
+settings_save model-artifact-huggingface-endpoint model-artifact-delivery-mode
 
 cleanup() {
   echo
@@ -87,7 +77,7 @@ cleanup() {
   kubectl -n "$NS" delete deploy,svc "${P}-hub" --ignore-not-found >/dev/null 2>&1
   kubectl -n "$NS" delete configmap "${P}-hub-script" --ignore-not-found >/dev/null 2>&1
   kubectl delete namespace "$MDNS" --ignore-not-found --wait=false >/dev/null 2>&1
-  for k in $KEYS; do restore "$k"; done
+  settings_restore
   rm -rf "$SCRATCH"
 }
 trap cleanup EXIT

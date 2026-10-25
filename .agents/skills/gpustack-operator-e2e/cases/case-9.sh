@@ -46,10 +46,12 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-9.sh <NS>}"
+# shellcheck disable=SC2034 # Read by the sourced library, which shellcheck does not follow.
+SYSTEM_NS="$NS"   # the settings Secret lives in the namespace this case was given
 SMALL_IT=gpustack-e2e-case9-small     # the sibling type with the smaller unit RAM, owned by this case
 IT=$(kubectl get instancetypes.worker.gpustack.ai \
   -o jsonpath='{.items[?(@.spec.acceleratable==false)].metadata.name}' 2>/dev/null | tr ' ' '\n' \
@@ -60,7 +62,7 @@ INST_B=gpustack-e2e-lifecycle-start   # Q2: stopped → moved to the sibling →
 SMALL_RAM=1Gi
 
 # The Q2 outcome depends on the overcommit setting; read it (seeded in the settings Secret).
-OVERCOMMIT=$(kubectl -n "$NS" get secret gpustack-settings -o jsonpath='{.data.instance-general-resources-overcommit}' 2>/dev/null | base64 -d 2>/dev/null)
+OVERCOMMIT="$(setting_get instance-general-resources-overcommit)"
 [ -n "$OVERCOMMIT" ] || OVERCOMMIT=true
 
 restore() {
@@ -77,10 +79,6 @@ restore() {
   echo "[case-9] WARNING: InstanceType ${SMALL_IT} is still present after 60s"
 }
 trap restore EXIT
-
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 wait_phase() { # name phase
   for _ in $(seq 1 40); do

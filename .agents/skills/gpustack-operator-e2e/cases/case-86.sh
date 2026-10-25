@@ -69,8 +69,8 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:-}"
 if [ -z "$NS" ]; then
@@ -90,19 +90,6 @@ MAXLEN="${E2E_RP_MAX_MODEL_LEN:-4096}"
 PROBE_IMAGE="${E2E_RP_PROBE_IMAGE:-docker.io/library/busybox:1.37}"
 READY_BOUND="${E2E_RP_READY_BOUND:-900}"
 NEED_CARDS=$((2 * TP))
-
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
-
-print_rows() {
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in ${ROWS[@]+"${ROWS[@]}"}; do
-    IFS="|" read -r s c o <<<"$r"
-    printf "%s | %s | %s\n" "$s" "$c" "$o"
-  done
-}
 
 skip() { echo "[case-86] SKIP: $1"; echo "NOTHING WAS VERIFIED"; exit 0; }
 

@@ -49,13 +49,15 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: MIG_NODE_SSH=<user@host> case-28.sh <NS>}"
 CASE_ID=28
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_partition-lib.sh"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_ssh-lib.sh"
 
 INST=gpustack-e2e-part-ssh
 SECRET=gpustack-e2e-part-ssh-key
@@ -86,9 +88,7 @@ echo "[case-28] requesting partition profile ${MID} on ${IT}"
 # ---------------------------------------------------------------------------------------------------
 # One SSH-enabled Instance whose accelerator request is a hardware partition.
 # ---------------------------------------------------------------------------------------------------
-ssh-keygen -t ed25519 -f "$KEYDIR/id" -N "" -q
-kubectl -n default delete secret "$SECRET" --ignore-not-found >/dev/null 2>&1
-kubectl -n default create secret generic "$SECRET" --from-file=authorized_keys="$KEYDIR/id.pub" >/dev/null
+ssh_setup_key_secret default "$SECRET" "$KEYDIR/id"
 cat <<EOF | kubectl apply -f - >/dev/null
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: Instance

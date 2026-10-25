@@ -1,87 +1,37 @@
 #!/usr/bin/env bash
 #
-# CASE 73 — An engine under KV turnover writes the shared store; the other replica's replay of the
-#            same prefixes is the reuse the chain exists for, and today it does not happen
-#   (MUTATING, self-recovering)
+# CASE 73 — An engine under KV turnover writes the shared store; the other replica's replay of the same prefixes is the reuse the chain exists for, and today it does not happen   (MUTATING, self-recovering)
 #
 #   case-73.sh <NS>
 #
-# Goal:        Proves the two halves of the store-reuse chain separately, because they are in
-#              different states and a single verdict would hide the one that is broken.
-#
-#                The WRITE half is real and this case guards it: drive one engine replica with more
-#                distinct prefixes than its local KV cache holds, and the connector sinks evicted
-#                blocks to the shared store — the master's key count and the domain's charge both
-#                rise above their pre-load baselines. Measured on the cluster this case was written
-#                against (vllm 0.29.0, MooncakeStoreConnector kv_both, transfer engine 0.3.13.post1,
-#                461,808-token local KV): 690,590 tokens of distinct prefixes grew master_key_count
-#                from 1 to hundreds within the load window.
-#
-#                The READ half does not work, and this case carries it as a KNOWN-FAILURE DETECTOR
-#                in the case-67 sense: rows that PASS while the defect persists and go red the day
-#                it is fixed. Replay the written prefixes at the OTHER replica — and at the writer
-#                itself — and every hit carrier stays at zero: vllm:external_prefix_cache_hits_total
-#                on the replaying engine, mem_cache_hit_nums_ on the master. The lookup path is
-#                active (its queries counter tracks every prompt token) and the local prefix cache
-#                works (a same-prompt repeat hits it fully), so the miss is specific to the store
-#                path. The store's content is also transient: it churns during load, drains to the
-#                pre-load baseline minutes after, and master_evicted_key_count never moves — the
-#                deletions are client-side. Which component deletes the objects, and whether write
-#                and lookup even share a key namespace, is not observable from the surfaces this
-#                operator renders; that question is recorded, not answered.
-#
-#              When a detector row FAILS with a nonzero delta, the reuse fix has landed: invert that
-#              row and its master-side sibling into positive guards in the same commit, the way
-#              case-65's bucket-limit rows were inverted.
-#
-# Environment: A real accelerator pool with at least TWO free exclusive cards (two server replicas;
-#              one card cannot exercise the cross-replica half), an accelerated InstanceType, and the
-#              model weights pre-staged on every accelerator node at a hostPath. Exits 2 (input
-#              required) when E2E_VB_INSTANCE_TYPE is unset rather than guessing a pool. No RDMA.
-#              Needs a registry the cluster can pull the Mooncake image from — override with
-#              E2E_MOONCAKE_IMAGE.
-#
-# Inputs:      All real, nothing mocked. This case creates its own KVCacheBackend (one DRAM member),
-#              pool, binding and a two-role ModelDeployment bound to that binding; the load comes
-#              from throwaway Pods on the Mooncake image driving the engines' own HTTP APIs.
-#              E2E_VB_INSTANCE_TYPE (required), E2E_VB_MODEL (default Qwen/Qwen3-0.6B — a small
-#              model on purpose: prefill is cheap and every verdict here rides on counters, never on
-#              TTFT, which is undiscriminating at this size), E2E_VB_ENGINE_IMAGE (default
-#              quay.io/gpustack/runner:cann9.1-910b-vllm0.30.0),
-#              E2E_VB_WEIGHTS (default /mnt/kvcache-weights), E2E_VB_GPU_MEM_UTIL (default 0.55).
-#              The fill volume is computed from the engine's own reported kv_cache_size_tokens, so
-#              the case adapts to whatever card and utilization it lands on.
-#
-#              REUSE MODE, for validating the verdict logic where no two cards are free: when
-#              E2E_VB_EXISTING_BACKEND (a Ready backend whose status carries the Admin endpoint),
-#              E2E_VB_EXISTING_DOMAIN (the reuse domain those engines share) and
-#              E2E_VB_EXISTING_SERVICES (comma-separated host:port of two engine replicas on that
-#              binding) are ALL set, the case creates nothing and deletes nothing it did not create:
-#              it runs the toolbox, the control, the fill, the replay and every verdict row against
-#              the named engines. The one row this mode cannot validate is the creation leg itself;
-#              the run reports the mode in its first row so a report never overstates its coverage.
-#              The Mooncake image must run on CPU-only nodes too — a CUDA-only tag crashes its
-#              member there with "Failed to start store service", which is an image choice, not a
-#              backend defect.
-#
+# Goal:        Two halves of the store-reuse chain, in different states, so they are proven separately. The WRITE half is real and guarded here: drive one engine
+#              replica with more distinct prefixes than its local KV cache holds, and the connector sinks the evicted blocks to the shared store. The READ half does
+#              not work, and this case carries it as a KNOWN-FAILURE DETECTOR: replay the written prefixes at the OTHER replica and every hit carrier stays at zero
+#              - vllm:external_prefix_cache_hits_total on the replaying engine and mem_cache_hit_nums_ on the master.
+# Environment: A real accelerator pool with at least TWO free exclusive cards (two server replicas; one card cannot exercise the cross-replica half), an accelerated
+#              InstanceType, and the model weights pre-staged on every accelerator node at a hostPath. Exits 2 (input required) when E2E_VB_INSTANCE_TYPE is unset
+#              rather than guessing a pool. No RDMA. Needs a registry the cluster can pull the Mooncake image from - override with E2E_MOONCAKE_IMAGE.
+# Inputs:      All real, nothing mocked. This case creates its own KVCacheBackend (one DRAM member), pool, binding and a two-role ModelDeployment bound to that
+#              binding; the load comes from throwaway Pods on the Mooncake image driving the engines' own HTTP APIs. The fill volume is computed from the engine's
+#              own reported kv_cache_size_tokens, so the case adapts to whatever card it lands on. E2E_VB_INSTANCE_TYPE is required; the model, engine image,
+#              weights path and GPU utilization have defaults in the case body. REUSE MODE: with E2E_VB_EXISTING_BACKEND, E2E_VB_EXISTING_DOMAIN and
+#              E2E_VB_EXISTING_SERVICES all set, the case creates nothing and deletes nothing it did not create, and every verdict row runs against the named
+#              engines; the creation leg is the one row that mode cannot validate, and the run reports the mode in its first row so a report never overstates its
+#              coverage. The Mooncake image must also run on CPU-only nodes - a CUDA-only tag crashes its member there, which is an image choice and not a backend
+#              defect.
 # Expected:    - both engine replicas reach Ready and answer completions;
-#              - a same-prompt repeat on one replica hits that replica's local prefix cache (the
-#                control that keeps the store-side misses from reading as a sick engine);
-#              - after a fill of distinct prefixes past the local KV capacity, the master's key
-#                count and the domain's charged bytes are both above their pre-load baselines;
-#              - KNOWN-FAILURE DETECTOR: after replaying every written prefix at the other replica,
-#                that replica's vllm:external_prefix_cache_hits_total has not moved, and the
-#                master's mem_cache_hit_nums_ has not moved. PASS while the defect persists; an
-#                empty baseline or final reading FAILS the row, since nothing was measured.
-#
-# Cleanup:     Trap removes the ModelDeployment, the probe Pods and ConfigMap, then the namespace,
-#              pool and backend. A binding whose domain still holds objects is held by its
-#              finalizer on purpose; the trap reports what held it and then forces the finalizer
-#              off, as case-44 does, so the next run starts clean.
+#              - a same-prompt repeat on one replica hits that replica's local prefix cache, the control that keeps the store-side misses from reading as a sick
+#                engine;
+#              - after a fill of distinct prefixes past the local KV capacity, the master's key count and the domain's charged bytes are both above their pre-load
+#                baselines;
+#              - KNOWN-FAILURE DETECTOR: after replaying every written prefix at the other replica, that replica's vllm:external_prefix_cache_hits_total has not
+#                moved, and the master's mem_cache_hit_nums_ has not moved; PASS while the defect persists, and an empty baseline or final reading FAILS the row.
+# Cleanup:     The trap removes the ModelDeployment, the probe Pods and ConfigMap, then the namespace, pool and backend. A binding whose domain still holds objects
+#              is held by its finalizer on purpose; the trap reports what held it and then forces the finalizer off, so the next run starts clean.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-73.sh <NS>}"
 IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
@@ -133,12 +83,6 @@ FILL_RATIO_DEN=2
 MIN_REQUESTS=8
 MAX_REQUESTS=400
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
-# shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
-
 TMP="$(mktemp -d)"
 
 restore() {
@@ -161,36 +105,9 @@ restore() {
   # Same held-binding dance as case-44, for the same reason: the master refuses to drop a non-empty
   # tenant's quota and the operator is right to wait. Scoped to THIS case's binding by name, for the
   # reason at the top of this function.
-  local left=""
-  for _ in $(seq 1 20); do
-    kubectl -n "$NS" get kvcachepoolbindings.worker.gpustack.ai "$BINDING" -o name >/dev/null 2>&1 || break
-    left="held"
-    sleep 3
-  done
-  if [ -n "$left" ]; then
-    echo "[case-73] the binding is still held after 60s; what the operator says about it:"
-    kubectl -n "$NS" get kvcachepoolbindings.worker.gpustack.ai "$BINDING" \
-      -o 'jsonpath={range .status.conditions[*]}{.type}={.status}({.reason}) {.message}{"\n"}{end}' 2>/dev/null \
-      | sed 's/^/    /'
-    echo "[case-73] forcing the finalizer off so the next run starts clean"
-    kubectl -n "$NS" patch kvcachepoolbindings.worker.gpustack.ai "$BINDING" \
-      --type=merge -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1 || true
-  fi
+  kvi_release_binding_finalizer "$NS" "$BINDING"
 }
 trap restore EXIT
-
-wait_for() {
-  local kind="$1" name="$2" path="$3" want="$4" secs="${5:-120}" ns_args=()
-  [ -n "${6:-}" ] && ns_args=(-n "$6")
-  local got=""
-  for _ in $(seq 1 "$secs"); do
-    got="$(kubectl "${ns_args[@]}" get "$kind" "$name" -o jsonpath="$path" 2>/dev/null)"
-    [ "$got" = "$want" ] && return 0
-    sleep 1
-  done
-  echo "$got"
-  return 1
-}
 
 fail_out() {
   print_rows

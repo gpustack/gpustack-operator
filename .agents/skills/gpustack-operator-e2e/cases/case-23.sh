@@ -56,440 +56,51 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: MIG_NODE_SSH=<user@host> case-23.sh <NS>}"
 
 PODPFX=gpustack-e2e-mig
-DM_DS=gpustack-operator-device-manager-nvidia
-MIGSSH_TIMEOUT="${MIG_SSH_TIMEOUT:-90}"
+
+# shellcheck disable=SC2034 # Read by the sourced library, which shellcheck does not follow.
+CASE_ID=23
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_pool-lib.sh"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_partition-lib.sh"
 
 # ---------------------------------------------------------------------------------------------------
-# Env gate — the node address the case must NOT guess. Without it the case cannot toggle MIG mode, so
-# it stops here (exit 2, "input required") rather than proceeding blind. Supply MIG_NODE_SSH and re-run.
+# The hardware gate and the cluster correlation. The library owns both: the node address is never
+# guessed, the card's partitioning mode decides whether the case can run at all, and the k8s node
+# behind that address is correlated with the pool that backs it.
 # ---------------------------------------------------------------------------------------------------
-if [ -z "${MIG_NODE_SSH:-}" ]; then
-  echo "== CASE 23 — INPUT REQUIRED (not run) =="
-  echo
-  echo "This case toggles a node's NVIDIA MIG mode over SSH, so it needs the node's SSH address."
-  echo "It will not guess or auto-discover it. Provide it and re-run:"
-  echo
-  echo "    MIG_NODE_SSH=<user@host> bash .claude/skills/gpustack-operator-e2e/cases/case-23.sh ${NS}"
-  echo
-  echo "Optional overrides:"
-  echo "    MIG_NODE_NAME=<k8s node>   # disambiguate when several nodes carry an NVIDIA card"
-  echo "    MIG_NODE_SSH_OPTS='-i ...' # extra ssh options (identity file, port, jump host, …)"
-  echo "    MIG_GPU_INDEX=<n>          # which card to toggle (default 0)"
-  echo "    MIG_SSH_TIMEOUT=<secs>     # per-ssh timeout (default 90)"
-  echo
-  echo "The address stays out of this script and out of the repo — it is passed at run time only."
-  exit 2
-fi
-
-GPU_INDEX="${MIG_GPU_INDEX:-0}"
-
-# node_ssh <cmd...> — run a command on the node (non-interactive, bounded). The caller passes a full
-# command line; sudo is the caller's responsibility (nvidia-smi mode switches need it).
-# One shared control connection for the whole case. wait_card_idle alone polls up to 40 times, and
-# every poll otherwise pays a full TCP + auth handshake to a remote node; multiplexing collapses them
-# onto a single handshake. ControlPersist outlives the `timeout` killing a slow client, so the master
-# survives an individual call being cut short. node_ssh_close tears it down from the trap.
-MIGSSH_CTL="${TMPDIR:-/tmp}/gpustack-e2e-mig-$$.sock"
-node_ssh() {
-  # shellcheck disable=SC2086
-  timeout "${MIGSSH_TIMEOUT}" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o BatchMode=yes \
-    -o ControlMaster=auto -o ControlPath="$MIGSSH_CTL" -o ControlPersist=300 \
-    ${MIG_NODE_SSH_OPTS:-} "$MIG_NODE_SSH" "$@"
-}
-node_ssh_close() {
-  ssh -O exit -o ControlPath="$MIGSSH_CTL" "${MIG_NODE_SSH:-}" >/dev/null 2>&1 || true
-}
-
-# --- Confirm SSH reachability + sudo before mutating anything. ---
-if ! node_ssh true >/dev/null 2>&1; then
-  echo "== CASE 23 — SKIPPED =="
-  echo "Cannot SSH to '${MIG_NODE_SSH}' (BatchMode, ${MIGSSH_TIMEOUT}s). Check the address / key / MIG_NODE_SSH_OPTS."
-  exit 0
-fi
-
-# --- MIG-capability gate: the card must report a MIG mode field ('Enabled'/'Disabled'), not '[N/A]'. ---
-INITIAL_MODE="$(node_ssh sudo nvidia-smi -i "$GPU_INDEX" --query-gpu=mig.mode.current --format=csv,noheader 2>/dev/null | tr -d '[:space:]')"
-case "$INITIAL_MODE" in
-  Enabled|Disabled) ;;
-  *)
-    echo "== CASE 23 — SKIPPED =="
-    echo "Card ${GPU_INDEX} on ${MIG_NODE_SSH} does not report a MIG mode (got '${INITIAL_MODE:-<none>}') — not MIG-capable."
-    echo "MIG needs an A100/A30/H100/H200/B-series (or newer) data-center card. Run this case on such a node."
-    exit 0
-  esac
-echo "[case-23] node ${MIG_NODE_SSH} card ${GPU_INDEX}: MIG mode currently ${INITIAL_MODE}"
-
-# --- The nvidia GPU node in the cluster + its accelerated pool. Correlate the SSH host to a k8s node so
-#     the ledger/InstanceType assertions read the right object. Require a single nvidia-accelerated node
-#     unless MIG_NODE_NAME disambiguates. ---
-GPU_NODE="${MIG_NODE_NAME:-}"
-if [ -z "$GPU_NODE" ]; then
-  _nv=()
-  # Read the ledger and its exit status separately, and parse in a command substitution: a failed
-  # query or an unparseable answer would otherwise read as an empty list, which this gate turns into
-  # a SKIP. Only a query that answered with no nvidia group may skip.
-  if ! _devs="$(kubectl get devices.worker.gpustack.ai -o json 2>&1)"; then
-    echo "== CASE 23 — FAILED (setup) =="
-    echo "Reading the Devices ledger failed, so this case cannot tell 'no nvidia hardware' from 'the"
-    echo "query did not answer'. It refuses to report a skip on either:"
-    printf '%s\n' "$_devs" | head -5
-    exit 1
-  fi
-  if ! _parsed="$(printf '%s' "$_devs" | python3 -c "
-import json,sys
-for d in json.load(sys.stdin).get('items',[]):
-    for g in d.get('spec',{}).get('groups',[]):
-        if g.get('manufacturer')=='nvidia' and g.get('accelerators'):
-            print(d['metadata']['name']); break
-")"; then
-    echo "== CASE 23 — FAILED (setup) =="
-    echo "The Devices ledger was read but could not be parsed, so this case cannot tell 'no nvidia"
-    echo "hardware' from 'the answer was unreadable'. It refuses to report a skip on either."
-    exit 1
-  fi
-  while IFS= read -r _n; do [ -n "$_n" ] && _nv+=("$_n"); done <<<"$_parsed"
-  if [ "${#_nv[@]}" -eq 0 ]; then
-    echo "== CASE 23 — SKIPPED =="
-    echo "No Devices object reports an nvidia accelerator group — the operator chain is not observing a GPU node."
-    exit 0
-  fi
-  if [ "${#_nv[@]}" -gt 1 ]; then
-    echo "[case-23] several nvidia GPU nodes (${_nv[*]}); set MIG_NODE_NAME=<the node behind ${MIG_NODE_SSH}> and re-run"
-    exit 2
-  fi
-  GPU_NODE="${_nv[0]}"
-fi
-echo "[case-23] correlated k8s node: ${GPU_NODE}"
-
-# Accelerated InstanceType for this node's nvidia group + its entrance LocalQueue + the manufacturer.
-GROUPID=$(kubectl get devices "$GPU_NODE" -o json 2>/dev/null | python3 -c "
-import json,sys
-for g in json.load(sys.stdin).get('spec',{}).get('groups',[]):
-    if g.get('manufacturer')=='nvidia' and g.get('accelerators'):
-        print(g.get('id','')); break
-" 2>/dev/null)
-read -r IT LQ MANUF <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | NODE_GID="$GROUPID" NODE_JSON="$(kubectl get node "$GPU_NODE" -o json 2>/dev/null)" python3 -c "
-import json,sys,os
-gid=os.environ.get('NODE_GID','')
-nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
-# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
-# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
-# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
-# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
-def backs(it):
-    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
-    return bool(d) and all(nl.get(k)==v for k,v in d.items())
-def in_group(s):
-    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
-items=json.load(sys.stdin).get('items',[])
-# The pool identity this node belongs to, not its rendered name — see the index's note on pool lookup.
-for it in items:
-    s=it.get('spec',{}); st=it.get('status',{})
-    if s.get('acceleratable') and in_group(s) and backs(it) and st.get('entrance'):
-        print(it['metadata']['name'], st['entrance'], (st.get('detail') or {}).get('manufacturer','nvidia')); sys.exit(0)
-for it in items:
-    s=it.get('spec',{}); st=it.get('status',{})
-    if s.get('acceleratable') and st.get('entrance'):
-        print(it['metadata']['name'], st['entrance'], (st.get('detail') or {}).get('manufacturer','nvidia')); sys.exit(0)
-")"
-[ -n "${IT:-}" ] && [ -n "${LQ:-}" ] || { echo "[case-23] no accelerated InstanceType with an entrance LocalQueue — chain not materialized"; exit 1; }
-MANUF="${MANUF:-nvidia}"
-# The two disjoint accelerator families. LOGICAL slicing (software, the vendor preload library) is
-# served only by a card that is NOT in a hardware partitioning mode; PHYSICAL partitioning (the MIG
-# hardware) only by a card that is. Enabling MIG moves the card from the first family to the second.
-SLICED="${MANUF}.com/gpu.sliced"
-PARTITIONED="${MANUF}.com/gpu.partitioned"
-echo "[case-23] accelerated InstanceType ${IT} (entrance LocalQueue ${LQ}, group ${GROUPID:-?}, logical base ${SLICED}, partition base ${PARTITIONED})"
-
-# The vendor runtimeClass mounts the driver libs the workload needs (nvidia-smi -L, and — on the logically sliced
-# path — the LD_PRELOAD'd libvgpu.so, which exits 127 without it). Derive it from the manufacturer.
-RUNTIMECLASS=""
-if kubectl get runtimeclass.node.k8s.io "$MANUF" >/dev/null 2>&1; then RUNTIMECLASS="$MANUF"; fi
-RTC_LINE=""; [ -n "$RUNTIMECLASS" ] && RTC_LINE="runtimeClassName: ${RUNTIMECLASS}"
-echo "[case-23] test-pod runtimeClass: ${RUNTIMECLASS:-<none>}"
+part_require_node_ssh "case-23.sh"
+part_require_mig_capable
+part_discover
 
 # ---------------------------------------------------------------------------------------------------
-# Bookkeeping + helpers.
+# Cleanup. The trap restores what the case changed: the test Pods go, and the card goes back into the
+# mode the case found it in.
 # ---------------------------------------------------------------------------------------------------
-FAILS=0
-ROWS=()
-TESTPODS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
-
-running()      { [ "$(kubectl -n default get pod "$1" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Running" ]; }
-wait_running() { for _ in $(seq 1 40); do running "$1" && return 0; sleep 3; done; return 1; }
-
-# workload_refusal <pod> — the Pod's own Kueue Workload verdict, when an AdmissionCheck has actually
-# rendered one: "admission-check(<name>/<state>)" for Retry or Rejected, empty otherwise. This is the
-# product saying "I refuse to admit this", so it is conclusive the moment it appears.
-workload_refusal() {
-  kubectl -n default get workloads.kueue.x-k8s.io -o json 2>/dev/null | python3 -c "
-import json,sys
-pod='$1'
-for wl in json.load(sys.stdin).get('items',[]):
-    if not any(o.get('name')==pod for o in wl.get('metadata',{}).get('ownerReferences',[])):
-        continue
-    st=wl.get('status',{})
-    if any(c.get('type')=='Admitted' and c.get('status')=='True' for c in st.get('conditions',[])):
-        break
-    for c in st.get('admissionChecks',[]):
-        if c.get('state') in ('Retry','Rejected'):
-            print('admission-check(%s/%s)' % (c.get('name',''), c.get('state')))
-            break
-    break
-" 2>/dev/null
-}
-
-# pod_events <pod> — the reasons of the events recorded against THIS Pod, one per line. Scoped to the
-# Pod's UID as well as its name: events outlive their Pod by about an hour while this case reuses the
-# same Pod names every round, so a name-only selector reports a previous round's events as this Pod's.
-# Returns non-zero when the identity or the event query cannot be answered.
-pod_events() {
-  local uid
-  uid="$(kubectl -n default get pod "$1" -o jsonpath='{.metadata.uid}' 2>/dev/null)" || return 1
-  [ -n "$uid" ] || return 1
-  kubectl -n default get events \
-    --field-selector "involvedObject.name=$1,involvedObject.uid=${uid}" \
-    -o jsonpath='{range .items[*]}{.reason}{"\n"}{end}' 2>/dev/null || return 1
-}
-
-# held_reason <pod> — a DECISIVE signal that the Pod was refused: a terminal failure, an Unschedulable
-# verdict, a device-plugin admission refusal, or an AdmissionCheck that declined it. Empty when none is
-# present. The bare Kueue scheduling gate is deliberately NOT among these — see assert_held.
-held_reason() {
-  local p="$1" phase cond ev wl
-  phase="$(kubectl -n default get pod "$p" -o jsonpath='{.status.phase}' 2>/dev/null)"
-  [ "$phase" = Failed ] && { echo "Failed"; return; }
-  cond="$(kubectl -n default get pod "$p" -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].reason}' 2>/dev/null)"
-  [ "$cond" = Unschedulable ] && { echo "Unschedulable"; return; }
-  # A failed event query reads as "no event", which can only withhold a PASS, never grant one.
-  ev="$(pod_events "$p" | grep -iE 'UnexpectedAdmissionError|FailedScheduling' | head -1)"
-  [ -n "$ev" ] && { echo "$ev"; return; }
-  wl="$(workload_refusal "$p")"
-  [ -n "$wl" ] && { echo "$wl"; return; }
-  echo ""
-}
-
-# assert_held <pod> [polls] — confirm the Pod is HELD rather than merely slow; PASS text on success,
-# empty on "cannot confirm".
-#
-# Kueue's pod integration gates EVERY Pod born in this namespace, so the bare kueue.x-k8s.io/admission
-# scheduling gate proves nothing on its own: a Pod that is about to admit normally carries it too, for
-# the second or two before Kueue clears it. Evidence therefore comes in two grades:
-#
-#   DECISIVE  — a verdict has been rendered against the Pod (held_reason). Conclusive on sight.
-#   ENDURING  — nothing but the birth gate. It means "held" only once it OUTLASTS the window a healthy
-#               admission needs, so it must survive every poll of the window.
-#
-# The window is always polled to its end unless the Pod resolves, because the device-plugin's
-# UnexpectedAdmissionError backstop fires only AFTER Kueue clears the gate. Reaching Running at any
-# point returns empty: the Pod was never held.
-assert_held() {
-  local p="$1" t="${2:-20}" hr gate last_gate="" gated_throughout=1
-  for _ in $(seq 1 "$t"); do
-    running "$p" && { echo ""; return; }
-    hr="$(held_reason "$p")"
-    [ -n "$hr" ] && { echo "$hr"; return; }
-    gate="$(kubectl -n default get pod "$p" -o jsonpath='{.spec.schedulingGates[*].name}' 2>/dev/null)"
-    if [ -n "$gate" ]; then last_gate="$gate"; else gated_throughout=0; fi
-    sleep 3
-  done
-  [ "$gated_throughout" = 1 ] && [ -n "$last_gate" ] &&
-    { echo "scheduling-gated(${last_gate}) sustained across ${t} polls"; return; }
-  echo ""
-}
-
-# node_gi_count — the number of live GPU instances the card actually holds (node ground truth).
-# It prints the count and returns 0 only when the node answered. Two exit statuses are real answers of
-# "none": 0 with "No MIG-enabled devices found." and 6 with "No GPU instances found: Not Found".
-# Anything else (unreachable node, timeout, sudo refused) prints nothing and returns non-zero, because
-# a probe that never answered must never be read as an idle card.
-node_gi_count() {
-  local out rc
-  out="$(node_ssh sudo nvidia-smi mig -lgi 2>&1)"; rc=$?
-  case "$rc" in
-    0 | 6) ;;
-    *) return 1 ;;
-  esac
-  # grep -c prints "0" AND exits non-zero on no match, so keep the count and discard the status.
-  printf '%s\n' "$out" | grep -cE '^\|[[:space:]]+[0-9]+' || true
-}
-
-# wait_card_idle — poll until the card holds no live GPU instances, bounded ~120s. A MIG mode switch
-# needs an idle card (the disable prerequisite), so callers wait for the last workload's instance to
-# reclaim before toggling the mode. An unanswered probe keeps it waiting: unknown is not idle.
-# Returns 0 when idle, 1 on timeout.
-wait_card_idle() {
-  local n
-  for _ in $(seq 1 40); do
-    n="$(node_gi_count)" && [ "$n" = 0 ] && return 0
-    sleep 3
-  done
-  return 1
-}
-
-# exec_out <pod> <cmd>... — run a command in the Pod and echo its output, retried.
-#
-# A Pod reports Running slightly before its container is attachable, so an exec issued the instant
-# wait_running returns can come back empty — or fail outright with `container not found` — on a Pod
-# whose allocation is perfectly correct. That matters most in pod_mig_devices below: `grep -c` prints
-# 0 even when the exec failed, so an attach race reads as "no MIG device inside the Pod" and fails a
-# correct allocation.
-exec_out() {
-  local pod="$1"; shift
-  local out
-  for _ in $(seq 1 8); do
-    out=$(kubectl -n default exec "$pod" -- "$@" 2>/dev/null)
-    [ -n "$out" ] && { printf '%s\n' "$out"; return 0; }
-    sleep 3
-  done
-  return 1
-}
-
-# pod_mig_devices <pod> — count of MIG devices nvidia-smi -L reports inside the Pod (want exactly 1).
-pod_mig_devices() {
-  local out
-  out="$(exec_out "$1" nvidia-smi -L | grep -c 'MIG')"
-  echo "${out:-0}"
-}
-
-# node_key <resource> — the node's allocatable quantity for an extended resource (empty if absent).
-node_key() { kubectl get node "$GPU_NODE" -o jsonpath="{.status.allocatable['${1//./\\.}']}" 2>/dev/null; }
-
-# node_key_gone <resource> — true when a key is absent OR reads 0. Reconciler-owned counting keys are
-# genuinely REMOVED when their family leaves the node, but a device-plugin pool key only zeroes out —
-# the kubelet keeps the entry until it restarts — so "gone" must accept both for the pool keys.
-node_key_gone() { local v; v="$(node_key "$1")"; [ -z "$v" ] || [ "$v" = 0 ]; }
-
-# partition_profile_keys — the per-profile partition keys the node currently advertises, i.e. every
-# "<base>.partitioned.<kind>-<profile>" (never ".partitioned.units", which is a counting key, not a
-# profile). The kind segment is the manufacturer's own name for hardware partitioning and is read off
-# the node rather than assumed, so the case does not hardcode a vendor's spelling of it.
-partition_profile_keys() {
-  kubectl get node "$GPU_NODE" -o json 2>/dev/null | PFX="${PARTITIONED}." python3 -c "
-import json,os,sys
-pfx=os.environ['PFX']
-a=json.load(sys.stdin).get('status',{}).get('allocatable',{})
-print(' '.join(k for k in a if k.startswith(pfx) and not k.endswith('.units')))
-" 2>/dev/null
-}
-
-# profile_key <profile> — the advertised per-profile key whose profile segment is <profile>, or empty.
-profile_key() {
-  local want="$1" k
-  for k in $(partition_profile_keys); do
-    case "$k" in *-"$want") echo "$k"; return;; esac
-  done
-  echo ""
-}
-
-# refresh_dm — the Device Manager writes the capability at startup, and its detect loop compares only
-# {manufacturer, id, unhealthy}, which a partitioning-mode toggle does not change — so a mode flip is
-# picked up by RESTARTING the DaemonSet. Deleting the Devices object is deliberately NOT done: an
-# existing group's capability is rewritten in place, and deleting it here would hide a regression of
-# that. Waits for the rollout and for the object to be present.
-# Both halves are measured, not assumed: on an 8-card node the flip alone left the object at the same
-# generation and resourceVersion, unchanged again minutes later, while each restart moved it exactly
-# one generation — logical to partitioned and back — with the object's uid and creationTimestamp never
-# changing. So the restart is required, and it is also sufficient.
-refresh_dm() {
-  echo "[case-23]   refreshing Device Manager (rollout restart ${DM_DS}; the Devices object is kept)"
-  kubectl -n "$NS" rollout restart "ds/${DM_DS}" >/dev/null 2>&1 || true
-  kubectl -n "$NS" rollout status "ds/${DM_DS}" --timeout=180s >/dev/null 2>&1 || true
-  for _ in $(seq 1 30); do kubectl get devices.worker.gpustack.ai "$GPU_NODE" >/dev/null 2>&1 && break; sleep 3; done
-}
-
-# set_mig_mode <0|1> — toggle the card's MIG mode over SSH and wait until it converges (or a reset pends).
-# Returns 0 on convergence, 1 otherwise (caller records the failure with guidance).
-# Converged here means only that the CARD reports the new mode. The toggle on its own is invisible to
-# the operator, so a caller that stops at this point asserts against the capability the card had
-# BEFORE the flip and reads a stale answer as a real one. Follow every successful toggle with
-# refresh_dm.
-set_mig_mode() {
-  local want="$1" target; [ "$want" = 1 ] && target=Enabled || target=Disabled
-  echo "[case-23]   nvidia-smi -i ${GPU_INDEX} -mig ${want} on ${MIG_NODE_SSH}"
-  node_ssh sudo nvidia-smi -i "$GPU_INDEX" -mig "$want" >/dev/null 2>&1 || true
-  for _ in $(seq 1 20); do
-    local cur; cur="$(node_ssh sudo nvidia-smi -i "$GPU_INDEX" --query-gpu=mig.mode.current --format=csv,noheader 2>/dev/null | tr -d '[:space:]')"
-    [ "$cur" = "$target" ] && return 0
-    sleep 3
-  done
-  return 1
-}
-
-# card_profiles — DISCOVER the SMALL(size-1)/MID(size-4,3g)/FULL(size-8,7g) profiles + per-card counts +
-# the partitioned-card count N and the group's TOTAL card count NTOT, from the cards' own capability.
-# The physical-slice geometry is CAPABILITY, so it lives in Devices.spec (the per-card runtime ledger is
-# in .status). NTOT is what tells the case whether the WHOLE pool moved family (N == NTOT) or only part
-# of it, which decides whether the logical keys may legitimately still be present. Emits:
-# SMALL SMALL_CNT MID MID_CNT FULL FULL_CNT N NTOT.
-card_profiles() {
-  kubectl get devices "$GPU_NODE" -o json 2>/dev/null | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-small=mid=full=None; n=0; ntot=0
-for g in d.get('spec',{}).get('groups',[]):
-    if g.get('manufacturer')!='nvidia': continue
-    for a in g.get('accelerators',[]):
-        ntot+=1
-        profs=a.get('status',{}).get('physicalSliced',{}).get('profiles',[]) or []
-        if profs: n+=1
-        for p in profs:
-            ms=p.get('memorySlices',0); cs=p.get('computeSlices',0)
-            if ms==1 and (small is None or p.get('memoryMib',0)<small[1]): small=(p['name'],p.get('memoryMib',0),p.get('count',0))
-            if ms==4 and cs==3: mid=(p['name'],p.get('memoryMib',0),p.get('count',0))
-            if ms==8: full=(p['name'],p.get('memoryMib',0),p.get('count',0))
-def f(x): return (x[0], x[2]) if x else ('', 0)
-sn,sc=f(small); mn,mc=f(mid); fn,fc=f(full)
-print(sn, sc, mn, mc, fn, fc, n, ntot)
-" 2>/dev/null
-}
-
 restore() {
   echo
   echo "[case-23] cleanup: deleting test Pods and restoring MIG mode to '${INITIAL_MODE}'"
-  for p in "${TESTPODS[@]}"; do kubectl -n default delete pod "$p" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true; done
-  local now; now="$(node_ssh sudo nvidia-smi -i "$GPU_INDEX" --query-gpu=mig.mode.current --format=csv,noheader 2>/dev/null | tr -d '[:space:]')"
+  delete_test_pods
+  local now; now="$(mig_mode "$GPU_INDEX")"
   if [ "$now" != "$INITIAL_MODE" ]; then
     # A disable needs an idle card; wait for any just-deleted workload's instance to reclaim first.
     [ "$INITIAL_MODE" = Enabled ] || wait_card_idle || true
-    [ "$INITIAL_MODE" = Enabled ] && set_mig_mode 1 || set_mig_mode 0
+    if [ "$INITIAL_MODE" = Enabled ]; then
+      set_mig_mode "$GPU_INDEX" 1 || set_mig_mode "$GPU_INDEX" 0
+    else
+      set_mig_mode "$GPU_INDEX" 0
+    fi
     refresh_dm
   fi
   node_ssh_close
 }
 trap restore EXIT
-
-# mkpod <name> <extra-resource-lines> — a Pod on the GPU node, through the pool's LocalQueue.
-mkpod() {
-  local name="$1" reslines="$2"; TESTPODS+=("$name")
-  cat <<EOF | kubectl apply -f - >/dev/null
-apiVersion: v1
-kind: Pod
-metadata: { name: ${name}, namespace: default, labels: { kueue.x-k8s.io/queue-name: ${LQ} } }
-spec:
-  schedulerName: default-scheduler
-  ${RTC_LINE}
-  restartPolicy: Never
-  nodeSelector: { kubernetes.io/hostname: ${GPU_NODE} }
-  containers:
-    - name: main
-      image: ubuntu:24.04
-      command: ["sleep", "86400"]
-      resources:
-        limits:
-${reslines}
-        requests:
-${reslines}
-EOF
-}
-delpod() { kubectl -n default delete pod "$1" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true; }
 
 # ===================================================================================================
 # Phase L — Logical slicing, only when the card started with MIG OFF.
@@ -530,7 +141,7 @@ echo
 echo "[case-23] === Phase E: enable MIG + Device Manager re-detect ==="
 CUR="$(node_ssh sudo nvidia-smi -i "$GPU_INDEX" --query-gpu=mig.mode.current --format=csv,noheader 2>/dev/null | tr -d '[:space:]')"
 if [ "$CUR" != Enabled ]; then
-  if ! set_mig_mode 1; then
+  if ! set_mig_mode "$GPU_INDEX" 1; then
     record FAIL "enable MIG mode" "nvidia-smi -mig 1 did not converge to Enabled (a pending GPU reset on Ampere, a busy card, or a loaded nvidia_drm blocks it) — see Prerequisites"
     echo; echo "== CASE 23 — cannot proceed without MIG enabled =="; exit 1
   fi
@@ -781,7 +392,7 @@ echo "[case-23] === Phase D: disable MIG → logical-slice capability returns ==
 # A mode switch needs an idle card — wait for the whole-card FULL from Phase S (just deleted) to
 # reclaim before disabling, else nvidia-smi -mig 0 cannot converge (the disable prerequisite).
 wait_card_idle || echo "[case-23]   warning: card still reports live instances before disable"
-if set_mig_mode 0; then
+if set_mig_mode "$GPU_INDEX" 0; then
   refresh_dm
   logicalpct=""; partleft="x"; punits_left="x"
   for _ in $(seq 1 30); do

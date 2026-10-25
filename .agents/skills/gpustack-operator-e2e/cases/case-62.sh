@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # CASE 62 — A replicated KV cache leader elects exactly one of three through a Lease, the two
-#   rendered accounts are sufficient and no more, and an induced failover moves the Lease without
-#   touching a member   (MUTATING, self-recovering)
+#   rendered accounts are sufficient and no more, and both ways of failing the holder -- a graceful
+#   delete and a hard kill -- move the Lease without touching a member   (MUTATING, self-recovering)
 #
 #   case-62.sh <NS>
 #
@@ -25,11 +25,15 @@
 #                    server's authorizer (kubectl auth can-i), not compared against a rendered Role:
 #                    the leader's account may create/get/update leases and patch its own pods; the
 #                    member's account may ONLY get leases -- `update leases` must print "no".
-#                (4) A FAILOVER MOVES THE LEASE AND NOTHING ELSE. Deleting the serving replica
-#                    changes the holder, a different replica becomes ready, NO member Pod restarts
-#                    (restartCount unchanged), and the backend reports no member fault throughout:
-#                    a health rule that fires on a successful failover is worse than the one it
-#                    replaced.
+#                (4) A FAILOVER MOVES THE LEASE AND NOTHING ELSE, AND BOTH WAYS OF FAILING PASS. The
+#                    serving replica is failed twice, on one cluster: first deleted gracefully, so
+#                    the holder exits on its own schedule and keeps serving through termination
+#                    grace; then hard-killed with --force --grace-period=0, so the holder never
+#                    releases the Lease and a standby has to notice an EXPIRED lease rather than an
+#                    answered handoff. Each time the holder changes, a different replica becomes
+#                    ready, NO member Pod restarts (restartCount unchanged), and the backend reports
+#                    no member fault throughout: a health rule that fires on a successful failover
+#                    is worse than the one it replaced.
 #
 # Environment: Any cluster; no GPU, no RDMA (members are DRAM over TCP). One node is enough: the
 #              leader replicas are a Deployment and need not be spread, and the member DaemonSet
@@ -41,8 +45,9 @@
 #              carries the backend.
 #
 # Inputs:      All real, nothing mocked. One KVCacheBackend (replicas 3, Kubernetes election, one DRAM
-#              member group of 2Gi per node). The failover is induced by deleting the ready leader
-#              Pod -- the one the Lease names.
+#              member group of 2Gi per node) serves both failovers. They are induced by deleting the
+#              ready leader Pod -- the one the Lease names: once with the grace period the kubelet
+#              grants, once with no grace period at all.
 #
 # Expected:    - the backend reaches Ready;
 #              - the leader Deployment: spec.replicas=3, three Pods, readyReplicas=1;
@@ -52,11 +57,18 @@
 #              - leader SA: create/get/update leases=yes, patch pods=yes; watch/list/delete leases
 #                and get/update pods=no;
 #              - member SA: get leases=yes; update/create/delete leases and patch pods=no;
-#              - after deleting the serving Pod: the Lease's holder changes WITHIN THE FAILOVER
+#              - after the graceful delete: the Lease's holder changes WITHIN THE FAILOVER
 #                BOUND (120s; graceful failovers here measure 43-44s), a DIFFERENT replica
 #                becomes ready, every member Pod keeps its UID and restartCount, MembersMounted
 #                reads True/Mounted before the delete and no sample reports a member fault (the
-#                leader-gap and re-registration reasons are data), and the phase returns to Ready.
+#                leader-gap and re-registration reasons are data), and the phase returns to Ready;
+#              - the leader Deployment is back to three running replicas before the hard kill, so
+#                the second failover has standbys to campaign;
+#              - after the hard kill: the holder changes within the same bound (a hard kill skips
+#                the grace period, so this path is expected FASTER than the graceful one), a
+#                DIFFERENT replica becomes ready, every member Pod keeps its UID and restartCount,
+#                MembersMounted reads True/Mounted before the kill, no sample reports a member
+#                fault, and the phase returns to Ready again.
 #
 # Cleanup:     Trap deletes the KVCacheBackend; owner references cascade to the Deployment, Service,
 #              both ServiceAccounts, both Roles and both RoleBindings. The Lease is the store's, not
@@ -67,12 +79,18 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
 # transport alone, and a check that takes such a failure for an answer reports a verdict about the
 # network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-62.sh <NS>}"
-CASE_ID=62
+export CASE_ID=62
 IMAGE="${E2E_MOONCAKE_IMAGE:-gpustack/mirrored-mooncake:0.3.13.post1-cpu}"
+
+# A failover is a promise about SPEED, and a check that records the number without judging it
+# waves a three-minute election through. Graceful-delete failovers measure 43-44s on this suite
+# (termination grace + Lease expiry); 120s is a regression tripwire at ~2.5x that -- loose enough
+# for scheduler noise, tight enough that a real slowdown cannot walk past. A hard kill skips the
+# grace period entirely, so the same bound is the tripwire there too.
 FAILOVER_BOUND_SECS=120
 
 # The suffix keeps two runs of this case apart: the backend's name is cluster-scoped, and every
@@ -91,137 +109,27 @@ MEMBER_SA="${BACKEND}-member"
 LEADER_SEL="app.kubernetes.io/name=kv-cache-backend,app.kubernetes.io/instance=${BACKEND},app.kubernetes.io/component=leader"
 MEMBER_SEL="app.kubernetes.io/name=kv-cache-backend,app.kubernetes.io/instance=${BACKEND},app.kubernetes.io/component=member-0"
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# The Lease readers, the member snapshot, the failover handoff and the teardown live in the shared HA library.
 # shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
-
-results() {
-  print_rows
-  [ "$FAILS" -eq 0 ] || { echo "[case-${CASE_ID}] ${FAILS} check(s) FAILED"; return 1; }
-  echo "[case-${CASE_ID}] all checks passed"
-  return 0
-}
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_kvcache-ha-lib.sh"
 
 teardown() {
   echo
   echo "[case-62] cleanup"
-  kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  # After the backend, because a standby still running would campaign the Lease back into existence.
-  kubectl wait --for=delete "kvcachebackends.worker.gpustack.ai/${BACKEND}" --timeout=120s >/dev/null 2>&1 || true
-  kubectl -n "$NS" delete leases.coordination.k8s.io "$LEADER" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kvha_teardown "$NS" "$BACKEND" "$LEADER"
 }
 trap teardown EXIT
 
-# wait_for polls one jsonpath until it equals what is wanted, and prints the LAST value seen, so a
-# timeout says what the object was doing rather than only that it timed out.
-wait_for() {
-  local kind="$1" name="$2" path="$3" want="$4" secs="${5:-180}"
-  local got="" i
-  for ((i = 0; i < secs; i += 3)); do
-    got="$(kubectl -n "$NS" get "$kind" "$name" -o "jsonpath=$path" 2>/dev/null)"
-    [ "$got" = "$want" ] && { echo "$got"; return 0; }
-    sleep 3
-  done
-  echo "$got"
-  return 1
-}
+# ---------------------------------------------------------------- readers
+# What the shared HA library does not answer, this case asks for itself.
 
-# ready_leader_pod prints the name of the one leader Pod that is Ready, or nothing. With the
-# readiness gate working there is exactly one; an empty result and a two-line result are both
-# answers the checks below report rather than reinterpret.
-ready_leader_pod() {
+# running_leader_pods prints the number of leader Pods that are Running. The standbys are Running
+# but NOT Ready -- the readiness gate admits only the leader -- so this, not readyReplicas, is the
+# count that says the Deployment has a full set of candidates to campaign again.
+running_leader_pods() {
   kubectl -n "$NS" get pod -l "$LEADER_SEL" \
-    -o jsonpath='{range .items[?(@.status.containerStatuses[0].ready==true)]}{.metadata.name}{"\n"}{end}' \
-    2>/dev/null | head -1
-}
-
-lease_holder() {
-  kubectl -n "$NS" get leases.coordination.k8s.io "$LEADER" \
-    -o jsonpath='{.spec.holderIdentity}' 2>/dev/null
-}
-
-lease_renew_time() {
-  kubectl -n "$NS" get leases.coordination.k8s.io "$LEADER" \
-    -o jsonpath='{.spec.renewTime}' 2>/dev/null
-}
-
-holder_pod_uid() {
-  local holder="$1" holder_ip pod_uid pod_ip deleting phase
-  case "$holder" in
-    \[*\]:*)
-      holder_ip="${holder#\[}"
-      holder_ip="${holder_ip%%\]*}"
-      ;;
-    *:*) holder_ip="${holder%:*}" ;;
-    *) holder_ip="$holder" ;;
-  esac
-  while IFS='|' read -r pod_uid pod_ip deleting phase; do
-    if [ "$phase" != "Running" ] || [ -n "$deleting" ] || [ -z "$pod_ip" ] \
-      || [ "$pod_ip" != "$holder_ip" ]; then
-      continue
-    fi
-    echo "$pod_uid"
-    return 0
-  done < <(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
-    -o jsonpath='{range .items[*]}{.metadata.uid}{"|"}{.status.podIP}{"|"}{.metadata.deletionTimestamp}{"|"}{.status.phase}{"\n"}{end}' \
-    2>/dev/null)
-}
-
-observe_handoff_snapshot() {
-  local observed_at="$1"
-  if [ -z "$HOLDER_MOVED_AT" ] && [ -n "$NEW_HOLDER_POD_UID" ] \
-    && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
-    if [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
-      HOLDER_MOVED_AT="$observed_at"
-      MOVED_HOLDER="$NEW_HOLDER"
-      MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
-      MOVE_EVIDENCE="holderIdentity changed"
-    elif [ -n "$NEW_RENEW_TIME" ]; then
-      if [ "$REUSED_HOLDER_POD_UID" != "$NEW_HOLDER_POD_UID" ] \
-        || [ -z "$REUSED_HOLDER_RENEW_TIME" ]; then
-        REUSED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
-        REUSED_HOLDER_RENEW_TIME="$NEW_RENEW_TIME"
-      elif [ "$NEW_RENEW_TIME" != "$REUSED_HOLDER_RENEW_TIME" ]; then
-        HOLDER_MOVED_AT="$observed_at"
-        MOVED_HOLDER="$NEW_HOLDER"
-        MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
-        MOVE_EVIDENCE="replacement renewed the reused holderIdentity"
-      fi
-    fi
-  fi
-  if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] \
-    && [ "$NEW_HOLDER_POD_UID" = "$NEW_READY_UID" ]; then
-    HANDOFF_OBSERVED=1
-    if [ -z "$HOLDER_MOVED_AT" ]; then
-      HOLDER_MOVED_AT="$observed_at"
-      MOVED_HOLDER="$NEW_HOLDER"
-      MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
-      MOVE_EVIDENCE="Ready replacement confirmed the reused holderIdentity"
-    fi
-  fi
-}
-
-record_failover_bound() {
-  local moved_secs=$((HOLDER_MOVED_AT - DELETE_EPOCH))
-  case "$MOVE_EVIDENCE" in
-    "holderIdentity changed"|"replacement renewed the reused holderIdentity")
-      if [ "$moved_secs" -le "$FAILOVER_BOUND_SECS" ]; then
-        record PASS "the Lease moves within the failover bound" "${moved_secs}s <= ${FAILOVER_BOUND_SECS}s; ${MOVE_EVIDENCE}"
-      else
-        record FAIL "the Lease moves within the failover bound" \
-          "${moved_secs}s > ${FAILOVER_BOUND_SECS}s -- ${MOVE_EVIDENCE}; the election still works but no longer meets the failover budget"
-      fi
-      ;;
-    "Ready replacement confirmed the reused holderIdentity")
-      record SKIP "the Lease moves within the failover bound" \
-        "${moved_secs}s after the failover trigger; the Ready replacement upper bound includes Pod scheduling, image pulling, and readiness probing"
-      ;;
-    *)
-      record FAIL "the Lease moves within the failover bound" "unrecognized move evidence: ${MOVE_EVIDENCE:-<none>}"
-      ;;
-  esac
+    -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' \
+    2>/dev/null | wc -l | tr -d ' '
 }
 
 # can_i asks the API server's authorizer -- not a rendered Role -- and prints the answer word.
@@ -233,8 +141,140 @@ can_i() {
   echo "${out:-<no answer>}"
 }
 
+# ---------------------------------------------------------------- failover machinery
+
+# sample_lease_holder reads the Pod that is Ready, the Pod the Lease names, and their UIDs. Both
+# failovers read it through this one helper: the second failover must target the holder the first
+# one left behind, not the Pod the first one deleted.
+sample_lease_holder() {
+  local i
+  for ((i = 0; i < 10; i++)); do
+    OLD_READY="$(kvha_ready_leader_pod "$NS" "$LEADER_SEL")"
+    OLD_READY_UID=""
+    if [ -n "$OLD_READY" ]; then
+      OLD_READY_UID="$(kvha_pod_uid "$NS" "$OLD_READY")"
+    fi
+    OLD_HOLDER="$(kvha_lease_holder "$NS" "$LEADER")"
+    OLD_HOLDER_POD_UID="$(kvha_holder_pod_uid "$NS" "$LEADER_SEL" "$OLD_HOLDER")"
+    [ -n "$OLD_READY_UID" ] && [ "$OLD_HOLDER_POD_UID" = "$OLD_READY_UID" ] && break
+    sleep 1
+  done
+}
+
+# observe_lease_handoff watches the Lease until the move is observable and records when it
+# happened. The watch and the detection live in the shared HA library, which returns one snapshot
+# of what it saw; the graceful and the hard-kill failover each start from a clean slate through
+# the same code.
+observe_lease_handoff() {
+  IFS='|' read -r HOLDER_MOVED_AT MOVED_HOLDER MOVED_HOLDER_POD_UID MOVE_EVIDENCE HANDOFF_OBSERVED \
+    NEW_HOLDER NEW_HOLDER_POD_UID NEW_READY NEW_READY_UID HANDOFF_WAIT_SECS \
+    < <(kvha_observe_handoff_snapshot "$NS" "$BACKEND" "$LEADER" "$LEADER_SEL" "$TRAJ_FILE" \
+      "$DELETE_EPOCH" "$OLD_READY_UID" "$OLD_HOLDER")
+}
+
+# wait_for_new_ready_pod waits for a leader Pod that is Ready and is not the one that was deleted.
+wait_for_new_ready_pod() {
+  local i
+  NEW_READY=""
+  for ((i = 0; i < 180; i += 3)); do
+    NEW_READY="$(kvha_ready_leader_pod "$NS" "$LEADER_SEL")"
+    [ -n "$NEW_READY" ] && [ "$NEW_READY" != "$OLD_READY" ] && break
+    sleep 3
+  done
+}
+
+# record_failover_bound emits the "the Lease moves within the failover bound" row. The judgement
+# itself is the shared HA library's; the row stays with the case.
+record_failover_bound() {
+  local verdict
+  verdict="$(kvha_failover_bound_verdict "$HOLDER_MOVED_AT" "$DELETE_EPOCH" "$FAILOVER_BOUND_SECS" "$MOVE_EVIDENCE")"
+  record "${verdict%%|*}" "the Lease moves within the failover bound" "${verdict#*|}"
+}
+
+# ---------------------------------------------------------------- row printers
+#
+# One wrapper per check that both failover paths read the same way. Each takes the CHECK label as
+# its first argument and emits one row per call, so a reader sees the label at the call site and
+# the wording in one place.
+
+# record_backend_ready emits the "the backend reaches Ready" row from one probe of the backend's
+# phase. A timeout is fatal: nothing below can run without it.
+record_backend_ready() {
+  local check="$1"
+  if ! kvha_wait_for "$NS" kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 300 >/dev/null; then
+    record FAIL "$check" \
+      "phase never became Ready in 300s; nothing below can run. If no leader Pod is ever ready, the \
+store image likely carries no Kubernetes Lease leadership backend (upstream images answer \
+UNAVAILABLE_IN_CURRENT_MODE and campaign forever): $(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
+-o jsonpath='{range .items[*]}{.metadata.name}={.status.phase}{" "}{end}' 2>/dev/null)"
+    results; exit 1
+  fi
+  record PASS "$check" "phase=Ready for ${BACKEND}"
+}
+
+# record_backend_ready_after_failover emits the "the backend is Ready after the failover" row. The
+# new leader being Ready and every member having re-registered with it are different events:
+# members remount one at a time, and the controller only re-reads the leader on its own cadence.
+# Assert CONVERGENCE through the bounded poll, not a snapshot -- a snapshot cannot tell mid-flight
+# from stuck.
+record_backend_ready_after_failover() {
+  local check="$1"
+  if kvha_wait_for "$NS" kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 300 >/dev/null; then
+    record PASS "$check" "phase=Ready"
+  else
+    record FAIL "$check" \
+      "phase='$(kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phase}' 2>/dev/null)' after a 300s settle window: $(kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phaseMessage}' 2>/dev/null | cut -c1-160)"
+  fi
+}
+
+# record_member_restarts emits the "no member Pod restarts across the failover" row: the member
+# Pods are the same Pods, by UID and restartCount, before and after.
+record_member_restarts() {
+  local check="$1" before="$2" after="$3"
+  if [ "$after" = "$before" ]; then
+    record PASS "$check" \
+      "every member kept its UID and restartCount: $(echo "$after" | tr '\n' ' ')"
+  else
+    record FAIL "$check" \
+      "before: $(echo "$before" | tr '\n' ' ') | after: $(echo "$after" | tr '\n' ' ')"
+  fi
+}
+
+# record_member_faults emits the "no member fault is reported throughout the transition" row from
+# the trajectory sampled across the failover.
+#
+# The trajectory: every sampled phase|MembersMounted pair, de-duplicated in order of first
+# appearance. A member fault firing on a healthy failover is the failure this case exists to catch;
+# a transient leader-unavailable reading during the gap is a true statement about the gap and is
+# reported as data, not passed or failed. (awk joins instead of paste: paste -sd treats a multi-char
+# delimiter as a SET of single-char separators used in rotation.)
+#
+# The reasons below are that gap and the members re-registering with the new leader
+# (setMembersObservationFailed and observeMembers in the KVCacheBackend controller); any other False
+# reason names a member fault. The pre-delete sample must read True/Mounted, which is the positive
+# baseline that proves the reader returns the condition at all.
+record_member_faults() {
+  local check="$1" pre_delete_sample="$2"
+  local gap_reasons='NoAdminEndpoint|LeaderStarting|LeaderUnreachable|LeaderUnschedulable|ServicePlaneNotActive|ListingFailed|NoSegments|SegmentsShort'
+  local trajectory member_faults
+  trajectory="$(awk '!seen[$0]++ {printf "%s%s", (NR>1 ? " -> " : ""), $0}' "$TRAJ_FILE")"
+  member_faults="$(grep -E '[|]False/' "$TRAJ_FILE" | grep -vE "[|]False/(${gap_reasons})\$" | sort -u | tr '\n' ' ')"
+  if [ "${pre_delete_sample#*|}" != "True/Mounted" ]; then
+    record FAIL "$check" \
+      "the pre-delete reading was '${pre_delete_sample:-<empty>}', not True/Mounted, so the samples below prove nothing; trajectory: ${trajectory}"
+  elif [ -n "$member_faults" ]; then
+    record FAIL "$check" \
+      "MembersMounted sampled a member fault (${member_faults% }); trajectory: ${trajectory}"
+  else
+    record PASS "$check" \
+      "True/Mounted before the delete, and no False reading outside the leader gap; trajectory: ${trajectory}"
+  fi
+}
+
 # ---------------------------------------------------------------- setup
 
+# One backend serves both failovers: the graceful one and the hard-kill one run against the same
+# three replicas, so the second one starts from a cluster the first one already restored.
 kubectl apply -f - <<YAML >/dev/null
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCacheBackend
@@ -255,15 +295,7 @@ spec:
           capacityPerMember: 2Gi
 YAML
 
-if ! wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 300 >/dev/null; then
-  record FAIL "the backend reaches Ready" \
-    "phase never became Ready in 300s; nothing below can run. If no leader Pod is ever ready, the \
-store image likely carries no Kubernetes Lease leadership backend (upstream images answer \
-UNAVAILABLE_IN_CURRENT_MODE and campaign forever): $(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
-    -o jsonpath='{range .items[*]}{.metadata.name}={.status.phase}{" "}{end}' 2>/dev/null)"
-  results; exit 1
-fi
-record PASS "the backend reaches Ready" "phase=Ready for ${BACKEND}"
+record_backend_ready "the backend reaches Ready"
 
 # ------------------------------------------------- (1) the steady state is an equality
 
@@ -278,7 +310,7 @@ fi
 
 # The wait is part of the check, not a preamble: it is where a standby that passes readiness, or a
 # winner that never does, shows up. 300s covers a first pull of the store image.
-if wait_for deploy "$LEADER" '{.status.readyReplicas}' 1 300 >/dev/null; then
+if kvha_wait_for "$NS" deploy "$LEADER" '{.status.readyReplicas}' 1 300 >/dev/null; then
   record PASS "exactly one leader replica is Ready" "status.readyReplicas=1 with 3 desired"
 else
   record FAIL "exactly one leader replica is Ready" \
@@ -290,7 +322,7 @@ fi
 
 # ------------------------------------------------- (2) the Lease names the serving pod
 
-HOLDER="$(lease_holder)"
+HOLDER="$(kvha_lease_holder "$NS" "$LEADER")"
 if [ -n "$HOLDER" ]; then
   record PASS "the Lease exists and names a holder" "lease/${LEADER} holderIdentity=${HOLDER}"
 else
@@ -299,7 +331,7 @@ else
   results; exit 1
 fi
 
-READY_POD="$(ready_leader_pod)"
+READY_POD="$(kvha_ready_leader_pod "$NS" "$LEADER_SEL")"
 READY_IP="$(kubectl -n "$NS" get pod "$READY_POD" -o jsonpath='{.status.podIP}' 2>/dev/null)"
 # The leader campaigns with its own rpc address, so the holder string should carry the serving
 # Pod's IP. Naming a standby here would put the Service's one endpoint and the Lease's one holder
@@ -362,16 +394,9 @@ else
   record FAIL "the member's account is no more than sufficient" "$M_NO -- all four must be no"
 fi
 
-# ------------------------------------------------- (4) induce the failover
+# ------------------------------- (4) induce the graceful failover: delete the serving Pod
 
-# The member snapshot is name=UID:restarts, so a replacement Pod -- which would legitimately carry
-# restartCount 0 -- is still caught, by its UID.
-member_snapshot() {
-  kubectl -n "$NS" get pod -l "$MEMBER_SEL" \
-    -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.uid}:{.status.containerStatuses[0].restartCount}{"\n"}{end}' \
-    2>/dev/null | sort
-}
-MEMBERS_BEFORE="$(member_snapshot)"
+MEMBERS_BEFORE="$(kvha_member_snapshot "$NS" "$MEMBER_SEL")"
 if [ -z "$MEMBERS_BEFORE" ]; then
   record FAIL "members exist to be observed" "no member Pod matched ${MEMBER_SEL}; the backend is Ready, so this is a defect"
   results; exit 1
@@ -381,17 +406,7 @@ OLD_READY=""
 OLD_READY_UID=""
 OLD_HOLDER=""
 OLD_HOLDER_POD_UID=""
-for ((i = 0; i < 10; i++)); do
-  OLD_READY="$(ready_leader_pod)"
-  OLD_READY_UID=""
-  if [ -n "$OLD_READY" ]; then
-    OLD_READY_UID="$(kubectl -n "$NS" get pod "$OLD_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
-  fi
-  OLD_HOLDER="$(lease_holder)"
-  OLD_HOLDER_POD_UID="$(holder_pod_uid "$OLD_HOLDER")"
-  [ -n "$OLD_READY_UID" ] && [ "$OLD_HOLDER_POD_UID" = "$OLD_READY_UID" ] && break
-  sleep 1
-done
+sample_lease_holder
 if [ -z "$OLD_READY_UID" ] || [ "$OLD_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
   record FAIL "the Lease holder is the serving Pod immediately before the delete" \
     "holderIdentity='${OLD_HOLDER:-<empty>}' maps to '${OLD_HOLDER_POD_UID:-<none>}', ready Pod '${OLD_READY:-<none>}' has UID '${OLD_READY_UID:-<none>}'"
@@ -400,16 +415,8 @@ fi
 
 # Sampling the backend's own report THROUGH the transition is what "no fault throughout" means:
 # a phase read only before and after would miss a health rule that fires mid-failover and clears.
-# One reading of the backend's own report, as phase|MembersMounted status/reason. The condition lives
-# under .status; reading it from the object root returns nothing, and an empty reading can never
-# contain False, which is how this row once passed on every run whatever the backend said.
-members_mounted_sample() {
-  kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" \
-    -o jsonpath='{.status.phase}{"|"}{.status.conditions[?(@.type=="MembersMounted")].status}{"/"}{.status.conditions[?(@.type=="MembersMounted")].reason}{"\n"}' \
-    2>/dev/null
-}
 TRAJ_FILE="$(mktemp)"
-PRE_DELETE_SAMPLE="$(members_mounted_sample)"
+PRE_DELETE_SAMPLE="$(kvha_members_mounted_sample "$NS" "$BACKEND")"
 echo "$PRE_DELETE_SAMPLE" >>"$TRAJ_FILE"
 DELETE_EPOCH="$(date +%s)"
 if DELETE_OUT="$(kubectl -n "$NS" delete pod "$OLD_READY" --wait=false 2>&1)"; then
@@ -420,41 +427,7 @@ else
   results; exit 1
 fi
 
-NEW_HOLDER=""
-NEW_HOLDER_POD_UID=""
-NEW_READY=""
-NEW_READY_UID=""
-NEW_RENEW_TIME=""
-REUSED_HOLDER_POD_UID=""
-REUSED_HOLDER_RENEW_TIME=""
-HOLDER_MOVED_AT=""
-MOVED_HOLDER=""
-MOVED_HOLDER_POD_UID=""
-MOVE_EVIDENCE=""
-HANDOFF_OBSERVED=0
-HANDOFF_DEADLINE=$((DELETE_EPOCH + 240))
-# A changed identity or renewTime timestamps the move directly. A Ready holder is an upper bound:
-# the Lease must have moved no later than the serving replacement became observable.
-while [ "$(date +%s)" -lt "$HANDOFF_DEADLINE" ]; do
-  members_mounted_sample >>"$TRAJ_FILE"
-  NEW_HOLDER="$(lease_holder)"
-  NEW_HOLDER_POD_UID="$(holder_pod_uid "$NEW_HOLDER")"
-  NEW_RENEW_TIME=""
-  if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] \
-    && [ "$NEW_HOLDER" = "$OLD_HOLDER" ]; then
-    NEW_RENEW_TIME="$(lease_renew_time)"
-  fi
-  NEW_READY="$(ready_leader_pod)"
-  NEW_READY_UID=""
-  if [ -n "$NEW_READY" ]; then
-    NEW_READY_UID="$(kubectl -n "$NS" get pod "$NEW_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
-  fi
-  observe_handoff_snapshot "$(date +%s)"
-  [ "$HANDOFF_OBSERVED" = "1" ] && break
-  sleep 2
-done
-HANDOFF_FINISHED_AT="$(date +%s)"
-HANDOFF_WAIT_SECS=$((HANDOFF_FINISHED_AT - DELETE_EPOCH))
+observe_lease_handoff
 
 if [ -n "$HOLDER_MOVED_AT" ]; then
   record PASS "the Lease moves to a different holder" \
@@ -480,12 +453,7 @@ if [ -n "$HOLDER_MOVED_AT" ]; then
   record_failover_bound
 fi
 
-NEW_READY=""
-for ((i = 0; i < 180; i += 3)); do
-  NEW_READY="$(ready_leader_pod)"
-  [ -n "$NEW_READY" ] && [ "$NEW_READY" != "$OLD_READY" ] && break
-  sleep 3
-done
+wait_for_new_ready_pod
 if [ -n "$NEW_READY" ] && [ "$NEW_READY" != "$OLD_READY" ]; then
   record PASS "a different replica becomes Ready" "${OLD_READY} -> ${NEW_READY}"
 else
@@ -493,52 +461,123 @@ else
     "ready Pod is '${NEW_READY:-<none>}' 180s after the Lease moved (deleted: ${OLD_READY})"
 fi
 
-MEMBERS_AFTER="$(member_snapshot)"
-if [ "$MEMBERS_AFTER" = "$MEMBERS_BEFORE" ]; then
-  record PASS "no member Pod restarts across the failover" \
-    "every member kept its UID and restartCount: $(echo "$MEMBERS_AFTER" | tr '\n' ' ')"
-else
-  record FAIL "no member Pod restarts across the failover" \
-    "before: $(echo "$MEMBERS_BEFORE" | tr '\n' ' ') | after: $(echo "$MEMBERS_AFTER" | tr '\n' ' ')"
-fi
+MEMBERS_AFTER="$(kvha_member_snapshot "$NS" "$MEMBER_SEL")"
+record_member_restarts "no member Pod restarts across the failover" "$MEMBERS_BEFORE" "$MEMBERS_AFTER"
 
-# The trajectory: every sampled phase|MembersMounted pair, de-duplicated in order of first
-# appearance. A member fault firing on a healthy failover is the failure this case exists to catch;
-# a transient leader-unavailable reading during the gap is a true statement about the gap and is
-# reported as data, not passed or failed. (awk joins instead of paste: paste -sd treats a multi-char
-# delimiter as a SET of single-char separators used in rotation.)
-#
-# The reasons below are that gap and the members re-registering with the new leader
-# (setMembersObservationFailed and observeMembers in the KVCacheBackend controller); any other False
-# reason names a member fault. The pre-delete sample must read True/Mounted, which is the positive
-# baseline that proves the reader returns the condition at all.
-GAP_REASONS='NoAdminEndpoint|LeaderStarting|LeaderUnreachable|LeaderUnschedulable|ServicePlaneNotActive|ListingFailed|NoSegments|SegmentsShort'
-TRAJECTORY="$(awk '!seen[$0]++ {printf "%s%s", (NR>1 ? " -> " : ""), $0}' "$TRAJ_FILE")"
-MEMBER_FAULTS="$(grep -E '[|]False/' "$TRAJ_FILE" | grep -vE "[|]False/(${GAP_REASONS})\$" | sort -u | tr '\n' ' ')"
-if [ "${PRE_DELETE_SAMPLE#*|}" != "True/Mounted" ]; then
-  record FAIL "no member fault is reported throughout the transition" \
-    "the pre-delete reading was '${PRE_DELETE_SAMPLE:-<empty>}', not True/Mounted, so the samples below prove nothing; trajectory: ${TRAJECTORY}"
-elif [ -n "$MEMBER_FAULTS" ]; then
-  record FAIL "no member fault is reported throughout the transition" \
-    "MembersMounted sampled a member fault (${MEMBER_FAULTS% }); trajectory: ${TRAJECTORY}"
-else
-  record PASS "no member fault is reported throughout the transition" \
-    "True/Mounted before the delete, and no False reading outside the leader gap; trajectory: ${TRAJECTORY}"
-fi
+record_member_faults "no member fault is reported throughout the transition" "$PRE_DELETE_SAMPLE"
 rm -f "$TRAJ_FILE"
 
-# The new leader being Ready and every member having re-registered with it are different
-# events: members remount one at a time (observed: 0/3 segments listed right at the new
-# leader's readiness, 1/3 ten seconds later, full remount tens of seconds after that), and
-# the controller only re-reads the leader on its own cadence. Reading phase once, right at
-# readiness, races that remount and reports a mid-flight Degraded as a verdict. Assert
-# CONVERGENCE instead, through the suite's bounded-poll idiom -- a single snapshot cannot
-# distinguish mid-flight from stuck.
-if wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 300 >/dev/null; then
-  record PASS "the backend is Ready after the failover" "phase=Ready"
+record_backend_ready_after_failover "the backend is Ready after the failover"
+
+# The hard kill below needs three candidates to campaign, and the graceful failover deleted one
+# Pod: the Deployment has to bring the replacement back before the second failover starts. The
+# standbys are Running but not Ready -- the readiness gate admits only the leader -- so this counts
+# Running Pods, not ready ones.
+RUNNING_LEADERS=""
+for ((i = 0; i < 120; i += 3)); do
+  RUNNING_LEADERS="$(running_leader_pods)"
+  [ "$RUNNING_LEADERS" = "3" ] && break
+  sleep 3
+done
+if [ "$RUNNING_LEADERS" = "3" ]; then
+  record PASS "the leader deployment returns to three running replicas" \
+    "3 leader Pods Running after the graceful failover"
 else
-  record FAIL "the backend is Ready after the failover" \
-    "phase='$(kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phase}' 2>/dev/null)' after a 300s settle window: $(kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phaseMessage}' 2>/dev/null | cut -c1-160)"
+  record FAIL "the leader deployment returns to three running replicas" \
+    "${RUNNING_LEADERS:-0} leader Pods Running 360s after the graceful failover; the hard kill needs three candidates to campaign"
+  results; exit 1
 fi
+
+# ------------------------------- (5) the same cluster, the hard kill: no grace, no farewell
+
+# The graceful delete above is the friendly path: the holder exited on its own schedule and kept
+# serving through termination grace. The failure that matters for availability is the rude one --
+# SIGKILL, power loss, a network partition -- where the holder never releases the Lease and the
+# standby must notice an EXPIRED lease rather than an answered handoff. The two paths fail
+# differently, so both are exercised, on one backend.
+
+# The new baseline is read from the cluster the graceful failover left behind, and the holder is
+# RE-SAMPLED here: the graceful failover moved it, so the Pod the Lease names now is not the Pod
+# the first failover deleted.
+record_backend_ready "the backend reaches Ready"
+
+if kvha_wait_for "$NS" deploy "$LEADER" '{.status.readyReplicas}' 1 300 >/dev/null; then
+  record PASS "exactly one leader replica is Ready" "status.readyReplicas=1 with 3 desired"
+else
+  record FAIL "exactly one leader replica is Ready" \
+    "readyReplicas settled at '$(kubectl -n "$NS" get deploy "$LEADER" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)' instead of 1"
+  results; exit 1
+fi
+
+OLD_HOLDER=""
+OLD_READY=""
+OLD_READY_UID=""
+OLD_HOLDER_POD_UID=""
+sample_lease_holder
+if [ -z "$OLD_READY_UID" ] || [ "$OLD_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
+  record FAIL "the Lease holder is the serving Pod immediately before the kill" \
+    "holderIdentity='${OLD_HOLDER:-<empty>}' maps to '${OLD_HOLDER_POD_UID:-<none>}', ready Pod '${OLD_READY:-<none>}' has UID '${OLD_READY_UID:-<none>}'"
+  results; exit 1
+fi
+
+MEMBERS_BEFORE="$(kvha_member_snapshot "$NS" "$MEMBER_SEL")"
+if [ -z "$MEMBERS_BEFORE" ]; then
+  record FAIL "members exist to be observed" "no member Pod matched ${MEMBER_SEL}; the backend is Ready, so this is a defect"
+  results; exit 1
+fi
+
+# --force --grace-period=0: the API object is deleted at once and the runtime SIGKILLs the holder,
+# so the Lease is left held by a dead process -- exactly what a power loss or a partition looks
+# like from the standby's side. The graceful path is covered above; this one exists because the
+# two paths fail differently.
+TRAJ_FILE="$(mktemp)"
+PRE_DELETE_SAMPLE="$(kvha_members_mounted_sample "$NS" "$BACKEND")"
+echo "$PRE_DELETE_SAMPLE" >>"$TRAJ_FILE"
+DELETE_EPOCH="$(date +%s)"
+if DELETE_OUT="$(kubectl -n "$NS" delete pod "$OLD_READY" --force --grace-period=0 --wait=false 2>&1)"; then
+  record PASS "the serving Pod deletion is accepted" "${OLD_READY} (${OLD_READY_UID}), forced with no grace period"
+else
+  record FAIL "the serving Pod deletion is accepted" \
+    "forced delete of ${OLD_READY} (${OLD_READY_UID}) failed: $(echo "$DELETE_OUT" | tr '\n' ' ' | cut -c1-200)"
+  results; exit 1
+fi
+
+observe_lease_handoff
+
+if [ -n "$HOLDER_MOVED_AT" ]; then
+  record PASS "the Lease moves off the dead holder" \
+    "holder Pod UID ${OLD_READY_UID} -> ${MOVED_HOLDER_POD_UID}, $((HOLDER_MOVED_AT - DELETE_EPOCH))s after the hard kill; ${MOVE_EVIDENCE}, holderIdentity=${MOVED_HOLDER}"
+else
+  record FAIL "the Lease moves off the dead holder" \
+    "${HANDOFF_WAIT_SECS}s after force-deleting ${OLD_READY} (${OLD_READY_UID}): holderIdentity='${NEW_HOLDER:-<empty>}', mapped Pod UID='${NEW_HOLDER_POD_UID:-<none>}'"
+fi
+
+if [ "$HANDOFF_OBSERVED" = "1" ]; then
+  record PASS "the new Lease holder is the Ready replica" \
+    "ready Pod ${NEW_READY} has holder Pod UID ${NEW_HOLDER_POD_UID}"
+else
+  record FAIL "the new Lease holder is the Ready replica" \
+    "${HANDOFF_WAIT_SECS}s after the hard kill: holder Pod UID='${NEW_HOLDER_POD_UID:-<none>}', ready Pod UID='${NEW_READY_UID:-<none>}'"
+fi
+
+if [ -n "$HOLDER_MOVED_AT" ]; then
+  record_failover_bound
+fi
+
+wait_for_new_ready_pod
+if [ -n "$NEW_READY" ] && [ "$NEW_READY" != "$OLD_READY" ]; then
+  record PASS "a different replica becomes Ready" "${OLD_READY} -> ${NEW_READY}"
+else
+  record FAIL "a different replica becomes Ready" \
+    "ready Pod is '${NEW_READY:-<none>}' 180s after the Lease moved (killed: ${OLD_READY})"
+fi
+
+MEMBERS_AFTER="$(kvha_member_snapshot "$NS" "$MEMBER_SEL")"
+record_member_restarts "no member Pod restarts across the failover" "$MEMBERS_BEFORE" "$MEMBERS_AFTER"
+
+record_member_faults "no member fault is reported throughout the transition" "$PRE_DELETE_SAMPLE"
+rm -f "$TRAJ_FILE"
+
+record_backend_ready_after_failover "the backend is Ready after the failover"
 
 results

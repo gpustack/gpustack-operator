@@ -1,93 +1,40 @@
 #!/usr/bin/env bash
 #
-# CASE 65 — A member group's local disk tier takes real bytes: evicted objects land in the
-#   host directory and stay readable, on the one write path the API offers   (MUTATING,
-#   self-recovering; AUTO-SKIPS without a prepared host directory on every node)
+# CASE 65 — A member group's local disk tier takes real bytes: evicted objects land in the host directory and stay readable, on the one write path the API offers   (MUTATING, self-recovering; AUTO-SKIPS without a prepared host directory on every node)
 #
 #   case-65.sh <NS>
 #
-# Goal:        A group declaring localDisks renders a tier the leader accepts and publishes, but a
-#              published capacity is not a written byte — the store has been observed announcing
-#              the tier while nothing ever reached the disk. The tier has ONE write path now, and
-#              the API removed the other on purpose: a key's bytes move to disk at eviction time,
-#              never at put time, because the write-at-put mode left an unflushed bucket's sole
-#              replica one eviction away from destruction. So this case forces eviction — it
-#              writes one member's capacity beyond the aggregate memory of the members actually
-#              running — and then asks three things only real bytes answer: the leader's own
-#              master_allocated_file_size_bytes reads above zero, files exist in the host
-#              directory, and a key the leader reports as holding a disk replica but no memory one
-#              reads back the exact bytes written under it. The figure follows a bucket being
-#              closed rather than a put returning, so it is asked for repeatedly until it carries
-#              a number; and before any of it is read as a verdict, the case reads the rendered
-#              bucket limit out of the member container and asserts its write set clears one
-#              bucket PER MEMBER, since each member client fills its own while the gauge sums the
-#              backend.
-#
-# Environment: Any cluster whose nodes share one prepared host directory for the tier.
-#              AUTO-SKIPS (exit 0) unless E2E_LOCALDISK_HOST_PATH (default
-#              /mnt/kvcache-localdisk) is a writable directory on EVERY Ready node — creating
-#              or formatting that directory is the deployer's, deliberately: the operator does
-#              not create or chown it either, and a case that silently landed the tier on the
-#              root filesystem would be verifying the wrong disk. On an i7ie node the prep is:
-#              mkfs.xfs /dev/nvme1n1 && mount it at the path && chmod 0777 — and if the prep
-#              runs from a `kubectl debug` pod, the MOUNT must be made in the host's mount
-#              namespace (`chroot /host nsenter -t 1 -m -- mount …`): a mount made in the
-#              debug container's own namespace dies with the pod, and the hostPath then lands
-#              on the node's root filesystem while everything still looks prepared. No GPU, no
-#              RDMA (members are DRAM over TCP). Needs the store image with the client bundled
-#              (E2E_MOONCAKE_IMAGE; the default carries it).
-#
-# Inputs:      One KVCacheBackend whose single member group declares localDisks{path,
-#              capacity}. The offload flags are derived from that declaration, in the deferred
-#              mode, and nothing about the tier is stated anywhere else on the object. Memory
-#              per member is sized small (256Mi) so eviction pressure is cheap to induce. Probe
-#              Pods (the store image's bundled python client, P2P handshake against the leader
-#              Service) write 4MiB objects whose content is derived from each key's own name.
-#              Per-node host-directory checks run as nodeName-pinned probe Pods mounting the
-#              path read-write.
-#
-# Expected:    - the backend reaches Ready with the local disk segment registered;
-#              - the rendered bucket limit is present in the member container and the write set
-#                clears it — without this the next assertions could not be read as verdicts;
-#              - writes succeed, INCLUDING the ones the store first refuses for want of memory:
-#                that refusal is the moment the master flags the eviction this case exists to
-#                force, so the put is retried rather than taken for a stop;
-#              - BEFORE any read, the leader reports keys holding a local disk replica and no
-#                memory replica — without that, bytes coming back proves only that the store
-#                works, not that the TIER served them;
-#              - one of THOSE keys, chosen from that answer rather than named in advance, then
-#                reads back byte-identical against a payload derived from its own key;
-#              - master_allocated_file_size_bytes on the leader reads > 0 once it has settled —
-#                NOT status.capacity, which reports the declared figure and cannot tell an
-#                empty tier from a full one;
+# Goal:        A published local disk tier is not a written byte: a key's bytes move to disk at eviction time, never
+#              at put time. This case forces eviction - one member's capacity beyond the aggregate memory of the
+#              running members - and then asks what only real bytes answer.
+# Environment: Any cluster whose nodes share one prepared host directory for the tier. AUTO-SKIPS (exit 0) unless
+#              E2E_LOCALDISK_HOST_PATH (default /mnt/kvcache-localdisk) is a writable directory on EVERY Ready node.
+#              The deployer prepares that directory - the operator neither creates nor chowns it - and a mount made
+#              from a `kubectl debug` pod must be made in the host's mount namespace (chroot /host nsenter -t 1 -m
+#              -- mount ...), or the hostPath lands on the root filesystem.
+# Inputs:      All real, nothing mocked. One KVCacheBackend whose single member group declares localDisks{path,
+#              capacity}; the offload flags are derived from that declaration in the deferred mode, and memory per
+#              member is small (256Mi). Probe Pods on the store image (E2E_MOONCAKE_IMAGE) carry the client and
+#              write 4MiB objects derived from each key's own name; per-node probes mount the path read-write.
+# Expected:    - the backend reaches Ready with the local disk segment registered, and the rendered bucket limit is
+#                present in the member container and cleared by the write set;
+#              - writes succeed, including the ones the store first refuses for want of memory - the put is retried;
+#              - before any read, the leader reports keys holding a local disk replica and no memory replica;
+#              - one of those keys, chosen from the leader's answer, reads back byte-identical against a payload
+#                derived from its own key;
+#              - master_allocated_file_size_bytes reads > 0 once it has settled, and not status.capacity;
 #              - the host directory on at least one node holds files.
-#
-#              NO LONGER A KNOWN-FAILURE DETECTOR, and the reason is worth keeping because it
-#              is the same reason the case exists. This case used to be documented as expected
-#              to FAIL: the tier was announced and nothing was ever written. That was never the
-#              store refusing to write — it was the write set never closing a BUCKET. The store
-#              defaults a bucket to 256 MB, the old write set offered less than that per member,
-#              and below one bucket a tier legitimately holds nothing. Once the operator began
-#              rendering the bucket limit the same write set closes eleven of them. Measured
-#              green end to end on one member of 256Mi with a rendered 16 MiB bucket. So a FAIL
-#              here is now a regression to act on rather than the expected reading — but read
-#              the bucket precondition row first, because it is what entitles the rows after it
-#              to be read as verdicts at all.
-#
-# Cleanup:     Trap deletes the KVCacheBackend (owner references cascade) and every probe Pod,
-#              then removes this run's subdirectory from every node that is Ready at teardown — or,
-#              when the prep check did not pass and so nothing was deployed, only from the nodes
-#              whose probe reported the directory writable. The prepared parent directory and other
-#              runs' contents are untouched. Removing the subdirectory whole includes dotfiles.
-#              Idempotent, runs on pass AND fail, safe to re-run and safe beside another case-65 run
-#              using the same parent directory.
+# Cleanup:     The trap deletes the KVCacheBackend (owner references cascade) and every probe Pod, then removes
+#              this run's subdirectory from every node Ready at teardown - or, when the prep check did not pass,
+#              only from the nodes whose probe reported the directory writable. The prepared parent directory and
+#              other runs' contents are untouched. Idempotent, runs on pass AND fail, safe to re-run.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
 # transport alone, and a check that takes such a failure for an answer reports a verdict about
 # the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-65.sh <NS>}"
 CASE_ID=65
@@ -137,13 +84,6 @@ SFX="$(set +o pipefail; LC_ALL=C tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | hea
 BACKEND="kvcb-ld-${SFX}"
 RUN_DIR="case-65-${SFX}"
 RUN_HOST_PATH="${HOST_PATH}/${RUN_DIR}"
-
-FAILS=0
-SKIPS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); [ "$1" = SKIP ] && SKIPS=$((SKIPS + 1)); return 0; }
-# shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 results() {
   print_rows

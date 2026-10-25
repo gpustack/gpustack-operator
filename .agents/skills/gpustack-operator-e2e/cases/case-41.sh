@@ -62,8 +62,11 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
+
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_pool-lib.sh"
 
 NS="${1:?usage: case-41.sh <NS>}"
 WHOLE=gpustack-e2e-scope-whole
@@ -110,25 +113,7 @@ echo "[case-41] target: ${NODE} with ${NCARDS} logically sliceable ${MANUF} card
 # controller keys a pool by. See the index's note on pool lookup for what a looser match selects. Both
 # Instances go to this one type: the whole card and the slice have to be drawn from the same pool for
 # "different cards of one node" to be the thing measured.
-read -r IT CARDMEM <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | NODE_GID="$GROUPID" NODE_JSON="$(kubectl get node "$NODE" -o json 2>/dev/null)" python3 -c "
-import json,sys,os
-gid=os.environ.get('NODE_GID','')
-nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
-# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
-# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
-# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
-# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
-def backs(it):
-    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
-    return bool(d) and all(nl.get(k)==v for k,v in d.items())
-def in_group(s):
-    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
-for it in json.load(sys.stdin).get('items',[]):
-    s=it.get('spec',{}); d=it.get('status',{}).get('detail',{})
-    sliceable=(d.get('slicedDetail',{}).get('logical',{}).get('count',0) or 0)>0
-    if s.get('acceleratable') and sliceable and in_group(s) and backs(it):
-        print(it['metadata']['name'], d.get('memory','')); break
-")"
+read -r IT CARDMEM <<<"$(discover_node_pool "$NODE" "$GROUPID" --sliceable name memory)"
 [ -n "$IT" ] || { echo "no sliceable accelerated InstanceType backs ${NODE} in group '${GROUPID}'"; exit 1; }
 echo "[case-41] pool InstanceType ${IT} (card ${CARDMEM:-<empty>})"
 
@@ -157,9 +142,6 @@ restore() {
 }
 trap restore EXIT
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 # verdict <cond-exit-code> <check> <object-on-pass> <object-on-fail>
 verdict() { [ "$1" -eq 0 ] && record PASS "$2" "$3" || record FAIL "$2" "$4"; }
 
@@ -297,7 +279,7 @@ verdict $? "the two Instances hold different cards of one node" \
 if [ "$WHOLE_CARD" = "$SLICED_CARD" ]; then
   echo
   echo "== CASE 41 — Slice pass reads only the carved cards =="
-  { echo "STATUS|CHECK|OBJECT"; printf '%s\n' "${ROWS[@]}"; } | column -t -s '|'
+  print_rows
   echo "CASE 41 FAILED (setup)"
   exit 1
 fi
@@ -355,10 +337,7 @@ fi
 
 echo
 echo "== CASE 41 — The slice pass reads only the carved cards: a whole card on the same node is never queried =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 
 if [ "$FAILS" -ne 0 ]; then
   echo

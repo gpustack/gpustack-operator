@@ -35,8 +35,8 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-14.sh <NS>}"
 INST_A=gpustack-e2e-coexist-a
@@ -112,10 +112,6 @@ restore() {
   kubectl -n default delete instance "$INST_A" "$INST_B" "$INST_C" --ignore-not-found --wait=false 2>/dev/null || true
 }
 trap restore EXIT
-
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 mkslice() { # mkslice <name> <mem-pct> [image] [command-json]
   cat <<EOF | kubectl apply -f - >/dev/null

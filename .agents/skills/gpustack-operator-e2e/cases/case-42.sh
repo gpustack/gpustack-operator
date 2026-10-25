@@ -62,17 +62,17 @@ NS="${1:-gpustack-system}"
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
 # transport alone, and a check that takes such a failure for an answer reports a verdict about the
 # network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
+
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_pool-lib.sh"
 
 IMAGE="${E2E_PARTITION_IMAGE:-quay.io/gpustack/runner:dtk25.04-vllm0.11.0}"
 MANU=hygon
 BASE=hygon.com/dcu
 PARTITIONED="${BASE}.partitioned"
 
-ROWS=()
-FAILS=0
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 # verdict <cond-exit-code> <check> <object-on-pass> <object-on-fail>
 verdict() { [ "$1" -eq 0 ] && record PASS "$2" "$3" || record FAIL "$2" "$4"; }
 
@@ -213,34 +213,20 @@ CLAIMS=$(( PER_CARD < 3 ? PER_CARD : 3 ))
 # The InstanceType whose POOL this node belongs to, matched on the pool's identity (accelerator group
 # plus the discriminator labels), the same lookup the other vendor cases use. Its status.entrance
 # names the LocalQueue; the ClusterQueue behind it carries the InstanceType's name.
-# A failed read must not turn into the "no pool backs this node" skip, so each read and the parse are
-# checked on their own.
-if ! ITS_JSON="$(kubectl get instancetypes.worker.gpustack.ai -o json 2>&1)" \
-   || ! NODE_JSON="$(kubectl get node "$NODE" -o json 2>&1)"; then
-  fail_setup "Reading the InstanceTypes or node ${NODE} failed, so this case cannot tell 'no pool backs" \
-    "this node' from 'the query did not answer'."
-fi
-if ! POOL="$(printf '%s' "$ITS_JSON" | NODE_GID="$GROUP_ID" NODE_JSON="$NODE_JSON" python3 -c "
-import json,sys,os
-gid=os.environ.get('NODE_GID','')
-nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
-# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
-# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
-# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
-# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
-def backs(it):
-    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
-    return bool(d) and all(nl.get(k)==v for k,v in d.items())
-def in_group(s):
-    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
-for it in json.load(sys.stdin).get('items',[]):
-    s=it.get('spec',{}); st=it.get('status',{})
-    if s.get('acceleratable') and in_group(s) and backs(it):
-        print(it['metadata']['name'], st.get('entrance','')); break
-")"; then
-  fail_setup "The InstanceTypes were read but could not be parsed, so this case cannot tell 'no pool" \
-    "backs this node' from 'the answer was unreadable'."
-fi
+# A failed read must not turn into the "no pool backs this node" skip, so the lookup tells the two
+# apart: exit 2 is a read that did not answer, exit 3 an answer that could not be parsed.
+POOL="$(discover_node_pool "$NODE" "$GROUP_ID" name entrance)"
+lookup_rc=$?
+case "$lookup_rc" in
+  2)
+    fail_setup "Reading the InstanceTypes or node ${NODE} failed, so this case cannot tell 'no pool backs" \
+      "this node' from 'the query did not answer'."
+    ;;
+  3)
+    fail_setup "The InstanceTypes were read but could not be parsed, so this case cannot tell 'no pool" \
+      "backs this node' from 'the answer was unreadable'."
+    ;;
+esac
 read -r IT ENTRANCE <<<"$POOL"
 [ -n "${IT:-}" ] || skip \
   "No InstanceType backs node ${NODE}'s ${MANU} accelerator group '${GROUP_ID}', so there is no pool to" \

@@ -42,6 +42,12 @@
 E2E_SHIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
 [ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 
+# The ModelDeployment readers, renderers and dry-run harness live in _md-lib.sh, which the plain
+# ModelDeployment cases read as well. The tas_md_* names below are thin aliases of it, so a TAS case
+# and a plain ModelDeployment case share one implementation.
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_md-lib.sh"
+
 # The label key that carries the topology this library schedules on. Zone is a standard Kubernetes
 # key every cloud writes; hostname is the level Kueue requires last when it is present at all. The
 # fixtures below spell both levels out, in that order.
@@ -410,40 +416,19 @@ tas_source_nodefeatures() {
 # waiting, and that name sorts ahead of ordinary derived types); inactive types are excluded for
 # the mirror reason -- a deployment on one is admitted and then never scheduled.
 tas_md_usable_instance_type() {
-  kubectl get instancetypes.worker.gpustack.ai \
-    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}{"\n"}{end}' \
-    2>/dev/null \
-    | while IFS='|' read -r name deleting inactive; do
-        [ -n "$name" ] || continue
-        [ -z "$deleting" ] || continue
-        [ "$inactive" = true ] && continue
-        echo "$name"
-        break
-      done
+  md_usable_instance_type "$@"
 }
 
 # The ClusterQueue an InstanceType schedules into, resolved the way the operator resolves it: the
 # type's published entrance LocalQueue, then that LocalQueue's ClusterQueue.
 tas_md_cq_of_it() {
-  local lq
-  lq="$(kubectl get instancetypes.worker.gpustack.ai "$2" \
-    -o jsonpath='{.status.entrance}' 2>/dev/null)"
-  [ -n "$lq" ] || return 0
-  kubectl -n "$1" get localqueue.kueue.x-k8s.io "$lq" \
-    -o jsonpath='{.spec.clusterQueue}' 2>/dev/null
+  md_cq_of_it "$@"
 }
 
 # One role block for a ModelDeployment. The image and command are placeholder plumbing: no reading
 # that matters is about what the container runs.
 tas_md_role_block() {
-  printf '  - name: %s\n' "$1"
-  [ -n "$2" ] && printf '    kind: %s\n' "$2"
-  printf '    instanceType: %s\n    replicas: %s\n' "$3" "$4"
-  printf '    image: %s\n    command: ["/pause"]\n' "$5"
-  [ -n "${6:-}" ] && printf '    size: %s\n' "$6"
-  if [ -n "${7:-}" ]; then
-    printf '    topology:\n      requiredLevel: %s\n' "$7"
-  fi
+  md_role_block "$@"
 }
 
 # Apply one ModelDeployment. The InstanceType, the image and the command live in the role blocks
@@ -451,55 +436,21 @@ tas_md_role_block() {
 # The apply's output is kept in TAS_APPLY_OUT: a schema or webhook refusal surfaces as text a row
 # can quote instead of as a timeout that blames the wrong thing.
 tas_md_apply() {
-  local name="$1" ns="$2" binding="$3" roles="$4"
+  md_apply "$@"
   # shellcheck disable=SC2034 # Output consumed by the sourcing case.
-  TAS_APPLY_OUT="$(cat <<YAML | kubectl apply -f - 2>&1
-apiVersion: worker.gpustack.ai/v1alpha1
-kind: ModelDeployment
-metadata:
-  name: ${name}
-  namespace: ${ns}
-spec:
-  engine:
-    name: vLLM
-    image: registry.k8s.io/pause:3.10
-  model:
-    name: Qwen/Qwen2.5-0.5B-Instruct
-  kvCache:
-    poolRef:
-      name: ${binding}
-  roles:
-${roles}
-YAML
-)"
+  TAS_APPLY_OUT="$MD_APPLY_OUT"
 }
 
 # Every Workload of one ModelDeployment, one name per line.
 #
 # THE LOOKUP RUNS WORKLOAD-TO-DEPLOYMENT, never deployment-to-Workload: the Workload is enumerated,
-# each of its owner references is read as a Pod NAME and UID, and the Workload is attributed when
-# either matches a Pod this deployment owns. Looking the other way -- searching for a Workload that
-# carries a direct ModelDeployment owner -- finds nothing on any correct cluster, because Kueue's
-# pod integration writes no such reference; a case built on it would pass as vacuously as it
-# failed. The UIDs are matched padded so one UID cannot hit a prefix of a longer one.
+# each of its owner references is read, and the Workload is attributed when one of them is a Pod this
+# deployment owns. Looking the other way -- searching for a Workload that carries a direct
+# ModelDeployment owner -- finds nothing on any correct cluster, because Kueue's pod integration
+# writes no such reference; a case built on it would pass as vacuously as it failed. The UIDs are
+# matched padded so one UID cannot hit a prefix of a longer one.
 tas_md_workloads() {
-  local ns="$1" md="$2" pods uids names row wl refs t
-  pods="$(kubectl -n "$ns" get pods -l "app.kubernetes.io/instance=${md}" \
-    -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.uid}{"\n"}{end}' 2>/dev/null)"
-  [ -n "$pods" ] || return 0
-  uids="$(printf '%s\n' "$pods" | cut -d= -f2 | tr '\n' ' ')"
-  names="$(printf '%s\n' "$pods" | cut -d= -f1 | tr '\n' ' ')"
-
-  kubectl -n "$ns" get workloads.kueue.x-k8s.io \
-    -o jsonpath='{range .items[*]}{.metadata.name}|{range .metadata.ownerReferences[*]}{.name}/{.uid}{";"}{end}{"\n"}{end}' \
-    2>/dev/null \
-    | while IFS='|' read -r wl refs; do
-        [ -n "$wl" ] || continue
-        for t in ${refs//;/ }; do
-          case " ${uids} " in *" ${t##*/} "*) echo "$wl"; continue 2 ;; esac
-          case " ${names} " in *" ${t%/*} "*) echo "$wl"; continue 2 ;; esac
-        done
-      done
+  md_workloads "$@"
 }
 
 # Wait until a ModelDeployment holds exactly $3 Pods. Kueue composes nothing for a group short of
@@ -529,27 +480,5 @@ tas_md_wait_workloads() {
 # this runs from teardown, a deployment of several replicas holds several Workloads, and releasing
 # one of them leaves the rest holding finalizers on Pods a later case then inherits.
 tas_md_force_release() {
-  local ns="$1" md="$2" uids row wl owners u
-  uids="$(kubectl -n "$ns" get pods -l "app.kubernetes.io/instance=${md}" \
-    -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' 2>/dev/null)"
-  [ -n "$uids" ] || return 0
-  while IFS= read -r row; do
-    [ -n "$row" ] || continue
-    wl="${row%%=*}"
-    owners="${row#*=}"
-    for u in $uids; do
-      case " $owners " in
-        *" $u "*)
-          kubectl -n "$ns" delete workloads.kueue.x-k8s.io "$wl" \
-            --ignore-not-found --wait=false >/dev/null 2>&1
-          break
-          ;;
-      esac
-    done
-  done <<EOF
-$(kubectl -n "$ns" get workloads.kueue.x-k8s.io \
-  -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.ownerReferences[*].uid}{"\n"}{end}' 2>/dev/null)
-EOF
-
-  return 0
+  md_force_release "$@"
 }

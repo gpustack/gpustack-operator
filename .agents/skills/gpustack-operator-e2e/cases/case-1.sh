@@ -37,8 +37,8 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-1.sh <NS>}"
 LIB="$(cd "$(dirname "$0")/../../_e2e-lib/scripts" && pwd)"
@@ -46,9 +46,6 @@ LIB="$(cd "$(dirname "$0")/../../_e2e-lib/scripts" && pwd)"
 # Operator core first (rollout / revision==HEAD / apiservices / CRDs / bundled applications).
 bash "$LIB/assert-core.sh" "$NS" || exit 1
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 assert_nonempty() { # check  command-output
   if [ -n "$2" ]; then record PASS "$1" "$(echo "$2" | tr '\n' ' ' | cut -c1-60)"; else record FAIL "$1" "none found"; fi
 }
@@ -161,10 +158,7 @@ cohorts=$(kubectl get cohorts.kueue.x-k8s.io -A --no-headers 2>/dev/null | grep 
 
 echo
 echo "== CASE 1 — CPU-only scheduling chain materializes =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 
 if [ "$FAILS" -ne 0 ]; then
   echo

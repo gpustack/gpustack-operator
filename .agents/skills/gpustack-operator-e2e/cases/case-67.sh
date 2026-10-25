@@ -71,8 +71,8 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
 # transport alone, and a check that takes such a failure for an answer reports a verdict about the
 # network rather than about the store.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-67.sh <NS>}"
 CASE_ID=67
@@ -104,13 +104,6 @@ P_A="case67-a-${SFX}"
 P_B="case67-b-${SFX}"
 LABEL_KEY="gpustack-e2e-case"
 LABEL_VAL="67-${SFX}"
-
-FAILS=0
-SKIPS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); [ "$1" = SKIP ] && SKIPS=$((SKIPS + 1)); return 0; }
-# shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 results() {
   print_rows
@@ -197,6 +190,89 @@ probe_ran() {
   fi
   record FAIL "$3" "$(head -3 "$1" 2>/dev/null | tr '\n' ' ' | cut -c1-200)"
   return 1
+}
+
+# py_lib -- the helper set every probe program shares: one request helper and the segment
+# lookups. Four copies of it were four places for the same helpers to drift apart.
+py_lib() {
+  cat <<'PY'
+import json, sys, time, hashlib, urllib.error, urllib.request
+
+def http(method, url, body=None, timeout=60):
+    req = urllib.request.Request(url, data=body, method=method)
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except Exception as e:
+        return -1, str(e).encode()
+
+def segments():
+    st, body = http("GET", "http://%s/get_segments_detail" % MASTER)
+    if st != 200:
+        raise RuntimeError("segment listing failed: %d %r" % (st, body[:200]))
+    return json.loads(body).get("segments", [])
+
+def seg_of(ip):
+    for s in segments():
+        if s.get("segment_name", "").startswith(ip + ":"):
+            return s
+    return None
+
+def free_bytes(seg):
+    return seg["allocator_capacity_bytes"] - seg["allocator_used_bytes"]
+PY
+}
+
+# py_drain -- the drain job creation and the polling loop, shared by both fill probes.
+py_drain() {
+  cat <<'PY'
+def num(d, k):
+    v = d.get(k)
+    return v if isinstance(v, int) else -1
+
+# The terminal state is read from the PARSED status_name; a substring match over the body matched
+# the field name "failed_units" in an earlier instrument and broke on the first poll.
+def drain(source_seg, target_seg):
+    body = json.dumps({"segments": [source_seg["segment_name"]],
+                       "target_segments": [target_seg["segment_name"]],
+                       "max_concurrency": 4}).encode()
+    st, resp = http("POST", "http://%s/api/v1/drain_jobs" % MASTER, body, timeout=60)
+    text = resp.decode("utf-8", "replace")
+    print("DRAIN-CREATE status=%d body=%s" % (st, text[:400]))
+    if st != 200:
+        print("DRAIN-CREATE-REJECTED nothing below carries information")
+        sys.exit(1)
+    job_id = (json.loads(text) or {}).get("job_id")
+    print("DRAIN-JOB-ID %s" % job_id)
+    if not job_id:
+        print("SETUP-FAILED the create response carried no job_id")
+        sys.exit(1)
+
+    terminal = {"DRAINED", "COMPLETED", "FAILED", "CANCELLED", "CANCELED", "SUCCEEDED"}
+    doc, state = {}, None
+    for i in range(90):
+        st, q = http("GET", "http://%s/api/v1/drain_jobs/query?job_id=%s" % (MASTER, job_id), timeout=30)
+        last = q.decode("utf-8", "replace")
+        try:
+            doc = json.loads(last)
+        except Exception:
+            doc = {}
+        state = doc.get("status_name")
+        print("DRAIN-QUERY t=%ds http=%d state=%s succeeded=%s failed=%s blocked=%s active=%s migrated_bytes=%s" % (
+            i * 2, st, state, doc.get("succeeded_units"), doc.get("failed_units"),
+            doc.get("blocked_units"), doc.get("active_units"), doc.get("migrated_bytes")), flush=True)
+        if st == 200 and state in terminal:
+            break
+        time.sleep(2)
+    print("DRAIN-TERMINAL-STATE %s" % state)
+    print("FINAL succeeded=%d failed=%d blocked=%d active=%d migrated_bytes=%d" % (
+        num(doc, "succeeded_units"), num(doc, "failed_units"), num(doc, "blocked_units"),
+        num(doc, "active_units"), num(doc, "migrated_bytes")))
+PY
 }
 
 # ------------------------------------------------- 0. two nodes, or this case says nothing
@@ -383,7 +459,9 @@ fi
 LOGA1="$(mktemp)"; LOGA2="$(mktemp)"; LOGB1="$(mktemp)"; LOGB2="$(mktemp)"
 
 run_probe a-fill "$LOGA1" <<PY
-import json, sys, time, hashlib, urllib.error, urllib.request
+$(py_lib)
+
+$(py_drain)
 
 MASTER = "${MASTER_IP}:9003"
 A = "${A_IP}:8080"
@@ -391,33 +469,6 @@ B = "${B_IP}:8080"
 A_IP = "${A_IP}"
 B_IP = "${B_IP}"
 OBJ = ${OBJ_BYTES}
-
-def http(method, url, body=None, timeout=60):
-    req = urllib.request.Request(url, data=body, method=method)
-    if body is not None:
-        req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, r.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read()
-    except Exception as e:
-        return -1, str(e).encode()
-
-def segments():
-    st, body = http("GET", "http://%s/get_segments_detail" % MASTER)
-    if st != 200:
-        raise RuntimeError("segment listing failed: %d %r" % (st, body[:200]))
-    return json.loads(body).get("segments", [])
-
-def seg_of(ip):
-    for s in segments():
-        if s.get("segment_name", "").startswith(ip + ":"):
-            return s
-    return None
-
-def free_bytes(seg):
-    return seg["allocator_capacity_bytes"] - seg["allocator_used_bytes"]
 
 payload = "x" * OBJ
 digest = hashlib.sha256(payload.encode()).hexdigest()
@@ -460,48 +511,7 @@ if free_bytes(b_seg) < len(subject) * OBJ:
     print("SETUP-FAILED target free=%d, under the %d the subject needs" % (free_bytes(b_seg), len(subject) * OBJ))
     sys.exit(1)
 
-body = json.dumps({"segments": [a_seg["segment_name"]],
-                   "target_segments": [b_seg["segment_name"]],
-                   "max_concurrency": 4}).encode()
-st, resp = http("POST", "http://%s/api/v1/drain_jobs" % MASTER, body, timeout=60)
-text = resp.decode("utf-8", "replace")
-print("DRAIN-CREATE status=%d body=%s" % (st, text[:400]))
-if st != 200:
-    print("DRAIN-CREATE-REJECTED nothing below carries information")
-    sys.exit(1)
-job_id = (json.loads(text) or {}).get("job_id")
-print("DRAIN-JOB-ID %s" % job_id)
-if not job_id:
-    print("SETUP-FAILED the create response carried no job_id")
-    sys.exit(1)
-
-# The terminal state is read from the PARSED status_name; a substring match over the body matched
-# the field name "failed_units" in an earlier instrument and broke on the first poll.
-terminal = {"DRAINED", "COMPLETED", "FAILED", "CANCELLED", "CANCELED", "SUCCEEDED"}
-doc, state = {}, None
-for i in range(90):
-    st, q = http("GET", "http://%s/api/v1/drain_jobs/query?job_id=%s" % (MASTER, job_id), timeout=30)
-    last = q.decode("utf-8", "replace")
-    try:
-        doc = json.loads(last)
-    except Exception:
-        doc = {}
-    state = doc.get("status_name")
-    print("DRAIN-QUERY t=%ds http=%d state=%s succeeded=%s failed=%s blocked=%s active=%s migrated_bytes=%s" % (
-        i * 2, st, state, doc.get("succeeded_units"), doc.get("failed_units"),
-        doc.get("blocked_units"), doc.get("active_units"), doc.get("migrated_bytes")), flush=True)
-    if st == 200 and state in terminal:
-        break
-    time.sleep(2)
-print("DRAIN-TERMINAL-STATE %s" % state)
-
-def num(d, k):
-    v = d.get(k)
-    return v if isinstance(v, int) else -1
-
-print("FINAL succeeded=%d failed=%d blocked=%d active=%d migrated_bytes=%d" % (
-    num(doc, "succeeded_units"), num(doc, "failed_units"), num(doc, "blocked_units"),
-    num(doc, "active_units"), num(doc, "migrated_bytes")))
+drain(a_seg, b_seg)
 
 a_after, b_after = seg_of(A_IP), seg_of(B_IP)
 print("AFTER source_used=%d source_status=%s" % (
@@ -589,34 +599,12 @@ fi
 kubectl -n "$NS" delete pod "$P_A" --wait=true --timeout=180s >/dev/null 2>&1 || true
 
 run_probe a-read "$LOGA2" <<PY
-import json, sys, time, hashlib, urllib.error, urllib.request
+$(py_lib)
 
 MASTER = "${MASTER_IP}:9003"
 B = "${B_IP}:8080"
 A_IP = "${A_IP}"
 EXPECT_200 = "${SUBJECT_A}".split(",")
-
-def http(method, url, body=None, timeout=60):
-    req = urllib.request.Request(url, data=body, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, r.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read()
-    except Exception as e:
-        return -1, str(e).encode()
-
-def segments():
-    st, body = http("GET", "http://%s/get_segments_detail" % MASTER)
-    if st != 200:
-        raise RuntimeError("segment listing failed: %d" % st)
-    return json.loads(body).get("segments", [])
-
-def seg_of(ip):
-    for s in segments():
-        if s.get("segment_name", "").startswith(ip + ":"):
-            return s
-    return None
 
 gone = -1
 for t in range(0, 150, 5):
@@ -685,7 +673,9 @@ A_IP="$(kubectl -n "$NS" get pod "$P_A" -o jsonpath='{.status.podIP}')"
 record PASS "member A comes back for the disk phase" "${P_A} at ${A_IP} on ${NODE_A}"
 
 run_probe b-fill "$LOGB1" <<PY
-import json, sys, time, hashlib, urllib.error, urllib.request
+$(py_lib)
+
+$(py_drain)
 
 MASTER = "${MASTER_IP}:9003"
 A = "${A_IP}:8080"
@@ -693,18 +683,6 @@ B = "${B_IP}:8080"
 A_IP = "${A_IP}"
 B_IP = "${B_IP}"
 OBJ = ${OBJ_BYTES}
-
-def http(method, url, body=None, timeout=60):
-    req = urllib.request.Request(url, data=body, method=method)
-    if body is not None:
-        req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, r.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read()
-    except Exception as e:
-        return -1, str(e).encode()
 
 def metrics():
     st, body = http("GET", "http://%s/metrics" % MASTER)
@@ -723,21 +701,6 @@ def metrics():
 
 def g(name, snap=None):
     return (snap or metrics()).get(name, 0.0)
-
-def segments():
-    st, body = http("GET", "http://%s/get_segments_detail" % MASTER)
-    if st != 200:
-        raise RuntimeError("segment listing failed: %d" % st)
-    return json.loads(body).get("segments", [])
-
-def seg_of(ip):
-    for s in segments():
-        if s.get("segment_name", "").startswith(ip + ":"):
-            return s
-    return None
-
-def free_bytes(seg):
-    return seg["allocator_capacity_bytes"] - seg["allocator_used_bytes"]
 
 payload = "x" * OBJ
 digest = hashlib.sha256(payload.encode()).hexdigest()
@@ -873,46 +836,7 @@ if free_bytes(b_seg) < 3 * OBJ:
     print("SETUP-FAILED target free=%d, the memory witnesses need %d" % (free_bytes(b_seg), 3 * OBJ))
     sys.exit(1)
 
-body = json.dumps({"segments": [a_seg["segment_name"]],
-                   "target_segments": [b_seg["segment_name"]],
-                   "max_concurrency": 4}).encode()
-st, resp = http("POST", "http://%s/api/v1/drain_jobs" % MASTER, body, timeout=60)
-text = resp.decode("utf-8", "replace")
-print("DRAIN-CREATE status=%d body=%s" % (st, text[:400]))
-if st != 200:
-    print("DRAIN-CREATE-REJECTED nothing below carries information")
-    sys.exit(1)
-job_id = (json.loads(text) or {}).get("job_id")
-print("DRAIN-JOB-ID %s" % job_id)
-if not job_id:
-    print("SETUP-FAILED the create response carried no job_id")
-    sys.exit(1)
-
-terminal = {"DRAINED", "COMPLETED", "FAILED", "CANCELLED", "CANCELED", "SUCCEEDED"}
-doc, state = {}, None
-for i in range(90):
-    st, q = http("GET", "http://%s/api/v1/drain_jobs/query?job_id=%s" % (MASTER, job_id), timeout=30)
-    last = q.decode("utf-8", "replace")
-    try:
-        doc = json.loads(last)
-    except Exception:
-        doc = {}
-    state = doc.get("status_name")
-    print("DRAIN-QUERY t=%ds http=%d state=%s succeeded=%s failed=%s blocked=%s active=%s migrated_bytes=%s" % (
-        i * 2, st, state, doc.get("succeeded_units"), doc.get("failed_units"),
-        doc.get("blocked_units"), doc.get("active_units"), doc.get("migrated_bytes")), flush=True)
-    if st == 200 and state in terminal:
-        break
-    time.sleep(2)
-print("DRAIN-TERMINAL-STATE %s" % state)
-
-def num(d, k):
-    v = d.get(k)
-    return v if isinstance(v, int) else -1
-
-print("FINAL succeeded=%d failed=%d blocked=%d active=%d migrated_bytes=%d" % (
-    num(doc, "succeeded_units"), num(doc, "failed_units"), num(doc, "blocked_units"),
-    num(doc, "active_units"), num(doc, "migrated_bytes")))
+drain(a_seg, b_seg)
 
 a_after, b_after = seg_of(A_IP), seg_of(B_IP)
 print("AFTER source_used=%d source_status=%s" % (
@@ -1016,35 +940,13 @@ kubectl -n "$NS" delete pod "$P_A" --wait=true --timeout=180s >/dev/null 2>&1 ||
 WANT_SHA="$(sed -n 's/^WANT sha256=\([0-9a-f]*\).*/\1/p' "$LOGB1" | tail -1)"
 
 run_probe b-read "$LOGB2" <<PY
-import json, sys, time, hashlib, urllib.error, urllib.request
+$(py_lib)
 
 MASTER = "${MASTER_IP}:9003"
 B = "${B_IP}:8080"
 A_IP = "${A_IP}"
 EXPECT_200 = "${MEM_SUBJECT}".split(",")
 EXPECT_404 = "${TIER_SUBJECT}".split(",")
-
-def http(method, url, body=None, timeout=60):
-    req = urllib.request.Request(url, data=body, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, r.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read()
-    except Exception as e:
-        return -1, str(e).encode()
-
-def segments():
-    st, body = http("GET", "http://%s/get_segments_detail" % MASTER)
-    if st != 200:
-        raise RuntimeError("segment listing failed: %d" % st)
-    return json.loads(body).get("segments", [])
-
-def seg_of(ip):
-    for s in segments():
-        if s.get("segment_name", "").startswith(ip + ":"):
-            return s
-    return None
 
 gone = -1
 for t in range(0, 150, 5):

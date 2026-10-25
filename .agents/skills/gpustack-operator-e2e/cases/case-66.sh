@@ -56,10 +56,6 @@ BACKEND="kvcb-legacy-${SFX}"
 POOL="kvcp-legacy-${SFX}"
 FIXTURE="case66-admin-${SFX}"
 
-FAILS=0
-SKIPS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); [ "$1" = SKIP ] && SKIPS=$((SKIPS + 1)); return 0; }
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 results() {

@@ -82,8 +82,8 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
 # transport alone, and a check that takes such a failure for an answer reports a verdict about the
 # network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-43.sh <NS>}"
 IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
@@ -108,12 +108,6 @@ NS_A="kvc-a-${SFX}"
 NS_B="kvc-b-${SFX}"
 DOM_A="dom-a-${SFX}"
 DOM_B="dom-b-${SFX}"
-
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
-# shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 # All three labels, and each one is load-bearing. The instance label alone also selects the members,
 # which run the same image and would answer an exec with a different process. The component value for
@@ -168,21 +162,6 @@ restore() {
     --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 trap restore EXIT
-
-# wait_for polls a jsonpath until it equals what is wanted. It reports the LAST value seen, so a
-# timeout says what the object was doing rather than only that it timed out.
-wait_for() {
-  local kind="$1" name="$2" path="$3" want="$4" secs="${5:-120}" ns_args=()
-  [ -n "${6:-}" ] && ns_args=(-n "$6")
-  local got=""
-  for _ in $(seq 1 "$secs"); do
-    got="$(kubectl "${ns_args[@]}" get "$kind" "$name" -o jsonpath="$path" 2>/dev/null)"
-    [ "$got" = "$want" ] && return 0
-    sleep 1
-  done
-  echo "$got"
-  return 1
-}
 
 echo "== 1. a multi-tenancy master reaches Ready with no pool bound to it =="
 

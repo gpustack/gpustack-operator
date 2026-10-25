@@ -1,180 +1,163 @@
 #!/usr/bin/env bash
 #
-# CASE 117 — The encoder's own Service exists, and the front door never points at it
+# CASE 117 — An encoder deployment renders one Service per role, a router picker document that
+#           carries the encoder stage, and one shared claim under the encoder and the prefiller
 #   (MUTATING, self-recovering)
 #   AUTO-SKIPS without an InstanceType that reports an admitted accelerator platform, which this
-#   case builds by injecting a CPU vendor label.
+#   case builds by injecting a CPU vendor label; its witness row additionally skips, naming the
+#   image, when the witness image cannot be pulled.
 #
 #   case-117.sh <NS>
 #
-# Goal:        A deployment with an encoder role gets one Service per role, and the address a
-#              caller dials never resolves to the encoder. The encoder answers no request of its
-#              own: it turns media into embeddings for a prefiller, so a front door pointed at one
-#              sends traffic to a process that serves none of it — with endpoints that resolve and
-#              answer health checks, which is what makes that failure quiet. So the case asserts
-#              the three per-role Services by NAME, each selecting only its own role's Pods (the
-#              encoder's may select none once the operator withdraws a placeholder that never
-#              becomes Ready), and
-#              the deployment-wide Service selecting the prefiller while the encoder sits FIRST in
-#              the roles list — the position where a "front the first role" implementation would
-#              pick it.
+# Goal:        THREE READINGS OF ONE RENDER, all on the same three-role deployment. The operator
+#              answers three different questions about one encoder deployment, and each answer has
+#              a failure that is quiet, so the case reads all three.
+#
+#              THE ADDRESSES. The encoder answers no request of its own: it turns media into
+#              embeddings for a prefiller, so a front door pointed at one sends traffic to a
+#              process that serves none of it — with endpoints that resolve and answer health
+#              checks, which is what makes that failure quiet. So the case asserts the three
+#              per-role Services by NAME, each selecting only its own role's Pods (the encoder's
+#              may select none once the operator withdraws a placeholder that never becomes
+#              Ready), and the deployment-wide Service selecting the prefiller while the encoder
+#              sits FIRST in the roles list — the position where a "front the first role"
+#              implementation would pick it.
 #
 #              THE SELECTOR IS THE OBSERVABLE, not the Service's existence alone. A Service whose
 #              selector matched every role of the deployment would exist under the same name and
 #              pass an existence check, so each row resolves the Service's own selector against the
 #              live Pods and reads back which role's Pods it fronts.
 #
+#              THE PICKER DOCUMENT. llm-d-router is the only router the admitted rows name, so
+#              what its picker document says about an encoder is the part of the router that
+#              carries this whole feature. The document must carry an ENCODE FILTER (a
+#              label-selector-filter selecting role-kind=encode), an ENCODE PROFILE that names that
+#              filter and NOTHING ELSE — no queue scorer, no KV-cache scorer, no prefix scorer,
+#              because an encoder keeps no KV cache: the scorers read gauges it never exports and
+#              the prefix scorer asks about token overlap that does not exist before a request has
+#              tokens — and the MULTIMODAL DECIDER that the disagg-profile-handler routes BOTH
+#              "prefill" and "encode" at. A control deployment with no encoder role renders none of
+#              the three, which is what makes them the encoder's facts and not the router's
+#              defaults.
+#
+#              THE SHARED CLAIM. On the platform whose encoder leg runs through a mounted
+#              directory rather than the network, the encoder writes its embeddings into a claim
+#              and the prefiller reads them out of the same one. Reading only the rendered specs
+#              proves the operator points both roles at one claim name; it cannot tell a claim
+#              that really shares bytes from two claims sharing a name. So the rows assert the
+#              volumes and mounts the two role Pods render, and then a pair of case-owned witness
+#              Pods — pinned to one node, mounting the same claim — writes through one mount and
+#              reads back through the other.
+#
 # Environment: Any cluster with a materialized scheduling chain (run case-1 first) and at least one
 #              Ready, schedulable worker node that is not a control-plane node. NO accelerator: the
-#              encoder shape reaches admission through the platform the injected CPU vendor builds.
-#              The gpustack-settings Secret must exist in the system namespace (E2E_SYSTEM_NS,
-#              default gpustack-system). The replicas are placeholders that never serve (the
-#              explicit pause image carries no engine), and the router image may be unpullable:
-#              nothing here reads the router beyond the endpoint string.
+#              encoder shape reaches admission through the platform an injected CPU vendor label
+#              builds ("Ascend" — the admitted row whose connector is a mounted directory rather
+#              than a network leg). The gpustack-settings Secret must exist in the system namespace
+#              (E2E_SYSTEM_NS, default gpustack-system). The case creates its own PV and PVC (a
+#              hostPath volume under /tmp on the labeled node, manually bound), so no StorageClass
+#              is needed. The runner needs jq and pyyaml to read the router document.
 #
-#              AUTO-SKIP: the whole subject needs the encoder shape ADMITTED, which needs a
-#              platform InstanceType. If the vendor label does not take (NFD owns cpu-model.vendor_id
-#              and may decline an injected override) or the pool never derives, the case prints one
-#              SKIP row naming that and exits 0.
+#              AUTO-SKIP: the subject needs the encoder shape ADMITTED, which needs a platform
+#              InstanceType. If the vendor label does not take (NFD owns cpu-model.vendor_id and
+#              may decline an injected override) or the pool never derives, the case prints SKIP
+#              rows naming that and exits 0. It also skips, naming the queue, when the pool's
+#              entrance LocalQueue is missing from the namespace: nothing is admitted and no
+#              document is ever rendered. The witness row additionally skips, naming the image,
+#              when the witness image cannot be pulled — a container nobody could start is a
+#              reading nobody took, not a verdict about the operator.
 #
-# Existing platform: if an InstanceType already reports the manufacturer named by E2E_C117_VENDOR
-#              (an accelerator cluster, for example E2E_C117_VENDOR=Ascend), the case uses it and
-#              injects nothing, so the label, the setting and the settle wait are skipped.
+#              Existing platform: if an InstanceType already reports the manufacturer named by
+#              E2E_C117_VENDOR (an accelerator cluster, for example E2E_C117_VENDOR=Ascend), the
+#              case uses it and injects nothing, so the label, the setting and the settle wait
+#              are skipped.
 #
-# Inputs:      MOCKED: one node label (the CPU vendor, "AMD" — the platform whose admitted row
-#              needs no shared claim) injected through a NodeFeature object, and one settings key
-#              (CPU-manufacturer awareness) flipped on; both restored by the trap. REAL: one
-#              ModelDeployment with the encode role listed first, engine vLLM, router
-#              llm-d-router, one replica per role on the platform type.
+# Inputs:      MOCKED: one node label (the CPU vendor) injected through a NodeFeature object and
+#              one settings key (CPU-manufacturer awareness) flipped on — both restored by the
+#              trap. REAL: one PV, one PVC, one three-role ModelDeployment (encode first, engine
+#              vLLM, router llm-d-router, one replica per role on the platform type, the encode and
+#              prefill roles mounting the claim at one path), the control deployment the same
+#              router with no encoder role, and two one-shot witness Pods mounting the same claim.
 #
-# Expected:    - the deployment is created and its three role Pods exist (gated counts, they never
-#                need to run);
+# Expected:    - the deployment is admitted and created, and its three role Pods exist (gated
+#                counts, they never need to run);
 #              - Services <deployment>-encode, <deployment>-prefill and <deployment>-decode exist,
 #                each selecting exactly its own role's Pod and nobody else's;
 #              - the deployment-wide Service exists and selects the prefill Pod, NOT the encode
 #                Pod, with the encode role first in the list;
-#              - status.roleSummary carries the ready counts in the fixed order E, P, D;
-#              - the RoleKindsReady condition accounts the roles (KindsNotReady while the pause
-#                placeholders fail the engine probes, AllKindsReady if something serves) rather
-#                than reporting NoRoleStatuses;
-#              - status.endpoint, when published, does not name the encoder;
-#              - the v1 ModelDeployment kubectl table carries the Endpoint column alongside Engine,
-#                Roles and Phase.
+#              - status.roleSummary carries the ready counts in the fixed order E, P, D, and the
+#                RoleKindsReady condition accounts the roles rather than reporting NoRoleStatuses;
+#              - status.endpoint, when published, does not name the encoder, and the v1 table
+#                carries the Endpoint column;
+#              - the router's ConfigMap carries an EndpointPickerConfig whose encode filter selects
+#                role-kind=encode, whose encode profile names that filter alone, whose multimodal
+#                decider the handler routes both prefill and encode at, and whose prefix-cache
+#                producer excludes the kinds that publish no events — while a deployment with no
+#                encoder role renders none of that;
+#              - the encoder Pod renders a volume naming the claim at the shared path and NOT
+#                read-only, the prefiller Pod renders the same claim at the same path, and the
+#                decoder Pod renders no volume naming the claim;
+#              - the PVC reaches Bound against the case's own PV, and a file written through the
+#                claim by one witness Pod is read back byte-for-byte by the other, proving one
+#                filesystem behind both mounts.
 #
-# Cleanup:     The trap deletes the deployment, releases any Workload still holding its replicas
-#              (Kueue keeps a finalizer on every Pod of a serving group), deletes the NodeFeature
-#              object, restores the settings key to its exact original value and waits for the chain
-#              to settle back: the derived type goes only once the setting cache flips and the pool
-#              re-derives. Idempotent, runs on pass AND fail, safe to re-run.
+# Cleanup:     The trap deletes the witness Pods and both deployments, releases any Workload still
+#              holding the replicas (Kueue keeps a finalizer on every Pod of a serving group),
+#              deletes the PVC and the PV, deletes the NodeFeature object, restores the settings
+#              key to its exact original value and waits for the chain to settle back: the
+#              derived type goes only once the setting cache flips and the pool re-derives.
+#              Idempotent, runs on pass AND fail, safe to re-run.
 #
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
-
-NS="${1:?usage: case-117.sh <NS>}"
-SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
-SETTING=instance-type-aware-cpu-manufacturer
-VENDOR="${E2E_C117_VENDOR:-AMD}"
-PLATFORM="$(printf '%s' "$VENDOR" | tr '[:upper:]' '[:lower:]')"
-
-# A platform whose encoder-cache connector carries the output through a directory (Ascend) is
-# admitted only when the encode and prefill roles mount one shared claim. Name an existing
-# ReadWriteMany claim in E2E_C117_EC_CLAIM; it stays empty for platforms that need none.
-EC_CLAIM="${E2E_C117_EC_CLAIM:-}"
-EC_VOLUMES=""
-if [ -n "$EC_CLAIM" ]; then
-  EC_VOLUMES="$(printf '      additionalVolumes:\n        - mountPath: /ec-cache\n          persistentVolumeClaim:\n            claimName: %s' "$EC_CLAIM")"
-fi
-NF="case117-cpu-vendor"
-MD=case117-epd
-IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
-SETTLE_ROUNDS="${E2E_C117_SETTLE:-60}"   # 60 x 5s = 5 min for the settings cache and re-derivation
-POD_ROUNDS="${E2E_C117_PODS:-40}"        # 40 x 5s for the group to form and its Pods to exist
-STATUS_ROUNDS="${E2E_C117_STATUS:-12}"   # 12 x 5s for the observed roles to reach the status
-
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
+NS="${1:?usage: case-117.sh <NS>}"
+SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
+VENDOR="${E2E_C117_VENDOR:-Ascend}"
+PLATFORM="$(printf '%s' "$VENDOR" | tr '[:upper:]' '[:lower:]')"
+NF=case117-cpu-vendor
+MD=case117-epd
+PD=case117-pd
+CLAIM=case117-claim
+PV=case117-pv
+IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
+WITNESS_IMAGE="${E2E_C117_WITNESS_IMAGE:-busybox:1.36}"
+MOUNT=/ec-cache
+SETTLE_ROUNDS="${E2E_C117_SETTLE:-60}"   # 60 x 5s for the settings cache and re-derivation
+POD_ROUNDS="${E2E_C117_PODS:-40}"        # 40 x 5s for the group to render its Pods
+STATUS_ROUNDS="${E2E_C117_STATUS:-12}"   # 12 x 5s for the observed roles to reach the status
+
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_epd-lib.sh"
+
+# The picker document is YAML, so the assertions on the converted document need jq and a YAML
+# reader. jq is a runner requirement the whole suite shares. A missing YAML reader instead
+# degrades only the picker-document section: the platform, deployment, Service, status and mount
+# rows need no YAML parse, so they still run - the section SKIPs its rows loudly instead of
+# taking the whole case down (the base case ran its full surface without this dependency; the
+# dependency arrived with the absorbed picker checks and must not widen past them).
+command -v jq >/dev/null 2>&1 || { echo "[case-117] jq is required to read the router document." >&2; exit 2; }
+PICKER_YAML_OK=yes
+python3 -c 'import yaml' >/dev/null 2>&1 || {
+  echo "[case-117] pyyaml is absent: the picker-document rows will SKIP." >&2
+  PICKER_YAML_OK=no
+}
+
 # One Ready, schedulable worker node (not a control-plane one): the vendor label lands there and
 # that node's CPU becomes the pool whose manufacturer the case controls.
-pick_worker_node() {
-  kubectl get nodes -o json 2>/dev/null | python3 -c '
-import json,sys
-for n in json.load(sys.stdin).get("items",[]):
-    cs=n.get("status",{}).get("conditions",[])
-    if not any(c.get("type")=="Ready" and c.get("status")=="True" for c in cs):
-        continue
-    if n.get("spec",{}).get("unschedulable"):
-        continue
-    # A CPU-vendor probe only reads back on a node that feeds the CPU-only catalog. An
-    # acceleratable node feeds the GPU InstanceType instead, whose manufacturer is the
-    # accelerator vendor, so an injected cpu-model.vendor_id never surfaces here and the
-    # platform-type poll below times out. Skip those nodes, exactly as case-18 reads the
-    # CPU pool (acceleratable=false) rather than the accelerator one.
-    if n.get("metadata",{}).get("labels",{}).get("feature.gpustack.ai/acceleratable") == "true":
-        continue
-    ts=n.get("spec",{}).get("taints",[])
-    if any(str(t.get("key","")).startswith("node-role.kubernetes.io/") for t in ts):
-        continue
-    print(n["metadata"]["name"])
-    break
-'
-}
-
-# The InstanceType reporting the injected platform, skipping types on their way out and Inactive
-# ones for the reasons case-51 records: naming either is refused at admission for a reason no row
-# here is about.
-epd_platform_type() {
-  kubectl get instancetypes.worker.gpustack.ai \
-    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
-    2>/dev/null \
-    | while IFS='|' read -r name deleting inactive manufacturer; do
-        [ -n "$name" ] || continue
-        [ -z "$deleting" ] || continue
-        [ "$inactive" = true ] && continue
-        if [ "$manufacturer" = "$PLATFORM" ]; then
-          echo "$name"
-          break
-        fi
-      done
-}
-
-ORIG_SETTING="$(kubectl -n "$SYSTEM_NS" get secret gpustack-settings -o jsonpath="{.data.${SETTING}}" 2>/dev/null)"
-set_awareness() { # true|false
-  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
-    -p "{\"data\":{\"${SETTING}\":\"$(printf '%s' "$1" | base64)\"}}" >/dev/null 2>&1
-}
-restore_setting() {
-  local v=null
-  [ -n "$ORIG_SETTING" ] && v="\"${ORIG_SETTING}\""
-  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
-    -p "{\"data\":{\"${SETTING}\":${v}}}" >/dev/null 2>&1
-}
-
-# Restoring the value is not the end of the restore: the worker reads it through a thirty-second
-# cache, and the type derived from it outlives the patch by that cache plus one reconcile. Wait for
-# the derived type to go, so the next case in a serial run does not list an aware type this run left
-# behind (case-18's wait_generic, on this same fixture). A cluster that started with the setting
-# already on keeps its derived type, so there is nothing to wait for and the wait is skipped.
-settle_back() {
-  [ "$(printf '%s' "$ORIG_SETTING" | base64 -d 2>/dev/null)" = "true" ] && return 0
-  for _ in $(seq 1 "$SETTLE_ROUNDS"); do
-    [ -z "$(epd_platform_type)" ] && return 0
-    sleep 5
-  done
-  return 0
-}
+#
+# The InstanceType reporting the injected platform, the label that builds it, the setting it turns
+# on, the type it waits for and the undo of all three are the library's: epd_pick_worker_node,
+# epd_platform_type and epd_setup_cpu_vendor_fixture.
 
 # One list call, because this runs from the EXIT trap: Kueue holds a finalizer on every Pod of a
 # serving group and releases it only when the Workload is deleted, so a cleanup that blocks on the
 # deployment would block for as long as the caller allows (case-50's mechanic).
-force_release() {
-  local row wl uids owners u
-  uids="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${MD}" \
+force_release() { # <modeldeployment>
+  local md="$1" row wl uids owners u
+  uids="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${md}" \
     -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' 2>/dev/null)"
   [ -n "$uids" ] || return 0
   while IFS= read -r row; do
@@ -197,88 +180,156 @@ EOF
   return 0
 }
 
-INJECTED=false
 cleanup() {
   echo
   echo "[case-117] cleanup"
-  kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai "$MD" \
-    --ignore-not-found --wait=false >/dev/null 2>&1
-  for _ in $(seq 1 12); do
-    sleep 5
-    force_release
-    [ -z "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${MD}" --no-headers 2>/dev/null)" ] && break
-  done
-  if [ "$INJECTED" = true ]; then
-    kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
-    restore_setting
-    settle_back
-  fi
+  epd_teardown_cpu_vendor_fixture "$NS" "$NF" "$SETTLE_ROUNDS" "$SYSTEM_NS" cleanup_deployments
 }
 trap cleanup EXIT
 
-# ---------------------------------------------------------------- the fixture
+# The deployments and the claim this run made, removed while the platform they were admitted on
+# still exists. The fixture teardown runs after this, so the type is still there while the
+# Workloads are released.
+cleanup_deployments() {
+  kubectl -n "$NS" delete pod case117-witness-write case117-witness-read \
+    --ignore-not-found --force --grace-period=0 >/dev/null 2>&1
+  for md in "$MD" "$PD"; do
+    kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai "$md" \
+      --ignore-not-found --wait=false >/dev/null 2>&1
+  done
+  for _ in $(seq 1 12); do
+    sleep 5
+    force_release "$MD"
+    force_release "$PD"
+    [ -z "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${MD}" --no-headers 2>/dev/null)" ] &&
+      [ -z "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${PD}" --no-headers 2>/dev/null)" ] && break
+  done
+  kubectl -n "$NS" delete pvc "$CLAIM" --ignore-not-found --wait=false >/dev/null 2>&1
+  kubectl delete pv "$PV" --ignore-not-found --wait=false >/dev/null 2>&1
+}
 
-IT="$(epd_platform_type)"
+# ---------------------------------------------------------------- the shared fixture
+
+# The platform this deployment is admitted on: an InstanceType reporting the injected vendor, or
+# one the cluster already carried. It is the ONE platform all three readings below share.
+IT="$(epd_platform_type "$PLATFORM")"
 if [ -z "$IT" ]; then
-  NODE="$(pick_worker_node)"
+  NODE="$(epd_pick_worker_node)"
   if [ -z "$NODE" ]; then
     echo "[case-117] no Ready schedulable worker node; this case cannot place its vendor label" >&2
     exit 2
   fi
 
   echo "[case-117] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
-  INJECTED=true
-
-  kubectl apply -f - >/dev/null 2>&1 <<YAML
-apiVersion: nfd.k8s-sigs.io/v1alpha1
-kind: NodeFeature
-metadata:
-  name: ${NF}
-  namespace: ${NS}
-  labels:
-    nfd.node.kubernetes.io/node-name: ${NODE}
-spec:
-  labels:
-    feature.node.kubernetes.io/cpu-model.vendor_id: "${VENDOR}"
-  features: {}
-YAML
-  set_awareness true
 
   # The poll IS the wait for the settings cache (30s), the node flavor re-derivation and the type
   # authoring. A timeout is a skip, not a failure: NFD owns cpu-model.vendor_id and may decline an
   # injected override, which is an environment answer this case reports rather than argues with.
-  for _ in $(seq 1 "$SETTLE_ROUNDS"); do
-    IT="$(epd_platform_type)"
-    [ -n "$IT" ] && break
-    sleep 5
-  done
+  epd_setup_cpu_vendor_fixture "$VENDOR" "$NS" "$NF" "$SETTLE_ROUNDS" "$SYSTEM_NS" "$NODE"
+  IT="$EPD_FIXTURE_TYPE"
 fi
 
 if [ -z "$IT" ]; then
+  # No platform means no admitted shape, so every reading below has nothing to read. Each subject
+  # says so in its own words, and the run ends here.
   record SKIP "an encoder deployment exists with one Service per role" \
+    "no InstanceType reported manufacturer '${PLATFORM}' within $((SETTLE_ROUNDS * 5))s, so the encoder shape cannot be admitted on this run: NFD did not keep the injected cpu-model.vendor_id, or the pool never derived"
+  record SKIP "the shared-claim encoder shape exists" \
+    "no InstanceType reported manufacturer '${PLATFORM}' within $((SETTLE_ROUNDS * 5))s, so the encoder shape cannot be admitted on this run: NFD did not keep the injected cpu-model.vendor_id, or the pool never derived"
+  record SKIP "the router picker carries the encoder stage" \
     "no InstanceType reported manufacturer '${PLATFORM}' within $((SETTLE_ROUNDS * 5))s, so the encoder shape cannot be admitted on this run: NFD did not keep the injected cpu-model.vendor_id, or the pool never derived"
   print_rows
   echo "[case-117] skipped: no platform InstanceType"
   exit 0
 fi
 
+# Where the platform came from, which the platform row below states and the sections repeat.
+if [ "$EPD_FIXTURE_INJECTED" = true ]; then
+  ORIGIN="the injected vendor label"
+else
+  ORIGIN="an InstanceType the cluster already carried"
+fi
+
+# The witness pair needs one node to share the claim on. When the case labeled a node itself,
+# that node is the pool's only node and the one the role Pods land on; otherwise the first node of
+# the cluster is taken.
+if [ -z "${NODE:-}" ]; then
+  NODE="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -n 1)"
+fi
+
 # The type's entrance LocalQueue in this namespace is what routes the group into its queue; the
 # operator materializes it in every non-reserved namespace once the queue exists, so this poll is
 # part of the fixture rather than a subject.
 ENTRANCE="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.entrance}' 2>/dev/null)"
+ENTRANCE_LQ=""
 for _ in $(seq 1 "$SETTLE_ROUNDS"); do
-  [ -n "$(kubectl -n "$NS" get localqueue "$ENTRANCE" -o name 2>/dev/null)" ] && break
+  ENTRANCE_LQ="$(kubectl -n "$NS" get localqueue "${ENTRANCE:-}" -o name 2>/dev/null)"
+  [ -n "$ENTRANCE_LQ" ] && break
   sleep 5
 done
 
 record PASS "a CPU-only pool reports an admitted platform" \
-  "instancetype ${IT} reports manufacturer '${PLATFORM}' from the node labels; entrance ${ENTRANCE}"
+  "instancetype ${IT} reports manufacturer '${PLATFORM}' from ${ORIGIN}; entrance ${ENTRANCE}"
 
-# ---------------------------------------------------------------- the subject
+if [ -z "$ENTRANCE_LQ" ]; then
+  # Without the entrance queue nothing is admitted, no role Pod is created and no router document
+  # is ever rendered, so every reading below would report the same absence three times.
+  record SKIP "the pool's entrance LocalQueue exists" \
+    "instancetype ${IT} names entrance '${ENTRANCE:-<none>}' and no localqueue/${ENTRANCE:-<none>} answered in ${NS} within $((SETTLE_ROUNDS * 5))s, so nothing is admitted, no role Pod is created and no router document is ever rendered"
+  print_rows
+  echo "[case-117] skipped: no entrance LocalQueue"
+  exit 0
+fi
+
+record PASS "the pool's entrance LocalQueue exists" "${ENTRANCE_LQ##*/} in ${NS}"
+
+# The claim the two encoder-side roles mount: a hostPath volume under /tmp on the labeled node,
+# manually bound. The pool the labeled node feeds is the only pool the deployment names, so every
+# Pod that mounts this claim lands on that node and ReadWriteOnce is enough; DirectoryOrCreate
+# spares the case any need to reach the node's shell. A storage class is deliberately not used:
+# binding by volumeName needs none, and the default class of an arbitrary cluster is not this
+# case's to depend on.
+kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ${PV}
+  labels:
+    app.kubernetes.io/part-of: gpustack-operator-e2e
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /tmp/gpustack-case-117
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${CLAIM}
+  namespace: ${NS}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: ""
+  volumeName: ${PV}
+YAML
+
+# ---------------------------------------------------------------- the shared subject
 
 # The encoder is FIRST in the list on purpose: the deployment-wide Service fronts the first role
 # that is not an encoder, and first-position is where an implementation that forgot the rule would
-# point the front door at the encoder.
+# point the front door at the encoder. The encode and prefill roles mount the shared claim at the
+# same path, because the platform whose encoder leg runs through a mounted directory is admitted
+# only when both roles mount one claim; the decode role mounts nothing, because that leg ends at
+# the prefiller.
 APPLY_OUT="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -299,13 +350,19 @@ spec:
       instanceType: ${IT}
       replicas: 1
       image: ${IMAGE}
-${EC_VOLUMES}
+      additionalVolumes:
+        - mountPath: ${MOUNT}
+          persistentVolumeClaim:
+            claimName: ${CLAIM}
     - name: prefill
       kind: Prefill
       instanceType: ${IT}
       replicas: 1
       image: ${IMAGE}
-${EC_VOLUMES}
+      additionalVolumes:
+        - mountPath: ${MOUNT}
+          persistentVolumeClaim:
+            claimName: ${CLAIM}
     - name: decode
       kind: Decode
       instanceType: ${IT}
@@ -315,8 +372,32 @@ YAML
 )"
 
 # The gate is that the object is THERE, not that the apply printed a nice word: a refusal surfaces
-# here as one message instead of nine timeouts (case-61's lesson).
+# here as one message instead of nine timeouts (case-49's lesson).
+DEPLOYED=no
 if kubectl -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" -o name >/dev/null 2>&1; then
+  DEPLOYED=yes
+fi
+
+# The three Pods need to EXIST, not to run: every selector row reads labels the Pod carries from
+# render time, and the group renders its Pods gated while Kueue has not admitted them. A refused
+# apply is not waited on — there is nothing that would arrive.
+PODS=0
+if [ "$DEPLOYED" = yes ]; then
+  for _ in $(seq 1 "$POD_ROUNDS"); do
+    PODS="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${MD}" --no-headers 2>/dev/null | grep -c . || true)"
+    [ "${PODS:-0}" -ge 3 ] && break
+    sleep 5
+  done
+fi
+
+# ---------------------------------------------------------------- the addresses
+
+# The role Services, the front door and the status view: what a caller's connection lands on.
+
+record PASS "a CPU-only pool reports an admitted platform" \
+  "instancetype ${IT} reports manufacturer '${PLATFORM}' from the node labels; entrance ${ENTRANCE}"
+
+if [ "$DEPLOYED" = yes ]; then
   record PASS "the encoder deployment is admitted and created" \
     "one encode, one prefill and one decode role on ${IT}, llm-d-router, image ${IMAGE}"
 else
@@ -326,14 +407,6 @@ else
   exit 1
 fi
 
-# The three Pods need to EXIST, not to run: every selector row reads labels the Pod carries from
-# render time, and the group renders its Pods gated while Kueue has not admitted them.
-PODS=""
-for _ in $(seq 1 "$POD_ROUNDS"); do
-  PODS="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${MD}" --no-headers 2>/dev/null | grep -c . || true)"
-  [ "${PODS:-0}" -ge 3 ] && break
-  sleep 5
-done
 if [ "${PODS:-0}" -ge 3 ]; then
   record PASS "all three role Pods exist" "${PODS} Pods rendered for the three roles"
 else
@@ -457,8 +530,8 @@ fi
 # it. A check that accepted it would accept any broken selector as withdrawal.
 #
 # A selector that names the encoder cannot also reach another role: label terms are a conjunction,
-# so component=encode already excludes every other component. That is why the control is built on
-# the empty set and not on a foreign Pod.
+# so component=encode already excludes every other component. That is why the control is built on the
+# empty set and not on a foreign Pod.
 DANGLING="app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=${MD},app.kubernetes.io/component=encode,case117.gpustack.ai/no-such-label=true"
 if selector_fronts_only "$DANGLING" encode; then
   record FAIL "the per-role Service check refuses an empty set that nothing explains" \
@@ -550,7 +623,7 @@ esac
 # The published endpoint is the front door as a string. For a routed deployment it is derived from
 # the router's objects, and on a cluster that cannot pull the router image it may never publish —
 # which is a NO-READ rather than a FAIL: the router image is deliberately not this case's subject
-# (case 71 isolates it). An endpoint that names the encoder role, on any cluster, is a FAIL.
+# (case 70 isolates it). An endpoint that names the encoder role, on any cluster, is a FAIL.
 EP="$(kubectl -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" -o jsonpath='{.status.endpoint}' 2>/dev/null)"
 if [ -z "$EP" ]; then
   record NO-READ "status.endpoint never names the encoder" \
@@ -577,6 +650,448 @@ case "$HDR" in
     record FAIL "v1 table carries the Endpoint column" "header missing ENDPOINT: ${HDR:-<empty>}"
     ;;
 esac
+
+# ---------------------------------------------------------------- the router picker document
+
+# What the router is TOLD about the encoder. The rows read the document the operator renders into
+# the router Pod, so an unpullable router image does not skip them: the ConfigMap exists before
+# any image is pulled.
+
+record PASS "a CPU-only pool reports an admitted platform" \
+  "instancetype ${IT} reports manufacturer '${PLATFORM}' from ${ORIGIN}"
+
+# The refusal itself is reported by the addresses section above, which stops the run on it; this
+# row states the same admission in the words of this subject.
+if [ "$DEPLOYED" = yes ]; then
+  record PASS "the encoder deployment is admitted and created" \
+    "one encode, one prefill and one decode role on ${IT}, llm-d-router"
+else
+  record FAIL "the encoder deployment is admitted and created" \
+    "no modeldeployment/${MD} after the apply: $(printf '%s' "${APPLY_OUT:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
+fi
+
+# The CONTROL deployment is the same router with no encoder at all. Reading the same document twice
+# is what makes the encoder's facts encoder facts rather than prefill/decode facts that happen to
+# be there: every term the control lacks is a term the encoder added.
+#
+# Its apply output is KEPT rather than discarded. A refusal here would otherwise surface as the
+# pod-count row below, which names a missing Pod and not the refusal that caused it — the same
+# wrong-cause report the LocalQueue poll was fixed for.
+PD_APPLY_OUT="$(cat <<YAML | kubectl apply -f - 2>&1
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: ${PD}
+  namespace: ${NS}
+spec:
+  engine:
+    name: vLLM
+    image: ${IMAGE}
+  model:
+    name: Qwen/Qwen2.5-0.5B-Instruct
+  router:
+    name: llm-d-router
+  roles:
+    - name: prefill
+      kind: Prefill
+      instanceType: ${IT}
+      replicas: 1
+      image: ${IMAGE}
+    - name: decode
+      kind: Decode
+      instanceType: ${IT}
+      replicas: 1
+      image: ${IMAGE}
+YAML
+)"
+
+# An empty output is not an accepted apply, so it counts as refused here too.
+PD_REFUSED=no
+case "$PD_APPLY_OUT" in
+  *created* | *configured*) ;;
+  *) PD_REFUSED=yes ;;
+esac
+
+# THE ENCODER DEPLOYMENT RENDERS THREE ROLE PODS AND THE CONTROL TWO, and the count each row
+# waits for is that deployment's own role count rather than a flat number: a two-of-three gate
+# would pass a renderer that dropped the encoder, which is the failure this case exists to catch.
+for md in "$MD" "$PD"; do
+  if [ "$md" = "$MD" ]; then want=3; else want=2; fi
+  if [ "$md" = "$MD" ]; then
+    # The shared fixture already waited for this deployment's three role Pods.
+    count="$PODS"
+  else
+    count=""
+    for _ in $(seq 1 "$POD_ROUNDS"); do
+      count="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${md}" --no-headers 2>/dev/null | grep -c . || true)"
+      [ "${count:-0}" -ge "$want" ] && break
+      sleep 5
+    done
+  fi
+  if [ "${count:-0}" -ge "$want" ]; then
+    record PASS "${md} rendered its role Pods" "${count} Pods for ${want} roles; the rows below read the router document, not the containers"
+  else
+    # A refused control apply is the cause of a missing control Pod, so it is named here instead of
+    # leaving the row to be read as a renderer that dropped a role.
+    cause=""
+    if [ "$md" = "$PD" ] && [ "$PD_REFUSED" = yes ]; then
+      cause="; its apply was refused: $(printf '%s' "$PD_APPLY_OUT" | tr '\n' ' ' | cut -c1-220)"
+    fi
+    record FAIL "${md} rendered its role Pods" \
+      "only ${count:-0} of ${want} role Pods appeared within $((POD_ROUNDS * 5))s, so the router ConfigMap may never be rendered${cause}"
+  fi
+done
+
+# The document as YAML, from the ConfigMap the operator renders into the router Pod. A router
+# configured by argv renders none, so its ABSENCE is a distinct answer from an empty one and both
+# are read rather than assumed.
+picker_yaml() { # <modeldeployment>
+  kubectl -n "$NS" get configmap "$1-router" -o jsonpath='{.data.epp\.yaml}' 2>/dev/null
+}
+
+# Each check runs the document through jq as YAML (jq reads YAML only with -y on some builds), so
+# the document is converted once with python3, which every case in this suite already requires.
+json_of() { # yaml-on-stdin
+  python3 -c '
+import json,sys
+try:
+    import yaml
+except ImportError:
+    sys.stderr.write("pyyaml is required to read the router document")
+    raise SystemExit(3)
+d = yaml.safe_load(sys.stdin.read())
+print(json.dumps(d) if d is not None else "{}")
+'
+}
+
+if [ "$PICKER_YAML_OK" != yes ]; then
+  record SKIP "the router ConfigMap carries an EndpointPickerConfig" \
+    "pyyaml is absent in the runner, so the rendered document cannot be read here"
+else
+DOC="$(picker_yaml "$MD")"
+if [ -z "$DOC" ]; then
+  record FAIL "the router ConfigMap carries an EndpointPickerConfig" \
+    "no configmap/${MD}-router carries a key epp.yaml, so there is no document to read"
+else
+  DOC_JSON="$(printf '%s' "$DOC" | json_of)" || {
+    echo "[case-117] cannot read the router document: pyyaml is required in the runner." >&2
+    exit 2
+  }
+  PD_JSON="$(printf '%s' "$(picker_yaml "$PD")" | json_of)" || PD_JSON=""
+
+  if printf '%s' "$DOC_JSON" | jq -e '.kind == "EndpointPickerConfig" and (.plugins | type == "array")' \
+    >/dev/null 2>&1; then
+    record PASS "the router ConfigMap carries an EndpointPickerConfig" \
+      "$(printf '%s' "$DOC_JSON" | jq -r '.plugins | length') plugins and $(printf '%s' "$DOC_JSON" | jq -r '.schedulingProfiles | length') scheduling profiles"
+  else
+    record FAIL "the router ConfigMap carries an EndpointPickerConfig" \
+      "kind=$(printf '%s' "$DOC_JSON" | jq -r '.kind // "<none>"'), and the document has no plugins array to read"
+  fi
+
+  # The encode filter: one label-selector-filter whose matchLabels select role-kind=encode. The
+  # label key is the role-kind label the operator stamps on every Pod, so this is the selector the
+  # router will actually match against, read off the document rather than assumed from the render.
+  FILTER_OK="$(printf '%s' "$DOC_JSON" | jq -r '
+    [ .plugins[]?
+      | select(.type == "label-selector-filter")
+      | select(.parameters.matchLabels["modeldeployment.gpustack.ai/role-kind"] == "encode")
+    ] | length')"
+  if [ "${FILTER_OK:-0}" -ge 1 ]; then
+    record PASS "an encode filter selects the encoder's Pods" \
+      "a label-selector-filter matches modeldeployment.gpustack.ai/role-kind=encode"
+  else
+    record FAIL "an encode filter selects the encoder's Pods" \
+      "no label-selector-filter matches role-kind=encode; the picker would never route to an encoder"
+  fi
+
+  # THE ENCODE PROFILE'S PLUGIN LIST, asserted exactly. Upstream completes any profile naming none
+  # with its own max-score-picker at load time, so [encode-pods] is a valid, runnable profile — and
+  # any additional plugin is a scorer that cannot separate encoder candidates.
+  ENCODE_PLUGINS="$(printf '%s' "$DOC_JSON" | jq -c \
+    '[.schedulingProfiles[]? | select(.name == "encode") | .plugins[]? | .pluginRef] | unique')"
+  if [ "$ENCODE_PLUGINS" = '["encode-pods"]' ]; then
+    record PASS "the encode profile scores on nothing but its own filter" \
+      "plugins=${ENCODE_PLUGINS}: upstream appends its max-score-picker to a profile naming none"
+  else
+    record FAIL "the encode profile scores on nothing but its own filter" \
+      "encode profile plugins=${ENCODE_PLUGINS}, expected [\"encode-pods\"]: an encoder keeps no KV cache, so the queue and KV scorers read gauges it never exports and the prefix scorer asks about tokens that do not exist yet"
+  fi
+
+  # The decider, and the handler that routes BOTH halves at one. Without the encode term in the
+  # handler the decider is present but never consulted, and the encoder stage is silently unused.
+  DECIDER="$(printf '%s' "$DOC_JSON" | jq -r \
+    '[.plugins[]? | select(.type == "always-disagg-multimodal-decider")] | length')"
+  HANDLER="$(printf '%s' "$DOC_JSON" | jq -c \
+    '[.plugins[]? | select(.type == "disagg-profile-handler") | .parameters] | first // {}')"
+  if [ "${DECIDER:-0}" -ge 1 ]; then
+    record PASS "the multimodal decider is present" "always-disagg-multimodal-decider is in the document"
+  else
+    record FAIL "the multimodal decider is present" \
+      "no always-disagg-multimodal-decider: without it the encoder stage is never selected and a media request is answered undivided"
+  fi
+
+  HANDLER_ENCODE="$(printf '%s' "$HANDLER" | jq -r '.profiles.encode // ""')"
+  HANDLER_PREFILL="$(printf '%s' "$HANDLER" | jq -r '.profiles.prefill // ""')"
+  HANDLER_DECIDER_ENCODE="$(printf '%s' "$HANDLER" | jq -r '.deciders.encode // ""')"
+  if [ "$HANDLER_ENCODE" = encode ] && [ "$HANDLER_PREFILL" = prefill ] \
+    && [ "$HANDLER_DECIDER_ENCODE" = always-disagg-multimodal-decider ]; then
+    record PASS "the handler routes the encoder stage at the multimodal decider" \
+      "profiles.encode=encode, profiles.prefill=prefill, deciders.encode=always-disagg-multimodal-decider"
+  else
+    record FAIL "the handler routes the encoder stage at the multimodal decider" \
+      "profiles.encode='${HANDLER_ENCODE}' profiles.prefill='${HANDLER_PREFILL}' deciders.encode='${HANDLER_DECIDER_ENCODE}'"
+  fi
+
+  # The precise prefix-cache producer's Pod discovery EXCLUDES the two kinds that publish no events.
+  # The exclusion is what makes the terms exist at all, so the row reads the selector string rather
+  # than the plugin's presence.
+  #
+  # THE KEY IS podLabelSelector, which is what the renderer writes. A producer configured by a
+  # different field would render a document this case could not read, and reading one that does not
+  # exist would answer "no producer" on a cluster that has one — so the key is named here rather than
+  # guessed, and the failure message quotes it.
+  DISCOVERY="$(printf '%s' "$DOC_JSON" | jq -r '
+    [ .plugins[]?
+      | select(.type == "precise-prefix-cache-producer")
+      | .parameters.kvEventsConfig.podDiscoveryConfig.podLabelSelector // ""
+    ] | first // ""')"
+  case "$DISCOVERY" in
+    *role-kind!=decode*role-kind!=encode* | *role-kind!=encode*role-kind!=decode*)
+      record PASS "the prefix-cache producer excludes the kinds that publish no events" \
+        "podLabelSelector: ${DISCOVERY}"
+      ;;
+    "")
+      # The renderer picks the PRECISE producer whenever the deployment opens a KV event port, and an
+      # encoder leg does — so this branch is the alternative a renderer can still emit, not the
+      # expected shape: the approximate producer discovers Pods by service and carries no role
+      # selector, so there is nothing to exclude and nothing wrong. It is a PASS, because a
+      # deployment that renders no events has no eventless kind to exclude.
+      APPROX="$(printf '%s' "$DOC_JSON" | jq -r \
+        '[.plugins[]? | select(.type == "approx-prefix-cache-producer")] | length')"
+      if [ "${APPROX:-0}" -ge 1 ]; then
+        record PASS "the prefix-cache producer excludes the kinds that publish no events" \
+          "the approximate producer renders instead, which discovers Pods by service and has no role selector to exclude"
+      else
+        record FAIL "the prefix-cache producer excludes the kinds that publish no events" \
+          "neither producer is in the document, so neither kind is excluded and nothing is subscribed"
+      fi
+      ;;
+    *)
+      record FAIL "the prefix-cache producer excludes the kinds that publish no events" \
+        "podLabelSelector '${DISCOVERY}' lacks role-kind!=decode or role-kind!=encode: both kinds publish no KV events and would be subscribers dialing a socket the engine never opens"
+      ;;
+  esac
+
+  # ---------------------------------------------------------------- the control deployment
+
+  # The same router, the same engine, one role fewer. Every term the control lacks is a term the
+  # encoder added, which is what makes the rows above encoder facts rather than router defaults.
+  if [ -z "$PD_JSON" ]; then
+    record SKIP "a deployment with no encoder role renders no encoder stage" \
+      "no configmap/${PD}-router carries a key epp.yaml, so the control document could not be read; the encoder rows above stand on their own"
+  else
+    CTRL_DECIDER="$(printf '%s' "$PD_JSON" | jq -r \
+      '[.plugins[]? | select(.type == "always-disagg-multimodal-decider")] | length')"
+    CTRL_PROFILE="$(printf '%s' "$PD_JSON" | jq -r \
+      '[.schedulingProfiles[]? | select(.name == "encode")] | length')"
+    CTRL_FILTER="$(printf '%s' "$PD_JSON" | jq -r \
+      '[.plugins[]? | select(.type == "label-selector-filter")
+        | select(.parameters.matchLabels["modeldeployment.gpustack.ai/role-kind"] == "encode")] | length')"
+    if [ "$CTRL_DECIDER" -eq 0 ] && [ "$CTRL_PROFILE" -eq 0 ] && [ "$CTRL_FILTER" -eq 0 ]; then
+      record PASS "a deployment with no encoder role renders no encoder stage" \
+        "the control's picker carries no multimodal decider, no encode profile and no encode filter, so all three are the encoder's and not the router's defaults"
+    else
+      record FAIL "a deployment with no encoder role renders no encoder stage" \
+        "the control still carries decider=${CTRL_DECIDER} profile=${CTRL_PROFILE} filter=${CTRL_FILTER}, which would mean the encoder rows above prove nothing about the encoder"
+    fi
+  fi
+fi
+fi  # PICKER_YAML_OK: the picker section is closed here; its SKIP shape sits above
+
+# ---------------------------------------------------------------- the shared claim mounts
+
+# The claim one role's FIRST Pod mounts, as "claimName|mountPath|readOnly", or "" when it mounts no
+# claim. Pending Pods count: the render is what these rows pin, and a gated Pod carries its full
+# spec (case-89's reading posture). The reading itself is the library's: epd_role_pod_claim.
+
+record PASS "a CPU-only pool reports an admitted platform" \
+  "instancetype ${IT} reports manufacturer '${PLATFORM}'; entrance ${ENTRANCE}"
+
+# The refusal itself is reported by the addresses section above, which stops the run on it; this
+# row states the same admission in the words of this subject.
+if [ "$DEPLOYED" = yes ]; then
+  record PASS "the shared-claim encoder deployment is admitted and created" \
+    "encode and prefill mount ${CLAIM} at ${MOUNT} on ${IT}"
+else
+  record FAIL "the shared-claim encoder deployment is admitted and created" \
+    "no modeldeployment/${MD} after the apply: $(printf '%s' "${APPLY_OUT:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
+fi
+
+if [ "${PODS:-0}" -ge 3 ]; then
+  record PASS "all three role Pods exist" "${PODS} Pods rendered; the mount rows below read specs, not running containers"
+else
+  record FAIL "all three role Pods exist" \
+    "only ${PODS:-0} Pod(s) of the group appeared within $((POD_ROUNDS * 5))s, so the mount rows below have nothing to read"
+fi
+
+ENCODE_CLAIM="$(epd_role_pod_claim "$NS" "$MD" encode)"
+PREFILL_CLAIM="$(epd_role_pod_claim "$NS" "$MD" prefill)"
+DECODE_CLAIM="$(epd_role_pod_claim "$NS" "$MD" decode)"
+
+case "$ENCODE_CLAIM" in
+  "${CLAIM}|${MOUNT}|false")
+    record PASS "the encoder Pod mounts the claim at the shared path, writable" \
+    "rendered ${ENCODE_CLAIM}"
+    ;;
+  *)
+    record FAIL "the encoder Pod mounts the claim at the shared path, writable" \
+      "rendered '${ENCODE_CLAIM:-no claim mount}', expected '${CLAIM}|${MOUNT}|false'"
+    ;;
+esac
+
+case "$PREFILL_CLAIM" in
+  "${CLAIM}|${MOUNT}|"*)
+
+    # Read-only is the PREFILLER's own choice — it only reads — so the row pins the claim name and
+    # the path and leaves the flag open, unlike the encoder's row above.
+    record PASS "the prefiller Pod mounts the same claim at the same path" \
+      "rendered ${PREFILL_CLAIM}, matching the encoder's claim and path"
+    ;;
+  *)
+    record FAIL "the prefiller Pod mounts the same claim at the same path" \
+      "rendered '${PREFILL_CLAIM:-no claim mount}', expected '${CLAIM}|${MOUNT}|<any readOnly>'"
+    ;;
+esac
+
+if [ -z "$DECODE_CLAIM" ]; then
+  record PASS "the decoder Pod mounts no claim" \
+    "the mounted-directory leg ends at the prefiller, and the decode role declares no volume"
+else
+  record FAIL "the decoder Pod mounts no claim" "rendered ${DECODE_CLAIM}"
+fi
+
+# ---------------------------------------------------------------- the claim is one filesystem
+
+PVC_PHASE="$(kubectl -n "$NS" get pvc "$CLAIM" -o jsonpath='{.status.phase}' 2>/dev/null)"
+if [ "$PVC_PHASE" = Bound ]; then
+  record PASS "the claim is Bound" "pvc/${CLAIM} bound to pv/${PV}"
+else
+  record FAIL "the claim is Bound" "pvc/${CLAIM} phase='${PVC_PHASE:-<none>}', so no witness can mount it"
+fi
+
+# Two one-shot witnesses pinned to the labeled node: the pool's only node, which is also where the
+# hostPath lives. The writer records a token through its mount; the reader cats the same path. That
+# round-trip is the reading that separates one shared filesystem from two claims sharing a name.
+#
+# THE WRITER IS CREATED FIRST AND THE READER ONLY AFTER IT HAS RUN, because the reader cats a file
+# that does not exist until the writer has written it: created together, whichever the kubelet starts
+# first decides the verdict, and on a cluster that already holds the image the reader usually loses,
+# failing a claim that shares perfectly well. Nothing in the manifest, the node or the loop orders
+# them, so the case orders them.
+#
+# This is the LAST reading of the case, so an unpullable witness image skips this row alone and
+# leaves every row above it standing.
+if [ "$PVC_PHASE" = Bound ]; then
+  TOKEN="case117-$(date +%s)"
+  kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: case117-witness-write
+  namespace: ${NS}
+spec:
+  restartPolicy: Never
+  tolerations:
+    - operator: Exists
+  nodeSelector:
+    kubernetes.io/hostname: ${NODE}
+  containers:
+    - name: write
+      image: ${WITNESS_IMAGE}
+      command: ["sh", "-c", "printf '%s' '${TOKEN}' > /shared/written-by-the-other-mount"]
+      volumeMounts:
+        - name: shared
+          mountPath: /shared
+  volumes:
+    - name: shared
+      persistentVolumeClaim:
+        claimName: ${CLAIM}
+YAML
+
+  # An image that cannot be pulled is a SKIP naming the image (case-81's rule): a container nobody
+  # could start is a reading nobody took, not a verdict about the claim. The reason a witness Pod
+  # is waiting on is read by name, because it carries none of the deployment's own labels.
+  W_ROUNDS=$((POD_ROUNDS))
+  W_OK=no
+  for _ in $(seq 1 "$W_ROUNDS"); do
+    case "$(kubectl -n "$NS" get pod case117-witness-write -o jsonpath='{.status.phase}' 2>/dev/null)" in
+      Succeeded) W_OK=yes; break ;;
+      Failed) break ;;
+    esac
+    case "$(epd_pod_pull_reason "$NS" case117-witness-write)" in ImagePullBackOff | ErrImagePull) break ;; esac
+    sleep 5
+  done
+
+  if [ "$W_OK" != yes ]; then
+    case "$(epd_pod_pull_reason "$NS" case117-witness-write)" in
+      ImagePullBackOff | ErrImagePull)
+        record SKIP "a file written through one mount is read back through the other" \
+          "the witness image '${WITNESS_IMAGE}' could not be pulled ($(epd_pod_pull_reason "$NS" case117-witness-write)), so no reading was taken; the render rows above stand on their own"
+        ;;
+      *)
+        record FAIL "a file written through one mount is read back through the other" \
+          "the writer witness never completed (phase '$(kubectl -n "$NS" get pod case117-witness-write -o jsonpath='{.status.phase}' 2>/dev/null)')"
+        ;;
+    esac
+  else
+    # The file exists now, so the reader is safe to start.
+    kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: case117-witness-read
+  namespace: ${NS}
+spec:
+  restartPolicy: Never
+  tolerations:
+    - operator: Exists
+  nodeSelector:
+    kubernetes.io/hostname: ${NODE}
+  containers:
+    - name: read
+      image: ${WITNESS_IMAGE}
+      command: ["sh", "-c", "cat /shared/written-by-the-other-mount"]
+      volumeMounts:
+        - name: shared
+          mountPath: /shared
+  volumes:
+    - name: shared
+      persistentVolumeClaim:
+        claimName: ${CLAIM}
+YAML
+
+    R_OK=no
+    for _ in $(seq 1 "$W_ROUNDS"); do
+      case "$(kubectl -n "$NS" get pod case117-witness-read -o jsonpath='{.status.phase}' 2>/dev/null)" in
+        Succeeded | Failed) R_OK=yes; break ;;
+      esac
+      case "$(epd_pod_pull_reason "$NS" case117-witness-read)" in ImagePullBackOff | ErrImagePull) break ;; esac
+      sleep 5
+    done
+
+    READ_BACK=""
+    if [ "$R_OK" = yes ]; then
+      READ_BACK="$(kubectl -n "$NS" logs case117-witness-read -c read 2>/dev/null)"
+    fi
+    if [ "$READ_BACK" = "$TOKEN" ]; then
+      record PASS "a file written through one mount is read back through the other" \
+        "witness pair exchanged '${READ_BACK}' through pvc/${CLAIM}: one filesystem behind both mounts"
+    else
+      record FAIL "a file written through one mount is read back through the other" \
+        "reader witness returned '${READ_BACK:-<nothing>}', expected '${TOKEN}'"
+    fi
+  fi
+fi
 
 # Results.
 print_rows

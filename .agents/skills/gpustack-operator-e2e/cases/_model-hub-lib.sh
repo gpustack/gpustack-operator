@@ -125,26 +125,8 @@ mh_manifest_sha() {
   mh_call "$1" "$2" GET /_manifest | python3 -c "import json,sys; print(json.load(sys.stdin)['$3']['files']['$4']['sha256'])"
 }
 
-# setting_get KEY / setting_set KEY VALUE: a Setting in the store, bypassing admission the way a
-# seed from the environment does. setting_set prints the previous value.
-setting_get() {
-  kubectl -n "$SYSTEM_NS" get secret gpustack-settings -o jsonpath="{.data.$1}" 2>/dev/null | base64 -d 2>/dev/null
-}
-setting_set() {
-  local b64
-  b64="$(printf '%s' "$2" | base64 | tr -d '\n')"
-  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge -p "{\"data\":{\"$1\":\"${b64}\"}}" >/dev/null
-}
-
-# setting_unset KEY: removes KEY from the store, so the Setting reads its default again.
-setting_unset() {
-  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge -p "{\"data\":{\"$1\":null}}" >/dev/null
-}
-
-# settings_settle: waits out the worker's thirty-second Settings read cache, so its next read of a
-# Setting written through the store sees the new value. The plugin needs no wait: it reads its
-# NodeModelStore's spec, which the worker rewrites on the Secret's change.
-settings_settle() { sleep 35; }
+# setting_get KEY, setting_set KEY VALUE, setting_unset KEY and settings_settle live in _rows-lib.sh,
+# which every case sourcing this file also sources, and sources before it.
 
 # artifact NS NAME REPOSITORY [SECRET] [LABEL] [SPEC_YAML]: a Hugging Face ModelArtifact at main,
 # with SPEC_YAML (such as allowPatterns) appended to its spec.
@@ -247,6 +229,35 @@ plugin_metrics() {
 plugin_metric() {
   plugin_metrics "$1" \
     | awk -v m="$2" '$1 ~ "^"m"({|$)" {s += $2} END {printf "%d", s}'
+}
+
+# mh_peer_sync_check NS POD NODE ARTIFACT UID DIGEST [BOUND]: mounts ARTIFACT on NODE through a
+# fresh consumer Pod and reports the plugin's download counters around the mount, as
+# "peer_before hub_before peer_after hub_after". The plugin Pod on NODE is deleted first: its
+# cache is an emptyDir that dies with it, so the node starts empty and the mount can only be
+# served by a peer. The counters are the plugin's own, so a peer pull raises the peer one and
+# leaves the hub one alone. The status is 0 when the consumer Pod ran; the counters are reported
+# either way.
+mh_peer_sync_check() {
+  local ns="$1" pod="$2" node="$3" artifact="$4" uid="$5" digest="$6" bound="${7:-300}"
+  local peer_metric='gpustack_model_manager_download_bytes_total{source="peer"}'
+  local hub_metric='gpustack_model_manager_download_bytes_total{source="hub"}'
+  local peer_before hub_before peer_after hub_after plugin status=0
+  kubectl -n "$SYSTEM_NS" delete pod -l app.kubernetes.io/component=model-manager \
+    --field-selector "spec.nodeName=$node" --wait=true --timeout=120s >/dev/null 2>&1
+  for _ in $(seq 1 30); do
+    plugin="$(plugin_pod "$node")"
+    [ -n "$plugin" ] && [ "$(kubectl -n "$SYSTEM_NS" get pod "$plugin" -o jsonpath='{.status.phase}' 2>/dev/null)" = Running ] && break
+    sleep 3
+  done
+  peer_before="$(plugin_metric "$node" "$peer_metric")"
+  hub_before="$(plugin_metric "$node" "$hub_metric")"
+  consumer "$ns" "$pod" "$node" "$artifact" "$uid" "$digest"
+  pod_ready "$ns" "$pod" "$bound" || status=$?
+  peer_after="$(plugin_metric "$node" "$peer_metric")"
+  hub_after="$(plugin_metric "$node" "$hub_metric")"
+  printf '%s %s %s %s\n' "$peer_before" "$hub_before" "$peer_after" "$hub_after"
+  return "$status"
 }
 
 # store_state NODE DIGEST: the node's NodeModelStore entry for DIGEST, "state|reason".

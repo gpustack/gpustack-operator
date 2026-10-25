@@ -35,8 +35,8 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-21.sh <NS>}"
 INST=gpustack-e2e-ssh-noninteractive
@@ -46,6 +46,9 @@ FWD_PORT=22121
 MARK=__case21_exec__
 KEYDIR="$(mktemp -d)"
 
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_ssh-lib.sh"
+
 for _tool in ssh ssh-keygen sftp; do
   command -v "$_tool" >/dev/null 2>&1 || { echo "== CASE 21 — SKIPPED =="; echo "missing ssh client tool: $_tool"; exit 0; }
 done
@@ -54,22 +57,14 @@ IT=$(kubectl get instancetypes.worker.gpustack.ai \
   -o jsonpath='{.items[?(@.spec.acceleratable==false)].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep -m1 'gpustack-')
 [ -n "$IT" ] || { echo "no general InstanceType found — run case-1 first to materialize the chain"; exit 1; }
 
-PF_PID=""
-FWD_PID=""
 restore() {
   echo
   echo "[case-21] cleanup"
-  [ -n "$FWD_PID" ] && kill "$FWD_PID" 2>/dev/null
-  [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null
   kubectl -n default delete instance "$INST" --ignore-not-found --wait=false 2>/dev/null || true
   kubectl -n default delete secret "$SECRET" --ignore-not-found 2>/dev/null || true
   rm -rf "$KEYDIR"
 }
-trap restore EXIT
-
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+trap 'ssh_cleanup; restore' EXIT
 
 print_and_exit() {
   echo
@@ -95,9 +90,7 @@ unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spe
 [ -n "$unit_ram" ] || { echo "no unit spec on ${IT} — the Instance webhook needs unitRAM to size the Pod"; exit 1; }
 
 # 1. SSH key + secret, then a CPU-only SSH-enabled Instance on the general pool.
-ssh-keygen -t ed25519 -f "$KEYDIR/id" -N "" -q
-kubectl -n default delete secret "$SECRET" --ignore-not-found >/dev/null 2>&1
-kubectl -n default create secret generic "$SECRET" --from-file=authorized_keys="$KEYDIR/id.pub" >/dev/null
+ssh_setup_key_secret default "$SECRET" "$KEYDIR/id"
 echo "[case-21] creating CPU-only SSH Instance ${INST} on ${IT}"
 cat <<EOF | kubectl apply -f - >/dev/null
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -132,18 +125,13 @@ fi
 record PASS "CPU-only SSH Instance reaches 2/2 Running" "${POD} main+sshd Running"
 
 # 3. Open a port-forward to the sshd sidecar for the SSH assertions below.
-kubectl -n default port-forward "pod/$POD" "${LOCAL_PORT}:22" >/dev/null 2>&1 &
-PF_PID=$!
-for _ in $(seq 1 20); do (exec 3<>"/dev/tcp/127.0.0.1/${LOCAL_PORT}") 2>/dev/null && { exec 3>&- 3<&-; break; }; sleep 1; done
-
-SSH_OPTS=(-p "$LOCAL_PORT" -i "$KEYDIR/id" -o IdentitiesOnly=yes
-  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=15)
+ssh_open_port_forward default "pod/$POD" 22 "$LOCAL_PORT"
 
 # 4. Exec channel: `ssh host '<cmd>'` must run the command in `main`, capability-stripped, no banner.
 #    The whole command rides $SSH_ORIGINAL_COMMAND; a stock server runs it, the old chroot.sh discarded
 #    it and launched an interactive login shell instead (so stdout came back empty).
 EXEC_CMD='echo MARK='"$MARK"'; grep -E "^Cap(Eff|Bnd):" /proc/self/status; mknod /tmp/case21blk b 8 0 2>/dev/null; echo MKNOD_RC=$?'
-exec_stdout=$(ssh -T "${SSH_OPTS[@]}" root@127.0.0.1 "$EXEC_CMD" 2>"$KEYDIR/exec.err")
+exec_stdout=$(ssh_exec "$KEYDIR/id" "$LOCAL_PORT" "$EXEC_CMD" 2>"$KEYDIR/exec.err")
 exec_stderr=$(cat "$KEYDIR/exec.err" 2>/dev/null)
 
 exec_capeff=$(printf '%s\n' "$exec_stdout" | awk '/^CapEff:/{print $2}')
@@ -172,7 +160,7 @@ else
 fi
 
 # 5. Interactive path (regression): no command, stdin over a heredoc → banner + login shell, unchanged.
-int_out=$(ssh -T "${SSH_OPTS[@]}" root@127.0.0.1 2>&1 <<'CMDS'
+int_out=$(ssh_exec "$KEYDIR/id" "$LOCAL_PORT" 2>&1 <<'CMDS'
 echo INT_MARK=__case21_int__
 exit
 CMDS
@@ -187,15 +175,13 @@ fi
 #    $SSH_ORIGINAL_COMMAND set to the configured sftp-server path. chroot.sh stages the bundled static
 #    sftp-server into `main` and serves it there (not the musl sidecar), so a put/get round-trips and the
 #    uploaded file is visible in `main`'s own filesystem. The old chroot.sh discarded the subsystem request.
-SFTP_OPTS=(-P "$LOCAL_PORT" -i "$KEYDIR/id" -o IdentitiesOnly=yes
-  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=15)
 SFTP_MARK=__case21_sftp__
 printf '%s\n' "$SFTP_MARK" >"$KEYDIR/up.txt"
-sftp "${SFTP_OPTS[@]}" root@127.0.0.1 >/dev/null 2>&1 <<SFTP
+ssh_sftp "$KEYDIR/id" "$LOCAL_PORT" >/dev/null 2>&1 <<SFTP
 put $KEYDIR/up.txt /workspace/case21-sftp.txt
 get /workspace/case21-sftp.txt $KEYDIR/down.txt
 SFTP
-sftp_seen=$(ssh -T "${SSH_OPTS[@]}" root@127.0.0.1 'cat /workspace/case21-sftp.txt' 2>/dev/null)
+sftp_seen=$(ssh_exec "$KEYDIR/id" "$LOCAL_PORT" 'cat /workspace/case21-sftp.txt' 2>/dev/null)
 if [ -f "$KEYDIR/down.txt" ] && diff -q "$KEYDIR/up.txt" "$KEYDIR/down.txt" >/dev/null 2>&1; then
   record PASS "sftp subsystem round-trips a file" "put/get returned identical bytes via the bundled sftp-server"
 else
@@ -209,17 +195,14 @@ fi
 
 # 7. Loopback TCP port-forward: forward a local port through the Instance to the in-Pod sshd (:22) and
 #    read its protocol greeting back. Proves TCP forwarding round-trips (direct-tcpip, ForceCommand-agnostic).
-ssh -N -T "${SSH_OPTS[@]}" -o ExitOnForwardFailure=yes \
-  -L "127.0.0.1:${FWD_PORT}:127.0.0.1:22" root@127.0.0.1 >/dev/null 2>&1 &
-FWD_PID=$!
+ssh_open_loopback_forward "$KEYDIR/id" "$LOCAL_PORT" "$FWD_PORT" 127.0.0.1 22
 fwd_greeting=""
 for _ in $(seq 1 15); do
   g=$( (exec 3<>"/dev/tcp/127.0.0.1/${FWD_PORT}" && head -c 8 <&3) 2>/dev/null )
   if printf '%s' "$g" | grep -q '^SSH-2.0'; then fwd_greeting="$g"; break; fi
   sleep 1
 done
-kill "$FWD_PID" 2>/dev/null; FWD_PID=""
-kill "$PF_PID" 2>/dev/null; PF_PID=""
+ssh_cleanup
 if [ -n "$fwd_greeting" ]; then
   record PASS "loopback TCP port-forward round-trips" "forwarded port reached the in-Pod sshd (${fwd_greeting})"
 else
