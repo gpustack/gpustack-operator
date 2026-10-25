@@ -2,8 +2,8 @@
 #
 # CASE 45 — The ModelDeployment admission surface: every refusal fires, and each one fires from the
 #           layer that is supposed to own it
-#   (NON-MUTATING for the refusals, which are server-side dry-runs; one short-lived object for the
-#    controller-level check)
+#   (MUTATING, self-cleaning: the refusals are server-side dry-runs; one short-lived object
+#    serves the controller-level check)
 #
 #   case-45.sh <NS>
 #
@@ -74,6 +74,9 @@
 #              the behaviour is missing, but that asserting it would not DISCRIMINATE. See the row
 #              about what the unregistered domain costs, near the end.
 #
+# Expected:    Every refusal fires from the layer the Goal names, the field and message asserted
+#              per row; the created-object row observes creation before it judges.
+# Cleanup:     An EXIT trap deletes the one short-lived deployment (case45-nobind).
 set -o pipefail
 
 NS="${1:-}"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # CASE 91 — A routed prefill/decode pair moves real KV bytes over its direct leg, and writes the
-#           store when it has one.
+#           store when it has one.   (NON-MUTATING)
 #
 # case-91.sh <NS> <MODEL_DEPLOYMENT>
 #

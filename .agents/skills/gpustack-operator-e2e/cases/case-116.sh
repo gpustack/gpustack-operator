@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # CASE 116 — Every encoder-role admission refusal fires, each naming what its rule refuses
-#   (MUTATING for the fixture only: one settings key and one injected node label, both restored by
+#   (MUTATING, self-recovering: one settings key and one injected node label, both restored by
 #    the trap; every verdict below is a server-side dry run that persists nothing)
 #   AUTO-SKIPS its matrix rows without an InstanceType that reports an admitted accelerator
 #   platform, which this case builds by injecting a CPU vendor label.

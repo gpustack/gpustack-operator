@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
 # CASE 90 — A ModelDeployment metrics snapshot reflects served traffic and Pod endpoints.
+#           (MUTATING, self-cleaning: one temporary probe Pod, deleted by the trap)
 #
 # case-90.sh <NS> <MODEL_DEPLOYMENT>
 #

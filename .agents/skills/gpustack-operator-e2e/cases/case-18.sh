@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# CASE 18 — CPU-manufacturer awareness reshapes the catalog   (MUTATING: flips an editable setting, self-restoring)
+# CASE 18 — CPU-manufacturer awareness reshapes the catalog   (MUTATING, self-recovering: flips an editable setting)
 #
 #   case-18.sh <NS>
 #

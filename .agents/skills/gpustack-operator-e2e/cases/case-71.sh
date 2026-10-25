@@ -8,6 +8,16 @@
 # This case is separate from CASE 70 because the upstream router images may be unavailable. An image
 # pull failure is a stated SKIP. Any other failure to become Ready is a FAIL. No accelerator or
 # serving engine is needed: the router runs outside Kueue and discovers the role Pods dynamically.
+# Goal:        The router endpoint publishes only once the router Deployment has a ready replica —
+#              the readiness contract status.endpoint carries.
+# Environment: A single-node cluster with no accelerator, the operator deployed, the general
+#              InstanceType from CASE 1, and pull access to a router image.
+# Inputs:      All real: the router image is pulled from its registry; no accelerator and no
+#              serving engine image is needed.
+# Expected:    With the image pullable, the deployment publishes its endpoint once the router
+#              replica is Ready and RouterReady reads True/Ready. An image pull failure is the
+#              stated SKIP; any other failure to become Ready is a FAIL.
+# Cleanup:     An EXIT trap deletes the deployment and any Pods left under it.
 set -uo pipefail
 
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"

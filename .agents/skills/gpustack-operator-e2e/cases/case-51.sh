@@ -2,8 +2,8 @@
 #
 # CASE 51 — Every P/D refusal fires, from the layer that owns it, and a replicas change replaces
 #           nobody
-#   (NON-MUTATING for the refusals, which are server-side dry-runs; one short-lived deployment for
-#    the convergence rows)
+#   (MUTATING, self-cleaning: the refusals are server-side dry-runs; one short-lived deployment
+#    serves the convergence rows)
 #
 #   case-51.sh <NS>
 #
@@ -43,6 +43,9 @@
 #              and whether a short pool leaves both roles queued is case-50's. This file stops at
 #              the operator's own writes, which is what it can assert without an engine.
 #
+# Expected:    Each refusal names its owning layer and message; the replicas change converges
+#              without replacing the replica already running.
+# Cleanup:     An EXIT trap deletes the short-lived deployment and its groups' Workloads.
 set -o pipefail
 
 NS="${1:-}"
