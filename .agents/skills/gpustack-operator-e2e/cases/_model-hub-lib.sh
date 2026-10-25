@@ -233,11 +233,12 @@ plugin_metric() {
 
 # mh_peer_sync_check NS POD NODE ARTIFACT UID DIGEST [BOUND]: mounts ARTIFACT on NODE through a
 # fresh consumer Pod and reports the plugin's download counters around the mount, as
-# "peer_before hub_before peer_after hub_after". The plugin Pod on NODE is deleted first: its
-# cache is an emptyDir that dies with it, so the node starts empty and the mount can only be
-# served by a peer. The counters are the plugin's own, so a peer pull raises the peer one and
-# leaves the hub one alone. The status is 0 when the consumer Pod ran; the counters are reported
-# either way.
+# "peer_before hub_before peer_after hub_after". The plugin Pod on NODE is deleted first, so the
+# counters read here belong to the restarted plugin: the restart resets them. The cache-root is a
+# hostPath (DirectoryOrCreate), so the restart does NOT empty the node's cache - what the deletion
+# takes away is the plugin's counters, not the files it cached. The counters are the plugin's own,
+# so a peer pull raises the peer one and leaves the hub one alone. The status is 0 when the
+# consumer Pod ran; the counters are reported either way.
 mh_peer_sync_check() {
   local ns="$1" pod="$2" node="$3" artifact="$4" uid="$5" digest="$6" bound="${7:-300}"
   local peer_metric='gpustack_model_manager_download_bytes_total{source="peer"}'
@@ -245,9 +246,13 @@ mh_peer_sync_check() {
   local peer_before hub_before peer_after hub_after plugin status=0
   kubectl -n "$SYSTEM_NS" delete pod -l app.kubernetes.io/component=model-manager \
     --field-selector "spec.nodeName=$node" --wait=true --timeout=120s >/dev/null 2>&1
+  # The wait is on the main container's readiness, not on the Pod's phase: the phase turns Running
+  # as soon as the containers start, and the counters are read over the plugin's own HTTPS server,
+  # whose /readyz is what the readiness probe asks. A Running Pod that is not Ready yet answers
+  # /metrics with nothing, and the "before" sample would be an empty reading rather than a zero.
   for _ in $(seq 1 30); do
     plugin="$(plugin_pod "$node")"
-    [ -n "$plugin" ] && [ "$(kubectl -n "$SYSTEM_NS" get pod "$plugin" -o jsonpath='{.status.phase}' 2>/dev/null)" = Running ] && break
+    [ -n "$plugin" ] && [ "$(kubectl -n "$SYSTEM_NS" get pod "$plugin" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null)" = true ] && break
     sleep 3
   done
   peer_before="$(plugin_metric "$node" "$peer_metric")"

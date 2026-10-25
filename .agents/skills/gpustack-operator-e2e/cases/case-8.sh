@@ -547,10 +547,7 @@ fi
 
 echo
 echo "== CASE 8 — Real accelerator slicing: runtime isolation, slice webhook and sibling-pool re-enqueue =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 
 if [ "$FAILS" -ne 0 ]; then
   echo

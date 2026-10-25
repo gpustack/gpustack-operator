@@ -498,10 +498,7 @@ fi
 
 echo
 echo "== CASE 22 — Cross-mode claims never co-locate on one physical card =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 
 if [ "$FAILS" -ne 0 ]; then
   echo

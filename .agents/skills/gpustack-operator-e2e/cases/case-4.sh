@@ -144,17 +144,6 @@ restore() {
 }
 trap restore EXIT
 
-# print_table prints the rows collected so far. A precondition that ends the case prints it first:
-# the rows that did hold are evidence, not noise.
-print_table() {
-  {
-    echo "STATUS|CHECK|OBJECT"
-    if [ "${#ROWS[@]}" -gt 0 ]; then
-      printf '%s\n' "${ROWS[@]}"
-    fi
-  } | column -t -s '|'
-}
-
 # set_ledger "<8 space-separated card tokens>" patches the mocked Devices ledger.
 # Tokens: f=free, e=exclusive, s9=shared(9 shares free), l80/l78/l50=logically sliced(80/78/50% free).
 # No token carries a hardware partitioning capability, so every mocked card is unpartitioned and the
@@ -201,10 +190,10 @@ PY
 
 # abort_on_ledger ends the case when a ledger write fails: the four-view cannot be compared against
 # a ledger that was never written. The rows collected so far are printed first, so the section that
-# already ran keeps its evidence.
+# already ran keeps its evidence. The shared printer draws that table, so the suite has one format.
 abort_on_ledger() {
   echo "[case-4] FATAL: the ledger write never landed — the four-view rows that follow cannot be compared against it"
-  print_table
+  print_rows
   exit 1
 }
 
@@ -298,7 +287,7 @@ for it in json.load(sys.stdin).get('items',[]):
 done
 if [ -z "$ITNAME" ]; then
   echo "[case-4] derived accelerated InstanceType never materialized — is instance-type-derived-from-node on?"
-  print_table
+  print_rows
   exit 1
 fi
 read -r OS ARCH LQ <<<"$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o json | python3 -c "
@@ -415,7 +404,7 @@ ${CARDS_YAML}
 EOF
 then
   echo "[case-4] could not create the mocked Devices ${MOCK_DEV} — neither section can read a ledger"
-  print_table
+  print_rows
   exit 1
 fi
 
@@ -671,7 +660,7 @@ fi
 
 echo
 echo "== CASE 4 — Mocked accelerator pool: over-admit held, four-view tracks the ledger =="
-print_table
+print_rows
 
 if [ "$FAILS" -ne 0 ]; then
   echo

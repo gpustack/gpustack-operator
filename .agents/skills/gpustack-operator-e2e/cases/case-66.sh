@@ -98,6 +98,9 @@ fi
 
 NS="${NS:?usage: case-66.sh <NS>}"
 
+# This case's own poller: it waits on a predicate run against the whole object and hands that
+# object back to the caller, so it is neither the shared kind/name/path/want poller nor the
+# predicate-with-no-result one.
 wait_for() {
   local name="$1" seconds="$2" predicate="$3" object i
   for ((i = 0; i < seconds; i += 3)); do

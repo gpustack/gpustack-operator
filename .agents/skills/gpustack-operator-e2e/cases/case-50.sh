@@ -344,6 +344,9 @@ pods_rv() {
     -o jsonpath='{range .items[*]}{.metadata.name}:{.metadata.resourceVersion} {end}' 2>/dev/null
 }
 
+# This case's own poller: the shared one in _rows-lib.sh takes a kind/name/path/want and reads one
+# jsonpath, while this case waits on a predicate the caller supplies, so the two cannot be called
+# with the same arguments.
 wait_for() { # wait_for <seconds> <predicate...>
   local deadline=$((SECONDS + $1))
   shift

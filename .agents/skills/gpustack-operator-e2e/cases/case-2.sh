@@ -328,10 +328,7 @@ echo "[case-2] worker log lines with 'spec.ports: Required value' in the last 5m
 
 echo
 echo "== CASE 2 — Portless Instance admits, writes status, skips Service; the drain stops it, the managed toggle scopes onboarding =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 
 if [ "$FAILS" -ne 0 ]; then
   echo

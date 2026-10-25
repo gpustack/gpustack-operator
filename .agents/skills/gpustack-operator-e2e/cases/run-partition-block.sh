@@ -17,6 +17,17 @@
 #   THE REST in any order. Each partitions a card only if none is partitioned
 #   yet and restores exactly the card it toggled.
 #
+#   CASE 22 IS NOT HERE. It is a cross-mode case, not a partition case: it claims
+#   whole-card, shared and sliced resources on cards that are NOT partitioned, and
+#   the block holds the partitioning mode across the whole run, so inside the block
+#   it would auto-skip on the missing unpartitioned card rather than measure
+#   anything. Run it on its own, against an unpartitioned node.
+#   CASE 82 IS NOT HERE. It is an RDMA case - the family 80-85, driven by
+#   run-rdma-block.sh - and it wants a node whose accelerators straddle its RDMA
+#   endpoints' NUMA nodes under a kubelet enforcing one-NUMA-node placement. It
+#   toggles no accelerator mode at all, so the block's mode handling has nothing
+#   to do with it, and the two blocks would fight over the same node's cards.
+#
 # The cases all toggle the SAME node hardware, so they can never overlap; this is
 # serial by construction. A failure is recorded and the block CONTINUES, because
 # each case is self-recovering and the next one's precondition is the restored

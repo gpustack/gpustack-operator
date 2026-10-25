@@ -254,10 +254,7 @@ fi
 
 echo
 echo "== CASE 9 — Instance lifecycle survives an InstanceType unit-spec change =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 
 if [ "$FAILS" -ne 0 ]; then
   echo
