@@ -6,6 +6,7 @@
 #
 #   case-67.sh <NS>
 #
+# Prerequisites: nodes=2; gpu=none; features=mooncake-store,multi-host; cluster=any; inputs=E2E_MOONCAKE_IMAGE
 # Goal:        The store's drain job API promises to move a member's data to a named peer before
 #              the member goes away, and a shipped API doc comment rests on two claims about it:
 #              the memory replica really moves, and a disk-resident key is skipped without being

@@ -4,6 +4,7 @@
 #
 #   case-2.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any
 # Goal:        One portless CPU Instance carries three contracts of the general (CPU) pool:
 #              - Kueue admits its Workload on the cpu-only queue even though the Pod asks for
 #                resources the queue does not cover, and the Instance reaches Ready;

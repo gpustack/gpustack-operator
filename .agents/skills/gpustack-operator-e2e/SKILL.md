@@ -32,13 +32,14 @@ Run as a **test-orchestration lead** (main agent) coordinating read-only **domai
 - **Pin the run to a user-confirmed context** — confirm the active context is the intended cluster. Never switch on your own judgement. When the confirmed cluster is **not** the active context, do not switch: take its isolated kubeconfig with `bash ../_e2e-lib/scripts/kube-context.sh <ctx>` and prefix every command of the run with the `KUBECONFIG=<path>` it prints (details in `orchestration.md`). On the user's explicit say-so you may switch instead — then record the context to return to as an outstanding environment mutation and restore it in Phase 8. Adopting the context a cluster **this run provisioned** merged in itself needs no such record.
 - **Prefer the user's own cluster; provisioning is a separate opt-in** and a cluster this run provisioned **must** be destroyed in Phase 8 — see [`cluster-provisioning.md`](../_e2e-lib/references/cluster-provisioning.md).
 - **Offer a context checkpoint at the trigger points** (see Flow); compacting is the user's action, and the lead hands over a focus block that carries the teardown obligation.
-- **Build locally when the nodes share this machine's image store; otherwise build remote and push** — `build-load.sh` keeps `PACKAGE_PUSH=false` locally, and switches to a builder host + registry push when `E2E_BUILDER_SSH` / `E2E_IMAGE_NAMESPACE` are set inline (never written into a file).
+- **Build locally when the nodes share this machine's image store; otherwise build remote and push** — `build-load.sh` keeps `PACKAGE_PUSH=false` locally, and switches to a builder host + registry push when `E2E_BUILDER_SSH` / `E2E_IMAGE_NAMESPACE` are set inline (never written into a file). Both are read by `build-load.sh` itself — no case reads them, and `E2E_BUILDER_SSH` alone is not enough: the script also requires `E2E_IMAGE_NAMESPACE`.
 - **Touch only what this run creates** — the Helm release, injected labels/NodeFeatures, mocked `Devices`, test workloads. Never touch the user's pre-existing resources.
 - **Confirm every mutating step** (`build-load.sh`, `deploy.sh`, mutating cases, `teardown.sh`); read-only steps (`preflight.sh`, `assert-core.sh`, CASE 1) run unprompted.
 - **Specialists are read-only** — the lead is the sole writer.
 
 **Layout:**
-- The `cases/_*.sh` helpers are not cases: never run one directly.
+- The `cases/_*.sh` helpers are not cases: never run one directly. The one exception is `cases/_env-audit.sh`, which is run directly — `bash cases/_env-audit.sh <NS>` — because it audits the cluster rather than a fixture. It is read-only and reports, per case, whether the cluster satisfies that case's `Prerequisites:` line.
+- `cases/_env-audit.sh` — the read-only preflight for the whole corpus: it parses each case's `Prerequisites:` field, reads the cluster once (the node inventory, the operator's `Devices` ledger, the store objects and the operator's namespace), and prints one `CASE <N> | RUN|SKIP|UNKNOWN | nodes <have>/<want> | gpu <have>/<want> | features <list>` row per case. A feature nobody has ever pulled is undecidable rather than missing, so it reads `?` and the row reads UNKNOWN.
 - `../_e2e-lib/scripts/` — `preflight.sh`, `build-load.sh <TAG>`, `deploy.sh <NS> <TAG>` (**installs only** — it refuses an existing release; upgrade in place with `helm upgrade`, or `teardown.sh` first), `assert-core.sh <NS>`, `teardown.sh <NS>` (custom-resource drain, test artifacts, release uninstall and a CRD-drain verdict; the drain and the cleanup are both delegated to the chart's `files/drain.sh` and `files/cleanup.sh`), plus the cluster-lifecycle trio `cluster-auth.sh <modality>` (read-only), `provision.sh <modality>` and `destroy.sh <modality>`, and `kube-context.sh <ctx>` (read-only; targets a context that is not the current one).
 - `cases/case-N.sh <NS>` — one scenario each; ends in a `STATUS | CHECK | OBJECT` table, exits non-zero on any FAIL.
 - `cases/_quota-lib.sh` — sourced by the cases that short a pool by occupying it (50, 118): `workload_charge` reads what Kueue charged one replica's Workload, and `pool_replica_bound` turns it into an upper bound on the replicas the queue's quota holds, summed over every flavor.
@@ -296,13 +297,14 @@ Each note below is something the **lead** must act on before or around a run. Wh
 
 ## Case header contract
 
-Every `cases/case-N.sh` opens with a header describing the case **on its own terms — no spec anchors** (no Story/Task numbers, F-codes or `specs/*.md` paths; no commit hashes from repository history — an input artifact's own revision identifier, such as a weight revision under test, is an input, not an anchor). A reader must understand what the case does, needs, and asserts from the header alone. New/edited cases follow this six-field template:
+Every `cases/case-N.sh` opens with a header describing the case **on its own terms — no spec anchors** (no Story/Task numbers, F-codes or `specs/*.md` paths; no commit hashes from repository history — an input artifact's own revision identifier, such as a weight revision under test, is an input, not an anchor). A reader must understand what the case does, needs, and asserts from the header alone. New/edited cases follow this seven-field template:
 
 ```
 # CASE N — <one-line behavior title>   (<mutation posture>)
 #
 #   case-N.sh <NS>
 #
+# Prerequisites: nodes=<N>; gpu=<vendor|none|any>; features=<mig,partition,rdma,efa,multi-host,kind,mooncake-store>; cluster=<real|kind|any>; inputs=<ENV_VAR_NAMES>
 # Goal:        <the one contract/behavior this case proves>
 # Environment: <what the cluster must provide + when it AUTO-SKIPS>
 # Inputs:      <what the case creates / injects / toggles; mark MOCKED inputs vs the real thing verified>
@@ -313,6 +315,7 @@ Every `cases/case-N.sh` opens with a header describing the case **on its own ter
 ```
 
 - **Mutation posture** rides the title line, and every case's title line carries one: `MUTATING, self-recovering` (writes, then a trap restores), `MUTATING, self-cleaning` (writes, then removes what it wrote), `NON-MUTATING` (creates nothing outside its own report tree) or `READ-ONLY` (no trap). Append `AUTO-SKIPS without <requirement>` when the case self-skips (real hardware, `ssh` client, ≥2 logically sliceable cards, …).
+- **Prerequisites** is the first field, one line, and it is the machine-readable gate an agent scans before reading anything else: `nodes=` the count of Ready worker nodes the case needs, `gpu=` the accelerator vendor families it can run against (`none` when it needs none, `any` for whatever the cluster provides, several families separated by `|`), `features=` drawn from the closed set `mig, partition, rdma, efa, multi-host, kind, mooncake-store`, `cluster=` the cluster shape (`real`, `kind` or `any`), and `inputs=` the environment variables that gate the case's behavior. `cases/_env-audit.sh <NS>` reads this line out of every case and reports, per case, whether the cluster in front of it satisfies it.
 - **Environment** always names the auto-skip condition so the run/skip decision is readable without executing the case.
 - **Inputs** distinguish **MOCKED** inputs (fake accelerator NodeFeature, mocked `Devices` ledger) from the **real** objects under test — the mock is a fixture, never the verification.
 - Describe behavior in **plain terms**, not spec reference; the case↔code mapping lives in the table's "Run when these change" column.
@@ -369,6 +372,8 @@ E2E_BUILDER_SSH=<user@host> E2E_IMAGE_NAMESPACE=<ns> \
 ```
 
 It syncs the exact commit to the builder as a git bundle before building. That step is not optional: a builder is not a clone that follows this branch, so a bare `make package` there builds whatever it last had checked out and produces an image of the wrong revision — which surfaces only later, as `assert-core.sh`'s stale-image guard. **Honor that guard rather than waiving it**, even when the intervening diff looks non-compiling: `case-1.sh` embeds the same assertion and aborts on it.
+
+`E2E_BUILDER_SSH` and `E2E_IMAGE_NAMESPACE` are consumed by `build-load.sh`, never by a case: no `cases/case-*.sh` reads either name. Setting them changes how the image is built and pushed, not what any case asserts.
 
 Redeploy over an existing release with a new image (avoids a full reinstall):
 

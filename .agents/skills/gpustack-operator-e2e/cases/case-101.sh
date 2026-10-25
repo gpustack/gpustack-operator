@@ -7,6 +7,7 @@
 #
 #   case-101.sh <NS>
 #
+# Prerequisites: nodes=2; gpu=none; features=multi-host; cluster=any; inputs=E2E_C101_OFFLINE,E2E_MODEL_MANAGER_SA,MH_PYTHON
 # Goal:        Prove node delivery end to end with bare Pods, which is what a tenant can write by
 #              hand, and the control-plane contract that governs it on a real API server: a cold
 #              mount lasting longer than one kubelet mount call downloads each file once for two

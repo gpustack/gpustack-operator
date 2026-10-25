@@ -6,6 +6,7 @@
 #
 #   case-66.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=real; inputs=E2E_CASE66_CHART,E2E_CASE66_NEW_CRD,E2E_CASE66_NEW_IMAGE_REPOSITORY,E2E_CASE66_NEW_IMAGE_TAG,E2E_CASE66_OLD_CRD,E2E_CASE66_OLD_IMAGE_REPOSITORY,E2E_CASE66_OLD_IMAGE_TAG,E2E_CASE66_RELEASE
 # Goal:        A stored member listing from before segmentID and clientID became required must not
 #              make a later status update invalid. While the leader's segment listing fails, the
 #              current controller omits the WHOLE legacy listing, marks MembersMounted False with

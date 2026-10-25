@@ -4,6 +4,7 @@
 #
 #   case-4.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any
 # Goal:        Two contracts over one mocked accelerator pool. A request for whole exclusive cards the
 #              pool cannot satisfy passes the coarse Kueue credits gate but is HELD by the
 #              node-devices AdmissionCheck reading the per-card Devices ledger — never becoming an

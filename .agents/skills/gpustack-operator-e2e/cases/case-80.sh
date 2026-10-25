@@ -8,6 +8,7 @@
 # <NS> is the operator's own namespace. This case reads cluster-scoped objects and the node, and its
 # one mutation is a read-only host probe Pod it deletes again.
 #
+# Prerequisites: nodes=1; gpu=none; features=rdma; cluster=real
 # Goal:        The four things that make the RDMA extended resources a contract rather than a number
 #              on a node:
 #                - every RDMA device the HOST's own subsystem lists is in the published inventory.

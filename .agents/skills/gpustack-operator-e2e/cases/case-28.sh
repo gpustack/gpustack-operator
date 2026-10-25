@@ -5,6 +5,7 @@
 #
 #   MIG_NODE_SSH=<user@host> case-28.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; features=partition; cluster=real; inputs=MIG_NODE_SSH,F11_IMAGE,F11_EXPECT
 # Goal:        The SSH sidecar of a hardware-partitioned workload must receive its workload's own
 #              PARTITION and nothing wider. The sidecar selects no device of its own: it co-allocates
 #              whatever the workload container holds, and that allocation buys exactly one thing, a

@@ -10,6 +10,7 @@
 # cluster-scoped; its rendered objects live in <NS>, and the two probe Pods live in a namespace this
 # case creates and removes.
 #
+# Prerequisites: nodes=1; gpu=none; features=mooncake-store; cluster=any; inputs=E2E_C63_PUT_BOUND,E2E_C63_ROUNDS,E2E_C63_ROUND_BOUND,E2E_C63_SETTLE_BOUND,E2E_MOONCAKE_IMAGE
 # Goal:        A member is handed MOONCAKE_MASTER in one of two forms. Path A is
 #              "k8s://<ns>/<lease>": the client reads the Lease itself and follows view changes,
 #              which costs the member's image a compiled-in lease backend and so excludes every

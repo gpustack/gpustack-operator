@@ -9,6 +9,7 @@
 #
 #   case-117.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_C117_PODS,E2E_C117_SETTLE,E2E_C117_STATUS,E2E_C117_VENDOR,E2E_C117_WITNESS_IMAGE,E2E_MD_IMAGE,E2E_SYSTEM_NS
 # Goal:        THREE READINGS OF ONE RENDER, all on the same three-role deployment. The operator
 #              answers three different questions about one encoder deployment, and each answer has
 #              a failure that is quiet, so the case reads all three.

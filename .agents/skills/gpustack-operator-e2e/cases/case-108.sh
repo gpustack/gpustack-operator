@@ -8,6 +8,7 @@
 #
 #   case-108.sh <NS>
 #
+# Prerequisites: nodes=2; gpu=none; features=multi-host; cluster=any; inputs=E2E_OFFLINE,MH_PYTHON
 # Goal:        Prove the node-delivery contract end to end against one controlled hub: the digest an
 #              artifact asserts is the identity the hub serves, a foreign anchor is refused naming
 #              both digests, a hub that cannot be reached hands the identity to the anchor, an

@@ -7,6 +7,7 @@
 #
 #   case-53.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; features=mooncake-store; cluster=any; inputs=E2E_ENGINE_READY_TIMEOUT,E2E_SGLANG_IMAGE,E2E_VLLM_IMAGE
 # Goal:        One case, seven sections, one fixture. The injection webhook decides what a Pod may
 #              do with a KV cache pool, and every half of that decision has to hold on a real API
 #              server: an ordinary Pod can use a pool it was merely opted into; the mechanism does

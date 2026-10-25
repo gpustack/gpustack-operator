@@ -5,6 +5,7 @@
 #
 #   case-112.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; features=kind; cluster=kind
 # Goal:        Prove the image source end to end: a tag-only reference is refused at admission,
 #              naming the digest contract; an image artifact resolves on its first pass with no
 #              network — claim-shaped status, no manifest digest, no revision; an Instance

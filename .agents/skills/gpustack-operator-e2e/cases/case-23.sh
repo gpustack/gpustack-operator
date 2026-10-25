@@ -5,6 +5,7 @@
 #
 #   MIG_NODE_SSH=<user@host> case-23.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; features=mig; cluster=real; inputs=MIG_NODE_SSH
 # Goal:        On a MIG-capable NVIDIA card the operator observes MIG geometry and dynamically
 #              allocates the hardware GPU/compute instances that back scheduled workloads. This case
 #              proves, end to end on real hardware, that:

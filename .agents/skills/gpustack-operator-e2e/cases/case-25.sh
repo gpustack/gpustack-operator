@@ -5,6 +5,7 @@
 #
 #   MIG_NODE_SSH=<user@host> case-25.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; features=partition; cluster=real; inputs=MIG_NODE_SSH,MIG_WRITE_IDLE_WINDOW
 # Goal:        A node's partition keys answer one question: how many more instances can this node host.
 #              A per-profile key publishes what its own cards can STILL host, because the profiles
 #              compete for the same physical slices: carving one 4-memory-slice instance consumes half

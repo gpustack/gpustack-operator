@@ -5,6 +5,7 @@
 #
 #   case-96.sh <NS>
 #
+# Prerequisites: nodes=2; gpu=none; features=multi-host; cluster=any; inputs=E2E_MD_IMAGE
 # Goal:        Prove that the fit labels plus the Workload fit pin let Kueue's topology-aware
 #              scheduling skip a node whose free slice units are spread over accelerators none of
 #              which fits, and that the pin alone is what makes the difference.

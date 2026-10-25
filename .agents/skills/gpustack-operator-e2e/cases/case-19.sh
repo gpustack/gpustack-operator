@@ -4,6 +4,7 @@
 #
 #   case-19.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; cluster=real
 # Goal:        With instance-type-aware-cpu-manufacturer ON, the derived accelerated pool splits by CPU
 #              (gpustack--${gKey}--${aKey}-${os}-${arch}) and its InstanceType status.detail carries BOTH
 #              the correct GPU descriptors (product/memory/cores, from the real card) AND the folded CPU

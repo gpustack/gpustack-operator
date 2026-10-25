@@ -8,6 +8,7 @@
 # <NS> is the operator's own namespace, where the rendered DaemonSet lands. The KVCacheBackend is
 # cluster-scoped.
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_MOONCAKE_IMAGE
 # Goal:        A KVCacheBackend whose transport is RDMA renders a member that REQUESTS
 #              device.gpustack.ai/rdma.shared and mounts nothing from the host's device tree. The
 #              request is the permission: a bind mount of /dev/infiniband carries the device node in

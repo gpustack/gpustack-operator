@@ -5,6 +5,7 @@
 #
 #   MIG_NODE_SSH=<user@host> case-42.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=hygon; features=partition; cluster=real; inputs=E2E_PARTITION_IMAGE,MIG_NODE_SSH
 # Goal:        ASSERTS four contracts on real Hygon DCU hardware, each proven from BOTH sides — what
 #              the operator recorded, and what the container or the vendor's own registry shows:
 #                (1) GEOMETRY. A container granted a partition sees EXACTLY that profile's compute

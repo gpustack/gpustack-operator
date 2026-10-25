@@ -6,6 +6,7 @@
 #
 #   case-86.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=ascend; cluster=real; inputs=E2E_RP_GPU_MEM_UTIL,E2E_RP_IMAGE,E2E_RP_INSTANCE_TYPE,E2E_RP_MAX_MODEL_LEN,E2E_RP_MODEL,E2E_RP_NODE_SSH,E2E_RP_NODE_SSH_OPTS,E2E_RP_PROBE_IMAGE,E2E_RP_READY_BOUND,E2E_RP_ROUTER_IMAGE,E2E_RP_TP,E2E_RP_WEIGHTS
 # Goal:        The transfer document of a vLLM-Ascend prefill/decode pair carries a per-half
 #              parallel shape that the connector ASSERTS at worker start: a wrong block turns a
 #              startup refusal into silently wrong block layouts, and the engine starts and serves

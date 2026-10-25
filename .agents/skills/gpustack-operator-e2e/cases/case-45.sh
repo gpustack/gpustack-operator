@@ -7,6 +7,7 @@
 #
 #   case-45.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_MD_BINDING,E2E_MD_CONTROL_IMAGE,E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE
 # Goal:        Pins the refusals a ModelDeployment owes its user, for a deployment that declares ONE
 #              role and for a deployment that declares SEVERAL. The interesting part is not that each
 #              bad manifest is rejected — it is WHICH layer rejects it, because three different

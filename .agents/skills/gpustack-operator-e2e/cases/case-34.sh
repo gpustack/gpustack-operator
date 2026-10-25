@@ -6,6 +6,7 @@
 #
 #   MIG_NODE_SSH=<user@host> case-34.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; features=partition; cluster=real; inputs=MIG_NODE_SSH
 # Goal:        RECORD what a non-default TopologyManager policy does to a hardware partition. The
 #              partition resource deliberately reports NO NUMA topology, because the plugin — not the
 #              kubelet — chooses the card, so any topology it reported would describe a card that may

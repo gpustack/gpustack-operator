@@ -6,6 +6,7 @@
 #
 #   case-78.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_C78_BOUND,E2E_C78_HOLD,E2E_MD_BINDING,E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE,E2E_MD_MEMBER_SETTLE,E2E_MD_SETTLE,E2E_SHIM_DIR
 # Goal:        Three contracts of the ModelDeployment controller, told on one InstanceType, one
 #              queue and one namespace.
 #

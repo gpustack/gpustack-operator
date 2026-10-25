@@ -5,6 +5,7 @@
 #
 #   MIG_NODE_SSH=<user@host> case-27.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; features=partition; cluster=real; inputs=MIG_MAX_FILL
 # Goal:        A card put into a hardware partitioning mode leaves the whole-card and shared
 #              populations entirely: it advertises no whole-card token and no ownership share, and the
 #              pool's EX and SH views stop counting it. The failure this prevents is quiet and

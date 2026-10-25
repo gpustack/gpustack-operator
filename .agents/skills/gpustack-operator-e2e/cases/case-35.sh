@@ -4,6 +4,7 @@
 #
 #   case-35.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=ascend; cluster=real; inputs=E2E_SLICE_IMAGE
 # Goal:        ASSERTS the per-card placement contract on Ascend, over sliced, exclusive and mixed
 #              claims. Two properties are asserted SEPARATELY for every sliced claim, because they
 #              fail for different reasons and one must not mask the other:

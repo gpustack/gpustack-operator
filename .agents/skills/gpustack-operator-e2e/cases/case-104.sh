@@ -6,6 +6,7 @@
 #
 #   case-104.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=any; cluster=real; inputs=E2E_C104_IMAGE,E2E_C104_IT,E2E_C104_MODEL,E2E_C104_READY_BOUND,E2E_PD_PROBE_IMAGE
 # Goal:        Prove Node delivery at the size it exists for: a ModelDeployment on a Hugging Face
 #              artifact of about 15 GB renders the plugin's volume, its node downloads and verifies
 #              the files once and publishes them, vLLM loads the read-only tree and serves under

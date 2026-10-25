@@ -6,6 +6,7 @@
 #
 #   case-47.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; features=mooncake-store; cluster=any; inputs=E2E_MD_INSTANCE_TYPE
 # Goal:        The sharing claim the KV connector rests on, asserted from the two ends that can be
 #              observed without an accelerator: what the operator RENDERED onto each replica, what
 #              the store does with those values, and what it renders when the pool cannot be

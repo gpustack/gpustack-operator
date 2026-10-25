@@ -6,6 +6,7 @@
 #
 #   case-97.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_C97_GATED,E2E_C97_PRIVATE,E2E_C97_REVOKE_BOUND,E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE,E2E_SYSTEM_NS,HF_TOKEN_READONLY
 # Goal:        Prove the ModelArtifact contract end to end against the real Hub: a branch and an
 #              annotated tag resolve to the commit git itself reports, the digest equals the one an
 #              independent implementation computes from the same tree, a private and a gated

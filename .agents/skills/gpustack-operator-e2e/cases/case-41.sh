@@ -5,6 +5,7 @@
 #
 #   case-41.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia|amd|ascend|cambricon|iluvatar|metax|hygon|thead; cluster=real; inputs=E2E_WHOLE_LOAD_COMMAND,E2E_WHOLE_LOAD_IMAGE
 # Goal:        ASSERTS that the per-process pass behind /monitor/snapshot is scoped to the accelerators
 #              something was actually carved on, not swept across the node. One Instance takes a WHOLE
 #              card and another takes a logical SLICE of a different card of the SAME node; the slice

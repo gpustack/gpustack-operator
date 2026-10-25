@@ -4,6 +4,7 @@
 #
 #   case-11.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; cluster=real
 # Goal:        ASSERTS the four properties per-card logical-slice accounting owes. The per-card ledger
 #              records REAL units, so the SL view's remaining drops below capacity (it used to stay
 #              ~full regardless of slice size) and the SL OnceMaxRequest stays per-card (<=100), not a

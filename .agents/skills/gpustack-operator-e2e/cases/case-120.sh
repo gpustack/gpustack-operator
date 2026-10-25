@@ -8,6 +8,7 @@
 #
 #   case-120.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia|amd; cluster=real; inputs=E2E_C120_CARDS,E2E_C120_IMAGE,E2E_C120_IMAGE_URL,E2E_C120_INSTANCE_TYPE,E2E_C120_MAX_TOKENS,E2E_C120_MODEL,E2E_C120_PROBE_IMAGE,E2E_C120_READY_BOUND,E2E_C120_ROUTER_IMAGE,E2E_C120_SETTLE_BOUND,E2E_C120_SIDECAR_IMAGE,E2E_C120_STAGE_BOUND,E2E_C120_TP,E2E_C120_WEIGHTS,E2E_SYSTEM_NS
 # Goal:        This is the functional reading of the admitted matrix rows
 #              llm-d-router + vLLM + NVIDIA CUDA (or AMD ROCm) + ECCPUConnector. Case 116 pins the
 #              ADMISSION of the shape, case 117 pins the shared-directory render of the OTHER row;

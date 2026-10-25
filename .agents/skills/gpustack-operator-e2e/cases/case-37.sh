@@ -9,6 +9,7 @@
 # go. The Instance lives in `default`: the Instance webhook rejects a reserved namespace, so
 # creating it in <NS> would be denied outright.
 #
+# Prerequisites: nodes=1; gpu=none; cluster=any
 # Goal:        One Instance's own utilization is observable through both surfaces the operator
 #              offers: the aggregated API's instances/<name>/metrics subresource serves it straight
 #              from the node kubelet — no Prometheus or metrics-server on that path — and the

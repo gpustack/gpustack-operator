@@ -5,6 +5,7 @@
 #
 #   case-87.sh <NS>
 #
+# Prerequisites: nodes=3; gpu=none; features=kind,multi-host; cluster=kind; inputs=E2E_MD_BINDING,E2E_MD_IMAGE,E2E_MD_INSTANCE_TYPE,E2E_SYSTEM_NAMESPACE,E2E_TAS_INTERVAL
 # Goal:        Prove the complete topology path on real Nodes: cloud labels, a ConfigMap snapshot,
 #              and an authenticated HTTPS webhook each become an observed profile and Kueue
 #              Topology; the operator-managed flavors and identity-stable ClusterQueue then turn a

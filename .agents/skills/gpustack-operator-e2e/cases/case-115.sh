@@ -5,6 +5,7 @@
 #
 #   E2E_C115_IT=<type> [E2E_C115_OTHER_IT=<other-pool-type>] case-115.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; cluster=real
 # Goal:        Observe size, resources, command and InstanceType edits on the same deployment.
 #              A first queued group has no replacement slot. Reducing its accelerator request
 #              must replace its obsolete members and Workload rather than leave it queued forever.

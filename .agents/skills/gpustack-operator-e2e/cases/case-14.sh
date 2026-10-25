@@ -5,6 +5,7 @@
 #
 #   case-14.sh <NS>
 #
+# Prerequisites: nodes=1; gpu=nvidia; cluster=real; inputs=E2E_SLICE_LOAD_COMMAND,E2E_SLICE_LOAD_IMAGE
 # Goal:        Two sliced Instances whose combined per-card memory <= 100% both admit and run on the
 #              same physical card, a third slice that would push the card over 100% is held (not
 #              over-admitted), and the two admitted slices stay Running after the third's rejected
