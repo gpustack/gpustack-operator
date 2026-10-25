@@ -3,11 +3,6 @@
 A managed router selects among serving endpoints, then its policy chooses among them. This page covers
 endpoint selection and SGLang's tested DP routing modes.
 
-The recorded combinations are vLLM `0.29.0` and `0.30.0`, SGLang `0.5.18` and `0.5.22`, and the
-routers of `gpustack/llm-router:v0.3.1`: `vllm-router` `v0.1.16.1`, `sglang-gateway`, and
-`llm-d-router` `v0.11.0`.
-Facts on this page apply to those versions; newer builds must be re-verified before they inherit a claim.
-
 ## Contents
 
 - [Which Pods receive traffic](#which-pods-receive-traffic)
