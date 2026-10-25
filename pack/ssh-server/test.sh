@@ -23,6 +23,8 @@
 #   forwarding   a forwarded connection that reaches the workload's listener on the shared Pod
 #                network namespace
 #   users        the existing user and permission behavior of the entrypoint
+#   readiness    every wait for something this recipe started stops on its own, and a wait that
+#                gives up names what it waited for
 #
 # The Go build information of the bundled SFTP binary is NOT checked here. The runtime image
 # carries no Go, so reading it needs a tool chain from outside the image, and a smoke recipe
@@ -41,6 +43,12 @@ if [[ $# -ne 1 || -z "${1:-}" ]]; then
 fi
 
 IMAGE="$1"
+
+# The waits live in their own file so they can be tested without a container topology.
+# shellcheck source=lib.sh
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${script_dir}/lib.sh"
 
 # The runtime and the SSH daemon the image is expected to carry. Both are the point of the
 # upgrade, so both are asserted rather than reported: a recipe that only prints them proves
@@ -107,6 +115,19 @@ s.close()' 2> /dev/null || true)"
   printf '%s' "$port"
 }
 
+# The body the forwarded connection returned. The wait that fetches it is a predicate, so the
+# helper needs a yes or a no; the body is what the assertion reports.
+forward_payload=""
+
+# forward_reaches_listener: whether a request through the forward reaches the workload's
+# listener and returns its body. The listener serves one request at a time and is started
+# again in a loop, so a request that did not reach it consumed nothing, and the request that
+# reaches it carries the body that the assertion then reports.
+function forward_reaches_listener() {
+  forward_payload="$(curl -s --max-time 10 "http://127.0.0.1:${forward_port}/" 2>&1 || true)"
+  [[ "$forward_payload" == *"WORKLOAD!"* ]]
+}
+
 for tool in docker ssh ssh-keygen sftp curl; do
   require_tool "$tool"
 done
@@ -121,6 +142,7 @@ AUTHCMD="${PREFIX}-authcmd"
 PREEXISTING="${PREFIX}-preexisting"
 WORK="$(mktemp -d)"
 FORWARD_PID=""
+forward_port=""
 
 # The workload's marker file. It exists only in the workload container, so reading it from a
 # session proves the session landed in the workload rather than in the sidecar.
@@ -182,7 +204,10 @@ cp "${WORK}/id.pub" "$authkeys"
 chmod 600 "$authkeys"
 
 docker run -d --name "$AUTHCMD" -e SSH_PUBLIC_KEY="$(cat "$authkeys")" "$IMAGE" > /dev/null
-sleep 2
+# There is nothing to wait for here. The configuration this container is read for is the
+# image's own, written when the image was built, and the host keys it is read with were
+# generated when the image was built. The entrypoint writes the key into the container, and
+# nothing asserted here reads it, so a fixed wait would only be a fixed wait.
 
 sshd_config="$(docker exec "$AUTHCMD" cat /etc/ssh/sshd_config 2> /dev/null || true)"
 check_contains "the image enables TCP forwarding" "AllowTcpForwarding yes" "$sshd_config"
@@ -233,7 +258,6 @@ docker run -d --name "$SIDECAR" \
   --cap-add SYS_ADMIN \
   -e SSH_PUBLIC_KEY="$(cat "$authkeys")" \
   "$IMAGE" > /dev/null
-sleep 2
 
 SSH_PORT="$(docker port "$PAUSE" 22/tcp 2> /dev/null | head -1 | sed 's/.*://')"
 if [[ -z "$SSH_PORT" ]]; then
@@ -242,14 +266,13 @@ if [[ -z "$SSH_PORT" ]]; then
 fi
 echo "ssh port: 127.0.0.1:${SSH_PORT}"
 
-# The sidecar is not ready until it accepts a connection.
-for _ in $(seq 1 30); do
-  if (exec 3<>/dev/tcp/127.0.0.1/"$SSH_PORT") 2> /dev/null; then
-    exec 3<&- 3>&-
-    break
-  fi
-  sleep 1
-done
+# The sidecar is not ready until it accepts a connection, and that wait is bounded. A sidecar
+# that never listens is reported as a sidecar that never listened, because everything after
+# this point depends on it and would otherwise fail as an authentication or contract error.
+if ! wait_for "the SSH sidecar to accept a connection on port ${SSH_PORT}" 30 \
+  port_accepts "$SSH_PORT"; then
+  exit 1
+fi
 
 # IdentitiesOnly keeps the client from offering every key it owns: sshd allows a limited
 # number of attempts, and an agent full of keys would fail before the right one is offered.
@@ -351,16 +374,29 @@ echo "== a forwarded connection reaches the workload's listener on the shared Po
 listener_port=9000
 docker exec -d "$TARGET" /bin/sh -c \
   "while true; do printf 'HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nWORKLOAD!' | nc -l -p ${listener_port} -s 0.0.0.0 2> /dev/null; done" > /dev/null 2>&1 || true
-sleep 2
+
+# The listener binds after the detached exec returns, so it is waited for. A listener that
+# never bound is its own failure and is reported as one, because otherwise it is read as a
+# failure of the forwarding below, which is the behaviour this section is here to prove.
+if ! wait_for "the workload's listener to bind port ${listener_port}" 30 \
+  container_listens_on "$TARGET" "$listener_port"; then
+  exit 1
+fi
 
 forward_port="$(free_local_port)"
 ssh "${SSH_OPTS[@]}" -i "${WORK}/id" -p "$SSH_PORT" -N \
   -L "127.0.0.1:${forward_port}:127.0.0.1:${listener_port}" root@127.0.0.1 > /dev/null 2>&1 &
 FORWARD_PID=$!
-sleep 3
 
-forward_out="$(curl -s --max-time 10 "http://127.0.0.1:${forward_port}/" 2>&1 || true)"
-check_contains "the forwarded connection reaches the workload's listener" "WORKLOAD!" "$forward_out"
+# The forward opens after the client is forked, so the request is retried until it arrives
+# rather than slept for. The workload's listener serves one request at a time and is started
+# again in a loop, so a request that never reached it consumed nothing, and the request that
+# reaches it carries the body, which makes that same request the assertion.
+if ! wait_for "the forwarded connection to reach the workload's listener" 30 \
+  forward_reaches_listener; then
+  exit 1
+fi
+check_contains "the forwarded connection reaches the workload's listener" "WORKLOAD!" "$forward_payload"
 
 kill "$FORWARD_PID" > /dev/null 2>&1 || true
 wait "$FORWARD_PID" 2> /dev/null || true
@@ -381,7 +417,12 @@ docker run -d --name "$PREEXISTING" \
   -e SSH_PUBLIC_KEY="$(cat "${WORK}/wrong.pub")" \
   -v "${authkeys}:/root/.ssh/authorized_keys:ro" \
   "$IMAGE" > /dev/null
-sleep 2
+# The entrypoint reports the key that is already there after the container starts, so the
+# report is waited for rather than slept for. What it says is checked by the assertion below.
+if ! wait_for "the entrypoint to report the key that is already there" 30 \
+  container_has_output "$PREEXISTING"; then
+  exit 1
+fi
 preexisting_logs="$(docker logs "$PREEXISTING" 2>&1 || true)"
 check_contains "a key that is already there wins over the environment" "already exists" "$preexisting_logs"
 
@@ -391,7 +432,13 @@ docker rm -f "$AUTHCMD" > /dev/null 2>&1 || true
 docker run -d --name "$AUTHCMD" \
   -v "${authkeys}:/var/run/sshd-authorized-keys/authorized_keys:ro" \
   "$IMAGE" > /dev/null
-sleep 2
+# The entrypoint appends the two AuthorizedKeysCommand lines to the configuration after the
+# container starts, so the configuration is waited for rather than slept for. What the lines
+# say is checked by the assertions below.
+if ! wait_for "the entrypoint to point sshd at the authorized keys command" 30 \
+  container_has_output "$AUTHCMD"; then
+  exit 1
+fi
 cmd_effective="$(docker exec "$AUTHCMD" /usr/sbin/sshd -T 2> /dev/null || true)"
 check_contains "the entrypoint points sshd at the authorized keys command" \
   "authorizedkeyscommand /get-authorized-keys.sh" "$cmd_effective"
