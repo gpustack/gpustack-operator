@@ -345,9 +345,6 @@ answers `/health` while its group is broken is not a healthy group.
 
 ## Limits
 
-- **A Router is required.** An *External* group has one endpoint per member and no leader, so the
-  Router is what balances them; admission refuses a role that declares external data parallelism
-  with no *`spec.router`*, naming the rule `RouterRequired`.
 - **Scale-down waits out the disaggregated handoff grace window (60 s)** before the member gauge
   reads, so total scale-down latency is at least 60 s on top of the drain itself. The group reads
   `Draining` during that window; that is the contract, not a stall.
