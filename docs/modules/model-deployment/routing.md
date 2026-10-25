@@ -63,10 +63,10 @@ carries a rank suffix (`http://host:port@0`, `http://host:port@1`), and every su
 member's one physical serving listener — the suffix is a rank, not a port.
 
 That registration is the gateway patch this project ships: an image carrying it is
-`gpustack/llm-router:v0.4.0` or later, while the default
-[`model-deployment-router-image`](../../reference/settings.md) still names `v0.3.1`, which
-predates the patch. The registration activates only where *`spec.router.image`* or the setting
-names an image that carries the patch.
+`gpustack/llm-router:v0.4.0` or later, which is also the default
+[`model-deployment-router-image`](../../reference/settings.md), so a deployment that names no
+image of its own registers per rank out of the box. An older default or a named image that
+predates the patch runs the gateway without the fan-out.
 
 No runtime run has exercised the flag: the render gate and the patched fan-out are verified in
 source and unit tests on the recorded shape.
