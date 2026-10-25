@@ -2,7 +2,7 @@
 #
 # CASE 100 — The weight identity in the KV store key: one artifact's deployments share blocks
 #            through the store, and a deployment of another commit on the same Binding reads none
-#            (MUTATING, cluster-scoped store objects; needs real accelerators)
+#            (MUTATING, self-cleaning: cluster-scoped store objects; needs real accelerators)
 #
 #   case-100.sh <NS>
 #

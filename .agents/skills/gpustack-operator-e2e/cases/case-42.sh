@@ -51,6 +51,9 @@
 #              one-slice partitions requested together, then one two-accelerator request expected to
 #              be refused.
 # Verdicts:    One row per contract above, plus the setup gates. Any FAIL fails the case.
+# Expected:    Every contract in the Goal holds from both sides — the operator's records and the
+#              container or the vendor's own registry — and the table names both sides per row.
+# Cleanup:     An EXIT trap deletes the case's Pods and waits for their release.
 set -uo pipefail
 
 CASE_ID=42

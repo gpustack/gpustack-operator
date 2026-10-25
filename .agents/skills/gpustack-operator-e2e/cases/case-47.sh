@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # CASE 47 — Two deployments on one Binding share a reuse domain; two on different Bindings do not
-#   (MUTATING: three ModelDeployments, one extra Binding and one probe Pod, all in the fixture's
-#    namespace, all removed by the shared teardown)
+#   (MUTATING, self-cleaning: three ModelDeployments, one extra Binding and one probe Pod, all
+#    removed by the shared teardown)
 #
 #   case-47.sh <NS>
 #
@@ -43,6 +43,12 @@
 #              image from. No GPU, no engine image.
 # Needs:       a live Mooncake store (the shared fixture brings up backend, pool and Bindings)
 #
+# Inputs:      All real, nothing mocked: the fixture's pool and Bindings, one additional Binding in
+#              the same namespace, and the engine image the deployments render.
+# Expected:    Deployments on the same Binding render the same reuse domain and the third
+#              deployment a different one; the probe writes land under the rendered values.
+# Cleanup:     The EXIT teardown deletes the three deployments, the extra Binding and the probe
+#              Pod; the shared fixture's teardown covers the rest.
 set -uo pipefail
 
 NS="${1:?usage: case-47.sh <NS>}"

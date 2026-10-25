@@ -6,6 +6,9 @@
 #
 #   case-70.sh <NS>
 #
+# Goal:        A routed deployment owns exactly one complete router object set through both
+#              router transitions, and its status reports every cache-event publication state
+#              observable from the cluster.
 # Environment: A single-node cluster with no accelerator, the operator deployed, the general
 #              InstanceType materialized by CASE 1, and pull access to the Mooncake fixture image.
 #              No serving engine image is required: the assertions read rendered objects, Pod
@@ -18,6 +21,11 @@
 #              garbage collection remove all six. The deployment remains Starting with no ready
 #              role replicas. KVEventsPublishing reaches NotApplicable, NoRouter,
 #              PublisherDisabled, RoleUnmanaged and Publishing, with status and reason asserted.
+# Inputs:      All real: the operator's charts and images, the Mooncake fixture image and a Ready
+#              Binding. No serving engine image — the assertions read rendered objects, Pod
+#              specifications and status.
+# Cleanup:     The teardown releases any finalizer-held Pods it created and deletes the lifecycle
+#              objects.
 set -uo pipefail
 
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"

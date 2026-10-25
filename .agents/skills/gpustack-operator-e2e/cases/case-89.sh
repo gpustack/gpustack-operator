@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
 # CASE 89 — A ModelDeployment role's rendered Pod requests the selected fabric device.
+#           (NON-MUTATING; E2E_REJECT_MANIFEST, when set, is a server-side dry run)
 #
 # case-89.sh <NS> <MODEL_DEPLOYMENT> <ROLE> <COUNT> <KEY|none>
 #

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # CASE 48 — The deliberate break: what a deployment looks like when the cache cannot work
-#   (MUTATING: one external KVCacheBackend and one KVCachePool, both CLUSTER-SCOPED, plus one
-#    KVCachePoolBinding and two ModelDeployments in the fixture's namespace — all removed here)
+#   (MUTATING, self-cleaning: one external KVCacheBackend and one KVCachePool, both
+#    cluster-scoped, plus one KVCachePoolBinding and two ModelDeployments — all removed here)
 #
 #   case-48.sh <NS>
 #
@@ -47,6 +47,13 @@
 # Needs:       a live Mooncake store (the shared fixture brings up backend, pool and Bindings) and an
 #              InstanceType, for the role to reference
 #
+# Inputs:      All real, nothing mocked: the fixture's pool and Bindings beside the case's own
+#              unreachable pool, and the engine image the deployments render.
+# Expected:    The unreachable pool renders no connector onto its deployment while the reachable
+#              pool's image still gets its render; every CacheAttached row pairs the condition
+#              with a fact not true of everything.
+# Cleanup:     The EXIT teardown deletes the namespace objects and both cluster-scoped objects
+#              the case created.
 set -uo pipefail
 
 NS="${1:?usage: case-48.sh <NS>}"

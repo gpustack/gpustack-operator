@@ -1589,7 +1589,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 			name:      "picker defaults to the image that carries every router",
 			md:        routedModelDeployment(),
 			container: "epp",
-			want:      "gpustack/llm-router:v0.3.1",
+			want:      "gpustack/llm-router:v0.4.0",
 			why:       "the default names a release of this project's own build, not a moving upstream tag",
 		},
 		{
@@ -1598,7 +1598,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 			}),
 			container: "router",
-			want:      "gpustack/llm-router:v0.3.1",
+			want:      "gpustack/llm-router:v0.4.0",
 			why:       "one setting says where the binaries come from; the command picks which one runs",
 		},
 		{
@@ -1645,12 +1645,14 @@ func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSpli
 		// The digests moved when the router HTTP port unified on 8000; they are pinned again here.
 		// They moved again when a managed protected group began to name the eligible endpoints from
 		// the first enable: every case whose roles are managed carries the term, and the sole
-		// single-member Server, which keeps its existing behavior, does not move at all.
-		"a prefill and decode pair": "9a449fcaaf867826dea0367a483e54e5388ddb395bd4afc8294553ba02b5bcb5",
-		"a sole server role":        "093e7e521452bbc07a00de54ad477f1a58dfd0d155fb16bdac70d94fad06edb5",
+		// single-member Server, which keeps its existing behavior, does not move at all. They moved
+		// once more when the default router image advanced to v0.4.0: every case running the default
+		// moved together, and the case naming its own image did not.
+		"a prefill and decode pair": "2011724654ee75385a74533b0462fc2e31fff428ecfbe0e09ce2e5ba0f57b2ec",
+		"a sole server role":        "2682f3e1bca1311a93f12f8416feeac60e854731e1e8d3169af2e4a9702badaf",
 		"a router declaring its own image, policy, replicas and extra arguments": "79a13fe3afffc0896e22d1b01cff9ad87f7c9be22aa04356838731d18d41645f",
-		"a role whose command the user took over, so it publishes no events":     "c9e93f6badf7d4ec334934ad2b5807bfe92ab16af110ac47b921ee67be001f17",
-		"an sglang engine, whose metrics contract differs":                       "475e475ecf7d41aa7eee26de36516cd582d70c955a3bd03c975acb525d58bc6d",
+		"a role whose command the user took over, so it publishes no events":     "fa48c32b9e77475557cbb48bbc18463921f841d1824faecffe2d0d972fee0d38",
+		"an sglang engine, whose metrics contract differs":                       "f9523a56a596e838d45c1e89c7578d8c6d0943a3594d5ec73b10cf1f8344579e",
 	}
 
 	soleServerRole := func() *workercore.ModelDeployment {

@@ -2,7 +2,8 @@
 #
 # CASE 123 — vllm-router admits vLLM encoder deployments on NVIDIA and AMD, refuses unadmitted
 #           engines and user-supplied --epd-config
-#           (NON-MUTATING on GPU clusters; fixture-mutating on CPU-only clusters, restored by trap)
+#           (MUTATING, self-recovering: the platform fixture on CPU-only clusters, restored by
+#            the trap — GPU clusters need no fixture, and every verdict is a server-side dry run)
 #           AUTO-SKIPS the platform rows without an InstanceType reporting nvidia or amd
 #
 #   case-123.sh <NS>

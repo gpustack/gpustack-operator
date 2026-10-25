@@ -83,6 +83,8 @@
 # against one object would be asserting one of them against a state that cannot produce it. Phase E
 # needs a THIRD object for the same reason: Phase C deactivates the deployment it runs on, and a
 # deactivated workload is never admitted again whatever the cluster does.
+# Cleanup:     An EXIT trap deletes the three ModelDeployments and the held InstanceType the case
+#              created.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on

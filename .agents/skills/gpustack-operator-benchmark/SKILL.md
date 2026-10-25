@@ -1,17 +1,17 @@
 ---
 name: gpustack-operator-benchmark
-description: "Benchmark ModelDeployment serving topologies on a GPU cluster: warm NodeModelStore cache, drive in-cluster load across EPD, P/D, Elastic EP, and External DP, and collect stage and transfer evidence."
+description: "Benchmark the operator on a GPU cluster — today the ModelDeployment serving topologies: warm NodeModelStore cache, drive in-cluster load across EPD, P/D, Elastic EP, and External DP, and collect stage and transfer evidence."
 disable-model-invocation: true
 allowed-tools: "Read, Agent, Bash(bash .claude/skills/_e2e-lib/scripts/preflight.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/assert-core.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/cluster-auth.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/kube-context.sh*), Bash(bash .claude/skills/gpustack-operator-benchmark/cases/*), Bash(kubectl get*), Bash(kubectl describe*), Bash(kubectl logs*), Bash(kubectl cluster-info*), Bash(kubectl version*), Bash(kubectl config current-context), Bash(kubectl config get-contexts*), Bash(git diff*), Bash(git rev-parse*), Bash(command -v*), Bash(date*), Bash(mkdir -p .claude/reports/*), Bash(tee .claude/reports/*)"
 ---
 
-# GPUStack Operator — ModelDeployment Serving Benchmark
+# GPUStack Operator — Benchmark
 
 Use [the shared module map](../../../docs/README.md#module-map) to locate the relevant guides,
 owning specs, code entry points and related modules. [AGENTS.md](../../../AGENTS.md#finding-sources)
 owns the retrieval and evidence rules; this skill owns its execution procedure.
 
-Measure and compare the four `ModelDeployment` serving topologies on a real multi-GPU cluster (8 × GPU baseline) and collect both end-to-end latency/throughput distributions (`TTFT`, `ITL`, `TPOT`, `E2E`, `output_tok/s`, `req/s`) and per-stage execution / KV-transfer / EC-transfer evidence:
+Measure and compare the `ModelDeployment` serving scenarios on a real multi-GPU cluster (8 × GPU baseline) and collect both end-to-end latency/throughput distributions (`TTFT`, `ITL`, `TPOT`, `E2E`, `output_tok/s`, `req/s`) and per-stage execution / KV-transfer / EC-transfer evidence. The scenarios below are the suite's first five; a scenario outside serving joins this suite, not a new skill:
 
 - **Scenario 1 (`cases/case-1-epd.sh`)** — [Encode, Prefill and Decode](../../../docs/walkthroughs/model-deployment/encode-prefill-decode.md) ([benchmark](../../../docs/modules/model-deployment/encode-prefill-decode-benchmark.md)): 3-arm comparison (`Aggregated` vs `P/D` vs `E/P/D`) on a 3-GPU budget with `Qwen/Qwen2.5-VL-7B-Instruct` (`NIXL` encoder cache + `Mooncake` KV cache).
 - **Scenario 2 (`cases/case-2-prefill-decode.sh`)** — [Prefill and Decode](../../../docs/walkthroughs/model-deployment/prefill-decode.md) ([benchmark](../../../docs/modules/model-deployment/prefill-decode-benchmark.md)): 2-arm comparison (`Aggregated` 3 × `Server(TP=2)` vs `P/D` 1 × `Prefill(TP=2)` + 2 × `Decode(TP=2)`) on a 6-GPU budget with `Qwen/Qwen3-32B`.

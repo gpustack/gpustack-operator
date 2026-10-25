@@ -3527,6 +3527,65 @@ func TestModelDeploymentServingGroups(t *testing.T) {
 		assert.False(t, fact.SnapshotValid, "a group seen half is not a group seen")
 		assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, fact.State)
 		assert.Contains(t, fact.InvalidReason, "partial")
+		assert.False(t, fact.Retained, "no member carries the eligibility label yet")
+	})
+
+	// THE RECORDED WEDGE: a gateway that registers one rank of a two-rank group leaves the
+	// survivor's view permanently partial, and the partial branch once returned before the
+	// retention was computed, so an eligible group of an unchanged generation was held
+	// AwaitingObservation forever. The retention is proved by the fresh membership, so it is
+	// computed before the view is judged and carries such a group through the half view.
+	t.Run("a partial view of a labeled group retains its eligibility", func(t *testing.T) {
+		t.Parallel()
+
+		generation := modelDeploymentMembershipGeneration("uid-a/uid-b")
+		labeled := func(uid types.UID, seat int) *corev1.Pod {
+			pod := servingGroupMember("regular", 0, seat, 2, uid, true)
+			pod.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+			pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = string(generation)
+
+			return pod
+		}
+
+		groups, _ := servingGroupFacts(md, []*corev1.Pod{labeled("uid-a", 0), labeled("uid-b", 1)},
+			[]RouterServingObservation{servingObservation("uid-a")})
+
+		fact, found := groups[modelDeploymentGroupKey{
+			Role: "regular", Ordinal: 0, Generation: generation,
+		}]
+		require.True(t, found, "a partial view still yields an entry")
+		assert.False(t, fact.SnapshotValid, "the view is still half, and that fact is published")
+		assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, fact.State)
+		assert.Contains(t, fact.InvalidReason, "partial")
+		assert.True(t, fact.Retained,
+			"every answering member carries the label at the current generation, so the retention holds")
+		assert.True(t, modelDeploymentGroupRestores(true, true, fact),
+			"a retained group restores through a partial view instead of waiting on one forever")
+	})
+
+	t.Run("a partial view of a group whose generation moved does not retain", func(t *testing.T) {
+		t.Parallel()
+
+		pod := servingGroupMember("regular", 0, 0, 2, "uid-a", true)
+		pod.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = "uid-a/uid-old"
+		peer := servingGroupMember("regular", 0, 1, 2, "uid-b", true)
+		peer.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		peer.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = "uid-a/uid-old"
+
+		groups, _ := servingGroupFacts(md, []*corev1.Pod{pod, peer},
+			[]RouterServingObservation{servingObservation("uid-a")})
+
+		fact, found := groups[modelDeploymentGroupKey{
+			Role:       "regular",
+			Ordinal:    0,
+			Generation: modelDeploymentMembershipGeneration("uid-a/uid-b"),
+		}]
+		require.True(t, found)
+		assert.False(t, fact.Retained,
+			"the members' annotation names an older generation, so the retention does not apply")
+		assert.False(t, modelDeploymentGroupRestores(true, true, fact),
+			"a group whose membership moved waits for a complete observation")
 	})
 
 	t.Run("a group the router holds none of is valid and observed as empty", func(t *testing.T) {
