@@ -34,20 +34,26 @@ Requests run against independent rank endpoints instead of queuing on one master
 
 Elastic serving uses *elastic expert parallelism (Elastic EP)* with *internal load balancing (Internal LB)*.
 
+*External DP* is the mode itself, on either engine: a fixed group whose every rank or member
+exposes its own HTTP endpoint behind a Router. The vLLM shape runs one independent engine per
+rank; the SGLang shape runs one distributed launch over the members
+([SGLang shape](#sglang-shape)).
+
 The serving configurations compare as follows:
 
 | Configuration | Collective | HTTP ingress | Resize contract |
 |---|---|---|---|
 | Monolithic *TP* | one engine process group, one master | one endpoint (the master) | replica replacement, not in-place |
 | *Elastic EP* | Ray *Internal LB*, one instance | one endpoint (the master) | online *`elasticEp.width`* scale-up |
-| *External DP* | fixed ranks, `--data-parallel-rank` each | one endpoint **per rank**, Router-balanced | fixed; world-size changes recreate |
+| *vLLM External DP* | fixed ranks, `--data-parallel-rank` each | one endpoint **per rank**, Router-balanced | fixed; world-size changes recreate |
 | *SGLang External DP* | one distributed launch over `size` members, *FFN* tensor-parallel across them | one endpoint **per member**, Router-balanced | fixed; replica count changes recreate groups |
 
-Choose *External DP* for fixed *MoE* groups that need per-rank HTTP ingress or lower median first-token
-latency under high concurrency. Its independent rank schedulers do not guarantee higher output throughput.
+Choose *External DP* for fixed *MoE* groups that need per-rank or per-member HTTP ingress or
+lower median first-token latency under high concurrency. Its independent rank or member
+schedulers do not guarantee higher output throughput.
 Choose [Elastic EP](elastic-ep.md) when the collective must grow online while retaining surviving `Pod`s.
 
-In the H100 recording, each *External DP* rank used intra-`Pod` NVLink for *TP* = 2.
+The H100 recording ran the vLLM shape: each rank used intra-`Pod` NVLink for *TP* = 2.
 The four ranks shared one *EP* collective over **cross-`Pod` TCP sockets on `eth0`**.
 The wide *TP* = 8 comparison kept all eight GPUs inside one NVLink-connected `Pod`.
 Separate GPU visibility, private IPC and `/dev/shm`, and no *remote direct memory access (RDMA)* interface
