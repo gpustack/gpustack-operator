@@ -84,8 +84,11 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
+
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_pool-lib.sh"
 
 NS="${1:?usage: case-39.sh <NS>}"
 
@@ -183,24 +186,7 @@ echo "[case-39] one accelerator = ${CARD_MEM_MIB}MiB VRAM"
 # the queue would route the claim to a different pool's nodes. The InstanceType qualifies the group with
 # the manufacturer where the per-node group id does not, so the manufacturer is supplied here and the
 # test is equality — see the index's note on pool lookup for why containment is not enough.
-read -r IT LQ <<<"$(kubectl get instancetypes.v1alpha1.worker.gpustack.ai -o json 2>/dev/null | NODE_GID="$GROUPID" NODE_JSON="$(kubectl get node "$NODE" -o json 2>/dev/null)" python3 -c "
-import json,sys,os
-gid=os.environ.get('NODE_GID','')
-nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
-# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
-# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
-# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
-# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
-def backs(it):
-    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
-    return bool(d) and all(nl.get(k)==v for k,v in d.items())
-def in_group(s):
-    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
-for it in json.load(sys.stdin).get('items',[]):
-    s=it.get('spec',{}); st=it.get('status',{})
-    if s.get('acceleratable') and in_group(s) and backs(it) and st.get('entrance'):
-        print(it['metadata']['name'], st['entrance']); break
-")"
+read -r IT LQ <<<"$(discover_node_pool "$NODE" "$GROUPID" --require-entrance name entrance)"
 [ -n "${IT:-}" ] && [ -n "${LQ:-}" ] || { echo "no T-Head InstanceType with an entrance LocalQueue backs ${NODE} in group '${GROUPID}'"; exit 1; }
 echo "[case-39] pool ${IT} via LocalQueue ${LQ}; slice pods carry no runtimeClass (this vendor needs none)"
 
@@ -379,9 +365,6 @@ restore() {
 }
 trap restore EXIT
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 # verdict <cond-exit-code> <check> <object-on-pass> <object-on-fail>
 verdict() { [ "$1" -eq 0 ] && record PASS "$2" "$3" || record FAIL "$2" "$4"; }
 

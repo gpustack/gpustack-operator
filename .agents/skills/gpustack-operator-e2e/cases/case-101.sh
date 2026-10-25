@@ -1,28 +1,37 @@
 #!/usr/bin/env bash
 #
-# CASE 101 — The node plugin delivers a Hugging Face artifact: one verified download per node, zero
-#            bytes for the next Pod, never a corrupted or partial tree, and a mount only for the
-#            Pod's own namespace (MUTATING, self-recovering; AUTO-SKIPS the real-Hub row with
-#            E2E_C101_OFFLINE=1)
+# CASE 101 — Node delivery and the control plane that owns it: one verified download per node, each
+#            status guard admitting only its own writer, a Setting that reaches every node, the
+#            CSIDriver Node delivery needs, and an HTTPS proxy carrying every download
+#            (MUTATING, self-recovering; AUTO-SKIPS the real-Hub row with E2E_C101_OFFLINE=1)
 #
 #   case-101.sh <NS>
 #
 # Goal:        Prove node delivery end to end with bare Pods, which is what a tenant can write by
-#              hand: a cold mount lasting longer than one kubelet mount call downloads each file once
-#              for two Pods and serves the manifest's bytes; a third Pod on the node downloads
-#              nothing; a corrupting source is never published; a plugin killed mid-download never
-#              exposes a partial tree; a namespace enforcing restricted mounts; forged volume
-#              attributes are refused by the rule they break; the real Hub serves through its
-#              redirects; and no token reaches any output.
+#              hand, and the control-plane contract that governs it on a real API server: a cold
+#              mount lasting longer than one kubelet mount call downloads each file once for two
+#              Pods and serves the manifest's bytes; a third Pod on the node downloads nothing; a
+#              corrupting source is never published; a plugin killed mid-download never exposes a
+#              partial tree; a namespace enforcing restricted mounts; forged volume attributes are
+#              refused by the rule they break; each status guard admits its writer and refuses the
+#              others by the rule it names; a Setting change rewrites every node's spec and every
+#              plugin applies it; without the CSIDriver Node delivery is refused and every
+#              NodeModelStore is removed; a cold download through an HTTPS proxy reaches the hub
+#              only from the proxy; the real Hub serves through its redirects; and no token reaches
+#              any output.
 # Environment: A cluster installed from this chart with modelManager.enabled (the default), two or
-#              more schedulable workers, and the stock python image pullable. NO GPU, no engine, no
-#              InstanceType: the consumers are bare Pods. The real-Hub row needs the public Hugging
-#              Face Hub from the nodes and is SKIPPED with E2E_C101_OFFLINE=1.
+#              more schedulable workers, the stock python image pullable and openssl on this machine.
+#              NO GPU, no engine, no InstanceType: the consumers are bare Pods. The real-Hub row
+#              needs the public Hugging Face Hub from the nodes and is SKIPPED with
+#              E2E_C101_OFFLINE=1.
 # Inputs:      MOCKED: a test hub (_model-hub.py) in <NS> standing in for the Hugging Face Hub,
-#              whose repositories are generated from their names, so every digest is known; a random
-#              token for its private repository, created here and never printed. Real: the plugin,
-#              kubelet, admission, and hf-internal-testing/tiny-random-bert on the real Hub,
-#              filtered to its JSON, text and safetensors files (about 0.5 MB of its 27 MB).
+#              whose repositories are generated from their names, so every digest is known; a second
+#              hub over HTTPS with a self-signed certificate made here, handed to the plugin and the
+#              controller through the model-artifact-ca-bundle Setting; a forward proxy; a random
+#              token for the hub's private repository, created here and never printed. Real: the
+#              plugin, kubelet, admission, the webhooks, the kubelet-issued tokens, the plugin's
+#              downloads, and hf-internal-testing/tiny-random-bert on the real Hub, filtered to its
+#              JSON, text and safetensors files (about 0.5 MB of its 27 MB).
 # Expected:    - cold: both Pods Running, each file fetched once, the cold mount outlasting 120 s,
 #                every file's SHA-256 equal to the hub's;
 #              - warm: a third Pod Running, no new request at the hub, the node's download counter
@@ -36,15 +45,24 @@
 #              - forged: another namespace's artifact, its own artifact with another digest, and a
 #                forged pod.namespace attribute are each refused with their rule, beside a Pod of the
 #                same namespace that mounts;
+#              - guards: the plugin's token writes only its own node's status, a token bound to no
+#                Pod and the cluster administrator are refused, and the worker alone writes a
+#                ModelArtifact's status;
+#              - a Setting change reaches every node's spec and every plugin applies it;
+#              - without the CSIDriver Node is refused and every NodeModelStore is removed; with it
+#                back Node is accepted and every NodeModelStore returns;
+#              - through the HTTPS proxy every file the hub serves is fetched from the proxy's
+#                address, and without it from the plugin's; equal addresses make that row undecidable;
 #              - real Hub: a Pod runs on the real repository and its model.safetensors hashes as this
 #                machine's own download of it at the resolved commit;
 #              - the token is in no log, event, status or metric, after a planted copy is found.
-# Cleanup:     Trap deletes the Pods, artifacts, Secrets, the second namespace and the hub, and puts
-#              back the Settings and namespace PSA labels it changed.
+# Cleanup:     Trap deletes the Pods, artifacts, Secrets, the second namespace, the hubs, the proxy
+#              and the CA ConfigMap, puts back the CSIDriver and the Settings it changed, and
+#              restores the namespace PSA labels it changed.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "${CASES_DIR}/_rows-lib.sh"
@@ -58,14 +76,15 @@ if [ "$NS" = "$SYSTEM_NS" ]; then
 fi
 NSB="${NS}-b"
 P=c101
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+TLS_HUB="${P}-tlshub"
 PSA_SNAPSHOT=0
 SCRATCH="$(mktemp -d)"
 TOKEN="hf_$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
-ORIG_ENDPOINT="$(setting_get model-artifact-huggingface-endpoint)"
-ORIG_DELIVERY="$(setting_get model-artifact-delivery-mode)"
+SA="${E2E_MODEL_MANAGER_SA:-gpustack-operator-model-manager}"
+# Remember what the store carried before the case touched it, so the cleanup puts every key back.
+settings_save model-artifact-huggingface-endpoint model-artifact-https-proxy \
+  model-artifact-no-proxy model-artifact-ca-bundle model-store-download-concurrency \
+  model-artifact-delivery-mode
 
 cleanup() {
   local labels
@@ -76,12 +95,15 @@ cleanup() {
     kubectl -n "$ns" delete modelartifacts.worker.gpustack.ai -l e2e.gpustack.ai/case=101 --ignore-not-found >/dev/null 2>&1
   done
   kubectl -n "$NS" delete secret "${P}-token" --ignore-not-found >/dev/null 2>&1
-  kubectl -n "$NS" delete deploy,svc,configmap -l e2e.gpustack.ai/model-hub=true --ignore-not-found >/dev/null 2>&1
-  kubectl -n "$NS" delete deploy,svc "${P}-hub" --ignore-not-found >/dev/null 2>&1
-  kubectl -n "$NS" delete configmap "${P}-hub-script" --ignore-not-found >/dev/null 2>&1
+  for n in "${P}-hub" "$TLS_HUB" "${P}-proxy"; do
+    kubectl -n "$NS" delete deploy,svc "$n" --ignore-not-found >/dev/null 2>&1
+    kubectl -n "$NS" delete configmap "${n}-script" --ignore-not-found >/dev/null 2>&1
+  done
+  kubectl -n "$NS" delete secret "${P}-tls" --ignore-not-found >/dev/null 2>&1
+  kubectl -n "$SYSTEM_NS" delete configmap "${P}-ca" --ignore-not-found >/dev/null 2>&1
   kubectl delete namespace "$NSB" --ignore-not-found --wait=false >/dev/null 2>&1
-  if [ -n "$ORIG_ENDPOINT" ]; then setting_set model-artifact-huggingface-endpoint "$ORIG_ENDPOINT"; else setting_unset model-artifact-huggingface-endpoint; fi
-  if [ -n "$ORIG_DELIVERY" ]; then setting_set model-artifact-delivery-mode "$ORIG_DELIVERY"; else setting_unset model-artifact-delivery-mode; fi
+  kubectl get csidriver model.csi.gpustack.ai >/dev/null 2>&1 || kubectl apply -f "$SCRATCH/csidriver.yaml" >/dev/null 2>&1
+  settings_restore
   rm -rf "$SCRATCH"
   if [ "$PSA_SNAPSHOT" = 1 ]; then
     labels=(pod-security.kubernetes.io/enforce- pod-security.kubernetes.io/enforce-version-)
@@ -124,6 +146,13 @@ if ! kubectl get csidriver model.csi.gpustack.ai >/dev/null 2>&1; then
   echo "[case-101] the model-manager plugin is not installed; NOTHING WAS VERIFIED"
   exit 2
 fi
+# The object to put back: its name, labels, annotations and spec, without what the API server set.
+kubectl get csidriver model.csi.gpustack.ai -o json | python3 -c "
+import json, sys
+o = json.load(sys.stdin)
+m = o['metadata']
+print(json.dumps({'apiVersion': o['apiVersion'], 'kind': o['kind'], 'spec': o['spec'],
+                  'metadata': {k: m[k] for k in ('name', 'labels', 'annotations') if k in m}}))" >"$SCRATCH/csidriver.yaml"
 
 for ns in "$NS" "$NSB"; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null || exit 1
@@ -145,6 +174,7 @@ print(json.dumps({
   'e2e/corrupt': {'files': {'config.json': {'size': 300}, 'model.safetensors': {'size': mib, 'lfs': True}}},
   'e2e/restart': {'files': {'config.json': {'size': 300}, 'model.safetensors': {'size': 8 * mib, 'lfs': True}}},
   'e2e/other': {'files': {'config.json': {'size': 400}}},
+  'e2e/guard': {'files': {'config.json': {'size': 100}}},
   'e2e/private': {'token': '${TOKEN}', 'files': {'config.json': {'size': 500}, 'w.bin': {'size': 70000, 'lfs': True}}},
 }))")"
 HUB_URL="$(mh_deploy "$NS" "${P}-hub" "$REPOS")"
@@ -329,10 +359,209 @@ else
   record FAIL "the token is in no output ($(grep -c -F "$TOKEN" "$SCRATCH/scan") matches)" "all"
 fi
 
+# ---------------------------------------------------------------- the NodeModelStore status guard
+SERVER="$(kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.server}')"
+kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d >"$SCRATCH/ca.crt"
+# status_as TOKEN NODE: an update of NODE's NodeModelStore status as the bearer of TOKEN alone, the
+# one verb the plugin's role holds on status and the one it sends, printing the API server's answer
+# and succeeding on a 2xx. The object is read as the administrator, with a changed usedPercent, and
+# put back as TOKEN.
+status_as() {
+  local code
+  kubectl get nodemodelstores.v1alpha1.worker.gpustack.ai "$2" -o json | python3 -c "
+import json, sys
+o = json.load(sys.stdin)
+o.setdefault('status', {}).setdefault('capacity', {})['usedPercent'] = 95
+print(json.dumps(o))" >"$SCRATCH/object"
+  printf 'Authorization: Bearer %s\n' "$1" >"$SCRATCH/auth"
+  code="$(curl -sS -o "$SCRATCH/answer" -w '%{http_code}' --cacert "$SCRATCH/ca.crt" -H @"$SCRATCH/auth" \
+    -X PUT -H 'Content-Type: application/json' --data @"$SCRATCH/object" \
+    "${SERVER}/apis/worker.gpustack.ai/v1alpha1/nodemodelstores/$2/status")"
+  rm -f "$SCRATCH/auth"
+  cat "$SCRATCH/answer"
+  case "$code" in 2*) return 0 ;; *) return 1 ;; esac
+}
+PLUGIN1="$(plugin_pod "$W1")"
+BOUND="$(kubectl -n "$SYSTEM_NS" create token "$SA" --bound-object-kind Pod --bound-object-name "$PLUGIN1" --duration=10m)"
+UNBOUND="$(kubectl -n "$SYSTEM_NS" create token "$SA" --duration=10m)"
+patch='{"status":{"capacity":{"totalBytes":1,"storedBytes":1,"usedPercent":95}}}'
+if status_as "$BOUND" "$W1" >"$SCRATCH/own" 2>&1; then
+  record PASS "the plugin's token bound to its Pod writes its own node's status (the baseline)" "$W1"
+else
+  record FAIL "the plugin writes its own node's status" "$(tr -d "\n" <"$SCRATCH/own" | cut -c1-300)"
+fi
+for row in "$BOUND|$W2|the plugin writes only the status of the node its Pod runs on|the plugin on another node" \
+           "$UNBOUND|$W1|the plugin's token must be bound to its Pod|a token bound to no Pod" \
+           "|$W1|only the model-manager plugin writes a NodeModelStore's status|the cluster administrator"; do
+  IFS='|' read -r token node rule who <<<"$row"
+  if [ -n "$token" ]; then
+    status_as "$token" "$node" >"$SCRATCH/out" 2>&1
+  else
+    kubectl patch nodemodelstores.v1alpha1.worker.gpustack.ai "$node" --subresource=status --type=merge -p "$patch" >"$SCRATCH/out" 2>&1
+  fi
+  rc=$?
+  if [ "$rc" != 0 ] && grep -q -F "$rule" "$SCRATCH/out"; then
+    record PASS "${who} is refused: ${rule}" "$node"
+  else
+    record FAIL "${who} is refused: ${rule} (rc ${rc})" "$(tr -d "\n" <"$SCRATCH/out" | cut -c1-300)"
+  fi
+done
+
+# ---------------------------------------------------------------- the ModelArtifact status guard
+artifact "$NS" "${P}-guard" e2e/guard "" 101
+if [ -n "$(wait_resolved "$NS" "${P}-guard" 120)" ]; then
+  record PASS "the worker's own status writes are admitted: a new artifact resolves" "${NS}/${P}-guard"
+else
+  record FAIL "the worker's own status writes are admitted" "${NS}/${P}-guard"
+fi
+kubectl -n "$NS" patch modelartifacts.v1alpha1.worker.gpustack.ai "${P}-guard" --subresource=status --type=merge \
+  -p '{"status":{"resolved":{"manifestDigest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}}}' >"$SCRATCH/ma" 2>&1
+rc=$?
+if [ "$rc" != 0 ] && grep -q -F "only the worker writes a ModelArtifact's status" "$SCRATCH/ma"; then
+  record PASS "the administrator's ModelArtifact status write is refused: only the worker writes it" "${NS}/${P}-guard"
+else
+  record FAIL "the administrator's ModelArtifact status write is refused (rc ${rc})" "$(head -1 "$SCRATCH/ma")"
+fi
+
+# ---------------------------------------------------------------- a Setting reaches every node
+cur="$(setting_get model-store-download-concurrency)"
+want=5
+[ "$cur" = 5 ] && want=6
+setting_set model-store-download-concurrency "$want"
+converged=0
+for _ in $(seq 1 30); do
+  converged=1
+  for n in $(kubectl get nodemodelstores.worker.gpustack.ai -o name); do
+    got="$(kubectl get "$n" -o jsonpath='{.spec.download.concurrency}|{.metadata.generation}|{.status.observedGeneration}')"
+    IFS='|' read -r c g o <<<"$got"
+    { [ "$c" = "$want" ] && [ "$g" = "$o" ]; } || converged=0
+  done
+  [ "$converged" = 1 ] && break
+  sleep 2
+done
+count="$(kubectl get nodemodelstores.worker.gpustack.ai -o name | wc -l | tr -d ' ')"
+if [ "$converged" = 1 ] && [ "$count" -ge 2 ]; then
+  record PASS "model-store-download-concurrency=${want} reached ${count} nodes' spec and every plugin applied it" "all nodes"
+else
+  record FAIL "the Setting reached every node's spec and observedGeneration within 60 s" "$(kubectl get nodemodelstores.worker.gpustack.ai -o jsonpath='{range .items[*]}{.metadata.name}={.spec.download.concurrency}/{.metadata.generation}/{.status.observedGeneration} {end}')"
+fi
+# The restore puts back every key the case saved, the endpoint among them, so the endpoint
+# carries its own value again until the case points it at the TLS hub.
+settings_restore
+
+# ---------------------------------------------------------------- Node delivery needs the CSIDriver
+set_delivery() {
+  kubectl -n "$SYSTEM_NS" patch settings.gpustack.ai model-artifact-delivery-mode --type=merge \
+    -p "{\"spec\":{\"value\":\"$1\"}}" >"$SCRATCH/set" 2>&1
+}
+set_delivery Engine || record FAIL "Engine is accepted" "$(head -1 "$SCRATCH/set")"
+kubectl delete csidriver model.csi.gpustack.ai >/dev/null
+gone=0
+for _ in $(seq 1 30); do [ -z "$(kubectl get nodemodelstores.worker.gpustack.ai -o name)" ] && { gone=1; break; }; sleep 2; done
+if [ "$gone" = 1 ]; then
+  record PASS "without the CSIDriver every NodeModelStore is removed" "all nodes"
+else
+  record FAIL "without the CSIDriver every NodeModelStore is removed" "$(kubectl get nodemodelstores.worker.gpustack.ai -o name | tr '\n' ' ')"
+fi
+if set_delivery Node; then
+  record FAIL "Node is refused while the CSIDriver is absent" "model-artifact-delivery-mode"
+else
+  if grep -q "does not exist" "$SCRATCH/set"; then
+    record PASS "Node is refused while the CSIDriver is absent" "model-artifact-delivery-mode"
+  else
+    record FAIL "Node is refused for the CSIDriver" "$(head -1 "$SCRATCH/set")"
+  fi
+fi
+kubectl apply -f "$SCRATCH/csidriver.yaml" >/dev/null
+back=0
+for _ in $(seq 1 60); do [ "$(kubectl get nodemodelstores.worker.gpustack.ai -o name | wc -l | tr -d ' ')" -ge "$count" ] && { back=1; break; }; sleep 2; done
+if [ "$back" = 1 ]; then
+  record PASS "with the CSIDriver back every NodeModelStore returns" "${count} nodes"
+else
+  record FAIL "with the CSIDriver back every NodeModelStore returns" "$(kubectl get nodemodelstores.worker.gpustack.ai -o name | wc -l)"
+fi
+if set_delivery Node; then
+  record PASS "with the CSIDriver back Node is accepted" "model-artifact-delivery-mode"
+else
+  record FAIL "with the CSIDriver back Node is accepted" "$(head -1 "$SCRATCH/set")"
+fi
+for _ in $(seq 1 30); do
+  [ "$(kubectl get nodemodelstore "$W1" -o jsonpath="{.status.conditions[?(@.type=='Ready')].status}" 2>/dev/null)" = True ] && break
+  sleep 2
+done
+
+# ---------------------------------------------------------------- an HTTPS proxy, with its control
+HOST="${TLS_HUB}.${NS}.svc"
+TLS_REPOS='{"e2e/proxied":{"files":{"config.json":{"size":200},"w.bin":{"size":300000,"lfs":true}}},"e2e/direct":{"files":{"config.json":{"size":210},"w.bin":{"size":310000,"lfs":true}}}}'
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=${HOST}" -addext "subjectAltName=DNS:${HOST}" \
+  -keyout "$SCRATCH/tls.key" -out "$SCRATCH/tls.crt" >/dev/null 2>&1
+kubectl -n "$NS" create secret tls "${P}-tls" --cert="$SCRATCH/tls.crt" --key="$SCRATCH/tls.key" >/dev/null
+kubectl -n "$SYSTEM_NS" create configmap "${P}-ca" --from-file=ca.crt="$SCRATCH/tls.crt" >/dev/null
+TLS_URL="$(mh_deploy "$NS" "$TLS_HUB" "$TLS_REPOS" "${P}-tls")"
+PROXY_URL="$(mh_proxy "$NS" "${P}-proxy")"
+setting_set model-artifact-ca-bundle "${P}-ca"
+setting_set model-artifact-no-proxy ""
+setting_set model-artifact-https-proxy "$PROXY_URL"
+setting_set model-artifact-huggingface-endpoint "$TLS_URL"
+settings_settle
+
+# remotes REPO: the distinct client addresses the hub served REPO's file downloads to.
+remotes() {
+  mh_log "$NS" "$TLS_HUB" | python3 -c "
+import json, sys
+print(' '.join(sorted({json.loads(l)['remote'] for l in sys.stdin if l.strip() and json.loads(l)['method'] == 'GET'
+                        and json.loads(l)['path'].startswith('/$1/') and json.loads(l).get('status') in (200, 206)})))"
+}
+fetch() { # name repo pod
+  artifact "$NS" "$1" "$2" "" 101
+  local d
+  d="$(wait_resolved "$NS" "$1" 120)"
+  [ -n "$d" ] || return 1
+  consumer "$NS" "$3" "$W1" "$1" "$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai "$1" -o jsonpath='{.metadata.uid}')" "$d"
+  pod_ready "$NS" "$3" 240
+}
+PROXY_IP="$(mh_pod_ip "$NS" "${P}-proxy")"
+PLUGIN_IP="$(kubectl -n "$SYSTEM_NS" get pod "$(plugin_pod "$W1")" -o jsonpath='{.status.podIP}')"
+if fetch "${P}-proxied" e2e/proxied "${P}-pp"; then
+  via="$(remotes e2e/proxied)"
+  if [ "$via" = "$PROXY_IP" ]; then
+    record PASS "through the HTTPS proxy every file reached the hub from the proxy (${via})" "e2e/proxied"
+  else
+    record FAIL "every file reached the hub from the proxy ${PROXY_IP} (saw ${via})" "e2e/proxied"
+  fi
+  tunnels="$(mh_log "$NS" "${P}-proxy" | grep -c -F "\"connect\": \"${HOST}:8443\"")"
+  if [ "$tunnels" -ge 1 ]; then
+    record PASS "the proxy tunneled to the hub (${tunnels} tunnels)" "${P}-proxy"
+  else
+    record FAIL "the proxy tunneled to the hub" "${P}-proxy"
+  fi
+else
+  record FAIL "a cold download through the HTTPS proxy and the CA bundle mounts" "$(pod_mount_events "$NS" "${P}-pp" | tail -1)"
+fi
+setting_set model-artifact-https-proxy ""
+settings_settle
+if fetch "${P}-direct" e2e/direct "${P}-pd"; then
+  direct="$(remotes e2e/direct)"
+  if [ "$PROXY_IP" = "$PLUGIN_IP" ]; then
+    record SKIP "undecidable: the proxy and the plugin share the address ${PLUGIN_IP}" "e2e/direct"
+  else
+    if [ "$direct" = "$PLUGIN_IP" ]; then
+      record PASS "without the proxy the files reached the hub from the plugin (${direct}), so the address tells the paths apart" "e2e/direct"
+    else
+      record FAIL "without the proxy the files reached the hub from the plugin ${PLUGIN_IP} (saw ${direct})" "e2e/direct"
+    fi
+  fi
+else
+  record FAIL "a cold download without the proxy mounts" "$(pod_mount_events "$NS" "${P}-pd" | tail -1)"
+fi
+
 # ---------------------------------------------------------------- the real Hub
 if [ "${E2E_C101_OFFLINE:-0}" = 1 ]; then
   record SKIP "the real Hub (E2E_C101_OFFLINE=1): NOTHING WAS VERIFIED on it" "hf-internal-testing/tiny-random-bert"
 else
+  # The test CA bundle and the proxy would stand between the plugin and the real Hub, so both go
+  # before the endpoint moves.
+  setting_unset model-artifact-ca-bundle
   setting_set model-artifact-huggingface-endpoint https://huggingface.co
   settings_settle
   REAL=hf-internal-testing/tiny-random-bert

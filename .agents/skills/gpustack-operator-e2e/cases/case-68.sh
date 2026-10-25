@@ -90,8 +90,8 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
 # transport alone, and a check that takes such a failure for an answer reports a verdict about the
 # network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-68.sh <NS>}"
 
@@ -101,6 +101,9 @@ NS="${1:?usage: case-68.sh <NS>}"
 # state is correct or not for reasons that are nowhere in its own output.
 KCTX="${E2E_KUBE_CONTEXT:-}"
 k() { if [ -n "$KCTX" ]; then kubectl --context "$KCTX" "$@"; else kubectl "$@"; fi; }
+# The readers in _md-lib.sh talk to the same context this case's own kubectl calls do.
+# shellcheck disable=SC2034 # Read by the sourced _md-lib.sh.
+MD_KUBE_CONTEXT="$KCTX"
 
 MD=case68-pair
 MD_CONTROL=case68-control
@@ -114,9 +117,7 @@ IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 # bound exists to turn "never happens" into a FAIL rather than to measure how quick it is.
 SETTLE="${E2E_MD_SETTLE:-120}"
 
-FAILS=0
 NOREADS=0
-ROWS=()
 
 # STATUS is one of PASS, FAIL, SKIP or NO-READ, and the last of those is not a shade of the others.
 #
@@ -136,6 +137,9 @@ record() {
   return 0
 }
 
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_md-lib.sh"
+
 # The first InstanceType A DEPLOYMENT CAN ACTUALLY NAME, which is not the same as the first one the
 # API returns.
 #
@@ -145,21 +149,8 @@ record() {
 # type that is being deleted is refused at admission, and the run then dies at fixture time for a
 # reason that has nothing to do with what it measures. Inactive is excluded for the mirror reason: a
 # deployment on one is admitted and then never scheduled, so the case waits out every timeout it has.
-usable_instance_type() {
-  k get instancetypes.worker.gpustack.ai \
-    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}{"\n"}{end}' \
-    2>/dev/null \
-    | while IFS='|' read -r name deleting inactive; do
-        [ -n "$name" ] || continue
-        [ -z "$deleting" ] || continue
-        [ "$inactive" = true ] && continue
-        echo "$name"
-        break
-      done
-}
-
 if [ -z "$IT" ]; then
-  IT="$(usable_instance_type)"
+  IT="$(md_usable_instance_type)"
 fi
 if [ -z "$IT" ]; then
   echo "[case-68] no usable InstanceType in the cluster; run case-1 first" >&2
@@ -181,17 +172,13 @@ cleanup() {
 trap cleanup EXIT
 
 # Every replica of one deployment, as name=<group name>, sorted so two samples compare as text.
-group_names() {
-  k -n "$NS" get pods -l "app.kubernetes.io/instance=$1" \
-    -o jsonpath='{range .items[*]}{.metadata.labels.kueue\.x-k8s\.io/pod-group-name}{"\n"}{end}' 2>/dev/null \
-    | grep -v '^$' | sort -u
-}
+# md_group_names in _md-lib.sh reads it.
 
 # PREDICATES FOR wait_for, WHICH RE-RUNS A COMMAND EACH ROUND. Passing `test "$(reading)" = n`
 # instead expands the reading ONCE, before the wait even begins, and then compares that same stale
 # value on every round -- a wait that can only succeed immediately or run out the clock. It reads
 # like a wait and behaves like a single sample.
-group_count_is() { [ "$(group_names "$1" | wc -l | tr -d ' ')" = "$2" ]; }
+group_count_is() { [ "$(md_group_names "$NS" "$1" | wc -l | tr -d ' ')" = "$2" ]; }
 admitted_count_is_not() { [ "$(admitted_count "$MD")" != "$1" ]; }
 role_count_is() { # role_count_is <md> <role> <n>
   [ "$(k -n "$NS" get pods -l "app.kubernetes.io/instance=$1,app.kubernetes.io/component=$2" \
@@ -206,26 +193,12 @@ md_quota_reason_is() {
 # Pod name=UID for one role, which is what tells a Pod that STAYED from one replaced by an
 # identical render. The UID is the cluster's to assign and is the reason this assertion belongs
 # here rather than in a unit test: a fake client leaves it empty, and two empty strings compare
-# equal exactly as two unchanged Pods do.
-role_uids() {
-  k -n "$NS" get pods -l "app.kubernetes.io/instance=$1,app.kubernetes.io/component=$2" \
-    -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.uid}{"\n"}{end}' 2>/dev/null \
-    | sort | tr '\n' ' '
-}
+# equal exactly as two unchanged Pods do. md_role_uids in _md-lib.sh reads it.
 
-# The Workloads Kueue composed for one deployment's replicas, by name.
+# The Workloads Kueue composed for one deployment's replicas, by name. md_workloads in _md-lib.sh
+# reads them; the sort is this case's, so two samples compare as text.
 deployment_workloads() {
-  local uids
-  uids="$(k -n "$NS" get pods -l "app.kubernetes.io/instance=$1" \
-    -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' 2>/dev/null | grep -v '^$')"
-  [ -z "$uids" ] && return 0
-  k -n "$NS" get workloads.kueue.x-k8s.io \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{range .metadata.ownerReferences[*]}{.uid}{","}{end}{"\n"}{end}' 2>/dev/null \
-    | while IFS='|' read -r name owners; do
-        for u in $uids; do
-          case "$owners" in *"$u"*) echo "$name"; break ;; esac
-        done
-      done | sort -u
+  md_workloads "$NS" "$1" | sort -u
 }
 
 admitted_count() {
@@ -361,14 +334,14 @@ apply_deployment "$MD" "$(two_roles_one_type)"
 # groups can be PLACED -- they land in different ClusterQueues and one of them is held -- and its
 # load-bearing rows are the admission ones below, not the count.
 if wait_for "$SETTLE" group_count_is "$MD" 2; then
-  record PASS "roles sharing one type still get a group each" "$(group_names "$MD" | tr '\n' ' ')"
+  record PASS "roles sharing one type still get a group each" "$(md_group_names "$NS" "$MD" | tr '\n' ' ')"
 else
-  record FAIL "roles sharing one type still get a group each" "saw [$(group_names "$MD" | tr '\n' ' ')]"
+  record FAIL "roles sharing one type still get a group each" "saw [$(md_group_names "$NS" "$MD" | tr '\n' ' ')]"
 fi
 
 # ------------------------------------------------- Phase D (on the Phase A shape): blast radius.
-before_beta="$(role_uids "$MD" beta)"
-before_alpha="$(role_uids "$MD" alpha)"
+before_beta="$(md_role_uids "$NS" "$MD" beta)"
+before_alpha="$(md_role_uids "$NS" "$MD" alpha)"
 scaled=""
 if [ -z "$before_beta" ] || [ -z "$before_alpha" ]; then
   record SKIP "a scale leaves every living replica alone" "no replicas to compare; earlier phase failed"
@@ -394,8 +367,8 @@ else
   fi
 fi
 if [ -n "$before_beta" ] && [ -n "$before_alpha" ] && [ -n "$scaled" ]; then
-  after_beta="$(role_uids "$MD" beta)"
-  after_alpha="$(role_uids "$MD" alpha)"
+  after_beta="$(md_role_uids "$NS" "$MD" beta)"
+  after_alpha="$(md_role_uids "$NS" "$MD" alpha)"
 
   # THE DIRECTION IS ASSERTED NOW, AND IT DELIBERATELY WAS NOT BEFORE. While a whole deployment was
   # one group, a replicas change rebuilt all of it and beta moving was as correct as beta staying --
@@ -488,9 +461,9 @@ apply_deployment "$MD" "$(two_roles_two_types)"
 two_groups=no
 if wait_for "$SETTLE" group_count_is "$MD" 2; then
   two_groups=yes
-  record PASS "two types are two groups" "$(group_names "$MD" | wc -l | tr -d ' ') distinct group names"
+  record PASS "two types are two groups" "$(md_group_names "$NS" "$MD" | wc -l | tr -d ' ') distinct group names"
 else
-  record FAIL "two types are two groups" "saw [$(group_names "$MD" | tr '\n' ' ')]"
+  record FAIL "two types are two groups" "saw [$(md_group_names "$NS" "$MD" | tr '\n' ' ')]"
 fi
 
 # THE TWO ROWS BELOW MEASURE NOTHING IF THE SHAPE ABOVE DID NOT FORM, and saying so is the point of
@@ -686,10 +659,7 @@ fi
 
 echo
 echo "== case-68: two groups, admitted as a set =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 
 # THE NO-READ COUNT IS STATED WHETHER OR NOT ANYTHING FAILED. A run that passed every row it could
 # measure, while several rows measured nothing, is not the same result as a clean run -- and the two

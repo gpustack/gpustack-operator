@@ -44,10 +44,12 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-36.sh <NS>}"
+# shellcheck disable=SC2034 # Read by the sourced library, which shellcheck does not follow.
+SYSTEM_NS="$NS"   # the settings Secret lives in the namespace this case was given
 INST=gpustack-e2e-pinned
 INST_GATED=gpustack-e2e-gated
 INST_PLAIN=gpustack-e2e-plain      # never holds an escape; the escalation-by-patch probe
@@ -61,40 +63,32 @@ HOST_DIR=/tmp/gpustack-e2e-case36
 LOCAL_PORT=22036
 KEYDIR="$(mktemp -d)"
 
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_ssh-lib.sh"
+
 IT=$(kubectl get instancetypes.worker.gpustack.ai \
   -o jsonpath='{.items[?(@.spec.acceleratable==false)].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep -m1 'gpustack-')
 [ -n "$IT" ] || { echo "no general InstanceType found — run case-1 first to materialize the chain"; exit 1; }
 
-# --- Setting helpers. The webhook resolves a Setting through a 30s cache, so a flip is not visible
-#     immediately; every gate assertion below RETRIES until the expected verdict appears rather than
-#     sleeping a fixed amount. ---
-set_gate() { local b64; b64=$(printf '%s' "$2" | base64 | tr -d '\n')
-  kubectl -n "$NS" patch secret gpustack-settings --type=merge \
-    -p "{\"data\":{\"$1\":\"${b64}\"}}" >/dev/null 2>&1; }
-get_gate() { local v; v=$(kubectl -n "$NS" get secret gpustack-settings \
-    -o jsonpath="{.data.$1}" 2>/dev/null | base64 -d 2>/dev/null); [ "$v" = "true" ] && echo true || echo false; }
+# --- The gates as the store carries them now, so cleanup puts both back as it found them. The
+#     webhook resolves a Setting through a 30s cache, so a flip is not visible immediately; every
+#     gate assertion below RETRIES until the expected verdict appears rather than sleeping a fixed
+#     amount. ---
+settings_save "$PRIV_KEY" "$HOST_KEY"
 
-ORIG_PRIV=$(get_gate "$PRIV_KEY")
-ORIG_HOST=$(get_gate "$HOST_KEY")
-
-PF_PID=""
+# shellcheck disable=SC2317  # the trap keeps it reachable; the checker cannot see the EXIT
 restore() {
   echo
   echo "[case-36] cleanup: deleting test objects and restoring both gates"
-  [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null
   kubectl -n default delete instance "$INST" "$INST_GATED" "$INST_PLAIN" --ignore-not-found --wait=false 2>/dev/null || true
   kubectl -n default delete instancepersistentvolume "$IPV" --ignore-not-found --wait=false 2>/dev/null || true
   kubectl -n default delete configmap "$CM" --ignore-not-found 2>/dev/null || true
   kubectl -n default delete secret "$SEC" "$SSH_SECRET" --ignore-not-found 2>/dev/null || true
-  set_gate "$PRIV_KEY" "$ORIG_PRIV"
-  set_gate "$HOST_KEY" "$ORIG_HOST"
+  settings_restore
   rm -rf "$KEYDIR" 2>/dev/null || true
 }
-trap restore EXIT
+trap 'ssh_cleanup; restore' EXIT
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 print_and_exit() {
   echo
   echo "== CASE 36 — Node-pinned Instance with additional volumes, and the host-access gates =="
@@ -157,14 +151,12 @@ for _tool in ssh ssh-keygen; do
   command -v "$_tool" >/dev/null 2>&1 || HAS_SSH=""
 done
 if [ -n "$HAS_SSH" ]; then
-  ssh-keygen -t ed25519 -f "$KEYDIR/id" -N "" -q
-  kubectl -n default delete secret "$SSH_SECRET" --ignore-not-found >/dev/null 2>&1
-  kubectl -n default create secret generic "$SSH_SECRET" --from-file=authorized_keys="$KEYDIR/id.pub" >/dev/null
+  ssh_setup_key_secret default "$SSH_SECRET" "$KEYDIR/id"
 fi
 
 # --- 1. The pinned Instance with four additional volumes. The hostPath one needs its gate on for the
 #     CREATE, so turn that gate on here and assert its OFF behavior later with a separate Instance. ---
-set_gate "$HOST_KEY" true
+setting_set "$HOST_KEY" true
 echo "[case-36] creating pinned Instance ${INST} with four additional volumes"
 created=""
 for _ in $(seq 1 20); do
@@ -343,15 +335,11 @@ ro=$(exec_main 'touch /mnt/host/probe >/dev/null 2>&1; echo $?')
 
 # --- 10. A mount is visible over SSH, with no sidecar change. ---
 if [ -n "$HAS_SSH" ]; then
-  kubectl -n default port-forward "pod/$POD" "${LOCAL_PORT}:22" >/dev/null 2>&1 &
-  PF_PID=$!
-  for _ in $(seq 1 20); do (exec 3<>"/dev/tcp/127.0.0.1/${LOCAL_PORT}") 2>/dev/null && { exec 3>&- 3<&-; break; }; sleep 1; done
-  SSH_OPTS=(-p "$LOCAL_PORT" -i "$KEYDIR/id" -o IdentitiesOnly=yes
-    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=15)
-  over_ssh=$(ssh -T "${SSH_OPTS[@]}" root@127.0.0.1 'cat /mnt/cm/alpha' 2>/dev/null | tr -d '\r\n')
+  ssh_open_port_forward default "pod/$POD" 22 "$LOCAL_PORT"
+  over_ssh=$(ssh_exec "$KEYDIR/id" "$LOCAL_PORT" 'cat /mnt/cm/alpha' 2>/dev/null | tr -d '\r\n')
   [ "$over_ssh" = ALPHA_VALUE ] && record PASS "additional mount visible over SSH" "ssh 'cat /mnt/cm/alpha' == ALPHA_VALUE" \
     || record FAIL "additional mount visible over SSH" "got '${over_ssh:-<empty>}' — the sidecar must see main's mounts"
-  kill "$PF_PID" 2>/dev/null; PF_PID=""
+  ssh_cleanup
 else
   record SKIP "additional mount visible over SSH" "no ssh client tools on the runner"
 fi
@@ -404,8 +392,8 @@ await_verdict() {
   echo "$v"
 }
 
-set_gate "$PRIV_KEY" false
-set_gate "$HOST_KEY" false
+setting_set "$PRIV_KEY" false
+setting_set "$HOST_KEY" false
 v=$(await_verdict gated true false)
 case "$v" in gated:*) record PASS "privileged create rejected while gated off" "${PRIV_KEY}=false rejects spec.privileged" ;;
              *)       record FAIL "privileged create rejected while gated off" "verdict '${v}' with ${PRIV_KEY}=false" ;; esac
@@ -415,7 +403,7 @@ case "$v" in gated:*) record PASS "hostPath create rejected while gated off" "${
 
 # Allowing only the hostPath gate must admit the hostPath one and still reject the privileged one —
 # the point of splitting the two Settings.
-set_gate "$HOST_KEY" true
+setting_set "$HOST_KEY" true
 v=$(await_verdict accepted false true)
 [ "$v" = accepted ] && record PASS "hostPath create admitted once allowed" "${HOST_KEY}=true admits it" \
   || record FAIL "hostPath create admitted once allowed" "verdict '${v}'"
@@ -426,8 +414,8 @@ case "$v" in gated:*) record PASS "each gate covers only its own field" "${HOST_
 # --- 12. A gate judges the escape a change TAKES, not the one it carries. An Instance that already
 #     holds an escape keeps it when the gate goes off; an Instance that never held one cannot acquire
 #     it by patch. ${INST} was created with the hostPath gate on; turn it off and stop/restart it. ---
-set_gate "$HOST_KEY" false
-sleep 35   # outlive the Setting cache, so the updates below are judged with the gate genuinely off
+setting_set "$HOST_KEY" false
+settings_settle   # outlive the Setting cache, so the updates below are judged with the gate genuinely off
 
 # A rejection here is only this contract's if it names a gate; report anything else as itself, so an
 # unrelated refusal can never read as "the gate leaked into UPDATE".

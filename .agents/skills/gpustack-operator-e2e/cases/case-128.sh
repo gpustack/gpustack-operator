@@ -66,8 +66,8 @@
 #              binding first.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:-}"
 if [ -z "$NS" ]; then
@@ -99,11 +99,8 @@ ELASTIC_TARGET=case128-target-elastic
 S1=case128-scaler1
 S2=case128-scaler2
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 # shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_md-lib.sh"
 
 cleanup() {
   kubectl -n "$NS" delete "$SCALER_RESOURCE" "$DEFAULTS_SCALER" "$S1" "$S2" \
@@ -181,60 +178,42 @@ expect() { # <check> <actual> <expected>
 # THE PHRASE IS THE RULE'S OWN WORDING where the rule owns the wording, and the FIELD PATH where
 # the schema owns it, because the schema and the webhook word the same fault differently and a
 # row that pinned one word would fail on the other layer's phrasing.
+#
+# The instrument is the library's: it reads the manifest on stdin, prints the text of the row and
+# returns the verdict. The row stays here, so the table and the verdict never leave the case that
+# owns them.
 refuses() { # <check> <phrase>
-  local check="$1" phrase="$2" out
-  out="$(cat | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
-  if [ -z "$out" ]; then
-    record FAIL "$check" "the apply produced no output at all, so nothing was refused"
-    return 0
+  local check="$1" phrase="$2" obj status=0
+  obj="$(md_dryrun_refuses "$phrase")" || status=1
+  if [ "$status" -eq 0 ]; then
+    record PASS "$check" "$obj"
+  else
+    record FAIL "$check" "$obj"
   fi
-  case "$out" in
-    *"created (server dry run)"* | *"configured (server dry run)"*)
-      record FAIL "$check" "the server ACCEPTED it: ${out:0:200}" ;;
-    *"$phrase"*)
-      record PASS "$check" "refused with: ${out:0:200}" ;;
-    *)
-      record FAIL "$check" "refused, but not with the expected wording (${phrase}): ${out:0:200}" ;;
-  esac
   return 0
 }
 
 # Assert that a scaler manifest is ACCEPTED, which is what makes the refusals above mean
 # something: a manifest wrong in some unrelated way would refuse too.
 accepts() { # <check>
-  local check="$1" out
-  out="$(cat | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
-  case "$out" in
-    *"created (server dry run)"* | *"configured (server dry run)"*)
-      record PASS "$check" "accepted by both the schema and the webhook" ;;
-    *)
-      record FAIL "$check" "refused: ${out:0:220}" ;;
-  esac
+  local check="$1" obj status=0
+  obj="$(md_dryrun_accepts)" || status=1
+  if [ "$status" -eq 0 ]; then
+    record PASS "$check" "$obj"
+  else
+    record FAIL "$check" "$obj"
+  fi
   return 0
 }
 
 # ---------------------------------------------------------------- the usable InstanceType
 
 # The rows that read a target need one, because the webhook reads the platform the type a role
-# names reports. The type must not be deleting and must not be inactive.
-usable_type_for() { # <manufacturer>
-  kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
-    2>/dev/null \
-    | while IFS='|' read -r name deleting inactive manufacturer; do
-      [ -n "$name" ] || continue
-      [ -z "$deleting" ] || continue
-      [ "$inactive" = true ] && continue
-      [ -n "$manufacturer" ] || continue
-      if [ "$manufacturer" = "$1" ]; then
-        echo "$name"
-        break
-      fi
-    done
-}
-
+# names reports. The type must not be deleting and must not be inactive. The lookup is the
+# library's: md_usable_type_for.
 IT=""
 for m in ascend nvidia amd; do
-  found="$(usable_type_for "$m")"
+  found="$(md_usable_type_for "$m")"
   if [ -n "$found" ]; then
     IT="$found"
     break

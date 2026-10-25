@@ -31,8 +31,6 @@
 #              probe Pod.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
@@ -49,10 +47,6 @@ SGLANG_IMAGE="${E2E_C99_SGLANG_IMAGE:-quay.io/gpustack/runner:cuda12.9-sglang0.5
 P=c99
 LABEL="e2e.gpustack.ai/case=99"
 HUB=https://huggingface.co
-
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 [ -n "${HF_TOKEN_READONLY:-}" ] || { echo "[case-99] HF_TOKEN_READONLY is not set" >&2; exit 2; }
 

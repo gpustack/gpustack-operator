@@ -41,9 +41,8 @@ IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 NODE=""
 WL=""
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 cleanup() {
   if [ -n "$WL" ]; then
@@ -283,10 +282,7 @@ fi
 
 echo
 echo "== CASE 88 — A topology-aware ModelDeployment passes device admission on a real accelerator =="
-{
-  echo "STATUS|CHECK|OBJECT"
-  printf '%s\n' "${ROWS[@]}"
-} | column -t -s '|'
+print_rows
 
 if [ "$FAILS" -ne 0 ]; then
   echo

@@ -21,7 +21,7 @@
 #              That is deliberate -- placement is what is under test here, and starting a round inside
 #              the reclaim window would make it fail for a reason that has nothing to do with the card
 #              populations. It does mean repetition here buys sampling, not extra coverage: reuse of a
-#              just-freed slot belongs to case-31, and this case stayed green throughout a defect that
+#              just-freed slot belongs to case-29, and this case stayed green throughout a defect that
 #              destroyed every such reuse.
 # Environment: A reachable cluster whose active context is the GPU cluster, a node with at least TWO
 #              nvidia cards of one model where at least one card can be put into a partitioning mode,
@@ -51,8 +51,8 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: MIG_NODE_SSH=<user@host> case-24.sh <NS>}"
 CASE_ID=24

@@ -31,18 +31,20 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-19.sh <NS>}"
+# shellcheck disable=SC2034 # Read by the sourced library, which shellcheck does not follow.
+SYSTEM_NS="$NS"   # the settings Secret lives in the namespace this case was given
 AWARE_KEY=instance-type-aware-cpu-manufacturer
 DERIVED_LABEL=schedule.gpustack.ai/derived-from-node
 INST=gpustack-e2e-case19
 MULTI_INST=${INST}-two
 CREATED=()
 
-set_aware() { local b64; b64=$(printf '%s' "$1" | base64 | tr -d '\n')
-  kubectl -n "$NS" patch secret gpustack-settings --type=merge -p "{\"data\":{\"${AWARE_KEY}\":\"${b64}\"}}" >/dev/null 2>&1; }
+# The Settings store and the helpers that read and write it.
+
 derived_its() { kubectl get instancetypes.worker.gpustack.ai -l "${DERIVED_LABEL}=true" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null; }
 note() { kubectl get resourceflavor "$1" -o jsonpath="{.metadata.annotations.note\.gpustack\.ai/$2}" 2>/dev/null; }
 bounce_worker() { kubectl -n "$NS" rollout restart deploy/gpustack-operator-worker >/dev/null 2>&1;
@@ -67,8 +69,11 @@ ARCH=$(kubectl get resourceflavor "$ARF" -o jsonpath='{.metadata.labels.kubernet
 AWARE_IT="gpustack--${GKEY}--${AKEY}-${OS}-${ARCH}"
 echo "[case-19] accelerated flavor ${ARF} → aware type ${AWARE_IT} (product=${PRODUCT} memory=${MEMORY} cores=${CORES})"
 
-# Capture the exact setting value, including an absent key, before any mutation.
-orig=$(kubectl -n "$NS" get secret gpustack-settings -o json | jq -c --arg key "$AWARE_KEY" '.data[$key]') || exit 1
+# Capture the setting as the store carries it before any mutation, so cleanup puts back exactly what
+# was there; an absent key reads as an empty value.
+kubectl -n "$NS" get secret gpustack-settings >/dev/null 2>&1 || { echo "[case-19] the gpustack-settings Secret is not in ${NS}"; exit 1; }
+settings_save "$AWARE_KEY"
+orig="$(setting_get "$AWARE_KEY")"
 before_json=$(kubectl get instancetypes.worker.gpustack.ai -o json) || exit 1
 before_type=$(printf '%s' "$before_json" | jq -c --arg name "$AWARE_IT" '.items[] | select(.metadata.name == $name)')
 for name in "$INST" "$MULTI_INST"; do
@@ -102,15 +107,13 @@ cleanup() {
     [ "$(printf '%s' "$current" | jq -cS '.spec | {unitResources,localStorage}')" = \
       "$(printf '%s' "$before_type" | jq -cS '.spec | {unitResources,localStorage}')" ] || failed=1
   fi
-  kubectl -n "$NS" patch secret gpustack-settings --type=merge \
-    -p "$(jq -nc --arg key "$AWARE_KEY" --argjson value "$orig" '{data:{($key):$value}}')" >/dev/null || failed=1
+  settings_restore
   bounce_worker || failed=1
-  current=$(kubectl -n "$NS" get secret gpustack-settings -o json | jq -c --arg key "$AWARE_KEY" '.data[$key]') || failed=1
+  current="$(setting_get "$AWARE_KEY")"
   # Startup initializes absent keys. Restore absence after the final restart as well.
-  if [ "$orig" = null ] && [ "$current" != null ]; then
-    kubectl -n "$NS" patch secret gpustack-settings --type=merge \
-      -p "$(jq -nc --arg key "$AWARE_KEY" '{data:{($key):null}}')" >/dev/null || failed=1
-    current=$(kubectl -n "$NS" get secret gpustack-settings -o json | jq -c --arg key "$AWARE_KEY" '.data[$key]') || failed=1
+  if [ -z "$orig" ] && [ -n "$current" ]; then
+    setting_unset "$AWARE_KEY"
+    current="$(setting_get "$AWARE_KEY")"
   fi
   [ "$current" = "$orig" ] || failed=1
   current=$(derived_its) || failed=1
@@ -124,13 +127,9 @@ cleanup() {
 }
 trap 'cleanup || exit 1' EXIT
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
-
 # 1. Enable awareness and force the aware re-derive (setting cache + create-only authoring).
 echo "[case-19] enabling awareness and restarting the worker to force the aware re-derive"
-set_aware true
+setting_set "$AWARE_KEY" true
 bounce_worker
 active=""
 for _ in $(seq 1 40); do

@@ -27,8 +27,8 @@
 #
 # Environment the caller may set:
 #   E2E_MOONCAKE_IMAGE   the store image                 (default docker.io/kvcacheai/mooncake:0.3.13)
-#   E2E_VLLM_IMAGE       a vLLM image, for case 59       (unset => that half SKIPs, loudly)
-#   E2E_SGLANG_IMAGE     an SGLang image, for case 59    (unset => that half SKIPs, loudly)
+#   E2E_VLLM_IMAGE       a vLLM image, for case 53       (unset => that half SKIPs, loudly)
+#   E2E_SGLANG_IMAGE     an SGLang image, for case 53    (unset => that half SKIPs, loudly)
 #   E2E_CLIENT_IMAGE     an image carrying the mooncake python client, for the read/write probes
 #
 # EXERCISED 2026-09-04 on a three-node k3s cluster: all seven completed with no failures, and case
@@ -37,8 +37,8 @@
 #
 # Four of the seven failed on their first real run, and not one was failing for the reason it printed:
 # case 53 hit a missing prerequisite (no Binding registered the tenant its writes land on) and then
-# read usage off the wrong Binding; case 56 could not have passed at all, because it compared fields
-# the API server defaults onto every Pod; case 59 timed out on a 19.1GB image pull. Reading them had
+# read usage off the wrong Binding; case 53 could not have passed at all, because it compared fields
+# the API server defaults onto every Pod; case 53 timed out on a 19.1GB image pull. Reading them had
 # shown none of that, and three of the four were defects in the cases rather than in the webhook.
 
 E2E_SHIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
@@ -98,7 +98,7 @@ DOMAIN="dom-i-${SFX}"
 ENDPOINT=""
 # The launch stub kvi_setup projects into every injected fixture, and where each Pod mounts it. The
 # three names are shared because four manifests in this family declare the same volume: this file's
-# kvi_pod_manifest, case 53's Deployment, case 54's LWS leader and case 56's submit().
+# kvi_pod_manifest, case 53's Deployment, LWS leader and submit().
 #
 # LAUNCH_DIR is NOT on any image's PATH, and must not be: the stub is reached by the absolute path in
 # `command`, while a probe running `python3` inside the container has to get the image's real
@@ -120,7 +120,11 @@ record() {
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 
-# kvi_wait_for polls one jsonpath until it equals want.
+# kvi_wait_for is the family's own jsonpath poller, self-contained on purpose: a consumer may
+# define a wait_for of its own (case-70 replaces its argument list with seconds-then-predicate),
+# and forwarding through a replaceable global would run this family's kind/name/path/want calls
+# against that incompatible signature. The base corpus had this implementation inline; the
+# extraction keeps it whole rather than aliasing it.
 kvi_wait_for() {
   local kind="$1" name="$2" path="$3" want="$4" secs="${5:-120}" ns_args=()
   [ -n "${6:-}" ] && ns_args=(-n "$6")
@@ -128,7 +132,7 @@ kvi_wait_for() {
   # ${ns_args[@]+...} rather than a bare "${ns_args[@]}": under set -u, bash 3.2 - macOS's stock
   # shell, which this family is usually launched from - treats expanding an EMPTY array as an unbound
   # variable and aborts the case mid-run. Every cluster-scoped wait passes no namespace, so the empty
-  # case is the common one, not the edge one. Measured both ways on bash 3.2.57.
+  # case is the common one, not the edge one.
   for ((i = 0; i < secs; i += 3)); do
     got="$(kubectl ${ns_args[@]+"${ns_args[@]}"} get "$kind" "$name" -o "jsonpath=$path" 2>/dev/null)"
     [ "$got" = "$want" ] && { echo "$got"; return 0; }
@@ -398,6 +402,52 @@ kvi_env() {
     -o "jsonpath={.spec.containers[0].env[?(@.name=='${name}')].value}" 2>/dev/null
 }
 
+# kvi_store_roundtrip_py POD CONTAINER KEY PAYLOAD runs the mooncake client library inside an injected
+# Pod and prints what it learned: the tenant the projected file named, the store's setup status, the
+# put's status, and the length of the bytes that came back with whether they match what was written.
+#
+# The probe reads the file the webhook PROJECTED - not an address this suite knows - and calls setup()
+# with the seven positional arguments plus the file's tenant_id. The tenant rides the keyword: the next
+# positional slot is a TransferEngine pointer, and passing the tenant there raises instead of
+# registering it. A file without a tenant_id falls back to the store's own "default", which the usage
+# rows catch.
+#
+# The python source stays at column 0: it is a program carried in a quoted argument, so indenting it
+# here would change the program rather than the shell.
+#
+# The exit status is the exec's own. A Pod that cannot run the client fails here, and the caller reads
+# the printed lines to say which half of the round trip was reached.
+kvi_store_roundtrip_py() {
+  local pod="$1" container="$2" key="$3" payload="$4" out rc
+  out="$(kubectl -n "$TEST_NS" exec "$pod" -c "$container" -- python3 -c '
+import json, os, sys
+from mooncake.store import MooncakeDistributedStore
+
+cfg = json.load(open(os.environ["MOONCAKE_CONFIG_PATH"]))
+tenant = cfg.get("tenant_id") or "default"
+print("TENANT %s" % tenant)
+store = MooncakeDistributedStore()
+rc = store.setup(
+    os.environ.get("POD_IP", "127.0.0.1"),
+    cfg["metadata_server"],
+    cfg["global_segment_size"],
+    cfg["local_buffer_size"],
+    cfg["protocol"],
+    cfg["device_name"],
+    cfg["master_server_address"],
+    tenant_id=tenant,
+)
+print("SETUP rc=%d" % rc)
+if rc != 0:
+    sys.exit(0)
+print("PUT rc=%d" % store.put(sys.argv[1], sys.argv[2].encode()))
+got = store.get(sys.argv[1])
+print("GET len=%d match=%s" % (len(got or b""), (got == sys.argv[2].encode())))
+' "$key" "$payload" 2>&1)" && rc=0 || rc=$?
+  printf '%s\n' "$out"
+  return "$rc"
+}
+
 # kvi_refused applies a manifest that must be REJECTED, and reports whether the message names what it
 # should. A create that succeeds is the failure: this family exists to prove the webhook refuses
 # rather than injecting something that looks configured and is not.
@@ -539,28 +589,24 @@ kvi_teardown() {
 
   kubectl -n "$TEST_NS" delete kvcachepoolbindings.worker.gpustack.ai "$BINDING" "$BINDING_DEFAULT" \
     --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  local left="" _
-  for _ in $(seq 1 20); do
-    left="$(kubectl -n "$TEST_NS" get kvcachepoolbindings.worker.gpustack.ai -o name 2>/dev/null)"
-    [ -z "$left" ] && break
-    sleep 3
-  done
-  if [ -n "${left:-}" ]; then
-    echo "[kvcache-inject] a binding is still held after 60s; what the operator says about it:"
-    kubectl -n "$TEST_NS" get kvcachepoolbindings.worker.gpustack.ai \
-      -o 'jsonpath={range .items[*]}{.metadata.name}{"\t"}{range .status.conditions[*]}{.type}={.status}({.reason}) {.message}{"\n"}{end}{end}' 2>/dev/null \
-      | sed 's/^/    /'
-    # Forcing the finalizer off bypasses the operator's own release path, which removes it only once
-    # the master's ledger entry for that tenant is gone (kv_cache_pool.go, releaseKVCachePoolBinding).
-    # So this can leave a tenant registered in a master with no Binding owning it. It is still the
-    # right trade here - a Binding left held forever poisons every later run of this family, and these
-    # names are cluster-scoped - but it is not clean, and a forced action that prints nothing reads as
-    # a clean one.
-    echo "[kvcache-inject] forcing the finalizer off; a tenant may remain registered in the master."
-    echo "[kvcache-inject] the pool and backend are deleted below, which normally takes it with them;"
-    echo "[kvcache-inject] if either is also stuck, check the master's tenant list by hand."
-    kubectl -n "$TEST_NS" get kvcachepoolbindings.worker.gpustack.ai -o name 2>/dev/null | while read -r b; do
-      kubectl -n "$TEST_NS" patch "$b" --type=merge -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1 || true
+  # One binding at a time: each is waited for, and one still held after 60s has its finalizer forced
+  # off, with a report of what the operator said about it. The pool and the backend are deleted
+  # below, which normally takes the tenant with them; if either is also stuck, the master's tenant
+  # list has to be read by hand.
+  kvi_release_binding_finalizer "$TEST_NS" "$BINDING"
+  kvi_release_binding_finalizer "$TEST_NS" "$BINDING_DEFAULT"
+  # A case's own probe can leave a binding this teardown never named - the refusal probe creates
+  # bind-term with a case-added finalizer, and an interrupted run leaves it held with no controller
+  # to release it. Sweep every binding still standing in the fixture namespace, so a leftover of
+  # any name releases the same way the named ones do and cannot wedge the namespace in
+  # Terminating against the next run.
+  local leftover=""
+  leftover="$(kubectl -n "$TEST_NS" get kvcachepoolbindings.worker.gpustack.ai -o name 2>/dev/null || true)"
+  if [ -n "$leftover" ]; then
+    echo "[kvcache-inject] releasing binding(s) the fixture did not name:"
+    printf '%s\n' "$leftover" | sed 's/^/    /'
+    printf '%s\n' "$leftover" | while read -r b; do
+      [ -n "$b" ] && kvi_release_binding_finalizer "$TEST_NS" "$(printf '%s' "$b" | awk -F/ '{print $NF}')"
     done
   fi
 

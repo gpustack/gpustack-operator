@@ -130,12 +130,9 @@ FOREIGN_LABEL="topology.gpustack.ai/e2e-foreign"
 # The label on the ballast Pods that shape each queue Node to one replica; its value is the prefix.
 BALLAST_LABEL="e2e.gpustack.ai/case87-ballast"
 
-FAILS=0
-ROWS=()
-CQ_WATCH_PID=""
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
+CQ_WATCH_PID=""
 # An input-required exit still owes the rows already recorded: a FAIL measured before the missing
 # input was noticed is a real failure, and exit 2 alone would report it as "input required".
 exit_input_required() {

@@ -35,7 +35,7 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/
 RAW="${1:?usage: run-partition-block.sh <RAW_DIR> [NS] [CASES...]}"
 NS="${2:-gpustack-system}"
 shift 2 2>/dev/null || shift $#
-CASES="${*:-27 24 25 26 28 29 30 31 32 34}"
+CASES="${*:-27 24 25 28 29 32 34}"
 : "${MIG_NODE_SSH:?MIG_NODE_SSH=<user@host> required — ask the user, never hardcode it}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

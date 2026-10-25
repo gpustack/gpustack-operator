@@ -30,6 +30,11 @@
 #   MIG_SSH_TIMEOUT=<secs>      per-ssh timeout (default 90)
 #   IMAGE=<image>               test-pod image (default ubuntu:24.04)
 
+# The pool lookup lives in its own library; part_discover needs it, and so does every case that
+# submits a claim through a queue.
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_pool-lib.sh"
+
 MIGSSH_TIMEOUT="${MIG_SSH_TIMEOUT:-90}"
 GPU_INDEX="${MIG_GPU_INDEX:-0}"
 IMAGE="${IMAGE:-ubuntu:24.04}"
@@ -260,30 +265,7 @@ for g in json.load(sys.stdin).get('spec',{}).get('groups',[]):
         print(g.get('id','')); break
 " 2>/dev/null)
 
-  read -r IT LQ MANUF <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | NODE_GID="$GROUPID" NODE_JSON="$(kubectl get node "$GPU_NODE" -o json 2>/dev/null)" python3 -c "
-import json,sys,os
-gid=os.environ.get('NODE_GID','')
-nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
-# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
-# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
-# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
-# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
-def backs(it):
-    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
-    return bool(d) and all(nl.get(k)==v for k,v in d.items())
-def in_group(s):
-    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
-items=json.load(sys.stdin).get('items',[])
-# The pool identity this node belongs to, not its rendered name — see the index's note on pool lookup.
-for it in items:
-    s=it.get('spec',{}); st=it.get('status',{})
-    if s.get('acceleratable') and in_group(s) and backs(it) and st.get('entrance'):
-        print(it['metadata']['name'], st['entrance'], (st.get('detail') or {}).get('manufacturer','nvidia')); sys.exit(0)
-for it in items:
-    s=it.get('spec',{}); st=it.get('status',{})
-    if s.get('acceleratable') and st.get('entrance'):
-        print(it['metadata']['name'], st['entrance'], (st.get('detail') or {}).get('manufacturer','nvidia')); sys.exit(0)
-")"
+  read -r IT LQ MANUF <<<"$(discover_node_pool "$GPU_NODE" "$GROUPID" --require-entrance --fallback-any name entrance manufacturer)"
   if [ -z "${IT:-}" ] || [ -z "${LQ:-}" ]; then
     echo "[case-${CASE_ID}] no accelerated InstanceType with an entrance LocalQueue — chain not materialized"
     exit 1
@@ -756,12 +738,31 @@ wait_pod_cards() {
   echo "$c"
 }
 
+# exec_out <pod> <cmd>... — run a command in the Pod and echo its output, retried.
+#
+# A Pod reports Running slightly before its container is attachable, so an exec issued the instant
+# wait_running returns can come back empty — or fail outright with `container not found` — on a Pod
+# whose allocation is perfectly correct. That matters most in pod_mig_devices below: `grep -c` prints
+# 0 even when the exec failed, so an attach race reads as "no MIG device inside the Pod" and fails a
+# correct allocation.
+exec_out() {
+  local pod="$1"; shift
+  local out
+  for _ in $(seq 1 8); do
+    out=$(kubectl -n default exec "$pod" -- "$@" 2>/dev/null)
+    [ -n "$out" ] && { printf '%s\n' "$out"; return 0; }
+    sleep 3
+  done
+  return 1
+}
+
 # pod_mig_devices <pod> — how many MIG devices nvidia-smi -L reports inside the Pod (want exactly 1 for
 # a single-instance partition request).
 pod_mig_devices() {
-  local out
-  out="$(kubectl -n default exec "$1" -- nvidia-smi -L 2>/dev/null | grep -c 'MIG')"
-  echo "${out:-0}"
+  local out n
+  out="$(exec_out "$1" nvidia-smi -L)"
+  n="$(printf '%s\n' "$out" | grep -c 'MIG' || true)"
+  echo "${n:-0}"
 }
 
 # in_set <token> <padded-set> — membership test against a " a b c " style set.

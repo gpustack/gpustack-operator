@@ -44,12 +44,14 @@
 #              and deletes the derived InstanceType once its flavor is gone.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-96.sh <NS>}"
+# The Settings store lives in the namespace the case was given, so the Setting it changes is the
+# one that namespace holds.
+# shellcheck disable=SC2034 # Read by the sourced library, which shellcheck does not follow.
+SYSTEM_NS="$NS"
 AKEY=nvidia-e2efit
 AGID="${AKEY#*-}"
 COUNT=4
@@ -64,20 +66,11 @@ AC=gpustack-node-devices
 PREFIX="case96-$$"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
-
 A=""
 B=""
 ADVERTISED=""
 ITNAME=""
-SETTING_BEFORE=""
 PODS=()
-
-set_setting() {
-  kubectl -n "$NS" patch setting "$SETTING" --type merge -p "{\"spec\":{\"value\":\"$1\"}}" >/dev/null
-}
 
 restore() {
   echo
@@ -102,7 +95,9 @@ for wl in json.load(sys.stdin).get("items", []):
       -p "[{\"op\":\"remove\",\"path\":\"/status/capacity/${POOL_PATH}\"},{\"op\":\"remove\",\"path\":\"/status/allocatable/${POOL_PATH}\"}]" \
       >/dev/null 2>&1 || true
   done
-  [ -n "$SETTING_BEFORE" ] && set_setting "$SETTING_BEFORE"
+  # The Setting goes back the way the case found it. The wait for the webhook's read cache is spent
+  # only when the case actually changed it.
+  settings_restore
   if [ -n "$ITNAME" ]; then
     for _ in $(seq 1 30); do
       [ -z "$(kubectl get resourceflavors.kueue.x-k8s.io -l "${LABELPFX}=true" -o name 2>/dev/null)" ] && break
@@ -138,8 +133,10 @@ print(" ".join(sorted(ok)[:2]))')"
 [ -n "$A" ] && [ -n "$B" ] || skip "Fewer than two Ready, untainted, schedulable nodes without a real ${POOL} pool or a Devices ledger."
 echo "[case-96] fragmented node A=${A}, roomy node B=${B}"
 
-SETTING_BEFORE=$(kubectl -n "$NS" get setting "$SETTING" -o jsonpath='{.status.value}' 2>/dev/null)
-[ -n "$SETTING_BEFORE" ] || { echo "[case-96] setting ${SETTING} is not served; the build under test predates it"; exit 1; }
+# The Setting's value is remembered before the case changes it, so the restore puts back what was
+# there. A Setting the store does not carry is a build that predates it.
+[ -n "$(setting_get "$SETTING")" ] || { echo "[case-96] setting ${SETTING} is not served; the build under test predates it"; exit 1; }
+settings_save "$SETTING"
 
 # 1. Fake accelerator on both nodes, and the bare sliced pool that gates the operator's sliced keys.
 for n in $A $B; do
@@ -381,9 +378,9 @@ print(json.dumps({
 field() { python3 -c "import json,sys; v=json.loads(sys.argv[1])[sys.argv[2]]; print(' '.join(v) if isinstance(v, list) else v)" "$1" "$2"; }
 
 # 3. Must fail: the pin switched off, the labels still published.
-set_setting false
+setting_set "$SETTING" false
 echo "[case-96] ${SETTING}=false; waiting 35s for the webhook's setting cache"
-sleep 35
+settings_settle
 probe "${PREFIX}-off"
 off=$(observe "${PREFIX}-off" 110)
 echo "[case-96] pin off: ${off}"
@@ -404,9 +401,9 @@ kubectl -n default delete pod "${PREFIX}-off" --force --grace-period=0 >/dev/nul
 sleep 5
 
 # 4. Positive: the pin back on.
-set_setting true
+setting_set "$SETTING" true
 echo "[case-96] ${SETTING}=true; waiting 35s for the webhook's setting cache"
-sleep 35
+settings_settle
 probe "${PREFIX}-on"
 on=$(observe "${PREFIX}-on" 90 until-admitted)
 echo "[case-96] pin on: ${on}"

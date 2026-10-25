@@ -24,8 +24,8 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-5.sh <NS>}"
 QLABEL=kueue.x-k8s.io/queue-name
@@ -42,10 +42,6 @@ restore() {
   kubectl -n default delete pod "$POD_OK" "$POD_BAD" --ignore-not-found --force --grace-period=0 2>/dev/null || true
 }
 trap restore EXIT
-
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 # 1. A .sliced Pod requesting memory-percentage=20: the mutating webhook folds it to
 #    .sliced.units = 20 × 16000 = 320000 and defaults .sliced.cores-percentage = 100.

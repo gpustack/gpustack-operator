@@ -42,16 +42,8 @@ if { [ "$COUNT" -eq 0 ] && [ "$KEY" != none ]; } ||
   exit 2
 fi
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); }
-print_rows() {
-  echo "STATUS | CHECK | OBJECT"
-  for row in "${ROWS[@]}"; do
-    IFS='|' read -r status check object <<<"$row"
-    printf '%s | %s | %s\n' "$status" "$check" "$object"
-  done
-}
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 md_json="$(kubectl -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" -o json 2>/dev/null)" || {
   echo "ModelDeployment $NS/$MD is unavailable" >&2

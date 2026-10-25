@@ -41,11 +41,13 @@
 #              the model-artifact-delivery-mode Setting it pinned to Engine.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "${CASES_DIR}/_rows-lib.sh"
+# shellcheck source=/dev/null
+. "${CASES_DIR}/_md-lib.sh"
 REPO_ROOT="$(cd "${CASES_DIR}/../../../.." && pwd)"
 REFERENCE="${REPO_ROOT}/pkg/modelartifact/testdata/manifest/canonical_manifest.py"
 
@@ -60,25 +62,16 @@ HUB=https://huggingface.co
 
 P=c97
 MD="${P}-md"
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 SCRATCH="$(mktemp -d)"
 
 # This case proves Engine delivery, and the chart seeds Node when it deploys the model-manager plugin,
 # so the case pins Engine for its run and puts back what it found. The wait is the worker's
 # thirty-second Settings read cache.
-ORIG_DELIVERY="$(kubectl -n "$SYSTEM_NS" get secret gpustack-settings -o jsonpath='{.data.model-artifact-delivery-mode}' 2>/dev/null)"
-restore_delivery() {
-  local v=null
-  [ -n "$ORIG_DELIVERY" ] && v="\"${ORIG_DELIVERY}\""
-  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge -p "{\"data\":{\"model-artifact-delivery-mode\":${v}}}" >/dev/null 2>&1
-}
+settings_save model-artifact-delivery-mode
 pin_engine_delivery() {
-  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
-    -p "{\"data\":{\"model-artifact-delivery-mode\":\"$(printf Engine | base64)\"}}" >/dev/null
-  sleep 35
+  setting_set model-artifact-delivery-mode Engine
+  settings_settle
 }
 
 cleanup() {
@@ -91,7 +84,9 @@ cleanup() {
   done
   kubectl -n "$NS" delete modelartifacts.worker.gpustack.ai -l "e2e.gpustack.ai/case=97" --ignore-not-found --wait=false >/dev/null 2>&1
   kubectl -n "$NS" delete secret -l "e2e.gpustack.ai/case=97" --ignore-not-found >/dev/null 2>&1
-  restore_delivery
+  # The Setting goes back the way the case found it. The wait for the worker's read cache is spent
+  # only when the case actually changed it.
+  settings_restore
   rm -rf "$SCRATCH"
 }
 trap cleanup EXIT
@@ -138,21 +133,23 @@ wait_cond() { # name type want-status bound -> prints the last reading
 
 field() { kubectl -n "$NS" get modelartifacts.worker.gpustack.ai "$1" -o jsonpath="$2" 2>/dev/null; }
 
+# The manifest travels on stdin; md_dryrun_rejects and md_dryrun_admits read it there and print the
+# row's object.
 refused() { # check manifest-on-stdin
-  local out
-  if out="$(kubectl apply --dry-run=server -f - 2>&1)"; then
-    record FAIL "$1" "admitted: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)"
+  local check="$1" text
+  if text="$(md_dryrun_rejects)"; then
+    record PASS "$check" "$text"
   else
-    record PASS "$1" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)"
+    record FAIL "$check" "$text"
   fi
 }
 
 admitted() { # check manifest-on-stdin
-  local out
-  if out="$(kubectl apply --dry-run=server -f - 2>&1)"; then
-    record PASS "$1" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)"
+  local check="$1" text
+  if text="$(md_dryrun_admits)"; then
+    record PASS "$check" "$text"
   else
-    record FAIL "$1" "refused: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)"
+    record FAIL "$check" "$text"
   fi
 }
 

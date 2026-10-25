@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
-# CASE 103 — The node cache's lifecycle: a plugin roll leaves mounted Pods reading, collection removes
-#            the oldest unreferenced digest and never a referenced one, a filtered artifact downloads
-#            only its files, and an Instance and a ModelDeployment mount a hub artifact
+# CASE 103 — The node cache's lifecycle and the node's own record of it: a plugin roll leaves mounted
+#            Pods reading, collection removes the oldest unreferenced digest and never a referenced
+#            one, a filtered artifact downloads only its files, an Instance and a ModelDeployment
+#            mount a hub artifact, the node's entries survive a plugin restart and a deleted
+#            object, and the record goes with the Node it belongs to
 #            (MUTATING, self-recovering; AUTO-SKIPS the collection rows without docker access to the
-#            kind nodes)
+#            kind nodes, and the Node row without it as well)
 #
 #   case-103.sh <NS>
 #
@@ -14,13 +16,17 @@
 #              removes by age of last use down to the low watermark, keeps a digest a Pod references
 #              even when told to go to 5%; allow patterns select the files downloaded, and a filtered
 #              artifact cannot be Engine-delivered; an Instance and a ModelDeployment on Node delivery
-#              render the plugin's volume and run.
+#              render the plugin's volume and run; the node's own record of its content is rewritten
+#              from the node's disk after the plugin restarts and after the record itself is deleted,
+#              and deleting the Node collects the record with it.
 # Environment: A kind cluster installed from this chart with modelManager.enabled, two or more
 #              workers, a materialized scheduling chain (run case-1 first) with an InstanceType,
 #              docker on this machine reaching the kind node containers, and the stock python image
 #              pullable. NO GPU. The collection rows mount a tmpfs over the second worker's cache
-#              root; without docker they SKIP. The whole case takes about fifteen minutes: the
-#              collector keeps a digest ten minutes after its last use.
+#              root and the Node row stops the second worker's kubelet while its Node object is
+#              deleted; without docker they SKIP. The whole case takes about half an hour: the
+#              collector keeps a digest ten minutes after its last use, and the node's entries are
+#              compared across a plugin restart.
 # Inputs:      MOCKED: a test hub over HTTP with generated repositories, and a tmpfs as the second
 #              worker's cache filesystem. Real: the plugin, kubelet, the collector and the worker.
 #              Override with E2E_MD_INSTANCE_TYPE, E2E_MD_IMAGE.
@@ -38,14 +44,20 @@
 #                and status.model.delivery Node;
 #              - with a 100 MiB cache holding three 20 MiB digests, two unreferenced past their
 #                grace and one referenced: watermarks 50/45 remove only the oldest; 10/5 remove the
-#                second and keep the referenced one.
+#                second and keep the referenced one;
+#              - after the plugin Pod on the first worker is replaced, the node's entries are the
+#                ones it held before; after the node's NodeModelStore is deleted, it comes back and
+#                the plugin rewrites the same entries from the node's disk;
+#              - after the second worker's Node object is deleted, its NodeModelStore is gone; after
+#                kubelet registers the node again, a new one exists with a new UID.
 # Cleanup:     Trap deletes the Pods, deployments, Instances, artifacts and the hub, puts the
 #              Settings back, restores the CSIDriver if it is missing, unmounts the tmpfs and
-#              restarts that node's plugin.
+#              restarts that node's plugin, and starts kubelet on a node whose Node object it
+#              deleted if that node is still missing.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "${CASES_DIR}/_rows-lib.sh"
@@ -59,25 +71,21 @@ IT="${E2E_MD_INSTANCE_TYPE:-}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 DS=gpustack-operator-model-manager
 CACHE_ROOT=/var/lib/gpustack/models
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 SCRATCH="$(mktemp -d)"
 TMPFS_NODE=""
+DELETED_NODE=""
 
-KEYS="model-artifact-huggingface-endpoint model-artifact-delivery-mode model-store-high-watermark model-store-low-watermark"
-mkdir -p "$SCRATCH/orig"
-for k in $KEYS; do
-  kubectl -n "$SYSTEM_NS" get secret gpustack-settings -o jsonpath="{.data.$k}" >"$SCRATCH/orig/$k" 2>/dev/null
-done
-# restore KEY: the value KEY had before the case, or no value when it had none.
-restore() {
-  if [ -s "$SCRATCH/orig/$1" ]; then setting_set "$1" "$(base64 -d <"$SCRATCH/orig/$1")"; else setting_unset "$1"; fi
-}
+# Remember what the store carried before the case touched it, so the cleanup puts every key back.
+settings_save model-artifact-huggingface-endpoint model-artifact-delivery-mode \
+  model-store-high-watermark model-store-low-watermark
 
 cleanup() {
   echo
   echo "[case-103] cleanup"
+  # A node whose Node object the case deleted gets its kubelet back, so it registers itself again.
+  if [ -n "$DELETED_NODE" ] && ! kubectl get node "$DELETED_NODE" >/dev/null 2>&1; then
+    docker exec "$DELETED_NODE" systemctl start kubelet >/dev/null 2>&1
+  fi
   kubectl -n "$MDNS" delete modeldeployments.worker.gpustack.ai,instances.worker.gpustack.ai --all --ignore-not-found --wait=false >/dev/null 2>&1
   for ns in "$NS" "$MDNS"; do
     kubectl -n "$ns" delete pods -l e2e.gpustack.ai/consumer=true --ignore-not-found --wait=true --timeout=120s >/dev/null 2>&1
@@ -89,9 +97,7 @@ cleanup() {
   kubectl -n "$NS" delete deploy,svc "${P}-hub" --ignore-not-found >/dev/null 2>&1
   kubectl -n "$NS" delete configmap "${P}-hub-script" --ignore-not-found >/dev/null 2>&1
   kubectl delete namespace "$MDNS" --ignore-not-found --wait=false >/dev/null 2>&1
-  for k in model-store-high-watermark model-store-low-watermark model-artifact-delivery-mode model-artifact-huggingface-endpoint; do
-    restore "$k"
-  done
+  settings_restore
   [ -s "$SCRATCH/csidriver.json" ] && ! kubectl get csidriver model.csi.gpustack.ai >/dev/null 2>&1 \
     && kubectl apply -f "$SCRATCH/csidriver.json" >/dev/null 2>&1
   if [ -n "$TMPFS_NODE" ]; then
@@ -131,6 +137,30 @@ weights() {
   kubectl -n "$MDNS" get modeldeployments.worker.gpustack.ai "$1" \
     -o jsonpath="{.status.conditions[?(@.type=='WeightsReady')].status}|{.status.conditions[?(@.type=='WeightsReady')].reason}" 2>/dev/null
 }
+# entries NODE: the node's entries as sorted "digest state size referenced" lines.
+entries() {
+  kubectl get nodemodelstores.worker.gpustack.ai "$1" -o json 2>/dev/null | python3 -c "
+import json, sys
+for m in sorted(json.load(sys.stdin).get('status', {}).get('models', []), key=lambda m: m['digest']):
+    print(m['digest'], m['state'], m.get('sizeBytes', 0), m.get('referenced', False))"
+}
+# wait_entries NODE WANT BOUND: waits until the node's entries equal WANT; 0 once they do.
+wait_entries() {
+  for _ in $(seq 1 $(( $3 / 3 ))); do
+    [ "$(entries "$1")" = "$2" ] && return 0
+    sleep 3
+  done
+  return 1
+}
+plugin_ready() { # plugin_ready NODE BOUND
+  local pod
+  for _ in $(seq 1 $(( $2 / 3 ))); do
+    pod="$(plugin_pod "$1")"
+    [ -n "$pod" ] && [ "$(kubectl -n "$SYSTEM_NS" get pod "$pod" -o jsonpath='{.status.containerStatuses[?(@.name=="main")].ready}')" = true ] && return 0
+    sleep 3
+  done
+  return 1
+}
 
 read -r -a WORKERS <<<"$(model_workers)"
 [ "${#WORKERS[@]}" -ge 2 ] || { echo "[case-103] needs two workers; NOTHING WAS VERIFIED"; exit 2; }
@@ -140,6 +170,9 @@ kubectl get csidriver model.csi.gpustack.ai >/dev/null 2>&1 \
 [ -n "$IT" ] || IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
 [ -n "$IT" ] || { echo "[case-103] no InstanceType; run case-1 first" >&2; exit 2; }
 for ns in "$NS" "$MDNS"; do kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null; done
+
+# One docker gate for the whole case: the tmpfs and the kubelet both need it.
+if docker exec "$W2" true >/dev/null 2>&1; then DOCKER_W2=1; else DOCKER_W2=0; fi
 
 REPOS="$(python3 -c "
 import json
@@ -155,6 +188,8 @@ print(json.dumps({
   'e2e/instance': {'files': {'config.json': {'size': 400}}},
   'e2e/md': {'files': {'config.json': {'size': 500}, 'w.bin': {'size': 4 * mib, 'lfs': True}}},
   'e2e/drv': {'files': {'config.json': {'size': 600}}},
+  'e2e/lifecycle-model': {'files': {'config.json': {'size': 300},
+                                    'model.safetensors': {'size': mib, 'lfs': True}}},
 }))")"
 HUB_URL="$(mh_deploy "$NS" "${P}-hub" "$REPOS")"
 setting_set model-artifact-huggingface-endpoint "$HUB_URL"
@@ -167,7 +202,7 @@ echo "[case-103] hub at ${HUB_URL}; workers ${W1}, ${W2}; InstanceType ${IT}"
 # released, a first, c held. The grace starts at each release, so the rows that follow run while it
 # passes, all of them on the first worker.
 GC=0 D_a="" D_b="" D_c=""
-if docker exec "$W2" mount -t tmpfs -o size=100m tmpfs "$CACHE_ROOT" >/dev/null 2>&1; then
+if [ "$DOCKER_W2" = 1 ] && docker exec "$W2" mount -t tmpfs -o size=100m tmpfs "$CACHE_ROOT" >/dev/null 2>&1; then
   TMPFS_NODE="$W2"
   kubectl -n "$SYSTEM_NS" delete pod "$(plugin_pod "$W2")" --wait=true >/dev/null
   total=""
@@ -431,6 +466,54 @@ else
 fi
 kubectl -n "$MDNS" delete modeldeployments.worker.gpustack.ai "${P}-drv" --wait=false >/dev/null
 
+# ---------------------------------------------------------------- the node's own entries
+# The first worker's record of its content is rewritten from the node's disk after the plugin Pod on
+# it is replaced, and again after the record itself is deleted and the worker creates it anew. It
+# runs here, while the collection grace below runs out, so the two share their wall clock.
+LIFE_ART="${P}-life"
+LIFE_POD="${P}-life-pod"
+artifact "$NS" "$LIFE_ART" e2e/lifecycle-model "" 103
+LIFE_DIGEST="$(mount_node "$NS" "$LIFE_ART" "$W1" "$LIFE_POD")"
+LIFE_OK=1
+if [ -z "$LIFE_DIGEST" ] || ! pod_ready "$NS" "$LIFE_POD" 300; then
+  record FAIL "the consumer runs on ${W1}" "$(pod_mount_events "$NS" "$LIFE_POD" | tail -1)"
+  LIFE_OK=0
+fi
+if [ "$LIFE_OK" = 1 ]; then
+  BEFORE=""
+  for _ in $(seq 1 20); do
+    BEFORE="$(entries "$W1")"
+    echo "$BEFORE" | grep -q "^${LIFE_DIGEST} Ready [0-9]* True$" && break
+    sleep 3
+  done
+  echo "[case-103] ${W1} holds:"
+  echo "$BEFORE"
+  # The plugin Pod on the node is replaced: the new one reads the node's disk again.
+  kubectl -n "$SYSTEM_NS" delete pod "$(plugin_pod "$W1")" --wait=true --timeout=120s >/dev/null 2>&1
+  if plugin_ready "$W1" 180 && wait_entries "$W1" "$BEFORE" 120; then
+    record PASS "after the plugin restarts the node's entries are rewritten as before" "$W1"
+  else
+    record FAIL "the plugin rewrites the same entries after a restart" "${W1}: $(entries "$W1" | tr '\n' ';')"
+  fi
+  # The record itself goes: the worker creates it again, and the plugin writes the same entries.
+  LIFE_OLD_UID="$(kubectl get nodemodelstores.worker.gpustack.ai "$W1" -o jsonpath='{.metadata.uid}')"
+  kubectl delete nodemodelstores.v1alpha1.worker.gpustack.ai "$W1" --wait=true >/dev/null 2>&1
+  LIFE_NEW_UID=""
+  for _ in $(seq 1 40); do
+    LIFE_NEW_UID="$(kubectl get nodemodelstores.worker.gpustack.ai "$W1" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+    [ -n "$LIFE_NEW_UID" ] && [ "$LIFE_NEW_UID" != "$LIFE_OLD_UID" ] && break
+    sleep 3
+  done
+  if [ -n "$LIFE_NEW_UID" ] && [ "$LIFE_NEW_UID" != "$LIFE_OLD_UID" ] && wait_entries "$W1" "$BEFORE" 420; then
+    record PASS "a deleted object comes back and the plugin rewrites the same entries from disk" "${W1}: ${LIFE_OLD_UID:0:8} -> ${LIFE_NEW_UID:0:8}"
+  else
+    record FAIL "the object is recreated with the node's entries" "${W1}: uid ${LIFE_NEW_UID:-<none>}, $(entries "$W1" | tr '\n' ';')"
+  fi
+else
+  record FAIL "the plugin rewrites the same entries after a restart" "${W1}: the consumer Pod did not mount"
+  record FAIL "the object is recreated with the node's entries" "${W1}: the consumer Pod did not mount"
+fi
+
 # ---------------------------------------------------------------- collection, part two: collect
 if [ "$GC" = 1 ]; then
   left=$(( RELEASED + 660 - $(date +%s) ))
@@ -458,6 +541,49 @@ if [ "$GC" = 1 ]; then
   else
     record FAIL "at 10/5 the referenced digest stays" "b=$(store_state "$W2" "$D_b") c=$(store_state "$W2" "$D_c")"
   fi
+fi
+
+# The tmpfs goes before the node does: the second worker's own cache root is back, and its Node
+# object is deleted against that root.
+if [ -n "$TMPFS_NODE" ]; then
+  docker exec "$TMPFS_NODE" umount -l "$CACHE_ROOT" >/dev/null 2>&1
+fi
+
+# ---------------------------------------------------------------- the Node goes, its record with it
+# The second worker's Node object is deleted while its kubelet is stopped, so the node does not
+# register itself again before the garbage collector reaches the record that belongs to it.
+if [ "$DOCKER_W2" = 1 ]; then
+  W2_OLD_UID="$(kubectl get nodemodelstores.worker.gpustack.ai "$W2" -o jsonpath='{.metadata.uid}')"
+  DELETED_NODE="$W2"
+  # kubelet stops first: a running kubelet registers its Node again within seconds, and the worker
+  # then adopts the record for the new Node before the garbage collector reaches it.
+  docker exec "$W2" systemctl stop kubelet >/dev/null 2>&1
+  kubectl delete node "$W2" --wait=true >/dev/null 2>&1
+  STORE_GONE=""
+  for _ in $(seq 1 40); do
+    kubectl get nodemodelstores.worker.gpustack.ai "$W2" >/dev/null 2>&1 || { STORE_GONE=1; break; }
+    sleep 3
+  done
+  if [ -n "$W2_OLD_UID" ] && [ -n "$STORE_GONE" ]; then
+    record PASS "deleting the Node collects its NodeModelStore" "$W2"
+  else
+    record FAIL "the NodeModelStore goes with its Node" "${W2}: uid ${W2_OLD_UID:-<none>} still there"
+  fi
+  docker exec "$W2" systemctl start kubelet >/dev/null 2>&1
+  W2_NEW_UID=""
+  for _ in $(seq 1 80); do
+    W2_NEW_UID="$(kubectl get nodemodelstores.worker.gpustack.ai "$W2" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+    [ -n "$W2_NEW_UID" ] && break
+    sleep 3
+  done
+  if [ -n "$W2_NEW_UID" ] && [ "$W2_NEW_UID" != "$W2_OLD_UID" ]; then
+    record PASS "the node registered again gets a new NodeModelStore" "${W2}: ${W2_NEW_UID:0:8}"
+    DELETED_NODE=""
+  else
+    record FAIL "the node registered again gets its object back" "${W2}: $(kubectl get node "$W2" -o name 2>&1)"
+  fi
+else
+  record SKIP "the NodeModelStore goes with its Node" "no docker access to the node ${W2}"
 fi
 
 print_rows

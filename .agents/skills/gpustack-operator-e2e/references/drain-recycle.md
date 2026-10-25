@@ -13,7 +13,7 @@ is no borrow topology and **no `schedule.gpustack.ai/drain` tombstone** anymore)
 **real CRD** whose `.status` four-view is materialized by `InstanceTypeReconciler`; teardown flows
 through the InstanceType **finalizer** (`HoldAndDrain` the backing CQ, then delete it).
 
-## Shared accelerated mock recipe (CASE 4 and CASE 6)
+## Shared accelerated mock recipe (CASE 4)
 
 A GPU-less node produces no accelerator labels and no `Devices` ledger, so two inputs are mocked, and
 a third for the cases that reach the node-devices AdmissionCheck; the derivation and the four-view /
@@ -39,7 +39,7 @@ AdmissionCheck math are **not** mocked.
    `kubernetes.io/os|arch` + `gpustack.ai/managed=true` — or, for a gate-3 case, the flavor's own
    `nodeLabels` (see CASE 4). The per-card occupancy lives in its **`.status`**
    (`status.groups[].accelerators[].{mode,remaining}`), so it must be written to the `/status`
-   subresource. The readers of that published Status, the four-view CASE 6 asserts and the fit labels
+   subresource. The readers of that published Status, the four-view rows CASE 4 asserts and the fit labels
    CASE 96 asserts, need nothing more.
 
 3. **A charging Pod per occupied node, for a gate-3 case** (CASE 4, CASE 96). The node-devices
@@ -51,7 +51,7 @@ AdmissionCheck math are **not** mocked.
    pass whatever the cards say.
 
 The derived `InstanceType` outlives the mock: removing the NodeFeature deletes the flavor, but the
-operator never deletes a type for lack of flavors. CASE 4 and CASE 6 delete it in their cleanup once
+operator never deletes a type for lack of flavors. CASE 4 deletes it in its cleanup once
 the mocked flavor is gone — deleting it while the flavor still exists makes the operator author it
 again.
 
@@ -99,7 +99,7 @@ Why a real cluster: the Instance's Pod carries the `kueue.x-k8s.io/queue-name` l
 admission-managed; the admission decision, the eviction, and the managed-toggle drain propagation cannot
 be observed with the fake client.
 
-## CASE 3 — managed-toggle scopes node onboarding (Story 5)
+## CASE 2 — managed-toggle scopes node onboarding (merged with the lifecycle and drain rows)
 
 Excluding a node (`gpustack.ai/managed=false`, toggled via the NodeFeature — NFD reverts a direct node
 label) must remove its pool contribution. **What changed post-refactor:** there is **no drain
@@ -163,7 +163,7 @@ Ordering invariant (pinned by a comment in `webhooks/setup.go`): our mutating co
 `gpustack-worker-mutation` must sort before `kueue-mutating-webhook-configuration` (`g` < `k`) so our
 fold runs before Kueue hashes the container resources.
 
-## CASE 6 — Pooled four-view + watch freshness (Story 2/6)
+## CASE 4 — pooled four-view + watch freshness (absorbed by the mock-chain case)
 
 Uses the shared accelerated mock. Walks the five-step pooling sequence and asserts the InstanceType
 four-view (`.status.accelerator/.acceleratorShared/.acceleratorSliced/.acceleratorPartitioned`)
@@ -192,7 +192,7 @@ did not land (wrong API version) or the ledger's reverse-lookup labels do not ma
   propagated) and that the operator image includes the drain-stop fix — a stale image predating it
   leaves the evicted Pod recreated and stuck `Pending`. Ground truth:
   `kubectl -n <ns> logs deploy/gpustack-operator-worker | grep 'stop instance as its instance type is gone, deleting, or draining'`.
-- **CASE 3 flavor never deleted** — confirm the operator was not restarted between the toggle and the
+- **CASE 2 flavor never deleted** — confirm the operator was not restarted between the toggle and the
   assertion (a restart's resync converges regardless of the predicate and masks a bug).
 - **CASE 4 workload never gets a check state** — confirm the AC is `Active` and the accelerated CQ
   references it (`kubectl get cq <name> -o jsonpath='{.spec.admissionChecksStrategy}'`); a Workload
@@ -205,7 +205,7 @@ did not land (wrong API version) or the ledger's reverse-lookup labels do not ma
 - **CASE 4 or CASE 96 check is `Ready` on a full ledger** — the check rebuilt the ledger from the
   node's Pods and found no charge: confirm the charging Pod exists, is bound to that node, and its
   allocation annotation names the ledger's card ids.
-- **CASE 6 four-view stuck at 0/0/0/0** — the ledger status patch did not land: target
+- **CASE 4 four-view stuck at 0/0/0/0** — the ledger status patch did not land: target
   `devices.v1alpha1.worker.gpustack.ai --subresource=status` (the `v1` proxy returns
   `ServiceUnavailable`), and verify the ledger's reverse-lookup labels match the InstanceType's.
 - **Accelerated InstanceType never materializes** — `instance-type-derived-from-node` must be on

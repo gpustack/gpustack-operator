@@ -29,16 +29,8 @@ if [ -z "$NS" ] || [ -z "$MD" ] || [ -z "$IMAGE" ]; then
 fi
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); }
-print_rows() {
-  echo "STATUS | CHECK | OBJECT"
-  for row in "${ROWS[@]}"; do
-    IFS='|' read -r status check object <<<"$row"
-    printf '%s | %s | %s\n' "$status" "$check" "$object"
-  done
-}
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 url="/apis/worker.gpustack.ai/v1/namespaces/$NS/modeldeployments/$MD/metrics"
 first="$(kubectl get --raw "$url" 2>/dev/null)" || {

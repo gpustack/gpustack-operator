@@ -34,8 +34,8 @@
 #              and forwarder, and the scratch dir.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "${CASES_DIR}/_rows-lib.sh"
@@ -44,9 +44,6 @@ NS="${1:?usage: case-112.sh <NS>}"
 P=c112
 REG_PORT=35000            # the node's loopback port the forwarder serves the registry on
 PUSH_PORT=5550            # the runner's loopback port port-forward pushes through
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 cleanup() {
   echo
@@ -340,7 +337,6 @@ else
   record PASS "prefetch-refused" "the prefetch was refused: nothing to warm"
 fi
 
-echo
 echo "[case-112] rows"
-for r in "${ROWS[@]}"; do echo "  $r"; done
+print_rows
 [ "$FAILS" -eq 0 ] || exit 1

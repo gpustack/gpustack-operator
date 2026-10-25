@@ -76,8 +76,8 @@
 #              and on exit. A target the caller named is never deleted.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${E2E_C129_NS:-${1:-}}"
 if [ -z "$NS" ]; then
@@ -111,11 +111,6 @@ READY_BOUND="${E2E_C129_READY_BOUND:-900}"
 STEP_BOUND="${E2E_C129_STEP_BOUND:-300}"
 RETIRE_BOUND="${E2E_C129_RETIRE_BOUND:-300}"
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
-# shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_serving-lib.sh"
 
@@ -249,6 +244,14 @@ skip_rest() { # <reason>
   record SKIP "every phase answers requests and fails none" "$reason"
 }
 
+# Print the rows and say the verdict. Every exit goes through here, so the case says the same
+# thing wherever it stops.
+finish() {
+  print_rows
+  [ "$FAILS" -eq 0 ] || { echo "[case-129] ${FAILS} check(s) FAILED"; exit 1; }
+  echo "[case-129] all checks passed"
+}
+
 # ---------------------------------------------------------------- the target
 
 BUILT=""
@@ -319,10 +322,7 @@ fi
 if [ -n "$ENV_REASON" ]; then
   record SKIP "the target serves and the probe gets an answer" "$ENV_REASON"
   skip_rest "$ENV_REASON"
-  print_rows
-  [ "$FAILS" -eq 0 ] || { echo "[case-129] ${FAILS} check(s) FAILED"; exit 1; }
-  echo "[case-129] all checks passed"
-  exit 0
+  finish; exit 0
 fi
 
 # The target has to serve before anything is measured: a scaler that reads the counter of an
@@ -344,10 +344,7 @@ if [ "$phase" != "Ready" ]; then
       "the target never reached Ready (its phase is ${phase:-unknown}) and it has no Pod, so nothing was admitted"
   fi
   skip_rest "the target never reached Ready (its phase is ${phase:-unknown})"
-  print_rows
-  [ "$FAILS" -eq 0 ] || { echo "[case-129] ${FAILS} check(s) FAILED"; exit 1; }
-  echo "[case-129] all checks passed"
-  exit 0
+  finish; exit 0
 fi
 
 # THE SERVED MODEL NAME. A request for a model the endpoint does not serve is refused with 404, so
@@ -383,10 +380,7 @@ if ! kubectl -n "$NS" wait "pod/$PROBE" --for=condition=Ready --timeout=300s >/d
   record SKIP "the target serves and the probe gets an answer" \
     "the probe Pod '${PROBE}' never became Ready on image '${PROBE_IMAGE}', so no request was sent"
   skip_rest "the probe Pod '${PROBE}' never became Ready on image '${PROBE_IMAGE}', so no request was sent"
-  print_rows
-  [ "$FAILS" -eq 0 ] || { echo "[case-129] ${FAILS} check(s) FAILED"; exit 1; }
-  echo "[case-129] all checks passed"
-  exit 0
+  finish; exit 0
 fi
 
 # THE PROBE SCRIPT. It holds each phase for its whole duration: a round of concurrent requests
@@ -489,10 +483,7 @@ else
   record FAIL "the probe files reach the Pod" \
     "the script is ${script_bytes:-0} bytes and the phase list is ${phase_bytes:-0} bytes in the Pod, so no request was sent"
   skip_rest "the probe files did not reach the Pod, so no request was sent"
-  print_rows
-  [ "$FAILS" -eq 0 ] || { echo "[case-129] ${FAILS} check(s) FAILED"; exit 1; }
-  echo "[case-129] all checks passed"
-  exit 0
+  finish; exit 0
 fi
 
 # ---------------------------------------------------------------- the scaler
@@ -739,6 +730,4 @@ else
 fi
 
 # Results.
-print_rows
-[ "$FAILS" -eq 0 ] || { echo "[case-129] ${FAILS} check(s) FAILED"; exit 1; }
-echo "[case-129] all checks passed"
+finish

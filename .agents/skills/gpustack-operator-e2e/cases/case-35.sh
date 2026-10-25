@@ -69,8 +69,11 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
+
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_pool-lib.sh"
 
 NS="${1:?usage: case-35.sh <NS>}"
 # Ascend's resource family. Hardcoded rather than derived: the case is gated on the ascend
@@ -160,26 +163,7 @@ echo "[case-35] group card order (spec): ${SPEC_ORDER}; unhealthy excluded: ${UN
 # The accelerated InstanceType whose POOL this node belongs to, and its entrance LocalQueue. This must
 # match the target node, or the queue would route the claim to a different pool's nodes. Matched on the
 # pool's identity tuple — accelerator group plus os/arch — see the index's note on pool lookup.
-read -r IT LQ <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | NODE_GID="$GROUPID" NODE_JSON="$(kubectl get node "$SLICE_NODE" -o json 2>/dev/null)" python3 -c "
-import json,sys,os
-gid=os.environ.get('NODE_GID','')
-nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
-# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
-# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
-# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
-# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
-def backs(it):
-    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
-    return bool(d) and all(nl.get(k)==v for k,v in d.items())
-def in_group(s):
-    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
-for it in json.load(sys.stdin).get('items',[]):
-    s=it.get('spec',{}); name=it['metadata']['name']; st=it.get('status',{})
-    sd=(st.get('detail',{}) or {}).get('slicedDetail',{}) or {}
-    if s.get('acceleratable') and ((sd.get('logical',{}) or {}).get('count',0) or 0)>0 \
-       and in_group(s) and backs(it):
-        print(name, st.get('entrance','')); break
-")"
+read -r IT LQ <<<"$(discover_node_pool "$SLICE_NODE" "$GROUPID" --sliceable name entrance)"
 [ -n "$IT" ] && [ -n "$LQ" ] || { echo "no logically sliceable ascend InstanceType with an entrance LocalQueue backs ${SLICE_NODE} in group '${GROUPID}'"; exit 1; }
 
 # The logical-slicing runtime needs the vendor runtimeClass to mount its driver-lib dependencies — a
@@ -250,9 +234,6 @@ restore() {
 }
 trap restore EXIT
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 # verdict <cond-exit-code> <check> <object-on-pass> <object-on-fail>
 verdict() { [ "$1" -eq 0 ] && record PASS "$2" "$3" || record FAIL "$2" "$4"; }
 

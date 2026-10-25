@@ -10,33 +10,27 @@
 # cluster-scoped; its rendered objects live in <NS>, and the two probe Pods live in a namespace this
 # case creates and removes.
 #
-# Goal:        Under Kubernetes leader election a member can be handed MOONCAKE_MASTER in one of two
-#              forms. Path A is "k8s://<ns>/<lease>": the client reads the Lease itself and follows
-#              view changes, which costs the member's image a compiled-in lease backend and so
-#              excludes every vendor image. Path B, the default, is the plain leader Service
-#              address: the Service's endpoints only ever contain the serving replica (standbys are
-#              deliberately not ready), and the client's ping loop re-dials the same DNS name after
-#              enough failed pings. Path B pays the endpoint propagation delay: the demoted leader
-#              stays in the endpoints until its readiness probe fails (periodSeconds 5 x
-#              failureThreshold 3, up to ~15s), during which a reconnect can land on a Pod that
-#              answers and refuses to serve.
-#
-#              This case MEASURES both paths instead of arguing them: delete the serving leader
-#              Pod, observe an error window, and record the interval from the delete until the first
-#              later store operation completes. A completed put is the endpoint because it requires
-#              the whole chain -- client reaches the new master AND a member has re-registered its
-#              segment there; "no error in the log" proves neither. The failover is repeated
-#              (E2E_C63_ROUNDS, default 3) so the comparison rests on more than one sample, and a
-#              sampler records when the old Pod left, when the Lease holder moved and when the
-#              Service's ready endpoint changed, so each interval can be split into its parts.
-#
-#              EVERY STORE CALL IS BOUNDED, and a call that exceeds the bound is a sample. A put
-#              that blocks inside the client after a failover is a real reading -- the store is
-#              unreachable for that long -- but an unbounded one yields no number at all: it holds
-#              the probe past any sampling window. So a put slower than E2E_C63_PUT_BOUND seconds
-#              counts as a failed one, a round with no recovery within E2E_C63_ROUND_BOUND seconds
-#              is recorded as "still unreachable at the bound", and the probe process is killed at
-#              its own deadline whatever it is doing.
+# Goal:        A member is handed MOONCAKE_MASTER in one of two forms. Path A is
+#              "k8s://<ns>/<lease>": the client reads the Lease itself and follows view changes,
+#              which costs the member's image a compiled-in lease backend and so excludes every
+#              vendor image. Path B, the default, is the plain leader Service address: the
+#              Service's endpoints only ever contain the serving replica (standbys are deliberately
+#              not ready), and the client re-dials the same DNS name after enough failed pings.
+#              Path B pays the endpoint propagation delay -- the demoted leader stays in the
+#              endpoints until its readiness probe fails (periodSeconds 5 x failureThreshold 3, up
+#              to ~15s), during which a reconnect can land on a Pod that answers and refuses to
+#              serve. The case MEASURES both paths instead of arguing them: delete the serving
+#              leader Pod, observe an error window, and record the interval from the delete until
+#              the first later store operation completes. A completed put is the endpoint because
+#              it requires the whole chain -- the client reaches the new master AND a member has
+#              re-registered its segment there; "no error in the log" proves neither. The failover
+#              is repeated (E2E_C63_ROUNDS, default 3) so the comparison rests on more than one
+#              sample, and a sampler records when the old Pod left, when the Lease holder moved and
+#              when the Service's ready endpoint changed, so each interval can be split into its
+#              parts. EVERY STORE CALL IS BOUNDED, and a call that exceeds the bound is a sample: a
+#              put slower than E2E_C63_PUT_BOUND seconds counts as a failed one, a round with no
+#              recovery within E2E_C63_ROUND_BOUND seconds is recorded as "still unreachable at the
+#              bound", and the probe process is killed at its own deadline whatever it is doing.
 #
 # Environment: Any cluster; no GPU, no RDMA (the member is DRAM over TCP). NEEDS a store image
 #              built with the Kubernetes Lease leadership backend (E2E_MOONCAKE_IMAGE; the default
@@ -57,8 +51,7 @@
 #              - in every round, after the serving leader Pod is deleted, each path reports a
 #                failed or over-bound put and then completes a put within the bound again, within
 #                the round bound -- the delete-to-recovery intervals are REPORTED per round, and
-#                Path B failing to converge at all is itself the answer the decision needs (then
-#                Path B does not work and the vendor-image work it would avoid is unavoidable);
+#                Path B failing to converge at all is itself the answer the decision needs;
 #              - between rounds the backend settles back to one ready leader that the Lease names,
 #                beside a full set of standbys, before the next delete;
 #              - the backend is Ready after the last round.
@@ -76,11 +69,11 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
 # transport alone, and a check that takes such a failure for an answer reports a verdict about the
 # network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-63.sh <NS>}"
-CASE_ID=63
+export CASE_ID=63
 IMAGE="${E2E_MOONCAKE_IMAGE:-gpustack/mirrored-mooncake:0.3.13.post1-cpu}"
 
 # The suffix keeps two runs apart: the backend's name is cluster-scoped and every rendered name
@@ -115,18 +108,9 @@ LOG_A="$WORK/pathA.log"
 LOG_B="$WORK/pathB.log"
 LOG_SAMPLE="$WORK/samples.log"
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# The Lease readers and the backend-plus-Lease teardown live in the shared HA library.
 # shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
-
-results() {
-  print_rows
-  [ "$FAILS" -eq 0 ] || { echo "[case-${CASE_ID}] ${FAILS} check(s) FAILED"; return 1; }
-  echo "[case-${CASE_ID}] all checks passed"
-  return 0
-}
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_kvcache-ha-lib.sh"
 
 teardown() {
   echo
@@ -134,59 +118,10 @@ teardown() {
   jobs -p | xargs kill 2>/dev/null || true
   kubectl delete namespace "$TEST_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kubectl -n "$NS" delete rolebinding.rbac.authorization.k8s.io "$PROBE_RB" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  # The store creates the Lease, so nothing owns it and the backend's deletion leaves it behind. It
-  # goes after the backend, because a standby still running would campaign it back into existence.
-  kubectl wait --for=delete "kvcachebackends.worker.gpustack.ai/${BACKEND}" --timeout=120s >/dev/null 2>&1 || true
-  kubectl -n "$NS" delete leases.coordination.k8s.io "$LEADER" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kvha_teardown "$NS" "$BACKEND" "$LEADER"
   echo "[case-63] probe logs kept at $WORK"
 }
 trap teardown EXIT
-
-wait_for() {
-  local kind="$1" name="$2" path="$3" want="$4" secs="${5:-180}"
-  local got="" i
-  for ((i = 0; i < secs; i += 3)); do
-    got="$(kubectl -n "$NS" get "$kind" "$name" -o "jsonpath=$path" 2>/dev/null)"
-    [ "$got" = "$want" ] && { echo "$got"; return 0; }
-    sleep 3
-  done
-  echo "$got"
-  return 1
-}
-
-ready_leader_pod() {
-  kubectl -n "$NS" get pod -l "$LEADER_SEL" \
-    -o jsonpath='{range .items[?(@.status.containerStatuses[0].ready==true)]}{.metadata.name}{"\n"}{end}' \
-    2>/dev/null | head -1
-}
-
-lease_holder() {
-  kubectl -n "$NS" get leases.coordination.k8s.io "$LEADER" \
-    -o jsonpath='{.spec.holderIdentity}' 2>/dev/null
-}
-
-holder_pod_uid() {
-  local holder="$1" holder_ip pod_uid pod_ip deleting phase
-  case "$holder" in
-    \[*\]:*)
-      holder_ip="${holder#\[}"
-      holder_ip="${holder_ip%%\]*}"
-      ;;
-    *:*) holder_ip="${holder%:*}" ;;
-    *) holder_ip="$holder" ;;
-  esac
-  while IFS='|' read -r pod_uid pod_ip deleting phase; do
-    if [ "$phase" != "Running" ] || [ -n "$deleting" ] || [ -z "$pod_ip" ] \
-      || [ "$pod_ip" != "$holder_ip" ]; then
-      continue
-    fi
-    echo "$pod_uid"
-    return 0
-  done < <(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
-    -o jsonpath='{range .items[*]}{.metadata.uid}{"|"}{.status.podIP}{"|"}{.metadata.deletionTimestamp}{"|"}{.status.phase}{"\n"}{end}' \
-    2>/dev/null)
-}
 
 # The probe loop. The master address arrives as argv[1] so the quoting of "k8s://..." never passes
 # through the shell twice; argv[2] is the loop's own deadline. One put every 0.3s, and every line
@@ -283,7 +218,7 @@ spec:
           capacityPerMember: 2Gi
 YAML
 
-if ! wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 300 >/dev/null; then
+if ! kvha_wait_for "$NS" kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 300 >/dev/null; then
   record FAIL "the backend reaches Ready" \
     "phase never became Ready in 300s; nothing below can run. No ready leader at all is the \
 signature of a store image without the Kubernetes Lease leadership backend"
@@ -291,7 +226,7 @@ signature of a store image without the Kubernetes Lease leadership backend"
 fi
 record PASS "the backend reaches Ready" "phase=Ready for ${BACKEND}"
 
-if ! wait_for deploy "$LEADER" '{.status.readyReplicas}' 1 300 >/dev/null; then
+if ! kvha_wait_for "$NS" deploy "$LEADER" '{.status.readyReplicas}' 1 300 >/dev/null; then
   record FAIL "exactly one leader replica is Ready" \
     "readyReplicas='$(kubectl -n "$NS" get deploy "$LEADER" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)' after 300s"
   results; exit 1
@@ -488,15 +423,15 @@ BASE_B="$(grep -c '^PUT s=.* rc=0$' "$LOG_B" 2>/dev/null || true)"
 serving_holder() {
   local secs="$1" i
   for ((i = 0; i < secs; i++)); do
-    OLD_READY="$(ready_leader_pod)"
+    OLD_READY="$(kvha_ready_leader_pod "$NS" "$LEADER_SEL")"
     OLD_READY_UID=""
     OLD_READY_IP=""
     if [ -n "$OLD_READY" ]; then
-      OLD_READY_UID="$(kubectl -n "$NS" get pod "$OLD_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+      OLD_READY_UID="$(kvha_pod_uid "$NS" "$OLD_READY")"
       OLD_READY_IP="$(kubectl -n "$NS" get pod "$OLD_READY" -o jsonpath='{.status.podIP}' 2>/dev/null)"
     fi
-    OLD_HOLDER="$(lease_holder)"
-    OLD_HOLDER_POD_UID="$(holder_pod_uid "$OLD_HOLDER")"
+    OLD_HOLDER="$(kvha_lease_holder "$NS" "$LEADER")"
+    OLD_HOLDER_POD_UID="$(kvha_holder_pod_uid "$NS" "$LEADER_SEL" "$OLD_HOLDER")"
     [ -n "$OLD_READY_UID" ] && [ "$OLD_HOLDER_POD_UID" = "$OLD_READY_UID" ] && return 0
     sleep 1
   done

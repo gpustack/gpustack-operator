@@ -85,15 +85,15 @@
 #              Creates no cluster-scoped object, changes no node, label or setting.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:-}"
 if [ -z "$NS" ]; then
   echo "usage: case-127.sh <NS>" >&2
   exit 2
 fi
-CASE_ID=127
+export CASE_ID=127
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 IT="${E2E_MD_INSTANCE_TYPE:-}"
 HOLD="${E2E_C127_HOLD:-240}"
@@ -112,50 +112,11 @@ MD="case127-${SFX}"
 MD_WARM="case127-warm-${SFX}"
 WORK="$(mktemp -d)"
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 # shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
-
-results() {
-  print_rows
-  [ "$FAILS" -eq 0 ] || { echo "[case-${CASE_ID}] ${FAILS} check(s) FAILED"; return 1; }
-  echo "[case-${CASE_ID}] all checks passed"
-  return 0
-}
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_md-lib.sh"
 
 # The first InstanceType a deployment can name: not terminating, not inactive. See case-49 for why
-# the first one listed is not good enough.
-usable_instance_type() {
-  kubectl get instancetypes.worker.gpustack.ai \
-    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}{"\n"}{end}' \
-    2>/dev/null \
-    | while IFS='|' read -r name deleting inactive; do
-        [ -n "$name" ] || continue
-        [ -z "$deleting" ] || continue
-        [ "$inactive" = true ] && continue
-        echo "$name"
-        break
-      done
-}
-
-# The first usable InstanceType whose reported manufacturer is the one named: the warm-restart leg
-# needs a pool whose cache directory carries a real vendor segment, not the cpu fallback.
-usable_type_for() { # <manufacturer>
-  kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
-    2>/dev/null \
-    | while IFS='|' read -r name deleting inactive manufacturer; do
-        [ -n "$name" ] || continue
-        [ -z "$deleting" ] || continue
-        [ "$inactive" = true ] && continue
-        [ -n "$manufacturer" ] || continue
-        if [ "$manufacturer" = "$1" ]; then
-          echo "$name"
-          break
-        fi
-      done
-}
+# the first one listed is not good enough. The lookup is the library's: md_usable_instance_type.
 
 has_localqueue() {
   kubectl -n "$NS" get localqueue -o name 2>/dev/null | head -n 1 | grep -q .
@@ -243,36 +204,32 @@ ${extra}
 YAML
 }
 
+# The instrument is the library's: it reads the manifest, prints the text of the row and returns the
+# verdict. The row stays here, so the table and the verdict never leave the case that owns them.
 admission_accepts() { # <check>
-  local check="$1" out
-  out="$(admission_manifest | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
-  case "$out" in
-    *"created (server dry run)"* | *"configured (server dry run)"*)
-      record PASS "$check" "accepted by the schema and the webhook" ;;
-    *)
-      record FAIL "$check" "refused: ${out:0:220}" ;;
-  esac
+  local check="$1" obj status=0
+  obj="$(md_dryrun_accepts < <(admission_manifest))" || status=1
+  if [ "$status" -eq 0 ]; then
+    record PASS "$check" "$obj"
+  else
+    record FAIL "$check" "$obj"
+  fi
   return 0
 }
 
 admission_refuses_timeout() { # <check>
-  local check="$1" out
-  out="$(admission_manifest | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
-  if [ -z "$out" ]; then
-    record FAIL "$check" "the apply produced no output at all, so nothing was refused"
-    return 0
+  local check="$1" obj status=0
+  obj="$(md_dryrun_refuses "startupTimeoutSeconds" < <(admission_manifest))" || status=1
+  if [ "$status" -eq 0 ]; then
+    record PASS "$check" "$obj"
+  else
+    record FAIL "$check" "$obj"
   fi
-  case "$out" in
-    *"startupTimeoutSeconds"*)
-      record PASS "$check" "refused naming startupTimeoutSeconds: ${out:0:180}" ;;
-    *)
-      record FAIL "$check" "not refused naming startupTimeoutSeconds (got: ${out:0:200})" ;;
-  esac
   return 0
 }
 
 if [ -z "$IT" ]; then
-  IT="$(usable_instance_type)"
+  IT="$(md_usable_instance_type)"
 fi
 
 MOUNT=""
@@ -343,7 +300,7 @@ POD=""
 if [ -z "$IT" ]; then
   record SKIP "$LEG_ROW" "no usable InstanceType in the cluster, so nothing would be admitted"
 elif ! has_localqueue; then
-  record SKIP "$LEG_ROW" "no LocalQueue in ${NS}, so the group would never be admitted; see case-93's Environment note"
+  record SKIP "$LEG_ROW" "no LocalQueue in ${NS}, so the group would never be admitted; see case-78's Environment note"
 else
   APPLY_OUT="$(rendered_manifest | kubectl apply -f - 2>&1 | tr '\n' ' ')"
   for _ in $(seq 1 90); do
@@ -539,8 +496,11 @@ if [ -z "$ENGINE_IMAGE" ] || [ -z "$ENGINE_MODEL" ]; then
     "E2E_C127_ENGINE_IMAGE and E2E_C127_MODEL are not both set, so there is no real engine to compile anything; the warm-restart leg is skipped"
 else
   WARM_IT=""
+  # The first usable InstanceType whose reported manufacturer is the one named: the warm-restart leg
+  # needs a pool whose cache directory carries a real vendor segment, not the cpu fallback. The
+  # lookup is the library's: md_usable_type_for.
   for m in ascend nvidia amd; do
-    WARM_IT="$(usable_type_for "$m")"
+    WARM_IT="$(md_usable_type_for "$m")"
     [ -n "$WARM_IT" ] && break
   done
   if [ -z "$WARM_IT" ]; then

@@ -30,8 +30,6 @@
 # Cleanup:     Trap deletes the Pods and the artifact.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "${CASES_DIR}/_rows-lib.sh"
@@ -47,9 +45,6 @@ P=c113
 REPO="qwen/Qwen2.5-0.5B-Instruct"
 COMMIT_BOUND=120
 POD_BOUND=300
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 WORKERS=()
 for _w in $(model_workers); do WORKERS+=("$_w"); done
@@ -132,23 +127,12 @@ else
 fi
 
 echo "== 3. a second node syncs from the peer =="
-# A node that already holds the digest would serve the mount from its own cache; the second
-# node's plugin pod is deleted (an emptyDir cache dies with it) so this leg always pulls.
-kubectl -n "$SYSTEM_NS" delete pod -l app.kubernetes.io/component=model-manager \
-  --field-selector "spec.nodeName=${WORKERS[1]}" --wait=true --timeout=120s >/dev/null 2>&1
-for _ in $(seq 1 30); do
-  PP="$(plugin_pod "${WORKERS[1]}")"
-  [ -n "$PP" ] && [ "$(kubectl -n "$SYSTEM_NS" get pod "$PP" -o jsonpath='{.status.phase}' 2>/dev/null)" = Running ] && break
-  sleep 3
-done
-PEER_BEFORE="$(plugin_metric "${WORKERS[1]}" "gpustack_model_manager_download_bytes_total{source=\"peer\"}")"
-HUB_BEFORE="$(plugin_metric "${WORKERS[1]}" "gpustack_model_manager_download_bytes_total{source=\"hub\"}")"
-consumer "$NS" "${P}-peer" "${WORKERS[1]}" "${P}-qwen" "$ART_UID" "$DIGEST"
-if pod_ready "$NS" "${P}-peer" "$POD_BOUND"; then
+# The second node's plugin pod is deleted before the mount, so its cache starts empty and this
+# leg always pulls; the helper samples the byte counters around the mount.
+if COUNTERS="$(mh_peer_sync_check "$NS" "${P}-peer" "${WORKERS[1]}" "${P}-qwen" "$ART_UID" "$DIGEST" "$POD_BOUND")"; then
+  read -r PEER_BEFORE HUB_BEFORE PEER_AFTER HUB_AFTER <<< "$COUNTERS"
   GOT="$(kubectl -n "$NS" logs "${P}-peer" 2>/dev/null | sort)"
   WANT="$(sort "$MS_SHA_JSON")"
-  PEER_AFTER="$(plugin_metric "${WORKERS[1]}" "gpustack_model_manager_download_bytes_total{source=\"peer\"}")"
-  HUB_AFTER="$(plugin_metric "${WORKERS[1]}" "gpustack_model_manager_download_bytes_total{source=\"hub\"}")"
   if [ "$GOT" != "$WANT" ]; then
     record FAIL "peer sync" "the second Pod's hashes differ from the hub's listing"
   elif [ "$PEER_AFTER" -le "$PEER_BEFORE" ] && [ "$HUB_AFTER" -le "$HUB_BEFORE" ]; then

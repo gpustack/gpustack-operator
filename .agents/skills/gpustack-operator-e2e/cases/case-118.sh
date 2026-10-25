@@ -67,12 +67,11 @@
 #
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-118.sh <NS>}"
 SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
-SETTING=instance-type-aware-cpu-manufacturer
 VENDOR="${E2E_C118_VENDOR:-AMD}"
 PLATFORM="$(printf '%s' "$VENDOR" | tr '[:upper:]' '[:lower:]')"
 
@@ -95,164 +94,56 @@ PROBE=case118-probe
 FILLER=case118-filler
 SUBJECT=case118-subject
 
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
-# shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_quota-lib.sh"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_md-lib.sh"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_epd-lib.sh"
 
 # ---------------------------------------------------------------- the fixture
 
-pick_worker_node() {
-  kubectl get nodes -o json 2>/dev/null | python3 -c '
-import json,sys
-for n in json.load(sys.stdin).get("items",[]):
-    cs=n.get("status",{}).get("conditions",[])
-    if not any(c.get("type")=="Ready" and c.get("status")=="True" for c in cs):
-        continue
-    if n.get("spec",{}).get("unschedulable"):
-        continue
-    # A CPU-vendor probe only reads back on a node that feeds the CPU-only catalog. An
-    # acceleratable node feeds the GPU InstanceType instead, whose manufacturer is the
-    # accelerator vendor, so an injected cpu-model.vendor_id never surfaces here and the
-    # platform-type poll below times out. Skip those nodes, exactly as case-18 reads the
-    # CPU pool (acceleratable=false) rather than the accelerator one.
-    if n.get("metadata",{}).get("labels",{}).get("feature.gpustack.ai/acceleratable") == "true":
-        continue
-    ts=n.get("spec",{}).get("taints",[])
-    if any(str(t.get("key","")).startswith("node-role.kubernetes.io/") for t in ts):
-        continue
-    print(n["metadata"]["name"])
-    break
-'
-}
+# The InstanceType reporting the injected platform, the label that builds it, the setting it turns
+# on, the type it waits for and the undo of all three are the library's: epd_platform_type,
+# epd_pick_worker_node and epd_setup_cpu_vendor_fixture.
 
-epd_platform_type() {
-  kubectl get instancetypes.worker.gpustack.ai \
-    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
-    2>/dev/null \
-    | while IFS='|' read -r name deleting inactive manufacturer; do
-        [ -n "$name" ] || continue
-        [ -z "$deleting" ] || continue
-        [ "$inactive" = true ] && continue
-        if [ "$manufacturer" = "$PLATFORM" ]; then
-          echo "$name"
-          break
-        fi
-      done
-}
-
-ORIG_SETTING="$(kubectl -n "$SYSTEM_NS" get secret gpustack-settings -o jsonpath="{.data.${SETTING}}" 2>/dev/null)"
-set_awareness() { # true|false
-  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
-    -p "{\"data\":{\"${SETTING}\":\"$(printf '%s' "$1" | base64)\"}}" >/dev/null 2>&1
-}
-restore_setting() {
-  local v=null
-  [ -n "$ORIG_SETTING" ] && v="\"${ORIG_SETTING}\""
-  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
-    -p "{\"data\":{\"${SETTING}\":${v}}}" >/dev/null 2>&1
-}
-
-# Restoring the value is not the end of the restore: the worker reads it through a thirty-second
-# cache, and the type derived from it outlives the patch by that cache plus one reconcile. Wait for
-# the derived type to go, so the next case in a serial run does not list an aware type this run left
-# behind (case-18's wait_generic, on this same fixture). A cluster that started with the setting
-# already on keeps its derived type, so there is nothing to wait for and the wait is skipped.
-settle_back() {
-  [ "$(printf '%s' "$ORIG_SETTING" | base64 -d 2>/dev/null)" = "true" ] && return 0
-  for _ in $(seq 1 "$SETTLE_ROUNDS"); do
-    [ -z "$(epd_platform_type)" ] && return 0
-    sleep 5
-  done
-  return 0
-}
-
-# One list call, because this runs from the EXIT trap on every invocation, pass or fail: Kueue holds
-# a finalizer on every Pod of a serving group and releases it only when the Workload is deleted.
-force_release() {
-  local md="$1" row wl uids owners u
-  uids="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${md}" \
-    -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' 2>/dev/null)"
-  [ -n "$uids" ] || return 0
-  while IFS= read -r row; do
-    [ -n "$row" ] || continue
-    wl="${row%%=*}"
-    owners="${row#*=}"
-    for u in $uids; do
-      case " $owners " in *" $u "*)
-        kubectl -n "$NS" delete workloads.kueue.x-k8s.io "$wl" \
-          --ignore-not-found --wait=false >/dev/null 2>&1
-        break
-        ;;
-      esac
-    done
-  done <<EOF
-$(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
-  -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.ownerReferences[*].uid}{"\n"}{end}' 2>/dev/null)
-EOF
-
-  return 0
-}
-
-INJECTED=false
 cleanup() {
+  epd_teardown_cpu_vendor_fixture "$NS" "$NF" "$SETTLE_ROUNDS" "$SYSTEM_NS" cleanup_deployments
+}
+trap cleanup EXIT
+
+# The deployments this run made, removed while the platform they were admitted on still exists.
+# The fixture teardown runs after this, so the type is still there while the Workloads are released.
+cleanup_deployments() {
   kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai \
     "$PROBE" "$FILLER" "$SUBJECT" --ignore-not-found --wait=false >/dev/null 2>&1
   # The release is a loop, not one pass: the probe holds up to MAX_REPLICAS Pods, a deletion takes
-  # longer than a single round trip, and force_release deletes only the Workloads whose owners it can
-  # still see. One pass finds nothing while the Pods are still going and leaves them holding the quota
+  # longer than a single round trip, and md_force_release deletes only the Workloads whose owners it
+  # can still see. One pass finds nothing while the Pods are still going and leaves them holding the quota
   # the next case needs.
   for _ in $(seq 1 12); do
     sleep 5
-    force_release "$PROBE"
-    force_release "$FILLER"
-    force_release "$SUBJECT"
+    md_force_release "$NS" "$PROBE"
+    md_force_release "$NS" "$FILLER"
+    md_force_release "$NS" "$SUBJECT"
     [ -z "$(kubectl -n "$NS" get pods \
       -l "app.kubernetes.io/instance in (${PROBE},${FILLER},${SUBJECT})" \
       --no-headers 2>/dev/null)" ] && break
   done
-  if [ "$INJECTED" = true ]; then
-    kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$NF" --ignore-not-found >/dev/null 2>&1
-    restore_setting
-    settle_back
-  fi
 }
-trap cleanup EXIT
 
-IT="$(epd_platform_type)"
+IT="$(epd_platform_type "$PLATFORM")"
 if [ -z "$IT" ]; then
-  NODE="$(pick_worker_node)"
+  NODE="$(epd_pick_worker_node)"
   if [ -z "$NODE" ]; then
     echo "[case-118] no Ready schedulable worker node; this case cannot place its vendor label" >&2
     exit 2
   fi
 
   echo "[case-118] injecting CPU vendor '${VENDOR}' on node ${NODE} and turning CPU-manufacturer awareness on"
-  INJECTED=true
 
-  kubectl apply -f - >/dev/null 2>&1 <<YAML
-apiVersion: nfd.k8s-sigs.io/v1alpha1
-kind: NodeFeature
-metadata:
-  name: ${NF}
-  namespace: ${NS}
-  labels:
-    nfd.node.kubernetes.io/node-name: ${NODE}
-spec:
-  labels:
-    feature.node.kubernetes.io/cpu-model.vendor_id: "${VENDOR}"
-  features: {}
-YAML
-  set_awareness true
-
-  for _ in $(seq 1 "$SETTLE_ROUNDS"); do
-    IT="$(epd_platform_type)"
-    [ -n "$IT" ] && break
-    sleep 5
-  done
+  epd_setup_cpu_vendor_fixture "$VENDOR" "$NS" "$NF" "$SETTLE_ROUNDS" "$SYSTEM_NS" "$NODE"
+  IT="$EPD_FIXTURE_TYPE"
 fi
 
 if [ -z "$IT" ]; then
@@ -271,7 +162,7 @@ for _ in $(seq 1 "$SETTLE_ROUNDS"); do
   sleep 5
 done
 
-CQ="$(kubectl -n "$NS" get localqueue "$ENTRANCE" -o jsonpath='{.spec.clusterQueue}' 2>/dev/null)"
+CQ="$(md_cq_of_it "$NS" "$IT")"
 if [ -z "$CQ" ]; then
   echo "[case-118] the platform InstanceType names no reachable ClusterQueue through ${NS}/${ENTRANCE}" >&2
   exit 2
@@ -357,41 +248,13 @@ YAML
 
 # ---------------------------------------------------------------- the reading instruments (case 50's)
 
-# Every Workload owning one of this deployment's Pods, one "name=status=role" line each. Two API
-# calls per invocation, not one per Workload: this is the hot path of every settle loop below.
-workload_verdicts() {
-  local md="$1" pods row wl rest status owners p
-  pods="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${md}" \
-    -o jsonpath='{range .items[*]}{.metadata.uid}={.metadata.labels.app\.kubernetes\.io/component}{"\n"}{end}' \
-    2>/dev/null)"
-  [ -n "$pods" ] || return 0
-  while IFS= read -r row; do
-    [ -n "$row" ] || continue
-    wl="${row%%=*}"
-    rest="${row#*=}"
-    status="${rest%%=*}"
-    owners="${rest#*=}"
-    for p in $pods; do
-      # Padded on both sides so a uid cannot match a longer one it is a prefix of.
-      case " $owners " in *" ${p%%=*} "*)
-        echo "${wl}=${status}=${p#*=}"
-        break
-        ;;
-      esac
-    done
-  done <<EOF
-$(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
-  -o jsonpath='{range .items[*]}{.metadata.name}={.status.conditions[?(@.type=="QuotaReserved")].status}={.metadata.ownerReferences[*].uid}{"\n"}{end}' 2>/dev/null)
-EOF
-}
-
 # "RESERVED WAITING" once every replica has a Workload and the counts stop moving. Waiting is what
 # did NOT reserve, not what Kueue judged short: once one replica is turned away, the identical ones
 # behind it carry no condition at all.
 settle_verdicts() {
   local md="$1" want="$2" prev="" cur n r=0 w=0
   for _ in $(seq 1 60); do
-    cur="$(workload_verdicts "$md")"
+    cur="$(md_workload_verdicts "$NS" "$md")"
     n="$(printf '%s' "$cur" | grep -c . || true)"
     r="$(printf '%s\n' "$cur" | grep -c '^[^=]*=True=' || true)"
     w="$(printf '%s\n' "$cur" | grep -c '^[^=]*=False=' || true)"
@@ -412,29 +275,11 @@ settle_verdicts() {
   return 1
 }
 
-deployment_workloads() {
-  local md="$1" uids row wl owners u
-  uids="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${md}" \
-    -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' 2>/dev/null)"
-  [ -n "$uids" ] || return 0
-  while IFS= read -r row; do
-    [ -n "$row" ] || continue
-    wl="${row%%=*}"
-    owners="${row#*=}"
-    for u in $uids; do
-      case " $owners " in *" $u "*) echo "$wl"; break ;; esac
-    done
-  done <<EOF
-$(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
-  -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.ownerReferences[*].uid}{"\n"}{end}' 2>/dev/null)
-EOF
-}
-
 # Every PodSet this deployment holds an assignment for, across ALL of its Workloads: three words is
 # the whole set, and reading a single Workload yields one and looks exactly like a starved role.
 assigned_sets() {
   local wl
-  for wl in $(deployment_workloads "$1"); do
+  for wl in $(md_workloads "$NS" "$1"); do
     kubectl -n "$NS" get workloads.kueue.x-k8s.io "$wl" \
       -o jsonpath='{range .status.admission.podSetAssignments[*]}{.name}{" "}{end}' 2>/dev/null
   done
@@ -453,10 +298,10 @@ wait_admitted() {
 }
 
 # Deletes a deployment and waits for its Pods to go, then deletes any Workload that outlived them.
-# The Workloads are named BEFORE the delete: force_release finds them through the Pods.
+# The Workloads are named BEFORE the delete: md_force_release finds them through the Pods.
 release_deployment() {
   local md="$1" wls wl
-  wls="$(workload_verdicts "$md" | cut -d= -f1)"
+  wls="$(md_workload_verdicts "$NS" "$md" | cut -d= -f1)"
   kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai "$md" \
     --ignore-not-found --wait=false >/dev/null 2>&1
   for _ in $(seq 1 60); do
@@ -464,7 +309,7 @@ release_deployment() {
       --no-headers 2>/dev/null | wc -l | tr -d ' ')" = 0 ] && break
     sleep 2
   done
-  force_release "$md"
+  md_force_release "$NS" "$md"
   for wl in $wls; do
     kubectl -n "$NS" delete workloads.kueue.x-k8s.io "$wl" \
       --ignore-not-found --wait=false >/dev/null 2>&1
@@ -488,7 +333,7 @@ fi
 # What Kueue charged ONE replica, read off a baseline Workload while it still holds its reservation:
 # the unit the pool's quota is written in, whatever the InstanceType's own numbers say.
 CHARGE="$(workload_charge "$NS" \
-  "$(workload_verdicts "$SUBJECT" | sed -n 's/=True=.*$//p' | head -n 1)")"
+  "$(md_workload_verdicts "$NS" "$SUBJECT" | sed -n 's/=True=.*$//p' | head -n 1)")"
 
 release_deployment "$SUBJECT"
 
@@ -585,7 +430,7 @@ if [ "$FILL" -ge 1 ]; then
   # stop the rows below rather than passing them vacuously.
   SUBJ="$(settle_verdicts "$SUBJECT" 3)"
   SUBJ_RC=$?
-  VERDICTS="$(workload_verdicts "$SUBJECT")"
+  VERDICTS="$(md_workload_verdicts "$NS" "$SUBJECT")"
   HOLDING="$(printf '%s\n' "$VERDICTS" | sed -n 's/^[^=]*=True=//p' | sort -u | tr '\n' ' ')"
   WAITING="$(printf '%s\n' "$VERDICTS" | sed -n 's/^[^=]*=False=//p' | sort -u | tr '\n' ' ')"
   WIDE=no
@@ -708,7 +553,7 @@ if [ "$FILL" -ge 1 ]; then
 
   kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai "$FILLER" \
     --ignore-not-found --wait=false >/dev/null 2>&1
-  force_release "$FILLER"
+  md_force_release "$NS" "$FILLER"
 
   AFTER="$(wait_admitted "$SUBJECT" 3)"
   if [ "$(echo "$AFTER" | wc -w | tr -d ' ')" = 3 ]; then

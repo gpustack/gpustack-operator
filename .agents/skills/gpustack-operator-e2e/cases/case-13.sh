@@ -29,8 +29,8 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-13.sh <NS>}"
 INST=gpustack-e2e-ssh-slice
@@ -38,6 +38,9 @@ SECRET=gpustack-e2e-ssh-slice-key
 MEM_PCT=60
 LOCAL_PORT=22022
 KEYDIR="$(mktemp -d)"
+
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_ssh-lib.sh"
 
 command -v ssh >/dev/null 2>&1 || { echo "== CASE 13 — SKIPPED =="; echo "no ssh client on the runner"; exit 0; }
 
@@ -74,20 +77,14 @@ print(int(m.group(1)) * (1024 if m.group(2) == 'G' else 1) if m else 0)
 " 2>/dev/null)
 echo "[case-13] sliceable InstanceType ${IT} (card memory ${CARDMEM} = ${PHYS_MIB}MiB)"
 
-PF_PID=""
 restore() {
   echo
   echo "[case-13] cleanup"
-  [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null
   kubectl -n default delete instance "$INST" --ignore-not-found --wait=false 2>/dev/null || true
   kubectl -n default delete secret "$SECRET" --ignore-not-found 2>/dev/null || true
   rm -rf "$KEYDIR"
 }
-trap restore EXIT
-
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+trap 'ssh_cleanup; restore' EXIT
 
 print_and_exit() {
   echo
@@ -107,9 +104,7 @@ print_and_exit() {
 }
 
 # 1. SSH key + secret, then a sliced SSH-enabled Instance on the sliceable pool.
-ssh-keygen -t ed25519 -f "$KEYDIR/id" -N "" -q
-kubectl -n default delete secret "$SECRET" --ignore-not-found >/dev/null 2>&1
-kubectl -n default create secret generic "$SECRET" --from-file=authorized_keys="$KEYDIR/id.pub" >/dev/null
+ssh_setup_key_secret default "$SECRET" "$KEYDIR/id"
 echo "[case-13] creating Instance ${INST}: ${MEM_PCT}% memory slice, SSH enabled, on ${IT}"
 cat <<EOF | kubectl apply -f - >/dev/null
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -175,12 +170,8 @@ fi
 
 # 5. SSH login (real sshd -> ForceCommand /chroot.sh -> nsenter into main -> setpriv login shell):
 #    the slice is visible, the shell has no capabilities, and host mknod is denied.
-kubectl -n default port-forward "pod/$POD" "${LOCAL_PORT}:22" >/dev/null 2>&1 &
-PF_PID=$!
-for _ in $(seq 1 20); do (exec 3<>"/dev/tcp/127.0.0.1/${LOCAL_PORT}") 2>/dev/null && { exec 3>&- 3<&-; break; }; sleep 1; done
-ssh_out=$(ssh -T -p "$LOCAL_PORT" -i "$KEYDIR/id" -o IdentitiesOnly=yes \
-  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=15 \
-  root@127.0.0.1 2>/dev/null <<'CMDS'
+ssh_open_port_forward default "pod/$POD" 22 "$LOCAL_PORT"
+ssh_out=$(ssh_exec "$KEYDIR/id" "$LOCAL_PORT" 2>/dev/null <<'CMDS'
 echo "CAPEFF=$(grep CapEff /proc/self/status | awk '{print $2}')"
 echo "CAPBND=$(grep CapBnd /proc/self/status | awk '{print $2}')"
 echo "SMI=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader 2>/dev/null | grep -oE '[0-9]+' | head -1)"
@@ -188,7 +179,7 @@ mknod /tmp/case13blk b 8 0 2>/dev/null; echo "MKNOD_RC=$?"
 exit
 CMDS
 )
-kill "$PF_PID" 2>/dev/null; PF_PID=""
+ssh_cleanup
 
 ssh_smi=$(printf '%s\n' "$ssh_out" | sed -n 's/^SMI=//p')
 ssh_capeff=$(printf '%s\n' "$ssh_out" | sed -n 's/^CAPEFF=//p')

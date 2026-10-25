@@ -30,8 +30,6 @@
 # Cleanup:     Trap deletes the deployments, the artifacts, the Binding, the pool and the backend.
 set -uo pipefail
 
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
@@ -51,10 +49,6 @@ COMMIT_B=fcc320f490e08fdb4b99d935b2c58d40bf35b0d0
 P=c100
 LABEL="e2e.gpustack.ai/case=100"
 SERVED=e2e/c100
-
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 cleanup() {
   echo

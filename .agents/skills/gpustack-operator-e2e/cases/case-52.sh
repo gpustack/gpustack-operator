@@ -62,8 +62,8 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
 # transport alone, and a check that takes such a failure for an answer reports a verdict about the
 # network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-52.sh <NS>}"
 
@@ -77,16 +77,9 @@ QUIET_SECONDS="${CASE52_QUIET_SECONDS:-70}"
 RESTART_SECONDS="${CASE52_RESTART_SECONDS:-300}"
 SETTLE_SECONDS="${CASE52_SETTLE_SECONDS:-40}"
 
-FAILS=0
 PASSES=0
-SKIPS=0
-ROWS=()
-# The rows are joined with ASCII UNIT SEPARATOR rather than a pipe. A pipe is correct only while no
-# check name or object text ever contains one, which is a property of today's strings rather than of
-# the code; 0x1f cannot appear in a node name, a label key or a link reason.
-ROW_SEP=$'\x1f'
 record() {
-  ROWS+=("$1${ROW_SEP}$2${ROW_SEP}$3")
+  ROWS+=("$1|$2|$3")
   case "$1" in
   FAIL) FAILS=$((FAILS + 1)) ;;
   PASS) PASSES=$((PASSES + 1)) ;;
@@ -96,15 +89,7 @@ record() {
 }
 
 results() {
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  # Split on the separator the rows were built with. A field-position guess over the flattened line
-  # cannot work: it has to locate the check text by content, and a check whose first word occurs
-  # earlier in the line lands on the wrong offset.
-  for r in "${ROWS[@]}"; do
-    IFS="$ROW_SEP" read -r st ck ob <<<"$r"
-    printf '%s | %s | %s\n' "$st" "$ck" "$ob"
-  done
+  print_rows
   [ "$FAILS" -eq 0 ] || {
     echo "[case-52] ${FAILS} check(s) FAILED (${PASSES} passed, ${SKIPS} skipped)"
     exit 1

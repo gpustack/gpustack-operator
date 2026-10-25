@@ -10,10 +10,10 @@
 #
 # Goal:        This is the functional reading of the admitted matrix rows
 #              llm-d-router + vLLM + NVIDIA CUDA (or AMD ROCm) + ECCPUConnector. Case 116 pins the
-#              ADMISSION of the shape, case 119 pins the shared-directory render of the OTHER row;
+#              ADMISSION of the shape, case 117 pins the shared-directory render of the OTHER row;
 #              nothing yet proves these run. The encoder's output reaches the prefiller over NIXL
 #              here —
-#              the sidecar on the decode Pod pulls it — so the rendered mount rows of case 119
+#              the sidecar on the decode Pod pulls it — so the rendered mount rows of case 117
 #              say nothing about this leg, and the only reading that says anything is a real
 #              engine moving real encodings: three roles Ready on real NVIDIA or AMD cards, the
 #              rendered leg naming the network connector on both halves that carry it, and one
@@ -112,14 +112,20 @@ set -uo pipefail
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
 # on transport alone, and a check that takes such a failure for an answer reports a verdict
 # about the network rather than about the operator.
-E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
-[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:-}"
 if [ -z "$NS" ]; then
   echo "usage: case-120.sh <NS>" >&2
   exit 2
 fi
+
+# The image override and the live serving group are read through the library: the registry the
+# operator prefixes onto every image, the pin and the restore of the router and the sidecar, the
+# role Pods, the router and the connector document.
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_epd-lib.sh"
 
 MD=case120-epd
 IT="${E2E_C120_INSTANCE_TYPE:-}"
@@ -147,28 +153,14 @@ SETTLE_BOUND="${E2E_C120_SETTLE_BOUND:-180}"
 # The operator prefixes `container-registry` onto every image it chooses, and the two settings below
 # take a reference of the form `namespace/name:tag`. A value that already names a host would render as
 # `<registry>/<host>/...` on a cluster that sets a registry, so drop the host there.
-registry_relative() {
-  case "${1%%/*}" in
-    *.*|*:*|localhost) printf '%s' "${1#*/}" ;;
-    *) printf '%s' "$1" ;;
-  esac
-}
-CLUSTER_REGISTRY="$(kubectl -n "$SYSTEM_NS" get secret gpustack-settings \
-  -o jsonpath='{.data.container-registry}' 2>/dev/null | base64 -d 2>/dev/null)"
-if [ -n "$CLUSTER_REGISTRY" ]; then
-  ROUTER_IMAGE="$(registry_relative "$ROUTER_IMAGE")"
-  SIDECAR_IMAGE="$(registry_relative "$SIDECAR_IMAGE")"
+if [ -n "$(epd_cluster_registry "$SYSTEM_NS")" ]; then
+  ROUTER_IMAGE="$(epd_registry_relative "$ROUTER_IMAGE")"
+  SIDECAR_IMAGE="$(epd_registry_relative "$SIDECAR_IMAGE")"
 fi
 # 30 minutes is not slack: this row loads a vision-language model on three roles, and the encoder
 # compiles a model it then never answers with. A smaller bound would report a slow cluster as a
 # broken leg.
 PROBE_NAME=case120-probe
-
-FAILS=0
-ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
-# shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 skip() { echo "[case-120] SKIP: $1"; echo "NOTHING WAS VERIFIED"; exit 0; }
 
@@ -232,54 +224,8 @@ echo "[case-120] pool '${IT}': ${FREE_EX} free exclusive cards, need ${NEED_CARD
 # set, and deleting the former would leave this run's baseline changed for every case after it.
 ROUTER_SETTING=model-deployment-router-image
 SIDECAR_SETTING=model-deployment-routing-sidecar-image
-ORIG_ROUTER="$(kubectl -n "$SYSTEM_NS" get secret gpustack-settings \
-  -o jsonpath="{.data.${ROUTER_SETTING}}" 2>/dev/null)"
-ORIG_SIDECAR="$(kubectl -n "$SYSTEM_NS" get secret gpustack-settings \
-  -o jsonpath="{.data.${SIDECAR_SETTING}}" 2>/dev/null)"
-
-set_image_setting() { # key value
-  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
-    -p "{\"data\":{\"$1\":\"$(printf '%s' "$2" | base64)\"}}" >/dev/null 2>&1
-}
-
-restore_image_setting() { # key original
-  local v=null
-  [ -n "$2" ] && v="\"$2\""
-  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
-    -p "{\"data\":{\"$1\":${v}}}" >/dev/null 2>&1
-}
-
-# Restoring the bytes is not the end of the restore: the worker reads settings through a cache and
-# re-renders the router Deployment by the value, so a case that returned while the router still ran
-# this case's image would hand the next one a router it did not choose. Wait for the restore to be
-# READ BACK, which is what the Deployment's own image shows.
-router_image() {
-  kubectl -n "$NS" get deploy "${MD}-router" \
-    -o jsonpath='{.spec.template.spec.containers[*].image}' 2>/dev/null
-}
-
-settle_back() {
-  local deadline=$((SECONDS + SETTLE_BOUND)) image
-  while [ "$SECONDS" -lt "$deadline" ]; do
-    image="$(router_image)"
-    # No router was ever rendered — an apply that was refused, or a run that never reached it — so
-    # nothing carries this case's image and there is nothing to wait for.
-    [ -n "$image" ] || return 0
-    # The restored value is not always comparable: a key the cluster shipped absent is restored by
-    # deleting it, and what the Deployment then carries is the operator's own default, which this
-    # case never knew. "No longer this case's image" is the condition both spellings satisfy.
-    case "$image" in
-      *"$ROUTER_IMAGE"*) ;;
-      *) return 0 ;;
-    esac
-    sleep 5
-  done
-  # The bound is spent and the router still runs this case's image: the restore was written but the
-  # worker has not read it back. Cleanup cannot record a row from here, and returning silently would
-  # hand the next case a router it did not choose without saying so, so say it on stderr.
-  echo "[case-120] settle bound ${SETTLE_BOUND}s spent with the router still on '${ROUTER_IMAGE}'; the settings restore has not been read back" >&2
-  return 0
-}
+# The pin, the restore and the wait for the router to be re-rendered are the library's:
+# epd_pin_router_sidecar_images, epd_restore_router_sidecar_images and epd_settle_router_image.
 
 force_release() {
   local md="$1" row wl uids u
@@ -304,17 +250,19 @@ $(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
 EOF
   return 0
 }
-
-# THE SETTINGS GO BACK BEFORE THE DEPLOYMENT IS DELETED, which is the order that lets settle_back
+# THE SETTINGS GO BACK BEFORE THE DEPLOYMENT IS DELETED, which is the order that lets the settle
 # prove the restore: while the ModelDeployment stands, its router Deployment stands with it, and
 # the image on that Deployment is the one thing in the cluster that shows what the worker has read
 # since the patch. Deleting the deployment first would remove the only witness.
 cleanup() {
   echo
   echo "[case-120] cleanup"
-  restore_image_setting "$ROUTER_SETTING" "$ORIG_ROUTER"
-  restore_image_setting "$SIDECAR_SETTING" "$ORIG_SIDECAR"
-  settle_back
+  epd_restore_router_sidecar_images "$SYSTEM_NS" "$ROUTER_SETTING" "$SIDECAR_SETTING"
+  # The bound is spent and the router still runs this case's image: the restore was written but the
+  # worker has not read it back. Cleanup cannot record a row from here, and returning silently would
+  # hand the next case a router it did not choose without saying so, so say it on stderr.
+  epd_settle_router_image "$NS" "$MD" "$SETTLE_BOUND" "$ROUTER_IMAGE" ||
+    echo "[case-120] settle bound ${SETTLE_BOUND}s spent with the router still on '${ROUTER_IMAGE}'; the settings restore has not been read back" >&2
   # By name only. kubectl refuses a name combined with a selector ("name cannot be provided when a
   # selector is specified") and stderr is silenced below, so a stale probe would survive every run
   # and take the name the next run's kubectl run needs. The e2e-probe label is still on the Pod; it
@@ -331,15 +279,15 @@ cleanup() {
 # cannot leave the cluster running a router image this run chose.
 trap cleanup EXIT
 
-set_image_setting "$ROUTER_SETTING" "$ROUTER_IMAGE"
-set_image_setting "$SIDECAR_SETTING" "$SIDECAR_IMAGE"
+epd_pin_router_sidecar_images "$SYSTEM_NS" "$ROUTER_SETTING" "$SIDECAR_SETTING" \
+  "$ROUTER_IMAGE" "$SIDECAR_IMAGE"
 
 # --- fixture ----------------------------------------------------------------
 
 # The decode role carries the sidecar that pulls encodings over NIXL, so the deployment needs the
 # router: an encoder role without one is refused at admission. No claim is mounted anywhere: this
 # row's connector moves embeddings over the network, and a claim here would be the OTHER row's
-# subject (case 119).
+# subject (case 117).
 APPLY_OUT="$(cat <<YAML | kubectl apply -f - 2>&1
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -415,52 +363,13 @@ fi
 
 # A pull failure on any of the three images is a SKIP naming the image (case-81's rule): a
 # container nobody could start is not a verdict about the leg. The bound is generous because a
-# vision-language model is loaded three times over.
-pull_reason() { # <component>
-  kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${MD},app.kubernetes.io/component=$1" \
-    -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{" "}{end}' 2>/dev/null
-}
-
-wait_pods() { # <component> -> pod name on stdout once Ready, rc!=0 on timeout
-  local comp="$1" deadline=$((SECONDS + READY_BOUND)) pods ready p
-  while [ "$SECONDS" -lt "$deadline" ]; do
-    pods="$(kubectl -n "$NS" get pods \
-      -l "app.kubernetes.io/instance=${MD},app.kubernetes.io/component=${comp}" \
-      -o json 2>/dev/null)"
-    ready="$(printf '%s' "$pods" | jq -r \
-      '[.items[] | select([.status.conditions // [] | .[] | select(.type=="Ready" and .status=="True")] | length > 0)] | length')"
-    if [ "${ready:-0}" -ge 1 ]; then
-      printf '%s' "$pods" | jq -r '.items[0].metadata.name'
-      return 0
-    fi
-    for p in ImagePullBackOff ErrImagePull; do
-      case "$(pull_reason "$comp")" in
-        *"$p"*) return 2 ;;
-      esac
-    done
-    sleep 15
-  done
-  return 1
-}
-
-# Each role is polled separately and the exit code is read IMMEDIATELY, because a pull failure on
-# the first role means the other two polls would sit out the whole bound before anything reported
-# it. 2 is "an image would not pull", which is an environment answer; 1 is a timeout.
-poll_role() { # <component> -> sets POD_<component> and returns the wait_pods code
-  local comp="$1" pod rc
-  pod="$(wait_pods "$comp")"; rc=$?
-  case "$comp" in
-    encode) EN_POD="$pod" ;;
-    prefill) PF_POD="$pod" ;;
-    decode) DC_POD="$pod" ;;
-  esac
-  return "$rc"
-}
+# vision-language model is loaded three times over. The reading of a role's Pods is the library's:
+# epd_pull_reason, epd_wait_pods and epd_poll_role.
 
 EN_POD=""; PF_POD=""; DC_POD=""
 UNPULLABLE_COMPONENT=""
 for comp in encode prefill decode; do
-  poll_role "$comp"; rc=$?
+  epd_poll_role "$NS" "$MD" "$READY_BOUND" "$comp"; rc=$?
   if [ "$rc" = 2 ]; then
     UNPULLABLE_COMPONENT="$comp"
     break
@@ -469,7 +378,7 @@ done
 
 if [ -n "$UNPULLABLE_COMPONENT" ]; then
   record SKIP "the three role Pods reach Ready" \
-    "the ${UNPULLABLE_COMPONENT} Pod waits on $(pull_reason "$UNPULLABLE_COMPONENT" | tr -s ' '): no container started, so the leg was never exercised. Render the images and re-run"
+    "the ${UNPULLABLE_COMPONENT} Pod waits on $(epd_pull_reason "$NS" "$MD" "$UNPULLABLE_COMPONENT" | tr -s ' '): no container started, so the leg was never exercised. Render the images and re-run"
   print_rows
   exit 0
 fi
@@ -488,62 +397,14 @@ done
 # role poll can see. It is the environment answer the role images already get, and reading it as an
 # operator defect would cost the whole bound and then be wrong.
 #
-# The router's Pods are selected by the router Deployment's OWN selector rather than by a label
-# spelled here. The router carries the same instance label the roles carry, plus a router key of its
-# own, so an instance-only selector would return the role Pods too and learn nothing about the
-# router; the Deployment's selector is the one that cannot drift from what was rendered.
-router_pods() {
-  local sel
-  # shellcheck disable=SC2016  # the dollar names are kubectl jsonpath map variables, and must not expand
-  sel="$(kubectl -n "$NS" get deploy "${MD}-router" \
-    -o go-template='{{range $k,$v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}' 2>/dev/null | sed 's/,$//')"
-  [ -n "$sel" ] || return 0
-  kubectl -n "$NS" get pods -l "$sel" -o json 2>/dev/null
-}
-
-# What any router container is WAITING on, joined; empty when none is waiting on an image. Read for
-# the same two reasons wait_pods reads them on the roles.
-router_pull_reason() {
-  router_pods | jq -r \
-    '[.items[]? | .status.containerStatuses[]? | .state.waiting?.reason // empty] | join(" ")' 2>/dev/null
-}
-
-# The Ready router Pod's name, or empty when the router is not up. Read once when the verdict is
-# formed, because by then the bound is spent and the router's state is settled.
-router_pod() {
-  router_pods | jq -r \
-    '[.items[]? | select([.status.conditions // [] | .[] | select(.type=="Ready" and .status=="True")] | length > 0) | .metadata.name] | if length > 0 then .[0] else "" end' 2>/dev/null
-}
-
-# The endpoint is written once the ROUTER's OWN Deployment reports a ready replica — it is the
-# router's status the operator copies, not a fact about the role Pods — so a single read here
-# races that writer by design, and the wait is bounded because the router is a fourth workload no
-# role poll above covers. Prints the endpoint and returns 0 on arrival, 2 when the router image
-# would not pull (the same code wait_pods returns for a role image), 1 once the bound is spent.
-wait_endpoint() {
-  local deadline=$((SECONDS + READY_BOUND)) ep p
-  while [ "$SECONDS" -lt "$deadline" ]; do
-    ep="$(kubectl -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" \
-      -o jsonpath='{.status.endpoint}' 2>/dev/null)"
-    if [ -n "$ep" ]; then
-      printf '%s' "$ep"
-      return 0
-    fi
-    for p in ImagePullBackOff ErrImagePull; do
-      case "$(router_pull_reason)" in
-        *"$p"*) return 2 ;;
-      esac
-    done
-    sleep 5
-  done
-  return 1
-}
+# The reading of the router is the library's: epd_router_pods, epd_router_pull_reason,
+# epd_router_pod and epd_wait_endpoint.
 
 ALL_READY=no
 [ -n "$EN_POD" ] && [ -n "$PF_POD" ] && [ -n "$DC_POD" ] && ALL_READY=yes
 
-ENDPOINT="$(wait_endpoint)"; ENDPOINT_RC=$?
-ROUTER_POD="$(router_pod)"
+ENDPOINT="$(epd_wait_endpoint "$NS" "$MD" "$READY_BOUND")"; ENDPOINT_RC=$?
+ROUTER_POD="$(epd_router_pod "$NS" "$MD")"
 # The FAIL verdict needs the WHOLE chain up, the router included. A router that never came up
 # publishes no front door either, and calling that a defect would blame the operator for an image
 # it was told to run.
@@ -556,7 +417,7 @@ elif [ "$ENDPOINT_RC" = 2 ]; then
   # An image that would not pull is not a verdict about the leg: no container started, so there was
   # never a front door to publish. Same shape as the role-image SKIP above, naming the image.
   record SKIP "endpoint" \
-    "the router Pod waits on $(router_pull_reason | tr -s ' '), so router image '${ROUTER_IMAGE}' would not pull and no front door could be published. Render the image and re-run"
+    "the router Pod waits on $(epd_router_pull_reason "$NS" "$MD" | tr -s ' '), so router image '${ROUTER_IMAGE}' would not pull and no front door could be published. Render the image and re-run"
 elif [ "$CHAIN_UP" = yes ]; then
   # Every Pod came up, the router's included, and the controller still publishes no front door.
   # Nothing else explains that, so it is a defect in what the operator publishes rather than an
@@ -584,28 +445,11 @@ fi
 
 # The document is the argument AFTER --ec-transfer-config, which is how the operator renders it:
 # the flag has no environment equivalent, so it is always two argv entries. Reading the pair off
-# the live argv rather than pattern-matching the JSON keeps the row a question about the flag.
-ec_document() { # <pod>
-  kubectl -n "$NS" get pod "$1" -o json 2>/dev/null | jq -r \
-    --arg f "--ec-transfer-config" \
-    '[(.spec.containers[] | select(.name=="main") | (.command // []) + (.args // []))][0] // []
-     | (index($f) // -1) as $i | if $i < 0 then "" else .[$i + 1] end' 2>/dev/null
-}
-
-ec_env() { # <pod> <name>
-  kubectl -n "$NS" get pod "$1" -o json 2>/dev/null | jq -r \
-    --arg n "$2" '[(.spec.containers[] | select(.name=="main") | .env // [])[] | select(.name==$n)][0].value // ""' 2>/dev/null
-}
-
-# The downward-API half of the same read: the field selector the kubelet resolves, not the value it
-# resolved. Rendered by valueFrom.fieldRef.fieldPath, so the variable has no .value to read.
-ec_env_field_path() { # <pod> <name>
-  kubectl -n "$NS" get pod "$1" -o json 2>/dev/null | jq -r \
-    --arg n "$2" '[(.spec.containers[] | select(.name=="main") | .env // [])[] | select(.name==$n)][0].valueFrom.fieldRef.fieldPath // ""' 2>/dev/null
-}
+# the live argv rather than pattern-matching the JSON keeps the row a question about the flag. The
+# reading itself is the library's: epd_ec_document, epd_ec_env and epd_ec_env_field_path.
 
 if [ -n "$EN_POD" ]; then
-  DOC="$(ec_document "$EN_POD")"
+  DOC="$(epd_ec_document "$NS" "$EN_POD")"
   if [ -n "$DOC" ]; then
     if printf '%s' "$DOC" | jq -e '.ec_connector == "ECCPUConnector" and .ec_role == "ec_producer"' \
       >/dev/null 2>&1; then
@@ -622,9 +466,9 @@ if [ -n "$EN_POD" ]; then
     #
     # The port half is the opposite: a plain string the renderer owns outright, so .value is the
     # right key and the only one there is.
-    SIDE_HOST_FIELD="$(ec_env_field_path "$EN_POD" VLLM_EC_SIDE_CHANNEL_HOST)"
-    SIDE_PORT="$(ec_env "$EN_POD" VLLM_EC_SIDE_CHANNEL_PORT)"
-    RUNNER="$(ec_env "$EN_POD" VLLM_USE_V2_MODEL_RUNNER)"
+    SIDE_HOST_FIELD="$(epd_ec_env_field_path "$NS" "$EN_POD" VLLM_EC_SIDE_CHANNEL_HOST)"
+    SIDE_PORT="$(epd_ec_env "$NS" "$EN_POD" VLLM_EC_SIDE_CHANNEL_PORT)"
+    RUNNER="$(epd_ec_env "$NS" "$EN_POD" VLLM_USE_V2_MODEL_RUNNER)"
     POD_IP="$(kubectl -n "$NS" get pod "$EN_POD" -o jsonpath='{.status.podIP}' 2>/dev/null)"
     if [ "$SIDE_HOST_FIELD" = status.podIP ] && [ -n "$POD_IP" ] && [ -n "$SIDE_PORT" ]; then
       record PASS "encoder side channel" \
@@ -645,7 +489,7 @@ if [ -n "$EN_POD" ]; then
 fi
 
 if [ -n "$PF_POD" ]; then
-  DOC="$(ec_document "$PF_POD")"
+  DOC="$(epd_ec_document "$NS" "$PF_POD")"
   if [ -n "$DOC" ]; then
     if printf '%s' "$DOC" | jq -e '.ec_connector == "ECCPUConnector" and .ec_role == "ec_consumer"' \
       >/dev/null 2>&1; then
@@ -654,7 +498,7 @@ if [ -n "$PF_POD" ]; then
       record FAIL "prefiller document" "got: ${DOC}"
     fi
     # A consumer that rendered the side channel would advertise an address it never binds.
-    SIDE_PORT="$(ec_env "$PF_POD" VLLM_EC_SIDE_CHANNEL_PORT)"
+    SIDE_PORT="$(epd_ec_env "$NS" "$PF_POD" VLLM_EC_SIDE_CHANNEL_PORT)"
     if [ -z "$SIDE_PORT" ]; then
       record PASS "prefiller binds no side channel" \
         "VLLM_EC_SIDE_CHANNEL_PORT is absent on ${PF_POD}, which is right: a consumer does not bind"
