@@ -2,6 +2,9 @@
 
 Start four fixed *DP* ranks behind `vllm-router`, send requests to each rank directly, and confirm the Router reaches every endpoint.
 
+The captured run in this walkthrough is **vLLM**; the SGLang shape's contract and recorded
+results are on [External DP](/gpustack-operator/main/docs/modules/model-deployment/external-dp/index.md).
+
 ## Contents
 
 - [Summary](#summary)

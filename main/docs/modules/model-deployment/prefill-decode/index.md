@@ -4,6 +4,9 @@ A *prefill/decode (PD)* deployment with *Prefill* and *Decode* roles is admitted
 operator connects them through a router and a transfer path. [Prefill and
 decode](deployment.md#prefill-and-decode) describes the role fields and admission rules.
 
+The recorded runs apply to vLLM `v0.30.0` and SGLang `0.5.22`. Other versions must be re-verified
+before they inherit a claim on this page.
+
 ## Contents
 
 - [Pair connections](#pair-connections)
@@ -22,7 +25,8 @@ nothing pairs the two roles.
 
 For a multi-`Pod` *PD* replica, managed HTTP routing selects its leader (`member-index=0`).
 A router policy such as `round_robin` chooses among those leaders; it does not add non-HTTP members.
-*External data parallelism (External DP)* inside a *Prefill* or *Decode* role has not been validated.
+*External data parallelism (External DP)* inside a *Prefill* or *Decode* role has not been validated;
+the shape's own contract, including its Router requirement, is on [External DP](/gpustack-operator/main/docs/modules/model-deployment/external-dp/index.md).
 [Issue #754](https://github.com/gpustack/gpustack-operator/issues/754) tracks that deferred combination.
 
 With the managed `llm-d-router`, the connector a native vLLM role runs depends on whether
@@ -113,13 +117,13 @@ spec:
     - name: prefill
       kind: Prefill
       replicas: 2
-      instanceType: gpustack-nvidia-h20-linux-amd64
+      instanceType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
     - name: decode
       kind: Decode
       replicas: 2
-      instanceType: gpustack-nvidia-h20-linux-amd64
+      instanceType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
 ```

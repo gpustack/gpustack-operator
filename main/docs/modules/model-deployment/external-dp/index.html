@@ -1004,27 +1004,6 @@
       
         
         
-          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
-          
-          
-            <div class="nav-children">
-              
-                
-                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
-                
-              
-            </div>
-          
-        
-      
-    
-      
-      
-    
-      
-      
-        
-        
           <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
           
           
@@ -1105,6 +1084,27 @@
               
                 
                   <a title="External DP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
                 
               
             </div>
@@ -1410,9 +1410,16 @@
         
   <h1 id="external-dp">External DP</h1>
 <p><em>External data parallelism (External DP)</em> runs one fixed group in which every rank exposes its own HTTP endpoint,
-and the Router balances requests across all of them. For captured commands and results, follow the
+and no rank is a leader, so a Router in front is <strong>required</strong> — admission refuses a role that
+declares external data parallelism without <em><code>spec.router</code></em>, naming the rule <code>RouterRequired</code>. For
+the vLLM captured commands and results, follow the
 <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
 .</p>
+<p>The recorded runs apply to two combinations, and they are the two the engine-match rule
+admits: vLLM <code>v0.30.0</code> on NVIDIA <em>H100</em> behind the <code>vllm-router</code> binary of
+<code>gpustack/llm-router:v0.3.1</code> under <code>--policy round_robin</code>, and SGLang <code>0.5.22</code> behind the
+<code>sglang-gateway</code> binary of <code>gpustack/llm-router:v0.3.1</code>. Other versions must be re-verified
+before they inherit a claim on this page.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#overview-and-selection">Overview and selection</a>
@@ -1427,6 +1434,10 @@ and the Router balances requests across all of them. For captured commands and r
 </li>
 <li><a href="#endpoint-selection">Endpoint selection</a>
 </li>
+<li><a href="#probe-and-health">Probe and health</a>
+</li>
+<li><a href="#limits">Limits</a>
+</li>
 <li><a href="#admission-constraints">Admission constraints</a>
 </li>
 <li><a href="#results">Results</a>
@@ -1439,6 +1450,11 @@ not on attention. Splitting the group into ranks with <em>data parallelism (DP)<
 narrow <em>tensor parallelism (TP)</em> slice in one shared <em>DP</em> × <em>TP</em> collective with <em>expert parallelism (EP)</em>.
 Requests run against independent rank endpoints instead of queuing on one master process.</p>
 <p>Elastic serving uses <em>elastic expert parallelism (Elastic EP)</em> with <em>internal load balancing (Internal LB)</em>.</p>
+<p><em>External DP</em> is the mode itself, on either engine: a fixed group whose every rank or member
+exposes its own HTTP endpoint behind a Router. The vLLM shape runs one independent engine per
+rank; the SGLang shape runs one distributed launch over the members
+(<a href="#sglang-shape">SGLang shape</a>
+).</p>
 <p>The serving configurations compare as follows:</p>
 <table>
   <thead>
@@ -1463,18 +1479,25 @@ Requests run against independent rank endpoints instead of queuing on one master
           <td>online <em><code>elasticEp.width</code></em> scale-up</td>
       </tr>
       <tr>
-          <td><em>External DP</em></td>
+          <td><em>vLLM External DP</em></td>
           <td>fixed ranks, <code>--data-parallel-rank</code> each</td>
           <td>one endpoint <strong>per rank</strong>, Router-balanced</td>
           <td>fixed; world-size changes recreate</td>
       </tr>
+      <tr>
+          <td><em>SGLang External DP</em></td>
+          <td>one distributed launch over <code>size</code> members, <em>FFN</em> tensor-parallel across them</td>
+          <td>one endpoint <strong>per member</strong>, Router-balanced</td>
+          <td>fixed; replica count changes recreate groups</td>
+      </tr>
   </tbody>
 </table>
-<p>Choose <em>External DP</em> for fixed <em>MoE</em> groups that need per-rank HTTP ingress or lower median first-token
-latency under high concurrency. Its independent rank schedulers do not guarantee higher output throughput.
+<p>Choose <em>External DP</em> for fixed <em>MoE</em> groups that need per-rank or per-member HTTP ingress or
+lower median first-token latency under high concurrency. Its independent rank or member
+schedulers do not guarantee higher output throughput.
 Choose <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/">Elastic EP</a>
  when the collective must grow online while retaining surviving <code>Pod</code>s.</p>
-<p>In the H100 recording, each <em>External DP</em> rank used intra-<code>Pod</code> NVLink for <em>TP</em> = 2.
+<p>The H100 recording ran the vLLM shape: each rank used intra-<code>Pod</code> NVLink for <em>TP</em> = 2.
 The four ranks shared one <em>EP</em> collective over <strong>cross-<code>Pod</code> TCP sockets on <code>eth0</code></strong>.
 The wide <em>TP</em> = 8 comparison kept all eight GPUs inside one NVLink-connected <code>Pod</code>.
 Separate GPU visibility, private IPC and <code>/dev/shm</code>, and no <em>remote direct memory access (RDMA)</em> interface
@@ -1505,7 +1528,7 @@ bounded the measured transport; host NVLink did not carry cross-<code>Pod</code>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">  </span><span class="c"># four member Pods in one fate-sharing DP group</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">  </span><span class="c"># matches local --tensor-parallel-size per member</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
@@ -1525,6 +1548,111 @@ bounded the measured transport; host NVLink did not carry cross-<code>Pod</code>
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;19500&#34;</span><span class="w">  </span><span class="c"># keeps candidate ports below the ephemeral source-port range</span></span></span></code></pre></div>
 </div><p>When the cluster provides an <em>RDMA</em> fabric, add <code>interface: &quot;2&quot;</code> under <em><code>resources</code></em> so cross-<code>Pod</code>
 expert collectives run over InfiniBand or RoCE instead of TCP.</p>
+<h3 id="sglang-shape">SGLang shape</h3>
+<p>The SGLang configuration is the same shape on the SGLang engine, declared through SGLang&rsquo;s own
+launch arguments. One instance is <strong>one SGLang distributed launch spanning <code>size</code> member <code>Pod</code>s</strong>,
+with <strong>one attention-DP group per member <code>Pod</code></strong>: under <code>SGLANG_RUST_SERVER=1</code> every attention-DP
+group hosts an HTTP listener of its own, so each member <code>Pod</code> answers on the base port of its own
+<code>Pod</code> IP and the Router balances across the members.</p>
+<p>The launch spans the members, so the <em>TP</em> width counts every member&rsquo;s GPU while the attention
+width counts the groups: with two members and one GPU each, <code>--tp-size 2 --attn-dp-size 2 --nnodes 2</code> gives each member one attention-DP group of one scheduler, with the <em>FFN</em>
+tensor-parallel group spanning both members.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-sglang-external-dp</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">SGLang</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-sglang0.5.22</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sglang-gateway </span><span class="w"> </span><span class="c"># balances requests across all member endpoints</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">  </span><span class="c"># two member Pods in one fate-sharing group</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># one GPU per member; the FFN tensor-parallel group spans both</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">tp-size</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">attn-dp-size</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">nnodes</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">node-rank</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">$(GPUSTACK_MEMBER_INDEX) </span><span class="w"> </span><span class="c"># zero-based member index injected by the operator</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">dist-init-addr</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">$(GPUSTACK_REPLICA_LEADER_ADDRESS):29500 </span><span class="w"> </span><span class="c"># leader DNS name injected by the operator</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">SGLANG_RUST_SERVER</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><p><code>--node-rank</code> is the only argument that differs between members. It carries
+<code>$(GPUSTACK_MEMBER_INDEX)</code> verbatim, and Kubernetes expands the reference in the container
+arguments against the member&rsquo;s own environment — the same mechanism the vLLM example above uses
+for <code>--data-parallel-rank</code>. The operator stamps the member index per member and the leader&rsquo;s DNS
+name per instance; it does not restate them in the manifest.</p>
+<p>The <strong>dist-init port must differ from the role&rsquo;s HTTP port</strong> and stay clear of the role&rsquo;s port
+range. The operator fills the listener&rsquo;s <code>--host</code> and <code>--port</code> (<code>8000</code> by default); the example
+uses <code>29500</code> for the collective rendezvous, which is a member-local port — each member has its own
+network namespace, so the derived-port budget does not collide across members.</p>
+<p>Use the modern <code>--attn-dp-size</code> spelling. The deprecated <code>--dp-size N --enable-dp-attention</code> pair
+resolves to the same attention width, but the operator reads <code>--attn-dp-size</code> and
+<code>--attention-data-parallel-size</code>, and the deprecated pair is not what the classification contract
+below is stated in.</p>
+<p>Where the vLLM shape runs one independent engine per rank, the SGLang shape is one launch with a
+collective in it: attention runs per member and the <em>FFN</em> tensor-parallel group spans the members.
+Three consequences follow, and they are the honest cost of the shape:</p>
+<ul>
+<li><strong>A member fault stalls the survivor&rsquo;s in-flight requests</strong> until the collective aborts, instead
+of failing fast. The group is withdrawn as a unit; the survivor is not left serving a collective
+whose peer is gone.</li>
+<li><strong>Capacity is the group, not the member count.</strong> Two members of one GPU each serve one model&rsquo;s
+attention width, not two independent models&rsquo; worth of capacity.</li>
+<li><strong>Withdrawal is group-atomic</strong>, under the same supervisor contract the vLLM shape&rsquo;s groups use:
+a fault in any member withdraws every candidate endpoint of that group, and the group returns
+only when every member is qualified again.</li>
+</ul>
+<h3 id="classification-contract">Classification contract</h3>
+<p>An SGLang role derives <em>External</em> only when <strong>all</strong> of these hold:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Condition</th>
+          <th>Why it is necessary</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--attn-dp-size</code> (or <code>--attention-data-parallel-size</code>) ≥ 2</td>
+          <td>More than one attention group exists</td>
+      </tr>
+      <tr>
+          <td><code>--nnodes</code> ≥ 2</td>
+          <td>The groups are on different members</td>
+      </tr>
+      <tr>
+          <td><code>SGLANG_RUST_SERVER</code> set to a true value in the role&rsquo;s environment</td>
+          <td>Every group gets a listener of its own, so the group is reachable from outside</td>
+      </tr>
+      <tr>
+          <td>The role&rsquo;s kind is <code>Server</code></td>
+          <td>A <em>Prefill</em> or <em>Decode</em> role is served through its own leg, and the balance of that leg is the leg&rsquo;s own business</td>
+      </tr>
+  </tbody>
+</table>
+<p>Anything less stays <strong>Internal</strong>, leader-served. A single-<code>Pod</code> attention-DP launch is <em>internal
+data parallelism</em> and is not this shape; an attention-DP launch behind the Python frontend is not
+this shape either, because the groups share one frontend and the group is balanced inside itself.
+The vote reads the environment value the way SGLang&rsquo;s own environment reader reads it, and a role
+that declares a value SGLang would refuse is left to the engine to refuse.</p>
 <h2 id="load-balancing-derivation">Load-balancing derivation</h2>
 <p>There is no <em>External DP</em> spec field. The operator reads each role&rsquo;s own <em><code>extraArgs</code></em> and <em><code>env</code></em> with
 the engine&rsquo;s flag table (<code>scanModelDeploymentParallelism</code>,
@@ -1564,8 +1692,9 @@ without a local size is Unknown; otherwise the no-vote branch returns Internal.<
 <p>The derived mode is reported per role as <code>.status.roles[].parallelism.loadBalance</code> (<code>External</code>,
 <code>Hybrid</code>, <code>Internal</code>, <code>MultiPort</code>, or <code>Unknown</code>), beside the declared degrees (<em><code>dataParallel</code></em>,
 <em><code>dataParallelLocal</code></em>, <em><code>expertParallel</code></em>) and modes (<em><code>expertParallel</code></em> from <code>--enable-expert-parallel</code>).
-SGLang declares the degrees through <code>--dp-size</code> and <code>--ep-size</code>, but the External load-balancing flags are
-vLLM&rsquo;s — an SGLang role resolves to Internal unless its engine accepts the same flags.</p>
+SGLang declares its degrees through <code>--dp-size</code>, <code>--ep-size</code> and <code>--attn-dp-size</code>, and reaches
+<em>External</em> through its own contract — see <a href="#sglang-shape">SGLang shape</a>
+.</p>
 <h2 id="per-rank-pod-identity">Per-rank Pod identity</h2>
 <p>A <em>Server</em> role with <code>size: N</code> runs N member <code>Pod</code>s in one replica group; each member carries one <em>DP</em>
 rank and the whole group shares one collective. The operator injects two environment variables into every
@@ -1672,11 +1801,11 @@ The <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external
 the role&rsquo;s <code>Service</code> and Router selectors carry a <code>member-index=0</code> term, because subordinate members
 expose no HTTP endpoint. An External role is the opposite — every member answers — so both selectors
 must cover all ranks.</p>
-<p>The endpoint-eligibility gate makes that switch observable. While the gate is inactive, the selectors
-keep the leader term. Once it activates, <code>modelDeploymentSelectEligibleEndpoints</code>
-(<code>pkg/worker/controllers/worker/model_deployment_service.go</code>) deletes the leader term from the
-role&rsquo;s <code>Service</code> selector, and the Router role selector does the same
-(<code>model_deployment_router.go</code>), so <code>gpustack/llm-router</code> discovers and balances across every qualified rank <code>Pod</code>.</p>
+<p>An External role is a managed protected group, so its selectors narrow from the first enable:
+<code>modelDeploymentSelectEligibleEndpoints</code> (<code>pkg/worker/controllers/worker/model_deployment_service.go</code>)
+deletes the leader term from the role&rsquo;s <code>Service</code> selector, and the Router role selector does the same
+(<code>model_deployment_router.go</code>), so <code>gpustack/llm-router</code> discovers and balances across every qualified
+rank <code>Pod</code>. The eligibility term is what admits the qualified ranks.</p>
 <p>The answering side agrees: an External role&rsquo;s endpoint-selection mode is <code>modelDeploymentAnsweringAll</code>, read
 from the members&rsquo; running arguments rather than the current spec, so a role edited mid-flight keeps
 serving on its original ranks.</p>
@@ -1689,12 +1818,35 @@ through the Router alone does not prove all ranks are selected.
 See <a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Status</a>
  and <a href="/gpustack-operator/main/docs/modules/model-deployment/routing/">Routing</a>
 .</p>
+<h2 id="probe-and-health">Probe and health</h2>
+<p>A member&rsquo;s <code>/health</code> answers for that member alone: on the vLLM shape it says nothing about the
+other ranks, and on the SGLang shape it is blind to its peer in the shared <em>FFN</em> collective. The
+qualification guard is the <strong>group-forward probe</strong> — a real generation posted to <em>every</em> member,
+each of which crosses the group&rsquo;s collective.</p>
+<p>A passing probe on member <em>i</em> therefore proves the group served a real generation through member
+<em>i</em>&rsquo;s own listener, which is a stronger qualification than an independent replica&rsquo;s. A member that
+answers <code>/health</code> while its group is broken is not a healthy group.</p>
+<h2 id="limits">Limits</h2>
+<ul>
+<li><strong>Scale-down waits out the disaggregated handoff grace window (60 s)</strong> before the member gauge
+reads, so total scale-down latency is at least 60 s on top of the drain itself. The group reads
+<code>Draining</code> during that window; that is the contract, not a stall.</li>
+<li><strong>Single-role deployments only on the SGLang shape.</strong> A deployment that mixes an <em>SGLang
+External DP</em> role with other roles is out of scope for this round.</li>
+<li><strong>Dense text models only on SGLang.</strong> The Rust server&rsquo;s pipeline refuses multimodal models.</li>
+<li><strong><code>--load-balance-method</code> is not rendered on SGLang.</strong> Under the Rust server it is inert; the
+group&rsquo;s own balance is the Router&rsquo;s. This is recorded, not relied on.</li>
+</ul>
 <h2 id="admission-constraints">Admission constraints</h2>
 <p>Admission enforces these boundaries on managed roles:</p>
 <ul>
 <li><code>MultiPort</code> (<code>--data-parallel-multi-port-external-lb</code>) is refused: managed roles require one HTTP
 endpoint per <code>Pod</code>.</li>
 <li>An unreadable balance (<code>Unknown</code>) is refused with the parse&rsquo;s stated reason.</li>
+<li>An <em>External</em> role with no <code>spec.router</code> is refused with the rule named <code>RouterRequired</code>: an
+external group has one endpoint per member and no leader, so the Router is what balances it. The
+refusal reads the role&rsquo;s own extra arguments, so it does not reach a role that took its command
+line over.</li>
 <li>The <em>Encode</em> role is refused beside External and Hybrid load balance: an encoder has one producer
 and one output key, so there is no per-member endpoint to balance across.</li>
 <li><em>Prefill</em> and <em>Decode</em> roles beside <em>External DP</em> are not refused, but the combination is unvalidated
@@ -1755,6 +1907,18 @@ placement remains unmeasured.</p>
 <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
  holds the per-step
 commands, the native group measurements, and the troubleshooting rows.</p>
+<p><strong>The SGLang runtime record.</strong> Recorded on SGLang <code>0.5.22</code> behind the <code>sglang-gateway</code> binary
+of <code>gpustack/llm-router:v0.3.1</code>, two groups of two members each: all eight content checks —
+ordinary, JSON, Chinese and streaming requests through each member&rsquo;s own listener — passed in
+both runs. The scale-down held the disaggregated handoff grace window, the withdrawn group&rsquo;s
+workers leaving the gateway&rsquo;s worker set after 482 s in one run and 310 s in the other.</p>
+<p>The gateway&rsquo;s worker set covered at most one worker per group in both runs — two healthy
+workers for two groups in one run and one in the other; the registration boundary and its image
+floor are under <a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#which-pods-receive-traffic">Routing</a>
+.</p>
+<p>After the scale-down the surviving group never republished <code>Eligible</code> within the case&rsquo;s 900 s
+budget while the retired group read <code>Withdrawn</code>, so a surviving group&rsquo;s recovery from a
+scale-down is unverified.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
@@ -1779,7 +1943,7 @@ monolithic wide tensor-parallel group)</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0d1afe221189d8ad801917d740131b40a07a2617/docs/modules/model-deployment/external-dp.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/08220218f7f5d0238f6f85d79686f110558a52f8/docs/modules/model-deployment/external-dp.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/external-dp.md">Edit this page</a>
             
@@ -1791,7 +1955,12 @@ monolithic wide tensor-parallel group)</li></ul>
   <ul>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#overview-and-selection">Overview and selection</a></li>
-    <li><a href="#configuration">Configuration</a></li>
+    <li><a href="#configuration">Configuration</a>
+      <ul>
+        <li><a href="#sglang-shape">SGLang shape</a></li>
+        <li><a href="#classification-contract">Classification contract</a></li>
+      </ul>
+    </li>
     <li><a href="#load-balancing-derivation">Load-balancing derivation</a></li>
     <li><a href="#per-rank-pod-identity">Per-rank Pod identity</a></li>
     <li><a href="#port-allocation">Port allocation</a>
@@ -1801,6 +1970,8 @@ monolithic wide tensor-parallel group)</li></ul>
       </ul>
     </li>
     <li><a href="#endpoint-selection">Endpoint selection</a></li>
+    <li><a href="#probe-and-health">Probe and health</a></li>
+    <li><a href="#limits">Limits</a></li>
     <li><a href="#admission-constraints">Admission constraints</a></li>
     <li><a href="#results">Results</a></li>
   </ul>

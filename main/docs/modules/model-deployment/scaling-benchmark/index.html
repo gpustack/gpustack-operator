@@ -1006,27 +1006,6 @@
       
         
         
-          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
-          
-          
-            <div class="nav-children">
-              
-                
-                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" aria-current="page">Benchmark</a>
-                
-              
-            </div>
-          
-        
-      
-    
-      
-      
-    
-      
-      
-        
-        
           <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
           
           
@@ -1107,6 +1086,27 @@
               
                 
                   <a title="External DP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" aria-current="page">Benchmark</a>
                 
               
             </div>
@@ -2131,6 +2131,29 @@ The <em>EPD</em> timeline captured no retirement state. These sets do not establ
 before release completes. Kubernetes can display a deleting <code>Pod</code> as <code>Terminating</code>.
 <code>Terminating</code> is not a retirement state. The captures do not include every transition, and zero client
 errors in the two scale-down phases do not prove every in-flight request survives every retirement.</p>
+<p>A later runtime-acceptance run scaled a <em>vLLM</em> multi-Server deployment by hand through one to two
+to one replicas. The Router&rsquo;s worker set followed every edit, the pinned <code>round_robin</code> policy
+split sixteen requests eight and eight across the two workers at two replicas, both workers
+stayed healthy, and the deployment still served after the scale-back. The run completed 21
+checks with zero failures.</p>
+<p>A second run retired one of two replica groups of a <em>vLLM</em> <a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/">External DP</a>
+ deployment
+at data parallelism 2. The Router&rsquo;s worker set held every member throughout — two workers for one
+group of two, four for two groups of two, and two again after the scale-down.</p>
+<p>The endpoint withdrawal reached the Router in 21 seconds, and the retired members were deleted 70
+seconds after the patch, past the 60-second disaggregated handoff grace window, which the
+retirement honored. Eight checks passed; the one failing row had timed the endpoint withdrawal
+against that window, a measurement defect in the case rather than a product finding.</p>
+<p>A third run drove a <em>SGLang</em> <em>PD</em> deployment of one <em>prefill</em> and one <em>decode</em> replica with the
+scaler active: 29 checks passed with zero failures, warnings or blocked rows. The deployment
+published each role&rsquo;s group independently, the four content classes served through the
+<code>sglang-gateway</code>, the thinking switch held on the arithmetic, Chinese and JSON requests, and the
+Mooncake transfer over the direct leg moved 54 MB across six transfers with zero failures.</p>
+<p>The scaler read the engine&rsquo;s waiting-request counter during a transfer and recorded 24 waiting
+requests on the <em>decode</em> role; under load the <em>decode</em> role grew to two replicas, and both roles
+returned to their floor of one with no retirement outstanding.</p>
+<p>The three runs cover one node, one shape each and one recorded cycle. They do not establish
+multi-node behavior or a general scaling claim.</p>
 <h2 id="benefits">Benefits</h2>
 <p>Predictive <em>PD</em> had lower ramp median <em>TTFT</em> than proportional <em>PD</em>: 467.906 versus 2540.853 ms.
 Its ramp throughput was 2109.251 versus 1117.481 tok/s. It entered the ramp with extra replicas
@@ -2172,7 +2195,7 @@ examples from captured lifecycle evidence.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0d1afe221189d8ad801917d740131b40a07a2617/docs/modules/model-deployment/scaling-benchmark.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/08220218f7f5d0238f6f85d79686f110558a52f8/docs/modules/model-deployment/scaling-benchmark.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/scaling-benchmark.md">Edit this page</a>
             

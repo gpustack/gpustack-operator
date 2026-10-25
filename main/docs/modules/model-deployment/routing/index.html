@@ -1004,27 +1004,6 @@
       
         
         
-          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
-          
-          
-            <div class="nav-children">
-              
-                
-                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
-                
-              
-            </div>
-          
-        
-      
-    
-      
-      
-    
-      
-      
-        
-        
           <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
           
           
@@ -1105,6 +1084,27 @@
               
                 
                   <a title="External DP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
                 
               
             </div>
@@ -1409,10 +1409,8 @@
       <article>
         
   <h1 id="model-deployment-routing">Model Deployment Routing</h1>
-<p>A managed router selects among the HTTP endpoints of serving replicas. Every routing choice measured here ran
-on a server role; on a <em>prefill/decode (PD)</em> pair, where each half is chosen separately, none has been run.</p>
-<p>See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
- for the <em>external data parallelism (External DP)</em> boundary within <em>PD</em> roles.</p>
+<p>A managed router selects among serving endpoints, then its policy chooses among them. This page covers
+endpoint selection and SGLang&rsquo;s tested DP routing modes.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#which-pods-receive-traffic">Which Pods receive traffic</a>
@@ -1433,22 +1431,22 @@ on a server role; on a <em>prefill/decode (PD)</em> pair, where each half is cho
 </li>
 </ul>
 <h2 id="which-pods-receive-traffic">Which Pods receive traffic</h2>
-<p>The engine&rsquo;s <em>load balancing (LB)</em> mode determines the candidate endpoints. The Router policy chooses among those candidates.
-<code>round_robin</code> does not change the endpoint selector.</p>
+<p>The serving mode decides which <code>Pod</code>s are candidates; the router decides which candidate a
+request lands on, and a policy such as <code>round_robin</code> never changes the selector.</p>
 <table>
   <thead>
       <tr>
-          <th>Serving configuration</th>
+          <th>Serving mode</th>
           <th>HTTP candidates</th>
       </tr>
   </thead>
   <tbody>
       <tr>
-          <td>Internal Server group</td>
+          <td>Internal <em>Server</em> group</td>
           <td>Member 0 of each replica.</td>
       </tr>
       <tr>
-          <td>Qualified External Server group</td>
+          <td>Qualified External <em>Server</em> group</td>
           <td>Every qualified member; each member serves one <em>data parallelism (DP)</em> rank.</td>
       </tr>
       <tr>
@@ -1456,24 +1454,94 @@ on a server role; on a <em>prefill/decode (PD)</em> pair, where each half is cho
           <td>Member 0 of each replica, including groups with <code>size &gt; 1</code>.</td>
       </tr>
       <tr>
+          <td><em>Elastic EP</em> collective</td>
+          <td>The collective&rsquo;s one endpoint, its master.</td>
+      </tr>
+      <tr>
           <td><em>Encode</em> group</td>
           <td>Excluded from answering candidates and the deployment-wide <code>Service</code>.</td>
       </tr>
+  </tbody>
+</table>
+<p>The table below records how each router forwards traffic within a mode. <code>vllm-router</code> serves vLLM
+deployments only and <code>sglang-gateway</code> SGLang only, so each of their cells is that engine&rsquo;s own
+pairing:</p>
+<table>
+  <thead>
       <tr>
-          <td>Unknown mode or unverified group</td>
-          <td>Keep the existing leader restriction; do not expand discovery.</td>
+          <th>Mode</th>
+          <th><code>llm-d-router</code></th>
+          <th><code>vllm-router</code></th>
+          <th><code>sglang-gateway</code></th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Multi-replica <em>Server</em></td>
+          <td>One fixed scoring profile — prefix match, queue depth, KV utilization — with no policy switch; measured 187/170 on vLLM and 375/0, every request on one replica, on SGLang</td>
+          <td><code>cache_aware</code> by default; <code>--policy round_robin</code> spreads evenly, measured 60 per replica</td>
+          <td>The same policies as <code>vllm-router</code>; <code>round_robin</code> measured 60 per replica</td>
+      </tr>
+      <tr>
+          <td><em>PD</em> pair</td>
+          <td>The disaggregated pairing&rsquo;s own router: the token-counted prefill/decode split, per-role connector documents, the decode sidecar</td>
+          <td>Its own <em>PD</em> mode over the pair</td>
+          <td>Native <code>--pd-disaggregation</code></td>
+      </tr>
+      <tr>
+          <td><em>EPD</em></td>
+          <td>An <code>encode</code> scheduling profile beside the pair; the decode sidecar coordinates the encoder transfer</td>
+          <td>Drives encode, prefill and decode itself through operator-owned <code>--epd-config</code>, no sidecar</td>
+          <td>Routes the pair natively; the prefiller reaches the encoder through <code>--encoder-urls</code></td>
+      </tr>
+      <tr>
+          <td><em>Elastic EP</em></td>
+          <td>The engine&rsquo;s own internal load balancing spreads work inside the collective, and the deployment publishes one endpoint, so a router is not how this mode balances</td>
+          <td>Same</td>
+          <td>Same</td>
+      </tr>
+      <tr>
+          <td><em>External DP</em></td>
+          <td>Admitted, but no <code>--policy</code> to spread the ranks evenly and no recorded run — use the engine&rsquo;s own router</td>
+          <td>Every rank endpoint behind <code>--policy round_robin</code> (recorded)</td>
+          <td>Per-member endpoints; the registration boundary is the paragraph below</td>
       </tr>
   </tbody>
 </table>
+<p><code>llm-d-router</code>&rsquo;s profile is not configurable — no policy flag, no settable weights
+(<a href="#no-policy-flag">No policy flag</a>
+) — so where even spread matters, above all multi-replica <em>Server</em>
+and <em>External DP</em>, prefer the engine&rsquo;s own router: <code>vllm-router</code> on vLLM and <code>sglang-gateway</code> on
+SGLang. The matrix&rsquo;s counts were recorded on vLLM <code>0.29.0</code> and SGLang <code>0.5.18</code> behind the routers
+of <code>gpustack/llm-router:v0.3.1</code>; newer builds must be re-verified before they inherit a claim.</p>
 <p><em>Encode</em> <code>Pod</code>s are never part of the deployment&rsquo;s answering set. Under <code>llm-d-router</code> they are
 discovered for stage routing, and under <code>vllm-router</code> their <code>Service</code> endpoint is passed through
 <code>--epd-config</code>, while the deployment <code>Service</code> never targets them. All three routers (<code>llm-d-router</code>,
 <code>vllm-router</code> and <code>sglang-gateway</code>) are admitted with an <em>Encode</em> role for their supported engine
 and platform combinations. See <a href="#encode-stage-routing">Encode stage routing</a>
 .</p>
-<p>For an eligible External Server role, Router discovery and ordinary <code>Service</code>s omit <code>member-index=0</code>.
-They retain the endpoint eligibility label, so an unhealthy group cannot receive new traffic.
+<p>For an eligible External Server role the selectors carry no member-index term at all, so every
+qualified rank is discovered; the leader restriction applies only to a shape whose subordinate members
+expose no HTTP endpoint. The selectors keep the endpoint eligibility requirement, so an unhealthy
+group cannot receive new traffic.
 The replica&rsquo;s headless <code>Service</code> always publishes every member for peer communication.</p>
+<p>On the SGLang External DP shape the operator renders <code>--dp-aware</code> for the gateway. With the flag,
+the gateway registers one worker per attention-DP rank: each rank is a logical worker whose URL
+carries a rank suffix (<code>http://host:port@0</code>, <code>http://host:port@1</code>), and every suffix dials the
+member&rsquo;s one physical serving listener — the suffix is a rank, not a port.</p>
+<p>That registration is the gateway patch this project ships: an image carrying it is
+<code>gpustack/llm-router:v0.4.0</code> or later, while the default
+<a href="/gpustack-operator/main/docs/reference/settings/"><code>model-deployment-router-image</code></a>
+ still names <code>v0.3.1</code>, which
+predates the patch. The registration activates only where <em><code>spec.router.image</code></em> or the setting
+names an image that carries the patch.</p>
+<p>No runtime run has exercised the flag: the render gate and the patched fan-out are verified in
+source and unit tests on the recorded shape.</p>
+<p>Without the flag the gateway registers at most one worker per group — recorded on
+<code>gpustack/llm-router:v0.3.1</code>, and on the <code>v0.4.0</code> gateway build with the flag withheld. Each
+group&rsquo;s subordinate member times out inside the gateway&rsquo;s 10 s discovery step and never enters
+the worker registry, and under load a group&rsquo;s registered worker can miss its registration too:
+a two-group, four-member deployment presented two healthy workers in one run and one in another.</p>
 <p>Known non-Internal modes follow the External selector rule. Status retains the engine&rsquo;s distinct mode name.
 Hybrid GPU behavior remains untested. See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
  for <em>PD</em> limitations.</p>
@@ -1483,6 +1551,43 @@ Admission rejects vLLM&rsquo;s MultiPort mode because it starts endpoints on add
 A decoder proxy&rsquo;s internal backend port remains separate from its published HTTP port.
 See the <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP walkthrough</a>
  for a minimal per-rank configuration.</p>
+<h3 id="how-groups-are-excluded">How groups are excluded</h3>
+<p>A managed protected group is excluded through its <code>Pod</code> set, not through a selector that loses a term.
+The requirement stays in the selector from the first enable, decided or not, and only the members whose
+group is qualified carry the matching label.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Group class</th>
+          <th>Exclusion</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Managed protected group: multi-member ordinary, External DP, or <em>Prefill</em>/<em>Decode</em></td>
+          <td>The selector carries the endpoint-eligibility requirement from the first enable, decided or not. Only the members whose group is qualified carry the matching label, so only they are discovered.</td>
+      </tr>
+      <tr>
+          <td>Unsupported custom route, or an engine outside the capability matrix</td>
+          <td>The compatibility carve-out: the existing leader restriction, and no claim of qualification.</td>
+      </tr>
+      <tr>
+          <td>Ordinary single-member Server</td>
+          <td>The leader restriction, with no eligibility requirement in the selector.</td>
+      </tr>
+  </tbody>
+</table>
+<p>The Router and the ordinary <code>Service</code> take the same decision, so a request cannot reach an endpoint the
+<code>Service</code> does not front.</p>
+<h3 id="managed-and-custom-roles">Managed and custom roles</h3>
+<p>A deployment whose roles do not all carry the same requirement needs one deployment-wide selector to
+express their union, and the operator names that union through an internal candidate label,
+<code>modeldeployment.gpustack.ai/router-candidate</code>. The label says membership, not qualification: a
+candidate is a member that may be discovered, and the label is no proof that its group qualifies.</p>
+<p>Actual discovery is the intersection of the deployment-wide selector with the router&rsquo;s native role and
+member filters, so a candidate the native filter excludes is not discovered. A per-kind filter admits
+that kind&rsquo;s union, because two roles of one kind share the filter and a filter demanding one role&rsquo;s
+requirement would withhold the other&rsquo;s members.</p>
 <h2 id="encode-stage-routing">Encode stage routing</h2>
 <p>How the encoder is reached depends on the engine and router. Send requests to
 <em><code>status.endpoint</code></em> in every case.</p>
@@ -1538,8 +1643,8 @@ engine uses no encoder-cache connector.</p>
 <h2 id="each-routers-default">Each router&rsquo;s default</h2>
 <p><strong><code>vllm-router</code> and <code>sglang-gateway</code> route by <code>cache_aware</code>, and <code>llm-d-router</code> scores every
 candidate for each request.</strong> The operator renders no policy flag for the first two, so each runs its
-upstream default. The table describes the bundled vLLM router <code>v0.1.15</code> and SGLang gateway
-<code>gateway-v0.3.1</code>; the llm-d row describes the operator&rsquo;s scoring profile.</p>
+upstream default. The table describes the bundled vLLM router <code>v0.1.16.1</code> and the <code>sglang-gateway</code> binary of
+<code>gpustack/llm-router:v0.3.1</code>; the llm-d row describes the operator&rsquo;s scoring profile.</p>
 <table>
   <thead>
       <tr>
@@ -1669,14 +1774,57 @@ the operator reports both.</strong> The first is the qualification list, and the
 of the Router itself; they are published separately in
 <a href="/gpustack-operator/main/docs/modules/model-deployment/status/#status"><code>status.roles[].endpoints</code></a>
  and never collapse into one number.</p>
+<p><strong>A group adds a third surface, and the operator publishes three related answers without collapsing
+them.</strong> The role&rsquo;s counts, the group&rsquo;s own entry in
+<a href="/gpustack-operator/main/docs/modules/model-deployment/status/#group-status"><code>status.roles[].groups[]</code></a>
+, and the Router&rsquo;s serving confirmation are three
+readings of one deployment, and the group entry answers a question the counts cannot: which members
+the group holds, and what holds it.</p>
+<p><code>AwaitingObservation</code> names a group whose qualification passed and whose restoration the Router&rsquo;s
+observation blocks. A group that was already eligible and whose fresh membership is complete,
+unchanged, safe and current stays <code>Eligible</code> through an observation loss, with its serving
+confirmation <code>Unknown</code>. The group&rsquo;s reason and the Router&rsquo;s reason name different facts, so a lost
+Router view never reads as an engine fault.</p>
+<p>Retained eligibility requires the <a href="/gpustack-operator/main/docs/modules/model-deployment/status/#group-status">Group status</a>
+ membership checks.</p>
+<p><strong>A Router process health result is not an engine group&rsquo;s health.</strong> The Router answers for its own
+process; the group answers for the engine&rsquo;s members.</p>
 <p>The observation is a plain HTTP GET with a short timeout against each Router <code>Pod</code>&rsquo;s own address. It
 deliberately does not go through the Router <code>Service</code>, which would load balance across the Router&rsquo;s
 replicas and report one of them as the whole Router. What <code>Confirmed</code> then means is the
 serving-observation contract <a href="/gpustack-operator/main/docs/modules/model-deployment/status/#status"><code>status.roles[].endpoints</code></a>
  defines once.</p>
+<p><strong>Three bounds apply, and they serve different purposes.</strong></p>
+<table>
+  <thead>
+      <tr>
+          <th>Bound</th>
+          <th>Value</th>
+          <th>What it covers</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Fetch deadline</td>
+          <td>2 seconds</td>
+          <td>one read of one Router&rsquo;s view</td>
+      </tr>
+      <tr>
+          <td>Collection budget</td>
+          <td>14 seconds</td>
+          <td>one collection, across every Router it reads</td>
+      </tr>
+      <tr>
+          <td>Freshness policy</td>
+          <td>15 seconds</td>
+          <td>how long a collected view informs the answer</td>
+      </tr>
+  </tbody>
+</table>
 <p><strong>A collected view informs the answer for fifteen seconds.</strong> Past that the answer becomes <code>Unknown</code>,
 so a Router that stops being reachable is reported as unobserved and never as serving whatever it
-served last.</p>
+served last. The fetch deadline keeps one unreachable Router from consuming the collection budget the
+other Routers share.</p>
 <blockquote>
 <p>The freshness bound is what keeps a stopped Router from reading as a healthy one. A view that
 outlived its evidence would report a serving count for a process that is gone, and the only way
@@ -1735,6 +1883,13 @@ request. Each router&rsquo;s own <code>/metrics</code> does, for the series belo
 </table>
 <p>Neither <code>sglang-gateway</code> nor <code>llm-d-router</code> keeps a running count per replica. Behind them, compare
 the engine <code>Pod</code>s&rsquo; own counts instead, such as each <code>Pod</code>&rsquo;s <em>time to first token (TTFT)</em> histogram <code>_count</code>.</p>
+<p>A scale event is visible in these series. On a <em>SGLang</em> multi-Server deployment scaled one to two,
+the gateway&rsquo;s worker set grew to two <code>smg_worker_health</code> series at <code>1</code>; on the scale back, the
+withdrawn worker&rsquo;s series stayed in the exposition at <code>-1</code> while
+<code>smg_discovery_deregistrations_total{reason=&quot;pod_deleted&quot;}</code> incremented, and the surviving worker
+kept its <code>1</code>.</p>
+<p>Count the healthy series, not the lines, on a scaled deployment. The same run&rsquo;s four content
+classes served through the gateway with zero failures.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
@@ -1756,7 +1911,7 @@ the engine <code>Pod</code>s&rsquo; own counts instead, such as each <code>Pod</
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0d1afe221189d8ad801917d740131b40a07a2617/docs/modules/model-deployment/routing.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/08220218f7f5d0238f6f85d79686f110558a52f8/docs/modules/model-deployment/routing.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/routing.md">Edit this page</a>
             
@@ -1767,7 +1922,12 @@ the engine <code>Pod</code>s&rsquo; own counts instead, such as each <code>Pod</
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#which-pods-receive-traffic">Which Pods receive traffic</a></li>
+    <li><a href="#which-pods-receive-traffic">Which Pods receive traffic</a>
+      <ul>
+        <li><a href="#how-groups-are-excluded">How groups are excluded</a></li>
+        <li><a href="#managed-and-custom-roles">Managed and custom roles</a></li>
+      </ul>
+    </li>
     <li><a href="#encode-stage-routing">Encode stage routing</a></li>
     <li><a href="#each-routers-default">Each router&rsquo;s default</a></li>
     <li><a href="#prefix-affinity">Prefix affinity</a></li>

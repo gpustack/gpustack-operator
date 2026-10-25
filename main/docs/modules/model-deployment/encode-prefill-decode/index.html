@@ -1004,27 +1004,6 @@
       
         
         
-          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
-          
-          
-            <div class="nav-children">
-              
-                
-                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
-                
-              
-            </div>
-          
-        
-      
-    
-      
-      
-    
-      
-      
-        
-        
           <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
           
           
@@ -1105,6 +1084,27 @@
               
                 
                   <a title="External DP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
                 
               
             </div>
@@ -1489,19 +1489,19 @@ router:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">encode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Encode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># defaults to 1 on an accelerated InstanceType when omitted</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
 </div><p>The operator injects the encoder-cache and KV-transfer connectors onto the three roles and fronts
@@ -1851,7 +1851,7 @@ hardware and when <em>EPD</em> helps.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0d1afe221189d8ad801917d740131b40a07a2617/docs/modules/model-deployment/encode-prefill-decode.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/08220218f7f5d0238f6f85d79686f110558a52f8/docs/modules/model-deployment/encode-prefill-decode.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/encode-prefill-decode.md">Edit this page</a>
             

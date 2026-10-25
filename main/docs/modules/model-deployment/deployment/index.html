@@ -1004,27 +1004,6 @@
       
         
         
-          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
-          
-          
-            <div class="nav-children">
-              
-                
-                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
-                
-              
-            </div>
-          
-        
-      
-    
-      
-      
-    
-      
-      
-        
-        
           <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
           
           
@@ -1105,6 +1084,27 @@
               
                 
                   <a title="External DP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
                 
               
             </div>
@@ -1459,7 +1459,7 @@ admission still applies to every replica.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-a10g-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">  </span><span class="c"># cards per Pod</span></span></span></code></pre></div>
 </div><p><em><code>model.name</code></em> is what the engine serves. The weights come from the engine&rsquo;s own hub client, a role&rsquo;s
@@ -1564,14 +1564,14 @@ admission check this operator runs, which holds every group until the whole set 
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill </span><span class="w"> </span><span class="c"># Server (default), Prefill, Decode or Encode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h20-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># may use different hardware from the prefill role</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h20-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
 </div><blockquote>
@@ -1838,11 +1838,67 @@ is required even when keeping <code>vLLM</code>&rsquo;s default settings so the 
 backed by <code>/var/lib/gpustack/cache/&lt;manufacturer&gt;-&lt;engine&gt;/&lt;model-identity&gt;/tp&lt;TP&gt;-pp&lt;PP&gt;-dp&lt;DP&gt;-ep&lt;EP&gt;-cp&lt;PCP&gt;_&lt;DCP&gt;-&lt;hash8&gt;</code>
 on the node, and defaults <code>VLLM_CACHE_ROOT=/var/lib/gpustack/cache</code> (<code>vLLM</code>) or
 <code>SGLANG_CACHE_DIR=/var/lib/gpustack/cache</code> (<code>SGLang</code>).</p>
+<p>The same mount carries the engine&rsquo;s other startup caches, because each of them otherwise defaults
+to the container&rsquo;s writable layer and the pod&rsquo;s ephemeral-storage limit measures that layer. The
+operator defaults seven more names into it. Each names a byte-heavy cache subtree alone: the Hugging
+Face token and its datasets cache stay under <code>HF_HOME</code> on the container&rsquo;s own filesystem, because
+the mount is a host-backed directory every pod mounting the same path can read:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Name</th>
+          <th>Points at</th>
+          <th>Holds</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>HF_HUB_CACHE</code></td>
+          <td><code>/var/lib/gpustack/cache/hf-hub</code></td>
+          <td>The model weights and tokenizer files huggingface_hub downloads, the cache whose growth onto the writable layer drove the recorded evictions</td>
+      </tr>
+      <tr>
+          <td><code>HF_XET_CACHE</code></td>
+          <td><code>/var/lib/gpustack/cache/xet</code></td>
+          <td>The Xet chunk cache, which hf_xet reads ahead of <code>HF_HOME</code> so the chunks join the hub cache on the mount while the token stays local</td>
+      </tr>
+      <tr>
+          <td><code>PIP_CACHE_DIR</code></td>
+          <td><code>/var/lib/gpustack/cache/pip</code></td>
+          <td>pip&rsquo;s download and wheel cache</td>
+      </tr>
+      <tr>
+          <td><code>TORCH_HOME</code></td>
+          <td><code>/var/lib/gpustack/cache/torch</code></td>
+          <td>torch&rsquo;s hub checkpoints and cached state</td>
+      </tr>
+      <tr>
+          <td><code>FLASHINFER_WORKSPACE_BASE</code></td>
+          <td><code>/var/lib/gpustack/cache/flashinfer</code></td>
+          <td>The FlashInfer JIT workspace, which holds the generated sources and the compiled kernels of the attention backend. FlashInfer appends its own <code>.cache/flashinfer</code> to the base, so the tree lands under <code>/var/lib/gpustack/cache/flashinfer/.cache/flashinfer</code></td>
+      </tr>
+      <tr>
+          <td><code>TORCHINDUCTOR_CACHE_DIR</code></td>
+          <td><code>/var/lib/gpustack/cache/inductor</code></td>
+          <td>The kernels torch&rsquo;s inductor compiles, whose default is a directory under the temporary directory</td>
+      </tr>
+      <tr>
+          <td><code>TRITON_CACHE_DIR</code></td>
+          <td><code>/var/lib/gpustack/cache/triton</code></td>
+          <td>triton&rsquo;s compiled kernels, whose default is under the home directory</td>
+      </tr>
+  </tbody>
+</table>
 <p>An explicit <code>/var/lib/gpustack/cache</code> mount in <em><code>additionalVolumes</code></em> takes precedence: the operator
 omits the default <code>gpustack-compile-cache</code> <code>HostPath</code> volume while preserving the defaulted
 <code>VLLM_CACHE_ROOT</code> or <code>SGLANG_CACHE_DIR</code> environment variable unless overridden in <em><code>roles[].env</code></em>.
-Take-over roles (<em><code>roles[].command</code></em> non-empty) receive neither the default cache volume nor the
-defaulted cache variable.</p>
+The seven cache names above follow the same rule. Take-over roles (<em><code>roles[].command</code></em> non-empty)
+receive neither the default cache volume nor the defaulted cache variables.</p>
+<p>The seven names are defaults, not ownership: an entry in <em><code>roles[].env</code></em> replaces any of them. Like
+every other operator-synthesized entry they reach a <code>Pod</code> through its
+<a href="#render-version-and-upgrades">render version</a>
+, so they apply to newly created or replaced <code>Pod</code>s
+and a deployment rolls onto them with <em><code>modeldeployment.gpustack.ai/min-render-version</code></em>.</p>
 <p><em><code>spec.roles[].startupTimeoutSeconds</code></em> sets the role&rsquo;s startup budget in seconds (default <code>1800</code>,
 range <code>10</code>..<code>86400</code>), scaling <em><code>startupProbe.failureThreshold</code></em> as <code>ceil(startupTimeoutSeconds / 10)</code>
 at <code>periodSeconds: 10</code> (<code>timeoutSeconds: 5</code>) so cold-start graph compilation is not killed by
@@ -1897,6 +1953,12 @@ which the hit rate this design rests on cannot be measured at all.</p>
 <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#sglang-host-memory-tier">SGLang&rsquo;s two cache switches</a>
 , and the compilation
 cache root (<code>VLLM_CACHE_ROOT</code> on <code>vLLM</code>, <code>SGLANG_CACHE_DIR</code> on <code>SGLang</code>).</p>
+<p>So are the seven runtime cache names (<code>HF_HUB_CACHE</code>, <code>HF_XET_CACHE</code>, <code>PIP_CACHE_DIR</code>,
+<code>TORCH_HOME</code>, <code>FLASHINFER_WORKSPACE_BASE</code>, <code>TORCHINDUCTOR_CACHE_DIR</code>, <code>TRITON_CACHE_DIR</code>), which
+keep an engine&rsquo;s startup caches on the
+mounted cache rather than on the container&rsquo;s writable layer, and are
+<a href="#compilation-cache-and-timeout">defaulted the same way</a>
+.</p>
 <p>Two of SGLang&rsquo;s owned keys are owned for what a user entry would <strong>destroy</strong> rather than duplicate,
 and the operator does not set either of them:</p>
 <ul>
@@ -2062,7 +2124,7 @@ rendering changes are evaluated separately:</p>
       </tr>
       <tr>
           <td><code>modeldeployment.gpustack.ai/render-version</code> (on <code>Pod</code>)</td>
-          <td>operator-synthesized flags (<code>--host</code>, <code>--port</code>, <code>--served-model-name</code>, connector flags), probes, <code>preStop</code> drain hook, sidecars (<code>routing-proxy</code>, <code>wait-for-worker</code>), implicit labels/annotations, and worker <code>Setting</code> values</td>
+          <td>operator-synthesized flags (<code>--host</code>, <code>--port</code>, <code>--served-model-name</code>, connector flags), defaulted environment entries, probes, <code>preStop</code> drain hook, sidecars (<code>routing-proxy</code>, <code>wait-for-worker</code>), implicit labels/annotations, and worker <code>Setting</code> values</td>
           <td>upgrading to an operator release with a newer rendering baseline</td>
           <td>keeps running replicas in place while <code>render-version</code> meets the effective minimum floor; applies to newly created or replaced <code>Pod</code>s</td>
       </tr>
@@ -2097,7 +2159,7 @@ replicas:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-a10g-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
 </div><h3 id="replica-departures">Replica departures</h3>
@@ -2488,7 +2550,7 @@ structured snapshot and <code>Pod</code> scrape endpoints.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0d1afe221189d8ad801917d740131b40a07a2617/docs/modules/model-deployment/deployment.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/08220218f7f5d0238f6f85d79686f110558a52f8/docs/modules/model-deployment/deployment.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/deployment.md">Edit this page</a>
             

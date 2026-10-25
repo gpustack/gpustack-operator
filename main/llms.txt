@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers hardware, shapes accelerator capacity, and helps Kubernetes place workloads where that capacity is available.
 
-Documentation version: main. Source revision: 0d1afe221189d8ad801917d740131b40a07a2617.
+Documentation version: main. Source revision: 08220218f7f5d0238f6f85d79686f110558a52f8.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -76,8 +76,6 @@ documentation and code for your release. This index routes questions; follow its
 
 - [Model Deployment](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/index.md): Start with managed model serving.
 - [Model Deployment Configuration](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md): Configure serving roles and overrides.
-- [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md): Plan a deployment's replica count from the signals it publishes.
-- [Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md): Compare five H100 scaling configurations with measured latency, throughput and lifecycle limits.
 - [Engine Compatibility](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md): Check engine releases, client and store requirements, and transport support.
 - [Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md): Pair serving roles.
 - [Prefill and Decode Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md): Compare equal-GPU H100 aggregated and disaggregated serving across fixed shapes and mixed traffic.
@@ -87,6 +85,8 @@ documentation and code for your release. This index routes questions; follow its
 - [Elastic EP Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md): Compare four- and eight-GPU H100 collectives and measure requests during live expansion.
 - [External DP](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/external-dp/index.md): Run one fixed data-parallel group with an HTTP endpoint on every rank.
 - [External DP Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/index.md): Compare External DP ranks with a monolithic wide tensor-parallel group.
+- [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md): Plan a deployment's replica count from the signals it publishes.
+- [Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md): Compare five H100 scaling configurations with measured latency, throughput and lifecycle limits.
 - [Model Deployment Routing](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/routing/index.md): Choose a routing policy, confirm a Router serves.
 - [Model Deployment Metrics](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md): Read serving metrics.
 - [Model Deployment Status](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/status/index.md): Diagnose deployment conditions, follow a retirement, read the scaler annotations.
@@ -117,6 +117,6 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/0d1afe221189d8ad801917d740131b40a07a2617/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/08220218f7f5d0238f6f85d79686f110558a52f8/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.
