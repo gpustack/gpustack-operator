@@ -33,7 +33,6 @@ function generate_api() {
   fi
 
   PATH="${ROOT_DIR}/.sbin:${ROOT_DIR}/.sbin/protoc/bin:${PATH}" \
-  GODEBUG=gotypesalias=0 \
     go run -mod=mod "${ROOT_DIR}/gen/${task}" "$@"
 }
 

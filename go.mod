@@ -71,7 +71,6 @@ require (
 	k8s.io/client-go v0.35.3
 	k8s.io/code-generator v0.35.3
 	k8s.io/component-base v0.35.3
-	k8s.io/gengo v0.0.0-20251215205346-5ee0d033ba5b
 	k8s.io/gengo/v2 v2.0.0-20251215205346-5ee0d033ba5b
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-aggregator v0.35.1

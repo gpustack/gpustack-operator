@@ -8,7 +8,7 @@ import (
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/gengo/types"
+	"k8s.io/gengo/v2/types"
 	klog "k8s.io/klog/v2"
 	apireg "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 

@@ -7,16 +7,16 @@ import (
 
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/gengo/generator"
-	"k8s.io/gengo/namer"
-	"k8s.io/gengo/types"
+	"k8s.io/gengo/v2/generator"
+	"k8s.io/gengo/v2/namer"
+	"k8s.io/gengo/v2/types"
 	"k8s.io/utils/ptr"
 )
 
-func NewCRDGen(sanitizedName, outputPackage string) generator.Generator {
+func NewCRDGen(outputFile, outputPackage string) generator.Generator {
 	return &crdGen{
-		DefaultGen: generator.DefaultGen{
-			OptionalName: sanitizedName,
+		GoGenerator: generator.GoGenerator{
+			OutputFilename: outputFile,
 		},
 		outputPackage: outputPackage,
 		imports:       generator.NewImportTrackerForPackage(outputPackage),
@@ -26,7 +26,7 @@ func NewCRDGen(sanitizedName, outputPackage string) generator.Generator {
 type CRDTypeDefinition = apiext.CustomResourceDefinition
 
 type crdGen struct {
-	generator.DefaultGen
+	generator.GoGenerator
 
 	outputPackage string
 	imports       namer.ImportTracker

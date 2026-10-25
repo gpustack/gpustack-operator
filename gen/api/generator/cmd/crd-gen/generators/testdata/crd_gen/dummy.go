@@ -8,7 +8,15 @@ import (
 	core "k8s.io/api/core/v1"
 )
 
+// +k8s:crd-gen:printcolumn:name="Detached",type="string",jsonPath=".spec.detachedString"
+
 // Dummy is the schema for the projects API.
+//
+// The print column above sits in a comment block of its own, separated from
+// the doc comment by an empty line. gengo keeps such a block as the second
+// closest comment of the type, and the generator reads the markers of both
+// comment blocks, so a marker that sits there has to reach the schema just
+// like one that sits inside the doc comment.
 //
 // The print columns are here for what they carry rather than for themselves. Priority is an int32
 // and has to be emitted BARE: quoted, it produced a string constant in an int32 field and the
@@ -141,9 +149,59 @@ type DummySpec struct {
 	DummyX              DummyX      `json:"dummyX"`
 	DummyY              DummyY      `json:"dummyY,omitempty"`
 
+	// Alias.
+	//
+	// A type alias has to resolve to the type it aliases: an alias of a named
+	// struct has the schema of that struct, and an alias of a byte slice has
+	// the schema of a byte slice. A defined type over an alias resolves the
+	// same way. An alias that did not resolve would show up as an object
+	// preserving unknown fields, and no field of this repository uses one, so
+	// nothing would notice it without these fields.
+	AliasTargetAlias  AliasTargetAlias  `json:"aliasTargetAlias,omitempty"`
+	AliasBytes        AliasBytes        `json:"aliasBytes,omitempty"`
+	DefinedAliasBytes DefinedAliasBytes `json:"definedAliasBytes,omitempty"`
+	MarkerAlias       MarkerAlias       `json:"markerAlias,omitempty"`
+
 	Quantity  resource.Quantity `json:"quantity"`
 	Container core.Container    `json:"container"`
 }
+
+type AliasTarget struct {
+	Field string `json:"field"`
+}
+
+// AliasTargetAlias is an alias of a named struct, so its schema is the schema
+// of that struct.
+type AliasTargetAlias = AliasTarget
+
+// AliasBytes is an alias of a byte slice, so its schema is the schema of a
+// byte slice.
+type AliasBytes = []byte
+
+// DefinedAliasBytes is a defined type over an alias of a byte slice, so its
+// schema is the schema of a byte slice too.
+type DefinedAliasBytes AliasBytes
+
+type MarkerAliasTarget struct {
+	Field string `json:"field"`
+}
+
+// MarkerAlias is an alias of a named struct that carries a comment tag of its
+// own.
+//
+// The tag is the point of this alias. A comment tag on an alias configures
+// nothing by itself: the CRD takes its tags from the CRD type, and the type
+// this alias resolves to is not the CRD type, so the tag must not become a
+// printer column of the CRD. The alias still has to resolve to the schema of
+// the type it aliases.
+//
+// The type this alias resolves to carries no comment of its own, so gengo
+// keeps the comment of the alias as the comment of that type. The tag is
+// therefore within reach of the generator, and it is the generator that has to
+// leave it alone.
+//
+// +k8s:crd-gen:printcolumn:name="MarkerAlias",type="string",jsonPath=".spec.markerAlias.field"
+type MarkerAlias = MarkerAliasTarget
 
 type DummyX struct {
 	Z DummyZRef `json:"z"`

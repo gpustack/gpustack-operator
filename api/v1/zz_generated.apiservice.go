@@ -9,10 +9,10 @@
 package v1
 
 import (
-	"bytes"
+	bytes "bytes"
 
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	rest "k8s.io/apiserver/pkg/registry/rest"
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
@@ -20,13 +20,13 @@ import (
 
 type (
 	WithStatusSubResource interface {
-		v1.ObjectMetaAccessor
+		metav1.ObjectMetaAccessor
 		runtime.Object
 		CopyStatusTo(runtime.Object)
 	}
 
 	WithScaleSubResource interface {
-		v1.ObjectMetaAccessor
+		metav1.ObjectMetaAccessor
 		runtime.Object
 		GetScale() *autoscalingv1.Scale // TODO: Main struct needs to implement this.
 		SetScale(*autoscalingv1.Scale)  // TODO: Main struct needs to implement this.
@@ -35,11 +35,11 @@ type (
 
 func GetAPIService(svc apiregistrationv1.ServiceReference, ca []byte) *apiregistrationv1.APIService {
 	return &apiregistrationv1.APIService{
-		TypeMeta: v1.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			APIVersion: "apiregistration.k8s.io/v1",
 			Kind:       "APIService",
 		},
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: "v1.gpustack.ai",
 		},
 		Spec: apiregistrationv1.APIServiceSpec{

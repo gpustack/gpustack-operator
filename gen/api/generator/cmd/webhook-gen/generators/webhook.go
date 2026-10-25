@@ -6,17 +6,17 @@ import (
 	"strings"
 
 	admreg "k8s.io/api/admissionregistration/v1"
-	"k8s.io/gengo/generator"
-	"k8s.io/gengo/namer"
-	"k8s.io/gengo/types"
+	"k8s.io/gengo/v2/generator"
+	"k8s.io/gengo/v2/namer"
+	"k8s.io/gengo/v2/types"
 
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
-func NewWebhookGen(sanitizedName, outputPackage string) generator.Generator {
+func NewWebhookGen(outputFile, outputPackage string) generator.Generator {
 	return &webhookGen{
-		DefaultGen: generator.DefaultGen{
-			OptionalName: sanitizedName,
+		GoGenerator: generator.GoGenerator{
+			OutputFilename: outputFile,
 		},
 		outputPackage: outputPackage,
 		imports:       generator.NewImportTrackerForPackage(outputPackage),
@@ -29,7 +29,7 @@ type WebhookTypeDefinition struct {
 }
 
 type webhookGen struct {
-	generator.DefaultGen
+	generator.GoGenerator
 
 	outputPackage string
 	imports       namer.ImportTracker
@@ -211,7 +211,7 @@ func (g *webhookGen) generateValidating(c *generator.Context, t *types.Type, w i
 	sw.Do("if cc.Service != nil {\n", nil)
 	sw.Do("cc.Service.Path = &path\n", nil)
 	sw.Do("} else if c.URL != nil {\n", nil)
-	sw.Do("cc.URL = ptr.To(*c.URL + path)\n", nil)
+	sw.Do("cc.URL = $.PtrTo|raw$(*c.URL + path)\n", args)
 	sw.Do("}\n\n", nil)
 	sw.Do("return $.ValidatingWebhook|raw${\n", args)
 
@@ -234,7 +234,7 @@ func (g *webhookGen) generateValidating(c *generator.Context, t *types.Type, w i
 	}
 	sw.Do("Resources: []string{\n\"$.$\",\n},\n", strings.Join(rule.Resources, "\",\n \""))
 	if rule.Scope != nil {
-		sw.Do("Scope: ptr.To[$.ScopeType|raw$](\"$.RULE.Scope$\"),\n", args)
+		sw.Do("Scope: $.PtrTo|raw$[$.ScopeType|raw$](\"$.RULE.Scope$\"),\n", args)
 	}
 	sw.Do("},\n", nil)
 	if len(rule.Operations) != 0 {
@@ -246,13 +246,13 @@ func (g *webhookGen) generateValidating(c *generator.Context, t *types.Type, w i
 	// END: Webhook/Rules/0.
 
 	if spec.FailurePolicy != nil {
-		sw.Do("FailurePolicy: ptr.To[$.FailurePolicyType|raw$](\"$.SPEC.FailurePolicy$\"),\n", args)
+		sw.Do("FailurePolicy: $.PtrTo|raw$[$.FailurePolicyType|raw$](\"$.SPEC.FailurePolicy$\"),\n", args)
 	}
 	if spec.MatchPolicy != nil {
-		sw.Do("MatchPolicy: ptr.To[$.MatchPolicyType|raw$](\"$.SPEC.MatchPolicy$\"),\n", args)
+		sw.Do("MatchPolicy: $.PtrTo|raw$[$.MatchPolicyType|raw$](\"$.SPEC.MatchPolicy$\"),\n", args)
 	}
 	if selector := spec.NamespaceSelector; selector != nil {
-		sw.Do("NamespaceSelector: ptr.To($.LabelSelector|raw${\n", args)
+		sw.Do("NamespaceSelector: $.PtrTo|raw$($.LabelSelector|raw${\n", args)
 		if len(selector.MatchLabels) != 0 {
 			sw.Do("MatchLabels: map[string]string{\n", nil)
 			for k, v := range selector.MatchLabels {
@@ -276,7 +276,7 @@ func (g *webhookGen) generateValidating(c *generator.Context, t *types.Type, w i
 		sw.Do("}),\n", nil)
 	}
 	if selector := spec.ObjectSelector; selector != nil {
-		sw.Do("ObjectSelector: ptr.To($.LabelSelector|raw${\n", args)
+		sw.Do("ObjectSelector: $.PtrTo|raw$($.LabelSelector|raw${\n", args)
 		if len(selector.MatchLabels) != 0 {
 			sw.Do("MatchLabels: map[string]string{\n", nil)
 			for k, v := range selector.MatchLabels {
@@ -300,10 +300,10 @@ func (g *webhookGen) generateValidating(c *generator.Context, t *types.Type, w i
 		sw.Do("}),\n", nil)
 	}
 	if spec.SideEffects != nil {
-		sw.Do("SideEffects: ptr.To[$.SideEffectClass|raw$](\"$.SPEC.SideEffects$\"),\n", args)
+		sw.Do("SideEffects: $.PtrTo|raw$[$.SideEffectClass|raw$](\"$.SPEC.SideEffects$\"),\n", args)
 	}
 	if spec.TimeoutSeconds != nil {
-		sw.Do("TimeoutSeconds: ptr.To[int32]($.SPEC.TimeoutSeconds$),\n", args)
+		sw.Do("TimeoutSeconds: $.PtrTo|raw$[int32]($.SPEC.TimeoutSeconds$),\n", args)
 	}
 	if len(spec.AdmissionReviewVersions) != 0 {
 		sw.Do("AdmissionReviewVersions: []string{\n\"$.$\",\n},\n", strings.Join(spec.AdmissionReviewVersions, "\",\n \""))
@@ -346,7 +346,7 @@ func (g *webhookGen) generateMutating(c *generator.Context, t *types.Type, w io.
 	sw.Do("if cc.Service != nil {\n", nil)
 	sw.Do("cc.Service.Path = &path\n", nil)
 	sw.Do("} else if c.URL != nil {\n", nil)
-	sw.Do("cc.URL = ptr.To(*c.URL + path)\n", nil)
+	sw.Do("cc.URL = $.PtrTo|raw$(*c.URL + path)\n", args)
 	sw.Do("}\n\n", nil)
 	sw.Do("return $.MutatingWebhook|raw${\n", args)
 
@@ -369,7 +369,7 @@ func (g *webhookGen) generateMutating(c *generator.Context, t *types.Type, w io.
 	}
 	sw.Do("Resources: []string{\n\"$.$\",\n},\n", strings.Join(rule.Resources, "\",\n \""))
 	if rule.Scope != nil {
-		sw.Do("Scope: ptr.To[$.ScopeType|raw$](\"$.RULE.Scope$\"),\n", args)
+		sw.Do("Scope: $.PtrTo|raw$[$.ScopeType|raw$](\"$.RULE.Scope$\"),\n", args)
 	}
 	sw.Do("},\n", nil)
 	if len(rule.Operations) != 0 {
@@ -381,13 +381,13 @@ func (g *webhookGen) generateMutating(c *generator.Context, t *types.Type, w io.
 	// END: Webhook/Rules/0.
 
 	if spec.FailurePolicy != nil {
-		sw.Do("FailurePolicy: ptr.To[$.FailurePolicyType|raw$](\"$.SPEC.FailurePolicy$\"),\n", args)
+		sw.Do("FailurePolicy: $.PtrTo|raw$[$.FailurePolicyType|raw$](\"$.SPEC.FailurePolicy$\"),\n", args)
 	}
 	if spec.MatchPolicy != nil {
-		sw.Do("MatchPolicy: ptr.To[$.MatchPolicyType|raw$](\"$.SPEC.MatchPolicy$\"),\n", args)
+		sw.Do("MatchPolicy: $.PtrTo|raw$[$.MatchPolicyType|raw$](\"$.SPEC.MatchPolicy$\"),\n", args)
 	}
 	if selector := spec.NamespaceSelector; selector != nil {
-		sw.Do("NamespaceSelector: ptr.To($.LabelSelector|raw${\n", args)
+		sw.Do("NamespaceSelector: $.PtrTo|raw$($.LabelSelector|raw${\n", args)
 		if len(selector.MatchLabels) != 0 {
 			sw.Do("MatchLabels: map[string]string{\n", nil)
 			for k, v := range selector.MatchLabels {
@@ -411,7 +411,7 @@ func (g *webhookGen) generateMutating(c *generator.Context, t *types.Type, w io.
 		sw.Do("}),\n", nil)
 	}
 	if selector := spec.ObjectSelector; selector != nil {
-		sw.Do("ObjectSelector: ptr.To($.LabelSelector|raw${\n", args)
+		sw.Do("ObjectSelector: $.PtrTo|raw$($.LabelSelector|raw${\n", args)
 		if len(selector.MatchLabels) != 0 {
 			sw.Do("MatchLabels: map[string]string{\n", nil)
 			for k, v := range selector.MatchLabels {
@@ -435,16 +435,16 @@ func (g *webhookGen) generateMutating(c *generator.Context, t *types.Type, w io.
 		sw.Do("}),\n", nil)
 	}
 	if spec.SideEffects != nil {
-		sw.Do("SideEffects: ptr.To[$.SideEffectClass|raw$](\"$.SPEC.SideEffects$\"),\n", args)
+		sw.Do("SideEffects: $.PtrTo|raw$[$.SideEffectClass|raw$](\"$.SPEC.SideEffects$\"),\n", args)
 	}
 	if spec.TimeoutSeconds != nil {
-		sw.Do("TimeoutSeconds: ptr.To[int32]($.SPEC.TimeoutSeconds$),\n", args)
+		sw.Do("TimeoutSeconds: $.PtrTo|raw$[int32]($.SPEC.TimeoutSeconds$),\n", args)
 	}
 	if len(spec.AdmissionReviewVersions) != 0 {
 		sw.Do("AdmissionReviewVersions: []string{\n\"$.$\",\n},\n", strings.Join(spec.AdmissionReviewVersions, "\",\n \""))
 	}
 	if spec.ReinvocationPolicy != nil {
-		sw.Do("ReinvocationPolicy: ptr.To[$.ReinvocationPolicyType|raw$](\"$.SPEC.ReinvocationPolicy$\"),\n", args)
+		sw.Do("ReinvocationPolicy: $.PtrTo|raw$[$.ReinvocationPolicyType|raw$](\"$.SPEC.ReinvocationPolicy$\"),\n", args)
 	}
 	if len(spec.MatchConditions) != 0 {
 		sw.Do("MatchConditions: []$.MatchCondition|raw${\n", args)

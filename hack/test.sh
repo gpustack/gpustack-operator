@@ -50,10 +50,10 @@ function test() {
 
   set -x
   if [[ $# -gt 0 ]]; then
-    GODEBUG=gotypesalias=0 CGO_ENABLED=1 \
+    CGO_ENABLED=1 \
       go list ./... | grep -v -E "$(gpustack::util::join_array "|" "$@")" | xargs -I {} go test "${opts[@]}" {}"/..."
   else
-    GODEBUG=gotypesalias=0 CGO_ENABLED=1 \
+    CGO_ENABLED=1 \
       go test "${opts[@]}" ./...
   fi
   set +x
