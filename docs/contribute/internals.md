@@ -92,6 +92,41 @@ last resort, not a pattern to copy; reach for it only where idempotence is out o
 > **Why** — Helm's release storage is a compare-and-create, not a mutex, and two Helm actions on one
 > release can leave it pending where no later attempt gets past.
 
+### System routing resources
+
+A worker outside a nearby cluster has no pod for the chart's `Service` to select, so it installs the
+routing objects itself (`pkg/systemkuberess`), in the system namespace:
+
+- a selectorless `Service` with a `https` port;
+- legacy `Endpoints` of the same name, holding the address of the system;
+- an `EndpointSlice` in `discovery.k8s.io/v1`, holding the same address and port.
+
+Three environment variables configure the routing at worker startup:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `KUBERNETES_POD_NAMESPACE` | `gpustack-system` | Namespace of the routing `Service`, `Endpoints`, `EndpointSlice`, and extension `APIService` backends. |
+| `KUBERNETES_SERVICE_NAME` | `gpustack-operator-worker` | Name of the routing `Service` and legacy `Endpoints` (`<name>-direct` for the `EndpointSlice`). |
+| `KUBERNETES_POD_IP` | primary host interface IP | Reachable worker IP written to the routing `Endpoints` and `EndpointSlice`. |
+
+With its `--enable-aggregator-routing` flag, the kube-apiserver resolves the backend of an extension
+API service from the `EndpointSlice`; without it, the backend is the cluster IP of the `Service`.
+
+The slice therefore carries the `kubernetes.io/service-name` label of the `Service`, a port named
+after the `Service` port, and a ready endpoint on the address of the system. Its address type
+follows the family of that address, and the endpoint slice controller leaves it alone because its
+`endpointslice.kubernetes.io/managed-by` label names this operator.
+
+The legacy `Endpoints` stay for the aggregators that read them, which are the ones older than
+Kubernetes 1.34. They carry the `endpointslice.kubernetes.io/skip-mirror` label, so the mirroring
+controller neither mirrors them nor leaves a second slice behind that the aggregator could pick
+instead.
+
+The reconcile replaces the address and the port it owns instead of appending them, and removes the
+slices it owns and no longer needs: the mirror of the legacy `Endpoints`, and a slice an earlier
+version left under another name. It removes a slice only when the owner reference names the routing
+`Service` or the legacy `Endpoints` of this worker, so a slice of another service stays.
+
 ## Worker gateway
 
 `pkg/workergateway/service` folds many clusters' `InstanceType`s into one fleet-wide
