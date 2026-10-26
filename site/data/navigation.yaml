@@ -188,5 +188,5 @@ labels:
   /docs/reference/instance-type-unit-resources/: Resource Presets
   /docs/reference/instance-metrics/: Instance Metrics
   /docs/contribute/development/: Development
-  /docs/contribute/kind/: kind Setup
+  /docs/contribute/local-cluster-setup/: Local Cluster Setup
   /docs/contribute/internals/: Internals
