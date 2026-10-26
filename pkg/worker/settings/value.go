@@ -169,7 +169,7 @@ var (
 	InstanceSSHServerImage = settings.NewEditable(
 		"instance-ssh-server-image",
 		"Indicates the image of the SSH server, when deploying Instances.",
-		setting.InitializeFromEnv("gpustack/ssh-server:v1.3.0"),
+		setting.InitializeFromEnv("gpustack/ssh-server:v1.4.0"),
 		setting.AllowContainerImageReference(),
 	)
 

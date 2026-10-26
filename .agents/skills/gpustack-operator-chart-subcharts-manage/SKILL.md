@@ -202,11 +202,12 @@ strip CRs. Regenerate it with the commands above.
    Kueue's `selectableFields` is gated at 1.31 and helm otherwise substitutes its own built-in version:
 
    ```bash
-   ./.sbin/helm version --short                       # expect v3.21.0
+   ./.sbin/helm version --short                       # expect v3.21.4
    ./.sbin/helm template gpustack-operator deploy/gpustack-operator/chart --kube-version 1.33.0
    ```
 
-6. `make test chart` — `ct install` in a container (docker + `~/.kube/config`, current context) into a
+6. `make test chart` — `ct install` in a container (docker + the kubeconfig `KUBECONFIG` names, or
+   `~/.kube/config` when it names none, mounted read-only with its own context) into a
    namespace **chart-testing generates**, which is also what proves the chart names no namespace of its own.
    Needs a reachable Kubernetes cluster with **no conflicting release**: the chart templates cluster-scoped
    objects and Helm refuses any object carrying another release's ownership metadata. `hack/lib/helm.sh`
@@ -262,7 +263,7 @@ strip CRs. Regenerate it with the commands above.
 
 - **A PATH `helm` shadows the pin.** `gpustack::helm::helm::validate` returns early on any PATH `helm` and
   `make deps` never installs one; a system 3.13 has no `--take-ownership`. Use `./.sbin/helm` and assert
-  `version --short` is v3.21.0. (chart-testing runs its own bundled helm in a container; the pin is moot there.)
+  `version --short` is v3.21.4. (chart-testing runs its own bundled helm in a container; the pin is moot there.)
 - **`Chart.lock` goes stale silently.** `helm template`/`lint` ignore it; `helm dependency build` — which
   chart-testing runs — fails *"the lock file (Chart.lock) is out of sync with the dependencies file"*. Delete
   it after any `Chart.yaml` dependency edit.

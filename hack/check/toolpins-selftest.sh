@@ -27,6 +27,13 @@
 #                 declared existence-only is required to name none, so the day it grows a
 #                 comparison its row has to say so.
 #
+# Beyond those four layers the file holds the pin-consistency contracts, which compare a pin in one
+# place with the pin that is supposed to agree with it: the Dockerfile's Helm ARG with the Helm
+# helper, the helper's variable with the version its own comment documents, the image's tool ARG
+# with the fetch that installs that tool, and the operator's SSH server image with the default the
+# settings reference publishes. A pin that moves alone is drift no other gate sees, and each of
+# these contracts is shown to bite on a file that breaks it.
+#
 # NEVER point ROOT_DIR at the real checkout: hack/lib/ is copied into a throwaway tree so the
 # planted files land in that tree's .sbin. Nothing in the real .sbin is read or written.
 #
@@ -407,6 +414,200 @@ else
   pass "a mismatched Helm helper pin is rejected"
 fi
 
+# ---------------------------------------------------------------------------- image tool pins
+
+# The operator image installs six CLI tools. Five are downloaded from a URL built from their own
+# ARG and the sixth is cloned at the branch their ARG names, so a pin is only as good as the fetch
+# that reads it. An ARG no fetch reads is a decorative pin, and a fetch that names a version itself
+# pins the tool twice, to two numbers that can disagree. Neither shows up in a built image -- the
+# build succeeds and ships whatever the fetch says -- so the two are compared here instead.
+#
+#      <rule>|<what it means>
+#   DECLARED    the Dockerfile declares the pin once, as an x.y.z version.
+#   REACHED     a fetch in the Dockerfile reads it.
+#   SOLITUDE    no fetch reads two tool pins, so no two tools share one.
+#   DERIVED     no fetch carries a version of its own, because a literal there is the second pin.
+
+TOOLS=(SKOPEO HELM VALS KUSTOMIZE YTT KUBECTL)
+
+# Every violation of the rules above in the given Dockerfile, one per line, none when it holds.
+function image_tool_pin_violations() {
+  local dockerfile="$1"
+  local fetches tool arg pin reached others literals
+
+  fetches="$(grep -E 'https://|--branch' "$dockerfile" || true)"
+
+  for tool in "${TOOLS[@]}"; do
+    arg="${tool}_VERSION"
+    pin="$(grep -E "^ARG ${arg}=" "$dockerfile" | head -n 1 | sed -E 's/^ARG [^=]+="?([^"]*)"?$/\1/' || true)"
+    if [ -z "$pin" ]; then
+      echo "${arg}: the Dockerfile declares no pin for it"
+      continue
+    fi
+    if ! printf '%s' "$pin" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+      echo "${arg}: the pin ${pin} is not an x.y.z version"
+    fi
+    reached="$(printf '%s\n' "$fetches" | grep -cF "\${${arg}}" || true)"
+    if [ "$reached" -eq 0 ]; then
+      echo "${arg}: no fetch in the Dockerfile reads it"
+      continue
+    fi
+    others="$(printf '%s\n' "$fetches" | grep -F "\${${arg}}" | grep -oE '\$\{[A-Z_]+_VERSION\}' |
+      grep -vF "${arg}" | sort -u || true)"
+    if [ -n "$others" ]; then
+      echo "${arg}: a fetch that reads it also reads ${others}"
+    fi
+  done
+
+  literals="$(printf '%s\n' "$fetches" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -u || true)"
+  if [ -n "$literals" ]; then
+    echo "a fetch names a version of its own: ${literals}"
+  fi
+}
+
+# A check that has only ever been seen to pass cannot be told apart from one that cannot fail, so
+# every rule above is shown to bite on a Dockerfile that breaks it and only that one.
+function assert_image_tool_pin_rejected() {
+  local label="$1" expect="$2" dockerfile="$3"
+  local violations
+  violations="$(image_tool_pin_violations "$dockerfile")"
+  if [ -z "$violations" ]; then
+    fail "${label}: a Dockerfile that breaks this was accepted"
+  elif ! printf '%s\n' "$violations" | grep -qF "$expect"; then
+    fail "${label}: the violation was not named (${expect})"
+  else
+    pass "${label}: a Dockerfile that breaks this is rejected"
+  fi
+}
+
+echo
+echo "== the image's tool pins reach the fetch that installs them =="
+DOCKERFILE="$ROOT/pack/gpustack-operator/Dockerfile"
+violations="$(image_tool_pin_violations "$DOCKERFILE")"
+if [ -z "$violations" ]; then
+  pass "every tool pin is declared and read by a fetch that derives its version from it"
+else
+  while IFS= read -r violation; do fail "$violation"; done <<<"$violations"
+fi
+
+sed 's/\${HELM_VERSION}/${HELM_PIN}/g' "$DOCKERFILE" > "$MINI/pin-unread.Dockerfile"
+assert_image_tool_pin_rejected "a pin no fetch reads" "HELM_VERSION: no fetch" "$MINI/pin-unread.Dockerfile"
+
+sed 's#\${HELM_VERSION}#${HELM_VERSION}-${VALS_VERSION}#g' "$DOCKERFILE" > "$MINI/pin-shared.Dockerfile"
+assert_image_tool_pin_rejected "one fetch reading two pins" "also reads" "$MINI/pin-shared.Dockerfile"
+
+sed 's/\${HELM_VERSION}/3.21.4/g' "$DOCKERFILE" > "$MINI/pin-hardcoded.Dockerfile"
+assert_image_tool_pin_rejected "a fetch naming a version of its own" "names a version of its own" "$MINI/pin-hardcoded.Dockerfile"
+
+sed 's/^ARG YTT_VERSION="0.55.4"$/ARG YTT_VERSION="0.55"/' "$DOCKERFILE" > "$MINI/pin-malformed.Dockerfile"
+assert_image_tool_pin_rejected "a malformed pin" "is not an x.y.z version" "$MINI/pin-malformed.Dockerfile"
+
+# ---------------------------------------------------------------------------- the Helm helper pin
+
+# The helper states its default twice: in the comment that documents the tunable and in the
+# variable that holds it. A bump that moves one and not the other leaves the file contradicting
+# itself, and the comment is the one a reader trusts.
+function helm_helper_pin_violations() {
+  local helm_library="$1"
+  local documented declared
+
+  documented="$(sed -nE 's/^#.*HELM_VERSION.*default is (v[0-9]+\.[0-9]+\.[0-9]+)\..*$/\1/p' "$helm_library" || true)"
+  declared="$(sed -nE 's/^helm_version=\$\{HELM_VERSION:-"(v[0-9]+\.[0-9]+\.[0-9]+)"\}$/\1/p' "$helm_library" || true)"
+
+  if [ -z "$documented" ]; then
+    echo "the helper documents no default version"
+  fi
+  if [ -z "$declared" ]; then
+    echo "the helper declares no default version"
+  fi
+  if [ -n "$documented" ] && [ -n "$declared" ] && [ "$documented" != "$declared" ]; then
+    echo "the helper documents ${documented} and declares ${declared}"
+  fi
+}
+
+echo
+echo "== the Helm helper declares the version it documents =="
+violations="$(helm_helper_pin_violations "$ROOT/hack/lib/helm.sh")"
+if [ -z "$violations" ]; then
+  pass "the helper declares the version its own comment documents"
+else
+  while IFS= read -r violation; do fail "$violation"; done <<<"$violations"
+fi
+
+sed 's/default is v3.21.4/default is v3.21.0/' "$ROOT/hack/lib/helm.sh" > "$MINI/helm-comment.sh"
+violations="$(helm_helper_pin_violations "$MINI/helm-comment.sh")"
+if [ -n "$violations" ]; then
+  pass "a helper whose comment names another version is rejected"
+else
+  fail "a helper whose comment names another version was accepted"
+fi
+
+sed 's/\${HELM_VERSION:-"v3.21.4"}/\${HELM_VERSION:-"v3.21.0"}/' "$ROOT/hack/lib/helm.sh" > "$MINI/helm-variable.sh"
+violations="$(helm_helper_pin_violations "$MINI/helm-variable.sh")"
+if [ -n "$violations" ]; then
+  pass "a helper whose variable names another version is rejected"
+else
+  fail "a helper whose variable names another version was accepted"
+fi
+
+# ---------------------------------------------------------------------------- the SSH image default
+
+# The SSH server image is a pin this repository publishes twice: as the default the worker starts
+# with, and as the default the settings reference tells an administrator to look for. Nothing else
+# compares the two, so a release that moves one and not the other leaves the published reference
+# naming an image the operator no longer installs.
+function ssh_image_default_violations() {
+  local value_go="$1" settings_doc="$2"
+  local declared documented
+
+  if [ ! -f "$value_go" ]; then
+    echo "the settings source is missing"
+    return
+  fi
+  if [ ! -f "$settings_doc" ]; then
+    echo "the settings reference is missing"
+    return
+  fi
+
+  declared="$(sed -nE '/InstanceSSHServerImage = settings\.NewEditable\(/,/^[[:space:]]*\)/ s/.*InitializeFromEnv\("([^"]+)"\).*/\1/p' "$value_go" | head -n 1 || true)"
+  documented="$(sed -nE '/^[|] `instance-ssh-server-image`/ s/.*Default: `([^`]+)`.*/\1/p' "$settings_doc" | head -n 1 || true)"
+
+  if [ -z "$declared" ]; then
+    echo "the settings source declares no default for the SSH server image"
+  fi
+  if [ -z "$documented" ]; then
+    echo "the settings reference documents no default for the SSH server image"
+  fi
+  if [ -n "$declared" ] && [ -n "$documented" ] && [ "$declared" != "$documented" ]; then
+    echo "the settings source installs ${declared} while the reference documents ${documented}"
+  fi
+}
+
+echo
+echo "== the published SSH image default matches the settings reference =="
+violations="$(ssh_image_default_violations "$ROOT/pkg/worker/settings/value.go" "$ROOT/docs/reference/settings.md")"
+if [ -z "$violations" ]; then
+  pass "the settings source and the settings reference name the same SSH server image"
+else
+  while IFS= read -r violation; do fail "$violation"; done <<<"$violations"
+fi
+
+sed 's|gpustack/ssh-server:v1.4.0|gpustack/ssh-server:v1.3.0|' "$ROOT/pkg/worker/settings/value.go" > "$MINI/value-moved.go"
+violations="$(ssh_image_default_violations "$MINI/value-moved.go" "$ROOT/docs/reference/settings.md")"
+if [ -n "$violations" ]; then
+  pass "a settings source that moves alone is rejected"
+else
+  fail "a settings source that moves alone was accepted"
+fi
+
+sed 's|gpustack/ssh-server:v1.4.0|gpustack/ssh-server:v1.3.0|' "$ROOT/docs/reference/settings.md" > "$MINI/settings-moved.md"
+violations="$(ssh_image_default_violations "$ROOT/pkg/worker/settings/value.go" "$MINI/settings-moved.md")"
+if [ -n "$violations" ]; then
+  pass "a settings reference that moves alone is rejected"
+else
+  fail "a settings reference that moves alone was accepted"
+fi
+
 # ---------------------------------------------------------------------------- the comparison
 
 # The accept side of the go-installed family. Those validators cannot be handed a matching binary
@@ -457,8 +658,10 @@ fi
 # drifts from the first, and the coverage layer above is what keeps the denominator honest.
 echo "$(printf '%s\n' "$discovered" | wc -l | tr -d ' ') validators: ${rejects} compare a version, ${accepts} accept by existence"
 # What a green run establishes: every validator in hack/lib has a row; each one's verdict on a
-# binary that is not its pin, silent and speaking, came from the file this script planted; and each
-# compares the pin its own installer installs, or compares none and is declared that way.
+# binary that is not its pin, silent and speaking, came from the file this script planted; each
+# compares the pin its own installer installs, or compares none and is declared that way; and every
+# pin that exists in two places agrees with the other one, each contract having been shown to bite
+# on a file that breaks it.
 #
 # What it does NOT establish, both turning on the want column being a declaration and not a
 # measurement:

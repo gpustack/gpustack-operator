@@ -1,10 +1,10 @@
 ARG GO_VERSION="1.27.3"
-ARG SKOPEO_VERSION="1.22.0"
-ARG HELM_VERSION="3.21.0"
-ARG VALS_VERSION="0.44.0"
-ARG KUSTOMIZE_VERSION="5.8.1"
-ARG YTT_VERSION="0.54.0"
-ARG KUBECTL_VERSION="1.35.3"
+ARG SKOPEO_VERSION="1.24.1"
+ARG HELM_VERSION="3.21.4"
+ARG VALS_VERSION="0.50.0"
+ARG KUSTOMIZE_VERSION="5.8.3"
+ARG YTT_VERSION="0.55.4"
+ARG KUBECTL_VERSION="1.36.5"
 ARG GPUSTACK_DATA_DIR="/var/lib/gpustack"
 ARG GPUSTACK_CONF_DIR="/etc/gpustack"
 ARG GPUSTACK_CHARTS_DIR="${GPUSTACK_CONF_DIR}/charts"
@@ -121,11 +121,17 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     set -exo pipefail
 
     # Download
+    # The project moved from containers/skopeo to podman-container-tools/skopeo, and its
+    # module path moved with it to go.podman.io/skopeo. The old URL still resolves through a
+    # rename redirect, but the clone names where the tag actually lives.
     git -C /tmp clone --recursive --shallow-submodules \
         --depth 1 --branch v${SKOPEO_VERSION} --single-branch \
-        https://github.com/containers/skopeo.git skopeo
+        https://github.com/podman-container-tools/skopeo.git skopeo
 
     # Build and install
+    # The Makefile exports GOPROXY itself, which would drop the ",direct" fallback the image
+    # sets, so that line is removed and the image's proxy stays in charge. The export is still
+    # present in the selected source, so the removal still applies to it.
     pushd /tmp/skopeo \
         && sed -i "/export GOPROXY=.*/d" Makefile \
         && make vendor \

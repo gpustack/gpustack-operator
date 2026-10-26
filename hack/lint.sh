@@ -185,6 +185,16 @@ function lint() {
     gpustack::log::fatal "the tool-pin validators in hack/lib are not trustworthy: their self-test failed"
   fi
 
+  # The chart test's kubeconfig, which nothing else asserts either. The chart test installs into a
+  # cluster through a kubeconfig the caller chose, mounted read-only into the chart-testing container,
+  # and the file it mounts is the caller's own. A helper that always mounts the default installs
+  # onto the cluster the caller did not choose, and Docker turns a missing bind-mount source into a
+  # directory, so the path has to be checked before it reaches Docker. The check carries its own
+  # fixtures and never reads the caller's HOME or the caller's kubeconfig.
+  if ! bash "${ROOT_DIR}/hack/check/helm-chart-test-selftest.sh" "${ROOT_DIR}"; then
+    gpustack::log::fatal "the chart test's kubeconfig selection is not trustworthy: its self-test failed"
+  fi
+
   # The Stop hook's routing, which decides whether anything above runs at all on a given turn. It is
   # asserted rather than trusted because a routing rule fails by staying silent: a path matching no
   # branch is verified by nothing, and from the outside that is indistinguishable from a turn with

@@ -4,14 +4,14 @@
 # linting and testing the charts under "deploy/". These functions rely on the
 # following tunable versions:
 #
-#            HELM_VERSION  -  The Helm CLI version, default is v3.21.0.
+#            HELM_VERSION  -  The Helm CLI version, default is v3.21.4.
 #       HELM_DOCS_VERSION  -  The norwoodj/helm-docs version, default is v1.14.2.
 #     HELM_SCHEMA_VERSION  -  The dadav/helm-schema version. It only ships Go
 #                             pseudo-versions, so a pinned one (helm-schema 0.23.4)
 #                             is used by default for reproducibility.
 #   CHART_TESTING_VERSION  -  The helm/chart-testing version, default is v3.14.0.
 
-helm_version=${HELM_VERSION:-"v3.21.0"}
+helm_version=${HELM_VERSION:-"v3.21.4"}
 helm_docs_version=${HELM_DOCS_VERSION:-"v1.14.2"}
 helm_schema_version=${HELM_SCHEMA_VERSION:-"v0.0.0-20260612175628-fff8d76bdcd4"}
 chart_testing_version=${CHART_TESTING_VERSION:-"v3.14.0"}
@@ -422,8 +422,70 @@ function gpustack::helm::lint() {
 # A failed uninstall does NOT fail chart-testing: it prints "Error deleting Helm release:"
 # and exits 0, so a broken delete hook would stay green while every run waited out the
 # timeout. The output is therefore kept and that line fails the test here.
+# gpustack::helm::test::kubeconfig resolves the kubeconfig the chart test installs against.
+#
+# The chart test runs chart-testing in a container, which reads the kubeconfig the host mounts at
+# /root/.kube/config. The file mounted is the one the caller names in KUBECONFIG, or the default path
+# the caller passes in when the caller names none. The file is mounted as it stands: its contents and
+# its own current-context are what the container sees, and nothing here rewrites them.
+#
+# The default path is an argument rather than something read from the environment here, because
+# HOME belongs to whoever runs the command. The caller decides what the default is and says so, and
+# a caller with a default of its own can pass that. Nothing in this function reads or writes HOME,
+# and nothing in it copies or moves the caller's kubeconfig.
+#
+# Two shapes are refused rather than repaired, because a repair would guess:
+#
+#   A PATH LIST   KUBECONFIG may legally hold several paths, separated by colons. The container
+#                 mounts exactly one file, so a list would lose every path but the first without
+#                 saying so. The caller is told to name one file.
+#   NOT A FILE    A path that does not exist, or that names a directory, is refused by name. Docker
+#                 would otherwise create a directory at a missing source, and the container would
+#                 read a directory where a kubeconfig belongs.
+#
+# The path is made absolute before it reaches Docker, because a relative source in --volume is read
+# as a named volume and the container would mount something else entirely.
+function gpustack::helm::test::kubeconfig() {
+  local default_kubeconfig_path="${1:-}"
+  local kubeconfig="${KUBECONFIG:-}"
+
+  if [[ -z "${kubeconfig}" ]]; then
+    kubeconfig="${default_kubeconfig_path}"
+  fi
+
+  if [[ -z "${kubeconfig}" ]]; then
+    gpustack::log::error "no kubeconfig was named and no default path was given"
+    return 1
+  fi
+
+  if [[ "${kubeconfig}" == *:* ]]; then
+    gpustack::log::error "KUBECONFIG names more than one file: ${kubeconfig}"
+    gpustack::log::error "the chart test mounts one kubeconfig, so name a single file"
+    return 1
+  fi
+
+  if [[ ! -e "${kubeconfig}" ]]; then
+    gpustack::log::error "the kubeconfig ${kubeconfig} does not exist"
+    return 1
+  fi
+
+  if [[ ! -f "${kubeconfig}" ]]; then
+    gpustack::log::error "the kubeconfig ${kubeconfig} is not a regular file"
+    return 1
+  fi
+
+  local directory base
+  directory="$(cd "$(dirname "${kubeconfig}")" && pwd -P)"
+  base="$(basename "${kubeconfig}")"
+  echo -n "${directory}/${base}"
+}
+
 function gpustack::helm::test() {
   local target="$1"
+
+  local kubeconfig
+  kubeconfig="$(gpustack::helm::test::kubeconfig "${HOME}/.kube/config")" || return 1
+  gpustack::log::info "the chart test installs against ${kubeconfig}"
 
   local chart_repos
   chart_repos=$(gpustack::helm::ct::chart_repos "${target}")
@@ -437,7 +499,7 @@ function gpustack::helm::test() {
     --rm \
     --network host \
     --volume "${ROOT_DIR}:/workspace" \
-    --volume "${HOME}/.kube/config:/root/.kube/config:ro" \
+    --volume "${kubeconfig}:/root/.kube/config:ro" \
     --workdir /workspace \
     "quay.io/helmpack/chart-testing:${chart_testing_version}" \
     ct install \

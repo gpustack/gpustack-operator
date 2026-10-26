@@ -146,6 +146,7 @@ CLASSIFY=(
   "symbols-selftest|none"
   "symbols|skills"
   "toolpins-selftest|none"
+  "helm-chart-test-selftest|none"
   "hook-dispatch|hooks"
   "review-config-selftest|none"
   "review-config|none"
