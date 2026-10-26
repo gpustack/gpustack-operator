@@ -2,6 +2,7 @@ package systemkuberess
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 
@@ -34,6 +35,22 @@ const (
 	// suffix, and the two must never be the same object.
 	routingEndpointSliceNameSuffix = "-direct"
 )
+
+// addressTypeMismatchError reports that the endpoint slice in the cluster carries another
+// address type than the routing wants.
+//
+// The address type of an endpoint slice cannot be changed, so such a slice is replaced
+// rather than updated.
+type addressTypeMismatchError struct {
+	name     string
+	actual   discovery.AddressType
+	expected discovery.AddressType
+}
+
+func (e *addressTypeMismatchError) Error() string {
+	return fmt.Sprintf("routing endpoint slice %q has address type %q, want %q",
+		e.name, e.actual, e.expected)
+}
 
 // newRoutingEndpointSlice builds the desired endpoint slice of the system routing.
 //
@@ -107,6 +124,11 @@ func routingAddressType(address string) (discovery.AddressType, error) {
 //
 // The address type of an endpoint slice cannot be changed, so a slice that was made for
 // the other address family is replaced instead of updated.
+//
+// One worker owns the routing of a cluster at a time. The namespace and the routing
+// service name are the same in every installation, so two workers pointing at one
+// cluster write the same slice, and the last write wins. A slice this worker does not
+// own is refused rather than taken over.
 func installRoutingEndpointSlice(ctx context.Context, cli kubernetes.Interface, nsName string,
 	desired *discovery.EndpointSlice, svc *core.Service,
 ) error {
@@ -115,17 +137,17 @@ func installRoutingEndpointSlice(ctx context.Context, cli kubernetes.Interface, 
 	actual, err := sliceCli.Get(ctx, desired.GetName(), meta.GetOptions{})
 	switch {
 	case err == nil:
-		if actual.GetLabels()[discovery.LabelManagedBy] != routingManagedBy {
-			return fmt.Errorf("routing endpoint slice %q is managed by %q, not by this operator",
-				desired.GetName(), actual.GetLabels()[discovery.LabelManagedBy])
+		err = checkRoutingSliceIdentity(actual, svc)
+		if err != nil {
+			return err
 		}
 		if actual.AddressType != desired.AddressType {
-			err = sliceCli.Delete(ctx, desired.GetName(), meta.DeleteOptions{
-				PropagationPolicy: ptr.To(meta.DeletePropagationBackground),
-			})
-			if err != nil && !kerrors.IsNotFound(err) {
-				return fmt.Errorf("delete routing endpoint slice %q: %w", desired.GetName(), err)
+			err = deleteRoutingSlice(ctx, cli, nsName, actual)
+			if err != nil && !kerrors.IsConflict(err) {
+				return err
 			}
+			// A conflict means another actor replaced the slice in between. The
+			// write below reads the slice that is there now and decides on it.
 		}
 	case kerrors.IsNotFound(err):
 		// The slice does not exist yet, it is created below.
@@ -135,13 +157,124 @@ func installRoutingEndpointSlice(ctx context.Context, cli kubernetes.Interface, 
 
 	kubemeta.ControlOn(desired, svc, core.SchemeGroupVersion.WithKind("Service"))
 
-	_, err = kubeclientset.Create(ctx, sliceCli, desired,
-		kubeclientset.WithUpdateIfExisted(routingEndpointSliceAlign(desired, svc)))
-	if err != nil {
-		return fmt.Errorf("install routing endpoint slice %q: %w", desired.GetName(), err)
+	// The read the create uses can still show the slice of the other address family
+	// after it was deleted, so a family mismatch is retried with the slice gone.
+	for attempt := 0; ; attempt++ {
+		_, err = kubeclientset.Create(ctx, sliceCli, desired,
+			kubeclientset.WithUpdateIfExisted(routingEndpointSliceAlign(desired, svc)))
+		if err == nil {
+			return nil
+		}
+
+		var mismatch *addressTypeMismatchError
+		if !errors.As(err, &mismatch) || attempt >= 2 {
+			return fmt.Errorf("install routing endpoint slice %q: %w", desired.GetName(), err)
+		}
+
+		stale, getErr := sliceCli.Get(ctx, desired.GetName(), meta.GetOptions{})
+		if getErr != nil {
+			if kerrors.IsNotFound(getErr) {
+				continue
+			}
+			return fmt.Errorf("get routing endpoint slice %q: %w", desired.GetName(), getErr)
+		}
+
+		// The slice may have been replaced between the read that found the
+		// mismatch and this one, so its identity is checked again before
+		// anything is deleted. The uid precondition of the deletion binds it to
+		// the slice that was read here, and that slice may be one another actor
+		// owns.
+		err = checkRoutingSliceIdentity(stale, svc)
+		if err != nil {
+			return err
+		}
+
+		if stale.AddressType == desired.AddressType {
+			// The slice carries the wanted address family now, so the
+			// reconcile converges on it without deleting it.
+			continue
+		}
+
+		err = deleteRoutingSlice(ctx, cli, nsName, stale)
+		if err != nil {
+			if !kerrors.IsConflict(err) {
+				return err
+			}
+			// Another actor replaced the slice in between. The write below reads
+			// the slice that is there now and decides on it.
+			continue
+		}
+	}
+}
+
+// checkRoutingSliceIdentity refuses an endpoint slice this worker does not own.
+//
+// A slice belongs to this worker when it carries the managed-by label of this operator
+// and the routing service controls it, or when it carries the label and has no owner at
+// all, which is the state a slice of an earlier version of this operator leaves behind.
+// Any other slice is refused, and the refusal names its owner.
+func checkRoutingSliceIdentity(slice *discovery.EndpointSlice, svc *core.Service) error {
+	if slice.GetLabels()[discovery.LabelManagedBy] != routingManagedBy {
+		return fmt.Errorf("routing endpoint slice %q is managed by %q, not by this operator",
+			slice.GetName(), slice.GetLabels()[discovery.LabelManagedBy])
+	}
+
+	owner := kubemeta.GetControllerOfNoCopy(slice)
+	switch {
+	case owner == nil:
+		// A slice of an earlier version of this operator, which left it without an owner.
+	case routingServiceOwns(slice, svc):
+		// The routing service controls the slice. The uid of the owner may be that
+		// of the service this installation recreated, which the slice outlived; the
+		// slice is adopted, and its owner reference is rewritten with the service
+		// of now.
+	default:
+		return fmt.Errorf("routing endpoint slice %q is controlled by %s %q with uid %q, not by the routing service",
+			slice.GetName(), owner.Kind, owner.Name, owner.UID)
 	}
 
 	return nil
+}
+
+// routingServiceOwns reports whether the routing service controls the slice.
+//
+// The owner is recognized by the name of the service it names, and not by its uid,
+// because the routing service is recreated whenever its spec changes. The slice that
+// the service of the past owned still belongs to this installation, and one service
+// carries the name in the namespace, so the name proves the owner as well as the uid
+// does, and it survives the recreation of the service.
+func routingServiceOwns(slice *discovery.EndpointSlice, svc *core.Service) bool {
+	if svc == nil {
+		return false
+	}
+
+	return controlsRoutingOwner(slice, "Service", svc.GetName())
+}
+
+// routingEndpointsOwns reports whether the legacy endpoints control the slice.
+//
+// The owner is recognized by the name here for the same reason it is for the routing
+// service: the legacy endpoints are recreated whenever they are deleted, and the
+// mirror of the endpoints of the past still belongs to this installation.
+func routingEndpointsOwns(slice *discovery.EndpointSlice, ep *core.Endpoints) bool {
+	if ep == nil {
+		return false
+	}
+
+	return controlsRoutingOwner(slice, "Endpoints", ep.GetName())
+}
+
+// controlsRoutingOwner reports whether the controller owner reference of the slice names
+// the resource of the given kind and name.
+func controlsRoutingOwner(slice *discovery.EndpointSlice, kind, name string) bool {
+	owner := kubemeta.GetControllerOfNoCopy(slice)
+	if owner == nil {
+		return false
+	}
+
+	return owner.APIVersion == core.SchemeGroupVersion.String() &&
+		owner.Kind == kind &&
+		owner.Name == name
 }
 
 // routingEndpointSliceAlign returns the align function of the endpoint slice of the
@@ -149,24 +282,61 @@ func installRoutingEndpointSlice(ctx context.Context, cli kubernetes.Interface, 
 //
 // The endpoints and the ports are replaced, not appended, so that a system that moved
 // to another address or another port does not keep the old one.
+//
+// The identity of the slice is checked on the object that is written, and not only on
+// the one that was read before, so that a slice that was swapped in between the two is
+// not rewritten.
 func routingEndpointSliceAlign(desired *discovery.EndpointSlice, svc *core.Service) kubeclientset.AlignWithFn[*discovery.EndpointSlice] {
 	return func(actual *discovery.EndpointSlice) (*discovery.EndpointSlice, bool, error) {
+		err := checkRoutingSliceIdentity(actual, svc)
+		if err != nil {
+			return nil, false, err
+		}
+
 		if actual.AddressType != desired.AddressType {
-			return nil, false, fmt.Errorf("routing endpoint slice %q has address type %q, want %q",
-				actual.GetName(), actual.AddressType, desired.AddressType)
+			return nil, false, &addressTypeMismatchError{
+				name:     actual.GetName(),
+				actual:   actual.AddressType,
+				expected: desired.AddressType,
+			}
 		}
 
 		aligned := actual.DeepCopy()
 		aligned.SetLabels(mergeLabels(actual.GetLabels(), desired.GetLabels()))
 		kubemeta.ControlOn(aligned, svc, core.SchemeGroupVersion.WithKind("Service"))
-		aligned.Ports = desired.Ports
-		aligned.Endpoints = desired.Endpoints
+
+		// The endpoints and the ports are copied, and not shared with the desired
+		// object, so that a change to the object that is written cannot reach the
+		// object the next attempt writes.
+		wanted := desired.DeepCopy()
+		aligned.Ports = wanted.Ports
+		aligned.Endpoints = wanted.Endpoints
 
 		if apiequality.Semantic.DeepEqual(actual, aligned) {
 			return actual, true, nil
 		}
 		return aligned, false, nil
 	}
+}
+
+// deleteRoutingSlice deletes an endpoint slice of the system routing.
+//
+// The deletion is bound to the uid of the slice that was read, so a slice that another
+// actor replaced in between is not destroyed. The api server answers a conflict in
+// that case, and the slice that is there then is read again by the caller.
+func deleteRoutingSlice(ctx context.Context, cli kubernetes.Interface, nsName string, slice *discovery.EndpointSlice) error {
+	err := cli.DiscoveryV1().EndpointSlices(nsName).Delete(ctx, slice.GetName(), meta.DeleteOptions{
+		PropagationPolicy: ptr.To(meta.DeletePropagationBackground),
+		Preconditions:     &meta.Preconditions{UID: ptr.To(slice.GetUID())},
+	})
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			// The slice is gone, which is the state the delete aimed at.
+			return nil
+		}
+		return fmt.Errorf("delete routing endpoint slice %q: %w", slice.GetName(), err)
+	}
+	return nil
 }
 
 // cleanupObsoleteRoutingSlices removes the endpoint slices this installation owns and no
@@ -198,27 +368,68 @@ func cleanupObsoleteRoutingSlices(ctx context.Context, cli kubernetes.Interface,
 			continue
 		}
 
-		switch {
-		case kubemeta.IsControlledBy(slice, ep):
-			// A mirror of the legacy endpoints of this installation. It carries
-			// the same address as the direct slice, but the aggregator may pick
-			// either of the two, so the direct slice replaces it.
-		case slice.GetLabels()[discovery.LabelManagedBy] == routingManagedBy &&
-			kubemeta.IsControlledBy(slice, svc):
-			// A direct slice of this installation under a name this version no
-			// longer uses.
-		default:
+		if !isObsoleteRoutingSlice(slice, svc, ep) {
 			// Not owned by this installation, keep it.
 			continue
 		}
 
-		err = sliceCli.Delete(ctx, slice.GetName(), meta.DeleteOptions{
-			PropagationPolicy: ptr.To(meta.DeletePropagationBackground),
-		})
-		if err != nil && !kerrors.IsNotFound(err) {
-			return fmt.Errorf("delete obsolete routing endpoint slice %q: %w", slice.GetName(), err)
+		err = deleteObsoleteRoutingSlice(ctx, cli, nsName, slice, svc, ep, keepName)
+		if err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// isObsoleteRoutingSlice reports whether the slice belongs to this installation and is no
+// longer needed.
+func isObsoleteRoutingSlice(slice *discovery.EndpointSlice, svc *core.Service, ep *core.Endpoints) bool {
+	switch {
+	case routingEndpointsOwns(slice, ep):
+		// A mirror of the legacy endpoints of this installation. It carries the
+		// same address as the direct slice, but the aggregator may pick either
+		// of the two, so the direct slice replaces it.
+	case slice.GetLabels()[discovery.LabelManagedBy] == routingManagedBy &&
+		routingServiceOwns(slice, svc):
+		// A direct slice of this installation under a name this version no
+		// longer uses.
+	default:
+		return false
+	}
+
+	return true
+}
+
+// deleteObsoleteRoutingSlice removes the obsolete slice, and reads the slice that is
+// there when another actor replaced it in between.
+//
+// The delete carries the uid of the slice that was read, so the slice that another
+// actor put in its place is not destroyed. The slice that is there then is read again,
+// and it is removed when it is ours and obsolete as well.
+func deleteObsoleteRoutingSlice(ctx context.Context, cli kubernetes.Interface, nsName string,
+	slice *discovery.EndpointSlice, svc *core.Service, ep *core.Endpoints, keepName string,
+) error {
+	err := deleteRoutingSlice(ctx, cli, nsName, slice)
+	if err == nil || !kerrors.IsConflict(err) {
+		return err
+	}
+
+	current, err := cli.DiscoveryV1().EndpointSlices(nsName).
+		Get(ctx, slice.GetName(), meta.GetOptions{})
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			// The slice is gone, which is the state the delete aimed at.
+			return nil
+		}
+		return fmt.Errorf("get routing endpoint slice %q: %w", slice.GetName(), err)
+	}
+
+	if current.GetName() == keepName || !isObsoleteRoutingSlice(current, svc, ep) {
+		// The slice that is there now is kept, and it is not ours or it is the
+		// one this installation uses.
+		return nil
+	}
+
+	return deleteRoutingSlice(ctx, cli, nsName, current)
 }

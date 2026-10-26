@@ -57,7 +57,7 @@ func installFakeSystemRoutingService(ctx context.Context, cli kubernetes.Interfa
 		return err
 	}
 
-	svc, err := installRoutingService(ctx, cli, nsName, svcName, port)
+	svc, err := installRoutingService(ctx, cli, nsName, svcName, port, desiredSlice.AddressType)
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func checkRoutingAccess(ctx context.Context, cli kubernetes.Interface, nsName st
 	}
 
 	verbs := []string{"get", "list", "create", "update", "delete"}
-	reviews := make(kubereviewself.Reviews, 0, len(verbs))
+	reviews := make(kubereviewself.Reviews, 0, len(verbs)+1)
 	for _, verb := range verbs {
 		reviews = append(reviews, kubereviewself.Review{
 			ResourceAttributes: &authz.ResourceAttributes{
@@ -116,19 +116,51 @@ func checkRoutingAccess(ctx context.Context, cli kubernetes.Interface, nsName st
 		})
 	}
 
+	// The owner reference of the slice blocks the deletion of the routing service,
+	// so the api server asks for the permission to update the finalizers of the
+	// service before it accepts the slice.
+	reviews = append(reviews, kubereviewself.Review{
+		ResourceAttributes: &authz.ResourceAttributes{
+			Verb:        "update",
+			Group:       core.SchemeGroupVersion.Group,
+			Version:     core.SchemeGroupVersion.Version,
+			Resource:    "services",
+			Subresource: "finalizers",
+			Namespace:   nsName,
+		},
+	})
+
 	return kubereviewself.CanDo(ctx, cli.AuthorizationV1().SelfSubjectAccessReviews(), reviews)
 }
 
 // installRoutingService creates the selectorless service the extension api services are
 // fronted by, and returns it as the cluster holds it.
-func installRoutingService(ctx context.Context, cli kubernetes.Interface, nsName, svcName string, port int32) (*core.Service, error) {
+func installRoutingService(ctx context.Context, cli kubernetes.Interface, nsName, svcName string, port int32,
+	addressType discovery.AddressType,
+) (*core.Service, error) {
 	expected := newRoutingService(nsName, svcName, port)
 	svcCompareFn := func(actual *core.Service) bool {
-		return actual.Spec.Type == expected.Spec.Type &&
-			actual.Spec.ClusterIP == expected.Spec.ClusterIP &&
-			slices.ContainsFunc(actual.Spec.Ports, func(ap core.ServicePort) bool {
-				return ap.Port == expected.Spec.Ports[0].Port
-			})
+		if actual.Spec.Type != expected.Spec.Type {
+			return false
+		}
+		// The cluster ip is compared only when the wanted service asks for one.
+		// The operator does not manage it, and the api server allocates one for
+		// the service of the cluster, so comparing it against the empty ip of the
+		// wanted service would delete and recreate the service on every start.
+		// The recreation takes the endpoint slice of this installation with it,
+		// because the slice is a dependent of the service that blocks its
+		// deletion, and it changes the address of the routing as well.
+		if expected.Spec.ClusterIP != "" && actual.Spec.ClusterIP != expected.Spec.ClusterIP {
+			return false
+		}
+		if actual.Spec.ClusterIP != "" && actual.Spec.ClusterIP != core.ClusterIPNone {
+			if actualType, err := routingAddressType(actual.Spec.ClusterIP); err == nil && actualType != addressType {
+				return false
+			}
+		}
+		return slices.ContainsFunc(actual.Spec.Ports, func(ap core.ServicePort) bool {
+			return ap.Port == expected.Spec.Ports[0].Port
+		})
 	}
 
 	actual, err := kubeclientset.Create(ctx, cli.CoreV1().Services(nsName), expected,

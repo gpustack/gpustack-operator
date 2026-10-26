@@ -36,6 +36,9 @@ type wantRouting struct {
 	endpoints bool
 	// slice is true when the endpoint slice must exist.
 	slice bool
+	// foreignSlice is true when the endpoint slice exists and belongs to somebody
+	// else, so the reconcile must have left it alone.
+	foreignSlice bool
 	// address is the address the routing must point at.
 	address string
 	// port is the routing port.
@@ -217,6 +220,39 @@ func Test_installFakeSystemRoutingService(t *testing.T) {
 			},
 		},
 		{
+			name:  "adopts a slice without an owner",
+			input: routingInput{address: "192.168.50.10", port: testPort},
+			objects: []runtime.Object{
+				ownerlessSlice("192.168.50.10", testPort),
+			},
+			want: wantRouting{
+				service:     true,
+				endpoints:   true,
+				slice:       true,
+				address:     "192.168.50.10",
+				port:        testPort,
+				addressType: discovery.AddressTypeIPv4,
+				sliceNames:  []string{"gpustack-operator-worker-direct"},
+			},
+		},
+		{
+			name:  "refuses a slice of another owner",
+			input: routingInput{address: "192.168.50.10", port: testPort},
+			objects: []runtime.Object{
+				foreignOwnedSlice("192.168.50.10", testPort),
+			},
+			want: wantRouting{
+				service:      true,
+				endpoints:    true,
+				foreignSlice: true,
+				address:      "192.168.50.10",
+				port:         testPort,
+				addressType:  discovery.AddressTypeIPv4,
+				sliceNames:   []string{"gpustack-operator-worker-direct"},
+			},
+			wantErr: "is controlled by",
+		},
+		{
 			name:  "keeps the endpoints of others",
 			input: routingInput{address: "192.168.50.10", port: testPort},
 			objects: []runtime.Object{
@@ -248,6 +284,23 @@ func Test_installFakeSystemRoutingService(t *testing.T) {
 			input: routingInput{address: "192.168.50.10", port: testPort},
 			deny: func(attrs *authz.ResourceAttributes) bool {
 				return attrs.Resource == "endpointslices" && attrs.Verb == "list"
+			},
+			want: wantRouting{
+				sliceNames: nil,
+			},
+			wantErr: "denied",
+		},
+		{
+			// The owner reference of the slice blocks the deletion of the routing
+			// service, so the api server asks for the permission to update the
+			// finalizers of the service before it accepts the slice. A binding
+			// without that permission stops the worker before it writes anything.
+			name:  "reports a denied finalizers access review",
+			input: routingInput{address: "192.168.50.10", port: testPort},
+			deny: func(attrs *authz.ResourceAttributes) bool {
+				return attrs.Resource == "services" &&
+					attrs.Subresource == "finalizers" &&
+					attrs.Verb == "update"
 			},
 			want: wantRouting{
 				sliceNames: nil,
@@ -335,6 +388,111 @@ func Test_installFakeSystemRoutingService(t *testing.T) {
 	}
 }
 
+// Test_installFakeSystemRoutingServiceConvergesWithoutWrites checks that an install
+// that finds the routing it wants writes nothing at all.
+//
+// The state after a repeated install is the same either way, so only the writes tell
+// the two apart.
+func Test_installFakeSystemRoutingServiceConvergesWithoutWrites(t *testing.T) {
+	cli := newFakeClient(nil)
+
+	require.NoError(t, installFakeSystemRoutingService(t.Context(), cli, testNamespace, testService,
+		"192.168.50.10", testPort))
+
+	var writes atomic.Int64
+	count := func(action ktesting.Action) (bool, runtime.Object, error) {
+		if action.GetResource().Resource != "selfsubjectaccessreviews" {
+			writes.Add(1)
+		}
+		return false, nil, nil
+	}
+	cli.PrependReactor("create", "*", count)
+	cli.PrependReactor("update", "*", count)
+	cli.PrependReactor("delete", "*", count)
+
+	require.NoError(t, installFakeSystemRoutingService(t.Context(), cli, testNamespace, testService,
+		"192.168.50.10", testPort))
+	assert.Equal(t, int64(0), writes.Load(), "a converged install must not write")
+}
+
+// Test_installFakeSystemRoutingServiceKeepsTheRoutingServiceOfTheCluster checks that
+// the routing service of the cluster is kept.
+//
+// The api server allocates a cluster ip for the service, and the operator does not
+// manage it. Comparing the cluster ip of the wanted service, which asks for none, with
+// the cluster ip of the service of the cluster would delete and recreate the service on
+// every start. The recreation takes the endpoint slice of this installation with it,
+// because the slice is a dependent of the service that blocks its deletion, and it
+// changes the address of the routing as well.
+func Test_installFakeSystemRoutingServiceKeepsTheRoutingServiceOfTheCluster(t *testing.T) {
+	allocated := &core.Service{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testService,
+		},
+		Spec: core.ServiceSpec{
+			Type:      core.ServiceTypeClusterIP,
+			ClusterIP: "10.96.0.42",
+			Ports: []core.ServicePort{
+				{Name: routingPortName, Port: testPort},
+			},
+		},
+	}
+	cli := newFakeClient(nil, allocated)
+
+	var deleted atomic.Int64
+	cli.PrependReactor("delete", "services", func(action ktesting.Action) (bool, runtime.Object, error) {
+		deleted.Add(1)
+		return false, nil, nil
+	})
+
+	require.NoError(t, installFakeSystemRoutingService(t.Context(), cli, testNamespace, testService,
+		"192.168.50.10", testPort))
+
+	assert.Equal(t, int64(0), deleted.Load(), "the routing service of the cluster must be kept")
+
+	svc, err := cli.CoreV1().Services(testNamespace).Get(t.Context(), testService, meta.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "10.96.0.42", svc.Spec.ClusterIP,
+		"the cluster ip of the service of the cluster must be kept")
+
+	checkRouting(t, cli, wantRouting{
+		service:     true,
+		endpoints:   true,
+		slice:       true,
+		address:     "192.168.50.10",
+		port:        testPort,
+		addressType: discovery.AddressTypeIPv4,
+		sliceNames:  []string{"gpustack-operator-worker-direct"},
+	})
+
+	t.Run("recreates the routing service when the cluster ip family differs from the routing address", func(t *testing.T) {
+		cli := newFakeClient(nil, allocated.DeepCopy())
+
+		var deleted atomic.Int64
+		cli.PrependReactor("delete", "services", func(action ktesting.Action) (bool, runtime.Object, error) {
+			deleted.Add(1)
+			return false, nil, nil
+		})
+
+		require.NoError(t, installFakeSystemRoutingService(t.Context(), cli, testNamespace, testService,
+			"fd00::1", testPort))
+
+		assert.Equal(t, int64(1), deleted.Load(),
+			"the routing service must be recreated when its cluster ip family differs from the routing address")
+
+		checkRouting(t, cli, wantRouting{
+			service:     true,
+			endpoints:   true,
+			slice:       true,
+			address:     "fd00::1",
+			port:        testPort,
+			addressType: discovery.AddressTypeIPv6,
+			sliceNames:  []string{"gpustack-operator-worker-direct"},
+		})
+	})
+}
+
 // Test_installFakeSystemRoutingServiceCancelled checks that a canceled call is reported
 // as it is, and that a context that is already done stops the reconcile from trying
 // again.
@@ -415,7 +573,16 @@ func checkRouting(t *testing.T, cli *kubefake.Clientset, want wantRouting) {
 
 	slice, err := cli.DiscoveryV1().EndpointSlices(testNamespace).
 		Get(t.Context(), routingEndpointSliceName(testService), meta.GetOptions{})
-	if want.slice {
+	switch {
+	case want.foreignSlice:
+		require.NoError(t, err)
+		owner := kubemeta.GetControllerOfNoCopy(slice)
+		require.NotNil(t, owner, "the slice of another owner must keep its owner")
+		if want.service {
+			assert.NotEqual(t, svc.GetUID(), owner.UID,
+				"the reconcile must not take the slice of another owner over")
+		}
+	case want.slice:
 		require.NoError(t, err)
 		assert.Equal(t, testService, slice.GetLabels()[discovery.LabelServiceName])
 		assert.Equal(t, routingManagedBy, slice.GetLabels()[discovery.LabelManagedBy])
@@ -435,7 +602,7 @@ func checkRouting(t *testing.T, cli *kubefake.Clientset, want wantRouting) {
 		if want.service {
 			assert.Equal(t, svc.GetUID(), owner.UID)
 		}
-	} else {
+	default:
 		assert.True(t, kerrors.IsNotFound(err), "the endpoint slice must not exist")
 	}
 
@@ -604,6 +771,30 @@ func mirroredSlice(address string, port int32) *discovery.EndpointSlice {
 func obsoleteSlice(address string, port int32) *discovery.EndpointSlice {
 	slice := staleSlice(address, port)
 	slice.SetName(testService + "-legacy")
+	return slice
+}
+
+// ownerlessSlice builds the endpoint slice an earlier version of this operator left
+// without an owner.
+func ownerlessSlice(address string, port int32) *discovery.EndpointSlice {
+	slice := staleSlice(address, port)
+	slice.SetOwnerReferences(nil)
+	return slice
+}
+
+// foreignOwnedSlice builds the endpoint slice of another owner, carrying the labels of
+// this operator.
+func foreignOwnedSlice(address string, port int32) *discovery.EndpointSlice {
+	slice := staleSlice(address, port)
+	slice.SetOwnerReferences([]meta.OwnerReference{
+		{
+			APIVersion: "v1",
+			Kind:       "Service",
+			Name:       "other-service",
+			UID:        types.UID("Service/other-service"),
+			Controller: ptr.To(true),
+		},
+	})
 	return slice
 }
 

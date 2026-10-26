@@ -127,6 +127,15 @@ slices it owns and no longer needs: the mirror of the legacy `Endpoints`, and a 
 version left under another name. It removes a slice only when the owner reference names the routing
 `Service` or the legacy `Endpoints` of this worker, so a slice of another service stays.
 
+The owner is recognized by the name it carries, and not by its uid, because the routing `Service` and
+the legacy `Endpoints` are recreated whenever their spec changes. A slice the resource of the past
+owned still belongs to the worker, so the worker adopts it and rewrites its owner reference; refusing
+it would leave the worker unable to repair the routing it owns.
+
+One worker owns the routing of a cluster at a time. The namespace and the routing service name are the
+same in every installation, so two workers pointing at one cluster write the same slice, and the last
+write wins. A slice the worker does not own is refused rather than taken over.
+
 ## Worker gateway
 
 `pkg/workergateway/service` folds many clusters' `InstanceType`s into one fleet-wide
