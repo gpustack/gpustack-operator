@@ -151,7 +151,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `development`
 - Use for: build, lint, test and codegen commands; commit and PR conventions; contributor invariants; release steps; site publication and translations.
 - Aliases: `make`, `lint`, `codegen`, `vendored dependencies`, `staging`, `Hugo`, `GitHub Pages`
-- Guides: commands and targets in [Development](contribute/development.md); startup invariants in [Internals](contribute/internals.md); orientation in [Architecture](getting-started/architecture.md).
+- Guides: commands and targets in [Development](contribute/development.md); a local test cluster in [kind Setup](contribute/kind.md); startup invariants in [Internals](contribute/internals.md); orientation in [Architecture](getting-started/architecture.md).
 - Code: [Makefile](../Makefile) and the scripts behind it in [hack](../hack/) · site publication in [Site workflow](../.github/workflows/site.yml) and [publisher](../hack/site/publish.py) · patched modules in [staging](../staging/) · generators in [gen](../gen/) · upgrade compatibility checks in [upgrade-compat.sh](../hack/check/upgrade-compat.sh)
 - Related: [API Changes](#api-changes) (what `make generate` owns) · [Installation](#installation) (chart targets and vendoring)
 - Skills: [gpustack-operator-overview](../.agents/skills/gpustack-operator-overview/SKILL.md) (codebase tour) · [gpustack-operator-docs](../.agents/skills/gpustack-operator-docs/SKILL.md) (documentation changes) · [gpustack-operator-code-review](../.agents/skills/gpustack-operator-code-review/SKILL.md) (PR review criteria) · [gpustack-operator-issue-pr](../.agents/skills/gpustack-operator-issue-pr/SKILL.md) (issue and PR titles) · [gpustack-operator-release](../.agents/skills/gpustack-operator-release/SKILL.md) (cut a release) · [gpustack-operator-generate](../.agents/skills/gpustack-operator-generate/SKILL.md) (API codegen)
@@ -291,6 +291,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | Page | Description |
 |---|---|
 | [Development](contribute/development.md) | Build, generate and lint the project. |
+| [kind Setup](contribute/kind.md) | Install kind and provide a cluster for development tests. |
 | [Internals](contribute/internals.md) | Review startup and naming constraints. |
 
 ## Conventions

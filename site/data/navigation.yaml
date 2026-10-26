@@ -102,6 +102,7 @@ order:
     - instance-metrics
   /docs/contribute/:
     - development
+    - kind
     - internals
 overview_labels:
   /docs/walkthroughs/model-deployment/: Preparation and Choices
@@ -187,4 +188,5 @@ labels:
   /docs/reference/instance-type-unit-resources/: Resource Presets
   /docs/reference/instance-metrics/: Instance Metrics
   /docs/contribute/development/: Development
+  /docs/contribute/kind/: kind Setup
   /docs/contribute/internals/: Internals
