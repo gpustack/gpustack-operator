@@ -167,7 +167,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # kindest/node images spanning v1.23 -> v1.35, one per every other minor.
+        # kindest/node images covering every other minor from v1.23 through v1.33,
+        # plus the latest supported v1.35 and v1.36 patches.
         node-image:
           - "kindest/node:v1.23.17"
           - "kindest/node:v1.25.16"
@@ -175,7 +176,8 @@ jobs:
           - "kindest/node:v1.29.14"
           - "kindest/node:v1.31.14"
           - "kindest/node:v1.33.12"
-          - "kindest/node:v1.35.5"
+          - "kindest/node:v1.35.8"
+          - "kindest/node:v1.36.4"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
