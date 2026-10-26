@@ -24,7 +24,7 @@ For cluster-backed tests, provide a kind cluster and its kubeconfig/context. Fol
 
 - `make deps` — vendor patched k8s staging modules into `staging/` **and** upstream Helm charts into `deploy/gpustack-operator/chart/charts/`, then `go mod tidy && go mod download`; `make deps update` adds `go get -u ./...`.
 - `make generate` — the `gen/api` generators: deepcopy, register, apiservice, CRDs, conversion, protobuf, webhooks. `make generate binding` regenerates the CGO bindings in `binding/` via c-for-go.
-- `make lint` — golangci-lint (`.golangci.yaml`); `make lint dirty` also fails on a dirty tree. `make lint docs` checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see [the docs skill](https://github.com/gpustack/gpustack-operator/blob/b30b051dd0f2b476f1eef4ad283e22c3a98c90de/.claude/skills/gpustack-operator-docs/SKILL.md).
+- `make lint` — golangci-lint (`.golangci.yaml`); `make lint dirty` also fails on a dirty tree. `make lint docs` checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see [the docs skill](https://github.com/gpustack/gpustack-operator/blob/399365ddcd4b395e4a5c78c300d307214f2a9e34/.claude/skills/gpustack-operator-docs/SKILL.md).
 - `make build` — cross-build `cmd/gpustack-operator` into `.dist/build/`, version ldflag-injected into `pkg/utils/version`; `VERSION=vX.y.z+l.m make build` sets it, `BUILD_PLATFORMS="linux/amd64 linux/arm64"` cross-compiles.
 - `make test` — `go test -v -failfast -race -cover -shuffle=on -timeout=30m ./...`, coverage to `.dist/test/coverage.out`. The order is shuffled on every run so an order-dependent test cannot hide behind the fixed one; a failure banner prints the seed, and `go test -shuffle=<seed>` reproduces that exact order. Trailing args are regexes of packages to **exclude**. `RACE=false make test` drops `-race` and changes nothing else.
 - `make package` — images via `docker buildx` from `pack/*/Dockerfile` (Linux only).
@@ -59,7 +59,7 @@ clone. The verdict on committed `.agents` shell comes from `agents-shell.yml` an
 
 - `make generate chart` — regenerate `README.md` (from `README.md.gotmpl`) and `values.schema.json`. **Never hand-edit those two**: edit `values.yaml`/its annotations/`README.md.gotmpl` and re-run, after **any** `values.yaml` edit — the generated schema is what rejects a bad install. Nothing in `values.yaml` is generated: Kueue's *`resources.transformations`* is rendered at install time by a chart helper a patch adds to its config.
 - `make lint chart` — `ct lint` in a container, then assert the `global.*` image settings reach every image the chart and its subcharts render (`gpustack::helm::verify_images`).
-- `make test chart` — `ct install` onto the current cluster in a container; needs a reachable cluster (e.g. kind) and `~/.kube/config`. It installs `CHART_TEST_IMAGE_REPOSITORY`:`CHART_TEST_IMAGE_TAG`, by default the published `gpustack/gpustack-operator:dev`, which is built from `main`. To test a chart change together with the binary it needs, build the tree, load the image into the cluster, and name it in those two variables. The Chart workflow does this on every run.
+- `make test chart` — `ct install` into the cluster the caller's kubeconfig names, in a container; needs a reachable cluster (e.g. kind). The kubeconfig is the file `KUBECONFIG` names, or `~/.kube/config` when `KUBECONFIG` is unset. A path that does not exist, that names a directory, or that lists more than one file is refused before the container starts: Docker turns a missing bind-mount source into a directory, and the container mounts exactly one file. The file is mounted read-only and unchanged, so the cluster the install reaches and the context it uses are the ones that file already names. It installs `CHART_TEST_IMAGE_REPOSITORY`:`CHART_TEST_IMAGE_TAG`, by default the published `gpustack/gpustack-operator:dev`, which is built from `main`. To test a chart change together with the binary it needs, build the tree, load the image into the cluster, and name it in those two variables. The Chart workflow does this on every run.
 
 ### Vendored subcharts
 
@@ -147,7 +147,7 @@ Edit documentation under `docs/`, navigation labels and order in `site/data/navi
 layouts and styles under `site/`. Run `make lint docs` before committing to check source links,
 page structure, index entries and rendered site links. CI runs the same gate.
 
-The [shared module map](https://github.com/gpustack/gpustack-operator/blob/b30b051dd0f2b476f1eef4ad283e22c3a98c90de/docs/README.md#module-map) connects guides, specs, code and skills for code
+The [shared module map](https://github.com/gpustack/gpustack-operator/blob/399365ddcd4b395e4a5c78c300d307214f2a9e34/docs/README.md#module-map) connects guides, specs, code and skills for code
 changes. Update its routing in the same PR when those entry points or associations change.
 `make site` also generates `/llms.txt` from that index and *`index.md`* beside each article's HTML.
 Markdown exports preserve the prose and code blocks, with links adjusted for the website.
@@ -347,4 +347,4 @@ are under `hack/deploy/`.
 **See also** — [Internals](/gpustack-operator/main/docs/contribute/internals/index.md) (the invariants the code keeps) ·
 [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) · [Settings](/gpustack-operator/main/docs/reference/settings/index.md)
 
-**Next** → [All documentation](https://github.com/gpustack/gpustack-operator/blob/b30b051dd0f2b476f1eef4ad283e22c3a98c90de/docs/README.md) — pick the next page on the contributor path.
+**Next** → [All documentation](https://github.com/gpustack/gpustack-operator/blob/399365ddcd4b395e4a5c78c300d307214f2a9e34/docs/README.md) — pick the next page on the contributor path.
