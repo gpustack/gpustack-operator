@@ -1,4 +1,4 @@
-# kind Setup
+# Local Cluster Setup
 
 Use [kind](https://kind.sigs.k8s.io/docs/user/quick-start/) to provide a local Kubernetes
 cluster for development and integration tests. Keep its kubeconfig separate from other clusters.

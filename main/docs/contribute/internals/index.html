@@ -1504,6 +1504,62 @@ last resort, not a pattern to copy; reach for it only where idempotence is out o
 <p><strong>Why</strong> — Helm&rsquo;s release storage is a compare-and-create, not a mutex, and two Helm actions on one
 release can leave it pending where no later attempt gets past.</p>
 </blockquote>
+<h3 id="system-routing-resources">System routing resources</h3>
+<p>A worker outside a nearby cluster has no pod for the chart&rsquo;s <code>Service</code> to select, so it installs the
+routing objects itself (<code>pkg/systemkuberess</code>), in the system namespace:</p>
+<ul>
+<li>a selectorless <code>Service</code> with a <code>https</code> port;</li>
+<li>legacy <code>Endpoints</code> of the same name, holding the address of the system;</li>
+<li>an <code>EndpointSlice</code> in <code>discovery.k8s.io/v1</code>, holding the same address and port.</li>
+</ul>
+<p>Three environment variables configure the routing at worker startup:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Variable</th>
+          <th>Default</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>KUBERNETES_POD_NAMESPACE</code></td>
+          <td><code>gpustack-system</code></td>
+          <td>Namespace of the routing <code>Service</code>, <code>Endpoints</code>, <code>EndpointSlice</code>, and extension <code>APIService</code> backends.</td>
+      </tr>
+      <tr>
+          <td><code>KUBERNETES_SERVICE_NAME</code></td>
+          <td><code>gpustack-operator-worker</code></td>
+          <td>Name of the routing <code>Service</code> and legacy <code>Endpoints</code> (<code>&lt;name&gt;-direct</code> for the <code>EndpointSlice</code>).</td>
+      </tr>
+      <tr>
+          <td><code>KUBERNETES_POD_IP</code></td>
+          <td>primary host interface IP</td>
+          <td>Reachable worker IP written to the routing <code>Endpoints</code> and <code>EndpointSlice</code>.</td>
+      </tr>
+  </tbody>
+</table>
+<p>With its <code>--enable-aggregator-routing</code> flag, the kube-apiserver resolves the backend of an extension
+API service from the <code>EndpointSlice</code>; without it, the backend is the cluster IP of the <code>Service</code>.</p>
+<p>The slice therefore carries the <code>kubernetes.io/service-name</code> label of the <code>Service</code>, a port named
+after the <code>Service</code> port, and a ready endpoint on the address of the system. Its address type
+follows the family of that address, and the endpoint slice controller leaves it alone because its
+<code>endpointslice.kubernetes.io/managed-by</code> label names this operator.</p>
+<p>The legacy <code>Endpoints</code> stay for the aggregators that read them, which are the ones older than
+Kubernetes 1.34. They carry the <code>endpointslice.kubernetes.io/skip-mirror</code> label, so the mirroring
+controller neither mirrors them nor leaves a second slice behind that the aggregator could pick
+instead.</p>
+<p>The reconcile replaces the address and the port it owns instead of appending them, and removes the
+slices it owns and no longer needs: the mirror of the legacy <code>Endpoints</code>, and a slice an earlier
+version left under another name. It removes a slice only when the owner reference names the routing
+<code>Service</code> or the legacy <code>Endpoints</code> of this worker, so a slice of another service stays.</p>
+<p>The owner is recognized by the name it carries, and not by its uid, because the routing <code>Service</code> is
+recreated whenever its spec changes and the legacy <code>Endpoints</code> are recreated whenever they are deleted.
+A slice the resource of the past owned still belongs to the worker, so the worker adopts it and rewrites
+its owner reference; refusing it would leave the worker unable to repair the routing it owns.</p>
+<p>One worker owns the routing of a cluster at a time. The namespace and the routing service name are the
+same in every installation, so two workers pointing at one cluster write the same slice, and the last
+write wins. A slice the worker does not own is refused rather than taken over.</p>
 <h2 id="worker-gateway">Worker gateway</h2>
 <p><code>pkg/workergateway/service</code> folds many clusters&rsquo; <code>InstanceType</code>s into one fleet-wide
 <code>AggregatedInstanceType</code>: candidates (one per cluster) group into tiers by accelerator <code>OnceMaxRequest</code>,
@@ -1630,7 +1686,7 @@ Check this limit for any name that flows into a label value.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/399365ddcd4b395e4a5c78c300d307214f2a9e34/docs/contribute/internals.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/ddd2578fb3275ed991fb5f32890f27e76e43ebbc/docs/contribute/internals.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/contribute/internals.md">Edit this page</a>
             
@@ -1647,6 +1703,7 @@ Check this limit for any name that flows into a label value.</p>
         <li><a href="#preparation-in-every-replica">Preparation in every replica</a></li>
         <li><a href="#crd-and-apiservice-maintenance">CRD and APIService maintenance</a></li>
         <li><a href="#application-installation-lock">Application installation lock</a></li>
+        <li><a href="#system-routing-resources">System routing resources</a></li>
       </ul>
     </li>
     <li><a href="#worker-gateway">Worker gateway</a></li>
