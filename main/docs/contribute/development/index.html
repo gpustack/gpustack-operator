@@ -17,7 +17,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Development · GPUStack Operator</title>
   
@@ -31,7 +31,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
@@ -1439,7 +1439,7 @@ before changing the operator&rsquo;s behavior.</p>
 <ul>
 <li><code>make deps</code> — vendor patched k8s staging modules into <code>staging/</code> <strong>and</strong> upstream Helm charts into <code>deploy/gpustack-operator/chart/charts/</code>, then <code>go mod tidy &amp;&amp; go mod download</code>; <code>make deps update</code> adds <code>go get -u ./...</code>.</li>
 <li><code>make generate</code> — the <code>gen/api</code> generators: deepcopy, register, apiservice, CRDs, conversion, protobuf, webhooks. <code>make generate binding</code> regenerates the CGO bindings in <code>binding/</code> via c-for-go.</li>
-<li><code>make lint</code> — golangci-lint (<code>.golangci.yaml</code>); <code>make lint dirty</code> also fails on a dirty tree. <code>make lint docs</code> checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see <a href="https://github.com/gpustack/gpustack-operator/blob/d777afc06dfcb96feaaf7bdd407970e8e9a7412f/.claude/skills/gpustack-operator-docs/SKILL.md">the docs skill</a>
+<li><code>make lint</code> — golangci-lint (<code>.golangci.yaml</code>); <code>make lint dirty</code> also fails on a dirty tree. <code>make lint docs</code> checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see <a href="https://github.com/gpustack/gpustack-operator/blob/b30b051dd0f2b476f1eef4ad283e22c3a98c90de/.claude/skills/gpustack-operator-docs/SKILL.md">the docs skill</a>
 .</li>
 <li><code>make build</code> — cross-build <code>cmd/gpustack-operator</code> into <code>.dist/build/</code>, version ldflag-injected into <code>pkg/utils/version</code>; <code>VERSION=vX.y.z+l.m make build</code> sets it, <code>BUILD_PLATFORMS=&quot;linux/amd64 linux/arm64&quot;</code> cross-compiles.</li>
 <li><code>make test</code> — <code>go test -v -failfast -race -cover -shuffle=on -timeout=30m ./...</code>, coverage to <code>.dist/test/coverage.out</code>. The order is shuffled on every run so an order-dependent test cannot hide behind the fixed one; a failure banner prints the seed, and <code>go test -shuffle=&lt;seed&gt;</code> reproduces that exact order. Trailing args are regexes of packages to <strong>exclude</strong>. <code>RACE=false make test</code> drops <code>-race</code> and changes nothing else.</li>
@@ -1545,7 +1545,7 @@ script and license are bundled under <code>site/assets/vendor/mermaid/</code>, s
 <p>Edit documentation under <code>docs/</code>, navigation labels and order in <code>site/data/navigation.yaml</code>, and
 layouts and styles under <code>site/</code>. Run <code>make lint docs</code> before committing to check source links,
 page structure, index entries and rendered site links. CI runs the same gate.</p>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/d777afc06dfcb96feaaf7bdd407970e8e9a7412f/docs/README.md#module-map">shared module map</a>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/b30b051dd0f2b476f1eef4ad283e22c3a98c90de/docs/README.md#module-map">shared module map</a>
  connects guides, specs, code and skills for code
 changes. Update its routing in the same PR when those entry points or associations change.
 <code>make site</code> also generates <code>/llms.txt</code> from that index and <em><code>index.md</code></em> beside each article&rsquo;s HTML.
@@ -1767,7 +1767,7 @@ are under <code>hack/deploy/</code>.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/d777afc06dfcb96feaaf7bdd407970e8e9a7412f/docs/contribute/development.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/b30b051dd0f2b476f1eef4ad283e22c3a98c90de/docs/contribute/development.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/contribute/development.md">Edit this page</a>
             
