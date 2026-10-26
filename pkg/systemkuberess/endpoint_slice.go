@@ -357,7 +357,8 @@ func cleanupObsoleteRoutingSlices(ctx context.Context, cli kubernetes.Interface,
 	}
 
 	sliceCli := cli.DiscoveryV1().EndpointSlices(nsName)
-	slices, err := sliceCli.List(ctx, meta.ListOptions{})
+	selector := discovery.LabelServiceName + "=" + svc.GetName()
+	slices, err := sliceCli.List(ctx, meta.ListOptions{LabelSelector: selector})
 	if err != nil {
 		return fmt.Errorf("list routing endpoint slices: %w", err)
 	}

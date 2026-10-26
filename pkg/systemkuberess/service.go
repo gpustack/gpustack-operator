@@ -138,7 +138,7 @@ func checkRoutingAccess(ctx context.Context, cli kubernetes.Interface, nsName st
 func installRoutingService(ctx context.Context, cli kubernetes.Interface, nsName, svcName string, port int32,
 	addressType discovery.AddressType,
 ) (*core.Service, error) {
-	expected := newRoutingService(nsName, svcName, port)
+	expected := newRoutingService(nsName, svcName, port, addressType)
 	svcCompareFn := func(actual *core.Service) bool {
 		if actual.Spec.Type != expected.Spec.Type {
 			return false
@@ -153,13 +153,19 @@ func installRoutingService(ctx context.Context, cli kubernetes.Interface, nsName
 		if expected.Spec.ClusterIP != "" && actual.Spec.ClusterIP != expected.Spec.ClusterIP {
 			return false
 		}
+		if len(actual.Spec.IPFamilies) > 0 && actual.Spec.IPFamilies[0] != expected.Spec.IPFamilies[0] {
+			return false
+		}
 		if actual.Spec.ClusterIP != "" && actual.Spec.ClusterIP != core.ClusterIPNone {
 			if actualType, err := routingAddressType(actual.Spec.ClusterIP); err == nil && actualType != addressType {
 				return false
 			}
 		}
+		expectedPort := expected.Spec.Ports[0]
 		return slices.ContainsFunc(actual.Spec.Ports, func(ap core.ServicePort) bool {
-			return ap.Port == expected.Spec.Ports[0].Port
+			return ap.Name == expectedPort.Name &&
+				ap.Port == expectedPort.Port &&
+				(ap.Protocol == "" || ap.Protocol == expectedPort.Protocol)
 		})
 	}
 
@@ -176,7 +182,7 @@ func installRoutingService(ctx context.Context, cli kubernetes.Interface, nsName
 //
 // The service has no selector, so no controller picks its endpoints for it, and the
 // endpoint slice below is the only thing that routes to the system.
-func newRoutingService(nsName, svcName string, port int32) *core.Service {
+func newRoutingService(nsName, svcName string, port int32, addressType discovery.AddressType) *core.Service {
 	return &core.Service{
 		ObjectMeta: meta.ObjectMeta{
 			Namespace: nsName,
@@ -186,15 +192,25 @@ func newRoutingService(nsName, svcName string, port int32) *core.Service {
 			},
 		},
 		Spec: core.ServiceSpec{
-			Type: core.ServiceTypeClusterIP,
+			Type:       core.ServiceTypeClusterIP,
+			IPFamilies: []core.IPFamily{routingIPFamily(addressType)},
 			Ports: []core.ServicePort{
 				{
-					Name: routingPortName,
-					Port: port,
+					Name:     routingPortName,
+					Port:     port,
+					Protocol: core.ProtocolTCP,
 				},
 			},
 		},
 	}
+}
+
+// routingIPFamily returns the service IP family matching the endpoint slice address type.
+func routingIPFamily(addressType discovery.AddressType) core.IPFamily {
+	if addressType == discovery.AddressTypeIPv6 {
+		return core.IPv6Protocol
+	}
+	return core.IPv4Protocol
 }
 
 // installRoutingEndpoints creates the legacy endpoints of the system routing, and returns

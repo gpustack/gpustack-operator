@@ -481,6 +481,11 @@ func Test_installFakeSystemRoutingServiceKeepsTheRoutingServiceOfTheCluster(t *t
 		assert.Equal(t, int64(1), deleted.Load(),
 			"the routing service must be recreated when its cluster ip family differs from the routing address")
 
+		svc, err := cli.CoreV1().Services(testNamespace).Get(t.Context(), testService, meta.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, []core.IPFamily{core.IPv6Protocol}, svc.Spec.IPFamilies,
+			"the recreated routing service must request the IPv6 family")
+
 		checkRouting(t, cli, wantRouting{
 			service:     true,
 			endpoints:   true,
@@ -488,6 +493,34 @@ func Test_installFakeSystemRoutingServiceKeepsTheRoutingServiceOfTheCluster(t *t
 			address:     "fd00::1",
 			port:        testPort,
 			addressType: discovery.AddressTypeIPv6,
+			sliceNames:  []string{"gpustack-operator-worker-direct"},
+		})
+	})
+
+	t.Run("recreates the routing service when the port name differs", func(t *testing.T) {
+		renamedPort := allocated.DeepCopy()
+		renamedPort.Spec.Ports[0].Name = "http"
+		cli := newFakeClient(nil, renamedPort)
+
+		var deleted atomic.Int64
+		cli.PrependReactor("delete", "services", func(action ktesting.Action) (bool, runtime.Object, error) {
+			deleted.Add(1)
+			return false, nil, nil
+		})
+
+		require.NoError(t, installFakeSystemRoutingService(t.Context(), cli, testNamespace, testService,
+			"192.168.50.10", testPort))
+
+		assert.Equal(t, int64(1), deleted.Load(),
+			"the routing service must be recreated when its port name differs")
+
+		checkRouting(t, cli, wantRouting{
+			service:     true,
+			endpoints:   true,
+			slice:       true,
+			address:     "192.168.50.10",
+			port:        testPort,
+			addressType: discovery.AddressTypeIPv4,
 			sliceNames:  []string{"gpustack-operator-worker-direct"},
 		})
 	})
