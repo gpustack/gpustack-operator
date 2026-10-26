@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apiserver/pkg/admission/plugin/namespace/lifecycle"
+	"k8s.io/apiserver/pkg/admission/plugin/policy/mutating"
 	"k8s.io/apiserver/pkg/admission/plugin/policy/validating"
 	"k8s.io/apiserver/pkg/apis/apiserver"
 	genericapiserver "k8s.io/apiserver/pkg/server"
@@ -252,6 +253,13 @@ func (o *Options) Validate(ctx context.Context) error {
 	return nil
 }
 
+func newExtensionAPIServerAdmissionOptions() *genericoptions.AdmissionOptions {
+	options := genericoptions.NewAdmissionOptions()
+	// Hosting clusters may lack the policy APIs required by these plugins.
+	options.DisablePlugins = []string{lifecycle.PluginName, mutating.PluginName, validating.PluginName}
+	return options
+}
+
 func (o *Options) Complete(ctx context.Context) (*Config, error) {
 	system.ConfigureControl(
 		"",
@@ -344,8 +352,7 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 	audit.LogOptions.Path = o.AuditLogFile
 	audit.WebhookOptions.ConfigFile = o.AuditWebhookConfigFile
 
-	admit := genericoptions.NewAdmissionOptions()
-	admit.DisablePlugins = []string{lifecycle.PluginName, validating.PluginName}
+	admit := newExtensionAPIServerAdmissionOptions()
 
 	// Recreate the loopback Kubernetes client for server as the runtime scheme is limited from the manager.
 	lpRestCfg, lpHttpCli := rest.CopyConfig(&mgrConfig.LoopbackKubeRestConfig), mgrConfig.LoopbackKubeHTTPClient
