@@ -101,7 +101,7 @@ jobs:
         if: steps.ref.outputs.kind != 'development'
         uses: azure/setup-helm@v4
         with:
-          version: v3.21.0
+          version: v3.21.4
       - name: Prepare release chart
         if: steps.ref.outputs.kind != 'development'
         run: |

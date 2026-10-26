@@ -131,7 +131,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - Use for: which version a manifest or call targets. User-facing resources are `worker.gpustack.ai/v1`; `worker.gpustack.ai/v1alpha1` is internal controller storage behind the public API, not a version users switch between. The layers: public types, the handlers that proxy them onto internal storage, code generation, and the RBAC that grants access.
 - Aliases: `worker.gpustack.ai/v1`, `v1alpha1`, `CRD`, `aggregated apiserver`
 - Guides: the version table in [Development](contribute/development.md); a public surface example with its grants in [Model Artifact API](modules/model-delivery/views.md).
-- Code: public types in [api/worker/v1](../api/worker/v1/) and internal storage in [api/worker/v1alpha1](../api/worker/v1alpha1/) · handlers and proxies in [pkg/worker/extensionapis](../pkg/worker/extensionapis/) over the [pkg/extensionapi](../pkg/extensionapi/) plumbing · generators in [gen/api](../gen/api/) · worker RBAC in [deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml](../deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml)
+- Code: public types in [api/worker/v1](../api/worker/v1/) and internal storage in [api/worker/v1alpha1](../api/worker/v1alpha1/) · handlers and proxies in [pkg/worker/extensionapis](../pkg/worker/extensionapis/) over the [pkg/extensionapi](../pkg/extensionapi/) plumbing · the routing objects the extension API services are fronted by in [pkg/systemkuberess](../pkg/systemkuberess/) · generators in [gen/api](../gen/api/) · worker RBAC in [deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml](../deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml)
 - Related: [Development](#development) (`make generate` regenerates the API surface) · [GPU Instances](#gpu-instances) (Instance and InstanceType are the main public resources)
 - Skills: [gpustack-operator-generate](../.agents/skills/gpustack-operator-generate/SKILL.md) (regenerate after type or webhook edits)
 
@@ -151,7 +151,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `development`
 - Use for: build, lint, test and codegen commands; commit and PR conventions; contributor invariants; release steps; site publication and translations.
 - Aliases: `make`, `lint`, `codegen`, `vendored dependencies`, `staging`, `Hugo`, `GitHub Pages`
-- Guides: commands and targets in [Development](contribute/development.md); a local test cluster in [kind Setup](contribute/kind.md); startup invariants in [Internals](contribute/internals.md); orientation in [Architecture](getting-started/architecture.md).
+- Guides: commands and targets in [Development](contribute/development.md); a local test cluster in [Local Cluster Setup](contribute/local-cluster-setup.md); startup invariants in [Internals](contribute/internals.md); orientation in [Architecture](getting-started/architecture.md).
 - Code: [Makefile](../Makefile) and the scripts behind it in [hack](../hack/) · site publication in [Site workflow](../.github/workflows/site.yml) and [publisher](../hack/site/publish.py) · patched modules in [staging](../staging/) · generators in [gen](../gen/) · upgrade compatibility checks in [upgrade-compat.sh](../hack/check/upgrade-compat.sh) · the chart test's kubeconfig isolation in [helm.sh](../hack/lib/helm.sh) and [helm-chart-test-selftest.sh](../hack/check/helm-chart-test-selftest.sh)
 - Related: [API Changes](#api-changes) (what `make generate` owns) · [Installation](#installation) (chart targets and vendoring)
 - Skills: [gpustack-operator-overview](../.agents/skills/gpustack-operator-overview/SKILL.md) (codebase tour) · [gpustack-operator-docs](../.agents/skills/gpustack-operator-docs/SKILL.md) (documentation changes) · [gpustack-operator-code-review](../.agents/skills/gpustack-operator-code-review/SKILL.md) (PR review criteria) · [gpustack-operator-issue-pr](../.agents/skills/gpustack-operator-issue-pr/SKILL.md) (issue and PR titles) · [gpustack-operator-release](../.agents/skills/gpustack-operator-release/SKILL.md) (cut a release) · [gpustack-operator-generate](../.agents/skills/gpustack-operator-generate/SKILL.md) (API codegen)
@@ -291,7 +291,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | Page | Description |
 |---|---|
 | [Development](contribute/development.md) | Build, generate and lint the project. |
-| [kind Setup](contribute/kind.md) | Install kind and provide a cluster for development tests. |
+| [Local Cluster Setup](contribute/local-cluster-setup.md) | Install kind and provide a cluster for development tests. |
 | [Internals](contribute/internals.md) | Review startup and naming constraints. |
 
 ## Conventions

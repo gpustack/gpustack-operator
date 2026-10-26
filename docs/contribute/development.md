@@ -17,7 +17,7 @@ before changing the operator's behavior.
 ## Commands
 
 For cluster-backed tests, provide a kind cluster and its kubeconfig/context. Follow
-[kind Setup](kind.md) for manual installation and connection checks.
+[Local Cluster Setup](local-cluster-setup.md) for manual installation and connection checks.
 
 `make <target> [args]` runs `hack/<target>.sh` and forwards `args` to it. All builds use `CGO_ENABLED=1`,
 `GODEBUG=gotypesalias=0` and the build tags `goccy netgo`.
