@@ -42,6 +42,7 @@ type ModelDeploymentKVTransferApplyConfiguration struct {
 	// across InstanceTypes the groups rebuild independently, and a mixed-protocol window
 	// between a prefiller and a decoder exists until both converge -- the same window an
 	// engine image edit already opens.
+	//
 	Protocol *string `json:"protocol,omitempty"`
 }
 

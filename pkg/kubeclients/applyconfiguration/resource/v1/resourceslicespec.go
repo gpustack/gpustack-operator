@@ -18,8 +18,10 @@ type ResourceSliceSpecApplyConfiguration struct {
 	// Must be a DNS subdomain and should end with a DNS domain owned by the
 	// vendor of the driver. It should use only lower case characters.
 	// This field is immutable.
+	//
 	Driver *string `json:"driver,omitempty"`
 	// Pool describes the pool that this ResourceSlice belongs to.
+	//
 	Pool *ResourcePoolApplyConfiguration `json:"pool,omitempty"`
 	// NodeName identifies the node which provides the resources in this pool.
 	// A field selector can be used to list only ResourceSlice
@@ -32,6 +34,7 @@ type ResourceSliceSpecApplyConfiguration struct {
 	//
 	// Exactly one of NodeName, NodeSelector, AllNodes, and PerDeviceNodeSelection must be set.
 	// This field is immutable.
+	//
 	NodeName *string `json:"nodeName,omitempty"`
 	// NodeSelector defines which nodes have access to the resources in the pool,
 	// when that pool is not limited to a single node.
@@ -39,16 +42,19 @@ type ResourceSliceSpecApplyConfiguration struct {
 	// Must use exactly one term.
 	//
 	// Exactly one of NodeName, NodeSelector, AllNodes, and PerDeviceNodeSelection must be set.
+	//
 	NodeSelector *corev1.NodeSelectorApplyConfiguration `json:"nodeSelector,omitempty"`
 	// AllNodes indicates that all nodes have access to the resources in the pool.
 	//
 	// Exactly one of NodeName, NodeSelector, AllNodes, and PerDeviceNodeSelection must be set.
+	//
 	AllNodes *bool `json:"allNodes,omitempty"`
 	// Devices lists some or all of the devices in this pool.
 	//
 	// Must not have more than 128 entries. If any device uses taints or consumes counters the limit is 64.
 	//
 	// Only one of Devices and SharedCounters can be set in a ResourceSlice.
+	//
 	Devices []DeviceApplyConfiguration `json:"devices,omitempty"`
 	// PerDeviceNodeSelection defines whether the access from nodes to
 	// resources in the pool is set on the ResourceSlice level or on each
@@ -56,6 +62,7 @@ type ResourceSliceSpecApplyConfiguration struct {
 	// must specify this individually.
 	//
 	// Exactly one of NodeName, NodeSelector, AllNodes, and PerDeviceNodeSelection must be set.
+	//
 	PerDeviceNodeSelection *bool `json:"perDeviceNodeSelection,omitempty"`
 	// SharedCounters defines a list of counter sets, each of which
 	// has a name and a list of counters available.
@@ -65,6 +72,7 @@ type ResourceSliceSpecApplyConfiguration struct {
 	// Only one of Devices and SharedCounters can be set in a ResourceSlice.
 	//
 	// The maximum number of counter sets is 8.
+	//
 	SharedCounters []CounterSetApplyConfiguration `json:"sharedCounters,omitempty"`
 }
 

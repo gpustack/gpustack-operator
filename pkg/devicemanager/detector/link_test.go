@@ -408,7 +408,8 @@ func (c *countingDevicesClient) Get(
 ) (*workercore.Devices, error) {
 	if c.stored == nil {
 		return nil, kerrors.NewNotFound(
-			schema.GroupResource{Group: workercore.GroupVersion.Group, Resource: "devices"}, name)
+			schema.GroupResource{Group: workercore.GroupVersion.Group, Resource: "devices"}, name,
+		)
 	}
 	return c.stored.DeepCopy(), nil
 }
@@ -668,7 +669,8 @@ func TestInterfacesChanged(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := interfacesChanged(
-				tc.reported, !tc.noBaseline, tc.detected, tc.detectedErr); got != tc.want {
+				tc.reported, !tc.noBaseline, tc.detected, tc.detectedErr,
+			); got != tc.want {
 				t.Errorf("interfacesChanged = %v, want %v", got, tc.want)
 			}
 		})

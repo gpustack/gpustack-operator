@@ -32,6 +32,7 @@ type KVCacheBackendMemberLocalDiskApplyConfiguration struct {
 	// container that chowns has to name a uid, while members[].image can put a different vendor's
 	// build on each group, and a chmod 0777 instead opens the directory to every process on the
 	// node. An operator whose uid holds for a whole backend has what would settle it.
+	//
 	Path *string `json:"path,omitempty"`
 	// Capacity caps what this tier stores, in bytes. Left unset, the store's own ceiling applies and
 	// nothing is rendered, so a ceiling that moves upstream is a change to investigate rather than
@@ -54,6 +55,7 @@ type KVCacheBackendMemberLocalDiskApplyConfiguration struct {
 	// leaves out. Left unset or zero, nothing is rendered, on the same rule as Capacity. It carries
 	// the same bucket floor and for the same reason — the store checks against one whole bucket's
 	// worth of keys, so a limit below that is a tier that can never receive one.
+	//
 	KeyLimit *int64 `json:"keyLimit,omitempty"`
 	// Eviction is what this tier does once it is full. Left unset, nothing is rendered and the
 	// store's own behavior applies, so a default that moves upstream is a change to investigate

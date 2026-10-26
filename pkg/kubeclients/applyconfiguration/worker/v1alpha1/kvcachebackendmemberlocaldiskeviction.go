@@ -22,6 +22,7 @@ type KVCacheBackendMemberLocalDiskEvictionApplyConfiguration struct {
 	// Turning it off renders TWO settings, not one: an eviction policy of "none", the store's own
 	// name for that value, and an explicit false on its watermark-eviction switch. They belong to
 	// different layers, and eviction should be off at whichever layer ends up asking.
+	//
 	Enabled *bool `json:"enabled,omitempty"`
 	// Policy is the order in which entries leave. FIFO drops the oldest written first, LRU the least
 	// recently read. It is REFUSED together with Enabled set to false, because there is no order in
@@ -35,6 +36,7 @@ type KVCacheBackendMemberLocalDiskEvictionApplyConfiguration struct {
 	// first-out. That earns more here than usual: the store maps a policy string it does not
 	// recognize onto no eviction at all — no error, no warning, no failure to start — so a policy
 	// is only ever sent when this API is the one that chose it, from a fixed set of spellings.
+	//
 	Policy *string `json:"policy,omitempty"`
 	// Watermark is WHEN eviction runs: it starts once the tier passes High and stops once it is back
 	// under Low, both as a percentage of Capacity. Left unset, nothing is rendered and the store's

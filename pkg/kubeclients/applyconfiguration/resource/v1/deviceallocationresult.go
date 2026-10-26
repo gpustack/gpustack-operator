@@ -8,6 +8,7 @@ package v1
 // DeviceAllocationResult is the result of allocating devices.
 type DeviceAllocationResultApplyConfiguration struct {
 	// Results lists all allocated devices.
+	//
 	Results []DeviceRequestAllocationResultApplyConfiguration `json:"results,omitempty"`
 	// This field is a combination of all the claim and class configuration parameters.
 	// Drivers can distinguish between those based on a flag.
@@ -16,6 +17,7 @@ type DeviceAllocationResultApplyConfiguration struct {
 	// devices in the result because it is up to the drivers which configuration
 	// parameters they support. They can silently ignore unknown configuration
 	// parameters.
+	//
 	Config []DeviceAllocationConfigurationApplyConfiguration `json:"config,omitempty"`
 }
 

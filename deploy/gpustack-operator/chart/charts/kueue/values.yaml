@@ -48,7 +48,7 @@ controllerManager:
       # -- ControllerManager's image repository
       repository: registry.k8s.io/kueue/kueue
       # -- ControllerManager's image tag
-      tag: v0.18.10
+      tag: v0.18.11
       # -- ControllerManager's image pullPolicy.
       # This should be set to 'IfNotPresent' for released version
       pullPolicy: IfNotPresent
@@ -320,7 +320,7 @@ kueueViz:
       # -- KueueViz dashboard backend image repository
       repository: "registry.k8s.io/kueue/kueueviz-backend"
       # -- KueueViz dashboard backend image tag
-      tag: v0.18.10
+      tag: v0.18.11
       # -- KueueViz dashboard backend image pullPolicy.
       # This should be set to 'IfNotPresent' for released version
       pullPolicy: IfNotPresent
@@ -367,7 +367,7 @@ kueueViz:
       # -- KueueViz dashboard frontend image repository
       repository: "registry.k8s.io/kueue/kueueviz-frontend"
       # -- KueueViz dashboard frontend image tag
-      tag: v0.18.10
+      tag: v0.18.11
       # -- KueueViz dashboard frontend image pullPolicy.
       # This should be set to 'IfNotPresent' for released version
       pullPolicy: IfNotPresent
@@ -375,6 +375,8 @@ metrics:
   # -- Prometheus namespace
   prometheusNamespace: monitoring
   serviceMonitor:
-    # -- ServiceMonitor's tlsConfig
-    tlsConfig:
-      insecureSkipVerify: true
+    # -- ServiceMonitor's tlsConfig. When empty, the chart verifies the metrics certificate
+    # issued by cert-manager if `enableCertManager` is true, and skips verification otherwise.
+    # When set, it replaces the generated tlsConfig, and `insecureSkipVerify` defaults to true
+    # unless set explicitly.
+    tlsConfig: {}

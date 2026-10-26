@@ -64,21 +64,25 @@ func (h *InstanceLogHandler) Get(ctx context.Context, name string, opts runtime.
 	var errs field.ErrorList
 	if instLogOpts.TailLines != nil && *instLogOpts.TailLines < 0 {
 		errs = append(errs, field.Invalid(
-			field.NewPath("tailLines"), *instLogOpts.TailLines, "must be greater than or equal to 0"),
+			field.NewPath("tailLines"), *instLogOpts.TailLines, "must be greater than or equal to 0",
+		),
 		)
 	}
 	if instLogOpts.LimitBytes != nil && *instLogOpts.LimitBytes < 1 {
 		errs = append(errs, field.Invalid(
-			field.NewPath("limitBytes"), *instLogOpts.LimitBytes, "must be greater than 0"))
+			field.NewPath("limitBytes"), *instLogOpts.LimitBytes, "must be greater than 0",
+		))
 	}
 	switch {
 	case instLogOpts.SinceSeconds != nil && instLogOpts.SinceTime != nil:
 		errs = append(errs, field.Forbidden(
-			field.NewPath(""), "at most one of `sinceTime` or `sinceSeconds` may be specified"))
+			field.NewPath(""), "at most one of `sinceTime` or `sinceSeconds` may be specified",
+		))
 	case instLogOpts.SinceSeconds != nil:
 		if *instLogOpts.SinceSeconds < 1 {
 			errs = append(errs, field.Invalid(
-				field.NewPath("sinceSeconds"), *instLogOpts.SinceSeconds, "must be greater than 0"))
+				field.NewPath("sinceSeconds"), *instLogOpts.SinceSeconds, "must be greater than 0",
+			))
 		}
 	}
 	if len(errs) > 0 {

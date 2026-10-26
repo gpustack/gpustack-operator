@@ -8,6 +8,7 @@ package v1alpha1
 // AcceleratorSlicedPhysicalDetail aggregates the group's physical slicing capability.
 type AcceleratorSlicedPhysicalDetailApplyConfiguration struct {
 	// Profiles is the group's physical profiles, summed by name.
+	//
 	Profiles []AcceleratorSlicedPhysicalDetailProfileApplyConfiguration `json:"profiles,omitempty"`
 	// Count is the sum of per-accelerator PhysicalSliced.Count across the group.
 	Count *int32 `json:"count,omitempty"`

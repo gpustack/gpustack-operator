@@ -407,7 +407,8 @@ func TestRDMALabelValuesAreValidBeforeSanitizing(t *testing.T) {
 				linkState(workercore.DeviceInterfaceLinkStateOK)),
 			rdmaNIC("eth2", "0000:82:00.0", "0000:80:02.0", "12", []string{"0000:80:02.0"},
 				linkState(workercore.DeviceInterfaceLinkStateOK)),
-		})
+		},
+	)
 
 	if len(labels) == 0 {
 		t.Fatal("the fixture produced no labels, so this asserts nothing")
@@ -581,7 +582,8 @@ func TestRDMAResourceNamesOutsideAcceleratorFamilies(t *testing.T) {
 		{
 			name: "an accelerator key still classifies",
 			in: GetAcceleratableResourceName(
-				ManufacturerNVIDIA, workercore.DeviceAllocationModeShared),
+				ManufacturerNVIDIA, workercore.DeviceAllocationModeShared,
+			),
 			want: ResourceFamilyShared,
 		},
 		{

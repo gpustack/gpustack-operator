@@ -16,11 +16,13 @@ package v1
 type CounterSetApplyConfiguration struct {
 	// Name defines the name of the counter set.
 	// It must be a DNS label.
+	//
 	Name *string `json:"name,omitempty"`
 	// Counters defines the set of counters for this CounterSet
 	// The name of each counter must be unique in that set and must be a DNS label.
 	//
 	// The maximum number of counters is 32.
+	//
 	Counters map[string]CounterApplyConfiguration `json:"counters,omitempty"`
 }
 

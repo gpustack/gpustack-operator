@@ -8,8 +8,10 @@ package v1
 // InstancePersistentVolumeTypeSpec defines the desired state of InstancePersistentVolumeType.
 type InstancePersistentVolumeTypeSpecApplyConfiguration struct {
 	// DisplayName is the display name of the InstancePersistentVolumeType.
+	//
 	DisplayName *string `json:"displayName,omitempty"`
 	// Description is the description of the InstancePersistentVolumeType.
+	//
 	Description *string `json:"description,omitempty"`
 	// InstancePersistentVolumeSource is the source of the InstancePersistentVolumeType.
 	InstancePersistentVolumeSourceApplyConfiguration `json:",inline"`

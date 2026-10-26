@@ -184,7 +184,8 @@ func TestModelDeploymentCompileCacheSubPathManufacturerAndEngine(t *testing.T) {
 					in.Deployment.Spec.Engine.Name = c.engine
 					in.InstanceType.Spec.Acceleratable = c.acceleratable
 					in.InstanceType.Status.Detail.Manufacturer = c.manufacturer
-				}))
+				},
+			))
 			if c.wantErr != "" {
 				require.ErrorContains(t, err, c.wantErr)
 
@@ -329,7 +330,8 @@ func TestModelDeploymentCompileCacheSubPathModelIdentity(t *testing.T) {
 				}
 			},
 			wantIdentity: testCompileCacheIdentity(testCompileCacheSHA256Hex(
-				"team-a/qwen-claim/claim-uid/models/qwen/72b")),
+				"team-a/qwen-claim/claim-uid/models/qwen/72b",
+			)),
 		},
 		{
 			name: "a node-delivered artifact is addressed by the digest it published",
@@ -362,7 +364,8 @@ func TestModelDeploymentCompileCacheSubPathModelIdentity(t *testing.T) {
 				}
 			},
 			wantIdentity: testCompileCacheIdentity(testCompileCacheSHA256Hex(
-				modelDeploymentHubHuggingFace + "/Qwen/Qwen2.5-72B@0123456789abcdef")),
+				modelDeploymentHubHuggingFace + "/Qwen/Qwen2.5-72B@0123456789abcdef",
+			)),
 		},
 		{
 			name: "an engine download naming nothing at all falls back to the model name",
@@ -390,7 +393,8 @@ func TestModelDeploymentCompileCacheSubPathModelIdentity(t *testing.T) {
 				}
 			},
 			wantIdentity: testCompileCacheIdentity(testCompileCacheSHA256Hex(
-				"team-a/qwen-claim/" + imageUID + "/models/qwen/72b")),
+				"team-a/qwen-claim/" + imageUID + "/models/qwen/72b",
+			)),
 		},
 		{
 			name:         "a deployment pulling its own weights is addressed by the model name",
@@ -511,7 +515,8 @@ func TestModelDeploymentCompileCacheSubPathParallelShape(t *testing.T) {
 				func(in *ModelDeploymentCompileCacheInput) {
 					in.Deployment.Spec.Engine.Name = c.engine
 					in.Role.ExtraArgs = c.args
-				}))
+				},
+			))
 			require.NoError(t, err)
 
 			_, _, shape, _ := testCompileCacheSplit(t, subPath)
@@ -542,7 +547,8 @@ func TestModelDeploymentCompileCacheOperationalFlagsShareTheCache(t *testing.T) 
 	for _, args := range operational {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			subPath, err := BuildModelDeploymentCompileCacheSubPath(newCompileCacheInput(
-				func(in *ModelDeploymentCompileCacheInput) { in.Role.ExtraArgs = args }))
+				func(in *ModelDeploymentCompileCacheInput) { in.Role.ExtraArgs = args },
+			))
 			require.NoError(t, err)
 			assert.Equal(t, baseline, subPath,
 				"an operational argument must not move the cache")
@@ -556,7 +562,8 @@ func TestModelDeploymentCompileCacheOperationalFlagsShareTheCache(t *testing.T) 
 func TestModelDeploymentCompileCacheReorderedAndTrailingFlagsShareTheCache(t *testing.T) {
 	baselineArgs := []string{"--dtype", "bfloat16"}
 	baseline, err := BuildModelDeploymentCompileCacheSubPath(newCompileCacheInput(
-		func(in *ModelDeploymentCompileCacheInput) { in.Role.ExtraArgs = baselineArgs }))
+		func(in *ModelDeploymentCompileCacheInput) { in.Role.ExtraArgs = baselineArgs },
+	))
 	require.NoError(t, err)
 
 	cases := []struct {
@@ -576,7 +583,8 @@ func TestModelDeploymentCompileCacheReorderedAndTrailingFlagsShareTheCache(t *te
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			subPath, err := BuildModelDeploymentCompileCacheSubPath(newCompileCacheInput(
-				func(in *ModelDeploymentCompileCacheInput) { in.Role.ExtraArgs = c.args }))
+				func(in *ModelDeploymentCompileCacheInput) { in.Role.ExtraArgs = c.args },
+			))
 			require.NoError(t, err)
 			assert.Equal(t, baseline, subPath)
 		})
@@ -590,7 +598,8 @@ func TestModelDeploymentCompileCacheCompilationFactorsIsolateTheCache(t *testing
 	baseline, err := BuildModelDeploymentCompileCacheSubPath(newCompileCacheInput(
 		func(in *ModelDeploymentCompileCacheInput) {
 			in.Role.ExtraArgs = []string{"--dtype", "bfloat16", "--max-model-len", "4096"}
-		}))
+		},
+	))
 	require.NoError(t, err)
 
 	cases := []struct {
@@ -872,10 +881,12 @@ func TestModelDeploymentCompileCacheEquivalentSpellingsShareTheCache(t *testing.
 		t.Run(c.name, func(t *testing.T) {
 			require.NotEqual(t, c.one, c.other, "a case states two spellings or none")
 			one, err := BuildModelDeploymentCompileCacheSubPath(newCompileCacheInput(
-				func(in *ModelDeploymentCompileCacheInput) { in.Role.ExtraArgs = c.one }))
+				func(in *ModelDeploymentCompileCacheInput) { in.Role.ExtraArgs = c.one },
+			))
 			require.NoError(t, err)
 			other, err := BuildModelDeploymentCompileCacheSubPath(newCompileCacheInput(
-				func(in *ModelDeploymentCompileCacheInput) { in.Role.ExtraArgs = c.other }))
+				func(in *ModelDeploymentCompileCacheInput) { in.Role.ExtraArgs = c.other },
+			))
 			require.NoError(t, err)
 			assert.Equal(t, one, other)
 		})
@@ -951,7 +962,8 @@ func TestModelDeploymentCompileCacheEnvironmentAffectsTheCache(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			subPath, err := BuildModelDeploymentCompileCacheSubPath(newCompileCacheInput(
-				func(in *ModelDeploymentCompileCacheInput) { in.Role.Env = c.env }))
+				func(in *ModelDeploymentCompileCacheInput) { in.Role.Env = c.env },
+			))
 			require.NoError(t, err)
 			if c.wantIn {
 				assert.NotEqual(t, baseline, subPath)
@@ -1041,7 +1053,8 @@ func TestModelDeploymentCompileCacheSubPathIsStable(t *testing.T) {
 				{Name: "VLLM_ATTENTION_BACKEND", Value: "FLASH_ATTN"},
 				{Name: "VLLM_USE_STANDALONE_COMPILE", Value: "1"},
 			}
-		}))
+		},
+	))
 	require.NoError(t, err)
 
 	for range 8 {
@@ -1053,7 +1066,8 @@ func TestModelDeploymentCompileCacheSubPathIsStable(t *testing.T) {
 					{Name: "VLLM_ATTENTION_BACKEND", Value: "FLASH_ATTN"},
 					{Name: "VLLM_USE_STANDALONE_COMPILE", Value: "1"},
 				}
-			}))
+			},
+		))
 		require.NoError(t, err)
 		require.Equal(t, first, next)
 	}

@@ -185,7 +185,8 @@ func TestVisibleDevices(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			visible, err := visibleDevices(
-				deviceplugin.AllocatedAccelerators(cambriconDevicesFixture(), c.allocated))
+				deviceplugin.AllocatedAccelerators(cambriconDevicesFixture(), c.allocated),
+			)
 			require.NoError(t, err)
 			assert.Equal(t, c.want, visible)
 		})
@@ -212,7 +213,8 @@ func TestWholeCard_MissingOwnDeviceNodeRejected(t *testing.T) {
 
 	pod, ctr := wholeCardPod("pod-no-devnode", "train")
 	_, err := newWholeCardServer(workercore.DeviceAllocationModeExclusive).GetContainerAllocateResponse(
-		context.Background(), pod, ctr, devs, allocateMLU0())
+		context.Background(), pod, ctr, devs, allocateMLU0(),
+	)
 	require.Error(t, err)
 	for _, want := range []string{testCard0, cardDevicePath(missingCardIndex)} {
 		assert.Containsf(t, err.Error(), want, "the message must name %q", want)

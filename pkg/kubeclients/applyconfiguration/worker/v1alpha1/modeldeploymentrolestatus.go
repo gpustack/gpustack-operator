@@ -12,6 +12,7 @@ import (
 // ModelDeploymentRoleStatus is one role's observed readiness.
 type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// Name is the role this entry describes.
+	//
 	Name *string `json:"name,omitempty"`
 	// Desired is how many INSTANCES the spec asks for, and Ready is how many of them are Ready. Both
 	// count instances rather than Pods, which is the same number only while an instance is one Pod: a
@@ -45,6 +46,7 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// list does not name would make every later status write on the object fail, taking every other
 	// figure down with the kind. The marker sits on the field because the type's own enum marker is a
 	// Go-level one and does not become schema validation.
+	//
 	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
 	// AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for
 	// their ACCELERATOR credits, deduplicated and sorted. It is a set because each replica is its
@@ -66,6 +68,7 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// carrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept
 	// identical on purpose: a flavor reported here that the gate would not fit against would be
 	// worse than none.
+	//
 	AssignedFlavors []string `json:"assignedFlavors,omitempty"`
 	// Parallelism is the parallelism the role's own arguments declare, with the provenance of
 	// the reading. Nothing is defaulted into it: a degree the role never declares is nil, an
@@ -76,6 +79,7 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	//
 	// It is optional so a role stored before this view existed stays writable: absence names
 	// that fact, never a defaulted reading, and the object the operator writes fills it again.
+	//
 	Parallelism *ModelDeploymentRoleParallelismStatusApplyConfiguration `json:"parallelism,omitempty"`
 	// Endpoints is the role's endpoint eligibility and its actual serving confirmation. The two
 	// are separate answers that never collapse: eligibility is the set the operator qualified,
@@ -84,6 +88,7 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	//
 	// It is optional like parallelism, and for the same reason: a role stored before this view
 	// existed carries neither object, and absence must not reject its next write.
+	//
 	Endpoints *ModelDeploymentRoleEndpointsStatusApplyConfiguration `json:"endpoints,omitempty"`
 	// Groups is one entry per group of this role, ordered by replica ordinal.
 	//
@@ -97,6 +102,7 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// replaced. A map keyed on the generation would replace the whole entry on every membership
 	// change, and a map keyed on the ordinal alone would let a reader match a stale entry to a new
 	// membership. The identity is carried in the entry instead.
+	//
 	Groups []ModelDeploymentGroupStatusApplyConfiguration `json:"groups,omitempty"`
 }
 

@@ -118,44 +118,44 @@ func (a *ModelDeploymentArtifactRender) volumes(takeOver bool) ([]core.Volume, [
 	switch {
 	case a.Delivery == workercore.ModelDeploymentModelDeliveryNode:
 		return []core.Volume{{
-				Name: modelDeploymentModelVolumeName, VolumeSource: a.nodeVolumeSource(),
-			}}, []core.VolumeMount{{
-				Name: modelDeploymentModelVolumeName, MountPath: ModelDeploymentModelMountPath, ReadOnly: true,
-			}}
+			Name: modelDeploymentModelVolumeName, VolumeSource: a.nodeVolumeSource(),
+		}}, []core.VolumeMount{{
+			Name: modelDeploymentModelVolumeName, MountPath: ModelDeploymentModelMountPath, ReadOnly: true,
+		}}
 	case a.Delivery == workercore.ModelDeploymentModelDeliveryPVC:
 		return []core.Volume{{
-				Name: modelDeploymentModelVolumeName,
-				VolumeSource: core.VolumeSource{PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
-					ClaimName: a.ClaimName, ReadOnly: true,
-				}},
-			}}, []core.VolumeMount{{
-				Name: modelDeploymentModelVolumeName, MountPath: ModelDeploymentModelMountPath,
-				SubPath: a.Path, ReadOnly: true,
-			}}
+			Name: modelDeploymentModelVolumeName,
+			VolumeSource: core.VolumeSource{PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
+				ClaimName: a.ClaimName, ReadOnly: true,
+			}},
+		}}, []core.VolumeMount{{
+			Name: modelDeploymentModelVolumeName, MountPath: ModelDeploymentModelMountPath,
+			SubPath: a.Path, ReadOnly: true,
+		}}
 	case a.Delivery == workercore.ModelDeploymentModelDeliveryImage:
 		// The pull policy is left at its default: a digest-pinned reference defaults to
 		// IfNotPresent, so a node that already holds the image does not fetch it again. No cache
 		// volume, no download environment: kubelet's own image store is the whole delivery.
 		return []core.Volume{{
-				Name: modelDeploymentModelVolumeName,
-				VolumeSource: core.VolumeSource{Image: &core.ImageVolumeSource{
-					Reference: a.ImageReference,
-				}},
-			}}, []core.VolumeMount{{
-				Name: modelDeploymentModelVolumeName, MountPath: ModelDeploymentModelMountPath, ReadOnly: true,
-			}}
+			Name: modelDeploymentModelVolumeName,
+			VolumeSource: core.VolumeSource{Image: &core.ImageVolumeSource{
+				Reference: a.ImageReference,
+			}},
+		}}, []core.VolumeMount{{
+			Name: modelDeploymentModelVolumeName, MountPath: ModelDeploymentModelMountPath, ReadOnly: true,
+		}}
 	case takeOver:
 		return nil, nil
 	default:
 		limit := a.cacheSize()
 		return []core.Volume{{
-				Name: modelDeploymentModelCacheVolumeName,
-				VolumeSource: core.VolumeSource{EmptyDir: &core.EmptyDirVolumeSource{
-					SizeLimit: &limit,
-				}},
-			}}, []core.VolumeMount{{
-				Name: modelDeploymentModelCacheVolumeName, MountPath: ModelDeploymentModelCachePath,
-			}}
+			Name: modelDeploymentModelCacheVolumeName,
+			VolumeSource: core.VolumeSource{EmptyDir: &core.EmptyDirVolumeSource{
+				SizeLimit: &limit,
+			}},
+		}}, []core.VolumeMount{{
+			Name: modelDeploymentModelCacheVolumeName, MountPath: ModelDeploymentModelCachePath,
+		}}
 	}
 }
 

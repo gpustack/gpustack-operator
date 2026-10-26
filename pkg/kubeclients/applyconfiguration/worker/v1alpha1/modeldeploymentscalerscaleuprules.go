@@ -8,18 +8,22 @@ package v1alpha1
 // ModelDeploymentScalerScaleUpRules tune how fast a role may grow.
 type ModelDeploymentScalerScaleUpRulesApplyConfiguration struct {
 	// StabilizationWindowSeconds is how long a recommendation is held before it takes effect.
+	//
 	StabilizationWindowSeconds *int32 `json:"stabilizationWindowSeconds,omitempty"`
 	// MaxStepReplicas is the most replicas one pass may add to a role.
 	//
 	// Zero leaves the bound unset, so only the percentage bound applies.
+	//
 	MaxStepReplicas *int32 `json:"maxStepReplicas,omitempty"`
 	// MaxStepPercent is the most percent of the current replica count one pass may add to a role.
 	//
 	// Zero leaves the bound unset, so only the replica bound applies.
+	//
 	MaxStepPercent *int32 `json:"maxStepPercent,omitempty"`
 	// StepPolicy is a step bound stated in one unit.
 	//
 	// It replaces the two bounds above, so a deployment states its cap once instead of twice.
+	//
 	StepPolicy *ModelDeploymentScalerStepPolicyApplyConfiguration `json:"stepPolicy,omitempty"`
 }
 

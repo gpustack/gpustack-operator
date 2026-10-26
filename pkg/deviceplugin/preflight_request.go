@@ -63,7 +63,8 @@ func NewPreflightAllocationRequest(
 	if quota > nodefeature.ResourceMaxUnits {
 		return nil, nil, nil, nil, fmt.Errorf(
 			"quota must not exceed one whole accelerator (%d units), got %d",
-			nodefeature.ResourceMaxUnits, quota)
+			nodefeature.ResourceMaxUnits, quota,
+		)
 	}
 
 	// Checked before any resource name is derived, because deriving one cannot catch it: the mode
@@ -72,7 +73,8 @@ func NewPreflightAllocationRequest(
 	// on the derived name. Every key built below would then be a suffix with no vendor in front.
 	if !nodefeature.IsKnownAcceleratableManufacturer(manufacturer) {
 		return nil, nil, nil, nil, fmt.Errorf(
-			"manufacturer %q is not an acceleratable manufacturer this operator knows", manufacturer)
+			"manufacturer %q is not an acceleratable manufacturer this operator knows", manufacturer,
+		)
 	}
 
 	// Checked here for the same reason the manufacturer is: deriving from it cannot catch it. Both
@@ -103,11 +105,13 @@ func NewPreflightAllocationRequest(
 			"allocation mode %s cannot be asked about through a preflight request: a partition is "+
 				"named by a <kind>-<profile> limit this builder has no profile to write, and a "+
 				"request carrying only the bare resource is refused at allocation for naming no "+
-				"partition profile", mode)
+				"partition profile", mode,
+		)
 
 	default:
 		return nil, nil, nil, nil, fmt.Errorf(
-			"allocation mode %s (%d) is not a mode a preflight can ask about", mode, uint32(mode))
+			"allocation mode %s (%d) is not a mode a preflight can ask about", mode, uint32(mode),
+		)
 	}
 
 	// Non-empty for every mode still reachable here, and provably so rather than by inspection:
@@ -167,7 +171,8 @@ func NewPreflightAllocationRequest(
 		if int64(quota)*100%nodefeature.ResourceMaxUnits != 0 {
 			return nil, nil, nil, nil, fmt.Errorf(
 				"a sliced quota must be a whole percent of an accelerator (a multiple of %d units), got %d",
-				nodefeature.ResourceMaxUnits/100, quota)
+				nodefeature.ResourceMaxUnits/100, quota,
+			)
 		}
 		pct := int64(quota) * 100 / nodefeature.ResourceMaxUnits
 		limits[nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(manufacturer)] = *resource.NewQuantity(pct, resource.DecimalSI)

@@ -20,6 +20,7 @@ type DeviceConstraintApplyConfiguration struct {
 	// References to subrequests must include the name of the main request
 	// and may include the subrequest using the format <main request>[/<subrequest>]. If just
 	// the main request is given, the constraint applies to all subrequests.
+	//
 	Requests []string `json:"requests,omitempty"`
 	// MatchAttribute requires that all devices in question have this
 	// attribute and that its type and value are the same across those
@@ -32,10 +33,21 @@ type DeviceConstraintApplyConfiguration struct {
 	// its specification, but if one device doesn't, then it also will not be
 	// chosen.
 	//
+	// When the DRAListTypeAttributes feature gate is enabled, comparison uses
+	// set semantics(i.e., element order and duplicates are ignored): list-valued attributes
+	// match when the intersection across all devices is non-empty.
+	// Scalar values are treated as single-element lists for backward compatibility.
+	//
 	// Must include the domain qualifier.
+	//
 	MatchAttribute *resourcev1.FullyQualifiedName `json:"matchAttribute,omitempty"`
 	// DistinctAttribute requires that all devices in question have this
 	// attribute and that its type and value are unique across those devices.
+	//
+	// When the DRAListTypeAttributes feature gate is enabled, comparison uses
+	// set semantics (i.e., element order and duplicates are ignored):
+	// list-valued attributes must be pairwise disjoint across devices.
+	// Scalar values are treated as singleton sets for backward compatibility.
 	//
 	// This acts as the inverse of MatchAttribute.
 	//
@@ -44,6 +56,7 @@ type DeviceConstraintApplyConfiguration struct {
 	//
 	// This is useful for scenarios where resource requests must be fulfilled by separate physical devices.
 	// For example, a container requests two network interfaces that must be allocated from two different physical NICs.
+	//
 	DistinctAttribute *resourcev1.FullyQualifiedName `json:"distinctAttribute,omitempty"`
 }
 

@@ -29,6 +29,7 @@ type InstanceTypePartitionedResourceApplyConfiguration struct {
 	// Its readers are the consumers of this status — the UI and the GPUStack app — which show what a
 	// pool is running beside what it can still take, and which cannot derive it: RemainingProfiles
 	// alone cannot say whether a zero is "occupied" or merely "squeezed out by a sibling profile".
+	//
 	AllocatedProfiles []AcceleratorProfileCountApplyConfiguration `json:"allocatedProfiles,omitempty"`
 	// RemainingProfiles lists, by profile name, how many more instances of each profile the pool
 	// can still host, summed over its partitioned accelerators.
@@ -37,6 +38,7 @@ type InstanceTypePartitionedResourceApplyConfiguration struct {
 	// sibling's instance consumed reads 0 instead of vanishing — a reader can tell "offered but
 	// currently full" from "not offered at all", and the wholesale status write does not churn the
 	// key set on every carve and release.
+	//
 	RemainingProfiles []AcceleratorProfileCountApplyConfiguration `json:"remainingProfiles,omitempty"`
 }
 

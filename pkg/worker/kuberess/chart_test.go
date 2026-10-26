@@ -96,7 +96,8 @@ func TestChartManufacturersMatchNodeFeature(t *testing.T) {
 
 			assert.Equal(t, nodefeature.GetPciVendorID(manufacturer), row.PciVendorID)
 			assert.Equal(t, string(nodefeature.GetAcceleratableResourceName(
-				manufacturer, workercore.DeviceAllocationModeExclusive)), row.ResourceName)
+				manufacturer, workercore.DeviceAllocationModeExclusive,
+			)), row.ResourceName)
 			assert.Equal(t, nodefeature.GetPartitionKind(manufacturer), row.PartitionKind)
 
 			if row.RuntimeName != "" {
@@ -242,7 +243,8 @@ func TestChartKueueTransformationsMatchNodeFeature(t *testing.T) {
 		// A manufacturer with no partition kind advertises no ".partitioned" family at all,
 		// so it has no fourth rule.
 		if partitionedUnits := nodefeature.GetAcceleratablePartitionedUnitsResourceName(
-			manufacturer); partitionedUnits != "" {
+			manufacturer,
+		); partitionedUnits != "" {
 			want = append(want, transformation{
 				Input:    string(partitionedUnits),
 				Strategy: "Replace",
@@ -307,7 +309,8 @@ func renderKueueConfig(t *testing.T, values map[string]any) kueueConfig {
 
 	var config kueueConfig
 	require.NoError(t, yaml.Unmarshal(
-		[]byte(manifest.Data["controller_manager_config.yaml"]), &config))
+		[]byte(manifest.Data["controller_manager_config.yaml"]), &config,
+	))
 
 	return config
 }
@@ -369,7 +372,8 @@ func TestChartCertManagerPathsAgree(t *testing.T) {
 // manufacturer that stops rendering its DaemonSet.
 func TestChartDefaultsMatchImageModeOverlay(t *testing.T) {
 	overlay, err := getGPUStackOperatorChartTemplateValues(
-		gpustackOperatorChartName, operatorChartValuesContext(nil)).
+		gpustackOperatorChartName, operatorChartValuesContext(nil),
+	).
 		GetValues(context.Background())
 	require.NoError(t, err, "render the image-mode overlay")
 

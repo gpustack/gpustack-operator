@@ -258,10 +258,12 @@ func Render(name string, input Input) (Output, error) {
 		return Output{}, fmt.Errorf("router %q rendered no command", name)
 	case output.Document == "" && len(output.Arguments) == 0:
 		return Output{}, fmt.Errorf(
-			"router %q rendered neither a configuration document nor arguments", name)
+			"router %q rendered neither a configuration document nor arguments", name,
+		)
 	case output.Document != "" && len(output.Arguments) != 0:
 		return Output{}, fmt.Errorf(
-			"router %q rendered both a configuration document and arguments", name)
+			"router %q rendered both a configuration document and arguments", name,
+		)
 	}
 
 	return output, nil

@@ -221,11 +221,13 @@ func groupStatusPublishMembership(
 
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
 	status, err := r.computeModelDeploymentStatusWithQualifications(
-		context.Background(), md, pods, nil, nil, nil, qualifications)
+		context.Background(), md, pods, nil, nil, nil, qualifications,
+	)
 	require.NoError(t, err)
 
 	collective := applyModelDeploymentGroupStatuses(
-		md, status.Roles, qualifications, pods, collectiveMembers)
+		md, status.Roles, qualifications, pods, collectiveMembers,
+	)
 	r.applyModelDeploymentGroupAnswer(status, modelDeploymentPassObservation{
 		Serving:        answer,
 		Qualifications: qualifications,
@@ -1152,7 +1154,8 @@ func collectiveStatusWorker(
 // collectiveStatusHead is the ancillary Ray head, which is not a worker of the collective.
 func collectiveStatusHead(md *workercore.ModelDeployment) core.Pod {
 	member := groupStatusMember(
-		md, workercore.ModelDeploymentRole{Name: modelDeploymentElasticHeadName(md)}, 0, 0, nil)
+		md, workercore.ModelDeploymentRole{Name: modelDeploymentElasticHeadName(md)}, 0, 0, nil,
+	)
 
 	return *member
 }
@@ -1193,7 +1196,8 @@ func TestElasticCollectiveStatusPublishesOneGroupForTheWholeCollective(t *testin
 	head := collectiveStatusHead(md)
 
 	master := groupStatusQualification(
-		groupStatusCase{role: md.Spec.Roles[0].Name, ordinal: 0}, []*core.Pod{&workers[0]})
+		groupStatusCase{role: md.Spec.Roles[0].Name, ordinal: 0}, []*core.Pod{&workers[0]},
+	)
 	status := collectiveStatusPublish(t, md, workers[:1], append(workers, head),
 		[]modelDeploymentInstanceQualification{master},
 		ServingAnswer{Groups: map[modelDeploymentGroupKey]modelDeploymentGroupServing{}})
@@ -1247,7 +1251,8 @@ func TestElasticCollectiveStatusDoesNotReuseTheMastersServingFact(t *testing.T) 
 
 	workers := []core.Pod{collectiveStatusWorker(md, 0, ptr.To(core.ConditionTrue))}
 	master := groupStatusQualification(
-		groupStatusCase{role: md.Spec.Roles[0].Name, ordinal: 0}, []*core.Pod{&workers[0]})
+		groupStatusCase{role: md.Spec.Roles[0].Name, ordinal: 0}, []*core.Pod{&workers[0]},
+	)
 
 	answer := ServingAnswer{Groups: map[modelDeploymentGroupKey]modelDeploymentGroupServing{
 		groupStatusKey(md.Spec.Roles[0].Name, 0, master.Generation): {
@@ -1434,7 +1439,8 @@ func TestElasticCollectiveStatusIsPublishedByTheElasticPath(t *testing.T) {
 	// replica of the role, and the collective is the role's one replica seen whole.
 	first := new(workercore.ModelDeployment)
 	require.NoError(t, f.reconciler.Client.Get(
-		context.Background(), ctrlcli.ObjectKeyFromObject(f.md), first))
+		context.Background(), ctrlcli.ObjectKeyFromObject(f.md), first,
+	))
 	require.Len(t, first.Status.Roles, 1)
 	assert.Empty(t, first.Status.Roles[0].Groups,
 		"an absent collective membership publishes no group at all")
@@ -1444,7 +1450,8 @@ func TestElasticCollectiveStatusIsPublishedByTheElasticPath(t *testing.T) {
 
 	stored := new(workercore.ModelDeployment)
 	require.NoError(t, f.reconciler.Client.Get(
-		context.Background(), ctrlcli.ObjectKeyFromObject(f.md), stored))
+		context.Background(), ctrlcli.ObjectKeyFromObject(f.md), stored,
+	))
 
 	pods := new(core.PodList)
 	require.NoError(t, f.reconciler.Client.List(context.Background(), pods))
@@ -1483,7 +1490,8 @@ func TestElasticCollectiveStatusInheritsNeitherTheMastersInstantNorItsServingFac
 
 	workers := []core.Pod{collectiveStatusWorker(md, 0, ptr.To(core.ConditionTrue))}
 	master := groupStatusQualification(
-		groupStatusCase{role: md.Spec.Roles[0].Name, ordinal: 0}, []*core.Pod{&workers[0]})
+		groupStatusCase{role: md.Spec.Roles[0].Name, ordinal: 0}, []*core.Pod{&workers[0]},
+	)
 
 	earned := meta.NewTime(time.Now().Add(-time.Hour))
 	previous := &workercore.ModelDeploymentStatus{
@@ -1515,7 +1523,8 @@ func TestElasticCollectiveStatusInheritsNeitherTheMastersInstantNorItsServingFac
 	// THE SETTLEMENT RUNS AGAINST THE PREVIOUS PUBLICATION, the way a second pass settles it.
 	applyModelDeploymentGroupQualificationTimes(
 		status, previous.Roles, meta.NewTime(time.Now()),
-		modelDeploymentElasticCollectiveView(md, workers))
+		modelDeploymentElasticCollectiveView(md, workers),
+	)
 
 	require.Len(t, status.Roles, 1)
 	require.Len(t, status.Roles[0].Groups, 1)
@@ -1567,10 +1576,12 @@ func TestModelDeploymentGroupStatusPublishesAGroupThatRetainedItsQualification(t
 	}
 
 	status, err := r.computeModelDeploymentStatusWithQualifications(
-		context.Background(), fixture.md, pods, nil, nil, nil, qualifications)
+		context.Background(), fixture.md, pods, nil, nil, nil, qualifications,
+	)
 	require.NoError(t, err)
 	collective := applyModelDeploymentGroupStatuses(
-		fixture.md, status.Roles, qualifications, pods, nil)
+		fixture.md, status.Roles, qualifications, pods, nil,
+	)
 	r.applyModelDeploymentGroupAnswer(status, modelDeploymentPassObservation{
 		Serving:        answer,
 		Qualifications: qualifications,
@@ -1625,10 +1636,12 @@ func TestModelDeploymentGroupStatusPublishesAwaitingReadyForAFreshlyUnreadyMembe
 	}
 
 	status, err := r.computeModelDeploymentStatusWithQualifications(
-		context.Background(), fixture.md, pods, nil, nil, nil, qualifications)
+		context.Background(), fixture.md, pods, nil, nil, nil, qualifications,
+	)
 	require.NoError(t, err)
 	collective := applyModelDeploymentGroupStatuses(
-		fixture.md, status.Roles, qualifications, pods, nil)
+		fixture.md, status.Roles, qualifications, pods, nil,
+	)
 	r.applyModelDeploymentGroupAnswer(status, modelDeploymentPassObservation{
 		Serving:        answer,
 		Qualifications: qualifications,

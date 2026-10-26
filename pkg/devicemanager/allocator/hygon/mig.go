@@ -219,7 +219,8 @@ func parseMigMarker(path string) (migMarker, error) {
 	}
 	if card, ok := cardFromMigMarkerPath(path); !ok || card != m.Card {
 		return migMarker{}, fmt.Errorf(
-			"marker %q records card %q, not the card its file name names: fail closed", path, m.Card)
+			"marker %q records card %q, not the card its file name names: fail closed", path, m.Card,
+		)
 	}
 	return m, nil
 }
@@ -406,7 +407,8 @@ func reserveMigInstance(
 	if m, perr := parseMigMarker(self); perr == nil {
 		if m.Profile != profile {
 			return migInstance{}, migRebound, fmt.Errorf(
-				"marker %q mismatches request (profile=%s): fail closed", self, profile)
+				"marker %q mismatches request (profile=%s): fail closed", self, profile,
+			)
 		}
 		state, serr := drv.CardState(card.PciBusID, profile)
 		if serr != nil {
@@ -415,7 +417,8 @@ func reserveMigInstance(
 		live, ok := findLiveMigInstance(state, m.GiID)
 		if !ok {
 			return migInstance{}, migRebound, fmt.Errorf(
-				"marker %q references missing gpu instance %d on card %s: fail closed", self, m.GiID, cardUUID)
+				"marker %q references missing gpu instance %d on card %s: fail closed", self, m.GiID, cardUUID,
+			)
 		}
 		// Guard against GPU-instance id reuse. The vendor assigns ids from a pool, so a destroyed
 		// instance's id can come back attached to a different partition -- and because this vendor's
@@ -424,7 +427,8 @@ func reserveMigInstance(
 		if live.UUID != m.MigUUID {
 			return migInstance{}, migRebound, fmt.Errorf(
 				"marker %q gpu instance %d uuid %q no longer matches live uuid %q (id reused): fail closed",
-				self, m.GiID, m.MigUUID, live.UUID)
+				self, m.GiID, m.MigUUID, live.UUID,
+			)
 		}
 		return m.instance(), migRebound, nil
 	} else if !os.IsNotExist(perr) {
@@ -454,12 +458,14 @@ func reserveMigInstance(
 		slot, ok := pickMigPlacement(state.Possible, occupied)
 		if !ok {
 			return migInstance{}, migCreated, fmt.Errorf(
-				"card %s has no free placement for profile %s", cardUUID, profile)
+				"card %s has no free placement for profile %s", cardUUID, profile,
+			)
 		}
 		inst, err = drv.CreateInstance(card.PciBusID, profile, slot)
 		if err != nil {
 			return migInstance{}, migCreated, fmt.Errorf(
-				"create %s instance on card %s: %w", profile, cardUUID, err)
+				"create %s instance on card %s: %w", profile, cardUUID, err,
+			)
 		}
 		outcome = migCreated
 	}
@@ -519,7 +525,8 @@ func migAllocatedCards(
 		if accel.Topology.PciBusID == "" {
 			return nil, fmt.Errorf(
 				"card %s: no recorded pci address to reach it through the multi-instance library: fail closed",
-				accel.ID)
+				accel.ID,
+			)
 		}
 		cards = append(cards, migCard{UUID: accel.ID, PciBusID: accel.Topology.PciBusID})
 	}

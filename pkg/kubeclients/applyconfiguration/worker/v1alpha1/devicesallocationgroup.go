@@ -12,6 +12,7 @@ type DevicesAllocationGroupApplyConfiguration struct {
 	// Manufacturer is the name of the device manufacturer.
 	Manufacturer *string `json:"manufacturer,omitempty"`
 	// Accelerators is the list of the allocated accelerator devices in this group.
+	//
 	Accelerators []AcceleratorAllocationApplyConfiguration `json:"accelerators,omitempty"`
 }
 

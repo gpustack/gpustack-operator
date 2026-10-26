@@ -12,22 +12,31 @@ import (
 // ModelDeploymentScalerStatus is the observed state of ModelDeploymentScaler.
 type ModelDeploymentScalerStatusApplyConfiguration struct {
 	// ObservedGeneration is the generation this status was computed from.
+	//
 	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
 	// Binding is the target this scaler is bound to.
+	//
 	Binding *ModelDeploymentScalerBindingStatusApplyConfiguration `json:"binding,omitempty"`
 	// Roles is what the scaler saw and what it recommends for each role.
+	//
 	Roles []ModelDeploymentScalerRoleStatusApplyConfiguration `json:"roles,omitempty"`
 	// LastCommit is the decision the scaler last committed.
+	//
 	LastCommit *ModelDeploymentScalerCommitStatusApplyConfiguration `json:"lastCommit,omitempty"`
 	// PendingCohort is the scale-up the scaler committed and is waiting on.
+	//
 	PendingCohort *ModelDeploymentScalerPendingCohortStatusApplyConfiguration `json:"pendingCohort,omitempty"`
 	// Rebalance is the transaction in which one role gives a replica to another.
+	//
 	Rebalance *ModelDeploymentScalerRebalanceStatusApplyConfiguration `json:"rebalance,omitempty"`
 	// LastScaleDown is the outcome of the last scale-down the scaler committed.
+	//
 	LastScaleDown *ModelDeploymentScalerScaleDownStatusApplyConfiguration `json:"lastScaleDown,omitempty"`
 	// Predictors is the state of the predictor of each role.
+	//
 	Predictors []ModelDeploymentScalerPredictorStatusApplyConfiguration `json:"predictors,omitempty"`
 	// Conditions holds the conditions of the scaler.
+	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 }
 

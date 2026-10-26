@@ -12,6 +12,7 @@ type TokenRequestApplyConfiguration struct {
 	Audience *string `json:"audience,omitempty"`
 	// expirationSeconds is the duration of validity of the token in "TokenRequestSpec".
 	// It has the same default value of "ExpirationSeconds" in "TokenRequestSpec".
+	//
 	ExpirationSeconds *int64 `json:"expirationSeconds,omitempty"`
 }
 

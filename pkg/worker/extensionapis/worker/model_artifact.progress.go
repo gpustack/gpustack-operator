@@ -250,7 +250,8 @@ func (h *ModelArtifactProgressHandler) downloads(ctx context.Context, url string
 // _pluginDownloadsClient reads the plugins' downloads: one keep-alive transport per process.
 var _pluginDownloadsClient = &http.Client{
 	Transport: httpx.Transport(httpx.TransportOptions().WithoutProxy().WithTLSClientConfig(
-		&tls.Config{InsecureSkipVerify: true})), // nolint: gosec
+		&tls.Config{InsecureSkipVerify: true}, // nolint: gosec
+	)),
 }
 
 // fetchPluginDownloads GETs a plugin's running downloads. The plugin serves a self-signed

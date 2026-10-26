@@ -98,7 +98,8 @@ func verbsDevicePath(sysfsRoot, name string) (string, error) {
 	switch {
 	case aerr == nil:
 		entry, unresolvable2, err := scanVerbsEntries(
-			root, filepath.Join(parent, sysfsVerbsClassName), name)
+			root, filepath.Join(parent, sysfsVerbsClassName), name,
+		)
 		if err != nil {
 			return "", err
 		}
@@ -115,21 +116,24 @@ func verbsDevicePath(sysfsRoot, name string) (string, error) {
 		// A link that is there and would not resolve might have located the parent, so it
 		// may not be read as the layout's absence.
 		unresolvable = errors.Join(unresolvable, fmt.Errorf(
-			"resolve the device link of %q: %w", filepath.Join(sysfsInfinibandDir, name), aerr))
+			"resolve the device link of %q: %w", filepath.Join(sysfsInfinibandDir, name), aerr,
+		))
 	}
 
 	if unresolvable != nil {
 		return "", fmt.Errorf(
 			"whether RDMA device %q has a verbs character device could not be established "+
 				"under %q: %w",
-			name, sysfsRoot, unresolvable)
+			name, sysfsRoot, unresolvable,
+		)
 	}
 	return "", fmt.Errorf(
 		"no verbs character device for RDMA device %q under %q: tried both sysfs layouts, "+
 			"%q (the verbs class directory) and the %q directory under %q (the RDMA "+
 			"device's hardware parent)",
 		name, sysfsRoot, sysfsVerbsClassDir, sysfsVerbsClassName,
-		filepath.Join(sysfsInfinibandDir, name, "device"))
+		filepath.Join(sysfsInfinibandDir, name, "device"),
+	)
 }
 
 // scanVerbsEntries lists one directory of candidate uverbs devices and returns the entry

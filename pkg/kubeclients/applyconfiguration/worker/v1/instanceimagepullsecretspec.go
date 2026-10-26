@@ -8,8 +8,10 @@ package v1
 // InstanceImagePullSecretSpec defines the desired state of InstanceImagePullSecret.
 type InstanceImagePullSecretSpecApplyConfiguration struct {
 	// DisplayName is the display name of the InstanceImagePullSecret.
+	//
 	DisplayName *string `json:"displayName,omitempty"`
 	// Description is the description of the InstanceImagePullSecret.
+	//
 	Description *string `json:"description,omitempty"`
 	// Registry is the registry of the image pull secret.
 	//

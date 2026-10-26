@@ -362,7 +362,8 @@ var (
 		apiext.FieldValueRequired,
 		apiext.FieldValueDuplicate,
 		apiext.FieldValueInvalid,
-		apiext.FieldValueForbidden)
+		apiext.FieldValueForbidden,
+	)
 )
 
 // schemeType reflects the given type into a JSONSchemaProps .

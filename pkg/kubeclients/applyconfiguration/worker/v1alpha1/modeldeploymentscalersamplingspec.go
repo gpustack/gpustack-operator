@@ -11,12 +11,14 @@ type ModelDeploymentScalerSamplingSpecApplyConfiguration struct {
 	//
 	// It is the floor on how fast the scaler reacts and the floor on how often it writes, so a
 	// short interval costs scrape load and a long one costs reaction time.
+	//
 	IntervalSeconds *int32 `json:"intervalSeconds,omitempty"`
 	// PendingTimeoutSeconds is how long a committed scale-up may stay unadmitted before it is
 	// retracted.
 	//
 	// The retraction restores the vector the scale-up started from, so a timeout undoes a change
 	// rather than leaving a role waiting for resources that never arrive.
+	//
 	PendingTimeoutSeconds *int32 `json:"pendingTimeoutSeconds,omitempty"`
 }
 

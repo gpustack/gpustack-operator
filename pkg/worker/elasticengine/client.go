@@ -219,7 +219,8 @@ func (c *Client) post(ctx context.Context, op, path string, payload any) ([]byte
 	defer cancel()
 
 	request, err := http.NewRequestWithContext(
-		callCtx, http.MethodPost, c.baseURL+path, body)
+		callCtx, http.MethodPost, c.baseURL+path, body,
+	)
 	if err != nil {
 		return nil, &Error{Kind: KindInvalidInput, Op: op, Detail: "the request could not be built", Err: err}
 	}

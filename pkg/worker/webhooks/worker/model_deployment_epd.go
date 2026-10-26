@@ -96,7 +96,8 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentEPD(
 	if gap := workerctrl.ModelDeploymentEPDMatrixGap(router, md.Spec.Engine.Name, platform); gap != "" {
 		return append(errs, field.Invalid(field.NewPath("spec", "engine", "name"), md.Spec.Engine.Name, fmt.Sprintf(
 			"%s; an encoder role is admitted only for a combination in the admitted matrix, and the "+
-				"admitted rows are %s", gap, workerctrl.ModelDeploymentEPDMatrixSummary()))), nil
+				"admitted rows are %s", gap, workerctrl.ModelDeploymentEPDMatrixSummary(),
+		))), nil
 	}
 
 	// The gap check above has already refused every combination this cannot answer for, so the row
@@ -143,7 +144,8 @@ func validateModelDeploymentEPDShape(md *workercore.ModelDeployment) field.Error
 
 		errs = append(errs, field.Required(encodePath, fmt.Sprintf(
 			"an %q role needs a %q role beside it, and none is declared: %s",
-			workercore.ModelDeploymentRoleKindEncode, kind, modelDeploymentEPDSiblingReason(kind))))
+			workercore.ModelDeploymentRoleKindEncode, kind, modelDeploymentEPDSiblingReason(kind),
+		)))
 	}
 
 	if md.Spec.Router == nil {
@@ -157,7 +159,8 @@ func validateModelDeploymentEPDShape(md *workercore.ModelDeployment) field.Error
 			"spec.kvCache is refused on a deployment with an %q role: the field is deployment-wide "+
 				"and would attach every role to one pool, but the encoder keeps no KV cache at all, "+
 				"so it has nothing to place in that pool",
-			workercore.ModelDeploymentRoleKindEncode)))
+			workercore.ModelDeploymentRoleKindEncode,
+		)))
 	}
 
 	for i := range md.Spec.Roles {
@@ -166,7 +169,8 @@ func validateModelDeploymentEPDShape(md *workercore.ModelDeployment) field.Error
 			errs = append(errs, field.Forbidden(rolesPath.Index(i).Child("command"), fmt.Sprintf(
 				"role %q is one of three roles the operator pairs through a router, and a command "+
 					"replaces the managed arguments and the routing sidecar: the roles would keep "+
-					"their kinds and stop talking to each other", role.Name)))
+					"their kinds and stop talking to each other", role.Name,
+			)))
 		}
 	}
 
@@ -199,7 +203,8 @@ func validateModelDeploymentEPDEncodeShape(md *workercore.ModelDeployment, encod
 			fmt.Sprintf(
 				"role %q runs one instance per Pod, so its replica size is 1: the operator places "+
 					"one encoder per member and a second instance would produce embeddings for a "+
-					"transfer key the prefiller never asks for", role.Name)))
+					"transfer key the prefiller never asks for", role.Name,
+			)))
 	}
 
 	if role.ElasticEP != nil {
@@ -208,7 +213,8 @@ func validateModelDeploymentEPDEncodeShape(md *workercore.ModelDeployment, encod
 				"role %q cannot carry the elastic-EP profile: that profile admits a single Server "+
 					"role of one instance of one Pod, and scales the group holding it, while an "+
 					"encoder is a fixed producer whose withdrawal would cut transfers already in "+
-					"flight", role.Name)))
+					"flight", role.Name,
+			)))
 	}
 
 	// External data parallelism moves the members that answer a request outside the engine process,
@@ -220,7 +226,8 @@ func validateModelDeploymentEPDEncodeShape(md *workercore.ModelDeployment, encod
 		errs = append(errs, field.Forbidden(rolePath.Child("extraArgs"), fmt.Sprintf(
 			"role %q declares a data parallelism the engine balances outside itself, and passes %v: "+
 				"an encoder has one producer and one output key, so there is no per-member endpoint "+
-				"to balance across", role.Name, role.ExtraArgs)))
+				"to balance across", role.Name, role.ExtraArgs,
+		)))
 	}
 
 	return errs
@@ -271,7 +278,8 @@ func (r *ModelDeploymentWebhook) modelDeploymentEPDPlatform(
 				fmt.Sprintf(
 					"instance type %q reports no accelerator platform yet: an encoder role is admitted "+
 						"per platform, because the connector it needs follows the accelerator, so the "+
-						"platform has to be known before this deployment can be judged", role.InstanceType)))
+						"platform has to be known before this deployment can be judged", role.InstanceType,
+				)))
 
 			continue
 		}
@@ -291,7 +299,8 @@ func (r *ModelDeploymentWebhook) modelDeploymentEPDPlatform(
 			"the roles of this deployment run on more than one accelerator platform: one reports %q "+
 				"and another reports %q. The encoder leg follows the accelerator, so one deployment "+
 				"cannot carry it across two",
-			platform, strings.Join(mixed, ", ")))), nil
+			platform, strings.Join(mixed, ", "),
+		))), nil
 	}
 
 	if platform == "" && len(errs) == 0 {
@@ -345,7 +354,8 @@ func validateModelDeploymentEPDSideChannelPort(
 			"role %q serves HTTP on port %d, which is the port %s binds its side channel on: the "+
 				"engine would serve on the socket every consumer dials for embeddings, and one of "+
 				"the two fails to bind",
-			role.Name, inject.VLLMECSideChannelPort, row.Connector))}
+			role.Name, inject.VLLMECSideChannelPort, row.Connector,
+		))}
 	}
 
 	// The declared set is read first because it is the one the render prefers: where a role
@@ -399,14 +409,16 @@ func validateModelDeploymentEPDSharedVolume(
 			"role %q is the encoder-cache producer on %s, and %s carries its output through a "+
 				"directory rather than over the network: attach the shared claim the prefiller mounts "+
 				"as an additionalVolumes entry naming a persistentVolumeClaim",
-			encode.Name, row.Platform, row.Connector)))
+			encode.Name, row.Platform, row.Connector,
+		)))
 	}
 
 	if encodeMount.ReadOnly {
 		errs = append(errs, field.Forbidden(encodePath.Child("readOnly"), fmt.Sprintf(
 			"role %q writes the embeddings %s carries, so its mount must not be read-only: the "+
 				"encoder's write would fail once the Pod is running, with nothing in the object to say "+
-				"so", encode.Name, row.Connector)))
+				"so", encode.Name, row.Connector,
+		)))
 	}
 
 	prefillPath := rolesPath.Index(prefillIdx).Child("additionalVolumes")
@@ -415,7 +427,8 @@ func validateModelDeploymentEPDSharedVolume(
 		return append(errs, field.Required(prefillPath, fmt.Sprintf(
 			"role %q reads the embeddings %s carries out of the directory role %q writes them to, "+
 				"and mounts nothing: attach the same claim role %q mounts",
-			md.Spec.Roles[prefillIdx].Name, row.Connector, encode.Name, encode.Name)))
+			md.Spec.Roles[prefillIdx].Name, row.Connector, encode.Name, encode.Name,
+		)))
 	}
 
 	for _, mismatch := range []struct {
@@ -441,7 +454,9 @@ func validateModelDeploymentEPDSharedVolume(
 			modelDeploymentEPDVolumeMismatchField(encodePath, mismatch.name), mismatch.value, fmt.Sprintf(
 				"role %q and role %q must name the same %s for %s to carry the encoder's output between "+
 					"them, and they do not",
-				encode.Name, md.Spec.Roles[prefillIdx].Name, mismatch.name, row.Connector)))
+				encode.Name, md.Spec.Roles[prefillIdx].Name, mismatch.name, row.Connector,
+			),
+		))
 	}
 
 	return errs

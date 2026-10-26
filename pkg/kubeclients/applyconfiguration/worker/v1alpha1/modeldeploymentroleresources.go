@@ -31,14 +31,17 @@ type ModelDeploymentRoleResourcesApplyConfiguration struct {
 	// AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced
 	// InstanceType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive
 	// whole-accelerator one. It is ignored by an InstanceType offering no slicing.
+	//
 	AcceleratorSlicedMemoryPercentage *int32 `json:"acceleratorSlicedMemoryPercentage,omitempty"`
 	// AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced
 	// InstanceType, as a percentage in [0,100], independent of the memory percentage.
+	//
 	AcceleratorSlicedCoresPercentage *int32 `json:"acceleratorSlicedCoresPercentage,omitempty"`
 	// AcceleratorPartitionedProfile is the hardware partition profile requested on a
 	// partition-offering InstanceType, e.g. "3g.40gb". A non-empty value is mutually exclusive with
 	// the two slice percentages: hardware partitioning and software slicing cannot both apply to one
 	// accelerator. It is ignored by an InstanceType offering no partition.
+	//
 	AcceleratorPartitionedProfile *string `json:"acceleratorPartitionedProfile,omitempty"`
 	// Interface is the number of fabric interfaces one role Pod requests, as a whole number.
 	// Unset or zero requests none. A positive count selects the device-plugin resource of the
@@ -47,6 +50,7 @@ type ModelDeploymentRoleResourcesApplyConfiguration struct {
 	// resource. Conflicting effective protocols are refused rather than assigned one of the
 	// available device families. Admission enforces the whole number and the protocol rules,
 	// the same as for accelerator; the schema carries no bound of its own.
+	//
 	Interface *resource.Quantity `json:"interface,omitempty"`
 }
 

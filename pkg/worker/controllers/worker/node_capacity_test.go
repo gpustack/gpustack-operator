@@ -285,7 +285,8 @@ func TestDesiredAcceleratorCapacity(t *testing.T) {
 			name: "same manufacturer models sum, memory-mib weighted per model",
 			node: withSlicedPool(
 				withModel(acceleratableNode("node-5", "nvidia-a10g", "4", "24Gi", true), "nvidia-t4", "2", "16Gi"),
-				nodefeature.ManufacturerNVIDIA, 6*128),
+				nodefeature.ManufacturerNVIDIA, 6*128,
+			),
 			devs: devicesWithSlicing("node-5",
 				vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 4, 128, true},
 				vendorSlicing{nodefeature.ManufacturerNVIDIA, "t4", 2, 128, true}),
@@ -307,8 +308,10 @@ func TestDesiredAcceleratorCapacity(t *testing.T) {
 			node: withSlicedPool(
 				withSlicedPool(
 					withModel(acceleratableNode("node-5", "nvidia-a10g", "4", "24Gi", true), "mthreads-s4000", "2", "48Gi"),
-					nodefeature.ManufacturerNVIDIA, 4*128),
-				nodefeature.ManufacturerMThreads, 2*16),
+					nodefeature.ManufacturerNVIDIA, 4*128,
+				),
+				nodefeature.ManufacturerMThreads, 2*16,
+			),
 			devs: devicesWithSlicing("node-5",
 				vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 4, 128, true},
 				vendorSlicing{nodefeature.ManufacturerMThreads, "s4000", 2, 16, false}),
@@ -326,8 +329,10 @@ func TestDesiredAcceleratorCapacity(t *testing.T) {
 			node: withSlicedPool(
 				withSlicedPool(
 					withModel(acceleratableNode("node-5", "nvidia-gpu", "4", "24Gi", true), "mthreads-gpu", "2", "48Gi"),
-					nodefeature.ManufacturerNVIDIA, 4*128),
-				nodefeature.ManufacturerMThreads, 2*16),
+					nodefeature.ManufacturerNVIDIA, 4*128,
+				),
+				nodefeature.ManufacturerMThreads, 2*16,
+			),
 			devs: devicesWithSlicing("node-5",
 				vendorSlicing{nodefeature.ManufacturerNVIDIA, "gpu", 4, 128, true},
 				vendorSlicing{nodefeature.ManufacturerMThreads, "gpu", 2, 16, false}),
@@ -343,7 +348,8 @@ func TestDesiredAcceleratorCapacity(t *testing.T) {
 			name: "mixed sliceable and non-sliceable models count only the sliceable",
 			node: withSlicedPool(
 				withModel(acceleratableNode("node-5", "ascend-910b", "4", "64Gi", true), "ascend-310", "2", "24Gi"),
-				nodefeature.ManufacturerAscend, 4*63),
+				nodefeature.ManufacturerAscend, 4*63,
+			),
 			devs: devicesWithSlicing("node-5",
 				vendorSlicing{nodefeature.ManufacturerAscend, "910b", 4, 63, true},
 				vendorSlicing{nodefeature.ManufacturerAscend, "310", 2, 0, false}),
@@ -660,7 +666,8 @@ func TestAcceleratorDetailChanged(t *testing.T) {
 		devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a100", migCardWithProfiles("0", multi))),
 		"a100", "0",
 		map[string]int32{"3g.40gb": 1},
-		map[string]int32{"1g.10gb": 4, "3g.40gb": 1})
+		map[string]int32{"1g.10gb": 4, "3g.40gb": 1},
+	)
 	assert.True(t, acceleratorDetailChanged(empty, carved), "an allocation that shrinks another profile fires")
 	assert.False(t, acceleratorDetailChanged(carved, carved), "an unchanged ledger does not fire")
 }
@@ -783,7 +790,8 @@ func TestBuildAcceleratorCapacityPatch(t *testing.T) {
 
 func TestAcceleratorFamilyCapacityChanged(t *testing.T) {
 	nvidiaSliced := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced,
+	)
 	mk := func(entries map[core.ResourceName]string) core.ResourceList {
 		rl := core.ResourceList{core.ResourceCPU: resource.MustParse("8")}
 		for k, v := range entries {

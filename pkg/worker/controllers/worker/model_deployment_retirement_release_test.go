@@ -89,7 +89,8 @@ func releaseHolder(t *testing.T, mutate ...func(*core.Pod)) *core.Pod {
 						Requests: core.ResourceList{
 							nodefeature.GetAcceleratableResourceName(
 								nodefeature.ManufacturerNVIDIA,
-								workercore.DeviceAllocationModeExclusive): resource.MustParse("1"),
+								workercore.DeviceAllocationModeExclusive,
+							): resource.MustParse("1"),
 						},
 					},
 				},
@@ -165,7 +166,8 @@ func newReleaseScenario(t *testing.T, holder ...func(*core.Pod)) *releaseScenari
 			res.Deadline = meta.NewTime(started.Add(modelDeploymentRetirementOverallBudget))
 			res.PhaseStartedAt = meta.NewTime(started)
 			res.TargetWorkloadUID = "wl-uid-1"
-		}))
+		},
+	))
 
 	// The reservation is PERSISTED before anything is captured. The capture is read back against a
 	// fresh server read of the operation, so an operation that exists only in this copy is not an
@@ -244,7 +246,8 @@ func (s *releaseScenario) settle() (*modelDeploymentRetirementPlan, bool) {
 			res.PhaseStartedAt = meta.NewTime(time.Now())
 			res.LastConsumedRetryToken = retry
 			res.TargetWorkloadUID = s.workloadUID
-		}))
+		},
+	))
 	require.NoError(s.t, s.cli.Status().Update(context.Background(), s.md))
 	key := ctrlcli.ObjectKeyFromObject(s.md)
 	s.md = new(workercore.ModelDeployment)
@@ -422,7 +425,8 @@ func (s *releaseScenario) rebuiltLedger() *workercore.Devices {
 		"spec.nodeName": releaseNode,
 	}))
 	rebuilt, _, err := deviceplugin.BuildDesiredStatusStrict(
-		ctrllogDiscard(), s.devices, live)
+		ctrllogDiscard(), s.devices, live,
+	)
 	require.NoError(s.t, err, "the node's records are readable, or the case is not about the ledger")
 
 	devs := new(workercore.Devices)
@@ -473,7 +477,8 @@ func TestModelDeploymentRetirementRelease_LateReleaseCompletes(t *testing.T) {
 				res.PhaseStartedAt = meta.NewTime(expired)
 				res.Deadline = meta.NewTime(expired.Add(modelDeploymentRetirementOverallBudget))
 				res.TargetWorkloadUID = scenario.workloadUID
-			}))
+			},
+		))
 		scenario.persistPhase()
 
 		run := &modelDeploymentRetirementPlan{
@@ -497,7 +502,8 @@ func TestModelDeploymentRetirementRelease_LateReleaseCompletes(t *testing.T) {
 				res.PhaseStartedAt = meta.NewTime(expired)
 				res.Deadline = meta.NewTime(expired.Add(modelDeploymentRetirementOverallBudget))
 				res.TargetWorkloadUID = scenario.workloadUID
-			}))
+			},
+		))
 
 		run := &modelDeploymentRetirementPlan{
 			Reservation: scenario.md.Status.Retirement, held: setsOf("member-1"),
@@ -607,7 +613,8 @@ func TestModelDeploymentRetirementRelease_ObservationNeedsTheServer(t *testing.T
 
 	withoutReader := &ModelDeploymentReconciler{Client: scenario.cli}
 	reason, released := withoutReader.observeModelDeploymentRetirementReleased(
-		context.Background(), scenario.md, plan)
+		context.Background(), scenario.md, plan,
+	)
 	assert.False(t, released)
 	assert.Contains(t, reason, "no API reader")
 
@@ -649,7 +656,8 @@ func TestModelDeploymentRetirementRelease_RouterBackedTwoToOneLifecycle(t *testi
 			res.Deadline = meta.NewTime(started.Add(modelDeploymentRetirementOverallBudget))
 			res.PhaseStartedAt = meta.NewTime(started)
 			res.TargetWorkloadUID = "wl-uid-1"
-		}))
+		},
+	))
 	require.NoError(t, cli.Status().Update(context.Background(), md))
 	key := ctrlcli.ObjectKeyFromObject(md)
 	md = new(workercore.ModelDeployment)
@@ -795,7 +803,8 @@ func TestModelDeploymentRetirementRelease_CPUOnlyTargetCompletes(t *testing.T) {
 			res.Deadline = meta.NewTime(started.Add(modelDeploymentRetirementOverallBudget))
 			res.PhaseStartedAt = meta.NewTime(started)
 			res.TargetWorkloadUID = "wl-uid-1"
-		}))
+		},
+	))
 	require.NoError(t, cli.Status().Update(context.Background(), md))
 	key := ctrlcli.ObjectKeyFromObject(md)
 	md = new(workercore.ModelDeployment)
@@ -1082,7 +1091,8 @@ func TestModelDeploymentRetirementRelease_InterleavedOperationChangeHolds(t *tes
 				require.NoError(t, s.cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(s.md), current))
 				edited := new(modelDeploymentRetirementRelease)
 				require.NoError(t, json.Unmarshal(
-					[]byte(current.Annotations[modelDeploymentRetirementReleaseAnnotation]), edited))
+					[]byte(current.Annotations[modelDeploymentRetirementReleaseAnnotation]), edited,
+				))
 				edited.Members[0].Namespace = "somewhere-else"
 				raw, err := json.Marshal(edited)
 				require.NoError(t, err)

@@ -8,6 +8,7 @@ package v1alpha1
 // DevicesStatus defines the observed state of Devices.
 type DevicesStatusApplyConfiguration struct {
 	// Groups is the list of device groups on the worker.
+	//
 	Groups []DevicesAllocationGroupApplyConfiguration `json:"groups,omitempty"`
 }
 

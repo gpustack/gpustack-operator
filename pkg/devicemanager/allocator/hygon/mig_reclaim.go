@@ -115,7 +115,8 @@ func (r *migReclaimer) note(seen map[string]sets.Set[uint32], m migMarker) {
 func (r *migReclaimer) release(entry migMarkerEntry) {
 	m := entry.marker
 	logger := r.logger.WithValues(
-		"pod", m.PodUID, "container", m.Container, "card", m.Card, "gpuInstance", m.GiID)
+		"pod", m.PodUID, "container", m.Container, "card", m.Card, "gpuInstance", m.GiID,
+	)
 
 	release := lockMigCard(m.PciBusID)
 	defer release()

@@ -91,8 +91,8 @@ var preflightRehosts = map[string]string{}
 // restored redirect removes its entries, because a path nobody redirected must not be rewritten.
 func PreflightRehosts() map[string]string {
 	out := make(map[string]string, len(preflightRehosts))
-	for scratch, real := range preflightRehosts {
-		out[scratch] = real
+	for scratch, hostPath := range preflightRehosts {
+		out[scratch] = hostPath
 	}
 	return out
 }

@@ -26,6 +26,7 @@ type DevicesGroupApplyConfiguration struct {
 	// Family is the family of the device.
 	Family *string `json:"family,omitempty"`
 	// Accelerators is the list of the accelerator devices in this group.
+	//
 	Accelerators []AcceleratorApplyConfiguration `json:"accelerators,omitempty"`
 	// AcceleratorSlicedDetail is the group's slicing capability, aggregated from its
 	// accelerators' per-accelerator slicing status.

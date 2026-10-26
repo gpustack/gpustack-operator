@@ -230,7 +230,8 @@ func (r *ModelDeploymentReconciler) captureModelDeploymentRetirementRelease(
 		// would be recorded as holding nothing.
 		if requests && len(cards) == 0 {
 			return nil, fmt.Errorf(
-				"target member %q requests an accelerator but carries no readable allocation record", memberUID)
+				"target member %q requests an accelerator but carries no readable allocation record", memberUID,
+			)
 		}
 		if pod.Spec.NodeName == "" && len(cards) > 0 {
 			return nil, fmt.Errorf("target member %q holds accelerators but is not on a node", memberUID)
@@ -287,7 +288,8 @@ func (r *ModelDeploymentReconciler) captureModelDeploymentRetirementRelease(
 			return nil, fmt.Errorf("list the node's pods: %w", err)
 		}
 		if _, _, err := deviceplugin.BuildDesiredStatusStrict(
-			ctrllog.FromContext(ctx), devices, onNode); err != nil {
+			ctrllog.FromContext(ctx), devices, onNode,
+		); err != nil {
 			return nil, fmt.Errorf("the target's allocation cannot be read strictly: %w", err)
 		}
 
@@ -722,7 +724,8 @@ func (r *ModelDeploymentReconciler) persistModelDeploymentRetirementRelease(
 	// makes the patch carry the version it was computed from, so a writer that raced this one is
 	// told so instead of overwriting it.
 	if err := r.Client.Patch(ctx, patched, ctrlcli.MergeFromWithOptions(
-		md, ctrlcli.MergeFromWithOptimisticLock{})); err != nil {
+		md, ctrlcli.MergeFromWithOptimisticLock{},
+	)); err != nil {
 		if apierrors.IsConflict(err) {
 			return fmt.Errorf("the release record was written against a stale object: %w", err)
 		}
@@ -955,7 +958,8 @@ func (r *ModelDeploymentReconciler) observeReleaseWorkloadsGone(
 				if _, owned := targets[owner.UID]; owned {
 					return fmt.Sprintf(
 						"workload %q owns the target's member %q but carries no identity, so its "+
-							"release cannot be shown", workload.Name, owner.Name), false
+							"release cannot be shown", workload.Name, owner.Name,
+					), false
 				}
 			}
 
@@ -966,7 +970,8 @@ func (r *ModelDeploymentReconciler) observeReleaseWorkloadsGone(
 			if _, owned := targets[owner.UID]; owned {
 				return fmt.Sprintf(
 					"workload %q still owns the target's member %q, so the target's quota is not released",
-					workload.Name, owner.Name), false
+					workload.Name, owner.Name,
+				), false
 			}
 		}
 	}
@@ -1066,12 +1071,14 @@ func (r *ModelDeploymentReconciler) observeReleaseAcceleratorsReturned(
 		if devices.UID != node.DevicesUID {
 			return fmt.Sprintf(
 				"the node's ledger is no longer the one that was captured (was %q, now %q)",
-				node.DevicesUID, devices.UID), false
+				node.DevicesUID, devices.UID,
+			), false
 		}
 		for _, card := range node.Cards {
 			if !cardInInventory(devices, card) {
 				return fmt.Sprintf(
-					"accelerator %q of group %q has left the node's inventory", card.DeviceID, card.GroupID), false
+					"accelerator %q of group %q has left the node's inventory", card.DeviceID, card.GroupID,
+				), false
 			}
 		}
 
@@ -1086,7 +1093,8 @@ func (r *ModelDeploymentReconciler) observeReleaseAcceleratorsReturned(
 		}
 
 		rebuilt, _, err := deviceplugin.BuildDesiredStatusStrict(
-			ctrllog.FromContext(ctx), devices, onNode)
+			ctrllog.FromContext(ctx), devices, onNode,
+		)
 		if err != nil {
 			return fmt.Sprintf("the node's allocation cannot be read strictly: %v", err), false
 		}
@@ -1259,17 +1267,20 @@ func releaseCardsAgree(
 		if rebuiltCard == nil {
 			return fmt.Sprintf(
 				"accelerator %q of group %q has no rebuilt accounting, so its release cannot be read",
-				card.DeviceID, card.GroupID), false
+				card.DeviceID, card.GroupID,
+			), false
 		}
 		publishedCard := findPublishedCard(published, card)
 		if publishedCard == nil {
 			return fmt.Sprintf(
-				"accelerator %q of group %q has no published row", card.DeviceID, card.GroupID), false
+				"accelerator %q of group %q has no published row", card.DeviceID, card.GroupID,
+			), false
 		}
 		if !releaseCardsMatch(rebuiltCard, publishedCard) {
 			return fmt.Sprintf(
 				"accelerator %q of group %q has not settled: published %s, the node's records say %s",
-				card.DeviceID, card.GroupID, releaseCardString(publishedCard), releaseCardString(rebuiltCard)), false
+				card.DeviceID, card.GroupID, releaseCardString(publishedCard), releaseCardString(rebuiltCard),
+			), false
 		}
 	}
 

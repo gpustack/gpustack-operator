@@ -804,13 +804,15 @@ func TestCollector_SameFixtureAsTheSubresource(t *testing.T) {
 			name: "both figures measured",
 			section: sliceSectionFixture(
 				[]detector.SliceUsage{sliceUsageFixture(ptr.To[uint64](6144), ptr.To[uint32](18))},
-				[]detector.SliceDeviceDiagnostics{measuredDevice("gpu-uuid-1")}),
+				[]detector.SliceDeviceDiagnostics{measuredDevice("gpu-uuid-1")},
+			),
 		},
 		{
 			name: "measured and idle",
 			section: sliceSectionFixture(
 				[]detector.SliceUsage{sliceUsageFixture(ptr.To[uint64](0), ptr.To[uint32](0))},
-				[]detector.SliceDeviceDiagnostics{measuredDevice("gpu-uuid-1")}),
+				[]detector.SliceDeviceDiagnostics{measuredDevice("gpu-uuid-1")},
+			),
 		},
 		{
 			name: "memory answered, compute did not",
@@ -819,7 +821,8 @@ func TestCollector_SameFixtureAsTheSubresource(t *testing.T) {
 				[]detector.SliceDeviceDiagnostics{{
 					Manufacturer: "nvidia", DeviceID: "gpu-uuid-1",
 					CoresReason: device.AcceleratorProcessReasonUnsupported,
-				}}),
+				}},
+			),
 		},
 		{
 			name:    "a device the section cannot answer for",
@@ -863,7 +866,8 @@ func TestCollector_SameFixtureAsTheSubresource(t *testing.T) {
 			// What the subresource serves for this very fixture. One grant per card in every mode
 			// these fixtures cover, so one entry.
 			resolved := round.Snapshot.Instances[0].Grants.Resolve(
-				c.section, "nvidia", &monitor.Groups[0].Accelerators[0])
+				c.section, "nvidia", &monitor.Groups[0].Accelerators[0],
+			)
 			require.Len(t, resolved, 1)
 			want := resolved[0]
 

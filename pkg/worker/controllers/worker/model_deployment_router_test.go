@@ -402,7 +402,8 @@ func TestRenderModelDeploymentRouterObjects_EPDKeepsUnsupportedPrefillDiscoverab
 	deriveLabels := func(t *testing.T) []modelDeploymentInstanceQualification {
 		t.Helper()
 		qualifications := qualifyModelDeploymentInstances(
-			context.Background(), md, pods, modelDeploymentPendingReplacement{}, unexpectedProbe)
+			context.Background(), md, pods, modelDeploymentPendingReplacement{}, unexpectedProbe,
+		)
 		byMember := modelDeploymentQualificationsByMember(qualifications)
 		replicaOf := make(map[types.UID]modelDeploymentReplicaView, len(pods))
 		for _, view := range modelDeploymentGroupPods(pods, true) {
@@ -450,7 +451,8 @@ func TestRenderModelDeploymentRouterObjects_EPDKeepsUnsupportedPrefillDiscoverab
 	render := func(t *testing.T, retainedEligibility bool) ModelDeploymentRouterObjects {
 		t.Helper()
 		objects, err := renderModelDeploymentRouterObjects(
-			context.Background(), md, manufacturers, retainedEligibility)
+			context.Background(), md, manufacturers, retainedEligibility,
+		)
 		require.NoError(t, err)
 
 		return objects
@@ -825,7 +827,8 @@ func TestRenderModelDeploymentRouterObjects_MixedRolesRenderTheirOwnRequirements
 	// deployment-wide selector alone, and its stage filters narrow per role.
 	assert.False(t, router.DocumentStageFilterDemands(
 		objects.ConfigMap.Data[modelDeploymentRouterConfigKey],
-		modelDeploymentLabelKeyEndpointEligible, modelDeploymentEndpointEligibleValue),
+		modelDeploymentLabelKeyEndpointEligible, modelDeploymentEndpointEligibleValue,
+	),
 		"the llm-d stage filter demands no eligibility term outside the encoder shape")
 
 	argvMD := mixed()
@@ -874,7 +877,8 @@ func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *tes
 		})
 		if decided {
 			ModelDeploymentConditionEndpointEligibility.False(
-				md, modelDeploymentReasonEndpointsRevoked, "a member was withdrawn")
+				md, modelDeploymentReasonEndpointsRevoked, "a member was withdrawn",
+			)
 		}
 		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 		require.NoError(t, err)
@@ -929,7 +933,8 @@ func TestSyncModelDeploymentRouter_RetentionReadsTheDocument(t *testing.T) {
 	// The pass a fault leaves behind: a decided condition, and a document that now demands
 	// eligibility of the encoder.
 	ModelDeploymentConditionEndpointEligibility.False(
-		md, modelDeploymentReasonEndpointsRevoked, "the encoder was withdrawn")
+		md, modelDeploymentReasonEndpointsRevoked, "the encoder was withdrawn",
+	)
 	faulted, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 	require.NotContains(t, faulted.ConfigMap.Data[modelDeploymentRouterSelectorKey],
@@ -953,7 +958,8 @@ func TestSyncModelDeploymentRouter_RetentionReadsTheDocument(t *testing.T) {
 	// Two quiet passes over an otherwise unchanged deployment. The second is the one that needs
 	// the document read: after the first, the term survives nowhere else.
 	ModelDeploymentConditionEndpointEligibility.Unknown(
-		md, modelDeploymentReasonEndpointsUnsupported, "a prefiller cannot be verified")
+		md, modelDeploymentReasonEndpointsUnsupported, "a prefiller cannot be verified",
+	)
 	for _, pass := range []string{"first", "second"} {
 		require.NoError(t, r.syncModelDeploymentRouter(context.Background(), md, false))
 		quiet := read(t)
@@ -1013,7 +1019,8 @@ func TestRenderModelDeploymentRouterObjects_MixedServerRolesRenderTheCandidateUn
 		}
 		if decided {
 			ModelDeploymentConditionEndpointEligibility.True(
-				md, modelDeploymentReasonEndpointsQualified, "the managed group qualified")
+				md, modelDeploymentReasonEndpointsQualified, "the managed group qualified",
+			)
 		}
 		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 		require.NoError(t, err)
@@ -1052,11 +1059,13 @@ func TestRenderModelDeploymentRouterObjects_MixedServerRolesRenderTheCandidateUn
 		// the filter is per kind and the requirement is per role.
 		assert.True(t, router.DocumentStageFilterDemands(
 			objects.ConfigMap.Data[modelDeploymentRouterConfigKey],
-			modelDeploymentRouterCandidateLabel, modelDeploymentEndpointEligibleValue),
+			modelDeploymentRouterCandidateLabel, modelDeploymentEndpointEligibleValue,
+		),
 			"the stage filter of the kind admits the candidate union (%s, decided=%t)", order, tc.decided)
 		assert.False(t, router.DocumentStageFilterDemands(
 			objects.ConfigMap.Data[modelDeploymentRouterConfigKey],
-			modelDeploymentLabelKeyEndpointEligible, modelDeploymentEndpointEligibleValue),
+			modelDeploymentLabelKeyEndpointEligible, modelDeploymentEndpointEligibleValue,
+		),
 			"and it does not demand one role's eligibility requirement (%s, decided=%t)", order, tc.decided)
 	}
 }
@@ -1701,7 +1710,8 @@ func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSpli
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			objects, err := renderModelDeploymentRouterObjects(
-				context.Background(), tc.md, tc.manufacturers, false)
+				context.Background(), tc.md, tc.manufacturers, false,
+			)
 			require.NoError(t, err)
 			for i := range objects.Contract.Roles {
 				kind := ModelDeploymentEffectiveRoleKind(&tc.md.Spec.Roles[i])
@@ -1760,7 +1770,8 @@ func TestRenderModelDeploymentRouterWorkload_ConfigurationBelongsToTheBranchThat
 	}
 
 	picker, err := renderModelDeploymentRouterWorkload(
-		context.Background(), routedModelDeployment(), derived)
+		context.Background(), routedModelDeployment(), derived,
+	)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{
 		modelDeploymentRouterConfigKey,
@@ -1920,7 +1931,8 @@ func TestRenderModelDeploymentRouterObjects_ProxyTemplateIsAssertedOnItsRendered
 
 	t.Run("unset keeps the proxy's own day", func(t *testing.T) {
 		objects, err := renderModelDeploymentRouterObjects(
-			context.Background(), routedModelDeployment(), nil, false)
+			context.Background(), routedModelDeployment(), nil, false,
+		)
 		require.NoError(t, err)
 
 		envoy := objects.ConfigMap.Data[modelDeploymentRouterEnvoyConfigKey]
@@ -1931,7 +1943,8 @@ func TestRenderModelDeploymentRouterObjects_ProxyTemplateIsAssertedOnItsRendered
 
 	t.Run("the access log names the endpoint beside the outcome", func(t *testing.T) {
 		objects, err := renderModelDeploymentRouterObjects(
-			context.Background(), routedModelDeployment(), nil, false)
+			context.Background(), routedModelDeployment(), nil, false,
+		)
 		require.NoError(t, err)
 
 		envoy := objects.ConfigMap.Data[modelDeploymentRouterEnvoyConfigKey]
@@ -2109,7 +2122,8 @@ func TestModelDeploymentRouterCandidate_RidesTheGuardedEligibilityWrite(t *testi
 			Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
 		}
 		require.NoError(t, r.convergeModelDeploymentEndpointEligibility(
-			context.Background(), f.md, f.pods, f.byMember, nil, f.observation))
+			context.Background(), f.md, f.pods, f.byMember, nil, f.observation,
+		))
 
 		carried := labelsOf(t, cli)
 		assert.Equal(t, modelDeploymentEndpointEligibleValue,
@@ -2137,7 +2151,8 @@ func TestModelDeploymentRouterCandidate_RidesTheGuardedEligibilityWrite(t *testi
 			Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
 		}
 		require.NoError(t, r.convergeModelDeploymentEndpointEligibility(
-			context.Background(), f.md, f.pods, f.byMember, nil, f.observation))
+			context.Background(), f.md, f.pods, f.byMember, nil, f.observation,
+		))
 		require.Equal(t, modelDeploymentEndpointEligibleValue,
 			labelsOf(t, cli)[f.leader][modelDeploymentLabelKeyEndpointEligible],
 			"the qualified member carries its eligibility")
@@ -2148,10 +2163,12 @@ func TestModelDeploymentRouterCandidate_RidesTheGuardedEligibilityWrite(t *testi
 		refuted := map[types.UID]modelDeploymentInstanceQualification{}
 		for i := range live {
 			refuted[live[i].UID] = modelDeploymentTestQualification(
-				[]*core.Pod{&live[i]}, f.generation, true)
+				[]*core.Pod{&live[i]}, f.generation, true,
+			)
 		}
 		require.NoError(t, r.convergeModelDeploymentEndpointEligibility(
-			context.Background(), f.md, live, refuted, nil, f.observation))
+			context.Background(), f.md, live, refuted, nil, f.observation,
+		))
 
 		carried := labelsOf(t, cli)
 		assert.NotContains(t, carried[f.leader], modelDeploymentLabelKeyEndpointEligible,
@@ -2181,7 +2198,8 @@ func TestModelDeploymentRouterCandidate_RidesTheGuardedEligibilityWrite(t *testi
 			Client: intercepted, APIReader: intercepted, Recorder: ctrlrecord.NewFakeRecorder(64),
 		}
 		require.NoError(t, r.convergeModelDeploymentEndpointEligibility(
-			context.Background(), f.md, f.pods, f.byMember, nil, f.observation))
+			context.Background(), f.md, f.pods, f.byMember, nil, f.observation,
+		))
 
 		assert.NotContains(t, labelsOf(t, replaced)[f.leader], modelDeploymentRouterCandidateLabel,
 			"the candidate membership of the member that is gone does not land on its replacement")
@@ -2208,7 +2226,8 @@ func TestModelDeploymentRouterCandidate_RidesTheGuardedEligibilityWrite(t *testi
 			Client: intercepted, APIReader: intercepted, Recorder: ctrlrecord.NewFakeRecorder(64),
 		}
 		err := r.convergeModelDeploymentEndpointEligibility(
-			context.Background(), f.md, f.pods, f.byMember, nil, f.observation)
+			context.Background(), f.md, f.pods, f.byMember, nil, f.observation,
+		)
 		require.Error(t, err, "the optimistic lock refuses the write")
 		assert.NotContains(t, labelsOf(t, moved)[f.leader], modelDeploymentRouterCandidateLabel,
 			"and no candidate membership lands on facts the pass no longer holds")

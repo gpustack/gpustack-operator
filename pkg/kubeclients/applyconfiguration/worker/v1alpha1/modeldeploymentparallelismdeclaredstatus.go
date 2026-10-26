@@ -20,8 +20,10 @@ type ModelDeploymentParallelismDeclaredStatusApplyConfiguration struct {
 	ExpertParallel           *int32 `json:"expertParallel,omitempty"`
 	AttentionContextParallel *int32 `json:"attentionContextParallel,omitempty"`
 	// MoEDPSize is the role's declared expert-dispatch data parallel size.
+	//
 	MoEDPSize *int32 `json:"moeDpSize,omitempty"`
 	// DWDPSize is the role's declared data-within-data parallel size.
+	//
 	DWDPSize *int32 `json:"dwdpSize,omitempty"`
 }
 

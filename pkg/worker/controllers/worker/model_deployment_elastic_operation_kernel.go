@@ -303,7 +303,8 @@ func elasticScaleRefusalOutcome(op *elasticOperation, facts elasticFacts) (elast
 func elasticScaleRefusalMessage(op *elasticOperation) string {
 	return fmt.Sprintf(
 		"the scale command from width %d to %d was refused %d times and its retry bound is spent; the last refusal: %s",
-		op.Width.Old, op.Width.Target, max(op.ScaleAttempts, 1), op.ScaleLastError)
+		op.Width.Old, op.Width.Target, max(op.ScaleAttempts, 1), op.ScaleLastError,
+	)
 }
 
 // decideUpwardAfterCommand waits for the engine to report the new width. There is nothing to remove

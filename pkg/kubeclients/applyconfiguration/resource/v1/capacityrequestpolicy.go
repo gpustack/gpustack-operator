@@ -15,6 +15,7 @@ import (
 type CapacityRequestPolicyApplyConfiguration struct {
 	// Default specifies how much of this capacity is consumed by a request
 	// that does not contain an entry for it in DeviceRequest's Capacity.
+	//
 	Default *resource.Quantity `json:"default,omitempty"`
 	// ValidValues defines a set of acceptable quantity values in consuming requests.
 	//
@@ -30,6 +31,7 @@ type CapacityRequestPolicyApplyConfiguration struct {
 	//
 	// If the requested amount exceeds all valid values, the request violates the policy,
 	// and this device cannot be allocated.
+	//
 	ValidValues []resource.Quantity `json:"validValues,omitempty"`
 	// ValidRange defines an acceptable quantity value range in consuming requests.
 	//
@@ -40,6 +42,7 @@ type CapacityRequestPolicyApplyConfiguration struct {
 	// and this device cannot be allocated.
 	//
 	// If the request doesn't contain this capacity entry, Default value is used.
+	//
 	ValidRange *CapacityRequestPolicyRangeApplyConfiguration `json:"validRange,omitempty"`
 }
 

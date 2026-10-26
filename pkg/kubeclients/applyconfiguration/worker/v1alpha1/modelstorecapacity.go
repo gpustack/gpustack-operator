@@ -8,8 +8,10 @@ package v1alpha1
 // ModelStoreCapacity is the pool's cache footprint, summed over the matched nodes.
 type ModelStoreCapacityApplyConfiguration struct {
 	// TotalBytes is the summed size of the matched nodes' cache filesystems.
+	//
 	TotalBytes *int64 `json:"totalBytes,omitempty"`
 	// StoredBytes is what the matched nodes' published trees and partial downloads occupy.
+	//
 	StoredBytes *int64 `json:"storedBytes,omitempty"`
 }
 

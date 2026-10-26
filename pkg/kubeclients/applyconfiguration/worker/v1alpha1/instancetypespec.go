@@ -11,8 +11,10 @@ package v1alpha1
 type InstanceTypeSpecApplyConfiguration struct {
 	// DisplayName is a human-friendly label for the InstanceType. It is admin-editable and, for a
 	// derived InstanceType, stamped at derivation time.
+	//
 	DisplayName *string `json:"displayName,omitempty"`
 	// Description is a free-form admin annotation for the InstanceType.
+	//
 	Description *string `json:"description,omitempty"`
 	// Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler
 	// holds the backing ClusterQueue (blocks new admission without evicting running

@@ -39,7 +39,8 @@ func nodeFeatureFixture(stored map[string]string) (*nfd.NodeFeature, *core.Node)
 // promise the whole node a co-location its GPUs are not in.
 func TestNodeWideReadSynced(t *testing.T) {
 	notFound := kerrors.NewNotFound(
-		schema.GroupResource{Group: "worker.gpustack.ai", Resource: "devices"}, "node-1")
+		schema.GroupResource{Group: "worker.gpustack.ai", Resource: "devices"}, "node-1",
+	)
 
 	assert.True(t, nodeWideReadSynced(nil), "a stored record is the whole node")
 	assert.False(t, nodeWideReadSynced(notFound),
@@ -48,7 +49,8 @@ func TestNodeWideReadSynced(t *testing.T) {
 		"a read that did not happen cannot support publishing or withholding")
 	assert.False(t, nodeWideReadSynced(kerrors.NewForbidden(
 		schema.GroupResource{Group: "worker.gpustack.ai", Resource: "devices"}, "node-1",
-		errors.New("nope"))), "nor can any other API error")
+		errors.New("nope"),
+	)), "nor can any other API error")
 }
 
 // TestNodeFeatureLabelsGroupSets pins which group set each label set is reduced over.

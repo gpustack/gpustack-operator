@@ -678,13 +678,15 @@ func modelDeploymentPairAnswers(
 				answers[i] = modelDeploymentGroupForwardAnswer{
 					forward: modelDeploymentGroupForwardUnknownFor(
 						"the group is not complete and ready, so the pair was not asked: " +
-							local.localFault()),
+							local.localFault(),
+					),
 				}
 			case fetch == nil:
 				answers[i] = modelDeploymentGroupForwardAnswer{
 					forward: modelDeploymentGroupForwardUnsupportedFor(
 						"no directed pair transport is wired, so this operator has no observation " +
-							"of a prefill-decode pair"),
+							"of a prefill-decode pair",
+					),
 				}
 			default:
 				ready = append(ready, i)
@@ -702,7 +704,8 @@ func modelDeploymentPairAnswers(
 		for _, i := range append(append([]int{}, readyPrefills...), readyDecodes...) {
 			answers[i] = modelDeploymentGroupForwardAnswer{
 				forward: modelDeploymentGroupForwardUnknownFor(
-					"no ready replica of the other role is available to complete the pair"),
+					"no ready replica of the other role is available to complete the pair",
+				),
 			}
 		}
 

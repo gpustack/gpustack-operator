@@ -8,6 +8,7 @@ package v1alpha1
 // ModelArtifactSpec defines the desired state of ModelArtifact.
 type ModelArtifactSpecApplyConfiguration struct {
 	// Source is where the weights come from.
+	//
 	Source *ModelArtifactSourceApplyConfiguration `json:"source,omitempty"`
 	// AllowPatterns and IgnorePatterns select the files of a hub source that make up the artifact,
 	// with the semantics of huggingface_hub's allow_patterns and ignore_patterns: Python's
@@ -20,6 +21,7 @@ type ModelArtifactSpecApplyConfiguration struct {
 	// digest of the whole commit. Only node delivery can honor a selection; an engine that downloads
 	// the weights itself chooses its own files. A claim source takes none, webhook-enforced, and
 	// each pattern is 1 to 256 characters without a control character.
+	//
 	AllowPatterns  []string `json:"allowPatterns,omitempty"`
 	IgnorePatterns []string `json:"ignorePatterns,omitempty"`
 	// ExpectedDigest optionally asserts the manifest digest this artifact must resolve to:
@@ -30,6 +32,7 @@ type ModelArtifactSpecApplyConfiguration struct {
 	// its reference's digest. A resolution whose digest differs is refused as DigestMismatch,
 	// and an artifact whose hub cannot be reached resolves to the anchor without the hub,
 	// recorded as status.resolved.digestSource "Expected". Immutable with the whole spec.
+	//
 	ExpectedDigest *string `json:"expectedDigest,omitempty"`
 }
 

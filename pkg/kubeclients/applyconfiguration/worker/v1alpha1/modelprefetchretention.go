@@ -14,11 +14,13 @@ type ModelPrefetchRetentionApplyConfiguration struct {
 	// Pinned keeps the content on every target node against the node cache's collection: a pinned
 	// digest is never an eviction candidate, though it still counts toward usage. It requires the
 	// Binding to allow pinning, and admission refuses it otherwise.
+	//
 	Pinned *bool `json:"pinned,omitempty"`
 	// TTLAfterLastUse unpins a node's copy once nothing mounted it for this long. It is enforced
 	// at the hour granularity the node's report already carries: retention does not need finer
 	// precision, and finer recording would multiply the node's writes for a decision that cannot
 	// tell the difference.
+	//
 	TTLAfterLastUse *v1.Duration `json:"ttlAfterLastUse,omitempty"`
 }
 

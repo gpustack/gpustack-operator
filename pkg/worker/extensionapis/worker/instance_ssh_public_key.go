@@ -66,7 +66,8 @@ func (h *InstanceSSHPublicKeyHandler) SetupHandler(
 				data = "..." + data[len(data)-tailLen:]
 			}
 			return strings.TrimRightFunc(data, unicode.IsSpace)
-		}))
+		}),
+	)
 	if err != nil {
 		return gvr, srs, err
 	}

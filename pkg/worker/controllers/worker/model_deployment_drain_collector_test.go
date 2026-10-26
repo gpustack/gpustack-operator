@@ -22,8 +22,7 @@ import (
 	remotecommandconsts "k8s.io/apimachinery/pkg/util/remotecommand"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/remotecommand"
-	kubeletexec "k8s.io/kubelet/pkg/cri/streaming/remotecommand"
+	cristreaming "k8s.io/cri-streaming/pkg/streaming/remotecommand"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -270,7 +269,8 @@ func TestDrainCollectorFixtureMatrix(t *testing.T) {
 	disaggregated := func(extra ...string) func(*corev1.Pod) {
 		return func(pod *corev1.Pod) {
 			pod.Spec.Containers[0].Command = append(
-				[]string{"vllm", "serve", "model"}, extra...)
+				[]string{"vllm", "serve", "model"}, extra...,
+			)
 		}
 	}
 
@@ -511,7 +511,8 @@ func TestDrainCollectorSumsLabelSetsWithinOneBody(t *testing.T) {
 			_ = script
 
 			answer := modelDeploymentDrainAnswerFromBody(
-				sumDrainEnvelope(t, tc.body), modelDeploymentInFlightMetrics[drainTestEngine])
+				sumDrainEnvelope(t, tc.body), modelDeploymentInFlightMetrics[drainTestEngine],
+			)
 			if answer.State != tc.state {
 				t.Fatalf("state = %q, want %q (reason %q)", answer.State, tc.state, answer.Reason)
 			}
@@ -1580,13 +1581,13 @@ func TestModelDeploymentDrainExecIntoAsksForStdoutOnTheWire(t *testing.T) {
 	assert.Equal(t, "engine", query.Get("container"))
 }
 
-// drainExecTestExecutor supplies a command result to the real kubelet stream server.
+// drainExecTestExecutor supplies a command result to the real container runtime stream server.
 type drainExecTestExecutor struct{}
 
 func (drainExecTestExecutor) ExecInContainer(
-	ctx context.Context, name string, uid types.UID, container string, cmd []string,
+	ctx context.Context, name, uid, container string, cmd []string,
 	in io.Reader, out, stderr io.WriteCloser, tty bool,
-	resize <-chan remotecommand.TerminalSize, timeout time.Duration,
+	resize <-chan cristreaming.TerminalSize, timeout time.Duration,
 ) error {
 	_, err := io.WriteString(out, "member-observation\n")
 	return err
@@ -1599,11 +1600,11 @@ func TestModelDeploymentDrainExecIntoCompletesDeclaredStreams(t *testing.T) {
 			value, err := strconv.ParseBool(query.Get(name))
 			return err == nil && value
 		}
-		options := &kubeletexec.Options{
+		options := &cristreaming.Options{
 			Stdin: requested("stdin"), Stdout: requested("stdout"),
 			Stderr: requested("stderr"), TTY: requested("tty"),
 		}
-		kubeletexec.ServeExec(w, r, drainExecTestExecutor{}, "member", "member-uid", query.Get("container"),
+		cristreaming.ServeExec(w, r, drainExecTestExecutor{}, "member", "member-uid", query.Get("container"),
 			query["command"], options, time.Second, time.Second,
 			[]string{remotecommandconsts.StreamProtocolV4Name})
 	}))
@@ -1627,9 +1628,9 @@ type drainExecVerboseStderrExecutor struct {
 }
 
 func (e *drainExecVerboseStderrExecutor) ExecInContainer(
-	ctx context.Context, name string, uid types.UID, container string, cmd []string,
+	ctx context.Context, name, uid, container string, cmd []string,
 	in io.Reader, out, stderr io.WriteCloser, tty bool,
-	resize <-chan remotecommand.TerminalSize, timeout time.Duration,
+	resize <-chan cristreaming.TerminalSize, timeout time.Duration,
 ) error {
 	if stderr == nil {
 		e.stderrUndeclared = true
@@ -1654,11 +1655,11 @@ func TestModelDeploymentDrainExecIntoDrainsVerboseStderrAndKeepsStdoutExact(t *t
 			value, err := strconv.ParseBool(query.Get(name))
 			return err == nil && value
 		}
-		options := &kubeletexec.Options{
+		options := &cristreaming.Options{
 			Stdin: requested("stdin"), Stdout: requested("stdout"),
 			Stderr: requested("stderr"), TTY: requested("tty"),
 		}
-		kubeletexec.ServeExec(w, r, executor, "member", "member-uid", query.Get("container"),
+		cristreaming.ServeExec(w, r, executor, "member", "member-uid", query.Get("container"),
 			query["command"], options, time.Second, time.Second,
 			[]string{remotecommandconsts.StreamProtocolV4Name})
 	}))

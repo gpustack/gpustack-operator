@@ -749,7 +749,8 @@ func TestModelDeploymentScalerSampler_SamplingFloor(t *testing.T) {
 	require.Equal(t, 1, script.askedCount("engine-0"))
 
 	tooEarly := sampler.SampleRoleMetrics(
-		context.Background(), scaler, target, []core.Pod{pod}, start.Add(14*time.Second))
+		context.Background(), scaler, target, []core.Pod{pod}, start.Add(14*time.Second),
+	)
 	assert.Equal(t, 1, script.askedCount("engine-0"),
 		"a pass before the interval of the scaler did not scrape the Pod again")
 	require.Contains(t, tooEarly, "server")

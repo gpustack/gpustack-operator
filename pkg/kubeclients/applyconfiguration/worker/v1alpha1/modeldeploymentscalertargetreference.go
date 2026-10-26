@@ -8,6 +8,7 @@ package v1alpha1
 // ModelDeploymentScalerTargetReference names the target of a scaler.
 type ModelDeploymentScalerTargetReferenceApplyConfiguration struct {
 	// Name is the name of the target ModelDeployment in this namespace.
+	//
 	Name *string `json:"name,omitempty"`
 }
 

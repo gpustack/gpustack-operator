@@ -74,7 +74,8 @@ func TestStageLib(t *testing.T) {
 
 		require.NoError(t, os.MkdirAll(filepath.Join(imageRoot, "ascend", "lib"), 0o755))
 		require.NoError(t, os.WriteFile(
-			filepath.Join(imageRoot, "ascend", "lib", "libvruntime.so"), []byte("new-bytes"), 0o755))
+			filepath.Join(imageRoot, "ascend", "lib", "libvruntime.so"), []byte("new-bytes"), 0o755,
+		))
 
 		// What an earlier stage left: shorter, and not executable.
 		dstDir := filepath.Join(hostRoot, deviceplugin.OperatorLibDir, "ascend", "lib")

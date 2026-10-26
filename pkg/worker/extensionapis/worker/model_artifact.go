@@ -41,7 +41,8 @@ func (h *ModelArtifactHandler) SetupHandler(
 		extensionapi.JSONPathTemplateColumn("Size", "{.status.resolved.sizeBytes}"),
 		extensionapi.JSONPathTemplateColumn("Ready", "{.status.nodes.ready}"),
 		extensionapi.JSONPathTemplateColumn("Downloading", "{.status.nodes.downloading}"),
-		extensionapi.JSONPathTemplateColumn("Resolved", "{.status.conditions[?(@.type=='Resolved')].status}"))
+		extensionapi.JSONPathTemplateColumn("Resolved", "{.status.conditions[?(@.type=='Resolved')].status}"),
+	)
 	if err != nil {
 		return gvr, nil, err
 	}

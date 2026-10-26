@@ -9,10 +9,13 @@ package v1alpha1
 // only when content does.
 type NodeModelStoreCapacityApplyConfiguration struct {
 	// TotalBytes is the cache filesystem's size.
+	//
 	TotalBytes *int64 `json:"totalBytes,omitempty"`
 	// StoredBytes is what published trees and partial downloads occupy.
+	//
 	StoredBytes *int64 `json:"storedBytes,omitempty"`
 	// UsedPercent is the filesystem's usage by everything on it, rounded down to a multiple of 5.
+	//
 	UsedPercent *int32 `json:"usedPercent,omitempty"`
 }
 

@@ -566,7 +566,8 @@ func TestBuildSliceSectionBound(t *testing.T) {
 		// Every figure on such a device is absent, whichever container is asked for.
 		figures, ok := section.Figures(
 			testManufacturer, "00000000-89ab-cdef-0123-456789abcdef",
-			"instance-container-name", diag.DeviceID)
+			"instance-container-name", diag.DeviceID,
+		)
 		require.True(t, ok)
 		assert.Nil(t, figures.MemoryUsedMiB)
 		assert.Nil(t, figures.CoresUtilizationPercent)
@@ -621,7 +622,8 @@ func TestCollectSlices(t *testing.T) {
 
 	slicedPods := func(_ context.Context) ([]core.Pod, error) {
 		return []core.Pod{*instancePodFixture(
-			testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID)}, nil
+			testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID,
+		)}, nil
 	}
 
 	t.Run("a detector serving no per-process query yields no section", func(t *testing.T) {
@@ -654,7 +656,8 @@ func TestCollectSlices(t *testing.T) {
 			t.Run(mode.String(), func(t *testing.T) {
 				d, provider := detectorWith(func(_ context.Context) ([]core.Pod, error) {
 					return []core.Pod{*instancePodFixture(
-						testPodAUID, testCtrAID, mode, testDeviceID)}, nil
+						testPodAUID, testCtrAID, mode, testDeviceID,
+					)}, nil
 				}, fakeProcTree(100, testPodAUID, testCtrAID))
 
 				assert.Nil(t, d.collectSlices(t.Context(), metrics))
@@ -672,7 +675,8 @@ func TestCollectSlices(t *testing.T) {
 			t.Run(mode.String(), func(t *testing.T) {
 				d, provider := detectorWith(func(_ context.Context) ([]core.Pod, error) {
 					return []core.Pod{*instancePodFixture(
-						testPodAUID, testCtrAID, mode, testDeviceID)}, nil
+						testPodAUID, testCtrAID, mode, testDeviceID,
+					)}, nil
 				}, fakeProcTree(100, testPodAUID, testCtrAID))
 
 				section := d.collectSlices(t.Context(), metrics)
@@ -744,34 +748,40 @@ func TestCarvedAcceleratorsOf(t *testing.T) {
 		{
 			name: "a logical slice is a target",
 			pods: []core.Pod{*instancePodFixture(
-				testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID)},
+				testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID,
+			)},
 			want: map[string]sets.Set[string]{testManufacturer: sets.New(testDeviceID)},
 		},
 		{
 			name: "a hardware partition is a target too",
 			pods: []core.Pod{*instancePodFixture(
-				testPodAUID, testCtrAID, workercore.DeviceAllocationModePartitioned, testDeviceID)},
+				testPodAUID, testCtrAID, workercore.DeviceAllocationModePartitioned, testDeviceID,
+			)},
 			want: map[string]sets.Set[string]{testManufacturer: sets.New(testDeviceID)},
 		},
 		{
 			name: "a whole-device allocation is not",
 			pods: []core.Pod{*instancePodFixture(
-				testPodAUID, testCtrAID, workercore.DeviceAllocationModeExclusive, testDeviceID)},
+				testPodAUID, testCtrAID, workercore.DeviceAllocationModeExclusive, testDeviceID,
+			)},
 			want: map[string]sets.Set[string]{},
 		},
 		{
 			name: "a shared allocation carries no quota to read a slice against",
 			pods: []core.Pod{*instancePodFixture(
-				testPodAUID, testCtrAID, workercore.DeviceAllocationModeShared, testDeviceID)},
+				testPodAUID, testCtrAID, workercore.DeviceAllocationModeShared, testDeviceID,
+			)},
 			want: map[string]sets.Set[string]{},
 		},
 		{
 			name: "two Pods carving two devices yield both",
 			pods: []core.Pod{
 				*instancePodFixture(
-					testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID),
+					testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID,
+				),
 				*instancePodFixture(
-					testPodBUID, testCtrBID, workercore.DeviceAllocationModeSliced, "GPU-1"),
+					testPodBUID, testCtrBID, workercore.DeviceAllocationModeSliced, "GPU-1",
+				),
 			},
 			want: map[string]sets.Set[string]{testManufacturer: sets.New(testDeviceID, "GPU-1")},
 		},
@@ -790,7 +800,8 @@ func TestCarvedAcceleratorsOf(t *testing.T) {
 					},
 				}},
 				*instancePodFixture(
-					testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID),
+					testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID,
+				),
 			},
 			want: map[string]sets.Set[string]{testManufacturer: sets.New(testDeviceID)},
 		},
@@ -808,7 +819,8 @@ func TestCarvedAcceleratorsOf(t *testing.T) {
 // container NAMES the section is keyed by.
 func TestPodIndexOf(t *testing.T) {
 	instance := instancePodFixture(
-		testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID)
+		testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID,
+	)
 	plain := &core.Pod{
 		ObjectMeta: meta.ObjectMeta{Name: "plain", Namespace: "default", UID: types.UID(testPodCUID)},
 		Status: core.PodStatus{ContainerStatuses: []core.ContainerStatus{
@@ -867,7 +879,8 @@ func fakeProcTree(pid uint32, podUID, containerID string) fstest.MapFS {
 	return fstest.MapFS{
 		dir + "/cgroup": {Data: []byte(fmt.Sprintf(
 			"0::/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod%s.slice/cri-containerd-%s.scope\n",
-			escaped, containerID))},
+			escaped, containerID,
+		))},
 		dir + "/stat": {Data: []byte(fmt.Sprintf("%d (python3) S 1 1 0 0 -1 4194304 0", pid))},
 		dir + "/comm": {Data: []byte("python3\n")},
 	}
@@ -1000,7 +1013,8 @@ func TestPartitionTargetsOf(t *testing.T) {
 		{
 			name: "a partition with a profile and a placement is a target",
 			pods: []core.Pod{*partitionPodFixture(
-				testPodAUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(0, 1)...)},
+				testPodAUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(0, 1)...,
+			)},
 			want: map[string][]partitionTarget{testManufacturer: {{
 				podUID: testPodAUID, container: testCtrName,
 				request: device.AcceleratorPartitionRequest{
@@ -1012,19 +1026,22 @@ func TestPartitionTargetsOf(t *testing.T) {
 		{
 			name: "a partition naming no profile is not a target",
 			pods: []core.Pod{*partitionPodFixture(
-				testPodAUID, testCtrAID, testDeviceID, "", testPlacement(0, 1)...)},
+				testPodAUID, testCtrAID, testDeviceID, "", testPlacement(0, 1)...,
+			)},
 			want: map[string][]partitionTarget{},
 		},
 		{
 			name: "a partition naming no placement is not a target",
 			pods: []core.Pod{*partitionPodFixture(
-				testPodAUID, testCtrAID, testDeviceID, "1g.10gb")},
+				testPodAUID, testCtrAID, testDeviceID, "1g.10gb",
+			)},
 			want: map[string][]partitionTarget{},
 		},
 		{
 			name: "a logical slice is not a target: it has no handle of its own to read",
 			pods: []core.Pod{*instancePodFixture(
-				testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID)},
+				testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID,
+			)},
 			want: map[string][]partitionTarget{},
 		},
 		{
@@ -1033,9 +1050,11 @@ func TestPartitionTargetsOf(t *testing.T) {
 			name: "a partition two Pods claim is dropped for both",
 			pods: []core.Pod{
 				*partitionPodFixture(
-					testPodAUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(0, 1)...),
+					testPodAUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(0, 1)...,
+				),
 				*partitionPodFixture(
-					testPodBUID, testCtrBID, testDeviceID, "1g.10gb", testPlacement(0, 1)...),
+					testPodBUID, testCtrBID, testDeviceID, "1g.10gb", testPlacement(0, 1)...,
+				),
 			},
 			want: map[string][]partitionTarget{},
 		},
@@ -1043,11 +1062,14 @@ func TestPartitionTargetsOf(t *testing.T) {
 			name: "a partition two Pods claim does not take a sibling partition with it",
 			pods: []core.Pod{
 				*partitionPodFixture(
-					testPodAUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(0, 1)...),
+					testPodAUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(0, 1)...,
+				),
 				*partitionPodFixture(
-					testPodBUID, testCtrBID, testDeviceID, "1g.10gb", testPlacement(0, 1)...),
+					testPodBUID, testCtrBID, testDeviceID, "1g.10gb", testPlacement(0, 1)...,
+				),
 				*partitionPodFixture(
-					testPodCUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(2, 1)...),
+					testPodCUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(2, 1)...,
+				),
 			},
 			want: map[string][]partitionTarget{testManufacturer: {{
 				podUID: testPodCUID, container: testCtrName,
@@ -1061,9 +1083,11 @@ func TestPartitionTargetsOf(t *testing.T) {
 			name: "two Pods partitioning one card are two targets",
 			pods: []core.Pod{
 				*partitionPodFixture(
-					testPodAUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(0, 1)...),
+					testPodAUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(0, 1)...,
+				),
 				*partitionPodFixture(
-					testPodBUID, testCtrBID, testDeviceID, "1g.10gb", testPlacement(1, 1)...),
+					testPodBUID, testCtrBID, testDeviceID, "1g.10gb", testPlacement(1, 1)...,
+				),
 			},
 			want: map[string][]partitionTarget{testManufacturer: {
 				{
@@ -1320,7 +1344,8 @@ func TestCollectSlicesPartitions(t *testing.T) {
 	}}
 	pods := func(_ context.Context) ([]core.Pod, error) {
 		return []core.Pod{*partitionPodFixture(
-			testPodAUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(0, 1)...)}, nil
+			testPodAUID, testCtrAID, testDeviceID, "1g.10gb", testPlacement(0, 1)...,
+		)}, nil
 	}
 	answered := device.AcceleratorPartition{
 		DeviceID:         testDeviceID,
@@ -1391,7 +1416,8 @@ func TestCollectSlicesPartitions(t *testing.T) {
 		d := detectorWith(provider)
 		d.podLister = func(_ context.Context) ([]core.Pod, error) {
 			return []core.Pod{*instancePodFixture(
-				testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID)}, nil
+				testPodAUID, testCtrAID, workercore.DeviceAllocationModeSliced, testDeviceID,
+			)}, nil
 		}
 
 		d.collectSlices(t.Context(), metrics)

@@ -58,7 +58,8 @@ func (s *server) ActuatePhysicalSliced(
 		return nil, fmt.Errorf(
 			"container %q was granted %d accelerators, but a hygon partition request can only be served by"+
 				" one: the vendor runtime makes exactly one partition visible to a container, so the rest"+
-				" would be carved and never reachable", ctr.Name, len(cards))
+				" would be carved and never reachable", ctr.Name, len(cards),
+		)
 	}
 	card := cards[0]
 
@@ -69,7 +70,8 @@ func (s *server) ActuatePhysicalSliced(
 
 	release := lockMigCard(card.PciBusID)
 	inst, outcome, err := reserveMigInstance(
-		s.mig, deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, card, profile)
+		s.mig, deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, card, profile,
+	)
 	release()
 	if err != nil {
 		return nil, err
@@ -141,7 +143,8 @@ func (s *server) GetPhysicalSlicedVisibilityResponse(
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	if s.mig == nil {
 		return nil, fmt.Errorf(
-			"partition driver not configured; cannot address the partition container %q holds", owner)
+			"partition driver not configured; cannot address the partition container %q holds", owner,
+		)
 	}
 
 	cards, err := migAllocatedCards(devs, allocated)
@@ -151,7 +154,8 @@ func (s *server) GetPhysicalSlicedVisibilityResponse(
 	if len(cards) != 1 {
 		return nil, fmt.Errorf(
 			"container %q co-allocates %d accelerators, but a hygon partition is only ever held on one",
-			ctr.Name, len(cards))
+			ctr.Name, len(cards),
+		)
 	}
 	card := cards[0]
 
@@ -178,7 +182,8 @@ func (s *server) liveOwnedMigInstance(card migCard, podUID, owner string) (migIn
 	m, err := parseMigMarker(path)
 	if err != nil {
 		return migInstance{}, fmt.Errorf(
-			"read the partition record of container %q on card %s: %w", owner, card.UUID, err)
+			"read the partition record of container %q on card %s: %w", owner, card.UUID, err,
+		)
 	}
 
 	release := lockMigCard(card.PciBusID)
@@ -192,12 +197,14 @@ func (s *server) liveOwnedMigInstance(card migCard, podUID, owner string) (migIn
 	if !ok {
 		return migInstance{}, fmt.Errorf(
 			"the partition container %q holds on card %s (gpu instance %d) is gone: fail closed",
-			owner, card.UUID, m.GiID)
+			owner, card.UUID, m.GiID,
+		)
 	}
 	if live.UUID != m.MigUUID {
 		return migInstance{}, fmt.Errorf(
 			"gpu instance %d on card %s now carries identity %q, not the %q container %q holds (id reused):"+
-				" fail closed", m.GiID, card.UUID, live.UUID, m.MigUUID, owner)
+				" fail closed", m.GiID, card.UUID, live.UUID, m.MigUUID, owner,
+		)
 	}
 	return m.instance(), nil
 }
@@ -221,7 +228,8 @@ func (s *server) migContainerResponse(
 	if confMount == nil {
 		return nil, fmt.Errorf(
 			"the registry file %q of partition %s is absent, so the container could not activate it",
-			inst.ConfPath, inst.UUID)
+			inst.ConfPath, inst.UUID,
+		)
 	}
 
 	resp := &deviceplugin.ContainerAllocateResponse{}

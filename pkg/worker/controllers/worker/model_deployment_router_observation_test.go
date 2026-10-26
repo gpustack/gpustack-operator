@@ -250,7 +250,8 @@ func TestTheRealCollectorDrivesTheRestoreAcrossAnEmptyAndAPopulatedRegistry(t *t
 			actual = append(actual, *pod)
 		}
 		require.NoError(t, r.convergeModelDeploymentEndpointEligibility(
-			context.Background(), md, actual, byMember, nil, observation))
+			context.Background(), md, actual, byMember, nil, observation,
+		))
 	}
 	leaderOf := func() *corev1.Pod {
 		t.Helper()
@@ -547,7 +548,8 @@ func (f qualifiedGroupFixture) write(
 		actual = append(actual, *pod)
 	}
 	require.NoError(t, r.convergeModelDeploymentEndpointEligibility(
-		context.Background(), f.md, actual, byMember, nil, observation))
+		context.Background(), f.md, actual, byMember, nil, observation,
+	))
 }
 
 // leaderLabel reads the eligibility key off the group's leader.
@@ -1824,7 +1826,8 @@ func TestEveryRouterOfOneCollectionSharesOneDeadline(t *testing.T) {
 	require.True(t, ok)
 
 	observations, failure := r.collectModelDeploymentRouterObservations(
-		ctx, md, []*corev1.Pod{observationLivePod("server-0", "10.0.0.5", "pod-uid-1", true)})
+		ctx, md, []*corev1.Pod{observationLivePod("server-0", "10.0.0.5", "pod-uid-1", true)},
+	)
 	require.Empty(t, failure, "both routers answer the same view: %s", failure)
 	require.Len(t, observations, 2, "both routers are read")
 
@@ -2194,7 +2197,8 @@ func TestRetirementResidualReadsTheDispatchJournal(t *testing.T) {
 			}
 
 			reason, held := r.observeModelDeploymentRetirementResidual(
-				context.Background(), md, sets.New[types.UID]("member-1"))
+				context.Background(), md, sets.New[types.UID]("member-1"),
+			)
 
 			assert.Equal(t, tc.wantHeld, held, reason)
 		})
@@ -2549,7 +2553,8 @@ func TestTheServingCountFoldsVirtualRowsOnOnePhysicalListener(t *testing.T) {
 			t.Parallel()
 
 			answer := aggregateModelDeploymentServing(
-				true, tc.observations, modelDeploymentServingFreshness)
+				true, tc.observations, modelDeploymentServingFreshness,
+			)
 			assert.Equal(t, tc.wantState, answer.State, answer.Reason)
 			if tc.wantValue == 0 && tc.wantState != workercore.ModelDeploymentServingStateConfirmed {
 				return
@@ -2794,7 +2799,8 @@ func TestATerminatingRouterProcessIsStillAProcess(t *testing.T) {
 	}
 
 	observations, failure := r.collectModelDeploymentRouterObservations(
-		context.Background(), md, []*corev1.Pod{member})
+		context.Background(), md, []*corev1.Pod{member},
+	)
 	require.Empty(t, failure)
 	require.Len(t, observations, 1,
 		"a terminating process is a running process: it holds an address and answers")
@@ -2914,7 +2920,8 @@ func TestTheCollectionIsBoundedByTheDeploymentItStartedFrom(t *testing.T) {
 			}
 
 			observations, failure := r.collectModelDeploymentRouterObservations(
-				context.Background(), md, []*corev1.Pod{member})
+				context.Background(), md, []*corev1.Pod{member},
+			)
 			if tc.wantMsg == "" {
 				require.Empty(t, failure)
 				require.Len(t, observations, 1)
@@ -2961,7 +2968,8 @@ func TestACallerHoldingAReplacedDeploymentIsRefused(t *testing.T) {
 	require.NoError(t, cli.Update(context.Background(), live))
 
 	observations, failure := r.collectModelDeploymentRouterObservations(
-		context.Background(), md, []*corev1.Pod{member})
+		context.Background(), md, []*corev1.Pod{member},
+	)
 	require.NotEmpty(t, failure,
 		"two agreeing fresh reads are a fact about the two reads, not about the caller")
 	assert.Contains(t, failure, "the caller read deployment")
@@ -3239,7 +3247,8 @@ func TestTheRouterOwningChainIsReadOncePerCollection(t *testing.T) {
 	})
 
 	observations, failure := r.collectModelDeploymentRouterObservations(
-		context.Background(), md, nil)
+		context.Background(), md, nil,
+	)
 	require.Empty(t, failure, "three processes answer the same view: %s", failure)
 	require.Len(t, observations, 3)
 
@@ -3778,7 +3787,8 @@ func (f *modelDeploymentGroupFixture) write(t *testing.T, observation modelDeplo
 		actual = append(actual, *pod)
 	}
 	require.NoError(t, f.router.convergeModelDeploymentEndpointEligibility(
-		context.Background(), f.md, actual, byMember, nil, observation))
+		context.Background(), f.md, actual, byMember, nil, observation,
+	))
 }
 
 // replaceMember puts a new member in the group's place, so the membership generation moves.

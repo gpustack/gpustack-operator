@@ -12,15 +12,15 @@ import (
 // Rule is a tuple of APIGroups, APIVersion, and Resources.It is recommended
 // to make sure that all the tuple expansions are valid.
 type RuleApplyConfiguration struct {
-	// APIGroups is the API groups the resources belong to. '*' is all groups.
+	// apiGroups is the API groups the resources belong to. '*' is all groups.
 	// If '*' is present, the length of the slice must be one.
 	// Required.
 	APIGroups []string `json:"apiGroups,omitempty"`
-	// APIVersions is the API versions the resources belong to. '*' is all versions.
+	// apiVersions is the API versions the resources belong to. '*' is all versions.
 	// If '*' is present, the length of the slice must be one.
 	// Required.
 	APIVersions []string `json:"apiVersions,omitempty"`
-	// Resources is a list of resources this rule applies to.
+	// resources is a list of resources this rule applies to.
 	//
 	// For example:
 	// 'pods' means pods.
@@ -44,6 +44,7 @@ type RuleApplyConfiguration struct {
 	// "*" means that there are no scope restrictions.
 	// Subresources match the scope of their parent resource.
 	// Default is "*".
+	//
 	Scope *admissionregistrationv1.ScopeType `json:"scope,omitempty"`
 }
 

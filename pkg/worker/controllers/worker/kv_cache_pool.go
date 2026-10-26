@@ -913,7 +913,8 @@ func observeKVCachePoolQuotaWithinTotal(
 					"reports the grant. The contested domains %s are left "+
 					"out of that sum, and no ceiling is written for them at all, so this comparison "+
 					"says nothing about what they asked for",
-				sum.String(), total.String(), strings.Join(sets.List(excluded), ", ")))
+				sum.String(), total.String(), strings.Join(sets.List(excluded), ", "),
+			))
 
 			return
 		}

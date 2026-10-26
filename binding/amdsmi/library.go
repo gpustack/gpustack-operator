@@ -71,7 +71,8 @@ func New(opts ...binding.LibraryOption) *AMDSMI {
 		[]binding.LibraryOption{
 			binding.WithLibraryLoadFlags(dl.RTLD_LAZY | dl.RTLD_GLOBAL | dl.RTLD_DEEPBIND),
 		},
-		opts...)
+		opts...,
+	)
 
 	so := binding.NewLibrary(soPaths, opts...)
 

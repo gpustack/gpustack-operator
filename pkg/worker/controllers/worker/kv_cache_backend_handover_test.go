@@ -307,19 +307,22 @@ func TestLeaseHolderChangePredicate(t *testing.T) {
 	renewed.Spec.RenewTime = &meta.MicroTime{Time: meta.Now().Time}
 
 	assert.False(t, kvCacheBackendLeaseHolderChanged(
-		electionLease("store", "store-leader-a", 0), renewed),
+		electionLease("store", "store-leader-a", 0), renewed,
+	),
 		"a renewal moves renewTime and nothing this feature reads")
 
 	assert.True(t, kvCacheBackendLeaseHolderChanged(
 		electionLease("store", "store-leader-a", 0),
-		electionLease("store", "store-leader-b", 1)))
+		electionLease("store", "store-leader-b", 1),
+	))
 
 	// A lease somebody else's component owns, in another namespace. Nothing this operator renders
 	// lands outside the system namespace, so a name that fits the pattern there is a coincidence.
 	elsewhere := electionLease("store", "store-leader-b", 1)
 	elsewhere.Namespace = "kube-system"
 	assert.False(t, kvCacheBackendLeaseHolderChanged(
-		electionLease("store", "store-leader-a", 0), elsewhere))
+		electionLease("store", "store-leader-a", 0), elsewhere,
+	))
 }
 
 // TestLeaseEnqueueEarnsTheLinkBackToItsBackend pins that the name is a QUERY and not a proof.

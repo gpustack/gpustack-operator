@@ -58,7 +58,8 @@ func epdCommandOf(
 	}
 
 	cli := newModelDeploymentClient(md, newRenderInstanceType(
-		func(it *worker.InstanceType) { it.Status.Detail.Manufacturer = manufacturer }))
+		func(it *worker.InstanceType) { it.Status.Detail.Manufacturer = manufacturer },
+	))
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
@@ -264,7 +265,8 @@ func TestModelDeploymentEncoderStage_RendersTheAdmittedRow(t *testing.T) {
 					assert.Contains(t, sidecarArgs(pods["decode"], "routing-proxy"),
 						"--ec-connector="+ModelDeploymentECSidecarConnector(
 							ModelDeploymentEPDConnector(tc.router,
-								workercore.ModelDeploymentEngineVLLM, tc.manufacturer)),
+								workercore.ModelDeploymentEngineVLLM, tc.manufacturer),
+						),
 						"the sidecar reads the admitted row, not the platform")
 				} else {
 					assert.Nil(t, sidecarArgs(pods["decode"], "routing-proxy"),
@@ -333,7 +335,8 @@ func TestModelDeploymentEncoderStage_GivesBothHalvesTheSameDirectory(t *testing.
 		}
 		document.Extra.SharedStoragePath = ""
 		require.NoError(t, json.Unmarshal([]byte(
-			commandValue(pods[role].Spec.Containers[0].Command, "--ec-transfer-config")), &document))
+			commandValue(pods[role].Spec.Containers[0].Command, "--ec-transfer-config"),
+		), &document))
 
 		return document.Extra.SharedStoragePath
 	}

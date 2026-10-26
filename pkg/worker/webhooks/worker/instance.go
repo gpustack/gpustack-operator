@@ -71,12 +71,14 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 
 	if kuberess.IsReservedNamespace(inst.Namespace) {
 		return nil, field.Invalid(
-			field.NewPath("metadata.namespace"), inst.Namespace, "cannot create instance in reserved namespace")
+			field.NewPath("metadata.namespace"), inst.Namespace, "cannot create instance in reserved namespace",
+		)
 	}
 
 	if inst.Spec.Type == "" {
 		return nil, field.Required(
-			field.NewPath("spec.type"), "type must be specified")
+			field.NewPath("spec.type"), "type must be specified",
+		)
 	}
 
 	// Only a wanna run instance requires an existing InstanceType and resource limits
@@ -93,13 +95,15 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 		if err != nil {
 			if !kerrors.IsNotFound(err) {
 				return nil, field.InternalError(
-					field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err))
+					field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err),
+				)
 			}
 			err = r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType,
 				ctrlclix.WithoutQuorum)
 			if err != nil {
 				return nil, field.NotFound(
-					field.NewPath("spec.type"), inst.Spec.Type)
+					field.NewPath("spec.type"), inst.Spec.Type,
+				)
 			}
 		}
 	}
@@ -130,20 +134,24 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 	switch {
 	case inst.Spec.Volume.Ephemeral != nil && inst.Spec.Volume.Persistent != nil:
 		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.volume"), "cannot specify both ephemeral and persistent of volume"))
+			field.NewPath("spec.volume"), "cannot specify both ephemeral and persistent of volume",
+		))
 	case inst.Spec.Volume.Ephemeral == nil && inst.Spec.Volume.Persistent == nil:
 		errs = append(errs, field.Required(
-			field.NewPath("spec.volume"), "either ephemeral or persistent of volume should be specified"))
+			field.NewPath("spec.volume"), "either ephemeral or persistent of volume should be specified",
+		))
 	case inst.Spec.Volume.Ephemeral != nil:
 		if inst.Spec.Volume.Ephemeral.Capacity.Sign() <= 0 {
 			errs = append(errs, field.Invalid(
 				field.NewPath("spec.volume.ephemeral.capacity"), inst.Spec.Volume.Ephemeral.Capacity.String(),
-				"capacity of ephemeral volume must be positive"))
+				"capacity of ephemeral volume must be positive",
+			))
 		}
 	case inst.Spec.Volume.Persistent != nil:
 		if inst.Spec.Volume.Persistent.Name == "" {
 			errs = append(errs, field.Required(
-				field.NewPath("spec.volume.persistent.name"), "name of the persistent volume must be specified"))
+				field.NewPath("spec.volume.persistent.name"), "name of the persistent volume must be specified",
+			))
 		}
 	}
 	if len(errs) > 0 {
@@ -167,73 +175,87 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 	if !stopped {
 		if inst.Spec.Type != instOld.Spec.Type {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.type"), "type is immutable"),
+				field.NewPath("spec.type"), "type is immutable",
+			),
 			)
 		}
 		if inst.Spec.Image != instOld.Spec.Image {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.image"), "image is immutable"),
+				field.NewPath("spec.image"), "image is immutable",
+			),
 			)
 		}
 		if inst.Spec.ImagePullPolicy != instOld.Spec.ImagePullPolicy {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.imagePullPolicy"), "imagePullPolicy is immutable"),
+				field.NewPath("spec.imagePullPolicy"), "imagePullPolicy is immutable",
+			),
 			)
 		}
 		if !kubemeta.DeepEqual(inst.Spec.Command, instOld.Spec.Command) {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.command"), "command is immutable"),
+				field.NewPath("spec.command"), "command is immutable",
+			),
 			)
 		}
 		if inst.Spec.Privileged != instOld.Spec.Privileged {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.privileged"), "privileged is immutable"),
+				field.NewPath("spec.privileged"), "privileged is immutable",
+			),
 			)
 		}
 		if !kubemeta.DeepEqual(inst.Spec.Ports, instOld.Spec.Ports) {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.ports"), "ports is immutable"),
+				field.NewPath("spec.ports"), "ports is immutable",
+			),
 			)
 		}
 		if !kubemeta.DeepEqual(inst.Spec.Env, instOld.Spec.Env) {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.env"), "env is immutable"),
+				field.NewPath("spec.env"), "env is immutable",
+			),
 			)
 		}
 		if inst.Spec.VolumeMount != instOld.Spec.VolumeMount {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.volumeMount"), "volumeMount is immutable"),
+				field.NewPath("spec.volumeMount"), "volumeMount is immutable",
+			),
 			)
 		}
 		if !kubemeta.DeepEqual(inst.Spec.ImagePullSecret, instOld.Spec.ImagePullSecret) {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.imagePullSecret"), "imagePullSecret is immutable"),
+				field.NewPath("spec.imagePullSecret"), "imagePullSecret is immutable",
+			),
 			)
 		}
 		if !kubemeta.DeepEqual(inst.Spec.Resources, instOld.Spec.Resources) {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.resources"), "resources is immutable"),
+				field.NewPath("spec.resources"), "resources is immutable",
+			),
 			)
 		}
 		if !kubemeta.DeepEqual(inst.Spec.SSHPublicKey, instOld.Spec.SSHPublicKey) {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.sshPublicKey"), "sshPublicKey is immutable"),
+				field.NewPath("spec.sshPublicKey"), "sshPublicKey is immutable",
+			),
 			)
 		}
 		if inst.Spec.NodeName != instOld.Spec.NodeName {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.nodeName"), "nodeName is immutable"),
+				field.NewPath("spec.nodeName"), "nodeName is immutable",
+			),
 			)
 		}
 		if !kubemeta.DeepEqual(inst.Spec.AdditionalVolumes, instOld.Spec.AdditionalVolumes) {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.additionalVolumes"), "additionalVolumes is immutable"),
+				field.NewPath("spec.additionalVolumes"), "additionalVolumes is immutable",
+			),
 			)
 		}
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Volume, instOld.Spec.Volume) {
 		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.volume"), "volume is immutable"),
+			field.NewPath("spec.volume"), "volume is immutable",
+		),
 		)
 	}
 
@@ -250,7 +272,8 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 		// Validate the instance is actually stopped before allowing it to be started.
 		if instOld.Status.Phase != workerctrl.InstancePhaseStopped {
 			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.stop"), "can only start stopped instance"))
+				field.NewPath("spec.stop"), "can only start stopped instance",
+			))
 		}
 		// Validate the existence of the referenced InstanceType when starting a stopped instance.
 		instType := &worker.InstanceType{
@@ -262,13 +285,15 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 		if err != nil {
 			if !kerrors.IsNotFound(err) {
 				return nil, field.InternalError(
-					field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err))
+					field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err),
+				)
 			}
 			err = r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType,
 				ctrlclix.WithoutQuorum)
 			if err != nil {
 				errs = append(errs, field.NotFound(
-					field.NewPath("spec.type"), inst.Spec.Type))
+					field.NewPath("spec.type"), inst.Spec.Type,
+				))
 			}
 		}
 		// The node pin is deliberately NOT re-validated here: it is checked once, on create, and a
@@ -474,7 +499,8 @@ func validateHostAccess(instOld, inst *workercore.Instance, privilegedAllowed, h
 			errs = append(errs, field.Forbidden(
 				field.NewPath("spec.additionalVolumes").Index(i).Child("hostPath"),
 				fmt.Sprintf("mounting a host path is not allowed: enable the %q setting to allow it",
-					settings.InstanceHostPathVolumeAllowed.Name())))
+					settings.InstanceHostPathVolumeAllowed.Name()),
+			))
 		}
 	}
 
@@ -640,13 +666,15 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return field.InternalError(
-				field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err))
+				field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err),
+			)
 		}
 		err = r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType,
 			ctrlclix.WithoutQuorum)
 		if err != nil {
 			return field.NotFound(
-				field.NewPath("spec.type"), inst.Spec.Type)
+				field.NewPath("spec.type"), inst.Spec.Type,
+			)
 		}
 	}
 
@@ -669,7 +697,8 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 		memPct := instRess.AcceleratorSlicedMemoryPercentage
 		coresPct := instRess.AcceleratorSlicedCoresPercentage
 		partitionPct, sizeable := workerctrl.PartitionProfileMemoryPercent(
-			(*workercore.InstanceType)(instType), instRess.AcceleratorPartitionedProfile)
+			(*workercore.InstanceType)(instType), instRess.AcceleratorPartitionedProfile,
+		)
 		if !sizeable {
 			// The pool offers the profile but cannot size it yet. Reject as retryable, the same
 			// way slicingRequestNotReady does for an uncomputed Detail — whole-card sizing here
@@ -677,7 +706,8 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 			return kerrors.NewInternalError(fmt.Errorf(
 				"instance type %s is not ready yet (partition profile %q cannot be sized from the "+
 					"observed accelerator detail); retry",
-				instType.Name, instRess.AcceleratorPartitionedProfile))
+				instType.Name, instRess.AcceleratorPartitionedProfile,
+			))
 		}
 		switch {
 		case partitionPct > 0:
@@ -733,7 +763,8 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 				if err != nil {
 					return field.InternalError(
 						field.NewPath("spec.resources.cpu"),
-						fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err))
+						fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err),
+					)
 				}
 			}
 			if withGeneralOvercommit || instRess.RAM.IsZero() {
@@ -741,7 +772,8 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 				if err != nil {
 					return field.InternalError(
 						field.NewPath("spec.resources.ram"),
-						fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err))
+						fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err),
+					)
 				}
 			}
 		}
@@ -759,7 +791,8 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 			if err != nil {
 				return field.InternalError(
 					field.NewPath("spec.resources.ram"),
-					fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err))
+					fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err),
+				)
 			}
 		}
 	}
@@ -792,7 +825,8 @@ func sizeAcceleratorUnitByPercent(
 		if err != nil {
 			return field.InternalError(
 				field.NewPath("spec.resources.cpu"),
-				fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err))
+				fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err),
+			)
 		}
 	}
 	if withGeneralOvercommit || instRess.RAM.IsZero() {
@@ -800,7 +834,8 @@ func sizeAcceleratorUnitByPercent(
 		if err != nil {
 			return field.InternalError(
 				field.NewPath("spec.resources.ram"),
-				fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err))
+				fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err),
+			)
 		}
 	}
 	return nil
@@ -851,7 +886,8 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 			if !instType.Status.Detail.IsLogicallySliceable() {
 				errs = append(errs, field.Forbidden(
 					field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage"),
-					fmt.Sprintf("instance type %s does not offer logical slicing", instType.Name)))
+					fmt.Sprintf("instance type %s does not offer logical slicing", instType.Name),
+				))
 				break
 			}
 			memPath := field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage")
@@ -876,12 +912,14 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 	} else if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
 		errs = append(errs, field.Invalid(
 			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
-			"accelerator request must not be specified for non-acceleratable instance type"))
+			"accelerator request must not be specified for non-acceleratable instance type",
+		))
 	}
 	if instRess.CPU.Sign() < 0 {
 		errs = append(errs, field.Invalid(
 			field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
-			"CPU request cannot be negative"))
+			"CPU request cannot be negative",
+		))
 	} else if !instType.Spec.Acceleratable &&
 		instRess.CPU.Cmp(instType.Status.CPU.Capacity) > 0 {
 		// Only a non-accelerated type has a CPU capacity view; an accelerated type's
@@ -894,7 +932,8 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 		// until a node that large joins; the status carries no per-node capacity to bound it tighter.
 		errs = append(errs, field.Invalid(
 			field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
-			cpuRequestRejection(instType)))
+			cpuRequestRejection(instType),
+		))
 	}
 	// A negative RAM or local-storage request is rejected outright; a positive one
 	// must stay within the InstanceType's per-unit RAM entitlement and its local
@@ -902,12 +941,14 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 	if instRess.RAM.Sign() < 0 {
 		errs = append(errs, field.Invalid(
 			field.NewPath("spec.resources.ram"), instRess.RAM.String(),
-			"RAM request cannot be negative"))
+			"RAM request cannot be negative",
+		))
 	}
 	if instRess.LocalStorage.Sign() < 0 {
 		errs = append(errs, field.Invalid(
 			field.NewPath("spec.resources.localStorage"), instRess.LocalStorage.String(),
-			"local storage request cannot be negative"))
+			"local storage request cannot be negative",
+		))
 	}
 	errs = append(errs, capResourcesToInstanceType(instType, instRess)...)
 	return errs
@@ -944,7 +985,8 @@ func validateSingleCardRequest(instRess *workercore.InstanceResources, kind stri
 	}
 	return field.ErrorList{field.Invalid(
 		field.NewPath("spec.resources.accelerator"), got,
-		fmt.Sprintf("accelerator request must be exactly 1 for a %s request", kind))}
+		fmt.Sprintf("accelerator request must be exactly 1 for a %s request", kind),
+	)}
 }
 
 // validatePartitionedAcceleratorRequest checks a hardware partition request: it is mutually
@@ -1029,7 +1071,8 @@ func validateExclusiveAcceleratorRequest(
 	if instRess.Accelerator.Sign() < 0 {
 		return field.ErrorList{field.Invalid(
 			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
-			"accelerator request cannot be negative")}
+			"accelerator request cannot be negative",
+		)}
 	}
 	// A whole-card request is emitted verbatim as a Pod extended-resource quantity, which
 	// Kubernetes requires to be an integer, so reject a fractional count (e.g. "1m") here
@@ -1037,12 +1080,14 @@ func validateExclusiveAcceleratorRequest(
 	if _, ok := instRess.Accelerator.AsInt64(); !ok {
 		return field.ErrorList{field.Invalid(
 			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
-			"accelerator request must be a whole number of cards")}
+			"accelerator request must be a whole number of cards",
+		)}
 	}
 	if instRess.Accelerator.Cmp(instType.Status.Accelerator.Capacity) > 0 {
 		return field.ErrorList{field.Invalid(
 			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
-			fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name))}
+			fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name),
+		)}
 	}
 	return nil
 }
@@ -1073,21 +1118,24 @@ func capResourcesToInstanceType(
 			instRess.CPU.Cmp(maxCPU) > 0 {
 			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
-				fmt.Sprintf("exceeds the maximum CPU %s of instance type %s", maxCPU.String(), instType.Name)))
+				fmt.Sprintf("exceeds the maximum CPU %s of instance type %s", maxCPU.String(), instType.Name),
+			))
 		}
 	}
 	if maxRAM, err := quantityx.StringMultiply(instType.Spec.UnitResources.RAM, unitCount); err == nil &&
 		instRess.RAM.Cmp(maxRAM) > 0 {
 		errs = append(errs, field.Invalid(
 			field.NewPath("spec.resources.ram"), instRess.RAM.String(),
-			fmt.Sprintf("exceeds the maximum RAM %s of instance type %s", maxRAM.String(), instType.Name)))
+			fmt.Sprintf("exceeds the maximum RAM %s of instance type %s", maxRAM.String(), instType.Name),
+		))
 	}
 	if instType.Spec.LocalStorage != "" {
 		if maxStg, err := resource.ParseQuantity(instType.Spec.LocalStorage); err == nil &&
 			instRess.LocalStorage.Cmp(maxStg) > 0 {
 			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.localStorage"), instRess.LocalStorage.String(),
-				fmt.Sprintf("exceeds the local storage %s of instance type %s", maxStg.String(), instType.Name)))
+				fmt.Sprintf("exceeds the local storage %s of instance type %s", maxStg.String(), instType.Name),
+			))
 		}
 	}
 	return errs

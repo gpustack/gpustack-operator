@@ -66,7 +66,8 @@ func Format(errs []error) string {
 
 	return fmt.Sprintf(
 		"%d errors occurred:\n\t%s\n\n",
-		len(msg), strings.Join(msg, "\n\t"))
+		len(msg), strings.Join(msg, "\n\t"),
+	)
 }
 
 // PublicFormat returns the formatted public error message.
@@ -86,7 +87,8 @@ func PublicFormat(errs []PublicError) string {
 
 	return fmt.Sprintf(
 		"%d errors occurred: %s",
-		len(msg), strings.Join(msg, ";"))
+		len(msg), strings.Join(msg, ";"),
+	)
 }
 
 // PublicError is the public error message interface.

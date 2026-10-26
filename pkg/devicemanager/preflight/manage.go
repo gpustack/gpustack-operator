@@ -497,7 +497,8 @@ func (p *Preflighter) simulateSidecarPair(
 	// A visibility container asks for the device-only resource and for no accelerator unit of its
 	// own, which is what tells the allocation apart from the owner's in the Pod the kubelet sees.
 	if name := nodefeature.GetAcceleratableResourceName(
-		manufacturer, workercore.DeviceAllocationModeVisibility); name != "" {
+		manufacturer, workercore.DeviceAllocationModeVisibility,
+	); name != "" {
 		alloc.Second.Resources.Limits = core.ResourceList{
 			name: *resource.NewQuantity(int64(len(alloc.Allocated)), resource.DecimalSI),
 		}
@@ -524,7 +525,8 @@ func (p *Preflighter) simulateSidecarPair(
 				return nil, err
 			}
 			side, err := visibilitySrv.GetContainerAllocateResponse(
-				ctx, alloc.Pod, alloc.Second, alloc.Devs, alloc.Allocated)
+				ctx, alloc.Pod, alloc.Second, alloc.Devs, alloc.Allocated,
+			)
 			if err != nil {
 				return nil, fmt.Errorf("drive the sidecar allocation: %w", err)
 			}
@@ -621,7 +623,8 @@ func newCoAllocation(
 	one.Accelerators = []workercore.Accelerator{*accel}
 
 	pod, _, devs, allocated, err := deviceplugin.NewPreflightAllocationRequest(
-		[]workercore.DevicesGroup{one}, manufacturer, workercore.DeviceAllocationModeSliced, sliceQuota)
+		[]workercore.DevicesGroup{one}, manufacturer, workercore.DeviceAllocationModeSliced, sliceQuota,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build the allocation request: %w", err)
 	}

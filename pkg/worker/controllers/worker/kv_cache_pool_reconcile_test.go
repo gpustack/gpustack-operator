@@ -214,7 +214,8 @@ func (m *fakeMaster) serve(w http.ResponseWriter, r *http.Request) {
 				`{"tenant_id":%q,"requested_quota_bytes":%d,"effective_quota_bytes":%d,`+
 					`"used_bytes":0,"reserved_bytes":0,"committed_count":0,`+
 					`"metadata_object_count":0,"over_quota":false,"has_explicit_policy":%t}`,
-				name, quota, quota, m.explicit[name]))
+				name, quota, quota, m.explicit[name],
+			))
 		}
 		fmt.Fprintf(w, `{"success":true,"data":[%s]}`, strings.Join(entries, ","))
 	case http.MethodPut:

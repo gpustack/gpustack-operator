@@ -10,10 +10,12 @@ package v1
 type DeviceCounterConsumptionApplyConfiguration struct {
 	// CounterSet is the name of the set from which the
 	// counters defined will be consumed.
+	//
 	CounterSet *string `json:"counterSet,omitempty"`
 	// Counters defines the counters that will be consumed by the device.
 	//
 	// The maximum number of counters is 32.
+	//
 	Counters map[string]CounterApplyConfiguration `json:"counters,omitempty"`
 }
 

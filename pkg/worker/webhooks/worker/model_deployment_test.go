@@ -1846,7 +1846,8 @@ func TestValidateModelDeploymentRoleExtraArgs_AnEngineWithNoTableAdmitsEverythin
 	})
 
 	assert.Empty(t, validateModelDeploymentRoleExtraArgs(
-		"test-engine", &r, field.NewPath("spec", "roles").Index(0)))
+		"test-engine", &r, field.NewPath("spec", "roles").Index(0),
+	))
 }
 
 // TestValidateModelDeploymentRoleParallelWidth_DoesNotRefuseTwice pins the silence rule: a
@@ -2372,7 +2373,8 @@ func offeringPartitionProfiles(profiles ...string) func(*worker.InstanceType) {
 		for _, name := range profiles {
 			instType.Status.Detail.SlicedDetail.Physical.Profiles = append(
 				instType.Status.Detail.SlicedDetail.Physical.Profiles,
-				workercore.AcceleratorSlicedPhysicalDetailProfile{Name: name, Count: 1, MemoryMib: 10240})
+				workercore.AcceleratorSlicedPhysicalDetailProfile{Name: name, Count: 1, MemoryMib: 10240},
+			)
 		}
 	}
 }
@@ -4006,7 +4008,8 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			errs := validateRoleResourcesAgainstInstanceType(
-				tc.instType, tc.ress, field.NewPath("spec", "roles").Index(0).Child("resources"))
+				tc.instType, tc.ress, field.NewPath("spec", "roles").Index(0).Child("resources"),
+			)
 
 			got := make([]string, 0, len(errs))
 			joined := ""
@@ -4039,7 +4042,8 @@ func TestValidateRoleResourcesAgainstInstanceType_TheCeilingIsInTheMessage(t *te
 	errs := validateRoleResourcesAgainstInstanceType(
 		servingInstanceType("h20-8x", 8),
 		&workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(9, resource.DecimalSI)},
-		field.NewPath("spec", "roles").Index(0).Child("resources"))
+		field.NewPath("spec", "roles").Index(0).Child("resources"),
+	)
 
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Error(), "8", "the refusal carries the ceiling the request has to fit")
@@ -4921,7 +4925,8 @@ func TestModelDeploymentWebhookScalerFenceHoldsTheSingleWriterRule(t *testing.T)
 
 			w := modelDeploymentFenceWebhook(tc.scalers...)
 			errs := w.validateModelDeploymentScalerFence(
-				modelDeploymentFenceContext(username), old, md)
+				modelDeploymentFenceContext(username), old, md,
+			)
 
 			if tc.wantField == "" {
 				assert.Empty(t, errs)
@@ -4949,7 +4954,8 @@ func TestModelDeploymentWebhookScalerFenceRefusesAUserWhoAddsABindingToAnUnbound
 	w := modelDeploymentFenceWebhook()
 	for _, prior := range []*workercore.ModelDeployment{nil, old} {
 		errs := w.validateModelDeploymentScalerFence(
-			modelDeploymentFenceContext(testFenceUser), prior, md)
+			modelDeploymentFenceContext(testFenceUser), prior, md,
+		)
 
 		require.NotEmpty(t, errs)
 		assert.Equal(t,
@@ -4970,7 +4976,8 @@ func TestModelDeploymentWebhookScalerFenceRefusesAMalformedBinding(t *testing.T)
 
 	w := modelDeploymentFenceWebhook()
 	errs := w.validateModelDeploymentScalerFence(
-		modelDeploymentFenceContext(testFenceUser), old, md)
+		modelDeploymentFenceContext(testFenceUser), old, md,
+	)
 
 	require.NotEmpty(t, errs)
 	assert.Contains(t, errs[0].Detail, "binding")

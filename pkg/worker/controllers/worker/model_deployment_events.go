@@ -94,7 +94,8 @@ func modelDeploymentReplicaDepartures(pods []core.Pod) []modelDeploymentReplicaD
 					"%s was evicted%s; its cached blocks are lost to its siblings, and any KV "+
 						"lease it holds lapses after the %s kv_lease_duration window, failing the "+
 						"requests still waiting on them",
-					modelDeploymentPodDescription(pod), why, modelDeploymentKVLeaseWindow),
+					modelDeploymentPodDescription(pod), why, modelDeploymentKVLeaseWindow,
+				),
 			})
 		case pod.DeletionTimestamp != nil:
 			departures = append(departures, modelDeploymentReplicaDeparture{
@@ -104,7 +105,8 @@ func modelDeploymentReplicaDepartures(pods []core.Pod) []modelDeploymentReplicaD
 					"%s is going away; its cached blocks are lost to its siblings, and any "+
 						"KV lease it holds lapses after the %s kv_lease_duration window, failing "+
 						"the requests still waiting on them",
-					modelDeploymentPodDescription(pod), modelDeploymentKVLeaseWindow),
+					modelDeploymentPodDescription(pod), modelDeploymentKVLeaseWindow,
+				),
 			})
 		default:
 			restarts := modelDeploymentReplicaRestarts(pod)
@@ -118,7 +120,8 @@ func modelDeploymentReplicaDepartures(pods []core.Pod) []modelDeploymentReplicaD
 					"%s has restarted %d time(s); each restart interrupts the engine's "+
 						"heartbeat, so the blocks it held were lost and any KV lease lapsed after "+
 						"the %s kv_lease_duration window",
-					modelDeploymentPodDescription(pod), restarts, modelDeploymentKVLeaseWindow),
+					modelDeploymentPodDescription(pod), restarts, modelDeploymentKVLeaseWindow,
+				),
 			})
 		}
 	}

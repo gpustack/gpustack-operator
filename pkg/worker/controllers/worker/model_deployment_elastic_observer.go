@@ -469,7 +469,8 @@ func joinModelDeploymentElasticRayIdentity(
 		if _, joined := nodeHexByUID[member.PodUID]; !joined {
 			obs.addUnknown(fmt.Sprintf(
 				"captured %s Pod %s (uid %s) is claimed by no live Ray node",
-				member.Role, member.PodName, member.PodUID))
+				member.Role, member.PodName, member.PodUID,
+			))
 		}
 	}
 
@@ -491,7 +492,8 @@ func joinModelDeploymentElasticRayIdentity(
 			obs.RegisteredGPUKnown = false
 			obs.RegisteredGPUUnknownReason = fmt.Sprintf(
 				"registered GPU capacity unknown: captured %s Pod %s has no unique current ALIVE Ray node",
-				member.Role, member.PodName)
+				member.Role, member.PodName,
+			)
 			continue
 		}
 		rawGPU, carried := nodeByHex[nodeHex].Resources["GPU"]
@@ -500,19 +502,23 @@ func joinModelDeploymentElasticRayIdentity(
 		case !carried:
 			obs.RegisteredGPUKnown = false
 			obs.RegisteredGPUUnknownReason = fmt.Sprintf(
-				"registered GPU capacity unknown: node %s states no GPU resource", nodeHex)
+				"registered GPU capacity unknown: node %s states no GPU resource", nodeHex,
+			)
 		case err != nil:
 			obs.RegisteredGPUKnown = false
 			obs.RegisteredGPUUnknownReason = fmt.Sprintf(
-				"registered GPU capacity unknown: node %s GPU resource %q is not a number", nodeHex, rawGPU)
+				"registered GPU capacity unknown: node %s GPU resource %q is not a number", nodeHex, rawGPU,
+			)
 		case math.IsInf(value, 0) || math.IsNaN(value):
 			obs.RegisteredGPUKnown = false
 			obs.RegisteredGPUUnknownReason = fmt.Sprintf(
-				"registered GPU capacity unknown: node %s GPU resource is not finite", nodeHex)
+				"registered GPU capacity unknown: node %s GPU resource is not finite", nodeHex,
+			)
 		case value != float64(tensorParallelSize):
 			obs.RegisteredGPUKnown = false
 			obs.RegisteredGPUUnknownReason = fmt.Sprintf(
-				"registered GPU capacity unknown: node %s carries %v GPUs, not exactly %d", nodeHex, value, tensorParallelSize)
+				"registered GPU capacity unknown: node %s carries %v GPUs, not exactly %d", nodeHex, value, tensorParallelSize,
+			)
 		default:
 			obs.RegisteredGPU++
 		}
@@ -540,7 +546,8 @@ func joinModelDeploymentElasticRayIdentity(
 		if _, known := nodeByHex[actor.NodeIDHex]; !known {
 			obs.addUnknown(fmt.Sprintf(
 				"actor %s (%s) sits on unknown node %s",
-				*actor.ActorIDHex, actor.ClassName, actor.NodeIDHex))
+				*actor.ActorIDHex, actor.ClassName, actor.NodeIDHex,
+			))
 			actorsComplete = false
 			continue
 		}
@@ -549,7 +556,8 @@ func joinModelDeploymentElasticRayIdentity(
 		if node := nodeByHex[actor.NodeIDHex]; !*node.Alive && *actor.State != elasticRayActorDead {
 			obs.addUnknown(fmt.Sprintf(
 				"nonterminal actor %s (%s) in state %s sits on DEAD node %s",
-				*actor.ActorIDHex, actor.ClassName, actor.StateName, actor.NodeIDHex))
+				*actor.ActorIDHex, actor.ClassName, actor.StateName, actor.NodeIDHex,
+			))
 			actorsComplete = false
 		}
 	}
@@ -593,7 +601,8 @@ func joinModelDeploymentElasticRayIdentity(
 		}
 		if *pg.State != elasticRayPGCreated {
 			addWidthReason(fmt.Sprintf(
-				"rank %d placement group is %s, not CREATED", rank, pg.StateName))
+				"rank %d placement group is %s, not CREATED", rank, pg.StateName,
+			))
 			continue
 		}
 		alive := 0
@@ -606,7 +615,8 @@ func joinModelDeploymentElasticRayIdentity(
 			if *actor.State != elasticRayActorAlive {
 				addWidthReason(fmt.Sprintf(
 					"rank %d carries nonterminal native actor %s in state %s",
-					rank, *actor.ActorIDHex, actor.StateName))
+					rank, *actor.ActorIDHex, actor.StateName,
+				))
 				continue
 			}
 			if !isNativeElasticActorClass(actor.ClassName) {
@@ -615,14 +625,16 @@ func joinModelDeploymentElasticRayIdentity(
 			node, known := nodeByHex[actor.NodeIDHex]
 			if !known || node.Alive == nil || !*node.Alive {
 				addWidthReason(fmt.Sprintf(
-					"rank %d native actor %s is not at an alive Ray node", rank, *actor.ActorIDHex))
+					"rank %d native actor %s is not at an alive Ray node", rank, *actor.ActorIDHex,
+				))
 				continue
 			}
 			uid, claimed := node.Labels[modelDeploymentElasticPodUIDLabelKey]
 			member, knownMember := memberByUID[types.UID(uid)]
 			if !claimed || !knownMember || member.Role == modelDeploymentElasticRoleHead {
 				addWidthReason(fmt.Sprintf(
-					"rank %d native actor %s is not at a captured GPU member", rank, *actor.ActorIDHex))
+					"rank %d native actor %s is not at a captured GPU member", rank, *actor.ActorIDHex,
+				))
 				continue
 			}
 			alive++
@@ -646,7 +658,8 @@ func joinModelDeploymentElasticRayIdentity(
 		// beyond the expected width is a native rank the engine still holds and holds.
 		if rank >= int(expectedWidth) && *pg.State != elasticRayPGRemoved {
 			addWidthReason(fmt.Sprintf(
-				"unexpected native rank %d placement group is %s", rank, pg.StateName))
+				"unexpected native rank %d placement group is %s", rank, pg.StateName,
+			))
 		}
 	}
 
@@ -666,7 +679,8 @@ func joinModelDeploymentElasticRayIdentity(
 			obs.ActorFree[member.PodUID] = modelDeploymentElasticActorFreeFact{
 				ActorFree: false,
 				Reason: fmt.Sprintf(
-					"no unique current ALIVE Ray node claims Pod %s (uid %s)", member.PodName, member.PodUID),
+					"no unique current ALIVE Ray node claims Pod %s (uid %s)", member.PodName, member.PodUID,
+				),
 			}
 			continue
 		}
@@ -687,7 +701,8 @@ func joinModelDeploymentElasticRayIdentity(
 				ActorFree: false,
 				Reason: fmt.Sprintf(
 					"%d nonterminal actor(s) remain on Pod %s: %s",
-					blocking, member.PodName, reason),
+					blocking, member.PodName, reason,
+				),
 			}
 			continue
 		}
@@ -847,7 +862,8 @@ func (o *modelDeploymentElasticObserver) liveIdentity(
 	if expected != nil && (current.UID != expected.UID || current.Generation != expected.Generation) {
 		return modelDeploymentElasticIdentity{}, fmt.Sprintf(
 			"deployment identity drifted during observation (uid %s->%s generation %d->%d)",
-			expected.UID, current.UID, expected.Generation, current.Generation)
+			expected.UID, current.UID, expected.Generation, current.Generation,
+		)
 	}
 	return current, ""
 }
@@ -868,7 +884,8 @@ func (o *modelDeploymentElasticObserver) liveMember(
 	if pod.UID != member.PodUID {
 		return nil, fmt.Sprintf(
 			"Pod %s carries uid %s, captured uid is %s (same-name replacement)",
-			member.PodName, pod.UID, member.PodUID)
+			member.PodName, pod.UID, member.PodUID,
+		)
 	}
 	owned := false
 	for _, ref := range pod.OwnerReferences {

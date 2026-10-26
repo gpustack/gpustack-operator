@@ -812,7 +812,8 @@ func ResolveInstanceTypeFlavorNames(
 		sched := nodefeature.PoolScheduleLabels(
 			it.Spec.Acceleratable, cpuAware,
 			it.Spec.GeneralGroup, it.Spec.AcceleratorGroup,
-			it.Spec.OS, it.Spec.Arch)
+			it.Spec.OS, it.Spec.Arch,
+		)
 		var flavorNames []string
 		for i := range flavors.Items {
 			if mapx.Contain(flavors.Items[i].Labels, sched) {

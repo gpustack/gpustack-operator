@@ -23,6 +23,7 @@ type RollingUpdateStatefulSetStrategyApplyConfiguration struct {
 	// Replicas-1. That means if there is any unavailable pod in the range 0 to Replicas-1, it
 	// will be counted towards MaxUnavailable.
 	// This setting might not be effective for the OrderedReady podManagementPolicy. That policy ensures pods are created and become ready one at a time.
+	//
 	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
 }
 

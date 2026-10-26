@@ -899,7 +899,8 @@ func TestValidateHostAccess(t *testing.T) {
 						heldHost = *c.heldHost
 					}
 					instOld.Spec.AdditionalVolumes = append(
-						instOld.Spec.AdditionalVolumes, heldHost)
+						instOld.Spec.AdditionalVolumes, heldHost,
+					)
 				}
 				if c.heldOnly == "privileged" {
 					instOld.Spec.Privileged = true

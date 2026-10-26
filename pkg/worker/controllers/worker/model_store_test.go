@@ -390,7 +390,8 @@ func TestModelStoreSiblingWatch_EnqueuesTheSiblings(t *testing.T) {
 			)
 			handler := ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueSiblingStores)
 			queue := workqueue.NewTypedRateLimitingQueue(
-				workqueue.DefaultTypedControllerRateLimiter[ctrlreconcile.Request]())
+				workqueue.DefaultTypedControllerRateLimiter[ctrlreconcile.Request](),
+			)
 			defer queue.ShutDown()
 
 			ctx := context.Background()

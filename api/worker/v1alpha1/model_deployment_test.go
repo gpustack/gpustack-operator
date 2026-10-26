@@ -532,7 +532,8 @@ func modelDeploymentSchemaValidator(t *testing.T) apiservervalidation.SchemaVali
 
 	internal := &apiextensions.JSONSchemaProps{}
 	require.NoError(t, extension.Convert_v1_JSONSchemaProps_To_apiextensions_JSONSchemaProps(
-		crd.Spec.Versions[0].Schema.OpenAPIV3Schema, internal, nil),
+		crd.Spec.Versions[0].Schema.OpenAPIV3Schema, internal, nil,
+	),
 		"the generated schema must convert for validation")
 	validator, _, err := apiservervalidation.NewSchemaValidator(internal)
 	require.NoError(t, err, "the generated schema must build a validator")

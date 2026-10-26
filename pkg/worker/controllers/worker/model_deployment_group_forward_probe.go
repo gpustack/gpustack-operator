@@ -394,25 +394,29 @@ func probeModelDeploymentGroupForward(
 		rid, err := modelDeploymentQualifyRequestID(member)
 		if err != nil {
 			return modelDeploymentGroupForwardUnknownFor(
-				"the probe's identifier for " + member.Name + " could not be generated: " + err.Error())
+				"the probe's identifier for " + member.Name + " could not be generated: " + err.Error(),
+			)
 		}
 		body, err := engine.Body(rid)
 		if err != nil {
 			return modelDeploymentGroupForwardUnknownFor(
-				"the probe request for " + member.Name + " could not be rendered: " + err.Error())
+				"the probe request for " + member.Name + " could not be rendered: " + err.Error(),
+			)
 		}
 
 		url, err := modelDeploymentGroupForwardURL(member, engine.Path)
 		if err != nil {
 			return modelDeploymentGroupForwardUnknownFor(
-				"member " + member.Name + " " + err.Error())
+				"member " + member.Name + " " + err.Error(),
+			)
 		}
 
 		response, err := fetch(probeCtx, url, body)
 		if err != nil {
 			return modelDeploymentGroupForwardUnknownFor(
 				"member " + member.Name + " did not answer the probe within the bound: " +
-					err.Error() + "; an unanswered probe is an absence of evidence, not a fault")
+					err.Error() + "; an unanswered probe is an absence of evidence, not a fault",
+			)
 		}
 		if refusal := engine.Bound(response, rid); refusal != "" {
 			return modelDeploymentGroupForwardUnknownFor("member " + member.Name + " " + refusal)
@@ -557,7 +561,8 @@ func defaultGroupForwardPairFetch(
 		method = http.MethodPost
 	}
 	probeRequest, err := http.NewRequestWithContext(
-		ctx, method, request.URL, strings.NewReader(string(request.Body)))
+		ctx, method, request.URL, strings.NewReader(string(request.Body)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("pair request could not be built: %w", err)
 	}
@@ -831,7 +836,8 @@ var modelDeploymentGroupForwardPairEngines = map[string]modelDeploymentGroupForw
 				return nil, fmt.Errorf(
 					"the probe cannot discover the prefiller engine id for rank %d, and the "+
 						"connector's handshake will not name the prefiller without it; the id is held "+
-						"in the prefiller's own transfer registry", in.PrefillRank)
+						"in the prefiller's own transfer registry", in.PrefillRank,
+				)
 			}
 			prefill, err := modelDeploymentGroupForwardPairVLLMBody(in, map[string]any{
 				"do_remote_decode":  true,
@@ -943,7 +949,8 @@ func observeModelDeploymentGroupForwardPair(
 		})
 	}
 	decodeURL, err := modelDeploymentGroupForwardPairDecodeURL(
-		md, decodeRole, decodeHead, engine.Path, viaProxy)
+		md, decodeRole, decodeHead, engine.Path, viaProxy,
+	)
 	if err != nil {
 		return modelDeploymentGroupForwardPairHeld(attempt, modelDeploymentGroupForward{
 			State:  modelDeploymentGroupForwardUnknown,
@@ -1321,7 +1328,8 @@ func modelDeploymentGroupForwardPairProxyLeg(
 	address, err := modelDeploymentGroupForwardHostPort(prefillHead)
 	if err != nil {
 		return modelDeploymentGroupForwardPairLeg{}, fmt.Errorf(
-			"the prefill group has no address to name to the decode side: %w", err)
+			"the prefill group has no address to name to the decode side: %w", err,
+		)
 	}
 	body, err := json.Marshal(modelDeploymentGroupForwardPairChatFields(in))
 	if err != nil {
@@ -1375,7 +1383,8 @@ func modelDeploymentGroupForwardPairDecodeURL(
 	}
 
 	return modelDeploymentGroupForwardURLOnPort(
-		decodeHead, ModelDeploymentRoleServingPort(md, role), path)
+		decodeHead, ModelDeploymentRoleServingPort(md, role), path,
+	)
 }
 
 // modelDeploymentGroupForwardPairHead returns the member of a group that serves the engine's
@@ -1408,7 +1417,8 @@ func modelDeploymentGroupForwardPairBootstrapPort(prefillHead *core.Pod) (int, e
 	if published == "" {
 		return 0, fmt.Errorf(
 			"the prefill head publishes no bootstrap port, so the decode side cannot be told where " +
-				"to fetch the transfer endpoints from")
+				"to fetch the transfer endpoints from",
+		)
 	}
 	port, err := strconv.Atoi(published)
 	if err != nil || port < 1 || port > 65535 {

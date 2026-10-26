@@ -239,7 +239,7 @@ func getStatus(obj any, condName string) string {
 
 // setStatus set status and message to condition.
 func setStatus(obj any, condName, status, reason, message string) {
-	if reflect.TypeOf(obj).Kind() != reflect.Ptr {
+	if reflect.TypeOf(obj).Kind() != reflect.Pointer {
 		panic("obj passed must be a pointer")
 	}
 
@@ -272,7 +272,7 @@ func getValue(obj any, name string, snames ...string) reflect.Value {
 	}
 	v := reflect.ValueOf(obj)
 	t := v.Type()
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 

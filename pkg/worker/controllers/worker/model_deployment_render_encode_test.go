@@ -36,7 +36,8 @@ func epdRenderDecodePod(
 
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment: md, Role: &md.Spec.Roles[2], InstanceType: newRenderInstanceType(
-			func(it *worker.InstanceType) { it.Status.Detail.Manufacturer = manufacturer }),
+			func(it *worker.InstanceType) { it.Status.Detail.Manufacturer = manufacturer },
+		),
 		Connector: ModelDeploymentConnectorRender{
 			Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 		},

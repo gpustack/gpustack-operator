@@ -54,6 +54,7 @@ type CertificateSigningRequestSpecApplyConfiguration struct {
 	// 3. Signer whose configured minimum is longer than the requested duration
 	//
 	// The minimum valid value for expirationSeconds is 600, i.e. 10 minutes.
+	//
 	ExpirationSeconds *int32 `json:"expirationSeconds,omitempty"`
 	// usages specifies a set of key usages requested in the issued certificate.
 	//

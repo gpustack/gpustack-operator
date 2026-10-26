@@ -37,7 +37,8 @@ func (r *ModelArtifactWebhook) validateModelArtifactStatus(ctx context.Context, 
 	if r.worker == "" || req.UserInfo.Username != r.worker {
 		return kerrors.NewInvalid(workercore.SchemeGroupVersionKind("ModelArtifact").GroupKind(), ma.Name,
 			field.ErrorList{field.Forbidden(field.NewPath("status"), fmt.Sprintf(
-				"%s: %q is not the worker", modelArtifactStatusRuleWriter, req.UserInfo.Username))})
+				"%s: %q is not the worker", modelArtifactStatusRuleWriter, req.UserInfo.Username,
+			))})
 	}
 
 	return nil

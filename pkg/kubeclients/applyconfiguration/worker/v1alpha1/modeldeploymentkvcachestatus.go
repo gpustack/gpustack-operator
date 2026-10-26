@@ -12,10 +12,13 @@ package v1alpha1
 // dtype is silent cache pollution, where writes succeed, reads succeed and the tensors are wrong.
 type ModelDeploymentKVCacheStatusApplyConfiguration struct {
 	// Binding is the KVCachePoolBinding this deployment resolved, in this namespace.
+	//
 	Binding *string `json:"binding,omitempty"`
 	// Pool is the KVCachePool that Binding points at.
+	//
 	Pool *string `json:"pool,omitempty"`
 	// Domain is the reuse identity, echoed from the Binding's immutable domain block.
+	//
 	Domain *ModelDeploymentKVCacheDomainApplyConfiguration `json:"domain,omitempty"`
 }
 

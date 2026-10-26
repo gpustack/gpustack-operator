@@ -20,6 +20,7 @@ type DeviceRequestAllocationResultApplyConfiguration struct {
 	// using the format <main request>/<subrequest>.
 	//
 	// Multiple devices may have been allocated per request.
+	//
 	Request *string `json:"request,omitempty"`
 	// Driver specifies the name of the DRA driver whose kubelet
 	// plugin should be invoked to process the allocation once the claim is
@@ -27,48 +28,55 @@ type DeviceRequestAllocationResultApplyConfiguration struct {
 	//
 	// Must be a DNS subdomain and should end with a DNS domain owned by the
 	// vendor of the driver. It should use only lower case characters.
+	//
 	Driver *string `json:"driver,omitempty"`
 	// This name together with the driver name and the device name field
 	// identify which device was allocated (`<driver name>/<pool name>/<device name>`).
 	//
 	// Must not be longer than 253 characters and may contain one or more
 	// DNS sub-domains separated by slashes.
+	//
 	Pool *string `json:"pool,omitempty"`
 	// Device references one device instance via its name in the driver's
 	// resource pool. It must be a DNS label.
+	//
 	Device *string `json:"device,omitempty"`
 	// AdminAccess indicates that this device was allocated for
 	// administrative access. See the corresponding request field
 	// for a definition of mode.
 	//
-	// This is an alpha field and requires enabling the DRAAdminAccess
-	// feature gate. Admin access is disabled if this field is unset or
+	// Admin access is disabled if this field is unset or
 	// set to false, otherwise it is enabled.
+	//
 	AdminAccess *bool `json:"adminAccess,omitempty"`
 	// A copy of all tolerations specified in the request at the time
 	// when the device got allocated.
 	//
 	// The maximum number of tolerations is 16.
 	//
-	// This is an alpha field and requires enabling the DRADeviceTaints
+	// This is a beta field and requires enabling the DRADeviceTaints
 	// feature gate.
+	//
 	Tolerations []DeviceTolerationApplyConfiguration `json:"tolerations,omitempty"`
 	// BindingConditions contains a copy of the BindingConditions
 	// from the corresponding ResourceSlice at the time of allocation.
 	//
-	// This is an alpha field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
+	// This is a beta field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
 	// feature gates.
+	//
 	BindingConditions []string `json:"bindingConditions,omitempty"`
 	// BindingFailureConditions contains a copy of the BindingFailureConditions
 	// from the corresponding ResourceSlice at the time of allocation.
 	//
-	// This is an alpha field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
+	// This is a beta field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
 	// feature gates.
+	//
 	BindingFailureConditions []string `json:"bindingFailureConditions,omitempty"`
 	// ShareID uniquely identifies an individual allocation share of the device,
 	// used when the device supports multiple simultaneous allocations.
 	// It serves as an additional map key to differentiate concurrent shares
 	// of the same device.
+	//
 	ShareID *types.UID `json:"shareID,omitempty"`
 	// ConsumedCapacity tracks the amount of capacity consumed per device as part of the claim request.
 	// The consumed amount may differ from the requested amount: it is rounded up to the nearest valid
@@ -78,6 +86,7 @@ type DeviceRequestAllocationResultApplyConfiguration struct {
 	//
 	// This field is populated only for devices that allow multiple allocations.
 	// All capacity entries are included, even if the consumed amount is zero.
+	//
 	ConsumedCapacity map[resourcev1.QualifiedName]resource.Quantity `json:"consumedCapacity,omitempty"`
 }
 

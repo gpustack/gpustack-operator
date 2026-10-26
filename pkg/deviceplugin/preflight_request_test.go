@@ -277,11 +277,13 @@ func TestNewPreflightAllocationRequest_Deterministic(t *testing.T) {
 	}}
 
 	pod1, ctr1, devs1, alloc1, err1 := NewPreflightAllocationRequest(
-		groups, nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced, sameQuota)
+		groups, nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced, sameQuota,
+	)
 	require.NoError(t, err1)
 
 	pod2, ctr2, devs2, alloc2, err2 := NewPreflightAllocationRequest(
-		groups, nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced, sameQuota)
+		groups, nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced, sameQuota,
+	)
 	require.NoError(t, err2)
 
 	assert.Equal(t, pod1, pod2)
@@ -341,7 +343,8 @@ func TestNewPreflightAllocationRequest_SlicedCarriesItsDimensions(t *testing.T) 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, ctr, _, _, err := NewPreflightAllocationRequest(
-				[]workercore.DevicesGroup{group}, nodefeature.ManufacturerAMD, tc.mode, tc.quota)
+				[]workercore.DevicesGroup{group}, nodefeature.ManufacturerAMD, tc.mode, tc.quota,
+			)
 			require.NoError(t, err)
 
 			memPct := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(nodefeature.ManufacturerAMD)

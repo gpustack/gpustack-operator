@@ -12,6 +12,7 @@ import (
 // InstanceModelVolumeSource references the ModelArtifact an Instance volume mounts.
 type InstanceModelVolumeSourceApplyConfiguration struct {
 	// ArtifactRef names a ModelArtifact in the Instance's namespace.
+	//
 	ArtifactRef *v1.LocalObjectReferenceApplyConfiguration `json:"artifactRef,omitempty"`
 }
 

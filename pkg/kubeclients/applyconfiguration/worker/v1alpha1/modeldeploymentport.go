@@ -21,8 +21,10 @@ type ModelDeploymentPortApplyConfiguration struct {
 	// The bounds are the container port's own. Without them a zero or out-of-range number is
 	// admitted here and refused later by the API server, on the rendered Pod, as a per-pass create
 	// failure naming a container port instead of an admission error naming this field.
+	//
 	Port *int32 `json:"port,omitempty"`
 	// Protocol is the protocol to use for the port.
+	//
 	Protocol *v1.Protocol `json:"protocol,omitempty"`
 }
 

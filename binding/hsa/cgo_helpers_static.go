@@ -152,13 +152,15 @@ func hsaAgentGetInfoComputeUnitCount(agent Agent) (uint32, Return) {
 func hsaAgentGetInfoNumShaderEngines(agent Agent) (uint32, Return) {
 	var numShaderEngines uint32
 	return numShaderEngines, hsaAgentGetInfo(
-		agent, AgentInfo(AMD_AGENT_INFO_NUM_SHADER_ENGINES), unsafe.Pointer(&numShaderEngines))
+		agent, AgentInfo(AMD_AGENT_INFO_NUM_SHADER_ENGINES), unsafe.Pointer(&numShaderEngines),
+	)
 }
 
 func hsaAgentGetInfoNumShaderArraysPerSE(agent Agent) (uint32, Return) {
 	var numShaderArraysPerSE uint32
 	return numShaderArraysPerSE, hsaAgentGetInfo(
-		agent, AgentInfo(AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE), unsafe.Pointer(&numShaderArraysPerSE))
+		agent, AgentInfo(AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE), unsafe.Pointer(&numShaderArraysPerSE),
+	)
 }
 
 func hsaAgentGetInfoNumXcc(agent Agent) (uint32, Return) {

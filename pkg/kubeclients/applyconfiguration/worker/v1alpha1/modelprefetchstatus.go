@@ -13,13 +13,17 @@ import (
 // nodes' reports: which node holds the digest, which is fetching it, and whether enough do.
 type ModelPrefetchStatusApplyConfiguration struct {
 	// DesiredNodes is the size of the target set the current placement resolves to.
+	//
 	DesiredNodes *int32 `json:"desiredNodes,omitempty"`
 	// ReadyNodes is how many target nodes report the digest published and mountable.
+	//
 	ReadyNodes *int32 `json:"readyNodes,omitempty"`
 	// DownloadingNodes is how many target nodes are still fetching it.
+	//
 	DownloadingNodes *int32 `json:"downloadingNodes,omitempty"`
 	// Conditions: Progressing says delivery is under way; Available says ReadyNodes reached the
 	// MinReady bar; Degraded says a target node gave up, and the message says why.
+	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 }
 

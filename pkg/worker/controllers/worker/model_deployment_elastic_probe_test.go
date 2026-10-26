@@ -92,7 +92,8 @@ func TestModelDeploymentElasticLivenessProbeShape(t *testing.T) {
 	require.NotNil(t, probe.Exec)
 
 	require.Equal(t, []string{"python3", "-c", modelDeploymentElasticLivenessScript(
-		modelDeploymentElasticLivenessURL)}, probe.Exec.Command)
+		modelDeploymentElasticLivenessURL,
+	)}, probe.Exec.Command)
 	require.Contains(t, probe.Exec.Command[2], "http://127.0.0.1:8000/health",
 		"the probe must read the engine's own health address")
 	require.Equal(t, modelDeploymentProbePeriodSeconds, probe.PeriodSeconds)

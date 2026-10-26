@@ -714,9 +714,11 @@ func TestPublishPartitionProfileNames(t *testing.T) {
 				st.Detail.SlicedDetail.Physical.Profiles = append(st.Detail.SlicedDetail.Physical.Profiles,
 					workercore.AcceleratorSlicedPhysicalDetailProfile{Name: n, Count: int32(i + 1)})
 				st.AcceleratorPartitioned.AllocatedProfiles = append(
-					st.AcceleratorPartitioned.AllocatedProfiles, profileCount(n, int32(i+1)))
+					st.AcceleratorPartitioned.AllocatedProfiles, profileCount(n, int32(i+1)),
+				)
 				st.AcceleratorPartitioned.RemainingProfiles = append(
-					st.AcceleratorPartitioned.RemainingProfiles, profileCount(n, int32(i+1)))
+					st.AcceleratorPartitioned.RemainingProfiles, profileCount(n, int32(i+1)),
+				)
 			}
 
 			publishPartitionProfileNames(&st)
@@ -2028,7 +2030,7 @@ func TestInstanceTypeReconciler_ExpectedWriteFailuresAreQuiet(t *testing.T) {
 // be one the predicate drops, so a conflict requeues. The fixture is an Inactive type over an active
 // queue, and the next reconcile holds the queue in every case.
 func TestInstanceTypeReconciler_ExpectedStopPolicySyncFailuresAreQuiet(t *testing.T) {
-	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "clusterqueues"}
+	gr := schema.GroupResource{Group: kueue.SchemeGroupVersion.Group, Resource: "clusterqueues"}
 	key := "nvidia-a10g"
 	name := nodeQueueName(key)
 	testCases := []struct {

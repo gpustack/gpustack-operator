@@ -35,11 +35,11 @@ function mod_staging() {
     fi
   done < <(
     cat <<EOF
-https://github.com/kubernetes/code-generator v0.35.3 ${staging_dir}/k8s.io/code-generator
-https://github.com/kubernetes/api v0.35.3 ${staging_dir}/k8s.io/api
-https://github.com/kubernetes/apimachinery v0.35.3 ${staging_dir}/k8s.io/apimachinery
-https://github.com/kubernetes/kube-aggregator v0.35.3 ${staging_dir}/k8s.io/kube-aggregator
-https://github.com/kubernetes/apiextensions-apiserver v0.35.3 ${staging_dir}/k8s.io/apiextensions-apiserver
+https://github.com/kubernetes/code-generator v0.36.5 ${staging_dir}/k8s.io/code-generator
+https://github.com/kubernetes/api v0.36.5 ${staging_dir}/k8s.io/api
+https://github.com/kubernetes/apimachinery v0.36.5 ${staging_dir}/k8s.io/apimachinery
+https://github.com/kubernetes/kube-aggregator v0.36.5 ${staging_dir}/k8s.io/kube-aggregator
+https://github.com/kubernetes/apiextensions-apiserver v0.36.5 ${staging_dir}/k8s.io/apiextensions-apiserver
 https://github.com/kubernetes/klog v2.140.0 ${staging_dir}/k8s.io/klog
 https://github.com/go-logr/logr v1.4.3 ${staging_dir}/github.com/go-logr/logr
 https://github.com/gogo/protobuf v1.3.2 ${staging_dir}/github.com/gogo/protobuf
@@ -131,7 +131,7 @@ function chart_staging() {
     done
   done < <(
     cat <<EOF
-https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.10/kueue-0.18.10.tgz 0.18.10 ${charts_dir}/kueue
+https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.11/kueue-0.18.11.tgz 0.18.11 ${charts_dir}/kueue
 https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v0.19.0/node-feature-discovery-chart-0.19.0.tgz 0.19.0 ${charts_dir}/node-feature-discovery
 https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.4/csi-driver-nfs-4.13.4.tgz 4.13.4 ${charts_dir}/csi-driver-nfs
 https://thxcode.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz 0.43.7 ${charts_dir}/csi-driver-s3

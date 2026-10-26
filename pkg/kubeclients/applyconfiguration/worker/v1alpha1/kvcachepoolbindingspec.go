@@ -10,6 +10,7 @@ type KVCachePoolBindingSpecApplyConfiguration struct {
 	// PoolRef names the pool this namespace is being granted. It is IMMUTABLE, webhook-enforced:
 	// re-pointing a Binding would move a namespace's grant silently and leave its bytes on
 	// the old master.
+	//
 	PoolRef *KVCachePoolBindingPoolReferenceApplyConfiguration `json:"poolRef,omitempty"`
 	// Domain is the reuse identity this Binding registers, and it is REQUIRED. Its name maps to the
 	// storage layer's tenant_id and to nothing else, so registering a domain creates a tenant with a
@@ -29,9 +30,11 @@ type KVCachePoolBindingSpecApplyConfiguration struct {
 	// EVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different
 	// ledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent
 	// corruption: the writes succeed, the reads succeed, and the tensors are wrong.
+	//
 	Domain *KVCachePoolBindingDomainApplyConfiguration `json:"domain,omitempty"`
 	// Quota is what this namespace asks of its pool, shaped like the pool's own declared ceiling so
 	// one concept is spelled one way on both sides of the grant.
+	//
 	Quota *KVCachePoolBindingQuotaApplyConfiguration `json:"quota,omitempty"`
 }
 

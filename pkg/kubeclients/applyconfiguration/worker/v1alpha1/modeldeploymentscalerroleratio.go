@@ -12,17 +12,22 @@ import (
 // ModelDeploymentScalerRoleRatio is a relationship two roles keep.
 type ModelDeploymentScalerRoleRatioApplyConfiguration struct {
 	// NumeratorRole is the role whose replica count is the numerator.
+	//
 	NumeratorRole *string `json:"numeratorRole,omitempty"`
 	// DenominatorRole is the role whose replica count is the denominator.
+	//
 	DenominatorRole *string `json:"denominatorRole,omitempty"`
 	// Target is the ratio the projection aims at.
 	//
 	// It is the ratio the planner looks for inside the bounds of every other rule, and it is
 	// what a coupled pair settles on when nothing else decides.
+	//
 	Target *resource.Quantity `json:"target,omitempty"`
 	// Min is the smallest ratio the numerator may hold against the denominator.
+	//
 	Min *resource.Quantity `json:"min,omitempty"`
 	// Max is the largest ratio the numerator may hold against the denominator.
+	//
 	Max *resource.Quantity `json:"max,omitempty"`
 }
 

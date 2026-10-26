@@ -19,6 +19,7 @@ import (
 // the other side of a setting must seed the Secret.
 func TestMain(m *testing.M) {
 	system.LoopbackCtrlClient.Configure(
-		ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build())
+		ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build(),
+	)
 	os.Exit(m.Run())
 }

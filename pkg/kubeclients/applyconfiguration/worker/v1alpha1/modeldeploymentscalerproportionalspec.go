@@ -13,16 +13,19 @@ import (
 // ModelDeploymentScalerProportionalSpec holds the parameters of the Proportional algorithm.
 type ModelDeploymentScalerProportionalSpecApplyConfiguration struct {
 	// Metric is the signal the algorithm scales on.
+	//
 	Metric *workerv1alpha1.ModelDeploymentScalerProportionalMetric `json:"metric,omitempty"`
 	// RoleTargets is the signal one replica of each role is expected to carry.
 	//
 	// Every role the scaler plans for needs a target, because the algorithm divides what it
 	// observed by it to reach a replica count.
+	//
 	RoleTargets []ModelDeploymentScalerRoleTargetApplyConfiguration `json:"roleTargets,omitempty"`
 	// Tolerance is the fraction around the target inside which nothing happens.
 	//
 	// A role whose observed load already sits inside the tolerance holds its replica count, so a
 	// steady deployment does not move for noise.
+	//
 	Tolerance *resource.Quantity `json:"tolerance,omitempty"`
 }
 

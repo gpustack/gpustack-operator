@@ -16,31 +16,39 @@ type ModelDeploymentScalerTokenThroughputSpecApplyConfiguration struct {
 	//
 	// It is the capacity the demand is divided by, so the number of replicas follows from how
 	// many prompt tokens per second one replica is expected to serve.
+	//
 	PrefillTargetTokensPerSecond *resource.Quantity `json:"prefillTargetTokensPerSecond,omitempty"`
 	// DecodeTargetTokensPerSecond is the generation-token rate one Decode replica sustains.
+	//
 	DecodeTargetTokensPerSecond *resource.Quantity `json:"decodeTargetTokensPerSecond,omitempty"`
 	// ServerTargetTokensPerSecond is the token rate one Server replica sustains, over prompt
 	// tokens and generation tokens together.
+	//
 	ServerTargetTokensPerSecond *resource.Quantity `json:"serverTargetTokensPerSecond,omitempty"`
 	// StableWindowSeconds is the window the stable recommendation is computed over.
 	//
 	// The stable window is long enough to smooth a burst, so a short spike does not move the
 	// replica count.
+	//
 	StableWindowSeconds *int32 `json:"stableWindowSeconds,omitempty"`
 	// PanicWindowSeconds is the window the panic recommendation is computed over.
 	//
 	// The panic window is short, so it reacts to a burst that the stable window smooths away.
+	//
 	PanicWindowSeconds *int32 `json:"panicWindowSeconds,omitempty"`
 	// PanicThreshold is the growth rate over the ready replicas that starts a panic.
 	//
 	// A panic holds the replica count up and stops scale-downs until the load settles.
+	//
 	PanicThreshold *resource.Quantity `json:"panicThreshold,omitempty"`
 	// TTFTTargetMilliseconds is the time to first token the role is expected to keep under.
 	//
 	// A role that is observed above this target is a role that needs more replicas, whatever the
 	// token counters say.
+	//
 	TTFTTargetMilliseconds *resource.Quantity `json:"ttftTargetMilliseconds,omitempty"`
 	// ITLTargetMilliseconds is the inter-token latency the role is expected to keep under.
+	//
 	ITLTargetMilliseconds *resource.Quantity `json:"itlTargetMilliseconds,omitempty"`
 }
 

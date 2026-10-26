@@ -12,6 +12,7 @@ type ResourcePoolApplyConfiguration struct {
 	//
 	// It must not be longer than 253 characters and must consist of one or more DNS sub-domains
 	// separated by slashes. This field is immutable.
+	//
 	Name *string `json:"name,omitempty"`
 	// Generation tracks the change in a pool over time. Whenever a driver
 	// changes something about one or more of the resources in a pool, it
@@ -25,12 +26,14 @@ type ResourcePoolApplyConfiguration struct {
 	// Combined with ResourceSliceCount, this mechanism enables consumers to
 	// detect pools which are comprised of multiple ResourceSlices and are
 	// in an incomplete state.
+	//
 	Generation *int64 `json:"generation,omitempty"`
 	// ResourceSliceCount is the total number of ResourceSlices in the pool at this
 	// generation number. Must be greater than zero.
 	//
 	// Consumers can use this to check whether they have seen all ResourceSlices
 	// belonging to the same pool.
+	//
 	ResourceSliceCount *int64 `json:"resourceSliceCount,omitempty"`
 }
 

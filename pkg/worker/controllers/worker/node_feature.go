@@ -156,5 +156,6 @@ func nodeFeatureNodeUpdated(oldNd, newNd *core.Node) bool {
 	// label is compared as the node carries it, which detects every change either mode derives.
 	return !maps.Equal(
 		nodefeature.ConstructNodeCapacityLabels(oldNd, nodefeature.WithManualNodeManagement(true)),
-		nodefeature.ConstructNodeCapacityLabels(newNd, nodefeature.WithManualNodeManagement(true)))
+		nodefeature.ConstructNodeCapacityLabels(newNd, nodefeature.WithManualNodeManagement(true)),
+	)
 }

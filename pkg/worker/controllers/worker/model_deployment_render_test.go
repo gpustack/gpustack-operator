@@ -426,7 +426,8 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("vllm speaks the mooncake handshake", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerNVIDIA, "")
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerNVIDIA, "",
+		)
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=mooncake")
 		assert.Contains(t, sidecar.Args,
@@ -442,7 +443,8 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("vllm on ascend relays through nixlv2", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerAscend, "")
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerAscend, "",
+		)
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=nixlv2",
 			"the Ascend connector speaks the four-null-key handshake the nixlv2 mode relays")
@@ -455,7 +457,8 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("sglang speaks the sglang handshake", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "")
+			workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "",
+		)
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=sglang")
 		assert.NotContains(t, sidecar.Args, "mooncake",
@@ -504,7 +507,8 @@ func TestRenderModelDeploymentRoutingSidecar_SGLangBootstrapPortPairsWithThePref
 
 	sidecar := renderModelDeploymentRoutingSidecar(
 		context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-		workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "")
+		workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "",
+	)
 	sidecarEnv := argEnvValue(t, sidecar.Env, "SGLANG_BOOTSTRAP_PORT")
 
 	assert.Equal(t, engineArg, sidecarEnv,
@@ -889,7 +893,8 @@ func TestRenderModelDeploymentPod_ConnectorPortCollision(t *testing.T) {
 			[]core.ContainerPort{
 				{Name: "http", Protocol: core.ProtocolTCP, ContainerPort: 8000},
 				{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557},
-			}, connector, false)
+			}, connector, false,
+		)
 		require.NoError(t, err)
 
 		var declared int
@@ -1308,7 +1313,8 @@ func TestRenderModelDeploymentPod_AcceleratorRequest(t *testing.T) {
 	pod := renderOne(t, md, newRenderInstanceType())
 
 	accName := nodefeature.GetAcceleratableResourceName(
-		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive,
+	)
 	limits := pod.Spec.Containers[0].Resources.Limits
 	qtyEqual(t, qty("2"), limits[accName], "the declared card count reaches the container")
 	qtyEqual(t, qty("32"), limits[core.ResourceCPU], "the host CPU is derived, not declared")
@@ -1537,7 +1543,8 @@ func TestRenderModelDeploymentPod_ResolvesTheImageAtTwoLevels(t *testing.T) {
 func TestRenderModelDeploymentPod_ClientConfigMount(t *testing.T) {
 	md := newRenderDeployment()
 	conn, err := SynthesizeModelDeploymentConnector(
-		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
+		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA),
+	)
 	require.NoError(t, err)
 
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
@@ -1964,7 +1971,8 @@ func TestConvertModelDeploymentAdditionalVolumes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			vols, mounts := convertModelDeploymentAdditionalVolumes(
-				[]workercore.ModelDeploymentAdditionalVolume{tc.entry})
+				[]workercore.ModelDeploymentAdditionalVolume{tc.entry},
+			)
 
 			assert.Equal(t, []core.Volume{tc.wantVolume}, vols)
 			assert.Equal(t, []core.VolumeMount{tc.wantMount}, mounts)
@@ -1980,9 +1988,11 @@ func TestConvertModelDeploymentAdditionalVolumes(t *testing.T) {
 		}
 
 		prefillVols, _ := convertModelDeploymentAdditionalVolumes(
-			[]workercore.ModelDeploymentAdditionalVolume{entry})
+			[]workercore.ModelDeploymentAdditionalVolume{entry},
+		)
 		decodeVols, _ := convertModelDeploymentAdditionalVolumes(
-			[]workercore.ModelDeploymentAdditionalVolume{entry})
+			[]workercore.ModelDeploymentAdditionalVolume{entry},
+		)
 
 		require.Len(t, prefillVols, 1)
 		require.Len(t, decodeVols, 1)
@@ -2796,7 +2806,8 @@ func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t 
 		t.Helper()
 
 		conn, err := SynthesizeModelDeploymentConnector(
-			connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
+			connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA),
+		)
 		require.NoError(t, err)
 
 		return conn

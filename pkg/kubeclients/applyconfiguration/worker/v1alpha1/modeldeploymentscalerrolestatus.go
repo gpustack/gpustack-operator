@@ -13,44 +13,60 @@ import (
 // ModelDeploymentScalerRoleStatus is what the scaler saw and recommends for one role.
 type ModelDeploymentScalerRoleStatusApplyConfiguration struct {
 	// Name is the role this status belongs to.
+	//
 	Name *string `json:"name,omitempty"`
 	// CurrentReplicas is the replica count the target reports for this role.
+	//
 	CurrentReplicas *int32 `json:"currentReplicas,omitempty"`
 	// ReadyReplicas is the replica count of this role that is ready to serve.
+	//
 	ReadyReplicas *int32 `json:"readyReplicas,omitempty"`
 	// SignalState is how much the scaler trusts what it observed for this role.
 	//
 	// It is Fresh when every required signal was read in the last window, Idle when the role was
 	// read and had nothing to do, Missing when a required signal was absent and Stale when the
 	// window it belongs to has passed.
+	//
 	SignalState *string `json:"signalState,omitempty"`
 	// PromptTokensPerSecond is the prompt-token rate the scaler observed.
+	//
 	PromptTokensPerSecond *resource.Quantity `json:"promptTokensPerSecond,omitempty"`
 	// GenerationTokensPerSecond is the generation-token rate the scaler observed.
+	//
 	GenerationTokensPerSecond *resource.Quantity `json:"generationTokensPerSecond,omitempty"`
 	// RunningRequests is the number of requests the role was running.
+	//
 	RunningRequests *int32 `json:"runningRequests,omitempty"`
 	// WaitingRequests is the number of requests the role was waiting for.
+	//
 	WaitingRequests *int32 `json:"waitingRequests,omitempty"`
 	// KVCacheUsage is how much of the key value cache the role was using.
+	//
 	KVCacheUsage *resource.Quantity `json:"kvCacheUsage,omitempty"`
 	// TTFTMilliseconds is the time to first token the scaler observed.
+	//
 	TTFTMilliseconds *resource.Quantity `json:"ttftMilliseconds,omitempty"`
 	// ITLMilliseconds is the inter-token latency the scaler observed.
+	//
 	ITLMilliseconds *resource.Quantity `json:"itlMilliseconds,omitempty"`
 	// RawRecommendedReplicas is the replica count the algorithm asked for, before the bounds and
 	// the ratios were applied.
+	//
 	RawRecommendedReplicas *int32 `json:"rawRecommendedReplicas,omitempty"`
 	// ConstrainedReplicas is the replica count the planner settled on after the bounds and the
 	// ratios were applied.
+	//
 	ConstrainedReplicas *int32 `json:"constrainedReplicas,omitempty"`
 	// Reason says why the recommendation is what it is.
+	//
 	Reason *string `json:"reason,omitempty"`
 	// LastScaleUpTime is when this role last grew.
+	//
 	LastScaleUpTime *v1.Time `json:"lastScaleUpTime,omitempty"`
 	// StabilizationHistory is the recommendation this role received over the last window.
 	//
 	// It is bounded, and it is what lets the scale-down floor survive a restart.
+	//
 	StabilizationHistory []ModelDeploymentScalerStabilizationSampleApplyConfiguration `json:"stabilizationHistory,omitempty"`
 }
 

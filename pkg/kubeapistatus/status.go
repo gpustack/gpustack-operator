@@ -64,7 +64,7 @@ type paths[T ~string] []path[T]
 
 func (ps paths[T]) GetSummary(st any) (phase, phaseMessage string) {
 	stValue := reflect.ValueOf(st)
-	for stValue.Kind() == reflect.Interface || stValue.Kind() == reflect.Ptr {
+	for stValue.Kind() == reflect.Interface || stValue.Kind() == reflect.Pointer {
 		stValue = stValue.Elem()
 	}
 
@@ -115,7 +115,7 @@ func (ps paths[T]) Summarize(st any) {
 	phase, phaseMessage := ps.GetSummary(st)
 
 	stValue := reflect.ValueOf(st)
-	for stValue.Kind() == reflect.Interface || stValue.Kind() == reflect.Ptr {
+	for stValue.Kind() == reflect.Interface || stValue.Kind() == reflect.Pointer {
 		stValue = stValue.Elem()
 	}
 
@@ -185,7 +185,7 @@ func (f path[T]) Walk(conditionsField reflect.Value, phase, phaseMessage string)
 
 		for i := 0; i < conditionsField.Len(); i++ {
 			cValue := conditionsField.Index(i)
-			for cValue.Kind() == reflect.Interface || cValue.Kind() == reflect.Ptr {
+			for cValue.Kind() == reflect.Interface || cValue.Kind() == reflect.Pointer {
 				cValue = cValue.Elem()
 			}
 

@@ -11,11 +11,14 @@ package v1alpha1
 type NodeModelStoreKubeletApplyConfiguration struct {
 	// NodefsAvailable is evictionHard["nodefs.available"] as kubelet reports it, a percentage such
 	// as "10%" or a quantity such as "20Gi"; empty when kubelet sets none.
+	//
 	NodefsAvailable *string `json:"nodefsAvailable,omitempty"`
 	// ImagefsAvailable is evictionHard["imagefs.available"], in the same forms; empty when kubelet
 	// sets none.
+	//
 	ImagefsAvailable *string `json:"imagefsAvailable,omitempty"`
 	// ImageGCHighThresholdPercent is the disk usage at which kubelet starts collecting images.
+	//
 	ImageGCHighThresholdPercent *int32 `json:"imageGCHighThresholdPercent,omitempty"`
 }
 

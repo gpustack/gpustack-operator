@@ -89,7 +89,8 @@ func validateDeviceInventory(devs *workercore.Devices) error {
 			ids[card.ID] = struct{}{}
 			if _, seen := indices[card.Index]; seen {
 				return fmt.Errorf(
-					"accelerator index %d is declared twice in group %q", card.Index, group.ID)
+					"accelerator index %d is declared twice in group %q", card.Index, group.ID,
+				)
 			}
 			indices[card.Index] = struct{}{}
 		}
@@ -215,7 +216,8 @@ func validateRecordedClaims(
 		if group.Manufacturer != spec.Manufacturer {
 			return fmt.Errorf(
 				"pod %s container %q: group %q claims manufacturer %q, the inventory says %q",
-				ctrlcli.ObjectKeyFromObject(pod), container, group.ID, group.Manufacturer, spec.Manufacturer)
+				ctrlcli.ObjectKeyFromObject(pod), container, group.ID, group.Manufacturer, spec.Manufacturer,
+			)
 		}
 
 		seen := make(map[string]struct{}, len(group.Accelerators))
@@ -225,7 +227,8 @@ func validateRecordedClaims(
 			if cardSpec == nil {
 				return fmt.Errorf(
 					"pod %s container %q: names accelerator %q in group %q, which the inventory does not have",
-					ctrlcli.ObjectKeyFromObject(pod), container, card.ID, group.ID)
+					ctrlcli.ObjectKeyFromObject(pod), container, card.ID, group.ID,
+				)
 			}
 			if _, duplicate := seen[card.ID]; duplicate {
 				return fmt.Errorf("pod %s container %q: names accelerator %q in group %q twice",
@@ -235,7 +238,8 @@ func validateRecordedClaims(
 			if card.Index != cardSpec.Index {
 				return fmt.Errorf(
 					"pod %s container %q: accelerator %q in group %q records index %d, the inventory says %d",
-					ctrlcli.ObjectKeyFromObject(pod), container, card.ID, group.ID, card.Index, cardSpec.Index)
+					ctrlcli.ObjectKeyFromObject(pod), container, card.ID, group.ID, card.Index, cardSpec.Index,
+				)
 			}
 			if err := validateCardModeAndUnits(pod, container, card); err != nil {
 				return err
@@ -277,7 +281,8 @@ func validateCardModeAndUnits(
 	if limit := int32(nodefeature.ResourceMaxUnits); card.Allocated > limit {
 		return fmt.Errorf(
 			"pod %s container %q: accelerator %q records %d allocated units, more than the %d a card holds",
-			ctrlcli.ObjectKeyFromObject(pod), container, card.ID, card.Allocated, limit)
+			ctrlcli.ObjectKeyFromObject(pod), container, card.ID, card.Allocated, limit,
+		)
 	}
 	// A SHARED SLICE'S UNIT BOUND IS THE CARD DIVIDED BY THE OWNER LIMIT. SharedResourceMaxSize is
 	// how many owners a shared card admits, not how many units one of them may hold, and reading it
@@ -286,7 +291,8 @@ func validateCardModeAndUnits(
 		if limit := int32(nodefeature.ResourceMaxUnits) / int32(nodefeature.SharedResourceMaxSize); card.Allocated > limit {
 			return fmt.Errorf(
 				"pod %s container %q: shared accelerator %q records %d units, more than the %d a shared slice holds",
-				ctrlcli.ObjectKeyFromObject(pod), container, card.ID, card.Allocated, limit)
+				ctrlcli.ObjectKeyFromObject(pod), container, card.ID, card.Allocated, limit,
+			)
 		}
 	}
 

@@ -134,7 +134,8 @@ func validateKVCachePoolSpec(kvcp *workercore.KVCachePool) field.ErrorList {
 	// pool declares bounds every ceiling written under it, so the two cannot hold separate opinions
 	// about which numbers are usable.
 	errs = append(errs, mooncake.ValidateQuotaPolicyQuota(
-		kvcp.Spec.Quota.Total, specPath.Child("quota", "total"))...)
+		kvcp.Spec.Quota.Total, specPath.Child("quota", "total"),
+	)...)
 
 	return errs
 }
@@ -188,7 +189,8 @@ func (r *KVCachePoolWebhook) validateKVCachePoolBackend(
 		"backend %q runs without multi-tenancy: it holds no tenant ledger, so no per-tenant quota "+
 			"is in force — every write falls into the default tenant, bounded only by the store's "+
 			"global capacity — and the master serves exactly one reuse domain",
-		key.Name)}, nil
+		key.Name,
+	)}, nil
 }
 
 // validateKVCachePoolImmutable freezes the reference a pool's whole identity rests on.

@@ -574,7 +574,8 @@ func (r *KVCacheBackendReconciler) observeLeader(
 		reason := "ServicePlaneNotActive"
 		message := fmt.Sprintf(
 			"the leader is up in role %q and reports ha_state %q, but its service plane is not active",
-			clipFaultDetail(health.Role), clipFaultDetail(health.HAState))
+			clipFaultDetail(health.Role), clipFaultDetail(health.HAState),
+		)
 		KVCacheBackendConditionLeaderAvailable.False(holder, reason, message)
 		KVCacheBackendConditionCapacityObserved.False(holder, reason,
 			"the leader is up but its service plane is not active, so it holds no capacity to report")
@@ -674,7 +675,8 @@ func (r *KVCacheBackendReconciler) leaderPodContainerFailure(
 			if t := status.LastTerminationState.Terminated; t != nil && status.RestartCount > 0 {
 				return "LeaderCrashLooping", fmt.Sprintf(
 					"the leader's container has restarted %d time(s); it last exited with code %d: %s",
-					status.RestartCount, t.ExitCode, clipFaultDetail(t.Message)), true
+					status.RestartCount, t.ExitCode, clipFaultDetail(t.Message),
+				), true
 			}
 			// Waiting with a reason is the kubelet saying it has stopped trying for now, and a
 			// container that never ran has nothing above to report. ContainerCreating and
@@ -1191,7 +1193,8 @@ func memberPodStuck(pod *core.Pod) (memberPodFault, bool) {
 					"member pod %s init container %s has restarted %d time(s); it last exited with "+
 						"code %d: %s",
 					pod.Name, status.Name, status.RestartCount, t.ExitCode,
-					clipFaultDetail(t.Message)),
+					clipFaultDetail(t.Message),
+				),
 			}, true
 		}
 		if w := status.State.Waiting; w != nil && isTerminalWaitReason(w.Reason) {
@@ -1211,7 +1214,8 @@ func memberPodStuck(pod *core.Pod) (memberPodFault, bool) {
 				reason: "MemberCrashLooping",
 				detail: fmt.Sprintf(
 					"member pod %s has restarted %d time(s); it last exited with code %d: %s",
-					pod.Name, status.RestartCount, t.ExitCode, clipFaultDetail(t.Message)),
+					pod.Name, status.RestartCount, t.ExitCode, clipFaultDetail(t.Message),
+				),
 			}, true
 		}
 		if w := status.State.Waiting; w != nil && isTerminalWaitReason(w.Reason) {
@@ -1711,7 +1715,8 @@ func alignOwnedIdentity(
 	if !renderedForKVCacheBackend(actual, kvcb) {
 		return false, fmt.Errorf(
 			"%T %q already exists and carries no note of this backend: rename or remove it, "+
-				"this operator will not take it over", actual, actual.GetName())
+				"this operator will not take it over", actual, actual.GetName(),
+		)
 	}
 
 	changed := restoreRenderedLabels(actual, expected)
@@ -1758,7 +1763,8 @@ func (r *KVCacheBackendReconciler) syncHARBAC(
 				// alignOwnedIdentity.
 				changed, err := alignOwnedIdentity(aSA, eSA, kvcb)
 				return aSA, !changed, err
-			}))
+			},
+		))
 	if err != nil {
 		logger.Error(err, "sync kv cache backend ha service account")
 		return err
@@ -1807,7 +1813,8 @@ func (r *KVCacheBackendReconciler) syncHARBAC(
 				return fmt.Errorf(
 					"role binding %q already exists, bound to %s/%s and carrying no note of this "+
 						"backend: rename or remove it, this operator will not delete it",
-					name, aBinding.RoleRef.Kind, aBinding.RoleRef.Name)
+					name, aBinding.RoleRef.Kind, aBinding.RoleRef.Name,
+				)
 			}
 			logger.Info("recreating a role binding whose roleRef does not match",
 				"name", name, "actual", aBinding.RoleRef.Name, "expected", eBinding.RoleRef.Name)
@@ -1833,7 +1840,8 @@ func (r *KVCacheBackendReconciler) syncHARBAC(
 					changed = true
 				}
 				return aBinding, !changed, nil
-			}))
+			},
+		))
 	if err != nil {
 		logger.Error(err, "sync kv cache backend ha role binding")
 		return err
@@ -2216,7 +2224,8 @@ func (r *KVCacheBackendReconciler) pruneRemovedMemberWorkloads(
 	err := r.Client.List(ctx, dss,
 		ctrlcli.InNamespace(kuberess.SystemNamespaceName),
 		ctrlcli.MatchingLabels(
-			systemmeta.GetResourcesLabelSetOfType[map[string]string](kvcache.ResourceType)))
+			systemmeta.GetResourcesLabelSetOfType[map[string]string](kvcache.ResourceType),
+		))
 	if err != nil {
 		return err
 	}
@@ -2700,7 +2709,8 @@ func (r *KVCacheBackendReconciler) deleteRenderedWorkloads(
 	err = r.Client.List(ctx, dss,
 		ctrlcli.InNamespace(kuberess.SystemNamespaceName),
 		ctrlcli.MatchingLabels(
-			systemmeta.GetResourcesLabelSetOfType[map[string]string](kvcache.ResourceType)))
+			systemmeta.GetResourcesLabelSetOfType[map[string]string](kvcache.ResourceType),
+		))
 	if err != nil {
 		return remaining, err
 	}
@@ -2746,7 +2756,8 @@ func (r *KVCacheBackendReconciler) deleteOwnedWorkload(
 	if !renderedForKVCacheBackend(obj, kvcb) {
 		ctrllog.FromContext(ctx).V(2).Info(
 			"skipping an object that carries this backend's derived name and no note of it",
-			"object", fmt.Sprintf("%T", obj), "name", key.Name)
+			"object", fmt.Sprintf("%T", obj), "name", key.Name,
+		)
 		return false, nil
 	}
 

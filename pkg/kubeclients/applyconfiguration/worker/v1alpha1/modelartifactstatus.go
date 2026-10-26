@@ -16,15 +16,18 @@ type ModelArtifactStatusApplyConfiguration struct {
 	// Resolved is what the source was resolved to. It is written once and never changes afterwards:
 	// a later revalidation moves only LastValidatedTime and the conditions. It is absent until the
 	// first resolution succeeds.
+	//
 	Resolved *ModelArtifactResolvedApplyConfiguration `json:"resolved,omitempty"`
 	// Nodes is where the content is: how many nodes hold it ready, are downloading it or failed to,
 	// and how far the downloading ones are. It counts the content, the manifest digest, so artifacts
 	// with the same digest see the same nodes; it holds numbers only. Absent for a claim source and
 	// before the first resolution.
+	//
 	Nodes *ModelArtifactNodesApplyConfiguration `json:"nodes,omitempty"`
 	// Conditions: Resolved says whether the source is bound to its immutable identity and the most
 	// recent access check passed; Degraded says a resolution or revalidation is failing, including
 	// one that has not yet revoked access.
+	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 }
 

@@ -14,15 +14,19 @@ import (
 // whose content is not changing writes nothing.
 type NodeModelStoreStatusApplyConfiguration struct {
 	// ObservedGeneration is the spec generation the plugin applies.
+	//
 	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
 	// Capacity is the cache filesystem's size and usage.
+	//
 	Capacity *NodeModelStoreCapacityApplyConfiguration `json:"capacity,omitempty"`
 	// Models is the content on the node, keyed by digest. When more is on disk than fits, the
 	// referenced entries are kept first and then the most recently used, and the Ready condition's
 	// message counts the omission.
+	//
 	Models []NodeModelStoreModelApplyConfiguration `json:"models,omitempty"`
 	// Conditions: Ready says the plugin serves and applies spec's generation; CapacityLow says usage
 	// is above the high watermark with nothing the plugin may remove.
+	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 }
 

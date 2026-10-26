@@ -12,18 +12,24 @@ import (
 // ModelDeploymentScalerCommitStatus is the decision the scaler last committed.
 type ModelDeploymentScalerCommitStatusApplyConfiguration struct {
 	// DecisionID identifies the decision.
+	//
 	DecisionID *string `json:"decisionID,omitempty"`
 	// Term is the binding term the decision was written under.
+	//
 	Term *int64 `json:"term,omitempty"`
 	// Vector is the replica count per role the decision committed.
+	//
 	Vector map[string]int32 `json:"vector,omitempty"`
 	// BaselineVector is the replica count per role the decision started from.
 	//
 	// It is the vector the scaler restores when the decision has to be retracted.
+	//
 	BaselineVector map[string]int32 `json:"baselineVector,omitempty"`
 	// Timestamp is when the decision was committed.
+	//
 	Timestamp *v1.Time `json:"timestamp,omitempty"`
 	// TargetGeneration is the generation of the target the decision was computed from.
+	//
 	TargetGeneration *int64 `json:"targetGeneration,omitempty"`
 }
 

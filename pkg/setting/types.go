@@ -20,7 +20,7 @@ import (
 type Prop uint8
 
 const (
-	PropEditable Prop = 1 << (iota)
+	PropEditable Prop = 1 << iota
 	PropPrivate
 	PropSensitive
 )

@@ -17,11 +17,13 @@ type KVCacheBackendMemberLocalDiskEvictionWatermarkApplyConfiguration struct {
 	// the store takes a fraction of its own quota rather than a size, and a size here would restate
 	// a figure Capacity already carries — one that would quietly stop matching the moment Capacity
 	// moved.
+	//
 	High *int32 `json:"high,omitempty"`
 	// Low is the percentage of Capacity eviction stops at, and it MUST be below High. Equal marks
 	// would make every write past the mark evict, which is the thrashing a band exists to prevent.
 	// The store refuses the pair when its member starts; admission refuses it here instead, where
 	// the message reaches whoever wrote it.
+	//
 	Low *int32 `json:"low,omitempty"`
 }
 

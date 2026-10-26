@@ -667,7 +667,8 @@ func TestKVCachePoolBindingWebhook_APoolThatCannotBeReadIsNotAPoolThatIsGone(t *
 	holder.Spec.PoolRef.Name = holderPool.Name
 
 	base := newKVCachePoolBindingWebhook(
-		newKVCachePool(), holderPool, holder, newKVCacheBackend())
+		newKVCachePool(), holderPool, holder, newKVCacheBackend(),
+	)
 	wh := &KVCachePoolBindingWebhook{
 		Client:    unreadableKVCachePoolClient{Client: base.Client, pool: holderPool.Name},
 		APIReader: unreadableKVCachePoolClient{Client: base.Client, pool: holderPool.Name},
@@ -712,7 +713,8 @@ func TestKVCachePoolBindingWebhook_EverySharedMasterIsAsked(t *testing.T) {
 
 	wh := newKVCachePoolBindingWebhook(
 		ownPool, okPool, badPool, okHolder, badHolder,
-		newMultiTenantKVCacheBackend(), ledgerless)
+		newMultiTenantKVCacheBackend(), ledgerless,
+	)
 
 	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
 	require.Error(t, err,
@@ -741,7 +743,8 @@ func TestKVCachePoolBindingWebhook_TheObservationIsReadOffEitherPool(t *testing.
 	holder.Spec.PoolRef.Name = holderPool.Name
 
 	wh := newKVCachePoolBindingWebhook(
-		ownPool, holderPool, holder, newExternalKVCachePoolBackend())
+		ownPool, holderPool, holder, newExternalKVCachePoolBackend(),
+	)
 
 	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
 	require.Error(t, err,
@@ -758,7 +761,8 @@ func TestKVCachePoolBindingWebhook_TheObservationIsReadOffEitherPool(t *testing.
 // exactly what the fall-through did not establish, in the one place an operator reads at that moment.
 func TestKVCachePoolBindingWebhook_TheWarningClaimsNoSeparationItDidNotEstablish(t *testing.T) {
 	wh := newKVCachePoolBindingWebhook(
-		newKVCachePool(), newExternalKVCachePoolBackend(), otherKVCachePoolBinding("team-b-batch"))
+		newKVCachePool(), newExternalKVCachePoolBackend(), otherKVCachePoolBinding("team-b-batch"),
+	)
 
 	warnings, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
 	require.NoError(t, err)
@@ -777,7 +781,8 @@ func TestKVCachePoolBindingWebhook_TheWarningClaimsNoSeparationItDidNotEstablish
 // what can be changed here; a message naming only the collision leaves the reader with no next step.
 func TestKVCachePoolBindingWebhook_TheSeparationRefusalSaysWhatToDo(t *testing.T) {
 	wh := newKVCachePoolBindingWebhook(
-		newKVCachePool(), newSingleTenantKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"))
+		newKVCachePool(), newSingleTenantKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"),
+	)
 
 	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
 	require.Error(t, err)
@@ -806,7 +811,8 @@ func TestKVCachePoolBindingWebhook_TheSeparationRefusalSaysWhatToDo(t *testing.T
 // removes a finalizer, which would leave the Binding undeletable.
 func TestKVCachePoolBindingWebhook_SeparationIsNotRejudgedOnUpdate(t *testing.T) {
 	wh := newKVCachePoolBindingWebhook(
-		newKVCachePool(), newSingleTenantKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"))
+		newKVCachePool(), newSingleTenantKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"),
+	)
 
 	// The collision is real: the same cluster state refuses this object at CREATE.
 	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
@@ -847,7 +853,8 @@ func storedKVCachePoolBinding(t *testing.T, namespace, name, pool string) *worke
 
 	var internal apiextensions.JSONSchemaProps
 	require.NoError(t, extension.Convert_v1_JSONSchemaProps_To_apiextensions_JSONSchemaProps(
-		crd.Spec.Versions[0].Schema.OpenAPIV3Schema, &internal, nil))
+		crd.Spec.Versions[0].Schema.OpenAPIV3Schema, &internal, nil,
+	))
 	structural, err := structuralschema.NewStructural(&internal)
 	require.NoError(t, err)
 

@@ -22,6 +22,7 @@ type CSIDriverSpecApplyConfiguration struct {
 	// Otherwise the attach operation will be called.
 	//
 	// This field is immutable.
+	//
 	AttachRequired *bool `json:"attachRequired,omitempty"`
 	// podInfoOnMount indicates this CSI volume driver requires additional pod information (like podName, podUID, etc.)
 	// during mount operations, if set to true.
@@ -48,6 +49,7 @@ type CSIDriverSpecApplyConfiguration struct {
 	// via a command line parameter of the driver.
 	//
 	// This field was immutable in Kubernetes < 1.29 and now is mutable.
+	//
 	PodInfoOnMount *bool `json:"podInfoOnMount,omitempty"`
 	// volumeLifecycleModes defines what kind of volumes this CSI volume driver supports.
 	// The default if the list is empty is "Persistent", which is the usage defined by the
@@ -63,6 +65,7 @@ type CSIDriverSpecApplyConfiguration struct {
 	//
 	// This field is beta.
 	// This field is immutable.
+	//
 	VolumeLifecycleModes []storagev1.VolumeLifecycleMode `json:"volumeLifecycleModes,omitempty"`
 	// storageCapacity indicates that the CSI volume driver wants pod scheduling to consider the storage
 	// capacity that the driver deployment will report by creating
@@ -78,6 +81,7 @@ type CSIDriverSpecApplyConfiguration struct {
 	// capacity information has been published.
 	//
 	// This field was immutable in Kubernetes <= 1.22 and now is mutable.
+	//
 	StorageCapacity *bool `json:"storageCapacity,omitempty"`
 	// fsGroupPolicy defines if the underlying volume supports changing ownership and
 	// permission of the volume before being mounted.
@@ -89,6 +93,7 @@ type CSIDriverSpecApplyConfiguration struct {
 	// to determine if Kubernetes should modify ownership and permissions of the volume.
 	// With the default policy the defined fsGroup will only be applied
 	// if a fstype is defined and the volume's access mode contains ReadWriteOnce.
+	//
 	FSGroupPolicy *storagev1.FSGroupPolicy `json:"fsGroupPolicy,omitempty"`
 	// tokenRequests indicates the CSI driver needs pods' service account
 	// tokens it is mounting volume for to do necessary authentication. Kubelet
@@ -105,6 +110,7 @@ type CSIDriverSpecApplyConfiguration struct {
 	// Note: Audience in each TokenRequest should be different and at
 	// most one token is empty string. To receive a new token after expiry,
 	// RequiresRepublish can be used to trigger NodePublishVolume periodically.
+	//
 	TokenRequests []TokenRequestApplyConfiguration `json:"tokenRequests,omitempty"`
 	// requiresRepublish indicates the CSI driver wants `NodePublishVolume`
 	// being periodically called to reflect any possible change in the mounted
@@ -113,6 +119,7 @@ type CSIDriverSpecApplyConfiguration struct {
 	// Note: After a successful initial NodePublishVolume call, subsequent calls
 	// to NodePublishVolume should only update the contents of the volume. New
 	// mount points will not be seen by a running container.
+	//
 	RequiresRepublish *bool `json:"requiresRepublish,omitempty"`
 	// seLinuxMount specifies if the CSI driver supports "-o context"
 	// mount option.
@@ -131,6 +138,7 @@ type CSIDriverSpecApplyConfiguration struct {
 	// This is typical for volumes that represent subdirectories of a bigger shared filesystem.
 	//
 	// Default is "false".
+	//
 	SELinuxMount *bool `json:"seLinuxMount,omitempty"`
 	// nodeAllocatableUpdatePeriodSeconds specifies the interval between periodic updates of
 	// the CSINode allocatable capacity for this driver. When set, both periodic updates and
@@ -138,9 +146,10 @@ type CSIDriverSpecApplyConfiguration struct {
 	// occur (neither periodic nor upon detecting capacity-related failures), and the
 	// allocatable.count remains static. The minimum allowed value for this field is 10 seconds.
 	//
-	// This is a beta feature and requires the MutableCSINodeAllocatableCount feature gate to be enabled.
+	// This feature requires the MutableCSINodeAllocatableCount feature gate to be enabled.
 	//
 	// This field is mutable.
+	//
 	NodeAllocatableUpdatePeriodSeconds *int64 `json:"nodeAllocatableUpdatePeriodSeconds,omitempty"`
 	// serviceAccountTokenInSecrets is an opt-in for CSI drivers to indicate that
 	// service account tokens should be passed via the Secrets field in NodePublishVolumeRequest
@@ -161,7 +170,26 @@ type CSIDriverSpecApplyConfiguration struct {
 	// CSIDriver specs that set this field without TokenRequests.
 	//
 	// Default behavior if unset is to pass tokens in the VolumeContext field.
+	//
 	ServiceAccountTokenInSecrets *bool `json:"serviceAccountTokenInSecrets,omitempty"`
+	// PreventPodSchedulingIfMissing indicates that the CSI driver wants to prevent pod
+	// scheduling if the CSI driver on the node is missing.
+	//
+	// Enabling this option will prevent the scheduler (or any other
+	// component which embeds default scheduler such as cluster-autoscaler) from
+	// scheduling pods to nodes where CSI driver is not installed.
+	//
+	// For components(such as cluster-autoscaler) that embed the scheduler and run
+	// pod placement simulations using scheduler plugins, they MUST be aware of
+	// CSI driver registration information via CSINode object. They must create simulated
+	// CSINode objects in addition to Node objects during scheduling simulation, otherwise
+	// if PreventPodSchedulingIfMissing is enabled globally for CSIDriver object, any
+	// newly created node may be rejected by the scheduler because of missing CSI driver
+	// information from the node.
+	//
+	// This is an alpha feature and requires the VolumeLimitScaling feature gate to be enabled.
+	// Default is "false".
+	PreventPodSchedulingIfMissing *bool `json:"preventPodSchedulingIfMissing,omitempty"`
 }
 
 // CSIDriverSpecApplyConfiguration constructs a declarative configuration of the CSIDriverSpec type for use with
@@ -254,5 +282,13 @@ func (b *CSIDriverSpecApplyConfiguration) WithNodeAllocatableUpdatePeriodSeconds
 // If called multiple times, the ServiceAccountTokenInSecrets field is set to the value of the last call.
 func (b *CSIDriverSpecApplyConfiguration) WithServiceAccountTokenInSecrets(value bool) *CSIDriverSpecApplyConfiguration {
 	b.ServiceAccountTokenInSecrets = &value
+	return b
+}
+
+// WithPreventPodSchedulingIfMissing sets the PreventPodSchedulingIfMissing field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PreventPodSchedulingIfMissing field is set to the value of the last call.
+func (b *CSIDriverSpecApplyConfiguration) WithPreventPodSchedulingIfMissing(value bool) *CSIDriverSpecApplyConfiguration {
+	b.PreventPodSchedulingIfMissing = &value
 	return b
 }

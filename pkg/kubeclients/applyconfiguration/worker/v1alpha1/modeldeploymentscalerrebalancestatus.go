@@ -13,22 +13,30 @@ import (
 // another.
 type ModelDeploymentScalerRebalanceStatusApplyConfiguration struct {
 	// ReceiverRole is the role that receives the replica.
+	//
 	ReceiverRole *string `json:"receiverRole,omitempty"`
 	// DonorRole is the role that gives the replica.
+	//
 	DonorRole *string `json:"donorRole,omitempty"`
 	// DonorTargetReplicas is the replica count the donor is heading for.
+	//
 	DonorTargetReplicas *int32 `json:"donorTargetReplicas,omitempty"`
 	// ReceiverTargetReplicas is the replica count the receiver is heading for.
+	//
 	ReceiverTargetReplicas *int32 `json:"receiverTargetReplicas,omitempty"`
 	// StartedAt is when the transaction began.
+	//
 	StartedAt *v1.Time `json:"startedAt,omitempty"`
 	// ExhaustionEpisodeGeneration counts the exhaustion episodes the transaction belongs to.
 	//
 	// It keeps one episode from draining more donors than it should.
+	//
 	ExhaustionEpisodeGeneration *int64 `json:"exhaustionEpisodeGeneration,omitempty"`
 	// DonationAttempted says whether the donor was already asked to give the replica.
+	//
 	DonationAttempted *bool `json:"donationAttempted,omitempty"`
 	// Reason says why the transaction is where it is.
+	//
 	Reason *string `json:"reason,omitempty"`
 }
 

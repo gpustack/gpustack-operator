@@ -145,7 +145,8 @@ func modelDeploymentCompileCacheManufacturer(it *worker.InstanceType) (string, e
 	manufacturer := strings.ToLower(strings.TrimSpace(it.Status.Detail.Manufacturer))
 	if manufacturer == "" {
 		return "", fmt.Errorf(
-			"instance type %q is acceleratable but has no manufacturer in status", it.Name)
+			"instance type %q is acceleratable but has no manufacturer in status", it.Name,
+		)
 	}
 
 	return manufacturer, nil
@@ -168,7 +169,8 @@ func modelDeploymentCompileCacheModelIdentity(in ModelDeploymentCompileCacheInpu
 	}
 
 	return modelDeploymentCompileCacheIdentityHex(
-		stringx.SumBySHA256(name)), nil
+		stringx.SumBySHA256(name),
+	), nil
 }
 
 // modelDeploymentCompileCacheArtifactIdentity is the identity of the ModelArtifact the
@@ -178,7 +180,8 @@ func modelDeploymentCompileCacheArtifactIdentity(ma *workercore.ModelArtifact) (
 	case ma.Spec.Source.HuggingFace != nil || ma.Spec.Source.ModelScope != nil:
 		if ma.Status.Resolved != nil && ma.Status.Resolved.ManifestDigest != "" {
 			hexDigits := strings.ToLower(strings.TrimPrefix(
-				ma.Status.Resolved.ManifestDigest, modelDeploymentCompileCacheDigestPrefix))
+				ma.Status.Resolved.ManifestDigest, modelDeploymentCompileCacheDigestPrefix,
+			))
 			if len(hexDigits) >= modelDeploymentCompileCacheIdentityDigits &&
 				modelDeploymentCompileCacheAllHex(hexDigits) {
 				return modelDeploymentCompileCacheIdentityHex(hexDigits), nil
@@ -189,7 +192,8 @@ func modelDeploymentCompileCacheArtifactIdentity(ma *workercore.ModelArtifact) (
 		// the weights, so a re-resolved artifact lands in a fresh directory instead of reading
 		// artifacts compiled for a repository it no longer names.
 		return modelDeploymentCompileCacheIdentityHex(
-			stringx.SumBySHA256(string(ma.UID))), nil
+			stringx.SumBySHA256(string(ma.UID)),
+		), nil
 
 	case ma.Spec.Source.Image != nil:
 		reference := ma.Spec.Source.Image.Reference
@@ -198,7 +202,8 @@ func modelDeploymentCompileCacheArtifactIdentity(ma *workercore.ModelArtifact) (
 		}
 
 		return modelDeploymentCompileCacheIdentityHex(
-			stringx.SumBySHA256(reference)), nil
+			stringx.SumBySHA256(reference),
+		), nil
 
 	case ma.Spec.Source.PersistentVolumeClaim != nil:
 		claim := ma.Spec.Source.PersistentVolumeClaim
@@ -220,7 +225,8 @@ func modelDeploymentCompileCacheRenderIdentity(in ModelDeploymentCompileCacheInp
 		switch {
 		case a.ManifestDigest != "":
 			hexDigits := strings.ToLower(strings.TrimPrefix(
-				a.ManifestDigest, modelDeploymentCompileCacheDigestPrefix))
+				a.ManifestDigest, modelDeploymentCompileCacheDigestPrefix,
+			))
 			if len(hexDigits) < modelDeploymentCompileCacheIdentityDigits ||
 				!modelDeploymentCompileCacheAllHex(hexDigits) {
 				return "", fmt.Errorf("the artifact manifest digest %q is not a hexadecimal address",
@@ -230,16 +236,19 @@ func modelDeploymentCompileCacheRenderIdentity(in ModelDeploymentCompileCacheInp
 			return modelDeploymentCompileCacheIdentityHex(hexDigits), nil
 		case a.ArtifactUID != "":
 			return modelDeploymentCompileCacheIdentityHex(
-				stringx.SumBySHA256(a.ArtifactUID)), nil
+				stringx.SumBySHA256(a.ArtifactUID),
+			), nil
 		case a.Repository != "" || a.Revision != "":
 			return modelDeploymentCompileCacheIdentityHex(stringx.SumBySHA256(
-				a.Hub + "/" + a.Repository + "@" + a.Revision)), nil
+				a.Hub + "/" + a.Repository + "@" + a.Revision,
+			)), nil
 		}
 
 		// A hub artifact that resolved to nothing at all is still the repository it names, and
 		// two roles pointing at one repository run the same code against the same weights.
 		return modelDeploymentCompileCacheIdentityHex(
-			stringx.SumBySHA256(in.Deployment.Spec.Model.Name)), nil
+			stringx.SumBySHA256(in.Deployment.Spec.Model.Name),
+		), nil
 
 	case workercore.ModelDeploymentModelDeliveryImage:
 		if digest, ok := modelDeploymentCompileCacheOCIDigest(a.ImageReference); ok {
@@ -247,7 +256,8 @@ func modelDeploymentCompileCacheRenderIdentity(in ModelDeploymentCompileCacheInp
 		}
 
 		return modelDeploymentCompileCacheIdentityHex(
-			stringx.SumBySHA256(a.ImageReference)), nil
+			stringx.SumBySHA256(a.ImageReference),
+		), nil
 
 	case workercore.ModelDeploymentModelDeliveryPVC:
 		artifactName := a.ArtifactName
@@ -257,7 +267,8 @@ func modelDeploymentCompileCacheRenderIdentity(in ModelDeploymentCompileCacheInp
 
 		return modelDeploymentCompileCacheIdentityHex(stringx.SumBySHA256(
 			in.Deployment.Namespace + "/" + artifactName + "/" + a.ArtifactUID + "/" +
-				a.ClaimName + "/" + a.Path)), nil
+				a.ClaimName + "/" + a.Path,
+		)), nil
 	}
 
 	return "", fmt.Errorf("unsupported model delivery %q", a.Delivery)
@@ -692,15 +703,15 @@ func modelDeploymentCompileCacheEnv(env []workercore.ModelDeploymentEnvVar) []st
 // and container VolumeMount for a managed role's compilation cache.
 func modelDeploymentCompileCacheVolumes(subPath string) (core.Volume, core.VolumeMount) {
 	return core.Volume{
-			Name: ModelDeploymentCompileCacheVolumeName,
-			VolumeSource: core.VolumeSource{HostPath: &core.HostPathVolumeSource{
-				Path: path.Join(DefaultModelDeploymentCompileCacheHostDir, subPath),
-				Type: ptr.To(core.HostPathDirectoryOrCreate),
-			}},
-		}, core.VolumeMount{
-			Name:      ModelDeploymentCompileCacheVolumeName,
-			MountPath: ModelDeploymentCompileCacheMountPath,
-		}
+		Name: ModelDeploymentCompileCacheVolumeName,
+		VolumeSource: core.VolumeSource{HostPath: &core.HostPathVolumeSource{
+			Path: path.Join(DefaultModelDeploymentCompileCacheHostDir, subPath),
+			Type: ptr.To(core.HostPathDirectoryOrCreate),
+		}},
+	}, core.VolumeMount{
+		Name:      ModelDeploymentCompileCacheVolumeName,
+		MountPath: ModelDeploymentCompileCacheMountPath,
+	}
 }
 
 // modelDeploymentCompileCacheMountOverridden reports whether an existing container mount already

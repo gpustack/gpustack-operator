@@ -154,5 +154,6 @@ func (s *server) ensureShareEnabled(accel *workercore.Accelerator) error {
 	return fmt.Errorf(
 		"enable container-share mode of card %d device %d: %w; "+
 			"enable it on the host with `npu-smi set -t device-share -i %d -c %d -d 1`",
-		cardID, deviceID, err, cardID, deviceID)
+		cardID, deviceID, err, cardID, deviceID,
+	)
 }

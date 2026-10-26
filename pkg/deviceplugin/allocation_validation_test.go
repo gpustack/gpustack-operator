@@ -221,7 +221,8 @@ func TestBuildDesiredStatusStrict_Rejects(t *testing.T) {
 						ID: "GPU-abc", Index: 0,
 						Mode:      workercore.DeviceAllocationModeExclusive,
 						Allocated: 1,
-					})
+					},
+				)
 				entries["vllm"] = record
 			}))},
 			wantErrs: []string{"twice"},
@@ -300,7 +301,8 @@ func TestBuildDesiredStatusStrict_Rejects(t *testing.T) {
 			name: "a duplicated card in the inventory is refused before any pod is read",
 			devs: releaseTestDevices(func(devs *workercore.Devices) {
 				devs.Spec.Groups[0].Accelerators = append(
-					devs.Spec.Groups[0].Accelerators, workercore.Accelerator{ID: "GPU-abc", Index: 0})
+					devs.Spec.Groups[0].Accelerators, workercore.Accelerator{ID: "GPU-abc", Index: 0},
+				)
 			}),
 			pods:     []*core.Pod{releaseTestPod()},
 			wantErrs: []string{"declared twice in group"},
@@ -455,7 +457,8 @@ func TestBuildDesiredStatusStrict_PreservesTheOrdinaryRebuild(t *testing.T) {
 						record := releaseTestAllocation()
 						record.Devices.Groups[0].Accelerators[0].ID = "GPU-zzz"
 						entries["vllm"] = record
-					})),
+					}),
+				),
 			},
 			mergeable:   []*core.Pod{releaseTestPod()},
 			wantErrs:    []string{"which the inventory does not have"},
@@ -493,7 +496,8 @@ func TestBuildDesiredStatusStrict_PreservesTheOrdinaryRebuild(t *testing.T) {
 						record := releaseTestAllocation()
 						record.Devices.Groups[0].Accelerators[0].Mode = workercore.DeviceAllocationModeShared
 						entries["vllm"] = record
-					})),
+					}),
+				),
 			},
 			mergeable:   []*core.Pod{releaseTestPod()},
 			wantErrs:    []string{"conflicting allocation mode"},

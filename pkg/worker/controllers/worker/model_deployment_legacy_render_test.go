@@ -41,7 +41,8 @@ import (
 // never silently: go test ./pkg/worker/controllers/worker/ -run LegacyRender -update, then read the
 // diff, then say in the change what rolled.
 var legacyRenderUpdate = flag.Bool(
-	"update", false, "rewrite the golden fixture files under testdata/legacy-render")
+	"update", false, "rewrite the golden fixture files under testdata/legacy-render",
+)
 
 const (
 	legacyRenderDir = "testdata/legacy-render"
@@ -299,7 +300,8 @@ func TestModelDeploymentLegacyRender_GoldenPods(t *testing.T) {
 			mutate: func(md *workercore.ModelDeployment) {
 				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 				md.Spec.Roles = legacyRenderPairRoles(
-					legacyRenderAscendInstanceType, legacyRenderPinnedAscendEngineImage)
+					legacyRenderAscendInstanceType, legacyRenderPinnedAscendEngineImage,
+				)
 			},
 			instypes: []*worker.InstanceType{newLegacyRenderAscendInstanceType()},
 		},

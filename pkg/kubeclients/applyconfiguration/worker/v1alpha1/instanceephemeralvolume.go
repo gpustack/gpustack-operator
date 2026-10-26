@@ -12,6 +12,7 @@ import (
 // InstanceEphemeralVolume defines the ephemeral volume to mount in the Instance.
 type InstanceEphemeralVolumeApplyConfiguration struct {
 	// Capacity is the size limit of the volume.
+	//
 	Capacity *resource.Quantity `json:"capacity,omitempty"`
 }
 

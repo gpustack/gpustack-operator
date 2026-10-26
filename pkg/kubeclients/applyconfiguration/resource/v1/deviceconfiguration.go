@@ -10,6 +10,7 @@ package v1
 // not conflict with those.
 type DeviceConfigurationApplyConfiguration struct {
 	// Opaque provides driver-specific configuration parameters.
+	//
 	Opaque *OpaqueDeviceConfigurationApplyConfiguration `json:"opaque,omitempty"`
 }
 

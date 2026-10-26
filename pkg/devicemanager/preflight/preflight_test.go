@@ -210,7 +210,8 @@ func TestPreflight_StagesNothingWhereNothingCanBeSliced(t *testing.T) {
 	imageRoot := withStagingRoots(t)
 	require.NoError(t, os.MkdirAll(filepath.Join(imageRoot, nodefeature.ManufacturerAscend), 0o755))
 	require.NoError(t, os.WriteFile(
-		filepath.Join(imageRoot, nodefeature.ManufacturerAscend, "ld.so.preload"), []byte("x"), 0o644))
+		filepath.Join(imageRoot, nodefeature.ManufacturerAscend, "ld.so.preload"), []byte("x"), 0o644,
+	))
 
 	root := fakeHostRoot(t)
 	p := &Preflighter{
@@ -561,7 +562,8 @@ func TestPreflightAccelerator_AManufacturerThatPanicsDoesNotTakeTheRunDown(t *te
 	})
 
 	p, err := New(&Config{Manufacturers: sets.New(
-		nodefeature.ManufacturerNVIDIA, nodefeature.ManufacturerAscend)})
+		nodefeature.ManufacturerNVIDIA, nodefeature.ManufacturerAscend,
+	)})
 	require.NoError(t, err)
 
 	// Driven per manufacturer rather than through the whole pass, because the detect pass finds no

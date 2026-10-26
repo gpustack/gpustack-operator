@@ -202,7 +202,8 @@ func (r *PodKVCacheWebhook) ValidateUpdate(
 
 	if errs := validatePodKVCacheOwnedMetadata(oldPod, newPod); len(errs) > 0 {
 		return nil, kerrors.NewInvalid(
-			core.SchemeGroupVersion.WithKind("Pod").GroupKind(), newPod.Name, errs)
+			core.SchemeGroupVersion.WithKind("Pod").GroupKind(), newPod.Name, errs,
+		)
 	}
 
 	return nil, nil

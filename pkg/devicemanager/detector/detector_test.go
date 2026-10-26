@@ -313,7 +313,8 @@ func TestNodeWideFabricDomain(t *testing.T) {
 	// Over the whole node it is not unanimous, so no key is published at all.
 	assert.Empty(t,
 		nodefeature.ConstructFabricNodeLabels(
-			nodeWideDeviceGroups(own, device.DevicesGroupList{inPod, gpu}, sets.New("ascend"))),
+			nodeWideDeviceGroups(own, device.DevicesGroupList{inPod, gpu}, sets.New("ascend")),
+		),
 		"the node as a whole has no single domain")
 
 	// And the other manufacturer's pass, whose own groups hold no fabric either way, computes that
@@ -321,7 +322,8 @@ func TestNodeWideFabricDomain(t *testing.T) {
 	assert.Empty(t,
 		nodefeature.ConstructFabricNodeLabels(
 			nodeWideDeviceGroups(device.DevicesGroupList{gpu},
-				device.DevicesGroupList{inPod, gpu}, sets.New("nvidia"))),
+				device.DevicesGroupList{inPod, gpu}, sets.New("nvidia")),
+		),
 		"both writers agree, so neither deletes the other's key")
 }
 

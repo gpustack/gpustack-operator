@@ -158,7 +158,8 @@ func (h *InstanceMetricsHandler) OnGet(ctx context.Context, key types.Namespaced
 	}
 	if allocGroups := allocations.Aggregate().Groups; len(allocGroups) != 0 {
 		sample.Accelerators = h.currentAcceleratorMetrics(
-			ctx, inst.Status.NodeName, allocGroups, kubemetrics.NewAcceleratorGrants(pod, allocations))
+			ctx, inst.Status.NodeName, allocGroups, kubemetrics.NewAcceleratorGrants(pod, allocations),
+		)
 	}
 
 	return newInstanceMetrics(inst, sample), nil
@@ -289,7 +290,8 @@ func filterAllocatedAcceleratorMetrics(
 		// One card can yield several entries: an Instance holding two hardware partitions of it
 		// holds two grants, each with its own identity and its own figures.
 		accelerators = append(accelerators, grants.Resolve(
-			snapshot.Slices, allocated[i].Manufacturer, &allocated[i].Metrics)...)
+			snapshot.Slices, allocated[i].Manufacturer, &allocated[i].Metrics,
+		)...)
 	}
 	return accelerators
 }
@@ -333,7 +335,8 @@ func (h *InstanceMetricsHandler) listNodeDeviceManagerPods(ctx context.Context, 
 // transport per process instead of one leaked per request.
 var _monitorSnapshotClient = &http.Client{
 	Transport: httpx.Transport(httpx.TransportOptions().WithoutProxy().WithTLSClientConfig(
-		&tls.Config{InsecureSkipVerify: true})), // nolint: gosec
+		&tls.Config{InsecureSkipVerify: true}, // nolint: gosec
+	)),
 }
 
 // fetchMonitorSnapshot GETs and decodes the monitor snapshot readout of a device manager pod.

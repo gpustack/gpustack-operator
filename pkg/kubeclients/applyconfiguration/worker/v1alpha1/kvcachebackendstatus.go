@@ -21,10 +21,12 @@ type KVCacheBackendStatusApplyConfiguration struct {
 	// CapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has
 	// something to be a verdict about — ElectionObserved and TierWasEmpty, the last only where a member group carries a local disk tier. Every one is derived from an
 	// observed document.
+	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	// Endpoints are this backend's addresses, one entry per named role — the same shape the
 	// external branch takes as input. A managed backend fills both from its own Service; an
 	// external one echoes what was declared.
+	//
 	Endpoints []KVCacheBackendEndpointApplyConfiguration `json:"endpoints,omitempty"`
 	// Capacity is what the leader reports it has and has allocated. It is ABSENT until a scrape
 	// succeeds, and absent again is not the same as reporting zero: an empty object here would be
@@ -32,6 +34,7 @@ type KVCacheBackendStatusApplyConfiguration struct {
 	Capacity *KVCacheBackendCapacityApplyConfiguration `json:"capacity,omitempty"`
 	// Members is one entry per observed store member. It is empty on a leader whose master version
 	// serves no segment listing, where MembersMounted is Unknown.
+	//
 	Members []KVCacheBackendMemberStatusApplyConfiguration `json:"members,omitempty"`
 	// UsedBy names the objects that consume this backend. A non-empty UsedBy is what the
 	// finalizer refuses deletion on, so the field is the enforcement input and not a display.
@@ -42,6 +45,7 @@ type KVCacheBackendStatusApplyConfiguration struct {
 	// registered on that backend's master. Entries leave Namespace empty, a backend being
 	// cluster-scoped and so is everything that claims one. KVCacheObjectReference's own doc says why
 	// the shape is neither of the two core reference types.
+	//
 	UsedBy []KVCacheObjectReferenceApplyConfiguration `json:"usedBy,omitempty"`
 }
 

@@ -10,8 +10,10 @@ type NodeModelStoreWatermarksApplyConfiguration struct {
 	// HighPercent is the usage above which the plugin removes unreferenced content. On a filesystem
 	// the cache shares with kubelet, the plugin may apply a lower one so kubelet neither evicts Pods
 	// nor collects images because of the cache.
+	//
 	HighPercent *int32 `json:"highPercent,omitempty"`
 	// LowPercent is the usage a collection removes down to, below HighPercent.
+	//
 	LowPercent *int32 `json:"lowPercent,omitempty"`
 }
 

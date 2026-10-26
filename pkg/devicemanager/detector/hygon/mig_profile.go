@@ -263,14 +263,16 @@ func deriveSlicedProfiles(
 		name := nodefeature.NormalizePartitionedProfileName(raw)
 		if nodefeature.GetAcceleratablePartitionedProfileResourceName(Manufacturer, name) == "" {
 			rejected = append(rejected, fmt.Sprintf(
-				"profile %d named %q yields no valid resource name, so it cannot be requested", info.Id, raw))
+				"profile %d named %q yields no valid resource name, so it cannot be requested", info.Id, raw,
+			))
 			continue
 		}
 
 		placements := placementsFor(info.Id)
 		if len(placements) == 0 || placements[0].Length <= 0 {
 			rejected = append(rejected, fmt.Sprintf(
-				"profile %d named %q has no legal placement, so its memory-slice span is unknown", info.Id, raw))
+				"profile %d named %q has no legal placement, so its memory-slice span is unknown", info.Id, raw,
+			))
 			continue
 		}
 
@@ -306,7 +308,8 @@ func deriveSlicedProfiles(
 			}
 			rejected = append(rejected, fmt.Sprintf(
 				"profiles %s normalize to %q with a different geometry, memory, count or placement set;"+
-					" all of them are withheld", strings.Join(raws, ", "), name))
+					" all of them are withheld", strings.Join(raws, ", "), name,
+			))
 			continue
 		}
 		profiles = append(profiles, group[0].profile)
@@ -388,7 +391,8 @@ func rejectDivergentGroupProfiles(group *device.DevicesGroup) (rejected []string
 				rejected = append(rejected, fmt.Sprintf(
 					"profile %q is exposed with a different geometry, memory, count or placement set by"+
 						" card %s than by another card of the same group; it is withheld from the group",
-					p.Name, group.Accelerators[i].ID))
+					p.Name, group.Accelerators[i].ID,
+				))
 			}
 		}
 	}

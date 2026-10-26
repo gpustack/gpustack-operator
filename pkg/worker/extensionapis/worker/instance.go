@@ -64,7 +64,8 @@ func (h *InstanceHandler) SetupHandler(
 			}
 			return strings.Join(parts, ",")
 		}),
-		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"))
+		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"),
+	)
 	if err != nil {
 		return gvr, srs, err
 	}

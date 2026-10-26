@@ -377,7 +377,8 @@ func TestMigPlacementsByProfile(t *testing.T) {
 						return nil, nvml.ERROR_NOT_SUPPORTED
 					}
 					return tc.slots[id], nvml.SUCCESS
-				})
+				},
+			)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("migPlacementsByProfile() error = %v, wantErr %v", err, tc.wantErr)
 			}

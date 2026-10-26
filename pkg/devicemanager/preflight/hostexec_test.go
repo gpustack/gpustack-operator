@@ -791,7 +791,8 @@ func TestValueAfter_KubeadmFlagsForm(t *testing.T) {
 
 	got, found := valueAfter(
 		`KUBELET_KUBEADM_ARGS="--container-runtime-endpoint=unix:///run/first.sock `+
-			`--pod-infra-container-image=x --container-runtime-endpoint=unix:///run/second.sock"`, key)
+			`--pod-infra-container-image=x --container-runtime-endpoint=unix:///run/second.sock"`, key,
+	)
 
 	require.True(t, found)
 	assert.Equal(t, "/run/second.sock", got, "the kubelet would have applied the later flag")

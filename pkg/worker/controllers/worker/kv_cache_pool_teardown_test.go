@@ -1228,7 +1228,8 @@ func TestKVCachePoolTeardown_MultiTenancyWithdrawnMidFlightStillDeletesBothObjec
 
 	reconcilePool(t, poolReconciler, "shared")
 	assert.True(t, kerrors.IsNotFound(
-		cli.Get(ctx, ctrlcli.ObjectKey{Name: "shared"}, new(workercore.KVCachePool))),
+		cli.Get(ctx, ctrlcli.ObjectKey{Name: "shared"}, new(workercore.KVCachePool)),
+	),
 		"the pool's finalizer completes against a master that holds no ledger")
 	assert.True(t, bindingIsGone(t, cli, "team-a", "chat"),
 		"and takes the binding it was holding with it")
@@ -1238,7 +1239,8 @@ func TestKVCachePoolTeardown_MultiTenancyWithdrawnMidFlightStillDeletesBothObjec
 	reconcileBackend(t)
 	reconcileBackend(t)
 	assert.True(t, kerrors.IsNotFound(
-		cli.Get(ctx, ctrlcli.ObjectKey{Name: "mooncake-dram"}, new(workercore.KVCacheBackend))),
+		cli.Get(ctx, ctrlcli.ObjectKey{Name: "mooncake-dram"}, new(workercore.KVCacheBackend)),
+	),
 		"and the backend drains on its own once nothing claims it")
 }
 

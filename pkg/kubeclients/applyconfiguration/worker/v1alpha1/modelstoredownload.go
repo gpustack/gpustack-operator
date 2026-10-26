@@ -12,9 +12,11 @@ package v1alpha1
 type ModelStoreDownloadApplyConfiguration struct {
 	// Concurrency is how many HTTP requests the matched nodes run at once; left out, the cluster
 	// default applies.
+	//
 	Concurrency *int32 `json:"concurrency,omitempty"`
 	// BytesPerSecond is the matched nodes' download rate limit; 0 is unlimited. Left out, the
 	// cluster default applies.
+	//
 	BytesPerSecond *int64 `json:"bytesPerSecond,omitempty"`
 }
 

@@ -12,18 +12,22 @@ import (
 // ModelDeploymentScalerAlgorithmSpec names the algorithm and holds its parameters.
 type ModelDeploymentScalerAlgorithmSpecApplyConfiguration struct {
 	// Type is the algorithm that runs.
+	//
 	Type *workerv1alpha1.ModelDeploymentScalerAlgorithmType `json:"type,omitempty"`
 	// Proportional holds the parameters of the Proportional algorithm.
 	//
 	// It is required when Type is Proportional and ignored otherwise.
+	//
 	Proportional *ModelDeploymentScalerProportionalSpecApplyConfiguration `json:"proportional,omitempty"`
 	// TokenThroughput holds the parameters of the TokenThroughput algorithm.
 	//
 	// It is required when Type is TokenThroughput and ignored otherwise.
+	//
 	TokenThroughput *ModelDeploymentScalerTokenThroughputSpecApplyConfiguration `json:"tokenThroughput,omitempty"`
 	// Predictive holds the parameters of the Predictive algorithm.
 	//
 	// It is required when Type is Predictive and ignored otherwise.
+	//
 	Predictive *ModelDeploymentScalerPredictiveSpecApplyConfiguration `json:"predictive,omitempty"`
 }
 

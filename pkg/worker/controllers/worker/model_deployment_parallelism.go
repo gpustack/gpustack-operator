@@ -578,7 +578,8 @@ func modelDeploymentLoadBalance(
 	startRank := slices.Contains(wiring, "--data-parallel-start-rank")
 	if startRank && len(shapes[workercore.ModelDeploymentLoadBalanceExternal]) > 0 {
 		shapes[workercore.ModelDeploymentLoadBalanceHybrid] = append(
-			shapes[workercore.ModelDeploymentLoadBalanceHybrid], "--data-parallel-start-rank")
+			shapes[workercore.ModelDeploymentLoadBalanceHybrid], "--data-parallel-start-rank",
+		)
 	}
 	if len(shapes) == 0 {
 		// Headless ranks belong to an Internal group. A start rank only selects
@@ -703,7 +704,8 @@ func matchModelDeploymentParallelFlag(
 				"the %s abbreviation %q is accepted by argparse only from Python 3.12 "+
 					"and refused before, so the engine's reading depends on the image; "+
 					"use the registered %s",
-				key, token, flag.names[0])
+				key, token, flag.names[0],
+			)
 		}
 		if !hasValue {
 			return flag, "", false, true, nil
@@ -724,7 +726,8 @@ func matchModelDeploymentParallelFlag(
 					return zero, "", false, false, fmt.Errorf(
 						"the %s abbreviation %q carries a glued value, which argparse "+
 							"refuses on every supported Python version; use the registered %s",
-						token[:2], token, flag.names[0])
+						token[:2], token, flag.names[0],
+					)
 				}
 			}
 		}

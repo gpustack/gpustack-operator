@@ -111,7 +111,8 @@ func isUnsupportedSerial(serial string) bool {
 // claim, whereas a surviving sentinel is silently accepted as one.
 func (info AsicInfo) GetAsicSerial() string {
 	ret := strings.TrimPrefix(
-		strings.ToLower(C.GoString((*C.char)(unsafe.Pointer(&info.Asic_serial[0])))), "0x")
+		strings.ToLower(C.GoString((*C.char)(unsafe.Pointer(&info.Asic_serial[0])))), "0x",
+	)
 	if ret == "n/a" || isUnsupportedSerial(ret) {
 		return ""
 	}

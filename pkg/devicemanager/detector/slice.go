@@ -622,7 +622,8 @@ func withPartitions(
 	slices.SortFunc(section.Partitions, func(a, b SlicePartition) int {
 		return strings.Compare(
 			a.Manufacturer+"\x00"+a.DeviceID+"\x00"+a.PodUID+"\x00"+a.Container,
-			b.Manufacturer+"\x00"+b.DeviceID+"\x00"+b.PodUID+"\x00"+b.Container)
+			b.Manufacturer+"\x00"+b.DeviceID+"\x00"+b.PodUID+"\x00"+b.Container,
+		)
 	})
 	return section
 }
@@ -724,7 +725,8 @@ func buildSliceSection(
 		for _, procs := range procGrp.Accelerators {
 			usages, diag := aggregateAcceleratorProcesses(
 				manufacturer, procs, cardMemory[manufacturer+"/"+procs.ID],
-				names, resolve)
+				names, resolve,
+			)
 
 			// The bound drops a device whole, never some of its records: a record missing from a
 			// device the section still reports as measured would read as a measured zero.
@@ -749,7 +751,8 @@ func buildSliceSection(
 	slices.SortFunc(section.Usages, func(a, b SliceUsage) int {
 		return strings.Compare(
 			a.Manufacturer+"\x00"+a.DeviceID+"\x00"+a.PodUID+"\x00"+a.Container,
-			b.Manufacturer+"\x00"+b.DeviceID+"\x00"+b.PodUID+"\x00"+b.Container)
+			b.Manufacturer+"\x00"+b.DeviceID+"\x00"+b.PodUID+"\x00"+b.Container,
+		)
 	})
 	slices.SortFunc(section.Devices, func(a, b SliceDeviceDiagnostics) int {
 		return strings.Compare(a.Manufacturer+"\x00"+a.DeviceID, b.Manufacturer+"\x00"+b.DeviceID)

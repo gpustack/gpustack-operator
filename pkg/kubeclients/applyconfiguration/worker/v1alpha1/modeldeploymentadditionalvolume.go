@@ -15,6 +15,7 @@ import (
 type ModelDeploymentAdditionalVolumeApplyConfiguration struct {
 	// MountPath is the absolute in-container path to mount the volume at. It must not duplicate
 	// another entry's path, nor a path the operator's own volumes already mount.
+	//
 	MountPath *string `json:"mountPath,omitempty"`
 	// ReadOnly mounts the volume read-only.
 	ReadOnly *bool `json:"readOnly,omitempty"`
@@ -26,6 +27,7 @@ type ModelDeploymentAdditionalVolumeApplyConfiguration struct {
 	// half — see the webhook. Both halves are refused there rather than left to the API server's
 	// rejection of the rendered Pod, which arrives as a per-pass create failure naming a
 	// volumeMount instead of an admission error naming this field.
+	//
 	SubPath *string `json:"subPath,omitempty"`
 	// ConfigMap is the reference to the ConfigMap to mount, in the same namespace.
 	ConfigMap *v1.LocalObjectReferenceApplyConfiguration `json:"configMap,omitempty"`

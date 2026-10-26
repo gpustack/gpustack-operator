@@ -693,7 +693,8 @@ func TestMemberWorkload_NoDiskTierRendersWhatItAlwaysDid(t *testing.T) {
 	require.NoError(t, err, "the recording is the contract; without it this test proves nothing")
 
 	rendered, err := json.MarshalIndent(
-		RenderMemberDaemonSet(testMemberBackend(), 0, "mooncake:v0.3.13").Spec.Template, "", "  ")
+		RenderMemberDaemonSet(testMemberBackend(), 0, "mooncake:v0.3.13").Spec.Template, "", "  ",
+	)
 	require.NoError(t, err)
 
 	assert.JSONEq(t, string(recorded), string(rendered),
@@ -1127,7 +1128,8 @@ func TestMemberWorkload_ShutdownDrainsTheDiskTier(t *testing.T) {
 		// grace is inert rather than refused, so that declaring a policy does not depend on the
 		// order two independent fields are edited in.
 		ds := RenderMemberDaemonSet(
-			testMemberBackend(withMemberScaleInGrace(300)), 0, "mooncake:v0.3.13")
+			testMemberBackend(withMemberScaleInGrace(300)), 0, "mooncake:v0.3.13",
+		)
 
 		require.NotNil(t, ds.Spec.Template.Spec.TerminationGracePeriodSeconds)
 		assert.Equal(t, int64(60), *ds.Spec.Template.Spec.TerminationGracePeriodSeconds)
@@ -1582,11 +1584,13 @@ func TestMemberWorkload_PullPolicyAndSecrets(t *testing.T) {
 		policy := MemberPodSpecHash(RenderMemberDaemonSet(
 			testMemberBackend(func(k *workercore.KVCacheBackend) {
 				k.Spec.ImagePullPolicy = core.PullAlways
-			}), 0, "mooncake:v1").Spec.Template)
+			}), 0, "mooncake:v1",
+		).Spec.Template)
 		secrets := MemberPodSpecHash(RenderMemberDaemonSet(
 			testMemberBackend(func(k *workercore.KVCacheBackend) {
 				k.Spec.ImagePullSecrets = []core.LocalObjectReference{{Name: "registry-creds"}}
-			}), 0, "mooncake:v1").Spec.Template)
+			}), 0, "mooncake:v1",
+		).Spec.Template)
 
 		assert.NotEqual(t, base, policy)
 		assert.NotEqual(t, base, secrets)
@@ -2085,7 +2089,8 @@ func TestMemberWorkload_AnUnsetInterfaceCountRendersAsOne(t *testing.T) {
 					testMemberBackend(func(k *workercore.KVCacheBackend) {
 						k.Spec.Transport.Protocol = protocol
 						k.Spec.Connection.Managed.Members[0].FabricInterfaceCount = count
-					}), 0, "mooncake:v0.3.13").Spec.Template)
+					}), 0, "mooncake:v0.3.13",
+				).Spec.Template)
 			}
 
 			assert.Equal(t, render(ptr.To[int32](1)), render(nil),

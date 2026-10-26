@@ -54,7 +54,8 @@ func TestLifecycle_AnInitialQueuedRoleAcceptsUpdatedSchedulingInputs(t *testing.
 			before := f.live("server", tc.queuedOrdinal)
 			require.Len(t, before, int(tc.size))
 			accName := nodefeature.GetAcceleratableResourceName(
-				nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+				nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive,
+			)
 			qtyEqual(t, qty("2"), before[0].Spec.Containers[0].Resources.Requests[accName], "the initial request")
 			oldWorkload := f.workloadNamed(before[0].Labels[kueuepodconst.GroupNameLabel])
 			require.NotNil(t, oldWorkload)

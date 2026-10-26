@@ -537,7 +537,8 @@ func sliceRequest(manufacturer string, grp *workercore.DevicesGroup, accel *work
 	one.Accelerators = []workercore.Accelerator{*accel}
 
 	pod, ctr, devs, allocated, err := deviceplugin.NewPreflightAllocationRequest(
-		[]workercore.DevicesGroup{one}, manufacturer, workercore.DeviceAllocationModeSliced, sliceQuota)
+		[]workercore.DevicesGroup{one}, manufacturer, workercore.DeviceAllocationModeSliced, sliceQuota,
+	)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("build the allocation request: %w", err)
 	}

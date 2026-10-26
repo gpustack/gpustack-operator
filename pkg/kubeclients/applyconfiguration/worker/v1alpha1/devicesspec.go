@@ -8,6 +8,7 @@ package v1alpha1
 // DevicesSpec defines the desired state of Devices.
 type DevicesSpecApplyConfiguration struct {
 	// Groups is the list of device groups on the worker.
+	//
 	Groups []DevicesGroupApplyConfiguration `json:"groups,omitempty"`
 	// Interfaces is the list of network interfaces on the worker.
 	//
@@ -33,6 +34,7 @@ type DevicesSpecApplyConfiguration struct {
 	// published when some other change reports, not when it happens. Anything carrying an RDMA
 	// record is exempt and is always current. A consumer that needs an up-to-the-second veth list
 	// must read the node, not this field.
+	//
 	Interfaces []DeviceInterfaceApplyConfiguration `json:"interfaces,omitempty"`
 }
 

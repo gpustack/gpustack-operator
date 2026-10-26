@@ -75,17 +75,20 @@ func FetchPodSample(
 	case ferr != nil:
 		return nil, fmt.Errorf(
 			"failed to read the usage of instance pod %s/%s from the kubelet (%w) and from the metrics API (%w)",
-			pod.Namespace, pod.Name, err, ferr)
+			pod.Namespace, pod.Name, err, ferr,
+		)
 	case previousIncarnation:
 		return nil, fmt.Errorf(
 			"failed to read the usage of instance pod %s/%s from the kubelet (%w); "+
 				"the metrics API only knows a previous incarnation of this pod name",
-			pod.Namespace, pod.Name, err)
+			pod.Namespace, pod.Name, err,
+		)
 	case cpu == nil:
 		return nil, fmt.Errorf(
 			"failed to read the usage of instance pod %s/%s from the kubelet (%w); "+
 				"the metrics.k8s.io API is not served in this cluster",
-			pod.Namespace, pod.Name, err)
+			pod.Namespace, pod.Name, err,
+		)
 	}
 
 	// The fallback carries no storage figures, so StorageUsedMiB stays absent.

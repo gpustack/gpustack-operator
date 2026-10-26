@@ -10,14 +10,18 @@ package v1alpha1
 // seconds, so a fleet downloading the content does not rewrite the artifact at every node's write.
 type ModelArtifactNodesApplyConfiguration struct {
 	// Ready counts the nodes holding the content published.
+	//
 	Ready *int32 `json:"ready,omitempty"`
 	// Downloading counts the nodes downloading it.
+	//
 	Downloading *int32 `json:"downloading,omitempty"`
 	// Failed counts the nodes whose last attempt failed and that wait to retry.
+	//
 	Failed *int32 `json:"failed,omitempty"`
 	// DownloadingPercent is the mean progress of the downloading nodes, each a whole copy, rounded
 	// down to a multiple of 5. Ready nodes are counted, not averaged in. Absent while no node
 	// downloads.
+	//
 	DownloadingPercent *int32 `json:"downloadingPercent,omitempty"`
 }
 

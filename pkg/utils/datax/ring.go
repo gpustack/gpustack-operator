@@ -31,7 +31,7 @@ func NewRingStack[T any](size uint64) *RingStack[T] {
 		panic("size must be greater than 0")
 	}
 	if size&(size-1) != 0 {
-		size = 1 << (bits.Len64(size - 1))
+		size = 1 << bits.Len64(size-1)
 	}
 
 	r := &RingStack[T]{
@@ -159,7 +159,7 @@ func NewRingQueue[T any](size uint64) *RingQueue[T] {
 		panic("size must be greater than 0")
 	}
 	if size&(size-1) != 0 {
-		size = 1 << (bits.Len64(size - 1))
+		size = 1 << bits.Len64(size-1)
 	}
 
 	r := &RingQueue[T]{
@@ -273,7 +273,7 @@ func NewRingBuffer[T any](size uint64) *RingBuffer[T] {
 		panic("size must be greater than 0")
 	}
 	if size&(size-1) != 0 {
-		size = 1 << (bits.Len64(size - 1))
+		size = 1 << bits.Len64(size-1)
 	}
 
 	r := &RingBuffer[T]{

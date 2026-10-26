@@ -225,7 +225,8 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 	}
 
 	checks, err := kueueadmissioncheck.FilterForController(
-		ctx, r.Client, wl.Status.AdmissionChecks, _JointAdmissionControllerName)
+		ctx, r.Client, wl.Status.AdmissionChecks, _JointAdmissionControllerName,
+	)
 	if err != nil {
 		logger.Error(err, "filter admission checks for controller")
 		return ctrl.Result{}, err
@@ -352,7 +353,8 @@ func (r *ModelDeploymentJointAdmissionReconciler) park(
 			"are deactivated and no longer ask for quota. An identical re-apply does not clear this — "+
 			"free the capacity the waiting groups need and reactivate the workloads, or delete the "+
 			"deployment and create it again",
-		waiting, _JointAdmissionInfeasibleAfter, _JointAdmissionParkedMarker)
+		waiting, _JointAdmissionInfeasibleAfter, _JointAdmissionParkedMarker,
+	)
 
 	if err := r.applyVerdict(ctx, wl, checks, kueue.CheckStatePending, parked); err != nil {
 		return err
@@ -500,7 +502,8 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 					"%s do not yet have every replica they declare, so Kueue has composed no "+
 					"workload for them yet. Nothing is wrong with the cluster; this resolves itself as "+
 					"the replicas appear",
-				strings.Join(assembling, ", ")),
+				strings.Join(assembling, ", "),
+			),
 		}, nil
 	}
 
@@ -510,7 +513,8 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 			"holding this replica until the whole deployment can run: %d of %d replicas have reserved quota, "+
 				"and the ones still waiting belong to the roles %s. Every replica keeps the quota it has "+
 				"reserved while it waits",
-			reserved, replicas, strings.Join(waiting, ", ")),
+			reserved, replicas, strings.Join(waiting, ", "),
+		),
 		Settled: true,
 	}, nil
 }
@@ -621,7 +625,8 @@ func modelDeploymentReplicaGroups(
 	// Seats are validated with the same reader the other observations use.
 	for group, groupMembers := range members {
 		shapes[group] = modelDeploymentDeployedReplicaShape(
-			modelDeploymentReplicaView{Members: groupMembers})
+			modelDeploymentReplicaView{Members: groupMembers},
+		)
 	}
 
 	return all, live, shapes, nil
@@ -736,7 +741,8 @@ func (r *ModelDeploymentJointAdmissionReconciler) applyVerdict(
 // returning only a bool would leave the rest rescanning the slice for the entry they need.
 func jointCheckEntry(wl *kueue.Workload) *kueue.AdmissionCheckState {
 	return kueueadmissioncheck.FindAdmissionCheck(
-		wl.Status.AdmissionChecks, kueue.AdmissionCheckReference(_JointAdmissionCheckName))
+		wl.Status.AdmissionChecks, kueue.AdmissionCheckReference(_JointAdmissionCheckName),
+	)
 }
 
 // carriesJointCheck reports whether a Workload carries this controller's admission check, read off

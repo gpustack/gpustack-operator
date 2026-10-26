@@ -45,6 +45,7 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	// its own engine, so each is refused in front of the other's. "llm-d-router" takes either
 	// engine, because upstream carries a handshake connector and a metrics configuration for each
 	// of them.
+	//
 	Name *string `json:"name,omitempty"`
 	// Replicas is how many router Pods to run. Absent means one.
 	//
@@ -60,19 +61,24 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	// where replicas do exchange events the exchange improves load estimation without making two
 	// replicas route alike. More than one is permitted; the cost is stated here rather than left to be
 	// found on a dashboard.
+	//
 	Replicas *int32 `json:"replicas,omitempty"`
 	// Image overrides the router's container image. Empty means the operator assembles one from Name,
 	// the same way a role's image is assembled when the role names none.
+	//
 	Image *string `json:"image,omitempty"`
 	// ExtraArgs are additional flags for the router process.
 	//
 	// A flag the operator derives itself is refused rather than merged, so that one setting has one
 	// source. The owned catalog is keyed by router because the engine-keyed catalog guarding a role's
 	// extraArgs answers a different question and cannot stand in for it.
+	//
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 	// ImagePullPolicy is the pull policy for Image.
+	//
 	ImagePullPolicy *v1.PullPolicy `json:"imagePullPolicy,omitempty"`
 	// ImagePullSecrets are the secrets used to pull Image.
+	//
 	ImagePullSecrets []corev1.LocalObjectReferenceApplyConfiguration `json:"imagePullSecrets,omitempty"`
 	// RequestTimeoutSeconds is how long the router waits for a reply before giving up on it.
 	//
@@ -87,6 +93,7 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	// under the other two, and a field meaning the same thing across three implementations cannot
 	// carry one implementation's special value. A day is already long enough that the difference is
 	// theoretical; the floor can be lowered later without breaking an object that exists.
+	//
 	RequestTimeoutSeconds *int32 `json:"requestTimeoutSeconds,omitempty"`
 	// DisaggregationThresholdTokens is how many prompt tokens NOT already in a prefix cache make a
 	// request worth splitting between a prefiller and a decoder. Below it the decode replica serves
@@ -101,6 +108,7 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	// ignored, because a field that is legal to write and renders nothing is a shape this API has
 	// rejected before. The refusal is stable because Name is frozen after creation, so an object
 	// cannot become invalid through a later edit to some other field.
+	//
 	DisaggregationThresholdTokens *int32 `json:"disaggregationThresholdTokens,omitempty"`
 }
 

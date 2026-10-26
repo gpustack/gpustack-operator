@@ -11,6 +11,7 @@ type KVCacheBackendManagedApplyConfiguration struct {
 	// Leader is the metadata service every member and every client talks to. The name is this
 	// API's, not the artifact's: the rendered flags and environment variables keep the vendor's
 	// own "master" spelling, and the mapping lives in the renderer.
+	//
 	Leader *KVCacheBackendLeaderApplyConfiguration `json:"leader,omitempty"`
 	// Members are the groups of store members. Each entry selects nodes, names the medium those
 	// nodes contribute, and may add a local disk tier on the same nodes.
@@ -33,6 +34,7 @@ type KVCacheBackendManagedApplyConfiguration struct {
 	// The cap of 32 is a SAFETY BOUND, not a statement about how many groups are useful: the port
 	// derivation stays valid to 57455, but an unbounded list can render a port outside the valid
 	// range with nothing reporting it.
+	//
 	Members []KVCacheBackendMemberApplyConfiguration `json:"members,omitempty"`
 	// ScaleIn is what a member does on its way out. Left unset, a member is stopped the way any
 	// Pod is: it gets SIGTERM and the time its own shutdown needs, and nothing waits for the

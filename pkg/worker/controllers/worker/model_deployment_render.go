@@ -451,7 +451,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		// label at all is not queued by Kueue, it is admitted by the kubelet directly -- charging no
 		// quota and bypassing every gate the chain exists to apply.
 		return nil, fmt.Errorf(
-			"instance type %q publishes no queue entrance yet", in.InstanceType.Name)
+			"instance type %q publishes no queue entrance yet", in.InstanceType.Name,
+		)
 	}
 
 	// A role that replaces the command owns the whole argv, so the operator contributes neither
@@ -532,7 +533,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 				if enginePort == declared.ContainerPort {
 					return nil, fmt.Errorf(
 						"role %q places its model server on port %d, which the role already "+
-							"declares as %q", role.Name, enginePort, declared.Name)
+							"declares as %q", role.Name, enginePort, declared.Name,
+					)
 				}
 			}
 			gradable = true
@@ -574,10 +576,12 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 					Role:         role,
 					InstanceType: in.InstanceType,
 					Artifact:     in.Artifact,
-				})
+				},
+			)
 			if err != nil {
 				return nil, fmt.Errorf(
-					"role %q cannot place its compilation cache: %w", role.Name, err)
+					"role %q cannot place its compilation cache: %w", role.Name, err,
+				)
 			}
 			cacheVolume, cacheMount := modelDeploymentCompileCacheVolumes(compileCacheSubPath)
 			vols = append(vols, cacheVolume)
@@ -594,7 +598,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	}
 	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(
 		servingPort, probeScheme, probePath, gradable,
-		modelDeploymentProbesEncoderStage(md, role, takeOver), role.StartupTimeoutSeconds)
+		modelDeploymentProbesEncoderStage(md, role, takeOver), role.StartupTimeoutSeconds,
+	)
 	ports, err := appendModelDeploymentConnectorPorts(declaredPorts, in.Connector, takeOver)
 	if err != nil {
 		return nil, err
@@ -610,7 +615,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		ImagePullPolicy: role.ImagePullPolicy,
 		Command:         command,
 		Resources: getResourceRequirements(
-			ress, in.InstanceType, true, in.GeneralResourcesOvercommit, true, false),
+			ress, in.InstanceType, true, in.GeneralResourcesOvercommit, true, false,
+		),
 		Ports:          ports,
 		Env:            mergeModelDeploymentEnv(md.Spec.Engine.Name, role, in.Connector, in.Artifact, takeOver),
 		VolumeMounts:   mounts,
@@ -692,7 +698,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		manufacturer := in.InstanceType.Status.Detail.Manufacturer
 		sidecar := renderModelDeploymentRoutingSidecar(
 			ctx, role, enginePort, scheme, md.Spec.Engine.Name, in.NativeSidecar,
-			manufacturer, in.ECConnector)
+			manufacturer, in.ECConnector,
+		)
 		if in.NativeSidecar {
 			pod.Spec.InitContainers = []core.Container{sidecar}
 		} else {
@@ -928,7 +935,8 @@ func stampModelDeploymentPod(
 	bindingHash := pod.Annotations[modelDeploymentTemplateBindingHashAnnotation]
 	delete(pod.Annotations, modelDeploymentTemplateBindingHashAnnotation)
 	pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentExplicitSpecHash(
-		md, role, ordinal, member, bindingHash)
+		md, role, ordinal, member, bindingHash,
+	)
 	pod.Annotations[modelDeploymentRenderVersionAnnotation] = strconv.Itoa(modelDeploymentRenderVersion)
 	modelDeploymentStampRouterCandidate(pod, md, role, member)
 }
@@ -970,7 +978,8 @@ func stampModelDeploymentRankEnv(
 			core.EnvVar{
 				Name: modelDeploymentLeaderAddressEnv,
 				Value: modelDeploymentMemberName(
-					md, role.Name, ordinal, modelDeploymentLeaderMemberIndex) +
+					md, role.Name, ordinal, modelDeploymentLeaderMemberIndex,
+				) +
 					"." + modelDeploymentReplicaServiceName(md, role.Name, ordinal),
 			},
 			core.EnvVar{
@@ -1138,7 +1147,8 @@ func appendModelDeploymentConnectorPorts(
 			if p.Name != synthesized.Name {
 				return nil, fmt.Errorf(
 					"the connector publishes port %d as %q but the template declares it as %q",
-					synthesized.ContainerPort, synthesized.Name, p.Name)
+					synthesized.ContainerPort, synthesized.Name, p.Name,
+				)
 			}
 			declared = true
 		}
@@ -1598,7 +1608,8 @@ func mergeModelDeploymentEnv(
 	defaulted := slices.Concat(
 		connector.DefaultedEnv, artifactDefaulted,
 		modelDeploymentCompileCacheDefaultedEnv(engine),
-		modelDeploymentRuntimeCacheDefaultedEnv(engine))
+		modelDeploymentRuntimeCacheDefaultedEnv(engine),
+	)
 
 	env := make([]core.EnvVar, 0,
 		len(connector.Env)+len(artifactEnv)+len(defaulted)+len(role.Env))
@@ -2046,7 +2057,8 @@ func modelDeploymentExplicitSpecHash(
 	}
 	if len(canonicalRole.Command) == 0 {
 		canonicalRole.TerminationGracePeriodSeconds = ptr.To(
-			modelDeploymentTerminationGracePeriodSeconds(&canonicalRole))
+			modelDeploymentTerminationGracePeriodSeconds(&canonicalRole),
+		)
 	} else {
 		canonicalRole.ExtraArgs = nil
 	}

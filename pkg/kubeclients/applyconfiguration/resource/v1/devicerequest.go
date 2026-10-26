@@ -20,11 +20,13 @@ type DeviceRequestApplyConfiguration struct {
 	// scheduler.
 	//
 	// Must be a DNS label.
+	//
 	Name *string `json:"name,omitempty"`
 	// Exactly specifies the details for a single request that must
 	// be met exactly for the request to be satisfied.
 	//
 	// One of Exactly or FirstAvailable must be set.
+	//
 	Exactly *ExactDeviceRequestApplyConfiguration `json:"exactly,omitempty"`
 	// FirstAvailable contains subrequests, of which exactly one will be
 	// selected by the scheduler. It tries to
@@ -39,6 +41,7 @@ type DeviceRequestApplyConfiguration struct {
 	// will determine which node is chosen. This means that the set of
 	// devices allocated to a claim might not be the optimal set
 	// available to the cluster. Scoring will be implemented later.
+	//
 	FirstAvailable []DeviceSubRequestApplyConfiguration `json:"firstAvailable,omitempty"`
 }
 

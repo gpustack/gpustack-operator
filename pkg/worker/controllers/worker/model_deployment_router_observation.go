@@ -472,12 +472,14 @@ func bindRouterObservationWorker(
 	candidates := byIP[host]
 	if len(candidates) != 1 {
 		return ServingEndpoint{}, fmt.Errorf(
-			"binding indeterminate: %s resolves to %d live pods, not one", host, len(candidates))
+			"binding indeterminate: %s resolves to %d live pods, not one", host, len(candidates),
+		)
 	}
 	pod := candidates[0]
 	if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
 		return ServingEndpoint{}, fmt.Errorf(
-			"binding indeterminate: %s is pod %s which is not live", host, pod.Name)
+			"binding indeterminate: %s is pod %s which is not live", host, pod.Name,
+		)
 	}
 	identity, err := modelDeploymentEndpointIdentityOf(pod, worker.Port)
 	if err != nil {
@@ -522,13 +524,15 @@ func modelDeploymentEndpointIdentityOf(pod *corev1.Pod, urlPort string) (modelDe
 	role := modelDeploymentPodRole(pod)
 	if role == "" {
 		return modelDeploymentEndpointIdentity{}, fmt.Errorf(
-			"binding indeterminate: member %s carries no workload role", pod.Name)
+			"binding indeterminate: member %s carries no workload role", pod.Name,
+		)
 	}
 
 	rank := pod.Labels[modelDeploymentMemberIndexLabel]
 	if rank == "" {
 		return modelDeploymentEndpointIdentity{}, fmt.Errorf(
-			"binding indeterminate: member %s carries no member rank", pod.Name)
+			"binding indeterminate: member %s carries no member rank", pod.Name,
+		)
 	}
 	// A MEMBER INDEX COUNTS FROM ZERO, so it is read as an unsigned decimal. ParseUint refuses a
 	// sign, a base prefix and any surrounding space, all of which are shapes the render never
@@ -536,13 +540,15 @@ func modelDeploymentEndpointIdentityOf(pod *corev1.Pod, urlPort string) (modelDe
 	if _, err := strconv.ParseUint(rank, 10, 32); err != nil {
 		return modelDeploymentEndpointIdentity{}, fmt.Errorf(
 			"binding indeterminate: member %s carries member rank %q rather than a decimal index",
-			pod.Name, rank)
+			pod.Name, rank,
+		)
 	}
 
 	listener := modelDeploymentDeclaredListenerOf(pod, urlPort)
 	if listener == 0 {
 		return modelDeploymentEndpointIdentity{}, fmt.Errorf(
-			"binding indeterminate: member %s declares no container port for %q", pod.Name, urlPort)
+			"binding indeterminate: member %s declares no container port for %q", pod.Name, urlPort,
+		)
 	}
 
 	return modelDeploymentEndpointIdentity{role: role, rank: rank, listener: listener}, nil
@@ -591,7 +597,8 @@ func recentDispatchFromLastJob(raw json.RawMessage) (bool, error) {
 	}
 	if job.Recent == nil {
 		return false, fmt.Errorf(
-			"the dispatch journal carries no recent_dispatch boolean, so it cannot be read")
+			"the dispatch journal carries no recent_dispatch boolean, so it cannot be read",
+		)
 	}
 
 	return *job.Recent, nil
@@ -843,7 +850,8 @@ func aggregateModelDeploymentServing(
 				State: workercore.ModelDeploymentServingStateNotConverged,
 				Reason: fmt.Sprintf(
 					"a router process reports two boot generations (%d and %d): a router rolled during observation",
-					seen, generation),
+					seen, generation,
+				),
 			}
 		}
 		generationByRouter[routerUID] = generation
@@ -875,7 +883,8 @@ func aggregateModelDeploymentServing(
 						State: workercore.ModelDeploymentServingStateNotConverged,
 						Reason: fmt.Sprintf(
 							"views disagree about whether pod %s listener %d is selected",
-							endpoint.PodUID, endpoint.Listener),
+							endpoint.PodUID, endpoint.Listener,
+						),
 					}
 				}
 				if previous.Role != endpoint.Role {
@@ -1055,7 +1064,8 @@ func modelDeploymentServingGroups(
 			Eligible: pod.Labels[modelDeploymentLabelKeyEndpointEligible] ==
 				modelDeploymentEndpointEligibleValue,
 			Generation: modelDeploymentMembershipGeneration(
-				pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration]),
+				pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration],
+			),
 			Ready: podIsReady(pod),
 		}
 	}
@@ -1156,7 +1166,8 @@ func modelDeploymentGroupFact(
 	}
 
 	answering, reason := modelDeploymentAnsweringMembers(
-		modelDeploymentDeployedAnsweringShape(view, md.Spec.Engine.Name), view.Members)
+		modelDeploymentDeployedAnsweringShape(view, md.Spec.Engine.Name), view.Members,
+	)
 	if reason != "" {
 		fact.State = workercore.ModelDeploymentServingStateUnknown
 		fact.InvalidReason = reason
@@ -1224,7 +1235,8 @@ func modelDeploymentGroupFact(
 		fact.InvalidReason = fmt.Sprintf(
 			"the router's view of the group is partial: it holds %d of the group's %d expected "+
 				"endpoints, so the group's serving cannot be confirmed",
-			heldExpected, len(expected))
+			heldExpected, len(expected),
+		)
 	}
 
 	return fact
@@ -1250,7 +1262,8 @@ func modelDeploymentGroupUnsafe(
 		if !carried.Ready {
 			return fmt.Sprintf(
 				"the group's member %s is not ready, so the group may not be served",
-				member.Name), true
+				member.Name,
+			), true
 		}
 	}
 
@@ -1402,7 +1415,8 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWith
 			reason: fmt.Sprintf(
 				"the caller read deployment %s at generation %d but the deployment is now %s at "+
 					"generation %d; the views would describe an object this pass was not asked about",
-				md.UID, md.Generation, before.deploymentUID, before.generation),
+				md.UID, md.Generation, before.deploymentUID, before.generation,
+			),
 		}
 	}
 
@@ -1525,7 +1539,8 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWith
 			return nil, live, modelDeploymentCollectionFailure{
 				reason: fmt.Sprintf(
 					"the deployment changed while the routers were being observed; the collected " +
-						"views describe an earlier snapshot and cannot confirm absence"),
+						"views describe an earlier snapshot and cannot confirm absence",
+				),
 				readAt: readAt,
 			}
 		}
@@ -1533,7 +1548,8 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWith
 			return nil, live, modelDeploymentCollectionFailure{
 				reason: fmt.Sprintf(
 					"the membership changed while the routers were being observed; the collected " +
-						"views describe an earlier snapshot and cannot confirm absence"),
+						"views describe an earlier snapshot and cannot confirm absence",
+				),
 				readAt: readAt,
 			}
 		}
@@ -1550,7 +1566,8 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWith
 		return nil, live, modelDeploymentCollectionFailure{
 			reason: fmt.Sprintf(
 				"the deployment or its membership changed while the routers were being observed; " +
-					"the collected views describe an earlier snapshot and cannot confirm absence"),
+					"the collected views describe an earlier snapshot and cannot confirm absence",
+			),
 			readAt: readAt,
 		}
 	}
@@ -1559,7 +1576,8 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWith
 			reason: fmt.Sprintf(
 				"the routers' processes changed while the routers were being observed; the group's " +
 					"members did not move, so the group keeps what it has and the serving answer " +
-					"stays unknown"),
+					"stays unknown",
+			),
 			retainable: true,
 			readAt:     readAt,
 		}
@@ -1641,7 +1659,8 @@ func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
 	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(md), live); err != nil {
 		return guard, modelDeploymentGuardError{
 			reason: fmt.Errorf(
-				"the deployment could not be re-read uncached during observation: %w", err).Error(),
+				"the deployment could not be re-read uncached during observation: %w", err,
+			).Error(),
 			identity: true,
 		}
 	}
@@ -1671,7 +1690,8 @@ func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
 		); err != nil {
 			return guard, modelDeploymentGuardError{
 				reason: fmt.Errorf(
-					"the membership could not be re-read uncached during observation: %w", err).Error(),
+					"the membership could not be re-read uncached during observation: %w", err,
+				).Error(),
 				members: true,
 			}
 		}
@@ -1723,7 +1743,8 @@ func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
 	); err != nil {
 		return guard, modelDeploymentGuardError{
 			reason: fmt.Errorf(
-				"the routers could not be re-read uncached during observation: %w", err).Error(),
+				"the routers could not be re-read uncached during observation: %w", err,
+			).Error(),
 			routers: true,
 		}
 	}

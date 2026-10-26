@@ -12,9 +12,11 @@ package v1alpha1
 // here would be publishing a value that works nowhere but inside the publishing Pod.
 type ModelDeploymentRouterKVEventsApplyConfiguration struct {
 	// Endpoint is the stream a consumer subscribes to.
+	//
 	Endpoint *string `json:"endpoint,omitempty"`
 	// ReplayEndpoint is where a consumer that joined late asks for the events it missed. A consumer
 	// without it starts with an empty view of a cache that is not empty.
+	//
 	ReplayEndpoint *string `json:"replayEndpoint,omitempty"`
 	// Topic is the topic the publisher was configured with. A consumer subscribing to a different one
 	// receives nothing and reports no error.

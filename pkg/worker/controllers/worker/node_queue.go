@@ -278,7 +278,8 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 				return ctrl.Result{RequeueAfter: _TASQueueMigrationRequeueAfter}, r.setTopologyReadyConditionStatus(
 					ctx, cq, meta.ConditionUnknown, "AwaitingQueueStatus",
 					fmt.Sprintf("waiting for Kueue to report flavor usage at generation %d before dropping flavors %v",
-						cq.Generation, dropped))
+						cq.Generation, dropped),
+				)
 			}
 			migrate = flavorsMayBeInUse(cq, dropped)
 		}
@@ -509,7 +510,8 @@ func (r *NodeQueueReconciler) validateTASFlavors(
 				reason: "MissingTopology",
 				message: fmt.Sprintf(
 					"ResourceFlavor %q references Topology %q instead of profile Topology %q",
-					rf.Name, *rf.Spec.TopologyName, expected),
+					rf.Name, *rf.Spec.TopologyName, expected,
+				),
 			}, nil
 		}
 		topology := new(kueue.Topology)
@@ -547,7 +549,8 @@ func (r *NodeQueueReconciler) validateTASFlavors(
 				reason: "NonConservedQuota",
 				message: fmt.Sprintf(
 					"ResourceFlavor %q advertises capacity %d but %d selected Nodes contribute %d each",
-					rf.Name, capacity, selectedCounts[i], count),
+					rf.Name, capacity, selectedCounts[i], count,
+				),
 			}, nil
 		}
 	}

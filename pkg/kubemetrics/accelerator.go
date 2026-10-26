@@ -116,7 +116,8 @@ func NewAcceleratorGrants(pod *core.Pod, allocations deviceplugin.PodAllocations
 						"two containers of one pod were granted the same accelerator,"+
 							" reporting no figures of its own",
 						"pod", pod.Namespace+"/"+pod.Name, "manufacturer", key.manufacturer,
-						"device", key.deviceID, "partition", key.partitionID)
+						"device", key.deviceID, "partition", key.partitionID,
+					)
 					held.ambiguous = true
 					grants.grants[key] = held
 					continue
@@ -237,7 +238,8 @@ func (g *AcceleratorGrants) resolveGrant(
 	entry.MemoryUsedMiB = figures.MemoryUsedMiB
 	entry.MemoryUtilizationPercent = utilizationPercent(entry.MemoryUsedMiB, entry.MemoryTotalMiB)
 	entry.CoresUtilizationPercent = ownCoresUtilizationPercent(
-		figures.CoresUtilizationPercent, grant.coresCapPercent)
+		figures.CoresUtilizationPercent, grant.coresCapPercent,
+	)
 	return entry
 }
 

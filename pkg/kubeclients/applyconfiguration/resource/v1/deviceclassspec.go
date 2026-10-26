@@ -9,12 +9,14 @@ package v1
 // and how to configure it.
 type DeviceClassSpecApplyConfiguration struct {
 	// Each selector must be satisfied by a device which is claimed via this class.
+	//
 	Selectors []DeviceSelectorApplyConfiguration `json:"selectors,omitempty"`
 	// Config defines configuration parameters that apply to each device that is claimed via this class.
 	// Some classses may potentially be satisfied by multiple drivers, so each instance of a vendor
 	// configuration applies to exactly one driver.
 	//
 	// They are passed to the driver, but are not considered while allocating the claim.
+	//
 	Config []DeviceClassConfigurationApplyConfiguration `json:"config,omitempty"`
 	// ExtendedResourceName is the extended resource name for the devices of this class.
 	// The devices of this class can be used to satisfy a pod's extended resource requests.
@@ -25,7 +27,7 @@ type DeviceClassSpecApplyConfiguration struct {
 	// If two classes are created at the same time, then the name of the class
 	// lexicographically sorted first is picked.
 	//
-	// This is an alpha field.
+	// This is a beta field.
 	ExtendedResourceName *string `json:"extendedResourceName,omitempty"`
 }
 

@@ -32,7 +32,8 @@ func (h *KVCachePoolHandler) SetupHandler(
 		extensionapi.JSONPathTemplateColumn("Quota", "{.spec.quota.total}"),
 		extensionapi.JSONPathTemplateColumn("Usage", "{.status.usage.total}"),
 		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"),
-		extensionapi.JSONPathTemplateColumn("Endpoint", "{.status.clientEndpoint}"))
+		extensionapi.JSONPathTemplateColumn("Endpoint", "{.status.clientEndpoint}"),
+	)
 	if err != nil {
 		return gvr, nil, err
 	}

@@ -324,7 +324,8 @@ func TestDeriveSlicedProfilesRejectsCollisions(t *testing.T) {
 				[]hgml.GpuInstanceProfileInfo_v3{base, collided, keeper},
 				func(id uint32) []device.AcceleratorPlacement {
 					return zw810ePlacements()[id]
-				})
+				},
+			)
 
 			// The colliding name is withheld entirely — neither reading of it is
 			// trustworthy — while every other profile the accelerator offers is unaffected.
@@ -421,7 +422,8 @@ func TestMigPlacementsByProfile(t *testing.T) {
 						return nil, hgml.ERROR_NOT_SUPPORTED
 					}
 					return tc.slots[id], hgml.SUCCESS
-				})
+				},
+			)
 			assert.Equal(t, tc.wantErr, err != nil, "error = %v", err)
 
 			gotAnswered := make([]uint32, 0, len(answered))

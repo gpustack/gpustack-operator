@@ -32,11 +32,13 @@ type WebhookClientConfigApplyConfiguration struct {
 	// Attempting to use a user or basic auth e.g. "user:password@" is not
 	// allowed. Fragments ("#...") and query parameters ("?...") are not
 	// allowed, either.
+	//
 	URL *string `json:"url,omitempty"`
 	// service is a reference to the service for this webhook. Either
 	// service or url must be specified.
 	//
 	// If the webhook is running within the cluster, then you should use `service`.
+	//
 	Service *ServiceReferenceApplyConfiguration `json:"service,omitempty"`
 	// caBundle is a PEM encoded CA bundle which will be used to validate the webhook's server certificate.
 	// If unspecified, system trust roots on the apiserver are used.

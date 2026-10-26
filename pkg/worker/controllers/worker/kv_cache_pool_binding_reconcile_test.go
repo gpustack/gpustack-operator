@@ -93,7 +93,8 @@ func TestKVCachePoolBindingReconcile_OneScrapeFeedsEveryBinding(t *testing.T) {
 		for i := range bindings {
 			objs = append(objs, newBoundBinding(
 				fmt.Sprintf("team-%d", i), "workload", "shared",
-				fmt.Sprintf("domain-%d", i), resource.MustParse("1Ti")))
+				fmt.Sprintf("domain-%d", i), resource.MustParse("1Ti"),
+			))
 		}
 
 		r, _ := newReconciler(objs...)

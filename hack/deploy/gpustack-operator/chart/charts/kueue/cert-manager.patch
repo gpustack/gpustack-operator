@@ -276,6 +276,19 @@ index e6f2746..74b7707 100644
        - name: metrics-certs
          secret:
            secretName: {{ include "kueue.fullname" . }}-metrics-server-cert
+diff --git a/templates/prometheus/monitor.yaml b/templates/prometheus/monitor.yaml
+index 76c5659..12d979f 100644
+--- a/templates/prometheus/monitor.yaml
++++ b/templates/prometheus/monitor.yaml
+@@ -39,7 +39,7 @@ spec:
+       {{- if not (hasKey .Values.metrics.serviceMonitor.tlsConfig "insecureSkipVerify") }}
+         insecureSkipVerify: true
+       {{- end }}
+-      {{- else if .Values.enableCertManager }}
++      {{- else if (include "kueue.enableCertManager" .) }}
+         serverName: '{{ include "kueue.fullname" . }}-controller-manager-metrics-service.{{ .Release.Namespace }}.svc'
+         insecureSkipVerify: false
+         ca:
 diff --git a/templates/visibility/apiservice_v1beta1.yaml b/templates/visibility/apiservice_v1beta1.yaml
 index d823e11..c1cf797 100644
 --- a/templates/visibility/apiservice_v1beta1.yaml

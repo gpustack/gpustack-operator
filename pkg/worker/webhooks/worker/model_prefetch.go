@@ -217,7 +217,8 @@ func (r *ModelPrefetchWebhook) validateModelPrefetchGranted(
 	return field.ErrorList{field.Invalid(field.NewPath("spec"), names, fmt.Sprintf(
 		"the target set leaves the grant: none of the stores %s names covers the node(s) %s, so "+
 			"warming there was never granted. Widen storeRefs on %s, or point the placement at "+
-			"nodes the grant covers", binding.Name, names, binding.Name))}
+			"nodes the grant covers", binding.Name, names, binding.Name,
+	))}
 }
 
 // validateModelPrefetchBudget projects the namespace's warm footprint onto the grant and refuses

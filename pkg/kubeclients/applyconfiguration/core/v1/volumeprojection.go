@@ -29,6 +29,7 @@ type VolumeProjectionApplyConfiguration struct {
 	// comments and block headers are stripped.  Certificates are deduplicated.
 	// The ordering of certificates within the file is arbitrary, and Kubelet
 	// may change the order over time.
+	//
 	ClusterTrustBundle *ClusterTrustBundleProjectionApplyConfiguration `json:"clusterTrustBundle,omitempty"`
 	// Projects an auto-rotating credential bundle (private key and certificate
 	// chain) that the pod can use either as a TLS client or server.
@@ -64,6 +65,7 @@ type VolumeProjectionApplyConfiguration struct {
 	// The named signer controls chooses the format of the certificate it
 	// issues; consult the signer implementation's documentation to learn how to
 	// use the certificates it issues.
+	//
 	PodCertificate *PodCertificateProjectionApplyConfiguration `json:"podCertificate,omitempty"`
 }
 

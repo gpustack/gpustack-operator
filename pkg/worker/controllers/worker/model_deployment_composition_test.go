@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	ctrlrecord "k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -76,13 +76,14 @@ func newCompositionClient(objs ...ctrlcli.Object) ctrlcli.WithWatch {
 // kueueComposeGroup runs Kueue's composition for a group and returns the Workload it decided on.
 func kueueComposeGroup(ctx context.Context, cli ctrlcli.Client, group string) (*kueue.Workload, error) {
 	podJob := kueuepod.NewPod(
-		kueuepod.WithExcessPodExpectations(utilexpectations.NewStore("composition-test")))
+		kueuepod.WithExcessPodExpectations(utilexpectations.NewStore("composition-test")),
+	)
 	key := types.NamespacedName{Namespace: "group/team-a", Name: group}
 	if _, err := podJob.Load(ctx, cli, &key); err != nil {
 		return nil, err
 	}
 
-	return podJob.ConstructComposableWorkload(ctx, cli, ctrlrecord.NewFakeRecorder(64), nil)
+	return podJob.ConstructComposableWorkload(ctx, cli, &events.FakeRecorder{}, nil)
 }
 
 // createMember creates one group member with a stamped UID and returns it.

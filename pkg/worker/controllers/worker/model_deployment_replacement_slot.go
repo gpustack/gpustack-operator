@@ -168,7 +168,8 @@ func (r *ModelDeploymentReconciler) loadReplacementSlots(
 	if current.UID != md.UID {
 		return nil, nil, fmt.Errorf(
 			"the deployment was replaced while this pass ran: read UID %s, expected %s",
-			current.UID, md.UID)
+			current.UID, md.UID,
+		)
 	}
 
 	return current, modelDeploymentReplacementSlotsOf(current), nil
@@ -720,7 +721,8 @@ func replacementTemplateMatches(
 			// derives from the template's containers.
 			if resourceQuantityListEqual(
 				replacementPodRequests(&core.Pod{Spec: got.Template.Spec}),
-				replacementPodRequests(&core.Pod{Spec: template.Spec})) {
+				replacementPodRequests(&core.Pod{Spec: template.Spec}),
+			) {
 				return ""
 			}
 

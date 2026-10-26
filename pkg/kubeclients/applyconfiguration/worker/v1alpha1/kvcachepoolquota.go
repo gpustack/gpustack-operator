@@ -16,6 +16,7 @@ import (
 // has mounted nothing — is a Condition rather than a silence.
 type KVCachePoolQuotaApplyConfiguration struct {
 	// Total is required: a pool with no declared ceiling has nothing to write into any ledger.
+	//
 	Total *resource.Quantity `json:"total,omitempty"`
 }
 

@@ -229,7 +229,8 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	// THE COLLECTIVE'S MEMBERSHIP ARRIVES ON THE PASS'S CARRIER, and it is empty for every shape
 	// that has no collective, so the elastic role keeps the replica-derived groups.
 	collective := applyModelDeploymentGroupStatuses(
-		md, desired.Roles, observation.Qualifications, pods, observation.CollectiveMembers)
+		md, desired.Roles, observation.Qualifications, pods, observation.CollectiveMembers,
+	)
 
 	// THE GROUPS ARE RESOLVED FROM THE SAME ANSWER THE COUNTS WERE, so a group and the role it
 	// belongs to cannot describe two different moments of the same collection.
@@ -238,7 +239,8 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	// THE INSTANTS ARE SETTLED AGAINST WHAT WAS PUBLISHED BEFORE, so a group that stays eligible
 	// keeps the instant it earned rather than the instant of the latest pass.
 	applyModelDeploymentGroupQualificationTimes(
-		desired, md.Status.Roles, meta.NewTime(r.modelDeploymentNow()), collective)
+		desired, md.Status.Roles, meta.NewTime(r.modelDeploymentNow()), collective,
+	)
 
 	// kubemeta.DeepEqual covers LastTransitionTime too, and that is correct rather than incidental:
 	// the condition accessors move it only when the condition's value changes, so an unchanged pass
@@ -708,13 +710,15 @@ func applyModelDeploymentGroupStatuses(
 			}
 
 			return strings.Compare(
-				string(modelDeploymentGenerationOf(a)), string(modelDeploymentGenerationOf(b)))
+				string(modelDeploymentGenerationOf(a)), string(modelDeploymentGenerationOf(b)),
+			)
 		})
 
 		roles[i].Groups = make([]workercore.ModelDeploymentGroupStatus, 0, len(groupViews))
 		for _, view := range groupViews {
 			qualification, found := modelDeploymentGroupQualificationOf(
-				qualifications, view.Role, view.Ordinal, string(modelDeploymentGenerationOf(view)))
+				qualifications, view.Role, view.Ordinal, string(modelDeploymentGenerationOf(view)),
+			)
 			roles[i].Groups = append(roles[i].Groups,
 				modelDeploymentGroupStatus(md, view, qualification, found))
 		}
@@ -1018,7 +1022,8 @@ func (r *ModelDeploymentReconciler) applyModelDeploymentGroupAnswer(
 			fact, observed := observation.Serving.Groups[modelDeploymentGroupKeyOf(group)]
 
 			group.Serving, group.ServingReason = modelDeploymentGroupServingAnswer(
-				observation.Serving, fact, observed, fresh, md)
+				observation.Serving, fact, observed, fresh, md,
+			)
 
 			r.holdModelDeploymentGroup(group, observation, md, fresh)
 		}
@@ -1082,7 +1087,8 @@ func (r *ModelDeploymentReconciler) holdModelDeploymentGroup(
 		return
 	}
 	qualification, found := modelDeploymentGroupQualificationOf(
-		observation.Qualifications, group.Role, int(group.Ordinal), group.Generation)
+		observation.Qualifications, group.Role, int(group.Ordinal), group.Generation,
+	)
 	if !found {
 		return
 	}
@@ -1495,7 +1501,8 @@ func observeModelDeploymentQuota(
 				"and no longer ask for quota: %s. An identical re-apply does not clear this — free the "+
 				"capacity the deployment needs and reactivate them, or delete the deployment and "+
 				"create it again",
-			len(parked), strings.Join(parked, ", ")))
+			len(parked), strings.Join(parked, ", "),
+		))
 
 		return
 	}
@@ -1569,7 +1576,8 @@ func observeModelDeploymentQuota(
 			effect = fmt.Sprintf(
 				"the deployment has no admitted replica of role kind %s at all, which is the loss of "+
 					"that role rather than of capacity",
-				strings.Join(unserved, ", "))
+				strings.Join(unserved, ", "),
+			)
 		}
 
 		ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPreemptedInPart,
@@ -1579,7 +1587,8 @@ func observeModelDeploymentQuota(
 					"their accelerators, and %s. They are released only by deleting the deployment "+
 					"or by the reclaimed replicas being admitted again once the capacity returns",
 				lostReplicas, modelDeploymentDeclaredReplicas(md), strings.Join(lost, ", "),
-				strings.Join(kept, ", "), effect))
+				strings.Join(kept, ", "), effect,
+			))
 
 		return
 	}
@@ -1608,7 +1617,8 @@ func observeModelDeploymentQuota(
 		// on their way out is what a reclaimed group looks like from the Pod side, so "all of them are
 		// terminating" without the reason why sends the reader to look for who deleted them.
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "AllReplicasTerminating", fmt.Sprintf(
-			"all %d replicas are terminating, so none holds quota to report on%s", all, taken))
+			"all %d replicas are terminating, so none holds quota to report on%s", all, taken,
+		))
 
 		return
 	}
@@ -1652,7 +1662,8 @@ func observeModelDeploymentQuota(
 					"%d of %d replicas role %q declares exist, so Kueue composes no workload for the "+
 						"missing ones at all and there is nothing in cluster queue %q to hold quota "+
 						"for them%s",
-					alive, want, group.Role, group.InstanceType, taken))
+					alive, want, group.Role, group.InstanceType, taken,
+				))
 
 			return
 		}
@@ -1675,21 +1686,24 @@ func observeModelDeploymentQuota(
 	if uncomposedRoles, uncomposed := modelDeploymentRolesWithUncomposedReplicas(md, pods, wlByReplica); uncomposed > 0 {
 		if kuberess.IsReservedNamespace(md.Namespace) {
 			ModelDeploymentConditionQuotaReserved.False(holder, "NoQueueInReservedNamespace", fmt.Sprintf(
-				"the deployment is in reserved namespace %q and will never be scheduled", md.Namespace))
+				"the deployment is in reserved namespace %q and will never be scheduled", md.Namespace,
+			))
 
 			return
 		}
 		if len(groups) == 1 {
 			ModelDeploymentConditionQuotaReserved.Unknown(holder, "AdmissionInFlight", fmt.Sprintf(
 				"%d of this deployment's %d replicas have no workload yet in cluster queue %q%s",
-				uncomposed, modelDeploymentDeclaredReplicas(md), queue, taken))
+				uncomposed, modelDeploymentDeclaredReplicas(md), queue, taken,
+			))
 
 			return
 		}
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "AdmissionInFlight", fmt.Sprintf(
 			"%d of this deployment's %d replicas have no workload yet: the replicas of roles %s%s",
 			uncomposed, modelDeploymentDeclaredReplicas(md),
-			strings.Join(uncomposedRoles, ", "), taken))
+			strings.Join(uncomposedRoles, ", "), taken,
+		))
 
 		return
 	}
@@ -1700,12 +1714,14 @@ func observeModelDeploymentQuota(
 		// already recognizes, because for one role it is exactly right.
 		if len(groups) == 1 {
 			ModelDeploymentConditionQuotaReserved.True(holder, "Reserved", fmt.Sprintf(
-				"all %d replicas have quota reserved in cluster queue %q", live, queue))
+				"all %d replicas have quota reserved in cluster queue %q", live, queue,
+			))
 
 			return
 		}
 		ModelDeploymentConditionQuotaReserved.True(holder, "Reserved", fmt.Sprintf(
-			"all %d of this deployment's replicas have quota reserved", live))
+			"all %d of this deployment's replicas have quota reserved", live,
+		))
 
 		return
 	}
@@ -1714,7 +1730,8 @@ func observeModelDeploymentQuota(
 	if len(groups) == 1 {
 		ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
 			"%d of this deployment's %d replicas are waiting for quota in cluster queue %q%s%s",
-			waiting, modelDeploymentDeclaredReplicas(md), queue, taken, downstream))
+			waiting, modelDeploymentDeclaredReplicas(md), queue, taken, downstream,
+		))
 
 		return
 	}
@@ -1725,7 +1742,8 @@ func observeModelDeploymentQuota(
 	ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
 		"%d of this deployment's %d replicas are waiting for quota: the replicas of roles %s. Those "+
 			"replicas are admitted only once the whole set can run%s%s",
-		waiting, modelDeploymentDeclaredReplicas(md), strings.Join(waitingRoles, ", "), taken, downstream))
+		waiting, modelDeploymentDeclaredReplicas(md), strings.Join(waitingRoles, ", "), taken, downstream,
+	))
 }
 
 // modelDeploymentInadmissibleWorkloadDetails preserves Kueue's explanation while adding the role
@@ -2336,5 +2354,6 @@ func modelDeploymentPreemptionNote(lost []string) string {
 
 	return fmt.Sprintf(
 		". A higher-priority workload has also reclaimed the quota of the replicas of roles %s",
-		strings.Join(lost, ", "))
+		strings.Join(lost, ", "),
+	)
 }

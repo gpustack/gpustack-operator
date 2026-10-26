@@ -464,7 +464,8 @@ func TestTierReuseVerdictNeedsFullCoverage(t *testing.T) {
 				Namespace:         kuberess.SystemNamespaceName,
 				CreationTimestamp: meta.NewTime(backendBorn.Add(after)),
 				Labels: mooncake.MemberSelectorLabels(
-					&workercore.KVCacheBackend{ObjectMeta: meta.ObjectMeta{Name: "store"}}, 0),
+					&workercore.KVCacheBackend{ObjectMeta: meta.ObjectMeta{Name: "store"}}, 0,
+				),
 			},
 			Spec: core.PodSpec{NodeName: node},
 		}
@@ -813,7 +814,8 @@ func TestTierCleanupPodOfAnotherIncarnationIsNotBelieved(t *testing.T) {
 	}
 
 	finished, _, err := r.ensureKVCacheBackendTierCleanupPod(
-		context.Background(), kvcb, member, "/mnt/tier", node)
+		context.Background(), kvcb, member, "/mnt/tier", node,
+	)
 	require.NoError(t, err)
 	assert.False(t, finished,
 		"a Succeeded Pod from another incarnation is not this backend's node being cleaned")
@@ -1144,7 +1146,8 @@ func TestTierSharedPathDeleteIsGuardedByTheUIDItRead(t *testing.T) {
 					// The object was replaced between the read and this call, which is what the
 					// precondition is there to turn into a refusal rather than a wrong deletion.
 					return kerrors.NewConflict(
-						schema.GroupResource{Resource: "pods"}, obj.GetName(), errors.New("uid"))
+						schema.GroupResource{Resource: "pods"}, obj.GetName(), errors.New("uid"),
+					)
 				},
 			}).
 			Build(),

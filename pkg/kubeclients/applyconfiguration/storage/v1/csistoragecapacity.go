@@ -53,6 +53,7 @@ type CSIStorageCapacityApplyConfiguration struct {
 	// not accessible from any node in the cluster. If empty, the
 	// storage is accessible from all nodes. This field is
 	// immutable.
+	//
 	NodeTopology *metav1.LabelSelectorApplyConfiguration `json:"nodeTopology,omitempty"`
 	// storageClassName represents the name of the StorageClass that the reported capacity applies to.
 	// It must meet the same requirements as the name of a StorageClass
@@ -69,6 +70,7 @@ type CSIStorageCapacityApplyConfiguration struct {
 	// The available capacity, in bytes, of the storage that can be used
 	// to provision volumes. If not set, that information is currently
 	// unavailable.
+	//
 	Capacity *resource.Quantity `json:"capacity,omitempty"`
 	// maximumVolumeSize is the value reported by the CSI driver in its GetCapacityResponse
 	// for a GetCapacityRequest with topology and parameters that match the
@@ -80,6 +82,7 @@ type CSIStorageCapacityApplyConfiguration struct {
 	// create a volume with the same parameters as those in
 	// GetCapacityRequest. The corresponding value in the Kubernetes
 	// API is ResourceRequirements.Requests in a volume claim.
+	//
 	MaximumVolumeSize *resource.Quantity `json:"maximumVolumeSize,omitempty"`
 }
 

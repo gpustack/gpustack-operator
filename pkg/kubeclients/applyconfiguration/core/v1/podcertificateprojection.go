@@ -9,11 +9,13 @@ package v1
 // pod filesystem.
 type PodCertificateProjectionApplyConfiguration struct {
 	// Kubelet's generated CSRs will be addressed to this signer.
+	//
 	SignerName *string `json:"signerName,omitempty"`
 	// The type of keypair Kubelet will generate for the pod.
 	//
 	// Valid values are "RSA3072", "RSA4096", "ECDSAP256", "ECDSAP384",
 	// "ECDSAP521", and "ED25519".
+	//
 	KeyType *string `json:"keyType,omitempty"`
 	// maxExpirationSeconds is the maximum lifetime permitted for the
 	// certificate.
@@ -30,6 +32,7 @@ type PodCertificateProjectionApplyConfiguration struct {
 	// seconds (1 hour).  This constraint is enforced by kube-apiserver.
 	// `kubernetes.io` signers will never issue certificates with a lifetime
 	// longer than 24 hours.
+	//
 	MaxExpirationSeconds *int32 `json:"maxExpirationSeconds,omitempty"`
 	// Write the credential bundle at this path in the projected volume.
 	//
@@ -44,6 +47,7 @@ type PodCertificateProjectionApplyConfiguration struct {
 	// atomic read that retrieves a consistent key and certificate chain.  If you
 	// project them to separate files, your application code will need to
 	// additionally check that the leaf certificate was issued to the key.
+	//
 	CredentialBundlePath *string `json:"credentialBundlePath,omitempty"`
 	// Write the key at this path in the projected volume.
 	//
@@ -51,6 +55,7 @@ type PodCertificateProjectionApplyConfiguration struct {
 	// and certificateChainPath, your application needs to check that the key
 	// and leaf certificate are consistent, because it is possible to read the
 	// files mid-rotation.
+	//
 	KeyPath *string `json:"keyPath,omitempty"`
 	// Write the certificate chain at this path in the projected volume.
 	//
@@ -58,6 +63,7 @@ type PodCertificateProjectionApplyConfiguration struct {
 	// and certificateChainPath, your application needs to check that the key
 	// and leaf certificate are consistent, because it is possible to read the
 	// files mid-rotation.
+	//
 	CertificateChainPath *string `json:"certificateChainPath,omitempty"`
 	// userAnnotations allow pod authors to pass additional information to
 	// the signer implementation.  Kubernetes does not restrict or validate this

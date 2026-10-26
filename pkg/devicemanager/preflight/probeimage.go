@@ -64,14 +64,16 @@ func ResolveProbeImage(manufacturer, family, runtimeVersion, override string) (s
 		}
 		return "", fmt.Errorf(
 			"no default probe image for ascend family %q on CANN runtime %q; pass --probe-image",
-			family, runtimeVersion)
+			family, runtimeVersion,
+		)
 	case nodefeature.ManufacturerNVIDIA:
 		dir := nvidiaCUDADir(runtimeVersion)
 		if img, ok := nvidiaProbeImages[dir]; ok {
 			return img, nil
 		}
 		return "", fmt.Errorf(
-			"no default probe image for nvidia CUDA runtime %q; pass --probe-image", runtimeVersion)
+			"no default probe image for nvidia CUDA runtime %q; pass --probe-image", runtimeVersion,
+		)
 	case nodefeature.ManufacturerAMD:
 		return amdProbeImage, nil
 	default:

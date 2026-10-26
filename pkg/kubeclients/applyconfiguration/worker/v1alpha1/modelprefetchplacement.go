@@ -13,8 +13,10 @@ import (
 type ModelPrefetchPlacementApplyConfiguration struct {
 	// InstanceTypes names the node pools to warm, by the InstanceType objects the scheduling chain
 	// already publishes. The target set is every node carrying one of these types' flavors.
+	//
 	InstanceTypes []string `json:"instanceTypes,omitempty"`
 	// NodeSelector selects the target nodes directly, the "download to these nodes" form.
+	//
 	NodeSelector *v1.LabelSelectorApplyConfiguration `json:"nodeSelector,omitempty"`
 }
 

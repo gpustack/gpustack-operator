@@ -292,7 +292,8 @@ func TestModelDeploymentScalerDeletionClearsBindingAndPreservesVector(t *testing
 	md := scalerTestDeployment("target", "md-uid", map[string]int32{"server": 2})
 	md.Annotations = map[string]string{
 		workercore.ModelDeploymentScalerBindingAnnotationKey: scalerTestBindingJSON(
-			scalerTestScaler("scaler", "scaler-uid", workercore.ModelDeploymentScalerModeActive), 2),
+			scalerTestScaler("scaler", "scaler-uid", workercore.ModelDeploymentScalerModeActive), 2,
+		),
 		"preserve": "annotation",
 	}
 	scaler := scalerTestScaler("scaler", "scaler-uid", workercore.ModelDeploymentScalerModeActive)

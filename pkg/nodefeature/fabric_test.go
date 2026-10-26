@@ -105,7 +105,8 @@ func TestConstructFabricNodeLabels(t *testing.T) {
 			name: "a partitioned fabric names the clique in the value",
 			groups: fabricGroups(
 				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "1"},
-				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "1"}),
+				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "1"},
+			),
 			want: map[string]string{NodeFabricDomainLabelKey: "nvlink-c0-1"},
 		},
 		{
@@ -114,7 +115,8 @@ func TestConstructFabricNodeLabels(t *testing.T) {
 			name: "one fabric whose cliques disagree",
 			groups: fabricGroups(
 				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "0"},
-				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "1"}),
+				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "1"},
+			),
 			want: map[string]string{},
 		},
 		{
@@ -201,7 +203,8 @@ func TestSoleFabricDomain(t *testing.T) {
 			name: "a clique every accelerator agrees on is part of the domain",
 			groups: fabricGroups(
 				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "2"},
-				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "2"}),
+				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "2"},
+			),
 			wantOK:  true,
 			wantDom: "nvlink-c0-2",
 		},

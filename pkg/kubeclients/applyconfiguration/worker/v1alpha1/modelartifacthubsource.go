@@ -12,9 +12,11 @@ import (
 // ModelArtifactHubSource is one repository on a model hub at one revision.
 type ModelArtifactHubSourceApplyConfiguration struct {
 	// Repository is the repository id, "owner/name", or a bare canonical name.
+	//
 	Repository *string `json:"repository,omitempty"`
 	// Revision is a branch, a tag or a commit. Admission defaults it to "main". It is resolved to a
 	// full commit once, at creation, into status.resolved.revision.
+	//
 	Revision *string `json:"revision,omitempty"`
 	// SecretRef names a Secret in this namespace whose "token" key is the hub token. It is read by
 	// the controller for resolution and revalidation, and handed to an engine that downloads the
@@ -22,6 +24,7 @@ type ModelArtifactHubSourceApplyConfiguration struct {
 	// enters a Pod spec, a status or an event.
 	//
 	// The Secret need not exist at admission; a missing one is reported in status.
+	//
 	SecretRef *v1.LocalObjectReferenceApplyConfiguration `json:"secretRef,omitempty"`
 }
 

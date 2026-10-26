@@ -385,7 +385,8 @@ func TestDeployedFactsFollowTheReplicasNotTheRole(t *testing.T) {
 	pods := oldReplicaPods(md, 0, 2, false)
 
 	execution, reason := modelDeploymentDeployedReplicaExecution(
-		modelDeploymentGroupPodsByReplica(pods)[0].Members)
+		modelDeploymentGroupPodsByReplica(pods)[0].Members,
+	)
 	assert.Empty(t, reason)
 	assert.Equal(t, modelDeploymentExecutionTakeover, execution)
 

@@ -23,7 +23,7 @@ var gp = sync.Pool{
 // which can specify with a size,
 // default is 32k.
 func GetBytes(size ...int) Bytes {
-	buf := *(gp.Get().(*Bytes))
+	buf := *gp.Get().(*Bytes)
 
 	s := defaultSize
 	if len(size) != 0 {

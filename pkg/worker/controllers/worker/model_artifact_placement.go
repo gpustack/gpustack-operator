@@ -105,7 +105,8 @@ func resolveModelArtifactWeights(
 	resolved := ma.Status.Resolved
 	if resolved == nil {
 		return blockedModelArtifactWeights(modelWeightsReasonArtifactUnready, fmt.Sprintf(
-			"ModelArtifact %q has not resolved: %s", name, ModelArtifactConditionResolved.GetMessage(ma))), nil
+			"ModelArtifact %q has not resolved: %s", name, ModelArtifactConditionResolved.GetMessage(ma),
+		)), nil
 	}
 
 	w := &modelArtifactWeights{}
@@ -253,7 +254,8 @@ func placeModelArtifactClaim(
 		w.Message = fmt.Sprintf(
 			"%d Pods would mount PersistentVolumeClaim %q, whose access modes %v allow neither ReadOnlyMany "+
 				"nor ReadWriteMany: ReadWriteOnce would crowd every replica onto one node and "+
-				"ReadWriteOncePod admits one; use a claim that can be shared", pods, claimName, modes)
+				"ReadWriteOncePod admits one; use a claim that can be shared", pods, claimName, modes,
+		)
 		return nil
 	}
 
@@ -283,7 +285,8 @@ func placeModelArtifactClaim(
 	w.Message = fmt.Sprintf(
 		"PersistentVolumeClaim %q is %s and nothing binds it to the node a Pod is assigned: bind it to "+
 			"its PersistentVolume first (spec.volumeName), so the Pods can be placed where that volume is",
-		claimName, pvc.Status.Phase)
+		claimName, pvc.Status.Phase,
+	)
 
 	return nil
 }
@@ -417,18 +420,22 @@ func observeModelDeploymentWeights(
 			retry = "; the node tries again at " + failed.RetryTime.UTC().Format(time.RFC3339)
 		}
 		ModelDeploymentConditionWeightsReady.False(holder, modelWeightsReasonMaterializeFail, fmt.Sprintf(
-			"a replica Pod's node failed to materialize %s, %s: %s%s", failed.Digest, failed.Reason, failed.Message, retry))
+			"a replica Pod's node failed to materialize %s, %s: %s%s", failed.Digest, failed.Reason, failed.Message, retry,
+		))
 	case waiting > 0 && materializing > 0:
 		ModelDeploymentConditionWeightsReady.False(holder, modelWeightsReasonMaterializing, fmt.Sprintf(
 			"%d replica Pods wait for their nodes to materialize %s; a Pod starts at kubelet's next mount "+
-				"retry after that, up to about two minutes later", waiting, weights.Render.ManifestDigest))
+				"retry after that, up to about two minutes later", waiting, weights.Render.ManifestDigest,
+		))
 	case waiting > 0 && engine:
 		ModelDeploymentConditionWeightsReady.False(holder, modelWeightsReasonDownloading, fmt.Sprintf(
 			"%d replica Pods' engines are not ready yet; each downloads commit %s itself and reports no progress",
-			waiting, weights.Render.Revision))
+			waiting, weights.Render.Revision,
+		))
 	case waiting > 0:
 		ModelDeploymentConditionWeightsReady.False(holder, modelWeightsReasonNotMounted, fmt.Sprintf(
-			"%d replica Pods do not have their volumes mounted yet (PodReadyToStartContainers is not True)", waiting))
+			"%d replica Pods do not have their volumes mounted yet (PodReadyToStartContainers is not True)", waiting,
+		))
 	case engine:
 		ModelDeploymentConditionWeightsReady.True(holder, modelWeightsReasonDownloaded,
 			fmt.Sprintf("every replica Pod serves commit %s", weights.Render.Revision))

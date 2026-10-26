@@ -22,11 +22,14 @@ import (
 // failed is Withdrawn, and neither reading can be mistaken for the other.
 type ModelDeploymentGroupStatusApplyConfiguration struct {
 	// Role is the role this group belongs to.
+	//
 	Role *string `json:"role,omitempty"`
 	// Ordinal is the replica slot this group occupies within its role.
+	//
 	Ordinal *int32 `json:"ordinal,omitempty"`
 	// Generation is the membership the answers below were taken against: the sorted member UID set.
 	// A replaced member is a different set, so a prior verification does not apply to the new one.
+	//
 	Generation *string `json:"generation,omitempty"`
 	// State is the group's eligibility state.
 	//
@@ -34,6 +37,7 @@ type ModelDeploymentGroupStatusApplyConfiguration struct {
 	// that passed every leg and is waiting on a valid Router observation is AwaitingObservation,
 	// while a group that passed every leg and is retained across an observation loss is Eligible,
 	// because the observation is not what holds it.
+	//
 	State *workerv1alpha1.ModelDeploymentGroupState `json:"state,omitempty"`
 	// Reason names the fact that holds the group, or says that it qualifies.
 	//
@@ -41,8 +45,10 @@ type ModelDeploymentGroupStatusApplyConfiguration struct {
 	// reason names that leg. When the Router's observation holds the group, the reason names the
 	// observation. A member fault and a lost Router view are therefore told apart by the reason as
 	// well as by the state.
+	//
 	Reason *string `json:"reason,omitempty"`
 	// Members are the group's current members, ordered by seat.
+	//
 	Members []ModelDeploymentGroupMemberStatusApplyConfiguration `json:"members,omitempty"`
 	// LastQualificationTime is when the group last entered published Eligible for this generation.
 	//
@@ -51,8 +57,10 @@ type ModelDeploymentGroupStatusApplyConfiguration struct {
 	// does not erase it. A group that leaves Eligible and comes back records the new instant. A NEW
 	// GENERATION INHERITS NO TIMESTAMP: the membership it names is a membership that was never
 	// qualified.
+	//
 	LastQualificationTime *v1.Time `json:"lastQualificationTime,omitempty"`
 	// Serving is the Router's answer for this group.
+	//
 	Serving *ModelDeploymentServingStatusApplyConfiguration `json:"serving,omitempty"`
 	// ServingReason names why the Router's answer is what it is, when it is not a confirmation.
 	//
@@ -63,6 +71,7 @@ type ModelDeploymentGroupStatusApplyConfiguration struct {
 	// IT IS SEPARATE FROM Reason, because the two name different facts. Reason names what holds the
 	// GROUP and ServingReason names what holds the SERVING ANSWER, so an engine fault's reason never
 	// appears here and the Router's reason never takes the group's place.
+	//
 	ServingReason *string `json:"servingReason,omitempty"`
 }
 

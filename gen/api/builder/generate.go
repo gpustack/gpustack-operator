@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -146,6 +147,23 @@ func Generate(c Config) error {
 	// Execute go-to-protobuf.
 	if len(internalAPIs) > 0 {
 		klog.Info("executing go-to-protobuf")
+
+		// The proto message markers are not produced any more. The upstream generator
+		// used to write a second file holding the empty ProtoMessage markers behind a
+		// build tag, and it used to remove that file when the markers went away. It
+		// now does neither, so a checked-in copy would survive as an orphan that no
+		// longer matches the API types. The stale copy is removed before the run, so
+		// that a generator which emits the file again would simply write it afresh.
+		for i := range internalAPIs {
+			protomessageFile := filepath.Join(
+				c.ProjectDir,
+				strings.TrimPrefix(internalAPIs[i], c.Project),
+				"generated.protomessage.pb.go",
+			)
+			if err := osx.DurableRemove(protomessageFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("remove obsolete proto message markers: %w", err)
+			}
+		}
 
 		protoGenAPIMachineryPackages := make([]string, 0, len(c.MachineryAPIs))
 		for _, api := range c.MachineryAPIs {

@@ -283,7 +283,8 @@ func reserveSlice(mgr sgpuManager, podUID, container, bdf string, coresPct int, 
 		if m.CardBDF != bdf || m.CoresPct != coresPct || m.MemMiB != memMiB || m.wholeCard() != wholeCard {
 			return sliceResult{}, fmt.Errorf(
 				"marker %q mismatches request (card=%s cores=%d mem=%d wholeCard=%t): fail closed",
-				self, bdf, coresPct, memMiB, wholeCard)
+				self, bdf, coresPct, memMiB, wholeCard,
+			)
 		}
 		if m.wholeCard() {
 			return sliceResult{wholeCard: true}, nil
@@ -294,7 +295,8 @@ func reserveSlice(mgr sgpuManager, podUID, container, bdf string, coresPct int, 
 		// by the reclaim loop, so a live pod reaching this is a real fault.
 		if !subdeviceOnCard(registry, bdf, m.Index) {
 			return sliceResult{}, fmt.Errorf(
-				"marker %q references missing sgpu subdevice %s#%d: fail closed", self, bdf, m.Index)
+				"marker %q references missing sgpu subdevice %s#%d: fail closed", self, bdf, m.Index,
+			)
 		}
 		return sliceResult{index: m.Index, envValue: encodeMetaxSGPUs(bdf, m.Index, coresPct, memMiB, encodeAlias(podUID))}, nil
 	} else if !os.IsNotExist(err) {

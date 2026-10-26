@@ -8,12 +8,15 @@ package v1alpha1
 // KVCacheBackendMemberStatus is one observed store member.
 type KVCacheBackendMemberStatusApplyConfiguration struct {
 	// SegmentID is the segment's unique identifier as the leader reports it.
+	//
 	SegmentID *string `json:"segmentID,omitempty"`
 	// ClientID is the identifier the member process minted when it started. Unlike the advertised
 	// address, it remains distinct when several host-network members run on one node.
+	//
 	ClientID *string `json:"clientID,omitempty"`
 	// SegmentName is the member's advertised address as the leader reports it. It is not unique:
 	// host-network members placed on one node advertise the same address.
+	//
 	SegmentName *string `json:"segmentName,omitempty"`
 	// NodeName is the node contributing this member's medium.
 	NodeName *string `json:"nodeName,omitempty"`

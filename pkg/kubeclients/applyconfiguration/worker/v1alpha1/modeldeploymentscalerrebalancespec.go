@@ -12,6 +12,7 @@ import (
 // ModelDeploymentScalerRebalanceSpec tunes what the scaler does when one role cannot grow.
 type ModelDeploymentScalerRebalanceSpecApplyConfiguration struct {
 	// Policy decides whether another role may give resources back to an exhausted one.
+	//
 	Policy *workerv1alpha1.ModelDeploymentScalerRebalancePolicy `json:"policy,omitempty"`
 	// Priority orders the roles from the one that may give resources away to the one that may
 	// not.
@@ -19,6 +20,7 @@ type ModelDeploymentScalerRebalanceSpecApplyConfiguration struct {
 	// It only means something under the Priority policy, where a role late in the order is the
 	// first one asked to shrink. A role that is not named keeps the place of its own
 	// recommendation.
+	//
 	Priority []string `json:"priority,omitempty"`
 }
 

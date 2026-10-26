@@ -13,6 +13,7 @@ import (
 // ModelArtifactResolved is the identity a source resolved to.
 type ModelArtifactResolvedApplyConfiguration struct {
 	// Revision is the full 40-character commit a hub source resolved to. Absent for a claim.
+	//
 	Revision *string `json:"revision,omitempty"`
 	// ManifestDigest is the content address of a hub source: "sha256:" and the SHA-256 of the
 	// canonical manifest of every file at Revision, in the format pkg/modelartifact defines.
@@ -20,18 +21,22 @@ type ModelArtifactResolvedApplyConfiguration struct {
 	// IT IS NEVER EVIDENCE OF AUTHORIZATION. It is a pure content address: a public and a private
 	// repository holding the same files have the same digest, so knowing it proves nothing about
 	// access. Absent for a claim.
+	//
 	ManifestDigest *string `json:"manifestDigest,omitempty"`
 	// FileCount and SizeBytes are the manifest's file count and total size. Absent for a claim.
+	//
 	FileCount *int64 `json:"fileCount,omitempty"`
 	SizeBytes *int64 `json:"sizeBytes,omitempty"`
 	// ResolvedTime is when the resolution succeeded.
 	ResolvedTime *v1.Time `json:"resolvedTime,omitempty"`
 	// LastValidatedTime is when access was last confirmed. Absent for a claim, which has no access
 	// check of its own.
+	//
 	LastValidatedTime *v1.Time `json:"lastValidatedTime,omitempty"`
 	// DigestSource says where ManifestDigest came from: Hub, the hub's own listing, or Expected,
 	// the spec's expectedDigest written after the hub's absence was confirmed. An Expected
 	// identity carries no Revision, FileCount or SizeBytes and never contacts the hub again.
+	//
 	DigestSource *workerv1alpha1.ModelArtifactDigestSource `json:"digestSource,omitempty"`
 }
 

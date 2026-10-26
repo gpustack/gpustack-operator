@@ -657,6 +657,7 @@ func ModelDeploymentEPDMatrixGap(router, engine, platform string) string {
 	default:
 		return fmt.Sprintf(
 			"platform %q is not admitted for encoder roles under router %q and engine %q",
-			platform, router, engine)
+			platform, router, engine,
+		)
 	}
 }

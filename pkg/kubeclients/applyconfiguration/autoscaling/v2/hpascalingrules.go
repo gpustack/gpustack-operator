@@ -49,6 +49,7 @@ type HPAScalingRulesApplyConfiguration struct {
 	//
 	// This is an beta field and requires the HPAConfigurableTolerance feature
 	// gate to be enabled.
+	//
 	Tolerance *resource.Quantity `json:"tolerance,omitempty"`
 }
 

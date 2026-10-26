@@ -266,7 +266,8 @@ func TestMonitorAcceleratorPartitionsUnread(t *testing.T) {
 func TestUnreadAcceleratorPartitions(t *testing.T) {
 	got := unreadAcceleratorPartitions(
 		[]device.AcceleratorPartitionRequest{request("1g.10gb", 0, 1)},
-		device.AcceleratorProcessReasonPermission)
+		device.AcceleratorProcessReasonPermission,
+	)
 
 	assert.Equal(t, []device.AcceleratorPartition{{
 		DeviceID: "GPU-0", Profile: "1g.10gb", Placements: placement(0, 1),

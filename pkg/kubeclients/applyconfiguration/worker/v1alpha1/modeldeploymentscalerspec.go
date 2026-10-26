@@ -15,42 +15,51 @@ type ModelDeploymentScalerSpecApplyConfiguration struct {
 	//
 	// The target is in this namespace. A scaler without a target has nothing to plan for, so the
 	// field is required and a name that matches nothing leaves the scaler unbound.
+	//
 	TargetRef *ModelDeploymentScalerTargetReferenceApplyConfiguration `json:"targetRef,omitempty"`
 	// Mode decides whether the scaler only observes or also acts.
 	//
 	// Shadow observes and publishes what it would have done, and changes nothing. Active publishes
 	// and the worker reconciler applies the committed vector. Shadow is the default, so a scaler
 	// that was just created never moves a target before its owner asked for it.
+	//
 	Mode *workerv1alpha1.ModelDeploymentScalerMode `json:"mode,omitempty"`
 	// Suspend stops the scaler without deleting it.
 	//
 	// A suspended scaler releases its owned binding and stops planning without being deleted,
 	// reporting Suspended on its Bound and Active conditions until resumed.
+	//
 	Suspend *bool `json:"suspend,omitempty"`
 	// Sampling tunes how often the scaler looks at the target and how long it waits for a
 	// committed scale-up to become admitted.
+	//
 	Sampling *ModelDeploymentScalerSamplingSpecApplyConfiguration `json:"sampling,omitempty"`
 	// Roles are the roles of the target this scaler plans for, with the bounds each one stays
 	// inside.
 	//
 	// Every role of the target the scaler plans for needs a bound, and a role the target does not
 	// have is refused, so that the planner never reasons about a role that is not there.
+	//
 	Roles []ModelDeploymentScalerRoleBoundsApplyConfiguration `json:"roles,omitempty"`
 	// Ratios are the relationships between roles that a committed vector has to keep.
 	//
 	// A ratio bounds the replica count of a numerator role against the replica count of a
 	// denominator role, so that a coupled prefill and decode pair does not drift apart. A ratio
 	// names roles the scaler plans for, and a ratio that names an unknown role is refused.
+	//
 	Ratios []ModelDeploymentScalerRoleRatioApplyConfiguration `json:"ratios,omitempty"`
 	// Algorithm says how the scaler turns what it observes into a replica count.
 	//
 	// The algorithm named here is the one that runs, and the parameters of the other algorithms
 	// are ignored, so a deployment states one algorithm and one set of parameters.
+	//
 	Algorithm *ModelDeploymentScalerAlgorithmSpecApplyConfiguration `json:"algorithm,omitempty"`
 	// Behavior tunes how fast the scaler may move a role and how long it waits after a failure.
+	//
 	Behavior *ModelDeploymentScalerBehaviorSpecApplyConfiguration `json:"behavior,omitempty"`
 	// Rebalance tunes what the scaler does when one role cannot grow because the cluster is
 	// exhausted and another role could give resources back.
+	//
 	Rebalance *ModelDeploymentScalerRebalanceSpecApplyConfiguration `json:"rebalance,omitempty"`
 }
 

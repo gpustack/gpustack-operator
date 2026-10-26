@@ -48,6 +48,7 @@ type PodDisruptionBudgetStatusApplyConfiguration struct {
 	// - SufficientPods: There are more pods than required by the PodDisruptionBudget.
 	// The condition will be True, and the number of allowed
 	// disruptions are provided by the disruptionsAllowed property.
+	//
 	Conditions []applyconfigurationsmetav1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 }
 

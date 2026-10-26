@@ -16,12 +16,16 @@ import (
 // level, and the variance of the trend.
 type ModelDeploymentScalerKalmanCovarianceApplyConfiguration struct {
 	// P00 is the variance of the level.
+	//
 	P00 *resource.Quantity `json:"p00,omitempty"`
 	// P01 is the covariance of the level with the trend.
+	//
 	P01 *resource.Quantity `json:"p01,omitempty"`
 	// P10 is the covariance of the trend with the level.
+	//
 	P10 *resource.Quantity `json:"p10,omitempty"`
 	// P11 is the variance of the trend.
+	//
 	P11 *resource.Quantity `json:"p11,omitempty"`
 }
 

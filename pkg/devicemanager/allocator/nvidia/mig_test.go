@@ -226,7 +226,8 @@ func TestReserveMigInstance(t *testing.T) {
 		drv.possible[testGPUUUID0] = evenSlots()
 
 		inst, outcome, err := reserveMigInstance(
-			drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, profile, 1, 2)
+			drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, profile, 1, 2,
+		)
 		require.NoError(t, err)
 		assert.Equal(t, migCreated, outcome)
 		assert.Equal(t, migPlacement{0, 2}, inst.Placement)
@@ -252,7 +253,8 @@ func TestReserveMigInstance(t *testing.T) {
 		}))
 
 		inst, outcome, err := reserveMigInstance(
-			drv, deviceplugin.OperatorPodsDir, "pod-b", "c", testGPUUUID0, profile, 1, 2)
+			drv, deviceplugin.OperatorPodsDir, "pod-b", "c", testGPUUUID0, profile, 1, 2,
+		)
 		require.NoError(t, err)
 		assert.Equal(t, migCreated, outcome)
 		assert.Equal(t, migPlacement{2, 2}, inst.Placement, "slot 0 is occupied by pod-old")
@@ -266,7 +268,8 @@ func TestReserveMigInstance(t *testing.T) {
 		drv.seedLive(testGPUUUID0, migInstance{GiID: 7, ComputeSlices: 1, Placement: migPlacement{4, 2}, UUID: "MIG-reuse"})
 
 		inst, outcome, err := reserveMigInstance(
-			drv, deviceplugin.OperatorPodsDir, "pod-c", "c", testGPUUUID0, profile, 1, 2)
+			drv, deviceplugin.OperatorPodsDir, "pod-c", "c", testGPUUUID0, profile, 1, 2,
+		)
 		require.NoError(t, err)
 		assert.Equal(t, migBound, outcome, "an unbound instance is reused, not created")
 		assert.Equal(t, uint32(7), inst.GiID)
@@ -281,7 +284,8 @@ func TestReserveMigInstance(t *testing.T) {
 		drv.seedLive(testGPUUUID0, migInstance{GiID: 1, ComputeSlices: 7, Placement: migPlacement{0, 8}, UUID: "MIG-whole"})
 
 		_, _, err := reserveMigInstance(
-			drv, deviceplugin.OperatorPodsDir, "pod-d", "c", testGPUUUID0, profile, 1, 2)
+			drv, deviceplugin.OperatorPodsDir, "pod-d", "c", testGPUUUID0, profile, 1, 2,
+		)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no free placement")
 		assert.Equal(t, 0, drv.createCalls)
@@ -298,7 +302,8 @@ func TestReserveMigInstance(t *testing.T) {
 		}))
 
 		inst, outcome, err := reserveMigInstance(
-			drv, deviceplugin.OperatorPodsDir, "pod-e", "c", testGPUUUID0, profile, 1, 2)
+			drv, deviceplugin.OperatorPodsDir, "pod-e", "c", testGPUUUID0, profile, 1, 2,
+		)
 		require.NoError(t, err)
 		assert.Equal(t, migRebound, outcome, "a retry rebinds its own partition, not a new one")
 		assert.Equal(t, "MIG-self", inst.UUID)
@@ -317,7 +322,8 @@ func TestReserveMigInstance(t *testing.T) {
 		}))
 
 		_, _, err := reserveMigInstance(
-			drv, deviceplugin.OperatorPodsDir, "pod-f", "c", testGPUUUID0, profile, 1, 2)
+			drv, deviceplugin.OperatorPodsDir, "pod-f", "c", testGPUUUID0, profile, 1, 2,
+		)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "id reused")
 		assert.Equal(t, 0, drv.createCalls)
@@ -337,7 +343,8 @@ func TestReserveMigInstance_SkipsEmptyUUIDInstance(t *testing.T) {
 	drv.seedLive(testGPUUUID0, migInstance{GiID: 9, ComputeSlices: 1, Placement: migPlacement{0, 2}, UUID: ""})
 
 	inst, outcome, err := reserveMigInstance(
-		drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, profile, 1, 2)
+		drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, profile, 1, 2,
+	)
 	require.NoError(t, err)
 	assert.Equal(t, migCreated, outcome, "a UUID-less orphan is not adopted")
 	assert.Equal(t, 1, drv.createCalls)
@@ -453,7 +460,8 @@ func TestReserveMigInstance_CorruptMarkerFailsAdoptionClosed(t *testing.T) {
 			}
 
 			inst, outcome, err := reserveMigInstance(
-				drv, deviceplugin.OperatorPodsDir, "pod-new", "c", testGPUUUID0, profile, 1, 2)
+				drv, deviceplugin.OperatorPodsDir, "pod-new", "c", testGPUUUID0, profile, 1, 2,
+			)
 			require.NoError(t, err, "a corrupt marker never fails the allocation outright")
 			assert.Equal(t, c.wantOutcome, outcome)
 			assert.Equal(t, c.wantCreates, drv.createCalls)
@@ -475,13 +483,15 @@ func TestReserveMigInstance_IdempotentRetry(t *testing.T) {
 	drv.possible[testGPUUUID0] = evenSlots()
 
 	first, outcome, err := reserveMigInstance(
-		drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, profile, 1, 2)
+		drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, profile, 1, 2,
+	)
 	require.NoError(t, err)
 	require.Equal(t, migCreated, outcome)
 
 	// A kubelet Allocate retry rebinds the same instance rather than double-creating.
 	second, outcome, err := reserveMigInstance(
-		drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, profile, 1, 2)
+		drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, profile, 1, 2,
+	)
 	require.NoError(t, err)
 	assert.Equal(t, migRebound, outcome)
 	assert.Equal(t, first.GiID, second.GiID)
@@ -501,7 +511,8 @@ func TestReserveMigInstance_SelfMarkerStale(t *testing.T) {
 	}))
 
 	_, _, err := reserveMigInstance(
-		drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, profile, 1, 2)
+		drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, profile, 1, 2,
+	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing gpu instance")
 }
@@ -516,7 +527,8 @@ func TestReserveMigInstance_ProfileMismatch(t *testing.T) {
 	}))
 
 	_, _, err := reserveMigInstance(
-		drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, "1g.10gb", 1, 2)
+		drv, deviceplugin.OperatorPodsDir, "pod-a", "c", testGPUUUID0, "1g.10gb", 1, 2,
+	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mismatches request")
 }
@@ -543,7 +555,8 @@ func TestReserveMigInstance_ConcurrentSameCard(t *testing.T) {
 		unlock := lockCard(testGPUUUID1)
 		defer unlock()
 		inst, _, err := reserveMigInstance(
-			drv, deviceplugin.OperatorPodsDir, "pod-sib", "c", testGPUUUID1, profile, 1, 2)
+			drv, deviceplugin.OperatorPodsDir, "pod-sib", "c", testGPUUUID1, profile, 1, 2,
+		)
 		require.NoError(t, err)
 		sibling <- inst.Placement
 	}()
@@ -555,7 +568,8 @@ func TestReserveMigInstance_ConcurrentSameCard(t *testing.T) {
 			unlock := lockCard(testGPUUUID0)
 			defer unlock()
 			inst, outcome, err := reserveMigInstance(
-				drv, deviceplugin.OperatorPodsDir, fmt.Sprintf("pod-%d", i), "c", testGPUUUID0, profile, 1, 2)
+				drv, deviceplugin.OperatorPodsDir, fmt.Sprintf("pod-%d", i), "c", testGPUUUID0, profile, 1, 2,
+			)
 			require.NoError(t, err)
 			require.Equal(t, migCreated, outcome)
 			starts[i] = inst.Placement.Start

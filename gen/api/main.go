@@ -57,7 +57,8 @@ func resolveProjectDir(pwd string) (string, error) {
 			"working directory %q does not end in the module import path %q: "+
 				"the generators derive their output base by trimming it off, so running here "+
 				"would write to the wrong tree; run from a checkout whose resolved path ends in %[2]q",
-			resolved, projectModule)
+			resolved, projectModule,
+		)
 	}
 
 	return normalized, nil

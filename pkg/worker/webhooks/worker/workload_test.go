@@ -397,7 +397,7 @@ func TestWorkloadWebhook_PatchTouchesOnlyAffinity(t *testing.T) {
 		require.NoError(t, err)
 		var obj map[string]any
 		require.NoError(t, json.Unmarshal(raw, &obj))
-		obj["apiVersion"], obj["kind"] = kueue.GroupVersion.String(), "Workload"
+		obj["apiVersion"], obj["kind"] = kueue.SchemeGroupVersion.String(), "Workload"
 		obj["spec"].(map[string]any)["fieldFromANewerKueue"] = "kept"
 		raw, err = json.Marshal(obj)
 		require.NoError(t, err)

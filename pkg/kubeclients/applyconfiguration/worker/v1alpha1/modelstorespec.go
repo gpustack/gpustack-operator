@@ -14,10 +14,13 @@ import (
 type ModelStoreSpecApplyConfiguration struct {
 	// NodeSelector selects the pool's nodes. Two stores whose selectors match one node are a
 	// misconfiguration this API reports rather than resolves silently; see SelectorOverlap.
+	//
 	NodeSelector *v1.LabelSelectorApplyConfiguration `json:"nodeSelector,omitempty"`
 	// Watermarks bounds the matched nodes' cache filesystem usage. Nil keeps the cluster defaults.
+	//
 	Watermarks *NodeModelStoreWatermarksApplyConfiguration `json:"watermarks,omitempty"`
 	// Download limits the matched nodes' downloads. Nil keeps the cluster defaults.
+	//
 	Download *ModelStoreDownloadApplyConfiguration `json:"download,omitempty"`
 }
 

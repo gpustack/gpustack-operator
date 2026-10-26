@@ -96,7 +96,8 @@ func (h *InstancePersistentVolumeTypeHandler) SetupHandler(
 				return t.Spec.S3.AccessKey
 			}
 			return ""
-		}))
+		}),
+	)
 	if err != nil {
 		return gvr, srs, err
 	}
@@ -146,12 +147,14 @@ func (h *InstancePersistentVolumeTypeHandler) OnCreate(ctx context.Context, obj 
 		case instPVType.Spec.NFS != nil:
 			if instPVType.Spec.NFS.Server == "" {
 				errs = append(errs, field.Required(
-					field.NewPath("spec.nfs.server"), "server is required"),
+					field.NewPath("spec.nfs.server"), "server is required",
+				),
 				)
 			}
 			if instPVType.Spec.NFS.Share == "" {
 				errs = append(errs, field.Required(
-					field.NewPath("spec.nfs.share"), "share is required"),
+					field.NewPath("spec.nfs.share"), "share is required",
+				),
 				)
 			}
 			if instPVType.Spec.NFS.MountPermissions != "" {
@@ -159,23 +162,28 @@ func (h *InstancePersistentVolumeTypeHandler) OnCreate(ctx context.Context, obj 
 				if err != nil {
 					errs = append(errs, field.Invalid(
 						field.NewPath("spec.nfs.mountPermissions"),
-						instPVType.Spec.NFS.MountPermissions, "mountPermissions must be an octal string"))
+						instPVType.Spec.NFS.MountPermissions, "mountPermissions must be an octal string",
+					))
 				}
 			}
 		case instPVType.Spec.S3 != nil:
 			if instPVType.Spec.S3.Endpoint == "" {
 				errs = append(errs, field.Required(
-					field.NewPath("spec.s3.endpoint"), "endpoint is required"))
+					field.NewPath("spec.s3.endpoint"), "endpoint is required",
+				))
 			} else if uri, err := url.ParseRequestURI(instPVType.Spec.S3.Endpoint); err != nil {
 				errs = append(errs, field.Invalid(
-					field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must be a valid URL"))
+					field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must be a valid URL",
+				))
 			} else if uri.Scheme != "http" && uri.Scheme != "https" {
 				errs = append(errs, field.Invalid(
-					field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must have http or https scheme"))
+					field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must have http or https scheme",
+				))
 			}
 			if instPVType.Spec.S3.Mounter != "" && !sets.New("geesefs", "rclone", "s3fs").Has(instPVType.Spec.S3.Mounter) {
 				errs = append(errs, field.Invalid(
-					field.NewPath("spec.s3.mounter"), instPVType.Spec.S3.Mounter, "unsupported mounter"))
+					field.NewPath("spec.s3.mounter"), instPVType.Spec.S3.Mounter, "unsupported mounter",
+				))
 			}
 		}
 		if len(errs) > 0 {
@@ -366,49 +374,60 @@ func (h *InstancePersistentVolumeTypeHandler) OnUpdate(
 	// Validate.
 	if instPVType.Spec.NFS != nil && instPVTypeOld.Spec.NFS == nil {
 		return nil, field.Forbidden(
-			field.NewPath("spec.nfs"), "cannot update to nfs from non-nfs")
+			field.NewPath("spec.nfs"), "cannot update to nfs from non-nfs",
+		)
 	}
 	if instPVType.Spec.S3 != nil && instPVTypeOld.Spec.S3 == nil {
 		return nil, field.Forbidden(
-			field.NewPath("spec.nfs"), "cannot update to s3 from non-s3")
+			field.NewPath("spec.nfs"), "cannot update to s3 from non-s3",
+		)
 	}
 	switch {
 	case instPVType.Spec.NFS != nil:
 		if instPVType.Spec.NFS.Server != instPVTypeOld.Spec.NFS.Server {
 			return nil, field.Forbidden(
-				field.NewPath("spec.nfs.server"), "server is immutable")
+				field.NewPath("spec.nfs.server"), "server is immutable",
+			)
 		}
 		if instPVType.Spec.NFS.Share != instPVTypeOld.Spec.NFS.Share {
 			return nil, field.Forbidden(
-				field.NewPath("spec.nfs.share"), "share is immutable")
+				field.NewPath("spec.nfs.share"), "share is immutable",
+			)
 		}
 	case instPVType.Spec.S3 != nil:
 		if instPVType.Spec.S3.Endpoint == "" {
 			return nil, field.Required(
-				field.NewPath("spec.s3.endpoint"), "endpoint is required")
+				field.NewPath("spec.s3.endpoint"), "endpoint is required",
+			)
 		}
 		if uri, err := url.ParseRequestURI(instPVType.Spec.S3.Endpoint); err != nil {
 			return nil, field.Invalid(
-				field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must be a valid URL")
+				field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must be a valid URL",
+			)
 		} else if uri.Scheme != "http" && uri.Scheme != "https" {
 			return nil, field.Invalid(
-				field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must have http or https scheme")
+				field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must have http or https scheme",
+			)
 		}
 		if instPVType.Spec.S3.Bucket != instPVTypeOld.Spec.S3.Bucket {
 			return nil, field.Forbidden(
-				field.NewPath("spec.s3.bucket"), "bucket is immutable")
+				field.NewPath("spec.s3.bucket"), "bucket is immutable",
+			)
 		}
 		if instPVType.Spec.S3.Prefix != instPVTypeOld.Spec.S3.Prefix {
 			return nil, field.Forbidden(
-				field.NewPath("spec.s3.prefix"), "prefix is immutable")
+				field.NewPath("spec.s3.prefix"), "prefix is immutable",
+			)
 		}
 		if instPVType.Spec.S3.Mounter != instPVTypeOld.Spec.S3.Mounter {
 			return nil, field.Forbidden(
-				field.NewPath("spec.s3.mounter"), "mounter is immutable")
+				field.NewPath("spec.s3.mounter"), "mounter is immutable",
+			)
 		}
 		if !kubemeta.DeepEqual(instPVType.Spec.S3.MountOptions, instPVTypeOld.Spec.S3.MountOptions) {
 			return nil, field.Forbidden(
-				field.NewPath("spec.s3.mountOptions"), "mountOptions is immutable")
+				field.NewPath("spec.s3.mountOptions"), "mountOptions is immutable",
+			)
 		}
 	}
 
