@@ -23,9 +23,6 @@ import (
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 	kueueadmissioncheck "sigs.k8s.io/kueue/pkg/util/admissioncheck"
 	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
-	kueueworkloadevict "sigs.k8s.io/kueue/pkg/workload/evict"
-	kueueworkloadfinish "sigs.k8s.io/kueue/pkg/workload/finish"
-	kueueworkloadpatching "sigs.k8s.io/kueue/pkg/workload/patching"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
@@ -215,8 +212,8 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 	// The same gates the node-devices check states: before reservation there is nothing to confirm,
 	// and after eviction or finish the verdict is moot. An evicted Workload still reports a
 	// reservation for the window between Kueue's two writes, and overwriting that reset wedges it.
-	if !kueueworkload.HasQuotaReservation(wl) || kueueworkloadevict.IsEvicted(wl) ||
-		kueueworkloadfinish.IsFinished(wl) || !kueueworkload.IsActive(wl) {
+	if !kueueworkload.HasQuotaReservation(wl) || kueueworkload.IsEvicted(wl) ||
+		kueueworkload.IsFinished(wl) || !kueueworkload.IsActive(wl) {
 		logger.V(3).Info("skip workload not holding quota reservation, evicted, finished or deactivated")
 
 		return ctrl.Result{}, nil
@@ -725,10 +722,10 @@ func (r *ModelDeploymentJointAdmissionReconciler) applyVerdict(
 		return nil
 	}
 
-	return kueueworkloadpatching.PatchStatus(ctx, r.Client, wl, ctrlcli.FieldOwner(_JointAdmissionFieldOwner),
+	return kueueworkload.PatchStatus(ctx, r.Client, wl, ctrlcli.FieldOwner(_JointAdmissionFieldOwner),
 		func(w *kueue.Workload) (bool, error) {
 			for i := range desired {
-				kueueworkloadpatching.SetAdmissionCheckState(&w.Status.AdmissionChecks, desired[i], clock.RealClock{})
+				kueueworkload.SetAdmissionCheckState(&w.Status.AdmissionChecks, desired[i], clock.RealClock{})
 			}
 
 			return true, nil

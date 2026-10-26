@@ -82,7 +82,7 @@ require (
 	k8s.io/kubelet v0.36.5
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd
 	sigs.k8s.io/controller-runtime v0.24.1
-	sigs.k8s.io/kueue v0.19.10
+	sigs.k8s.io/kueue v0.18.11
 	sigs.k8s.io/node-feature-discovery/api/nfd v0.0.0-20260410111035-2c517aa1a8c1
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2
 	sigs.k8s.io/yaml v1.6.0

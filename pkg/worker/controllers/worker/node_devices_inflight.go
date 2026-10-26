@@ -17,9 +17,6 @@ import (
 	kueueconstants "sigs.k8s.io/kueue/pkg/constants"
 	kueueadmissioncheck "sigs.k8s.io/kueue/pkg/util/admissioncheck"
 	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
-	kueueworkloadevict "sigs.k8s.io/kueue/pkg/workload/evict"
-	kueueworkloadfinish "sigs.k8s.io/kueue/pkg/workload/finish"
-	kueueworkloadpatching "sigs.k8s.io/kueue/pkg/workload/patching"
 
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -212,8 +209,8 @@ func (r *NodeDevicesAdmissionReconciler) inflightDemands(
 // is neither evicted, finished nor deactivated, and is either admitted or answered Ready by a check
 // this controller owns. Once admitted its Pods are on their way whichever checks it went through.
 func (r *NodeDevicesAdmissionReconciler) holdsCards(ctx context.Context, wl *kueue.Workload) (bool, error) {
-	if !kueueworkload.HasQuotaReservation(wl) || kueueworkloadevict.IsEvicted(wl) ||
-		kueueworkloadfinish.IsFinished(wl) || !kueueworkload.IsActive(wl) {
+	if !kueueworkload.HasQuotaReservation(wl) || kueueworkload.IsEvicted(wl) ||
+		kueueworkload.IsFinished(wl) || !kueueworkload.IsActive(wl) {
 		return false, nil
 	}
 	if kueueworkload.IsAdmitted(wl) {
@@ -298,7 +295,7 @@ func (r *NodeDevicesAdmissionReconciler) withUnobservedReady(cached []kueue.Work
 			continue
 		}
 		if written.UID != wl.UID || showsChecks(wl, written) || !kueueworkload.HasQuotaReservation(wl) ||
-			kueueworkloadevict.IsEvicted(wl) || kueueworkloadfinish.IsFinished(wl) {
+			kueueworkload.IsEvicted(wl) || kueueworkload.IsFinished(wl) {
 			delete(r.readyUnobserved, key)
 			out = append(out, wl)
 			continue
@@ -343,7 +340,7 @@ func (r *NodeDevicesAdmissionReconciler) recordVerdict(
 	}
 	cp := wl.DeepCopy()
 	for i := range written {
-		kueueworkloadpatching.SetAdmissionCheckState(&cp.Status.AdmissionChecks, written[i], clock.RealClock{})
+		kueueworkload.SetAdmissionCheckState(&cp.Status.AdmissionChecks, written[i], clock.RealClock{})
 	}
 	if r.readyUnobserved == nil {
 		r.readyUnobserved = make(map[types.NamespacedName]*kueue.Workload)

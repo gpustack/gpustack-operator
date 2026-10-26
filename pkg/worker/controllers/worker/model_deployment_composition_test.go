@@ -83,7 +83,7 @@ func kueueComposeGroup(ctx context.Context, cli ctrlcli.Client, group string) (*
 		return nil, err
 	}
 
-	return podJob.ConstructComposableWorkload(ctx, cli, &events.FakeRecorder{}, nil, nil)
+	return podJob.ConstructComposableWorkload(ctx, cli, &events.FakeRecorder{}, nil)
 }
 
 // createMember creates one group member with a stamped UID and returns it.
