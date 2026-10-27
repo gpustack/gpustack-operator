@@ -126,7 +126,7 @@ func TestNormalizeHardwareIdentityFoldsTheVendorSpellings(t *testing.T) {
 		{name: "the product line name", accelerator: "AMD Instinct MI325X", family: "amd-mi325x", memoryGB: 256, formFactor: "OAM Module"},
 		{name: "the family itself", accelerator: "amd-mi325x", family: "amd-mi325x", memoryGB: 256, formFactor: "OAM Module"},
 		{name: "the part number in a product string", accelerator: "NVIDIA H100-SXM5-80GB", family: "nvidia-h100", memoryGB: 80, formFactor: "SXM"},
-		{name: "the memory in the name", accelerator: "NVIDIA H200 141GB", family: "nvidia-h200", memoryGB: 141, formFactor: "SXM"},
+		{name: "the vendor memory label in the name is not the device memory", accelerator: "NVIDIA H200 141GB", family: "nvidia-h200", memoryGB: 140, formFactor: "SXM"},
 		{name: "the blackwell name", accelerator: "B200-SXM", family: "nvidia-b200", memoryGB: 192, formFactor: "SXM"},
 	}
 	for _, testCase := range cases {

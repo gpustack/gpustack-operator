@@ -59,7 +59,7 @@ var acceleratorSpecs = map[string]struct {
 	"amd-mi350x":       {memoryGB: 288, formFactor: "OAM Module"},
 	"amd-mi355x":       {memoryGB: 288, formFactor: "OAM Module"},
 	"nvidia-h100":      {memoryGB: 80, formFactor: "SXM"},
-	"nvidia-h200":      {memoryGB: 141, formFactor: "SXM"},
+	"nvidia-h200":      {memoryGB: 140, formFactor: "SXM"},
 	"nvidia-b200":      {memoryGB: 192, formFactor: "SXM"},
 	"nvidia-b300":      {memoryGB: 288, formFactor: "SXM"},
 	"nvidia-gb200":     {memoryGB: 186, formFactor: "SXM"},
