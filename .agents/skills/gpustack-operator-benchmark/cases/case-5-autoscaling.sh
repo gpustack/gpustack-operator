@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# CASE 5 — ModelDeployment autoscaling benchmark, two waves over 8 GPUs   (MUTATING, self-recovering)
+# CASE 5: capacity comparison or legacy topology benchmark (mutating).
+# Capacity comparison: --capacity-comparison --config FILE --out DIR --validate-only|--execute
+# The description below applies to the legacy topology mode.
 #
 #   case-5-autoscaling.sh [OUT_DIR] [--parallel|--serial] [--arm <arm-name>]
 #
@@ -56,6 +58,13 @@
 set -uo pipefail
 
 CASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "${1:-}" == "--capacity-comparison" ]]; then
+  shift
+  exec bash "${CASE_DIR}/../scripts/autoscaling_rounds.sh" "$@"
+fi
+if [[ "${1:-}" == "--legacy-topology" ]]; then
+  shift
+fi
 SKILL_DIR="$(cd "${CASE_DIR}/.." && pwd)"
 REPO="$(cd "${SKILL_DIR}/../../.." && pwd)"
 export PATH="${REPO}/.agents/skills/_e2e-lib/scripts/kubectl-shim:${PATH}"
@@ -750,7 +759,7 @@ write_summary() {
 # above it, because a summary that cannot see a broken case is not a summary of the run.
 write_summary_md() {
   {
-    echo "# Autoscaling benchmark"
+    echo "# Autoscaling benchmark: legacy topology"
     echo
     echo "Generated at $(date -u +%Y-%m-%dT%H:%M:%SZ), mode ${MODE}."
     echo
@@ -853,7 +862,7 @@ jq -n \
       jq -c --arg arm "$arm" '{key: $arm, value: .}' "${OUT_BASE}/${arm}/summary.json" 2>/dev/null
     fi
   done | jq -s 'from_entries' 2>/dev/null || echo '{}')" \
-  '{generated_at: $generated_at, mode: $mode, e2e: {case128: $case128, case129: $case129}, arms: $arms}' \
+  '{comparisonKind: "legacy-topology", generated_at: $generated_at, mode: $mode, e2e: {case128: $case128, case129: $case129}, arms: $arms}' \
   > "${OUT_BASE}/comparison.json"
 
 # The summary a reader opens first: one row per arm and phase, and the exit code of each E2E

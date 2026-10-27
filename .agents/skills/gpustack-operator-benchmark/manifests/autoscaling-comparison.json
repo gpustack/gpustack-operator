@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1",
+  "context": "REPLACE_WITH_EXPLICIT_CONTEXT",
+  "namespace": "capacity-comparison",
+  "namePrefix": "capacity",
+  "deploymentFile": "qualified-deployment.json",
+  "scalerFiles": {
+    "frozen-manual": "qualified-frozen-scaler.json",
+    "tuned-manual": "qualified-tuned-scaler.json",
+    "catalog": "qualified-catalog-scaler.json"
+  },
+  "catalogFile": "qualified-local-catalog-configmap.json",
+  "fitRunIDs": ["REPLACE_WITH_OFFLINE_FIT_RUN_ID"],
+  "evaluationTraceID": "REPLACE_WITH_SEPARATE_EVALUATION_ID",
+  "clusterQueues": ["REPLACE_WITH_DEDICATED_CLUSTER_QUEUE"],
+  "repeats": 3,
+  "order": "alternating",
+  "seed": 71,
+  "startCondition": "operator-declared-warm-cache/fresh-pods",
+  "driver": {
+    "namespace": "benchmark-driver",
+    "pod": "bench-driver",
+    "container": "driver"
+  },
+  "workload": {
+    "model": "REPLACE_WITH_QUALIFIED_MODEL",
+    "inputTokens": 512,
+    "outputTokens": 64,
+    "tokenOffset": 0,
+    "requestTimeoutSeconds": 60,
+    "phases": [
+      {"name": "ramp", "durationSeconds": 60, "concurrency": 4},
+      {"name": "sustain", "durationSeconds": 120, "concurrency": 8},
+      {"name": "cooldown", "durationSeconds": 600, "concurrency": 0}
+    ]
+  },
+  "sampleIntervalSeconds": 2,
+  "operationTimeoutSeconds": 30,
+  "readinessTimeoutSeconds": 600,
+  "cleanupTimeoutSeconds": 300,
+  "startupAllowanceSeconds": 120,
+  "retirementAllowanceSeconds": 120
+}
