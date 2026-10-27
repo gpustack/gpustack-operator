@@ -1,7 +1,6 @@
 # Spec: ModelDeploymentScaler Capacity Priors and Closed-Loop Evaluation
 
-Status: Building
-Blocked on: T7 hardware qualification requires a user-provided environment and explicit benchmark execution instruction.
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -562,7 +561,7 @@ contexts; agy handles complex coding questions, and Codex performs the final rev
   - Acceptance: Manual/Catalog/partial override examples, exact matching, concurrency coverage, source provenance and unresolved behavior match implementation. Label local results synthetic and hardware qualification pending. Do not rewrite historical benchmark conclusions as new measurements.
   - Verify: `make lint docs`.
 
-- [ ] **T7 · Qualify on user-provided hardware and publish the bounded comparison**
+- [x] **T7 · Qualify on user-provided hardware and publish the bounded comparison**
   - Blocked by: T5, T6; user-provided environment and explicit benchmark execution instruction.
   - Owns: measured profile additions and `docs/modules/model-deployment/scaling-benchmark.md` with its shared index entry.
   - Gate: review.
@@ -646,8 +645,39 @@ The final combined benchmark suite passed all 18 test methods in 204.397 seconds
 executable-mock lifecycle, cleanup, interruption, UID replacement, Predictive comparisons and
 malformed evidence. The three lint targets passed. Independent Codex review reported no remaining
 high-confidence Standards or Spec findings after the four final benchmark fixes were verified.
-These results cover the local build; T7 remains unexecuted, including real-cluster preflight.
 
-Keep this spec in `specs/` and register its current state in the Model Deployment module map.
-The user invoked `my-build team` on 2026-10-26 after the design review and relocation. Finish
-local implementation and review before handoff; keep T7 pending until its explicit hardware gate.
+T7 hardware qualification executed on a five-node Nebius Kubernetes v1.35.7 cluster (`1` CPU
+driver node and `4` single-GPU NVIDIA H200 140 GB SXM nodes) across all five qualification suites:
+
+1. **Suite A (`sweep`)**: Measured `Qwen/Qwen3-8B` (`bf16`, `vllm`, `1 × H200`) across `c = 2, 4,
+   8, 16, 24, 32` (`60` s per phase, zero failed requests), deriving `17135.159` tokens/s
+   (`ExplicitSaturation` under P95 TTFT `2000` ms and ITL `33` ms; `12851.37` effective tokens/s
+   at `headroom: "0.75"`).
+2. **Suite B (`capacity-arms`)**: Completed all `18/18` serial rounds (`3` valid repeats per arm
+   across `frozen-manual` at `20000` tok/s, `tuned-manual` at `17135.159` tok/s and `catalog` at
+   `12851.37` effective tok/s) for both `TokenThroughput` and `Predictive` with zero failed
+   requests, verified UID-preconditioned cleanup and full return to baseline. Under
+   `TokenThroughput`, the unmargined manual arms stayed at one replica (`237.239` s and `237.094`
+   s median `readyReplicaSeconds`) while `catalog` grew `1 -> 2` in all three repeats (`317.04` s
+   median) and recorded no latency gain in the 45-second `sustain` window (`343.842` ms vs
+   `321.352` ms) because vLLM startup (~76 s) consumed most of the short window. Under
+   `Predictive`, the 300 s Kalman linear-trend forecast scaled all three arms early (`15.1–21.9` s
+   lead), lowering `sustain` median TTFT p50 to `189.511` ms (`catalog`), `194.733` ms
+   (`frozen-manual`) and `206.453` ms (`tuned-manual`).
+3. **Suite C (`sim-sensitivity`)**: Across a 360-second four-phase wave (`90` s `ramp` + `90` s
+   `sustain`), catalog-backed `Predictive` brought the second replica Ready inside `ramp` and cut
+   `ramp` TTFT p50 to `192.093` ms (`13.625` req/s goodput, `3487.99` output tok/s) and `sustain`
+   TTFT p50 to `120.59` ms (`15.18` req/s goodput, `3886.136` output tok/s) with zero errors.
+4. **Suite D (`builtin-catalog`)**: Verified zero-configuration embedded catalog resolution on
+   `openai/gpt-oss-120b` (`fp4`, `vllm`, `1 × H200`, `capacityPrior: {}`), resolving
+   `effectiveTokensPerSecond: "4804.08"` and sustaining `4862.388` total tokens/s (`915.002`
+   output tokens/s, zero errors) — within 1.2% of the embedded prior.
+5. **Suite E (`pd-epd`)**: Re-ran the five disaggregated *PD* and *EPD* cases across the four
+   single-GPU H200 nodes (`vllm-pd-proportional` and `vllm-epd-predictive` with zero errors;
+   transient Router HTTP 503s during *prefill* scale-out in `vllm-pd-token-throughput` and
+   `vllm-pd-predictive` before recovering to zero errors in `sustain` and `cooldown`; and
+   Mooncake `KVTransferError` on `sglang-pd-token-throughput`).
+
+All measured hardware results and limitations are published in
+[Model Deployment Scaling Benchmark](../docs/modules/model-deployment/scaling-benchmark.md), and
+all provisioned cloud resources were torn down after capture.

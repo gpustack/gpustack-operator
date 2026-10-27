@@ -10,6 +10,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 SCRIPTS = Path(__file__).resolve().parent
 HELPER = SCRIPTS / "autoscaling_rounds.sh"
 ENTRY = SCRIPTS.parent / "cases" / "case-5-autoscaling.sh"
@@ -89,7 +91,7 @@ def rendered(obj):
         if fault == "mutation" and len(state["created"]) >= 4:
             obj["spec"]["engine"]["image"] = "example.invalid/different-image"
     if obj["kind"] == "ModelDeploymentScaler":
-        obj["status"] = {"conditions": [{"type": "Bound", "status": "True"}, {"type": "CapacityPriorsReady", "status": "True"}], "roles": [{"name": "server", "rawRecommendedReplicas": 3 if state["active"] else 1, "currentReplicas": 2 if state["active"] else 1, "readyReplicas": 2 if state["active"] else 1}], "resolvedCapacityPriors": [{"name": "server", "profileID": "pri-local", "sourceID": "local-fit", "compatibilityFingerprint": "sha256:mock"}]}
+        obj["status"] = {"conditions": [{"type": "Bound", "status": "True"}, {"type": "CapacityPriorsReady", "status": "True"}], "roles": [{"name": "server", "rawRecommendedReplicas": 3 if state["active"] else 1, "currentReplicas": 2 if state["active"] else 1, "readyReplicas": 2 if state["active"] else 1}], "resolvedCapacityPriors": [{"name": "server", "profileDigest": "sha256:" + "d" * 64, "compatibilityFingerprint": "sha256:mock", "metric": "tokens/s/user", "quantile": "0.95", "requestedQuantile": "0.95", "headroom": "750m", "seedTokensPerSecond": "533.33", "fields": [{"field": "serverTargetTokensPerSecond", "source": "Catalog", "effectiveTokensPerSecond": "400"}]}]}
         if fault == "prior":
             obj["status"]["conditions"][-1]["status"] = "False"
     return obj
@@ -283,6 +285,18 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2) + "\n")
 
 
+def catalog_point(concurrency, total, itl):
+    """One measured load point in the flat 6-tuple catalog shape."""
+    return {
+        "concurrency": concurrency,
+        "totalTokensPerSecond": total,
+        "inputTokensPerSecond": round(total * 0.8, 3),
+        "outputTokensPerSecond": round(total * 0.2, 3),
+        "ttftMilliseconds": {"p50": 120.0, "p90": 180.0, "p95": 200.0},
+        "itlMilliseconds": {"p50": itl, "p90": round(itl * 1.3, 3), "p95": round(itl * 1.5, 3)},
+    }
+
+
 def fixture(root, algorithm="TokenThroughput"):
     deployment = {
         "apiVersion": "worker.gpustack.ai/v1", "kind": "ModelDeployment",
@@ -331,14 +345,16 @@ def fixture(root, algorithm="TokenThroughput"):
         del catalog_scaler["spec"]["algorithm"]["predictive"]["tokenThroughput"]["serverTargetTokensPerSecond"]
     catalog_scaler["spec"]["algorithm"]["capacityPrior"] = {
         "catalogRef": {"name": "offline-prior", "key": "priors.json"},
-        "roles": [{"name": "server", "profileID": "pri-local"}],
+        "headroom": "0.75",
     }
     catalog = {
-        "schemaVersion": "gpustack.ai/v1", "digest": "sha256:" + "b" * 64,
-        "sources": [{"id": "local-fit", "revision": "fit-run-1", "outcome": "Accepted",
-                     "artifacts": [{"path": "fit-results.json", "sha256": "c" * 64}]}],
-        "profiles": [{"id": "pri-local", "sourceID": "local-fit", "digest": "sha256:" + "d" * 64,
-                      "role": "Server", "workload": {"id": "local-workload", "revision": "fit-run-1"}}],
+        "schemaVersion": "gpustack.ai/v1",
+        "profiles": [{
+            "role": "Server", "model": "local-model", "quantization": "bf16",
+            "engine": "vllm", "hardware": "local-gpu",
+            "topology": {"gpusPerReplica": 1, "tensorParallel": 1},
+            "points": [catalog_point(1, 250.0, 12.0), catalog_point(2, 400.0, 14.0)],
+        }],
     }
     cm = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "offline-prior", "namespace": "comparison"},
           "data": {"priors.json": json.dumps(catalog)}}
@@ -441,6 +457,35 @@ class LifecycleTests(unittest.TestCase):
                 else:
                     self.assertTrue(summary["failure"])
                     self.assertIn(expected_reason, summary["failure"])
+
+    def test_embedded_catalog_lifecycle_skips_configmap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture(root)
+            catalog_scaler = json.loads((root / "catalog-scaler.json").read_text())
+            catalog_scaler["spec"]["algorithm"]["capacityPrior"] = {}
+            write_json(root / "catalog-scaler.json", catalog_scaler)
+            config = json.loads((root / "comparison.json").read_text())
+            config.pop("catalogFile")
+            write_json(root / "comparison.json", config)
+            result = subprocess.run(
+                ["/bin/bash", str(ENTRY), "--capacity-comparison", "--config", str(root / "comparison.json"),
+                 "--out", str(root / "output"), "--execute"],
+                env=lifecycle_environment(root, ""), text=True, capture_output=True, timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            plan = json.loads((root / "output" / "validated-plan.json").read_text())
+            self.assertEqual(plan["catalogMode"], "embedded")
+            self.assertIsNone(plan["catalog"])
+            self.assertFalse((root / "output" / "catalog-input.json").exists())
+            run = json.loads((root / "output" / "03-catalog" / "run.json").read_text())
+            self.assertEqual(run["catalogMode"], "embedded")
+            deletes = [json.loads(line) for line in (root / "deletes.log").read_text().splitlines()]
+            self.assertTrue(deletes)
+            self.assertFalse(any("/configmaps/" in entry["uri"] for entry in deletes), "embedded catalog created a ConfigMap")
+            state = json.loads((root / "state.json").read_text())
+            self.assertEqual(state["objects"], {})
+            self.assertEqual(state["removed"], 9)
 
 
 class FailureDiagnosticsTests(unittest.TestCase):
@@ -553,7 +598,7 @@ class ValidationTests(unittest.TestCase):
             ("different baseline", "TokenThroughput", "deployment.json", ("spec", "roles"), [{"name": "server", "kind": "Server", "replicas": 2}], False),
             ("different metadata", "TokenThroughput", "tuned.json", ("metadata", "annotations"), {"identity": "different"}, False),
             ("existing binding", "TokenThroughput", "deployment.json", ("metadata", "annotations"), {"modeldeployment.gpustack.ai/scaler-binding": "{}"}, False),
-            ("unaccepted source", "TokenThroughput", "catalog.json", ("data", "priors.json"), "{}", False),
+            ("schemaless catalog document", "TokenThroughput", "catalog.json", ("data", "priors.json"), "{}", False),
             ("driver shares namespace", "TokenThroughput", "comparison.json", ("driver", "namespace"), "comparison", False),
             ("short cooldown", "TokenThroughput", "comparison.json", ("startupAllowanceSeconds",), 2, False),
             ("routed deployment", "TokenThroughput", "deployment.json", ("spec", "router"), {"name": "llm-d-router"}, False),
@@ -631,36 +676,79 @@ class ValidationTests(unittest.TestCase):
                 self.assertFalse(state["loaded"])
 
     def test_capacity_prior_shape_validation(self):
-        """capacityPrior carries no policy: absent is manual, present resolves offline."""
+        """capacityPrior is catalogRef and headroom only; the catalog arm may omit catalogRef."""
         cases = [
-            ("catalog capacityPrior without policy field", None, True),
-            ("manual arm with capacityPrior", "manual-prior", False),
-            ("removed policy field is rejected", "policy-field", False),
-            ("catalog scaler without capacityPrior", "no-prior", False),
+            ("catalogRef and headroom", [], True),
+            ("embedded default catalog", [
+                ("catalog-scaler.json", ("spec", "algorithm", "capacityPrior"), {}),
+                ("comparison.json", ("catalogFile",), None),
+            ], True),
+            ("manual arm with capacityPrior", [
+                ("frozen.json", ("spec", "algorithm", "capacityPrior"), {"catalogRef": {"name": "offline-prior", "key": "priors.json"}}),
+            ], False),
+            ("removed policy field", [
+                ("catalog-scaler.json", ("spec", "algorithm", "capacityPrior", "policy"), "Catalog"),
+            ], False),
+            ("removed roles field", [
+                ("catalog-scaler.json", ("spec", "algorithm", "capacityPrior", "roles"), [{"name": "server"}]),
+            ], False),
+            ("removed profileID field", [
+                ("catalog-scaler.json", ("spec", "algorithm", "capacityPrior", "profileID"), "pri-local"),
+            ], False),
+            ("unknown capacityPrior field", [
+                ("catalog-scaler.json", ("spec", "algorithm", "capacityPrior", "source"), "embedded"),
+            ], False),
+            ("headroom above one", [
+                ("catalog-scaler.json", ("spec", "algorithm", "capacityPrior", "headroom"), "1.5"),
+            ], False),
+            ("catalog scaler without capacityPrior", [
+                ("catalog-scaler.json", ("spec", "algorithm", "capacityPrior"), None),
+            ], False),
         ]
-        for name, shape, valid in cases:
+        for name, mutations, valid in cases:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 fixture(root)
-                catalog_scaler = json.loads((root / "catalog-scaler.json").read_text())
-                algorithm = catalog_scaler["spec"]["algorithm"]
-                if shape is None:
-                    algorithm["capacityPrior"] = {
-                        "catalogRef": {"name": "offline-prior", "key": "priors.json"},
-                        "roles": [{"name": "server", "profileID": "pri-local"}],
-                    }
-                elif shape == "policy-field":
-                    algorithm["capacityPrior"]["policy"] = "Catalog"
-                elif shape == "no-prior":
-                    algorithm.pop("capacityPrior", None)
-                write_json(root / "catalog-scaler.json", catalog_scaler)
-                if shape == "manual-prior":
-                    frozen = json.loads((root / "frozen.json").read_text())
-                    frozen["spec"]["algorithm"]["capacityPrior"] = {
-                        "catalogRef": {"name": "offline-prior", "key": "priors.json"},
-                        "roles": [{"name": "server", "profileID": "pri-local"}],
-                    }
-                    write_json(root / "frozen.json", frozen)
+                for filename, path, value in mutations:
+                    document = json.loads((root / filename).read_text())
+                    target = document
+                    for part in path[:-1]:
+                        target = target[part]
+                    if value is None:
+                        target.pop(path[-1], None)
+                    else:
+                        target[path[-1]] = value
+                    write_json(root / filename, document)
+                result = subprocess.run(
+                    ["/bin/bash", str(HELPER), "--config", str(root / "comparison.json"),
+                     "--out", str(root / "output"), "--validate-only"],
+                    env=mock_environment(root), text=True, capture_output=True, timeout=10,
+                )
+                self.assertEqual(result.returncode == 0, valid, result.stdout + result.stderr)
+                self.assertFalse((root / "calls.log").exists(), "validation contacted the cluster")
+
+    def test_catalog_document_validation(self):
+        """The catalog ConfigMap document must be a flat 6-tuple catalog, YAML or JSON."""
+        cases = [
+            ("yaml document", lambda document: yaml.safe_dump(document), True),
+            ("quantiles the source did not publish stay absent",
+             lambda document: document["profiles"][0]["points"][0].update({"ttftMilliseconds": {}, "itlMilliseconds": {}}), True),
+            ("duplicate profile identity",
+             lambda document: document["profiles"].append({**copy.deepcopy(document["profiles"][0]), "points": [catalog_point(9, 900.0, 20.0)]}), False),
+            ("removed profile id field", lambda document: document["profiles"][0].update({"id": "pri-local"}), False),
+            ("unknown topology width", lambda document: document["profiles"][0]["topology"].update({"tp": 1}), False),
+            ("point without concurrency", lambda document: document["profiles"][0]["points"][0].pop("concurrency"), False),
+            ("carried source list", lambda document: document.update({"sources": []}), False),
+        ]
+        for name, mutator, valid in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                fixture(root)
+                cm = json.loads((root / "catalog.json").read_text())
+                document = json.loads(cm["data"]["priors.json"])
+                text = mutator(document)
+                cm["data"]["priors.json"] = text if isinstance(text, str) else json.dumps(document)
+                write_json(root / "catalog.json", cm)
                 result = subprocess.run(
                     ["/bin/bash", str(HELPER), "--config", str(root / "comparison.json"),
                      "--out", str(root / "output"), "--validate-only"],

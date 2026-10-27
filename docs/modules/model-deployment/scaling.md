@@ -311,7 +311,7 @@ closed with no online fallback.
 |---|---|---|
 | *`capacityPrior`* | absent (manual mode) | Present: the offline catalog may resolve missing capacity fields for `TokenThroughput`/`Predictive`; explicit capacity fields always win; failures fail closed. `Proportional` rejects a present *`capacityPrior`*. |
 | *`catalogRef`* | omitted (embedded catalog) | Optional *`name`* and *`key`* (`priors.yaml` default; the parser accepts YAML and JSON) for a same-namespace `ConfigMap`; sole catalog source with no fallback or merge. |
-| *`headroom`* | `"0.75"` when *`capacityPrior`* is present | Quantity in `(0, 1]` multiplying catalog seed capacity; explicit capacity fields keep their configured values. The default is an initial configurable engineering margin — not measured or optimized; local mock rounds and later user-provided hardware experiments compare margins and performance, with no warranty. |
+| *`headroom`* | `"0.75"` when *`capacityPrior`* is present | Quantity in `(0, 1]` multiplying catalog seed capacity; explicit capacity fields keep their configured values. The default is an initial configurable engineering margin — not a universal optimum; [Scaling Benchmark](scaling-benchmark.md#suite-2-capacity-priors) compares `0.75` catalog headroom against unmargined manual capacities on H200 hardware, with no warranty. |
 
 The committed catalog is `pkg/worker/scaling/priors/priors.yaml`, a lean, human-editable file;
 the parser also accepts the JSON encoding, so a hand-written `ConfigMap` catalog may use either.
@@ -966,7 +966,7 @@ unchecked writes through the binding fence.
 ---
 
 **See also** — [Model Deployment Configuration](deployment.md) (target roles and replica counts) ·
-[Scaling Benchmark](scaling-benchmark.md) (H100 measurements and observed failures) ·
+[Scaling Benchmark](scaling-benchmark.md) (H100 and H200 measurements and observed failures) ·
 [Model Deployment Scaling Simulation](scaling-simulation.md) (the synthetic algorithm-dynamics
 comparison) ·
 [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) (configuration and observation) ·

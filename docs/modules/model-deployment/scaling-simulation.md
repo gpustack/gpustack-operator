@@ -6,8 +6,10 @@ complete, and the *time to first token (TTFT)*, *time per output token (TPOT)* a
 latency (ITL)* the serving produces. It is a local evaluation fixture for algorithm behavior:
 nothing in it is measured on hardware, and it makes no tuning or purchasing recommendation.
 
-The measured hardware comparison lives in [Model Deployment Scaling Benchmark](scaling-benchmark.md);
-the scaler contract lives in [Model Deployment Scaling](scaling.md).
+The measured hardware comparison — including a four-node H200 sensitivity wave scored against the
+same true-SLO and goodput metrics — lives in
+[Model Deployment Scaling Benchmark](scaling-benchmark.md#algorithm-sensitivity); the scaler
+contract lives in [Model Deployment Scaling](scaling.md).
 
 ## Contents
 

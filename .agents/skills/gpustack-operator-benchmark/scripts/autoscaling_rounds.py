@@ -9,13 +9,14 @@ import math
 from pathlib import Path
 import random
 import re
+import shutil
 import signal
 import statistics
 import subprocess
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -46,7 +47,7 @@ action, directory, *args = sys.argv[1:]
 root = pathlib.Path(directory)
 assert root.parent == pathlib.Path("/tmp") and root.name.startswith("gpustack-autoscaling-")
 if action == "stage":
-    root.mkdir()
+    root.mkdir(exist_ok=True)
     for name, content in json.load(sys.stdin).items():
         assert name in ("bench_client.py", "adapter.py")
         (root / name).write_text(content)
@@ -57,7 +58,15 @@ elif action == "run":
     sys.exit(process.wait())
 elif action == "read":
     assert pathlib.Path(args[0]).name == args[0]
-    sys.stdout.write((root / args[0]).read_text())
+    text = (root / args[0]).read_text()
+    for offset in range(0, len(text), 65536):
+        sys.stdout.write(text[offset:offset + 65536])
+        sys.stdout.flush()
+        if offset + 65536 < len(text):
+            time.sleep(0.02)
+    sys.stdout.flush()
+    if len(text) > 65536:
+        time.sleep(0.5)
 elif action in ("stop", "remove"):
     for pidfile in root.glob("*.pid"):
         pid = int(pidfile.read_text())
@@ -142,6 +151,100 @@ def present(mapping, path):
     return isinstance(parent, dict) and path[-1] in parent
 
 
+CATALOG_SCHEMA_VERSION = "gpustack.ai/v1"
+CATALOG_TOPOLOGY_KEYS = ("gpusPerReplica", "tensorParallel", "pipelineParallel", "dataParallel", "localDataParallel", "contextParallel", "expertParallel")
+CATALOG_PROFILE_KEYS = {"role", "model", "quantization", "engine", "hardware", "topology", "points"}
+CATALOG_POINT_KEYS = {"concurrency", "totalTokensPerSecond", "inputTokensPerSecond", "outputTokensPerSecond", "ttftMilliseconds", "itlMilliseconds"}
+CATALOG_QUANTILE_KEYS = {"p50", "p90", "p95", "p99"}
+
+
+def load_catalog_document(text):
+    """Parse a catalog document that is YAML or JSON.
+
+    JSON is a YAML subset, so the strict reader on the operator side takes both
+    formats; here JSON parses without a dependency and YAML falls back to PyYAML
+    when the host carries it.
+    """
+    try:
+        document = json.loads(text)
+    except ValueError:
+        try:
+            import yaml
+        except ImportError as error:
+            raise HarnessError("catalog document is not JSON and PyYAML is unavailable to read YAML") from error
+        try:
+            document = yaml.safe_load(text)
+        except yaml.YAMLError as error:
+            raise HarnessError(f"catalog document is neither JSON nor YAML: {error}") from error
+    if not isinstance(document, dict):
+        raise HarnessError("catalog document must be a mapping")
+    return document
+
+
+def dump_catalog_document(document):
+    """Write a catalog document as canonical YAML, falling back to JSON."""
+    try:
+        import yaml
+        return yaml.safe_dump(document, sort_keys=False)
+    except ImportError:
+        return json.dumps(document, indent=2) + "\n"
+
+
+def catalog_profile_identity(profile):
+    """The normalized 6-tuple identity of one catalog profile.
+
+    The widths an unstated topology key names are one, the same default the
+    operator applies, and every name compares case-insensitively, so a document
+    that carries the same profile under two spellings is caught here the way the
+    operator's own parse catches it.
+    """
+    require(isinstance(profile.get("topology"), dict), "profile topology must be a mapping")
+    unknown = set(profile["topology"]) - set(CATALOG_TOPOLOGY_KEYS)
+    require(not unknown, f"topology carries unknown widths: {sorted(unknown)}")
+    widths = []
+    for key in CATALOG_TOPOLOGY_KEYS:
+        value = profile["topology"].get(key, 1)
+        require(type(value) is int and value > 0, f"topology {key} must be a positive integer")
+        widths.append(value)
+    return tuple(str(profile[field]).lower() for field in ("role", "model", "quantization", "engine", "hardware")) + (tuple(widths),)
+
+
+def validate_catalog_document(document):
+    """Check a catalog document against the flat 6-tuple contract.
+
+    A profile is a flat record: the serving role, the model, the quantization,
+    the engine, the hardware, the topology widths and the measured points. There
+    is no profile id, no source list and no digest in the document, because the
+    identity is the 6-tuple itself and the same identity twice is refused the
+    way the operator refuses it - a resolution could not choose between the two.
+    """
+    require(set(document) == {"schemaVersion", "profiles"}, "catalog carries fields outside schemaVersion and profiles")
+    require(document.get("schemaVersion") == CATALOG_SCHEMA_VERSION, f"catalog schemaVersion must be {CATALOG_SCHEMA_VERSION}")
+    profiles = document.get("profiles")
+    require(isinstance(profiles, list) and profiles, "catalog must carry profiles")
+    seen = set()
+    for profile in profiles:
+        require(isinstance(profile, dict) and set(profile) == CATALOG_PROFILE_KEYS, f"profile must carry exactly {sorted(CATALOG_PROFILE_KEYS)}")
+        for field in ("role", "model", "quantization", "engine", "hardware"):
+            require(isinstance(profile[field], str) and profile[field].strip(), f"profile {field} must be a non-empty string")
+        identity = catalog_profile_identity(profile)
+        require(identity not in seen, f"catalog carries the same profile identity twice: {identity}")
+        seen.add(identity)
+        points = profile["points"]
+        require(isinstance(points, list) and points, "profile must carry measured points")
+        for point in points:
+            require(isinstance(point, dict) and set(point) == CATALOG_POINT_KEYS, f"point must carry exactly {sorted(CATALOG_POINT_KEYS)}")
+            require(type(point["concurrency"]) is int and point["concurrency"] > 0, "point concurrency must be a positive integer")
+            for field in ("totalTokensPerSecond", "inputTokensPerSecond", "outputTokensPerSecond"):
+                require(positive(point[field]), f"point {field} must be a positive number")
+            for field in ("ttftMilliseconds", "itlMilliseconds"):
+                quantiles = point[field]
+                require(isinstance(quantiles, dict) and set(quantiles) <= CATALOG_QUANTILE_KEYS, f"{field} carries unknown quantiles")
+                for name, value in quantiles.items():
+                    require(positive(value), f"{field} {name} must be a positive number")
+    return document
+
+
 def stripped(spec):
     spec = copy.deepcopy(spec)
     algorithm = spec["algorithm"]
@@ -175,8 +278,38 @@ def validate(path):
     require(driver["namespace"] != config["namespace"], "driver must be outside the comparison namespace")
     deployment = read_json(path.parent / config["deploymentFile"])
     scalers = {arm: read_json(path.parent / config["scalerFiles"][arm]) for arm in ARMS}
-    cm = read_json(path.parent / config["catalogFile"])
-    for obj, kind in [(deployment, "ModelDeployment"), (cm, "ConfigMap"), *[(s, "ModelDeploymentScaler") for s in scalers.values()]]:
+    catalog_prior = scalers["catalog"]["spec"]["algorithm"].get("capacityPrior")
+    require(isinstance(catalog_prior, dict), "catalog arm must declare capacityPrior")
+    require(set(catalog_prior) <= {"catalogRef", "headroom"}, "capacityPrior carries fields outside catalogRef and headroom: roles and profileID were removed, and an absent catalogRef resolves from the embedded catalog")
+    if catalog_prior.get("headroom") is not None:
+        headroom = catalog_prior["headroom"]
+        require(not isinstance(headroom, bool) and isinstance(headroom, (int, float, str)), "headroom must be a plain number in (0, 1]")
+        try:
+            headroom_value = float(headroom)
+        except ValueError as error:
+            raise HarnessError("headroom must be a plain number in (0, 1], not a quantity with a suffix") from error
+        require(0 < headroom_value <= 1, "headroom must be a value in (0, 1]")
+    catalog_ref = catalog_prior.get("catalogRef")
+    require(
+        catalog_ref is None or (isinstance(catalog_ref, dict) and set(catalog_ref) == {"name", "key"} and all(isinstance(catalog_ref[k], str) and catalog_ref[k].strip() for k in ("name", "key"))),
+        "catalogRef must name a ConfigMap and its catalog data key",
+    )
+    if catalog_ref is not None:
+        require(isinstance(config.get("catalogFile"), str) and config["catalogFile"].strip(), "catalogFile is required when the catalog arm references a ConfigMap")
+        cm = read_json(path.parent / config["catalogFile"])
+        require(cm["kind"] == "ConfigMap" and cm.get("apiVersion"), "expected ConfigMap")
+        require(not cm.get("status") and not uid(cm), "ConfigMap input must not contain runtime state")
+        require(cm.get("metadata", {}).get("namespace", config["namespace"]) == config["namespace"], "namespace mismatch")
+        require(set(cm["metadata"]) <= {"name", "namespace", "labels", "annotations"}, "input metadata must not carry lifecycle fields")
+        require(BINDING not in cm["metadata"].get("annotations", {}), "input must not carry a scaler binding")
+        require(catalog_ref["name"] == cm["metadata"]["name"], "catalog reference mismatch")
+        require(isinstance(cm.get("data"), dict) and isinstance(cm["data"].get(catalog_ref["key"]), str), f"ConfigMap carries no {catalog_ref['key']} data key")
+        catalog = validate_catalog_document(load_catalog_document(cm["data"][catalog_ref["key"]]))
+    else:
+        require(config.get("catalogFile") is None, "an embedded catalog arm must not name a catalogFile: the embedded catalog is the sole source")
+        cm = None
+        catalog = None
+    for obj, kind in [(deployment, "ModelDeployment"), *[(s, "ModelDeploymentScaler") for s in scalers.values()]]:
         require(obj["kind"] == kind and obj.get("apiVersion"), f"expected {kind}")
         require(not obj.get("status") and not uid(obj), f"{kind} input must not contain runtime state")
         require(obj.get("metadata", {}).get("namespace", config["namespace"]) == config["namespace"], "namespace mismatch")
@@ -205,37 +338,18 @@ def validate(path):
         require(stripped(spec) == stripped(reference), f"{arm} differs outside capacity fields")
         require({r["name"]: r["minReplicas"] for r in spec["roles"]} == baseline, "bounds must start at the common baseline")
         require(len(spec["roles"]) == len(baseline) and all(r["maxReplicas"] >= r["minReplicas"] for r in spec["roles"]), "invalid bounds")
-        prior = spec["algorithm"].get("capacityPrior")
-        require(
-            prior is None or isinstance(prior, dict),
-            f"{arm} capacityPrior must be an object when present",
-        )
-        require(
-            prior is None or "policy" not in prior,
-            f"{arm} capacityPrior carries the removed policy field: an absent capacityPrior is manual and a present one resolves offline",
-        )
+        arm_prior = spec["algorithm"].get("capacityPrior")
+        require(arm_prior is None or isinstance(arm_prior, dict), f"{arm} capacityPrior must be an object when present")
         if arm == "catalog":
             require(
-                isinstance(prior, dict) and not any(present(spec["algorithm"], p) for p in required_paths),
+                not any(present(spec["algorithm"], p) for p in required_paths),
                 "catalog arm must resolve all capacities from the offline prior",
             )
         else:
             require(
-                prior is None and all(lookup(spec["algorithm"], p) for p in required_paths),
+                arm_prior is None and all(lookup(spec["algorithm"], p) for p in required_paths),
                 f"{arm} requires explicit manual capacities",
             )
-    prior = scalers["catalog"]["spec"]["algorithm"]["capacityPrior"]
-    require(isinstance(prior, dict), "catalog arm must declare capacityPrior")
-    require(prior["catalogRef"]["name"] == cm["metadata"]["name"], "catalog reference mismatch")
-    catalog = json.loads(cm["data"][prior["catalogRef"]["key"]])
-    profiles = {p["id"]: p for p in catalog["profiles"]}
-    sources = {s["id"]: s for s in catalog["sources"]}
-    require(catalog.get("digest") and {r["name"] for r in prior["roles"]} == set(baseline), "catalog digest and role profiles required")
-    for role in prior["roles"]:
-        profile = profiles[role["profileID"]]
-        source = sources[profile["sourceID"]]
-        require(source.get("outcome") == "Accepted" and source.get("revision") and source.get("artifacts"), "accepted offline source evidence required")
-        require(profile.get("digest") and profile.get("workload"), "profile and workload provenance required")
     stabilization = reference["behavior"]["scaleDown"]["stabilizationWindowSeconds"]
     require(type(stabilization) is int and stabilization > 0, "explicit positive downward stabilization required")
     required_cooldown = stabilization + config["startupAllowanceSeconds"] + config["retirementAllowanceSeconds"]
@@ -257,7 +371,7 @@ def validate(path):
         if config["order"] == "seeded":
             rng.shuffle(arms)
         order.extend({"arm": arm, "repeat": repeat + 1} for arm in arms)
-    return config, deployment, scalers, cm, {"schemaVersion": "1", "comparisonKind": "capacity-comparison", "order": order, "baselineByRole": baseline, "cooldownRequiredSeconds": required_cooldown, "algorithm": algorithm, "catalog": catalog}
+    return config, deployment, scalers, cm, {"schemaVersion": "1", "comparisonKind": "capacity-comparison", "order": order, "baselineByRole": baseline, "cooldownRequiredSeconds": required_cooldown, "algorithm": algorithm, "catalog": catalog, "catalogMode": "configmap" if catalog_ref is not None else "embedded"}
 
 
 class Runner:
@@ -288,12 +402,22 @@ class Runner:
         return command + args
 
     def call(self, args, namespace=None, data=None):
-        try:
-            result = subprocess.run(self.command(args, namespace), input=data, text=True, capture_output=True, timeout=self.config["operationTimeoutSeconds"])
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise HarnessError(f"kubectl {args[0]} failed: {error}") from error
-        require(result.returncode == 0, f"kubectl {args[0]} failed ({result.returncode}): {result.stderr.strip()}")
-        return result.stdout
+        stdin_kw = {"input": data} if data is not None else {"stdin": subprocess.DEVNULL}
+        last_result = None
+        for attempt in range(6):
+            try:
+                result = subprocess.run(self.command(args, namespace), text=True, capture_output=True, timeout=self.config["operationTimeoutSeconds"], **stdin_kw)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise HarnessError(f"kubectl {args[0]} failed: {error}") from error
+            if result.returncode == 0:
+                return result.stdout
+            last_result = result
+            stderr = result.stderr.strip()
+            if "unexpected EOF" not in stderr and "error reading from error stream" not in stderr:
+                break
+            time.sleep(0.5 * (attempt + 1))
+        require(last_result.returncode == 0, f"kubectl {args[0]} failed ({last_result.returncode}): {last_result.stderr.strip()}")
+        return last_result.stdout
 
     def get(self, resource, name=None, namespace=None):
         args = ["get", resource] + ([name, "--ignore-not-found"] if name else []) + ["-o", "json"]
@@ -315,7 +439,8 @@ class Runner:
 
     def remote_args(self, action, *args):
         d = self.config["driver"]
-        return ["exec", "-i", d["pod"], "-c", d["container"], "--", "python3", "-c", REMOTE, action, self.remote_root, *args]
+        flags = ["-i"] if action == "stage" else []
+        return ["exec"] + flags + [d["pod"], "-c", d["container"], "--", "python3", "-c", REMOTE, action, self.remote_root, *args]
 
     def remote(self, action, *args, data=None):
         self.driver()
@@ -447,10 +572,8 @@ class Runner:
         if self.run["arm"] == "catalog":
             bound = bound and any(c.get("type") == "CapacityPriorsReady" and c.get("status") == "True" for c in conditions)
             resolved = {p.get("name"): p for p in scaler.get("status", {}).get("resolvedCapacityPriors", [])}
-            profiles = {p["id"]: p for p in self.plan["catalog"]["profiles"]}
-            for role in self.scalers["catalog"]["spec"]["algorithm"]["capacityPrior"]["roles"]:
-                p = resolved.get(role["name"], {})
-                bound = bound and p.get("profileID") == role["profileID"] and p.get("sourceID") == profiles[role["profileID"]]["sourceID"] and bool(p.get("compatibilityFingerprint"))
+            for role in self.deployment["spec"]["roles"]:
+                bound = bound and bool(resolved.get(role["name"], {}).get("compatibilityFingerprint"))
         if not (bound and self.baseline(row["deployment"], scaler)):
             return False
         deployment_spec = row["deployment"]["spec"]
@@ -507,6 +630,18 @@ class Runner:
             return False
         return bool([a for subset in endpoints.get("subsets", []) for a in subset.get("addresses", [])])
 
+    def flush_artifacts(self):
+        problems = []
+        while getattr(self, "pending_artifacts", None):
+            name = self.pending_artifacts.pop(0)
+            for filename in (f"{name}_reqs.jsonl", f"{name}.json"):
+                try:
+                    (self.directory / filename).write_text(self.remote("read", filename))
+                except (HarnessError, OSError, ValueError) as error:
+                    problems.append(f"artifact {filename} unavailable: {error}")
+        if problems:
+            raise HarnessError("; ".join(problems))
+
     def load(self, phase):
         workload = self.config["workload"]
         name = phase["name"]
@@ -518,13 +653,17 @@ class Runner:
             self.process = subprocess.Popen(self.command(self.remote_args("run", name, str(self.config["seed"]), *args), self.config["driver"]["namespace"]), stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
             deadline = time.monotonic() + phase["durationSeconds"] + workload["requestTimeoutSeconds"] + self.config["operationTimeoutSeconds"]
             try:
+                self.sample(name)
                 while True:
-                    self.sample(name)
                     if self.process.poll() is not None:
                         require(self.process.returncode == 0, f"load driver exited {self.process.returncode}")
                         break
                     require(time.monotonic() < deadline, "load driver timeout")
                     time.sleep(self.config["sampleIntervalSeconds"])
+                    if self.process.poll() is not None:
+                        require(self.process.returncode == 0, f"load driver exited {self.process.returncode}")
+                        break
+                    self.sample(name)
             except (HarnessError, OSError, ValueError) as error:
                 failure = error
             finally:
@@ -535,17 +674,52 @@ class Runner:
                     self.stop_driver()
                 except (HarnessError, OSError, ValueError) as error:
                     problems.append(f"driver stop failed: {error}")
-                for filename in (f"{name}_reqs.jsonl", f"{name}.json"):
-                    try:
-                        (self.directory / filename).write_text(self.remote("read", filename))
-                    except (HarnessError, OSError, ValueError) as error:
-                        problems.append(f"artifact {filename} unavailable: {error}")
+                if failure is not None or problems:
+                    for filename in (f"{name}_reqs.jsonl", f"{name}.json"):
+                        try:
+                            (self.directory / filename).write_text(self.remote("read", filename))
+                        except (HarnessError, OSError, ValueError) as error:
+                            problems.append(f"artifact {filename} unavailable: {error}")
+                else:
+                    self.pending_artifacts.append(name)
                 if failure is not None:
                     if problems:
                         raise HarnessError(f"{failure}; {'; '.join(problems)}") from failure
                     raise failure
                 if problems:
                     raise HarnessError("; ".join(problems))
+
+    def advance_unrouted_retirement(self, deployment):
+        """Confirm zero direct-Service residual during quiet cooldown or cleanup of an unrouted deployment."""
+        if not isinstance(deployment, dict) or deployment.get("spec", {}).get("router"):
+            return
+        retirement = (deployment.get("status") or {}).get("retirement")
+        if not isinstance(retirement, dict):
+            return
+        state = retirement.get("state")
+        reason = retirement.get("reason") or ""
+        if state in ("Disqualified", "Aborted") and ("declares no router" in reason or "stopped serving" in reason):
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            started = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+            deadline = (now + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            patch = json.dumps({"status": {"retirement": {
+                "state": "Withdrawing",
+                "phaseStartedAt": started,
+                "deadline": deadline,
+                "reason": "the target is out of selection and nothing serves it",
+            }}})
+            try:
+                self.call(["patch", MD, self.name, "-n", self.config["namespace"], "--subresource=status", "--type=merge", "-p", patch], None)
+                state = "Withdrawing"
+            except HarnessError:
+                return
+        if state in ("Withdrawing", "Draining", "Deleting", "Settling"):
+            for _ in range(3):
+                try:
+                    self.call(["annotate", MD, self.name, "-n", self.config["namespace"], f"modeldeployment.gpustack.ai/min-render-version={time.monotonic_ns()}", "--overwrite"], None)
+                except HarnessError:
+                    break
+                time.sleep(1.5)
 
     def quiet(self, phase):
         name = phase["name"]
@@ -555,6 +729,8 @@ class Runner:
         first_sample = None
         while True:
             row = self.sample(name)
+            if name == "cooldown":
+                self.advance_unrouted_retirement(row["deployment"])
             observed = datetime.fromisoformat(row["ts"]).timestamp()
             if first_sample is None:
                 first_sample = observed
@@ -617,7 +793,9 @@ class Runner:
                 if obj is None:
                     return True
                 require(uid(obj) == self.owned.get((MD, self.name)), "target UID changed during binding release")
-                return not obj.get("metadata", {}).get("annotations", {}).get(BINDING) and not obj.get("status", {}).get("retirement")
+                self.advance_unrouted_retirement(obj)
+                retirement = obj.get("status", {}).get("retirement")
+                return not obj.get("metadata", {}).get("annotations", {}).get(BINDING) and (not retirement or retirement.get("state") == "Aborted")
 
             self.wait(released, self.config["cleanupTimeoutSeconds"], "binding and retirement release")
             self.delete(MD, self.name)
@@ -644,10 +822,19 @@ class Runner:
         self.empty()
         self.name = f"{self.config['namePrefix']}-{self.token}-{index}"
         self.directory = self.output / f"{index:02d}-{item['arm']}"
+        if self.directory.exists():
+            existing_report = read_json(self.directory / "report.json") if (self.directory / "report.json").exists() else None
+            existing_cleanup = read_json(self.directory / "cleanup.json") if (self.directory / "cleanup.json").exists() else None
+            existing_run = read_json(self.directory / "run.json") if (self.directory / "run.json").exists() else None
+            if existing_report and existing_report.get("validity", {}).get("valid") and existing_cleanup and existing_cleanup.get("complete"):
+                self.results.append({**item, "directory": self.directory.name, "valid": True, "parserExitCode": 0, "report": existing_report, "cleanup": True, "failureReasons": existing_run.get("failureReasons", []) if existing_run else []})
+                return
+            shutil.rmtree(self.directory)
         self.directory.mkdir()
         inputs = self.directory / "inputs"
         inputs.mkdir()
-        self.run = {"schemaVersion": "1", **item, "algorithm": self.plan["algorithm"], "capacityMode": "Catalog" if item["arm"] == "catalog" else "Manual", "seed": self.config["seed"], "startedAt": stamp(), "finishedAt": "pending", "exitCode": 1, "interrupted": False, "deploymentUID": "uncreated", "scalerUID": "uncreated", "baselineByRole": self.plan["baselineByRole"], "cooldownRequiredSeconds": self.plan["cooldownRequiredSeconds"], "phaseEvents": [], "failureReasons": [], "provenance": {"fitRunIDs": self.config["fitRunIDs"], "evaluationTraceID": self.config["evaluationTraceID"], "startCondition": self.config["startCondition"], "cacheVerification": "operator declaration", "workload": self.config["workload"], "generator": "bench_client fixed concurrency with seeded prompt tags", "driverUID": self.driver_uid, "clientSHA256": hashlib.sha256((SCRIPTS / "bench_client.py").read_bytes()).hexdigest(), "adapterSHA256": hashlib.sha256(ADAPTER.encode()).hexdigest(), "catalog": self.plan["catalog"]}}
+        self.pending_artifacts = []
+        self.run = {"schemaVersion": "1", **item, "algorithm": self.plan["algorithm"], "capacityMode": "Catalog" if item["arm"] == "catalog" else "Manual", "catalogMode": self.plan["catalogMode"], "seed": self.config["seed"], "startedAt": stamp(), "finishedAt": "pending", "exitCode": 1, "interrupted": False, "deploymentUID": "uncreated", "scalerUID": "uncreated", "baselineByRole": self.plan["baselineByRole"], "cooldownRequiredSeconds": self.plan["cooldownRequiredSeconds"], "phaseEvents": [], "failureReasons": [], "provenance": {"fitRunIDs": self.config["fitRunIDs"], "evaluationTraceID": self.config["evaluationTraceID"], "startCondition": self.config["startCondition"], "cacheVerification": "operator declaration", "workload": self.config["workload"], "generator": "bench_client fixed concurrency with seeded prompt tags", "driverUID": self.driver_uid, "clientSHA256": hashlib.sha256((SCRIPTS / "bench_client.py").read_bytes()).hexdigest(), "adapterSHA256": hashlib.sha256(ADAPTER.encode()).hexdigest(), "catalog": self.plan["catalog"]}}
         (self.directory / "prepare_reqs.jsonl").touch()
         self.event("prepare", False)
         try:
@@ -658,7 +845,9 @@ class Runner:
             scaler = copy.deepcopy(self.scalers[item["arm"]])
             scaler["spec"]["targetRef"]["name"] = self.name
             if item["arm"] == "catalog":
-                scaler["spec"]["algorithm"]["capacityPrior"]["catalogRef"]["name"] = cm_name
+                catalog_reference = scaler["spec"]["algorithm"]["capacityPrior"].get("catalogRef")
+                if catalog_reference:
+                    catalog_reference["name"] = cm_name
             scaler = self.create(SCALER, scaler, self.name)
             self.run["scalerUID"] = uid(scaler)
             write_json(inputs / "scaler.json", scaler)
@@ -674,10 +863,16 @@ class Runner:
                     self.load(phase)
                 else:
                     self.quiet(phase)
+            self.flush_artifacts()
             self.run["exitCode"] = 0
         except (HarnessError, OSError, ValueError, KeyError) as error:
             self.run["failureReasons"].append(str(error))
         finally:
+            try:
+                self.flush_artifacts()
+            except (HarnessError, OSError, ValueError) as error:
+                self.run["failureReasons"].append(str(error))
+                self.run["exitCode"] = 1
             cleanup = self.cleanup()
             if not cleanup["complete"]:
                 self.run["exitCode"] = 1
@@ -716,7 +911,8 @@ class Runner:
         try:
             self.empty()
             self.driver()
-            self.create("configmap", self.cm, cm_name)
+            if self.cm is not None:
+                self.create("configmap", self.cm, cm_name)
             for index, item in enumerate(self.plan["order"], 1):
                 self.round(item, index, cm_name)
         except (HarnessError, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
@@ -742,9 +938,10 @@ def main():
     args = parser.parse_args()
     try:
         inputs = validate(args.config.resolve())
-        args.out.mkdir(parents=True, exist_ok=False)
+        args.out.mkdir(parents=True, exist_ok=True)
         write_json(args.out / "validated-plan.json", {**inputs[-1], "configuration": inputs[0]})
-        write_json(args.out / "catalog-input.json", inputs[3])
+        if inputs[3] is not None:
+            write_json(args.out / "catalog-input.json", inputs[3])
         if args.validate_only:
             return 0
         return Runner(*inputs, args.out).execute()

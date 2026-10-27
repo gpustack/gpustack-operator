@@ -548,8 +548,11 @@ interrupt), and `2` on validation error.
 
 `autoscaling_report.py` writes schema `1` diagnostics (`null` metrics with reasons and no win
 verdict when evidence is missing) and exits `0` when valid, `1` when invalid, and `2` when
-`ARM_DIR` is missing or the output cannot be written. Legacy invocations (`case-5-autoscaling.sh [OUT_DIR] ...` or
-`--legacy-topology`) remain aliases for the five-configuration topology benchmark.
+`ARM_DIR` is missing or the output cannot be written.
+
+See [Scaling Benchmark](../../modules/model-deployment/scaling-benchmark.md#capacity-arm-rounds)
+for the recorded 18-round H200 comparison. Legacy invocations (`case-5-autoscaling.sh [OUT_DIR] ...`
+or `--legacy-topology`) remain aliases for the five-configuration topology benchmark.
 
 ## Cleanup
 
@@ -585,7 +588,7 @@ Keep shared prefetched artifacts and `default/bench-driver` when other procedure
 ---
 
 **See also** — [Model Deployment Scaling](../../modules/model-deployment/scaling.md) (public field contracts) ·
-[Scaling Benchmark](../../modules/model-deployment/scaling-benchmark.md) (H100 measurements and limits) ·
+[Scaling Benchmark](../../modules/model-deployment/scaling-benchmark.md) (H100 and H200 measurements and limits) ·
 [Model Deployment Shutdown](../../modules/model-deployment/shutdown.md) (retirement behavior)
 
 **Next** → [Model Deployment Status](../../modules/model-deployment/status.md)
