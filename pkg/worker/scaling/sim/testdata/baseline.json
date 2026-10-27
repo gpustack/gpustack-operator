@@ -1,0 +1,540 @@
+{
+  "Synthetic": true,
+  "Version": 1,
+  "Tolerances": {
+    "MaximumCostIncreaseFraction": 0.1,
+    "MaximumSLODecreaseFraction": 0.02,
+    "MaximumSteadyChanges": 3
+  },
+  "CapacityFactors": [
+    0.5,
+    0.75,
+    1,
+    1.5,
+    2
+  ],
+  "Scenarios": [
+    {
+      "Name": "idle",
+      "Holdout": false,
+      "DurationSeconds": 900,
+      "StepSeconds": 0.25,
+      "Engine": "vllm",
+      "Traffic": {
+        "Seed": 17,
+        "Phases": [
+          {
+            "UntilSeconds": 900,
+            "RequestsPerSecond": 0,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          }
+        ]
+      },
+      "Plant": {
+        "TokensPerSecond": 400,
+        "BatchSize": 4,
+        "BatchGain": 0,
+        "Contention": 0,
+        "TimeoutSeconds": 60,
+        "TTFTSLOSeconds": 2,
+        "ITLSLOSeconds": 0.1
+      },
+      "Fleet": {
+        "Initial": 2,
+        "Quota": 6,
+        "AdmissionSeconds": 10,
+        "BootSeconds": 20,
+        "RetirementSeconds": 20
+      }
+    },
+    {
+      "Name": "steady_noise",
+      "Holdout": false,
+      "DurationSeconds": 900,
+      "StepSeconds": 0.25,
+      "Engine": "vllm",
+      "Traffic": {
+        "Seed": 29,
+        "Phases": [
+          {
+            "UntilSeconds": 900,
+            "RequestsPerSecond": 0.8,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          }
+        ]
+      },
+      "Plant": {
+        "TokensPerSecond": 400,
+        "BatchSize": 4,
+        "BatchGain": 0,
+        "Contention": 0,
+        "TimeoutSeconds": 60,
+        "TTFTSLOSeconds": 2,
+        "ITLSLOSeconds": 0.1
+      },
+      "Fleet": {
+        "Initial": 2,
+        "Quota": 6,
+        "AdmissionSeconds": 10,
+        "BootSeconds": 20,
+        "RetirementSeconds": 20
+      }
+    },
+    {
+      "Name": "step_and_cooldown",
+      "Holdout": false,
+      "DurationSeconds": 900,
+      "StepSeconds": 0.25,
+      "Engine": "vllm",
+      "Traffic": {
+        "Seed": 43,
+        "Phases": [
+          {
+            "UntilSeconds": 120,
+            "RequestsPerSecond": 0.8,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 300,
+            "RequestsPerSecond": 5,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 420,
+            "RequestsPerSecond": 0.8,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 900,
+            "RequestsPerSecond": 0,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          }
+        ]
+      },
+      "Plant": {
+        "TokensPerSecond": 400,
+        "BatchSize": 4,
+        "BatchGain": 0,
+        "Contention": 0,
+        "TimeoutSeconds": 60,
+        "TTFTSLOSeconds": 2,
+        "ITLSLOSeconds": 0.1
+      },
+      "Fleet": {
+        "Initial": 2,
+        "Quota": 6,
+        "AdmissionSeconds": 10,
+        "BootSeconds": 20,
+        "RetirementSeconds": 20
+      }
+    },
+    {
+      "Name": "quota_exhaustion",
+      "Holdout": false,
+      "DurationSeconds": 900,
+      "StepSeconds": 0.25,
+      "Engine": "vllm",
+      "Traffic": {
+        "Seed": 71,
+        "Phases": [
+          {
+            "UntilSeconds": 120,
+            "RequestsPerSecond": 0.8,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 360,
+            "RequestsPerSecond": 5,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 900,
+            "RequestsPerSecond": 0,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          }
+        ]
+      },
+      "Plant": {
+        "TokensPerSecond": 400,
+        "BatchSize": 4,
+        "BatchGain": 0,
+        "Contention": 0,
+        "TimeoutSeconds": 60,
+        "TTFTSLOSeconds": 2,
+        "ITLSLOSeconds": 0.1
+      },
+      "Fleet": {
+        "Initial": 2,
+        "Quota": 2,
+        "AdmissionSeconds": 10,
+        "BootSeconds": 20,
+        "RetirementSeconds": 20
+      }
+    },
+    {
+      "Name": "slow_boot",
+      "Holdout": false,
+      "DurationSeconds": 900,
+      "StepSeconds": 0.25,
+      "Engine": "vllm",
+      "Traffic": {
+        "Seed": 83,
+        "Phases": [
+          {
+            "UntilSeconds": 120,
+            "RequestsPerSecond": 0.8,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 360,
+            "RequestsPerSecond": 5,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 900,
+            "RequestsPerSecond": 0,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          }
+        ]
+      },
+      "Plant": {
+        "TokensPerSecond": 400,
+        "BatchSize": 4,
+        "BatchGain": 0,
+        "Contention": 0,
+        "TimeoutSeconds": 60,
+        "TTFTSLOSeconds": 2,
+        "ITLSLOSeconds": 0.1
+      },
+      "Fleet": {
+        "Initial": 2,
+        "Quota": 6,
+        "AdmissionSeconds": 10,
+        "BootSeconds": 180,
+        "RetirementSeconds": 20
+      }
+    },
+    {
+      "Name": "coverage_and_counter_reset",
+      "Holdout": false,
+      "DurationSeconds": 900,
+      "StepSeconds": 0.25,
+      "Engine": "vllm",
+      "Traffic": {
+        "Seed": 97,
+        "Phases": [
+          {
+            "UntilSeconds": 120,
+            "RequestsPerSecond": 3,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 900,
+            "RequestsPerSecond": 0,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          }
+        ]
+      },
+      "Plant": {
+        "TokensPerSecond": 400,
+        "BatchSize": 4,
+        "BatchGain": 0,
+        "Contention": 0,
+        "TimeoutSeconds": 60,
+        "TTFTSLOSeconds": 2,
+        "ITLSLOSeconds": 0.1
+      },
+      "Fleet": {
+        "Initial": 2,
+        "Quota": 6,
+        "AdmissionSeconds": 10,
+        "BootSeconds": 20,
+        "RetirementSeconds": 20
+      },
+      "Faults": [
+        {
+          "FromSeconds": 130,
+          "UntilSeconds": 250,
+          "Ordinal": 0
+        }
+      ],
+      "ResetAtSeconds": 300
+    },
+    {
+      "Name": "retirement_abort",
+      "Holdout": false,
+      "DurationSeconds": 900,
+      "StepSeconds": 0.25,
+      "Engine": "vllm",
+      "Traffic": {
+        "Seed": 113,
+        "Phases": [
+          {
+            "UntilSeconds": 180,
+            "RequestsPerSecond": 0,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 300,
+            "RequestsPerSecond": 5,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 900,
+            "RequestsPerSecond": 0,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          }
+        ]
+      },
+      "Plant": {
+        "TokensPerSecond": 400,
+        "BatchSize": 4,
+        "BatchGain": 0,
+        "Contention": 0,
+        "TimeoutSeconds": 60,
+        "TTFTSLOSeconds": 2,
+        "ITLSLOSeconds": 0.1
+      },
+      "Fleet": {
+        "Initial": 2,
+        "Quota": 6,
+        "AdmissionSeconds": 10,
+        "BootSeconds": 20,
+        "RetirementSeconds": 20
+      },
+      "AbortRetirement": true
+    },
+    {
+      "Name": "restart",
+      "Holdout": false,
+      "DurationSeconds": 900,
+      "StepSeconds": 0.25,
+      "Engine": "vllm",
+      "Traffic": {
+        "Seed": 131,
+        "Phases": [
+          {
+            "UntilSeconds": 120,
+            "RequestsPerSecond": 0.8,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 300,
+            "RequestsPerSecond": 5,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 900,
+            "RequestsPerSecond": 0,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          }
+        ]
+      },
+      "Plant": {
+        "TokensPerSecond": 400,
+        "BatchSize": 4,
+        "BatchGain": 0,
+        "Contention": 0,
+        "TimeoutSeconds": 60,
+        "TTFTSLOSeconds": 2,
+        "ITLSLOSeconds": 0.1
+      },
+      "Fleet": {
+        "Initial": 2,
+        "Quota": 6,
+        "AdmissionSeconds": 10,
+        "BootSeconds": 20,
+        "RetirementSeconds": 20
+      },
+      "RestartAtSeconds": 180
+    },
+    {
+      "Name": "heldout_bursts",
+      "Holdout": true,
+      "DurationSeconds": 900,
+      "StepSeconds": 0.25,
+      "Engine": "sglang",
+      "Traffic": {
+        "Seed": 1009,
+        "Phases": [
+          {
+            "UntilSeconds": 100,
+            "RequestsPerSecond": 0.8,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 180,
+            "RequestsPerSecond": 5,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 240,
+            "RequestsPerSecond": 0.5,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 330,
+            "RequestsPerSecond": 6,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 450,
+            "RequestsPerSecond": 0.5,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 900,
+            "RequestsPerSecond": 0,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          }
+        ]
+      },
+      "Plant": {
+        "TokensPerSecond": 400,
+        "BatchSize": 4,
+        "BatchGain": 0.1,
+        "Contention": 0,
+        "TimeoutSeconds": 60,
+        "TTFTSLOSeconds": 2,
+        "ITLSLOSeconds": 0.1
+      },
+      "Fleet": {
+        "Initial": 2,
+        "Quota": 6,
+        "AdmissionSeconds": 10,
+        "BootSeconds": 20,
+        "RetirementSeconds": 20
+      }
+    },
+    {
+      "Name": "heldout_length_cache_shift",
+      "Holdout": true,
+      "DurationSeconds": 900,
+      "StepSeconds": 0.25,
+      "Engine": "vllm",
+      "Traffic": {
+        "Seed": 2003,
+        "Phases": [
+          {
+            "UntilSeconds": 120,
+            "RequestsPerSecond": 1,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          },
+          {
+            "UntilSeconds": 360,
+            "RequestsPerSecond": 2,
+            "InputTokens": 500,
+            "OutputTokens": 200,
+            "CacheFraction": 0.5,
+            "Jitter": 0.35
+          },
+          {
+            "UntilSeconds": 900,
+            "RequestsPerSecond": 0,
+            "InputTokens": 100,
+            "OutputTokens": 100,
+            "CacheFraction": 0,
+            "Jitter": 0.2
+          }
+        ]
+      },
+      "Plant": {
+        "TokensPerSecond": 400,
+        "BatchSize": 4,
+        "BatchGain": 0,
+        "Contention": 0.15,
+        "TimeoutSeconds": 60,
+        "TTFTSLOSeconds": 2,
+        "ITLSLOSeconds": 0.1
+      },
+      "Fleet": {
+        "Initial": 2,
+        "Quota": 6,
+        "AdmissionSeconds": 10,
+        "BootSeconds": 20,
+        "RetirementSeconds": 20
+      }
+    }
+  ]
+}
