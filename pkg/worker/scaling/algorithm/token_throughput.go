@@ -265,6 +265,14 @@ func windowMean(history *datax.RingBuffer[DemandSample], now time.Time, window t
 	return sum / float64(count)
 }
 
+// latencyGuard returns the replica count the latency targets hold the role to.
+//
+// IT HOLDS EVERY TARGET ON ITS OWN, because a target whose latency could not be read does not
+// make the target that could be read unreadable. A role whose first token latency breaches
+// its target still scales up when its inter token latency is unknown.
+//
+// IT WAITS FOR THE METRICS A TARGET NEEDS, because a latency nobody measured is not a
+// latency within the target.
 func (t TokenThroughput) latencyGuard(obs RoleObservation) (int32, string, bool) {
 	if obs.LatencyState == SignalIdle || !t.latencyConfigured(obs) {
 		return obs.CurrentReplicas, "", false
@@ -272,19 +280,15 @@ func (t TokenThroughput) latencyGuard(obs RoleObservation) (int32, string, bool)
 	if !signalUsable(obs.LatencyState) {
 		return obs.CurrentReplicas, ReasonWaitingForMetrics, true
 	}
-	target, latency := t.latencyTargetAndValue(obs)
-	if math.IsNaN(latency) || math.IsInf(latency, 0) {
-		return obs.CurrentReplicas, ReasonWaitingForMetrics, true
-	}
-	if target <= 0 {
-		return obs.CurrentReplicas, "", false
-	}
-	ratio := latency / target
+	ratio, missing := t.latencyAssessment(obs)
 	if ratio > 1.2 {
 		return obs.CurrentReplicas + 1, ReasonLatencyGuardScaleUp, true
 	}
 	if ratio > 1 {
 		return obs.CurrentReplicas, ReasonLatencyGuardHold, true
+	}
+	if missing {
+		return obs.CurrentReplicas, ReasonWaitingForMetrics, true
 	}
 	return obs.CurrentReplicas, "", false
 }
@@ -300,39 +304,35 @@ func (t TokenThroughput) latencyConfigured(obs RoleObservation) bool {
 	}
 }
 
-func (t TokenThroughput) latencyTargetAndValue(obs RoleObservation) (float64, float64) {
+// latencyAssessment returns the worst ratio between a measured latency and the target it is
+// held to, and says whether a latency the role is held to could not be read.
+//
+// IT SKIPS A LATENCY THAT COULD NOT BE READ, because a reading nobody made is not a ratio.
+//
+// IT READS A LATENCY THAT IS NOT A NUMBER AS ONE THAT WAS NOT MEASURED, because a caller that
+// has no reading has no number.
+func (t TokenThroughput) latencyAssessment(obs RoleObservation) (float64, bool) {
 	kind := roleKind(obs)
-	if kind == RoleKindPrefill {
-		if math.IsNaN(obs.TTFTMilliseconds) || math.IsInf(obs.TTFTMilliseconds, 0) {
-			return 0, math.NaN()
+	type latencyTarget struct {
+		milliseconds float64
+		latency      float64
+		unmeasured   bool
+	}
+	var targets []latencyTarget
+	if kind != RoleKindDecode && t.TTFTTargetMilliseconds > 0 {
+		targets = append(targets, latencyTarget{t.TTFTTargetMilliseconds, obs.TTFTMilliseconds, obs.TTFTUnmeasured})
+	}
+	if kind != RoleKindPrefill && t.ITLTargetMilliseconds > 0 {
+		targets = append(targets, latencyTarget{t.ITLTargetMilliseconds, obs.ITLMilliseconds, obs.ITLUnmeasured})
+	}
+	ratio := 0.0
+	missing := false
+	for _, entry := range targets {
+		if entry.unmeasured || math.IsNaN(entry.latency) || math.IsInf(entry.latency, 0) {
+			missing = true
+			continue
 		}
-		return t.TTFTTargetMilliseconds, obs.TTFTMilliseconds
+		ratio = math.Max(ratio, entry.latency/entry.milliseconds)
 	}
-	if kind == RoleKindDecode {
-		if math.IsNaN(obs.ITLMilliseconds) || math.IsInf(obs.ITLMilliseconds, 0) {
-			return 0, math.NaN()
-		}
-		return t.ITLTargetMilliseconds, obs.ITLMilliseconds
-	}
-	var targets []float64
-	var values []float64
-	if t.TTFTTargetMilliseconds > 0 {
-		targets = append(targets, t.TTFTTargetMilliseconds)
-		values = append(values, obs.TTFTMilliseconds)
-	}
-	if t.ITLTargetMilliseconds > 0 {
-		targets = append(targets, t.ITLTargetMilliseconds)
-		values = append(values, obs.ITLMilliseconds)
-	}
-	if len(targets) == 0 {
-		return 0, 0
-	}
-	maxRatio := 0.0
-	for i := range targets {
-		if math.IsNaN(values[i]) || math.IsInf(values[i], 0) {
-			return 0, math.NaN()
-		}
-		maxRatio = math.Max(maxRatio, values[i]/targets[i])
-	}
-	return 1, maxRatio
+	return ratio, missing
 }

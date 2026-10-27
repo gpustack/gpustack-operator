@@ -32,8 +32,9 @@ const (
 
 // ModelDeploymentScalerReconciler plans replica vectors for ModelDeployments.
 type ModelDeploymentScalerReconciler struct {
-	Client   ctrlcli.Client
-	Recorder ctrlrecord.EventRecorder
+	Client    ctrlcli.Client
+	APIReader ctrlcli.Reader
+	Recorder  ctrlrecord.EventRecorder
 
 	clock   func() time.Time
 	sampler *modelDeploymentScalerSampler
@@ -41,6 +42,7 @@ type ModelDeploymentScalerReconciler struct {
 
 func (r *ModelDeploymentScalerReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
+	r.APIReader = opts.Manager.GetAPIReader()
 	r.Recorder = opts.Manager.GetEventRecorderFor("modeldeploymentscaler")
 	r.clock = time.Now
 	r.sampler = &modelDeploymentScalerSampler{HTTPClient: defaultModelDeploymentScalerHTTPClient}
@@ -52,6 +54,7 @@ func (r *ModelDeploymentScalerReconciler) SetupController(ctx context.Context, o
 			&workercore.ModelDeployment{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapTargetDeployment),
 		).
+		Watches(&core.ConfigMap{}, ctrlhandler.EnqueueRequestsFromMapFunc(r.mapCapacityPriorCatalog)).
 		Watches(
 			&kueue.Workload{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapTargetWorkload),
@@ -87,6 +90,7 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 			return ctrlreconcile.Result{}, err
 		}
 		before := scaler.DeepCopy()
+		r.invalidateCapacityPriorState(scaler, workercore.ModelDeploymentScalerReasonTargetNotFound, "the target does not exist", now)
 		r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBound, meta.ConditionFalse,
 			workercore.ModelDeploymentScalerReasonTargetNotFound, "the target ModelDeployment does not exist", now)
 		r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeActive, meta.ConditionFalse,
@@ -101,6 +105,7 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 	if scaler.Status.Binding != nil && scaler.Status.Binding.TargetUID != "" && scaler.Status.Binding.TargetUID != string(md.UID) {
 		if scaler.Status.ObservedGeneration >= scaler.Generation {
 			before := scaler.DeepCopy()
+			r.invalidateCapacityPriorState(scaler, workercore.ModelDeploymentScalerReasonTargetReplaced, "the target was replaced", now)
 			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBound, meta.ConditionFalse,
 				workercore.ModelDeploymentScalerReasonTargetReplaced, "the target was replaced; edit the Scaler spec to bind the new target", now)
 			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeActive, meta.ConditionFalse,
@@ -128,6 +133,7 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 		}
 		if scaler.Spec.Suspend {
 			before := scaler.DeepCopy()
+			r.invalidateCapacityPriorState(scaler, workercore.ModelDeploymentScalerReasonSuspended, "the scaler is suspended", now)
 			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBound, meta.ConditionFalse,
 				workercore.ModelDeploymentScalerReasonSuspended, "the scaler is suspended", now)
 			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeActive, meta.ConditionFalse,
@@ -225,6 +231,14 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 		term = maxInt64(modelDeploymentScalerInitialTerm, scaler.Status.Binding.Term+1)
 	}
 	if !hasBinding || binding.ScalerUID != string(scaler.UID) || binding.Term != term {
+		resolved, resolutionErr := ResolveModelDeploymentScalerCapacityPriors(ctx, r.priorReader(), scaler, md)
+		if resolutionErr != nil {
+			before := scaler.DeepCopy()
+			r.applyCapacityPriorResolution(scaler, resolved, resolutionErr, now)
+			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBound, meta.ConditionFalse,
+				workercore.ModelDeploymentScalerReasonCapacityPriorUnresolved, "capacity priors must resolve before acquiring a binding", now)
+			return r.stopForCapacityPrior(ctx, before, scaler, resolutionErr, now)
+		}
 		if md.Annotations == nil {
 			md.Annotations = make(map[string]string)
 		}

@@ -6142,6 +6142,52 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeploymentScaler() *v1.CustomResource
 												"type",
 											},
 											Properties: map[string]v1.JSONSchemaProps{
+												"capacityPrior": {
+													Description: "CapacityPrior permits resolving missing token capacities from a measured catalog for\nTokenThroughput and Predictive.\nAn absent object means every capacity is stated by hand, and the scaler uses only those\nvalues. A present object permits resolving the capacities the scaler does not state, and\nonly from the offline catalog it names. A capacity the scaler states is never replaced by a\ncatalog value. When every serving capacity is stated, no catalog is read at all.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"catalogRef": {
+															Description: "CatalogRef names an optional ConfigMap and key in this namespace as the sole catalog source.\nWhen omitted, the embedded catalog is used.",
+															Type:        "object",
+															Required: []string{
+																"name",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"key": {
+																	Description: "Key is the ConfigMap data key that holds the catalog document.\nThe document is YAML or JSON, and the reader accepts the catalog under\nthe priors.yaml key and under the priors.json key.\nIt defaults to priors.yaml when omitted.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`"priors.yaml"`),
+																	},
+																	MaxLength: ptr.To[int64](253),
+																	MinLength: ptr.To[int64](1),
+																},
+																"name": {
+																	Description: "Name is the name of the ConfigMap in this namespace.",
+																	Type:        "string",
+																	MaxLength:   ptr.To[int64](253),
+																	MinLength:   ptr.To[int64](1),
+																},
+															},
+															Nullable: true,
+														},
+														"headroom": {
+															Description: "Headroom is the margin in (0,1] applied to catalog-derived seed capacities.\nIt defaults to 0.75 when capacityPrior is present and does not apply to explicit capacity\nfields.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+													},
+													Nullable: true,
+												},
 												"predictive": {
 													Description: "Predictive holds the parameters of the Predictive algorithm.\nIt is required when Type is Predictive and ignored otherwise.",
 													Type:        "object",
@@ -6264,6 +6310,20 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeploymentScaler() *v1.CustomResource
 																},
 																"itlTargetMilliseconds": {
 																	Description: "ITLTargetMilliseconds is the inter-token latency the role is expected to keep under.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"latencyQuantile": {
+																	Description: "LatencyQuantile is the quantile of the latency distribution the role is held to.\nIT IS THE QUANTILE THE ONLINE HISTOGRAMS ARE SAMPLED AT and the quantile the capacity\nprior is resolved against. An absent value means the ninety fifth percentile.\nIT IS A NUMBER BETWEEN ZERO EXCLUSIVE AND ONE INCLUSIVE, and any percentile is allowed.\nTHE VALUE IS READ AT THE PRECISION THE QUANTITY RESOLVES IT, so a quantile with more\ndigits than that resolution keeps the rounded value and not the written one.",
 																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
 																	AnyOf: []v1.JSONSchemaProps{
 																		{
@@ -6458,6 +6518,20 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeploymentScaler() *v1.CustomResource
 														},
 														"itlTargetMilliseconds": {
 															Description: "ITLTargetMilliseconds is the inter-token latency the role is expected to keep under.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"latencyQuantile": {
+															Description: "LatencyQuantile is the quantile of the latency distribution the role is held to.\nIT IS THE QUANTILE THE ONLINE HISTOGRAMS ARE SAMPLED AT and the quantile the capacity\nprior is resolved against. An absent value means the ninety fifth percentile.\nIT IS A NUMBER BETWEEN ZERO EXCLUSIVE AND ONE INCLUSIVE, and any percentile is allowed.\nTHE VALUE IS READ AT THE PRECISION THE QUANTITY RESOLVES IT, so a quantile with more\ndigits than that resolution keeps the rounded value and not the written one.",
 															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
 															AnyOf: []v1.JSONSchemaProps{
 																{
@@ -7063,6 +7137,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeploymentScaler() *v1.CustomResource
 											},
 											Nullable: true,
 										},
+										"latencyQuantile": {
+											Description: "LatencyQuantile is the quantile of the latency distribution the scaler is held to.\nIT IS THE QUANTILE THE SCALER ASKED FOR, and the observed latencies of every role were\nsampled at it. It is absent only when the scaler names none, which means the ninety\nfifth percentile.\nIT IS A STABLE VALUE, because it changes when the configuration changes and not when the\nsampler reads a new sample.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](64),
+										},
 										"observedGeneration": {
 											Description: "ObservedGeneration is the generation this status was computed from.",
 											Type:        "integer",
@@ -7314,6 +7393,216 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeploymentScaler() *v1.CustomResource
 												},
 											},
 											Nullable: true,
+										},
+										"resolvedCapacityPriors": {
+											Description: "ResolvedCapacityPriors records the resolved capacity prior basis and per-field effective\ncapacities for each role.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"catalogDigest": {
+															Description: "CatalogDigest is the content digest of the catalog the profile was resolved from.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+														"compatibilityFingerprint": {
+															Description: "CompatibilityFingerprint covers the target, role, model, engine, hardware, quantization,\ntopology, workload, catalog digest, and latency targets this resolution depends on.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+														"denominator": {
+															Description: "Denominator is the measurement denominator reconstructed for one scaling replica.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+														"fields": {
+															Description: "Fields records the effective value and source of each required capacity field for this role.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](8),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"field",
+																		"source",
+																		"effectiveTokensPerSecond",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"effectiveTokensPerSecond": {
+																			Description: "EffectiveTokensPerSecond is the effective per-replica token capacity used for this field.",
+																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																			AnyOf: []v1.JSONSchemaProps{
+																				{
+																					Type: "integer",
+																				},
+																				{
+																					Type: "string",
+																				},
+																			},
+																			XIntOrString: true,
+																		},
+																		"field": {
+																			Description: "Field is the name of the capacity field.",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](253),
+																			MinLength:   ptr.To[int64](1),
+																		},
+																		"source": {
+																			Description: "Source says whether the effective value came from an explicit spec field or from the\ncatalog.",
+																			Type:        "string",
+																			Enum: []v1.JSON{
+																				{
+																					Raw: []byte(`"Explicit"`),
+																				},
+																				{
+																					Raw: []byte(`"Catalog"`),
+																				},
+																			},
+																		},
+																	},
+																},
+															},
+															Nullable: true,
+															XListMapKeys: []string{
+																"field",
+															},
+															XListType: ptr.To[string]("map"),
+														},
+														"gpusPerReplica": {
+															Description: "GPUsPerReplica is the number of accelerators in one scaling replica used to reconstruct a\nPerGPU measurement denominator.",
+															Type:        "integer",
+															Format:      "int32",
+															Minimum:     ptr.To[float64](0),
+														},
+														"headroom": {
+															Description: "Headroom is the margin applied to the catalog seed capacity.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"latencyBounds": {
+															Description: "LatencyBounds records the quantile and conservative-bound basis for each required latency\nmetric of the role.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](8),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"metric",
+																		"quantile",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"conservative": {
+																			Description: "Conservative says whether a quantile higher than the required quantile was used as a\nconservative upper bound.",
+																			Type:        "boolean",
+																		},
+																		"metric": {
+																			Description: "Metric is the required latency metric name, such as TTFT or ITL.",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](64),
+																			MinLength:   ptr.To[int64](1),
+																		},
+																		"quantile": {
+																			Description: "Quantile is the measured latency quantile statistic used to bound the metric.",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](64),
+																			MinLength:   ptr.To[int64](1),
+																		},
+																	},
+																},
+															},
+															Nullable: true,
+															XListMapKeys: []string{
+																"metric",
+															},
+															XListType: ptr.To[string]("map"),
+														},
+														"measuredReplicas": {
+															Description: "MeasuredReplicas is the number of scaling replicas in the measured system used to\nreconstruct a WholeSystem measurement denominator.",
+															Type:        "integer",
+															Format:      "int32",
+															Minimum:     ptr.To[float64](0),
+														},
+														"metric": {
+															Description: "Metric is the throughput metric numerator the capacity was resolved from.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+														"name": {
+															Description: "Name is the role this status belongs to.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+															MinLength:   ptr.To[int64](1),
+														},
+														"profileDigest": {
+															Description: "ProfileDigest is the content digest of the catalog profile.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+														"quantile": {
+															Description: "Quantile is the latency quantile statistic used to verify the role's latency constraints.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+														"requestedQuantile": {
+															Description: "RequestedQuantile is the latency quantile the resolution was held to.\nIT IS THE QUANTILE THE SCALER ASKED FOR and not the quantile the catalog measured, and\nthe two differ when the catalog measured a higher quantile than the request needed.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+														"seedTokensPerSecond": {
+															Description: "SeedTokensPerSecond is the per-replica catalog seed capacity before headroom is applied.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"sourceID": {
+															Description: "SourceID is the catalog source identifier the profile came from.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+														"sourceRevision": {
+															Description: "SourceRevision pins the upstream source revision the catalog profile was imported from.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+														"workloadID": {
+															Description: "WorkloadID is the workload envelope identifier the profile was measured under.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+														"workloadRevision": {
+															Description: "WorkloadRevision pins the workload definition the profile was measured under.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
 										},
 										"roles": {
 											Description: "Roles is what the scaler saw and what it recommends for each role.",

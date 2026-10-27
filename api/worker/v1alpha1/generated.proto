@@ -4594,6 +4594,17 @@ message ModelDeploymentScalerAlgorithmSpec {
   //
   // +optional
   optional ModelDeploymentScalerPredictiveSpec predictive = 4;
+
+  // CapacityPrior permits resolving missing token capacities from a measured catalog for
+  // TokenThroughput and Predictive.
+  //
+  // An absent object means every capacity is stated by hand, and the scaler uses only those
+  // values. A present object permits resolving the capacities the scaler does not state, and
+  // only from the offline catalog it names. A capacity the scaler states is never replaced by a
+  // catalog value. When every serving capacity is stated, no catalog is read at all.
+  //
+  // +optional
+  optional ModelDeploymentScalerCapacityPriorSpec capacityPrior = 5;
 }
 
 // ModelDeploymentScalerBehaviorSpec tunes how fast a role may move and how long the scaler
@@ -4647,6 +4658,53 @@ message ModelDeploymentScalerBindingStatus {
   //
   // +optional
   optional int64 term = 3;
+}
+
+// ModelDeploymentScalerCapacityPriorSpec permits resolving missing token capacities from an
+// offline catalog for TokenThroughput and Predictive.
+//
+// The presence of the spec is the request, because it holds no switch that turns the resolution
+// off. The resolution fills only the capacities the scaler does not state, and only from the
+// offline catalog, so there is no source outside it.
+message ModelDeploymentScalerCapacityPriorSpec {
+  // CatalogRef names an optional ConfigMap and key in this namespace as the sole catalog source.
+  //
+  // When omitted, the embedded catalog is used.
+  //
+  // +optional
+  optional ModelDeploymentScalerCatalogReference catalogRef = 2;
+
+  // Headroom is the margin in (0,1] applied to catalog-derived seed capacities.
+  //
+  // It defaults to 0.75 when capacityPrior is present and does not apply to explicit capacity
+  // fields.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity headroom = 4;
+}
+
+// ModelDeploymentScalerCatalogReference selects a catalog key in a ConfigMap in the scaler's
+// namespace.
+message ModelDeploymentScalerCatalogReference {
+  // Name is the name of the ConfigMap in this namespace.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string name = 1;
+
+  // Key is the ConfigMap data key that holds the catalog document.
+  //
+  // The document is YAML or JSON, and the reader accepts the catalog under
+  // the priors.yaml key and under the priors.json key.
+  //
+  // It defaults to priors.yaml when omitted.
+  //
+  // +optional
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  // +k8s:validation:default="priors.yaml"
+  optional string key = 2;
 }
 
 // ModelDeploymentScalerCommitStatus is the decision the scaler last committed.
@@ -4966,6 +5024,175 @@ message ModelDeploymentScalerRebalanceStatus {
   //
   // +optional
   optional string reason = 8;
+}
+
+// ModelDeploymentScalerResolvedCapacityFieldStatus records the effective value and source of one
+// algorithm capacity field.
+message ModelDeploymentScalerResolvedCapacityFieldStatus {
+  // Field is the name of the capacity field.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string field = 1;
+
+  // Source says whether the effective value came from an explicit spec field or from the
+  // catalog.
+  //
+  // +required
+  // +k8s:validation:enum=["Explicit","Catalog"]
+  optional string source = 2;
+
+  // EffectiveTokensPerSecond is the effective per-replica token capacity used for this field.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity effectiveTokensPerSecond = 3;
+}
+
+// ModelDeploymentScalerResolvedCapacityPriorStatus records the resolved capacity prior basis and
+// effective field values for one role.
+message ModelDeploymentScalerResolvedCapacityPriorStatus {
+  // Name is the role this status belongs to.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string name = 1;
+
+  // SourceID is the catalog source identifier the profile came from.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string sourceID = 3;
+
+  // ProfileDigest is the content digest of the catalog profile.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string profileDigest = 4;
+
+  // CompatibilityFingerprint covers the target, role, model, engine, hardware, quantization,
+  // topology, workload, catalog digest, and latency targets this resolution depends on.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string compatibilityFingerprint = 5;
+
+  // Metric is the throughput metric numerator the capacity was resolved from.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string metric = 6;
+
+  // Quantile is the latency quantile statistic used to verify the role's latency constraints.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string quantile = 7;
+
+  // WorkloadID is the workload envelope identifier the profile was measured under.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string workloadID = 8;
+
+  // Denominator is the measurement denominator reconstructed for one scaling replica.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string denominator = 9;
+
+  // Headroom is the margin applied to the catalog seed capacity.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity headroom = 10;
+
+  // SeedTokensPerSecond is the per-replica catalog seed capacity before headroom is applied.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity seedTokensPerSecond = 11;
+
+  // Fields records the effective value and source of each required capacity field for this role.
+  //
+  // +optional
+  // +listType=map
+  // +listMapKey=field
+  // +k8s:validation:maxItems=8
+  repeated ModelDeploymentScalerResolvedCapacityFieldStatus fields = 12;
+
+  // CatalogDigest is the content digest of the catalog the profile was resolved from.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string catalogDigest = 13;
+
+  // SourceRevision pins the upstream source revision the catalog profile was imported from.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string sourceRevision = 14;
+
+  // WorkloadRevision pins the workload definition the profile was measured under.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string workloadRevision = 15;
+
+  // GPUsPerReplica is the number of accelerators in one scaling replica used to reconstruct a
+  // PerGPU measurement denominator.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  optional int32 gpusPerReplica = 16;
+
+  // MeasuredReplicas is the number of scaling replicas in the measured system used to
+  // reconstruct a WholeSystem measurement denominator.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  optional int32 measuredReplicas = 17;
+
+  // LatencyBounds records the quantile and conservative-bound basis for each required latency
+  // metric of the role.
+  //
+  // +optional
+  // +listType=map
+  // +listMapKey=metric
+  // +k8s:validation:maxItems=8
+  repeated ModelDeploymentScalerResolvedLatencyBoundStatus latencyBounds = 18;
+
+  // RequestedQuantile is the latency quantile the resolution was held to.
+  //
+  // IT IS THE QUANTILE THE SCALER ASKED FOR and not the quantile the catalog measured, and
+  // the two differ when the catalog measured a higher quantile than the request needed.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string requestedQuantile = 19;
+}
+
+// ModelDeploymentScalerResolvedLatencyBoundStatus records the measured quantile basis for one
+// required latency metric.
+message ModelDeploymentScalerResolvedLatencyBoundStatus {
+  // Metric is the required latency metric name, such as TTFT or ITL.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=64
+  optional string metric = 1;
+
+  // Quantile is the measured latency quantile statistic used to bound the metric.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=64
+  optional string quantile = 2;
+
+  // Conservative says whether a quantile higher than the required quantile was used as a
+  // conservative upper bound.
+  //
+  // +optional
+  optional bool conservative = 3;
 }
 
 // ModelDeploymentScalerRoleBounds are the bounds one role stays inside.
@@ -5419,6 +5646,27 @@ message ModelDeploymentScalerStatus {
   // +listType=map
   // +listMapKey=type
   repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 9;
+
+  // ResolvedCapacityPriors records the resolved capacity prior basis and per-field effective
+  // capacities for each role.
+  //
+  // +optional
+  // +listType=map
+  // +listMapKey=name
+  repeated ModelDeploymentScalerResolvedCapacityPriorStatus resolvedCapacityPriors = 10;
+
+  // LatencyQuantile is the quantile of the latency distribution the scaler is held to.
+  //
+  // IT IS THE QUANTILE THE SCALER ASKED FOR, and the observed latencies of every role were
+  // sampled at it. It is absent only when the scaler names none, which means the ninety
+  // fifth percentile.
+  //
+  // IT IS A STABLE VALUE, because it changes when the configuration changes and not when the
+  // sampler reads a new sample.
+  //
+  // +optional
+  // +k8s:validation:maxLength=64
+  optional string latencyQuantile = 11;
 }
 
 // ModelDeploymentScalerStepPolicy is a bound on how far one role may move in one pass.
@@ -5506,6 +5754,18 @@ message ModelDeploymentScalerTokenThroughputSpec {
   //
   // +optional
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity itlTargetMilliseconds = 8;
+
+  // LatencyQuantile is the quantile of the latency distribution the role is held to.
+  //
+  // IT IS THE QUANTILE THE ONLINE HISTOGRAMS ARE SAMPLED AT and the quantile the capacity
+  // prior is resolved against. An absent value means the ninety fifth percentile.
+  //
+  // IT IS A NUMBER BETWEEN ZERO EXCLUSIVE AND ONE INCLUSIVE, and any percentile is allowed.
+  // THE VALUE IS READ AT THE PRECISION THE QUANTITY RESOLVES IT, so a quantile with more
+  // digits than that resolution keeps the rounded value and not the written one.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity latencyQuantile = 9;
 }
 
 // ModelDeploymentServingStatus is the actual serving confirmation of a role's endpoints: a

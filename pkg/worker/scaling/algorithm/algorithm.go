@@ -66,11 +66,22 @@ type RoleObservation struct {
 	KVCacheUsage              float64
 	TTFTMilliseconds          float64
 	ITLMilliseconds           float64
-	ThroughputState           SignalState
-	LatencyState              SignalState
-	GaugeState                SignalState
-	CompleteCoverage          bool
-	ObservedAt                time.Time
+	// TTFTUnmeasured says the first token latency was not measured.
+	//
+	// IT IS SET WHEN THE SAMPLER COULD NOT READ THE LATENCY, because a latency that
+	// was not measured is not a latency of no time. The value beside it says
+	// nothing, and the algorithms that hold a role by this latency skip it.
+	TTFTUnmeasured bool
+	// ITLUnmeasured says the inter token latency was not measured.
+	//
+	// IT IS SET WHEN THE SAMPLER COULD NOT READ THE LATENCY, for the same reason
+	// the first token latency carries the same mark.
+	ITLUnmeasured    bool
+	ThroughputState  SignalState
+	LatencyState     SignalState
+	GaugeState       SignalState
+	CompleteCoverage bool
+	ObservedAt       time.Time
 }
 
 // RoleRecommendation is an unconstrained recommendation for one role.

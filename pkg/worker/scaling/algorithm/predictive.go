@@ -191,13 +191,14 @@ func (p Predictive) capacity(kind RoleKind) float64 {
 	}
 }
 
+// latencyBreached reports whether a latency the role is held to is beyond its target.
+//
+// IT HOLDS EVERY TARGET ON ITS OWN, because a target whose latency could not be read does not
+// make the target that could be read unreadable.
 func (p Predictive) latencyBreached(obs RoleObservation) bool {
 	if obs.LatencyState == SignalIdle || !signalUsable(obs.LatencyState) {
 		return false
 	}
-	target, value := p.latencyTargetAndValue(obs)
-	if target <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
-		return false
-	}
-	return value > 1.2*target
+	ratio, _ := p.latencyAssessment(obs)
+	return ratio > 1.2
 }

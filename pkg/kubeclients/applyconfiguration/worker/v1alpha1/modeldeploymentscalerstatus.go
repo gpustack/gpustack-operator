@@ -38,6 +38,20 @@ type ModelDeploymentScalerStatusApplyConfiguration struct {
 	// Conditions holds the conditions of the scaler.
 	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
+	// ResolvedCapacityPriors records the resolved capacity prior basis and per-field effective
+	// capacities for each role.
+	//
+	ResolvedCapacityPriors []ModelDeploymentScalerResolvedCapacityPriorStatusApplyConfiguration `json:"resolvedCapacityPriors,omitempty"`
+	// LatencyQuantile is the quantile of the latency distribution the scaler is held to.
+	//
+	// IT IS THE QUANTILE THE SCALER ASKED FOR, and the observed latencies of every role were
+	// sampled at it. It is absent only when the scaler names none, which means the ninety
+	// fifth percentile.
+	//
+	// IT IS A STABLE VALUE, because it changes when the configuration changes and not when the
+	// sampler reads a new sample.
+	//
+	LatencyQuantile *string `json:"latencyQuantile,omitempty"`
 }
 
 // ModelDeploymentScalerStatusApplyConfiguration constructs a declarative configuration of the ModelDeploymentScalerStatus type for use with
@@ -130,5 +144,26 @@ func (b *ModelDeploymentScalerStatusApplyConfiguration) WithConditions(values ..
 		}
 		b.Conditions = append(b.Conditions, *values[i])
 	}
+	return b
+}
+
+// WithResolvedCapacityPriors adds the given value to the ResolvedCapacityPriors field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the ResolvedCapacityPriors field.
+func (b *ModelDeploymentScalerStatusApplyConfiguration) WithResolvedCapacityPriors(values ...*ModelDeploymentScalerResolvedCapacityPriorStatusApplyConfiguration) *ModelDeploymentScalerStatusApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithResolvedCapacityPriors")
+		}
+		b.ResolvedCapacityPriors = append(b.ResolvedCapacityPriors, *values[i])
+	}
+	return b
+}
+
+// WithLatencyQuantile sets the LatencyQuantile field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the LatencyQuantile field is set to the value of the last call.
+func (b *ModelDeploymentScalerStatusApplyConfiguration) WithLatencyQuantile(value string) *ModelDeploymentScalerStatusApplyConfiguration {
+	b.LatencyQuantile = &value
 	return b
 }

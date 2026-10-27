@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -34,6 +35,8 @@ func (r *ModelDeploymentScalerReconciler) plan(
 	now time.Time,
 	active bool,
 ) (ctrlreconcile.Result, error) {
+	resolved, resolutionErr := ResolveModelDeploymentScalerCapacityPriors(ctx, r.priorReader(), scaler, md)
+	r.applyCapacityPriorResolution(scaler, resolved, resolutionErr, now)
 	pods, pendingByRole, cohorts, err := r.executionState(ctx, md)
 	if err != nil {
 		return ctrlreconcile.Result{}, err
@@ -78,10 +81,9 @@ func (r *ModelDeploymentScalerReconciler) plan(
 			if r.Recorder != nil {
 				r.Recorder.Eventf(scaler, core.EventTypeWarning, "CohortRetracted", "retracted unadmitted scale-up cohort to %v", target)
 			}
-			if err := r.updateStatus(ctx, before, scaler); err != nil {
-				return ctrlreconcile.Result{}, err
-			}
-			return ctrlreconcile.Result{RequeueAfter: interval}, nil
+			return ctrlreconcile.Result{RequeueAfter: interval}, errors.Join(
+				modelDeploymentScalerPriorAPIError(resolutionErr), r.updateStatus(ctx, before, scaler),
+			)
 		}
 	}
 
@@ -129,10 +131,13 @@ func (r *ModelDeploymentScalerReconciler) plan(
 				retirement.RoleName, retirement.ReplicaOrdinal,
 			)
 		}
-		if err := r.updateStatus(ctx, before, scaler); err != nil {
-			return ctrlreconcile.Result{}, err
-		}
-		return ctrlreconcile.Result{RequeueAfter: interval}, nil
+		return ctrlreconcile.Result{RequeueAfter: interval}, errors.Join(
+			modelDeploymentScalerPriorAPIError(resolutionErr), r.updateStatus(ctx, before, scaler),
+		)
+	}
+
+	if resolutionErr != nil {
+		return r.stopForCapacityPrior(ctx, before, scaler, resolutionErr, now)
 	}
 
 	if reason := targetRolesEligibility(scaler.Spec, md.Spec.Roles); reason != "" {
@@ -178,7 +183,7 @@ func (r *ModelDeploymentScalerReconciler) plan(
 		observation.Role = role.Name
 		observation.CurrentReplicas = role.Replicas
 		obsSample := samples[role.Name]
-		engineAlgorithm, err := modelDeploymentScalerAlgorithmForRole(scaler.Spec.Algorithm, role.Name)
+		engineAlgorithm, err := modelDeploymentScalerAlgorithmForRole(resolved.Algorithms[role.Name], role.Name)
 		if err != nil {
 			return ctrlreconcile.Result{}, err
 		}
@@ -201,8 +206,8 @@ func (r *ModelDeploymentScalerReconciler) plan(
 			RunningRequests:           int32(math.Max(0, math.Round(observation.RunningRequests))),
 			WaitingRequests:           int32(math.Max(0, math.Round(observation.WaitingRequests))),
 			KVCacheUsage:              quantityPointerFloat(observation.KVCacheUsage),
-			TTFTMilliseconds:          quantityPointerFloat(observation.TTFTMilliseconds),
-			ITLMilliseconds:           quantityPointerFloat(observation.ITLMilliseconds),
+			TTFTMilliseconds:          modelDeploymentScalerLatencyQuantity(observation.TTFTMilliseconds, observation.TTFTUnmeasured),
+			ITLMilliseconds:           modelDeploymentScalerLatencyQuantity(observation.ITLMilliseconds, observation.ITLUnmeasured),
 			RawRecommendedReplicas:    recommendation.DesiredReplicas,
 			Reason:                    recommendation.Reason,
 		}
@@ -260,6 +265,9 @@ func (r *ModelDeploymentScalerReconciler) plan(
 	}
 	scaler.Status.Roles = roleStatuses
 	scaler.Status.Predictors = scalerPredictorStatuses(predictorByRole)
+	// THE SCALER SAYS WHICH QUANTILE IT IS HELD TO WHERE THE STATUS IS WRITTEN, because
+	// the quantile belongs to the specification and every path that writes the status
+	// has to say it, not only the paths that planned.
 	if metricsReady {
 		r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeMetricsReady, meta.ConditionTrue,
 			"Observed", "all required role signals are available", now)
@@ -282,6 +290,10 @@ func (r *ModelDeploymentScalerReconciler) plan(
 	}
 
 	if active && !equalReplicaVectors(current, vector) {
+		if err := r.recheckCapacityPriors(ctx, scaler, md, resolved); err != nil {
+			r.applyCapacityPriorResolution(scaler, nil, err, now)
+			return r.stopForCapacityPrior(ctx, before, scaler, err, now)
+		}
 		owned, err := r.ensureOwnedBinding(ctx, before, scaler, md, now)
 		if err != nil {
 			return ctrlreconcile.Result{}, err

@@ -295,6 +295,12 @@ func (m *ModelDeploymentScalerBinding) Reset() { *m = ModelDeploymentScalerBindi
 
 func (m *ModelDeploymentScalerBindingStatus) Reset() { *m = ModelDeploymentScalerBindingStatus{} }
 
+func (m *ModelDeploymentScalerCapacityPriorSpec) Reset() {
+	*m = ModelDeploymentScalerCapacityPriorSpec{}
+}
+
+func (m *ModelDeploymentScalerCatalogReference) Reset() { *m = ModelDeploymentScalerCatalogReference{} }
+
 func (m *ModelDeploymentScalerCommitStatus) Reset() { *m = ModelDeploymentScalerCommitStatus{} }
 
 func (m *ModelDeploymentScalerDecision) Reset() { *m = ModelDeploymentScalerDecision{} }
@@ -318,6 +324,18 @@ func (m *ModelDeploymentScalerProportionalSpec) Reset() { *m = ModelDeploymentSc
 func (m *ModelDeploymentScalerRebalanceSpec) Reset() { *m = ModelDeploymentScalerRebalanceSpec{} }
 
 func (m *ModelDeploymentScalerRebalanceStatus) Reset() { *m = ModelDeploymentScalerRebalanceStatus{} }
+
+func (m *ModelDeploymentScalerResolvedCapacityFieldStatus) Reset() {
+	*m = ModelDeploymentScalerResolvedCapacityFieldStatus{}
+}
+
+func (m *ModelDeploymentScalerResolvedCapacityPriorStatus) Reset() {
+	*m = ModelDeploymentScalerResolvedCapacityPriorStatus{}
+}
+
+func (m *ModelDeploymentScalerResolvedLatencyBoundStatus) Reset() {
+	*m = ModelDeploymentScalerResolvedLatencyBoundStatus{}
+}
 
 func (m *ModelDeploymentScalerRoleBounds) Reset() { *m = ModelDeploymentScalerRoleBounds{} }
 
@@ -7380,6 +7398,18 @@ func (m *ModelDeploymentScalerAlgorithmSpec) MarshalToSizedBuffer(dAtA []byte) (
 	_ = i
 	var l int
 	_ = l
+	if m.CapacityPrior != nil {
+		{
+			size, err := m.CapacityPrior.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x2a
+	}
 	if m.Predictive != nil {
 		{
 			size, err := m.Predictive.MarshalToSizedBuffer(dAtA[:i])
@@ -7534,6 +7564,86 @@ func (m *ModelDeploymentScalerBindingStatus) MarshalToSizedBuffer(dAtA []byte) (
 	i -= len(m.TargetUID)
 	copy(dAtA[i:], m.TargetUID)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.TargetUID)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *ModelDeploymentScalerCapacityPriorSpec) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentScalerCapacityPriorSpec) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentScalerCapacityPriorSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Headroom != nil {
+		{
+			size, err := m.Headroom.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x22
+	}
+	if m.CatalogRef != nil {
+		{
+			size, err := m.CatalogRef.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x12
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ModelDeploymentScalerCatalogReference) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentScalerCatalogReference) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentScalerCatalogReference) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	i -= len(m.Key)
+	copy(dAtA[i:], m.Key)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Key)))
+	i--
+	dAtA[i] = 0x12
+	i -= len(m.Name)
+	copy(dAtA[i:], m.Name)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Name)))
 	i--
 	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
@@ -8280,6 +8390,239 @@ func (m *ModelDeploymentScalerRebalanceStatus) MarshalToSizedBuffer(dAtA []byte)
 	return len(dAtA) - i, nil
 }
 
+func (m *ModelDeploymentScalerResolvedCapacityFieldStatus) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentScalerResolvedCapacityFieldStatus) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentScalerResolvedCapacityFieldStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	{
+		size, err := m.EffectiveTokensPerSecond.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0x1a
+	i -= len(m.Source)
+	copy(dAtA[i:], m.Source)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Source)))
+	i--
+	dAtA[i] = 0x12
+	i -= len(m.Field)
+	copy(dAtA[i:], m.Field)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Field)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *ModelDeploymentScalerResolvedCapacityPriorStatus) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentScalerResolvedCapacityPriorStatus) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentScalerResolvedCapacityPriorStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	i -= len(m.RequestedQuantile)
+	copy(dAtA[i:], m.RequestedQuantile)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.RequestedQuantile)))
+	i--
+	dAtA[i] = 0x1
+	i--
+	dAtA[i] = 0x9a
+	if len(m.LatencyBounds) > 0 {
+		for iNdEx := len(m.LatencyBounds) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.LatencyBounds[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x1
+			i--
+			dAtA[i] = 0x92
+		}
+	}
+	i = encodeVarintGenerated(dAtA, i, uint64(m.MeasuredReplicas))
+	i--
+	dAtA[i] = 0x1
+	i--
+	dAtA[i] = 0x88
+	i = encodeVarintGenerated(dAtA, i, uint64(m.GPUsPerReplica))
+	i--
+	dAtA[i] = 0x1
+	i--
+	dAtA[i] = 0x80
+	i -= len(m.WorkloadRevision)
+	copy(dAtA[i:], m.WorkloadRevision)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.WorkloadRevision)))
+	i--
+	dAtA[i] = 0x7a
+	i -= len(m.SourceRevision)
+	copy(dAtA[i:], m.SourceRevision)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.SourceRevision)))
+	i--
+	dAtA[i] = 0x72
+	i -= len(m.CatalogDigest)
+	copy(dAtA[i:], m.CatalogDigest)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.CatalogDigest)))
+	i--
+	dAtA[i] = 0x6a
+	if len(m.Fields) > 0 {
+		for iNdEx := len(m.Fields) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.Fields[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x62
+		}
+	}
+	if m.SeedTokensPerSecond != nil {
+		{
+			size, err := m.SeedTokensPerSecond.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x5a
+	}
+	if m.Headroom != nil {
+		{
+			size, err := m.Headroom.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x52
+	}
+	i -= len(m.Denominator)
+	copy(dAtA[i:], m.Denominator)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Denominator)))
+	i--
+	dAtA[i] = 0x4a
+	i -= len(m.WorkloadID)
+	copy(dAtA[i:], m.WorkloadID)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.WorkloadID)))
+	i--
+	dAtA[i] = 0x42
+	i -= len(m.Quantile)
+	copy(dAtA[i:], m.Quantile)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Quantile)))
+	i--
+	dAtA[i] = 0x3a
+	i -= len(m.Metric)
+	copy(dAtA[i:], m.Metric)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Metric)))
+	i--
+	dAtA[i] = 0x32
+	i -= len(m.CompatibilityFingerprint)
+	copy(dAtA[i:], m.CompatibilityFingerprint)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.CompatibilityFingerprint)))
+	i--
+	dAtA[i] = 0x2a
+	i -= len(m.ProfileDigest)
+	copy(dAtA[i:], m.ProfileDigest)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ProfileDigest)))
+	i--
+	dAtA[i] = 0x22
+	i -= len(m.SourceID)
+	copy(dAtA[i:], m.SourceID)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.SourceID)))
+	i--
+	dAtA[i] = 0x1a
+	i -= len(m.Name)
+	copy(dAtA[i:], m.Name)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Name)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *ModelDeploymentScalerResolvedLatencyBoundStatus) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentScalerResolvedLatencyBoundStatus) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentScalerResolvedLatencyBoundStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	i--
+	if m.Conservative {
+		dAtA[i] = 1
+	} else {
+		dAtA[i] = 0
+	}
+	i--
+	dAtA[i] = 0x18
+	i -= len(m.Quantile)
+	copy(dAtA[i:], m.Quantile)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Quantile)))
+	i--
+	dAtA[i] = 0x12
+	i -= len(m.Metric)
+	copy(dAtA[i:], m.Metric)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Metric)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
 func (m *ModelDeploymentScalerRoleBounds) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -8934,6 +9277,25 @@ func (m *ModelDeploymentScalerStatus) MarshalToSizedBuffer(dAtA []byte) (int, er
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.LatencyQuantile)
+	copy(dAtA[i:], m.LatencyQuantile)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.LatencyQuantile)))
+	i--
+	dAtA[i] = 0x5a
+	if len(m.ResolvedCapacityPriors) > 0 {
+		for iNdEx := len(m.ResolvedCapacityPriors) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.ResolvedCapacityPriors[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x52
+		}
+	}
 	if len(m.Conditions) > 0 {
 		for iNdEx := len(m.Conditions) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -9121,6 +9483,18 @@ func (m *ModelDeploymentScalerTokenThroughputSpec) MarshalToSizedBuffer(dAtA []b
 	_ = i
 	var l int
 	_ = l
+	if m.LatencyQuantile != nil {
+		{
+			size, err := m.LatencyQuantile.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x4a
+	}
 	if m.ITLTargetMilliseconds != nil {
 		{
 			size, err := m.ITLTargetMilliseconds.MarshalToSizedBuffer(dAtA[:i])
@@ -13886,6 +14260,10 @@ func (m *ModelDeploymentScalerAlgorithmSpec) Size() (n int) {
 		l = m.Predictive.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	if m.CapacityPrior != nil {
+		l = m.CapacityPrior.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
 	return n
 }
 
@@ -13927,6 +14305,36 @@ func (m *ModelDeploymentScalerBindingStatus) Size() (n int) {
 	l = len(m.TargetName)
 	n += 1 + l + sovGenerated(uint64(l))
 	n += 1 + sovGenerated(uint64(m.Term))
+	return n
+}
+
+func (m *ModelDeploymentScalerCapacityPriorSpec) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.CatalogRef != nil {
+		l = m.CatalogRef.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	if m.Headroom != nil {
+		l = m.Headroom.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	return n
+}
+
+func (m *ModelDeploymentScalerCatalogReference) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Name)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Key)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -14198,6 +14606,90 @@ func (m *ModelDeploymentScalerRebalanceStatus) Size() (n int) {
 	return n
 }
 
+func (m *ModelDeploymentScalerResolvedCapacityFieldStatus) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Field)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Source)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = m.EffectiveTokensPerSecond.Size()
+	n += 1 + l + sovGenerated(uint64(l))
+	return n
+}
+
+func (m *ModelDeploymentScalerResolvedCapacityPriorStatus) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Name)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.SourceID)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.ProfileDigest)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.CompatibilityFingerprint)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Metric)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Quantile)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.WorkloadID)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Denominator)
+	n += 1 + l + sovGenerated(uint64(l))
+	if m.Headroom != nil {
+		l = m.Headroom.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	if m.SeedTokensPerSecond != nil {
+		l = m.SeedTokensPerSecond.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	if len(m.Fields) > 0 {
+		for _, e := range m.Fields {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	l = len(m.CatalogDigest)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.SourceRevision)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.WorkloadRevision)
+	n += 1 + l + sovGenerated(uint64(l))
+	n += 2 + sovGenerated(uint64(m.GPUsPerReplica))
+	n += 2 + sovGenerated(uint64(m.MeasuredReplicas))
+	if len(m.LatencyBounds) > 0 {
+		for _, e := range m.LatencyBounds {
+			l = e.Size()
+			n += 2 + l + sovGenerated(uint64(l))
+		}
+	}
+	l = len(m.RequestedQuantile)
+	n += 2 + l + sovGenerated(uint64(l))
+	return n
+}
+
+func (m *ModelDeploymentScalerResolvedLatencyBoundStatus) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Metric)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Quantile)
+	n += 1 + l + sovGenerated(uint64(l))
+	n += 2
+	return n
+}
+
 func (m *ModelDeploymentScalerRoleBounds) Size() (n int) {
 	if m == nil {
 		return 0
@@ -14464,6 +14956,14 @@ func (m *ModelDeploymentScalerStatus) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
+	if len(m.ResolvedCapacityPriors) > 0 {
+		for _, e := range m.ResolvedCapacityPriors {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	l = len(m.LatencyQuantile)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -14520,6 +15020,10 @@ func (m *ModelDeploymentScalerTokenThroughputSpec) Size() (n int) {
 	}
 	if m.ITLTargetMilliseconds != nil {
 		l = m.ITLTargetMilliseconds.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	if m.LatencyQuantile != nil {
+		l = m.LatencyQuantile.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
 	return n
@@ -17240,6 +17744,7 @@ func (this *ModelDeploymentScalerAlgorithmSpec) String() string {
 		`Proportional:` + strings.Replace(this.Proportional.String(), "ModelDeploymentScalerProportionalSpec", "ModelDeploymentScalerProportionalSpec", 1) + `,`,
 		`TokenThroughput:` + strings.Replace(this.TokenThroughput.String(), "ModelDeploymentScalerTokenThroughputSpec", "ModelDeploymentScalerTokenThroughputSpec", 1) + `,`,
 		`Predictive:` + strings.Replace(this.Predictive.String(), "ModelDeploymentScalerPredictiveSpec", "ModelDeploymentScalerPredictiveSpec", 1) + `,`,
+		`CapacityPrior:` + strings.Replace(this.CapacityPrior.String(), "ModelDeploymentScalerCapacityPriorSpec", "ModelDeploymentScalerCapacityPriorSpec", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -17275,6 +17780,28 @@ func (this *ModelDeploymentScalerBindingStatus) String() string {
 		`TargetUID:` + fmt.Sprintf("%v", this.TargetUID) + `,`,
 		`TargetName:` + fmt.Sprintf("%v", this.TargetName) + `,`,
 		`Term:` + fmt.Sprintf("%v", this.Term) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ModelDeploymentScalerCapacityPriorSpec) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelDeploymentScalerCapacityPriorSpec{`,
+		`CatalogRef:` + strings.Replace(this.CatalogRef.String(), "ModelDeploymentScalerCatalogReference", "ModelDeploymentScalerCatalogReference", 1) + `,`,
+		`Headroom:` + strings.Replace(fmt.Sprintf("%v", this.Headroom), "Quantity", "resource.Quantity", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ModelDeploymentScalerCatalogReference) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelDeploymentScalerCatalogReference{`,
+		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
+		`Key:` + fmt.Sprintf("%v", this.Key) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -17493,6 +18020,67 @@ func (this *ModelDeploymentScalerRebalanceStatus) String() string {
 	}, "")
 	return s
 }
+func (this *ModelDeploymentScalerResolvedCapacityFieldStatus) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelDeploymentScalerResolvedCapacityFieldStatus{`,
+		`Field:` + fmt.Sprintf("%v", this.Field) + `,`,
+		`Source:` + fmt.Sprintf("%v", this.Source) + `,`,
+		`EffectiveTokensPerSecond:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.EffectiveTokensPerSecond), "Quantity", "resource.Quantity", 1), `&`, ``, 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ModelDeploymentScalerResolvedCapacityPriorStatus) String() string {
+	if this == nil {
+		return "nil"
+	}
+	repeatedStringForFields := "[]ModelDeploymentScalerResolvedCapacityFieldStatus{"
+	for _, f := range this.Fields {
+		repeatedStringForFields += strings.Replace(strings.Replace(f.String(), "ModelDeploymentScalerResolvedCapacityFieldStatus", "ModelDeploymentScalerResolvedCapacityFieldStatus", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForFields += "}"
+	repeatedStringForLatencyBounds := "[]ModelDeploymentScalerResolvedLatencyBoundStatus{"
+	for _, f := range this.LatencyBounds {
+		repeatedStringForLatencyBounds += strings.Replace(strings.Replace(f.String(), "ModelDeploymentScalerResolvedLatencyBoundStatus", "ModelDeploymentScalerResolvedLatencyBoundStatus", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForLatencyBounds += "}"
+	s := strings.Join([]string{`&ModelDeploymentScalerResolvedCapacityPriorStatus{`,
+		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
+		`SourceID:` + fmt.Sprintf("%v", this.SourceID) + `,`,
+		`ProfileDigest:` + fmt.Sprintf("%v", this.ProfileDigest) + `,`,
+		`CompatibilityFingerprint:` + fmt.Sprintf("%v", this.CompatibilityFingerprint) + `,`,
+		`Metric:` + fmt.Sprintf("%v", this.Metric) + `,`,
+		`Quantile:` + fmt.Sprintf("%v", this.Quantile) + `,`,
+		`WorkloadID:` + fmt.Sprintf("%v", this.WorkloadID) + `,`,
+		`Denominator:` + fmt.Sprintf("%v", this.Denominator) + `,`,
+		`Headroom:` + strings.Replace(fmt.Sprintf("%v", this.Headroom), "Quantity", "resource.Quantity", 1) + `,`,
+		`SeedTokensPerSecond:` + strings.Replace(fmt.Sprintf("%v", this.SeedTokensPerSecond), "Quantity", "resource.Quantity", 1) + `,`,
+		`Fields:` + repeatedStringForFields + `,`,
+		`CatalogDigest:` + fmt.Sprintf("%v", this.CatalogDigest) + `,`,
+		`SourceRevision:` + fmt.Sprintf("%v", this.SourceRevision) + `,`,
+		`WorkloadRevision:` + fmt.Sprintf("%v", this.WorkloadRevision) + `,`,
+		`GPUsPerReplica:` + fmt.Sprintf("%v", this.GPUsPerReplica) + `,`,
+		`MeasuredReplicas:` + fmt.Sprintf("%v", this.MeasuredReplicas) + `,`,
+		`LatencyBounds:` + repeatedStringForLatencyBounds + `,`,
+		`RequestedQuantile:` + fmt.Sprintf("%v", this.RequestedQuantile) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ModelDeploymentScalerResolvedLatencyBoundStatus) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelDeploymentScalerResolvedLatencyBoundStatus{`,
+		`Metric:` + fmt.Sprintf("%v", this.Metric) + `,`,
+		`Quantile:` + fmt.Sprintf("%v", this.Quantile) + `,`,
+		`Conservative:` + fmt.Sprintf("%v", this.Conservative) + `,`,
+		`}`,
+	}, "")
+	return s
+}
 func (this *ModelDeploymentScalerRoleBounds) String() string {
 	if this == nil {
 		return "nil"
@@ -17680,6 +18268,11 @@ func (this *ModelDeploymentScalerStatus) String() string {
 		repeatedStringForConditions += fmt.Sprintf("%v", f) + ","
 	}
 	repeatedStringForConditions += "}"
+	repeatedStringForResolvedCapacityPriors := "[]ModelDeploymentScalerResolvedCapacityPriorStatus{"
+	for _, f := range this.ResolvedCapacityPriors {
+		repeatedStringForResolvedCapacityPriors += strings.Replace(strings.Replace(f.String(), "ModelDeploymentScalerResolvedCapacityPriorStatus", "ModelDeploymentScalerResolvedCapacityPriorStatus", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForResolvedCapacityPriors += "}"
 	s := strings.Join([]string{`&ModelDeploymentScalerStatus{`,
 		`ObservedGeneration:` + fmt.Sprintf("%v", this.ObservedGeneration) + `,`,
 		`Binding:` + strings.Replace(this.Binding.String(), "ModelDeploymentScalerBindingStatus", "ModelDeploymentScalerBindingStatus", 1) + `,`,
@@ -17690,6 +18283,8 @@ func (this *ModelDeploymentScalerStatus) String() string {
 		`LastScaleDown:` + strings.Replace(this.LastScaleDown.String(), "ModelDeploymentScalerScaleDownStatus", "ModelDeploymentScalerScaleDownStatus", 1) + `,`,
 		`Predictors:` + repeatedStringForPredictors + `,`,
 		`Conditions:` + repeatedStringForConditions + `,`,
+		`ResolvedCapacityPriors:` + repeatedStringForResolvedCapacityPriors + `,`,
+		`LatencyQuantile:` + fmt.Sprintf("%v", this.LatencyQuantile) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -17728,6 +18323,7 @@ func (this *ModelDeploymentScalerTokenThroughputSpec) String() string {
 		`PanicThreshold:` + strings.Replace(fmt.Sprintf("%v", this.PanicThreshold), "Quantity", "resource.Quantity", 1) + `,`,
 		`TTFTTargetMilliseconds:` + strings.Replace(fmt.Sprintf("%v", this.TTFTTargetMilliseconds), "Quantity", "resource.Quantity", 1) + `,`,
 		`ITLTargetMilliseconds:` + strings.Replace(fmt.Sprintf("%v", this.ITLTargetMilliseconds), "Quantity", "resource.Quantity", 1) + `,`,
+		`LatencyQuantile:` + strings.Replace(fmt.Sprintf("%v", this.LatencyQuantile), "Quantity", "resource.Quantity", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -41050,6 +41646,42 @@ func (m *ModelDeploymentScalerAlgorithmSpec) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CapacityPrior", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.CapacityPrior == nil {
+				m.CapacityPrior = &ModelDeploymentScalerCapacityPriorSpec{}
+			}
+			if err := m.CapacityPrior.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -41432,6 +42064,242 @@ func (m *ModelDeploymentScalerBindingStatus) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ModelDeploymentScalerCapacityPriorSpec) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentScalerCapacityPriorSpec: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentScalerCapacityPriorSpec: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CatalogRef", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.CatalogRef == nil {
+				m.CatalogRef = &ModelDeploymentScalerCatalogReference{}
+			}
+			if err := m.CatalogRef.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Headroom", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Headroom == nil {
+				m.Headroom = &resource.Quantity{}
+			}
+			if err := m.Headroom.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ModelDeploymentScalerCatalogReference) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentScalerCatalogReference: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentScalerCatalogReference: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Name = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Key", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Key = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -43944,6 +44812,899 @@ func (m *ModelDeploymentScalerRebalanceStatus) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
+func (m *ModelDeploymentScalerResolvedCapacityFieldStatus) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentScalerResolvedCapacityFieldStatus: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentScalerResolvedCapacityFieldStatus: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Field", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Field = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Source", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Source = ModelDeploymentScalerCapacityFieldSource(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EffectiveTokensPerSecond", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.EffectiveTokensPerSecond.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ModelDeploymentScalerResolvedCapacityPriorStatus) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentScalerResolvedCapacityPriorStatus: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentScalerResolvedCapacityPriorStatus: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Name = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SourceID", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SourceID = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ProfileDigest", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ProfileDigest = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CompatibilityFingerprint", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.CompatibilityFingerprint = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Metric", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Metric = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Quantile", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Quantile = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field WorkloadID", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.WorkloadID = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Denominator", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Denominator = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Headroom", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Headroom == nil {
+				m.Headroom = &resource.Quantity{}
+			}
+			if err := m.Headroom.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 11:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SeedTokensPerSecond", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.SeedTokensPerSecond == nil {
+				m.SeedTokensPerSecond = &resource.Quantity{}
+			}
+			if err := m.SeedTokensPerSecond.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 12:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Fields", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Fields = append(m.Fields, ModelDeploymentScalerResolvedCapacityFieldStatus{})
+			if err := m.Fields[len(m.Fields)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 13:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CatalogDigest", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.CatalogDigest = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 14:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SourceRevision", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SourceRevision = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 15:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field WorkloadRevision", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.WorkloadRevision = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 16:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field GPUsPerReplica", wireType)
+			}
+			m.GPUsPerReplica = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.GPUsPerReplica |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 17:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MeasuredReplicas", wireType)
+			}
+			m.MeasuredReplicas = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MeasuredReplicas |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 18:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LatencyBounds", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.LatencyBounds = append(m.LatencyBounds, ModelDeploymentScalerResolvedLatencyBoundStatus{})
+			if err := m.LatencyBounds[len(m.LatencyBounds)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 19:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestedQuantile", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.RequestedQuantile = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ModelDeploymentScalerResolvedLatencyBoundStatus) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentScalerResolvedLatencyBoundStatus: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentScalerResolvedLatencyBoundStatus: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Metric", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Metric = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Quantile", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Quantile = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Conservative", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Conservative = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func (m *ModelDeploymentScalerRoleBounds) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -46370,6 +48131,72 @@ func (m *ModelDeploymentScalerStatus) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ResolvedCapacityPriors", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ResolvedCapacityPriors = append(m.ResolvedCapacityPriors, ModelDeploymentScalerResolvedCapacityPriorStatus{})
+			if err := m.ResolvedCapacityPriors[len(m.ResolvedCapacityPriors)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 11:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LatencyQuantile", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.LatencyQuantile = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -46854,6 +48681,42 @@ func (m *ModelDeploymentScalerTokenThroughputSpec) Unmarshal(dAtA []byte) error 
 				m.ITLTargetMilliseconds = &resource.Quantity{}
 			}
 			if err := m.ITLTargetMilliseconds.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LatencyQuantile", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.LatencyQuantile == nil {
+				m.LatencyQuantile = &resource.Quantity{}
+			}
+			if err := m.LatencyQuantile.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

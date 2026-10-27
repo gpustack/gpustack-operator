@@ -1568,6 +1568,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerBehaviorSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerBindingStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerBindingStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerCapacityPriorSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerCapacityPriorSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerCatalogReference"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerCatalogReferenceApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerCommitStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerCommitStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerDemandSample"):
@@ -1586,6 +1590,12 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerRebalanceSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerRebalanceStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerRebalanceStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerResolvedCapacityFieldStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerResolvedCapacityFieldStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerResolvedCapacityPriorStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerResolvedCapacityPriorStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerResolvedLatencyBoundStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerResolvedLatencyBoundStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerRoleBounds"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentScalerRoleBoundsApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentScalerRoleRatio"):

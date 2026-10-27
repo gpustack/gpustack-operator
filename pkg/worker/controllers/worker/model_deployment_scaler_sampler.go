@@ -13,6 +13,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/utils/datax"
 	"gpustack.ai/gpustack/pkg/worker/scaling/algorithm"
+	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
 
 // modelDeploymentScalerMaxStabilizationSamples is how many stabilization samples the window of
@@ -100,6 +101,12 @@ type modelDeploymentScalerRing struct {
 	roles map[string]modelDeploymentScalerRoleSample
 	// windows holds the sliding window of every role, keyed by the role's name.
 	windows map[string]*modelDeploymentScalerRoleWindow
+	// quantile is the latency quantile the remembered observations were taken at.
+	//
+	// IT IS THE QUANTILE THE OBSERVATIONS CARRY, and an observation taken at
+	// another quantile describes another distribution, so the remembered
+	// observations are dropped when the quantile changes.
+	quantile float64
 	// targetKey is the key the target of the scaler is remembered under.
 	//
 	// IT IS THE KEY OF THE TARGET AND NOT OF THE SCALER, because the passes are counted per
@@ -178,12 +185,16 @@ func (s *modelDeploymentScalerSampler) SampleRoleMetrics(
 		targetKey = scalerKey
 	}
 
+	// THE QUANTILE THE SCALER IS HELD TO COMES FROM ITS SPECIFICATION, and a
+	// specification that names none means the ninety fifth percentile.
+	quantile, quantileErr := ModelDeploymentScalerLatencyQuantile(&scaler.Spec.Algorithm)
+
 	if !s.beginPass(targetKey, now, s.samplingInterval(scaler)) {
-		return s.cachedObservations(scalerKey, now, s.freshnessBound(scaler))
+		return s.cachedObservations(scalerKey, now, s.freshnessBound(scaler), quantile)
 	}
 	defer s.endPass(targetKey)
 
-	return s.observe(ctx, scalerKey, targetKey, scaler, md, pods, now)
+	return s.observe(ctx, scalerKey, targetKey, scaler, md, pods, now, quantile, quantileErr)
 }
 
 // Forget drops everything the sampler remembers about a scaler.
@@ -227,6 +238,8 @@ func (s *modelDeploymentScalerSampler) observe(
 	md *workercore.ModelDeployment,
 	pods []core.Pod,
 	now time.Time,
+	quantile float64,
+	quantileErr error,
 ) map[string]algorithm.RoleObservation {
 	engine := modelDeploymentScalerEngine(md)
 	ready := s.readyEnginePods(md, pods)
@@ -240,7 +253,7 @@ func (s *modelDeploymentScalerSampler) observe(
 		role := &md.Spec.Roles[i]
 		roleCtx, cancel := context.WithTimeout(ctx, samplerPassTimeout)
 		observation, read, sample := s.observeRole(
-			roleCtx, role, engine, ready[role.Name], previous, now, freshness,
+			roleCtx, role, engine, ready[role.Name], previous, now, freshness, quantile, quantileErr,
 		)
 		cancel()
 		observations[role.Name] = observation
@@ -249,7 +262,7 @@ func (s *modelDeploymentScalerSampler) observe(
 			samples[uid] = podSample
 		}
 	}
-	s.commit(scalerKey, targetKey, samples, roles)
+	s.commit(scalerKey, targetKey, samples, roles, quantile)
 	return observations
 }
 
@@ -262,6 +275,8 @@ func (s *modelDeploymentScalerSampler) observeRole(
 	previous map[string]modelDeploymentScalerPodSample,
 	now time.Time,
 	freshness time.Duration,
+	quantile float64,
+	quantileErr error,
 ) (algorithm.RoleObservation, map[string]modelDeploymentScalerPodSample, modelDeploymentScalerRoleSample) {
 	observation := algorithm.RoleObservation{
 		Role:            role.Name,
@@ -272,6 +287,11 @@ func (s *modelDeploymentScalerSampler) observeRole(
 		GaugeState:      algorithm.SignalMissing,
 		ThroughputState: algorithm.SignalMissing,
 		LatencyState:    algorithm.SignalMissing,
+		// THE LATENCIES START OUT UNMEASURED, because a role that served nothing
+		// measured no latency and a reader that cannot tell the two apart reads a
+		// latency of no time.
+		TTFTUnmeasured: true,
+		ITLUnmeasured:  true,
 	}
 	sample := modelDeploymentScalerRoleSample{ReadyPods: len(ready)}
 	var reasons []string
@@ -427,19 +447,46 @@ func (s *modelDeploymentScalerSampler) observeRole(
 	} else {
 		observation.GaugeState = gaugeState
 		observation.ThroughputState = throughputState
-		observation.LatencyState = latencyState
 		// BOTH LATENCIES ARE READ ON THE LATENCY SIGNAL ALONE, because a first-token latency
 		// and an inter-token latency are latency readings: an engine that reports its
 		// histograms but not its token counters has said what it knows about its latency, and
 		// withholding it would answer a question the engine did answer.
 		if latencyState == algorithm.SignalFresh {
-			if value, ok := modelDeploymentScalerQuantileMilliseconds(ttft, modelDeploymentScalerLatencyQuantile); ok {
-				observation.TTFTMilliseconds = value
-			}
-			if value, ok := modelDeploymentScalerQuantileMilliseconds(itl, modelDeploymentScalerLatencyQuantile); ok {
-				observation.ITLMilliseconds = value
+			ttftValue, ttftReadable := modelDeploymentScalerQuantileMilliseconds(ttft, quantile)
+			itlValue, itlReadable := modelDeploymentScalerQuantileMilliseconds(itl, quantile)
+			switch {
+			case quantileErr != nil:
+				// A QUANTILE THAT NAMES NO PERCENTILE CANNOT BE READ, and a
+				// reading of zero would be a latency nobody measured.
+				latencyState = algorithm.SignalMissing
+				reasons = append(reasons, quantileErr.Error())
+			default:
+				// A ROLE IS HELD BY THE LATENCY IT NEEDS, and a latency it is not
+				// held by cannot take the reading away from the one it is. A
+				// prefill role is held by its first token latency and a decode
+				// role by its inter token latency.
+				ttftReading, itlReading, held := modelDeploymentScalerLatencyReadings(
+					observation.Kind, ttftValue, ttftReadable, itlValue, itlReadable,
+				)
+				observation.TTFTMilliseconds = ttftReading
+				observation.ITLMilliseconds = itlReading
+				observation.TTFTUnmeasured = !ttftReadable
+				observation.ITLUnmeasured = !itlReadable
+				if !held {
+					// THE HISTOGRAM CANNOT REPRESENT THE QUANTILE THE ROLE IS
+					// HELD BY, so there is no latency reading for it. The signal
+					// stays missing, because a fresh zero would be a reading of
+					// a latency nobody measured.
+					latencyState = algorithm.SignalMissing
+					reasons = append(reasons, fmt.Sprintf(
+						"the %s cannot represent the %s quantile",
+						modelDeploymentScalerLatencyMetricName(observation.Kind),
+						priors.FormatLatencyQuantile(quantile),
+					))
+				}
 			}
 		}
+		observation.LatencyState = latencyState
 	}
 
 	// AN IDLE ROLE IS FULLY COVERED. It was read and it was quiet, and a coverage rule that
@@ -453,6 +500,49 @@ func (s *modelDeploymentScalerSampler) observeRole(
 	sample.WindowSeconds = shortestWindow(windows)
 	sample.ContainerRestarts = highestRestarts(reads)
 	return observation, samples, sample
+}
+
+// modelDeploymentScalerLatencyReadings returns the latency readings of a role and says
+// whether the role holds the latency it is held to.
+//
+// IT READS THE ROLE BY ITS KIND, because a prefill role is held by its first token latency
+// and a decode role by its inter token latency. A latency the role is not held by cannot take
+// the reading away from the one it is.
+//
+// IT LEAVES A LATENCY NOBODY MEASURED AT ZERO, because a zero is not a latency. The
+// algorithms read a latency that is not positive as one that was not measured.
+func modelDeploymentScalerLatencyReadings(
+	kind algorithm.RoleKind,
+	ttftValue float64, ttftReadable bool,
+	itlValue float64, itlReadable bool,
+) (float64, float64, bool) {
+	ttft, itl := 0.0, 0.0
+	if ttftReadable {
+		ttft = ttftValue
+	}
+	if itlReadable {
+		itl = itlValue
+	}
+	switch kind {
+	case algorithm.RoleKindPrefill:
+		return ttft, itl, ttftReadable
+	case algorithm.RoleKindDecode:
+		return ttft, itl, itlReadable
+	default:
+		return ttft, itl, ttftReadable || itlReadable
+	}
+}
+
+// modelDeploymentScalerLatencyMetricName returns the name of the latency a role is held by.
+func modelDeploymentScalerLatencyMetricName(kind algorithm.RoleKind) string {
+	switch kind {
+	case algorithm.RoleKindPrefill:
+		return "time to first token histogram"
+	case algorithm.RoleKindDecode:
+		return "inter token latency histogram"
+	default:
+		return "latency histograms"
+	}
 }
 
 // shortestWindow returns the shortest window a role's rates were read over.
@@ -636,6 +726,7 @@ func (s *modelDeploymentScalerSampler) commit(
 	targetKey string,
 	samples map[string]modelDeploymentScalerPodSample,
 	roles map[string]modelDeploymentScalerRoleSample,
+	quantile float64,
 ) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -650,6 +741,7 @@ func (s *modelDeploymentScalerSampler) commit(
 	ring.targetKey = targetKey
 	ring.pods = samples
 	ring.roles = roles
+	ring.quantile = quantile
 }
 
 // StabilizationHistory returns the stabilization history the sampler holds for one role.
@@ -793,13 +885,21 @@ func (s *modelDeploymentScalerSampler) RoleSamples(
 //
 // IT IS WHAT A REFUSED PASS RETURNS, because a reading that is too old is not a reading of
 // now, and a caller that cannot tell an old reading from a current one would act on it.
+//
+// IT REFUSES THE OBSERVATIONS TAKEN AT ANOTHER QUANTILE, because an observation
+// taken at the ninety ninth percentile does not describe the distribution the ninety fifth
+// percentile names. The scaler waits for the next pass instead of acting on a reading of
+// another distribution.
 func (s *modelDeploymentScalerSampler) cachedObservations(
-	scalerKey string, now time.Time, freshness time.Duration,
+	scalerKey string, now time.Time, freshness time.Duration, quantile float64,
 ) map[string]algorithm.RoleObservation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ring := s.rings[scalerKey]
 	if ring == nil {
+		return nil
+	}
+	if ring.quantile != quantile {
 		return nil
 	}
 	cached := make(map[string]algorithm.RoleObservation, len(ring.roles))

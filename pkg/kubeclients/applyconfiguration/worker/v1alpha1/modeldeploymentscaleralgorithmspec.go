@@ -29,6 +29,15 @@ type ModelDeploymentScalerAlgorithmSpecApplyConfiguration struct {
 	// It is required when Type is Predictive and ignored otherwise.
 	//
 	Predictive *ModelDeploymentScalerPredictiveSpecApplyConfiguration `json:"predictive,omitempty"`
+	// CapacityPrior permits resolving missing token capacities from a measured catalog for
+	// TokenThroughput and Predictive.
+	//
+	// An absent object means every capacity is stated by hand, and the scaler uses only those
+	// values. A present object permits resolving the capacities the scaler does not state, and
+	// only from the offline catalog it names. A capacity the scaler states is never replaced by a
+	// catalog value. When every serving capacity is stated, no catalog is read at all.
+	//
+	CapacityPrior *ModelDeploymentScalerCapacityPriorSpecApplyConfiguration `json:"capacityPrior,omitempty"`
 }
 
 // ModelDeploymentScalerAlgorithmSpecApplyConfiguration constructs a declarative configuration of the ModelDeploymentScalerAlgorithmSpec type for use with
@@ -66,5 +75,13 @@ func (b *ModelDeploymentScalerAlgorithmSpecApplyConfiguration) WithTokenThroughp
 // If called multiple times, the Predictive field is set to the value of the last call.
 func (b *ModelDeploymentScalerAlgorithmSpecApplyConfiguration) WithPredictive(value *ModelDeploymentScalerPredictiveSpecApplyConfiguration) *ModelDeploymentScalerAlgorithmSpecApplyConfiguration {
 	b.Predictive = value
+	return b
+}
+
+// WithCapacityPrior sets the CapacityPrior field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the CapacityPrior field is set to the value of the last call.
+func (b *ModelDeploymentScalerAlgorithmSpecApplyConfiguration) WithCapacityPrior(value *ModelDeploymentScalerCapacityPriorSpecApplyConfiguration) *ModelDeploymentScalerAlgorithmSpecApplyConfiguration {
+	b.CapacityPrior = value
 	return b
 }

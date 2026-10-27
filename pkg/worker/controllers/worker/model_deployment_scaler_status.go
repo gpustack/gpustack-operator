@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"math"
-	"reflect"
 	"sort"
 	"time"
 
@@ -12,7 +11,9 @@ import (
 
 	gpustack "gpustack.ai/gpustack/api/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/worker/scaling/algorithm"
+	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
 
 const modelDeploymentScalerPredictorCheckpointStep = int32(16)
@@ -36,19 +37,27 @@ func modelDeploymentScalerStatusChanged(before, after *workercore.ModelDeploymen
 	if before.ObservedGeneration != after.ObservedGeneration {
 		return true
 	}
-	if !reflect.DeepEqual(before.Binding, after.Binding) {
+	// THE QUANTILE IS COMPARED, because it changes when the configuration
+	// changes and the status has to say which quantile the scaler is held to.
+	if before.LatencyQuantile != after.LatencyQuantile {
 		return true
 	}
-	if !reflect.DeepEqual(before.LastCommit, after.LastCommit) {
+	if !kubemeta.DeepEqual(before.ResolvedCapacityPriors, after.ResolvedCapacityPriors) {
 		return true
 	}
-	if !reflect.DeepEqual(before.PendingCohort, after.PendingCohort) {
+	if !kubemeta.DeepEqual(before.Binding, after.Binding) {
 		return true
 	}
-	if !reflect.DeepEqual(before.Rebalance, after.Rebalance) {
+	if !kubemeta.DeepEqual(before.LastCommit, after.LastCommit) {
 		return true
 	}
-	if !reflect.DeepEqual(before.LastScaleDown, after.LastScaleDown) {
+	if !kubemeta.DeepEqual(before.PendingCohort, after.PendingCohort) {
+		return true
+	}
+	if !kubemeta.DeepEqual(before.Rebalance, after.Rebalance) {
+		return true
+	}
+	if !kubemeta.DeepEqual(before.LastScaleDown, after.LastScaleDown) {
 		return true
 	}
 	if !equalScalerConditions(before.Conditions, after.Conditions) {
@@ -152,6 +161,7 @@ func modelDeploymentScalerConditionReason(scaler *workercore.ModelDeploymentScal
 }
 
 func (r *ModelDeploymentScalerReconciler) resetTargetState(scaler *workercore.ModelDeploymentScaler) {
+	scaler.Status.ResolvedCapacityPriors = nil
 	scaler.Status.Roles = nil
 	scaler.Status.LastCommit = nil
 	scaler.Status.PendingCohort = nil
@@ -189,9 +199,23 @@ func (r *ModelDeploymentScalerReconciler) setCondition(
 // IT WRITES NOTHING WHEN THE SCALER IS STEADY, because the sliding windows and the raw
 // metrics of a scaler change on every sampling tick and writing them would put every
 // scaler of the cluster on the write path of the apiserver once per interval.
+//
+// IT SAYS WHICH QUANTILE THE SCALER IS HELD TO, and it says the one the specification names,
+// because a status that keeps the quantile of another configuration describes a quantile the
+// scaler is no longer held to. The quantile is read here, where every status is written, so
+// that a scaler whose planning did not run still says which quantile its specification names.
+//
+// IT LEAVES THE GENERATION UNOBSERVED WHEN THE QUANTILE CANNOT BE READ, because a scaler that
+// cannot say which quantile it is held to has not observed the specification it was given.
 func (r *ModelDeploymentScalerReconciler) updateStatus(
 	ctx context.Context, before, scaler *workercore.ModelDeploymentScaler,
 ) error {
+	quantile, err := ModelDeploymentScalerLatencyQuantile(&scaler.Spec.Algorithm)
+	if err != nil {
+		scaler.Status.ObservedGeneration = before.Status.ObservedGeneration
+	} else {
+		scaler.Status.LatencyQuantile = priors.FormatLatencyQuantile(quantile)
+	}
 	if !modelDeploymentScalerStatusChanged(&before.Status, &scaler.Status) {
 		return nil
 	}
@@ -211,6 +235,18 @@ func quantityPointerFloat(value float64) *resource.Quantity {
 	}
 	quantity := *resource.NewMilliQuantity(int64(math.Round(value*1000)), resource.DecimalSI)
 	return &quantity
+}
+
+// modelDeploymentScalerLatencyQuantity returns the latency a role was observed at, and nothing
+// when the latency was not measured.
+//
+// IT LEAVES THE VALUE OUT, because a latency nobody measured is not a latency of no time and
+// a status that carries one says the engine answered in no time.
+func modelDeploymentScalerLatencyQuantity(milliseconds float64, unmeasured bool) *resource.Quantity {
+	if unmeasured {
+		return nil
+	}
+	return quantityPointerFloat(milliseconds)
 }
 
 func scalerObservationState(observation algorithm.RoleObservation) string {
