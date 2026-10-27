@@ -81,6 +81,7 @@ order:
     - external-dp
     - external-dp-benchmark
     - scaling
+    - scaling-simulation
     - scaling-benchmark
     - routing
     - metrics
@@ -110,6 +111,7 @@ children:
   /docs/modules/model-delivery/artifact/:
     - views
   /docs/modules/model-deployment/scaling/:
+    - scaling-simulation
     - scaling-benchmark
   /docs/modules/model-deployment/prefill-decode/:
     - prefill-decode-benchmark
@@ -162,6 +164,7 @@ labels:
   /docs/modules/model-delivery/operations/: Operations
   /docs/modules/model-deployment/deployment/: Configuration
   /docs/modules/model-deployment/scaling/: Scaling
+  /docs/modules/model-deployment/scaling-simulation/: Simulation
   /docs/modules/model-deployment/scaling-benchmark/: Benchmark
   /docs/modules/model-deployment/prefill-decode/: Prefill and Decode
   /docs/modules/model-deployment/prefill-decode-benchmark/: Benchmark

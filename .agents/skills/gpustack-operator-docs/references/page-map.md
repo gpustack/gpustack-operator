@@ -270,6 +270,15 @@ phase latency and throughput, request errors, scale-out timing and captured reti
 **Never** — algorithm field contracts (`scaling.md`) or an unmeasured zero-interruption guarantee.
 Keep failed configurations and incomplete lifecycle observations explicit.
 
+## `docs/modules/model-deployment/scaling-simulation.md`
+
+**Owns** — the deterministic local three-algorithm scaler comparison: the fixture and its seeds,
+the measured request outcomes, the adjustment-dynamics timelines, and the reading rules that
+separate true timestamp-derived latencies from per-step approximations.
+
+**Never** — the scaler field contracts (`scaling.md`), the measured H100 numbers and lifecycle
+limits (`scaling-benchmark.md`), or any hardware or tuning claim. Link each.
+
 ## `docs/modules/model-deployment/prefill-decode.md`
 
 **Owns** — what pairs a prefill role with a decode role: the connector each engine and router

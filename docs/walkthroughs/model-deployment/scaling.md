@@ -259,6 +259,74 @@ Inspect *`status.predictors`* and the role reasons to distinguish fallback from 
 Earlier growth alone does not prove a forecast caused it; token throughput also grew during baseline
 in the [recorded comparison](../../modules/model-deployment/scaling-benchmark.md#scale-out-timing).
 
+### Catalog priors
+
+*`spec.algorithm.capacityPrior`* resolves omitted `TokenThroughput` or `Predictive` capacities from
+a `gpustack.ai/v1` catalog. The embedded catalog carries the verified public sweeps imported from
+InferenceX; the `gpustack-operator-priors` skill's provenance records list every dataset.
+
+For other evidence, supply a reviewed same-namespace `ConfigMap` through *`catalogRef`* (key
+`priors.yaml` by default; the parser accepts YAML and JSON) with a qualified profile that
+matches the deployment.
+
+The *`PD`* target in Step 1 sets *`spec.router`*, so it requires manual capacities.
+To use `Catalog`, create a separate single-`Pod` *Server* target that satisfies
+[Target eligibility](../../modules/model-deployment/scaling.md#target-eligibility). A deployment
+whose identity matches an embedded profile resolves against the catalog with no extra setup.
+
+The model and hardware identity are inferred from the target — natural names in the optional
+identity annotations also work, and bare `mi325x` or `AMD Instinct MI325X` normalize to the
+canonical family `amd-mi325x` via the
+[Instance Type Unit Resources](../../reference/instance-type-unit-resources.md) family rules.
+
+The engine image matches by family, so no hand-computed digests or `@sha256` pinning are required.
+
+Omit *`spec.router`*, *`spec.kvCache`*, *`spec.kvTransfer`* and *`Encode`*. The fragment and
+command below are configuration examples, not captured output from a live cluster run:
+
+```yaml
+spec:
+  roles:
+    - name: server
+      minReplicas: 1
+      maxReplicas: 2
+  algorithm:
+    type: Predictive
+    predictive:
+      horizonSeconds: 30
+      minPoints: 2
+      tokenThroughput:
+        serverTargetTokensPerSecond: "1200"  # explicit fallback override
+        ttftTargetMilliseconds: "500"        # required when Server uses Catalog
+        itlTargetMilliseconds: "50"          # required when Server uses Catalog
+    capacityPrior:
+      catalogRef:
+        name: autoscaling-priors
+        key: priors.yaml
+      headroom: "0.75"
+```
+
+In this *Server* partial override, *`serverTargetTokensPerSecond`* stays `Explicit` at `"1200"`
+while the omitted *`serverTokenCapacityPerReplica`* forecast capacity resolves from `Catalog` by
+the role's identity and multiplies its profile seed capacity by *`headroom`*. Both `"1200"` and
+`"0.75"` are illustrative configuration values rather than measured hardware capacities; removing
+*`capacityPrior`* restores manual capacity validation.
+
+When the target matches an embedded profile, drop the explicit fallback and the `ConfigMap`: the
+embedded catalog supplies the capacity and the identity resolves from the target.
+
+```bash
+kubectl -n gpustack-bench get mds autoscale-vllm-server -o json \
+  | jq '{priors: .status.resolvedCapacityPriors,
+         conditions: [.status.conditions[] | select(.type == "CapacityPriorsReady" or .type == "Blocked")]}'
+```
+
+When the target exists, `CREATE` rejects an unresolved catalog prior. `UPDATE` admission returns a
+warning without writing `status` so you can suspend the scaler, switch to `Shadow`, remove
+*`capacityPrior`* or supply explicit capacities; the controller then sets
+`CapacityPriorsReady=False`, `Active=False` and `Blocked=True` on reconciliation (eventual
+consistency) and stops new replica commits.
+
 ### Encode ratios
 
 For a separate multimodal target, follow the
@@ -384,6 +452,105 @@ For a new run, retain client outcomes, new-replica counters, Ready counts and re
 Require successful requests during the tested transition before claiming uninterrupted serving.
 Missing state samples do not establish a complete `Draining`-to-deletion trace.
 
+### Resolving a catalog prior
+
+`Catalog.Resolve` turns one measured sweep into a capacity seed by walking the trade-off every
+benchmark sweep records: as concurrency rises, per-replica throughput — proportional to power
+efficiency (`tokens/s/MW` at a fixed node power) — climbs toward saturation, while per-user
+interactivity (`tokens/s/user` ≈ `1000 / ITL` milliseconds) falls.
+
+This example resolves the shipped public profile `(Server, deepseek-ai/DeepSeek-R1-0528, fp8,
+sglang, amd-mi325x, gpusPerReplica: 8, tensorParallel: 8)` from
+`pkg/worker/scaling/priors/priors.yaml`. Its five measured points follow; power efficiency is
+illustrative at a ~0.0115 MW eight-accelerator node, and interactivity is `1000 / ITL P90`:
+
+| Concurrency | Per-replica `tokens/s` | `tokens/s/MW` | TTFT P90 (ms) | ITL P90 (ms) | `tokens/s/user` |
+|---|---:|---:|---:|---:|---:|
+| 4 | 1875.02 | ~163k | 665.4 | 16.95 | 59.0 |
+| 8 | 3167.82 | ~275k | 1001.7 | 18.47 | 54.1 |
+| 16 | 4988.96 | ~434k | 1119.7 | 20.82 | 48.0 |
+| 32 | 6496.65 | ~565k | 1516.6 | 28.32 | 35.3 |
+| 64 | 7630.2 | ~663k | 2636.2 | 44.44 | 22.5 |
+
+A `Server` role held to P90 *TTFT* of `2000` ms and P90 *ITL* of `33` ms — a floor of about
+`30.3 tokens/s/user` — configures as:
+
+```yaml
+algorithm:
+  type: TokenThroughput
+  tokenThroughput:
+    latencyQuantile: "0.90"        # resolve the prior at P90, not the P95 default
+    ttftTargetMilliseconds: "2000"
+    itlTargetMilliseconds: "33"    # a 30.3 tokens/s/user floor
+    # serverTargetTokensPerSecond omitted: it resolves from the catalog
+capacityPrior:
+  headroom: "0.75"                 # catalogRef omitted: the embedded catalog
+```
+
+The resolver then:
+
+1. Matches the profile by the target's normalized `(role, model, quantization, engine, hardware,
+   topology)` tuple — no profile identifier is configured.
+2. Filters the points against the P90 targets: concurrency `4`, `8`, `16` and `32` meet both;
+   concurrency `64` breaches them (TTFT P90 `2636.2` ms, ITL P90 `44.44` ms ≈ `22.5 tokens/s/user`),
+   establishing `HigherLoadSLOFailure`. Looser targets that let every point pass would instead cap
+   at the measured concurrency `64` — never extrapolated (`ExplicitSaturation`).
+3. Selects the feasible point with the highest per-replica `tokens/s` — the `tokens/s/MW` maximum
+   under the targets — so `concurrency: 32` seeds the capacity: `6496.65` tokens/s, about
+   `565k tokens/s/MW` at `35.3 tokens/s/user`.
+4. Applies the headroom: `6496.65 * 0.75 = 4872.49` effective tokens/s per replica. A live demand
+   of `15,000` tokens/s therefore plans `ceil(15000 / 4872.49) = 4` replicas — about `3,750`
+   tokens/s per replica — keeping every replica inside its interactivity target.
+
+Bounds, pacing and the other guards still apply to that recommendation;
+[Capacity comparison](#capacity-comparison) then measures the dynamics these seeds produce.
+
+### Capacity comparison
+
+The initial comparison helper accepts a single-*Server* `ModelDeployment` (`len(roles) == 1` and
+`kind: Server`) with no *`spec.router`*, *`spec.kvCache`* or *`spec.kvTransfer`*, and a target-owned
+`Service` (`<target>-<role>`) publishing one HTTP port.
+
+Its engine-family image, identity (annotations or inferred) and effective launch flags must match
+the offline qualified catalog (`outcome: Accepted` and `evaluationTraceID` disjoint from
+`fitRunIDs`). It does not run *Prefill*/*Decode* comparison or require eight GPUs.
+
+The helper compares `frozen-manual`, `tuned-manual` and `catalog` across at least three serial repeats (`alternating` or `seeded`)
+that share `Active` mode, `TokenThroughput` or `Predictive`, latency targets, bounds, pacing, image, phases, seed and start condition
+outside capacity fields.
+
+For `Predictive`, the manual arms set both forecast and fallback capacities;
+the full-Catalog arm omits both. The API still supports partial overrides outside this comparison.
+Every scaler sets a positive downward *`stabilizationWindowSeconds`*, and the quiet `cooldown` phase
+(`concurrency: 0`) spans at least `stabilizationWindowSeconds` plus startup and retirement allowances.
+
+Copy `.agents/skills/gpustack-operator-benchmark/manifests/autoscaling-comparison.json`
+(`REPLACE_WITH_*` values are template placeholders, not a runnable profile) and supply your context,
+`clusterQueues`, disjoint `fitRunIDs` and `evaluationTraceID`, prepared driver `Pod`, JSON
+deployment/scaler manifests and offline qualified catalog `ConfigMap`. Priors are acquired offline
+only, never from live evaluation traffic.
+
+```bash
+bash .agents/skills/gpustack-operator-benchmark/cases/case-5-autoscaling.sh \
+  --capacity-comparison --config FILE --out DIR --validate-only
+python3 .agents/skills/gpustack-operator-benchmark/scripts/autoscaling_report.py \
+  ARM_DIR --out REPORT_JSON
+```
+
+`--validate-only` makes zero cluster API or driver calls, writes `validated-plan.json` and `catalog-input.json` under `--out`, and
+exits `0` when valid or `2` on validation or input error. On a live hardware gate, `--execute` writes per-round `<NN>-<arm>/`
+artifacts (`inputs/*.json`, `run.json`, `timeline.jsonl`, `prepare_reqs.jsonl`, `<phase>_reqs.jsonl`, `<phase>.json`, `cleanup.json`,
+`report.json`) and root `comparison.json` (`readyReplicaSeconds` and `latenciesByRun`).
+
+`--execute` exits `0` when all rounds, parser checks and UID-preconditioned raw `DELETE` cleanups
+succeed across at least three valid repeats per arm, `1` on round or cleanup failure (`130` on
+interrupt), and `2` on validation error.
+
+`autoscaling_report.py` writes schema `1` diagnostics (`null` metrics with reasons and no win
+verdict when evidence is missing) and exits `0` when valid, `1` when invalid, and `2` when
+`ARM_DIR` is missing or the output cannot be written. Legacy invocations (`case-5-autoscaling.sh [OUT_DIR] ...` or
+`--legacy-topology`) remain aliases for the five-configuration topology benchmark.
+
 ## Cleanup
 
 Delete the scaler first so its finalizer can release the binding. Deleting a scaler leaves its
@@ -408,6 +575,7 @@ Keep shared prefetched artifacts and `default/bench-driver` when other procedure
 | Binding annotation is unreadable | Reason: `InvalidBinding` | Fix or remove the annotation on the target; the scaler cannot tell which scaler owns the target. |
 | Counts sit outside the policy | Reason: `BoundsConflict` or `RatioConflict` | Compare the current counts with the policy; include the current vector in every bound and ratio band. |
 | Recommendations wait on metrics | Reason: `WaitingForMetrics` on the `MetricsReady` condition | Allow valid successive samples from role signals and engine metrics; investigate missing or restarted endpoints. |
+| Catalog prior fails to resolve | Condition: `CapacityPriorsReady=False` (`CapacityPriorUnresolved`, `InsufficientLoadCoverage` or `IncompatibleMetric`) | Check `catalogRef`, the target identity (annotations or inferred), engine-family image, single-`Pod` topology and explicit latency targets, or remove *`capacityPrior`* / supply explicit capacities. |
 | Growth stops at admission | Reason: `ResourceExhausted` | Read *`pendingCohort`*, `Workload`s and quota; restore admission capacity before retrying growth. |
 | Scale-down ends aborted | Reason: `ScaleDownAborted` | Read the retirement reason and *`lastScaleDown`*; resolve the drain failure and wait through the abort cooldown. |
 | Cooldown outlives its window | Reason: `PacingBounded` | Check stabilization, grace and coverage; continue observation, since a configured cooldown phase does not bypass guards. |
