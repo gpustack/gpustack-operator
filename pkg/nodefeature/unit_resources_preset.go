@@ -119,6 +119,145 @@ func PresetUnitResources(manufacturer, product string) (cpu, ram string) {
 	return _UnitResourcesPresetTable.lookup(manufacturer, product)
 }
 
+// PresetAcceleratorFamily returns the accelerator family the preset table declares for a
+// manufacturer and a product.
+//
+// The product is normalized and matched exactly as PresetUnitResources matches it, and the family
+// of the matched entry is returned. A manufacturer the table does not cover, a product no entry
+// matches, and an empty or unrepresentable input all yield an empty string, because an
+// accelerator this operator cannot place is not one it may name.
+func PresetAcceleratorFamily(manufacturer, product string) string {
+	return _UnitResourcesPresetTable.acceleratorFamily(manufacturer, product)
+}
+
+// ResolveAcceleratorFamily returns the accelerator family a raw accelerator name resolves to.
+//
+// The name is read as a whole, because a benchmark publishes a product name and not a table key.
+// A name that already is a family is returned as it is. A name that leads with a manufacturer is
+// resolved against that manufacturer's entries. Any other name is matched against every
+// manufacturer, and a name that names two families names neither of them.
+func ResolveAcceleratorFamily(raw string) string {
+	return _UnitResourcesPresetTable.resolveAcceleratorFamily(raw)
+}
+
+// acceleratorFamily returns the family the table declares for a product of one manufacturer.
+func (t *unitResourcesPresets) acceleratorFamily(manufacturer, product string) string {
+	entries := t.Families[manufacturer]
+	if len(entries) == 0 {
+		return ""
+	}
+
+	key := device.NormalizeName(product, manufacturer, 0, false)
+	tokens := t.stripLeadingMarketing(splitPresetTokens(key))
+	if len(tokens) == 0 {
+		return ""
+	}
+
+	for _, e := range entries {
+		if !hasTokenPrefix(tokens, splitPresetTokens(e.Prefix)) {
+			continue
+		}
+		return presetEntryFamily(e, tokens)
+	}
+	return ""
+}
+
+// presetEntryFamily returns the family an entry resolves to for a key. The ordered variant list
+// refines the entry, and the first listed token present in the key wins.
+func presetEntryFamily(e unitResourcesPresetEntry, tokens []string) string {
+	for _, v := range e.By {
+		if slices.Contains(tokens, v.Token) {
+			return v.Family
+		}
+	}
+	return e.Family
+}
+
+// resolveAcceleratorFamily resolves a raw accelerator name to a family of the table.
+func (t *unitResourcesPresets) resolveAcceleratorFamily(raw string) string {
+	tokens := splitPresetTokens(device.NormalizeName(raw, "", 0, false))
+	if len(tokens) == 0 {
+		return ""
+	}
+
+	// A name that already is a family is its own answer, and a catalog that
+	// stores the family has to read its own value back.
+	if name := strings.Join(tokens, "-"); t.declaresFamily(name) {
+		return name
+	}
+
+	// A name that leads with a manufacturer is resolved against that
+	// manufacturer alone, because the vendor settles what the product is.
+	if _UnitResourcesPresetManufacturers.Has(tokens[0]) {
+		if family := t.acceleratorFamily(tokens[0], raw); family != "" {
+			return family
+		}
+	}
+
+	return t.resolveFamilyTokens(tokens)
+}
+
+// resolveFamilyTokens resolves a token key to the family the table declares.
+//
+// The key may lead with words that name no vendor, so every suffix of it is tried and the
+// families that resolve have to agree.
+func (t *unitResourcesPresets) resolveFamilyTokens(tokens []string) string {
+	stripped := t.stripLeadingMarketing(tokens)
+	if family := t.matchFamily(stripped); family != "" {
+		return family
+	}
+
+	families := sets.New[string]()
+	for i := 1; i < len(stripped); i++ {
+		if family := t.matchFamily(stripped[i:]); family != "" {
+			families.Insert(family)
+		}
+	}
+	if families.Len() != 1 {
+		return ""
+	}
+	return families.UnsortedList()[0]
+}
+
+// matchFamily returns the family the table declares for a token key.
+//
+// A key that names two families names neither of them, so such a key is refused. A bare product
+// name is one case of that: it is also the tail of a longer product name the table covers, and
+// "v100" names both the NVIDIA part and the Iluvatar boards that end in it.
+func (t *unitResourcesPresets) matchFamily(tokens []string) string {
+	families := sets.New[string]()
+	for _, entries := range t.Families {
+		for _, e := range entries {
+			prefix := splitPresetTokens(e.Prefix)
+			if !hasTokenPrefix(tokens, prefix) && !hasTokenSuffix(prefix, tokens) {
+				continue
+			}
+			families.Insert(presetEntryFamily(e, tokens))
+		}
+	}
+	if families.Len() != 1 {
+		return ""
+	}
+	return families.UnsortedList()[0]
+}
+
+// declaresFamily reports whether the table declares a family under that name.
+func (t *unitResourcesPresets) declaresFamily(name string) bool {
+	for _, entries := range t.Families {
+		for _, e := range entries {
+			if e.Family == name {
+				return true
+			}
+			for _, v := range e.By {
+				if v.Family == name {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // lookup resolves one (manufacturer, product) pair. The product is read only when the
 // manufacturer has entries, so a manufacturer the operator cannot detect costs no normalization
 // at all — load-time validation keeps the covered set and the detectable set identical.
@@ -186,6 +325,12 @@ func splitPresetTokens(s string) []string {
 // the legitimate sibling pairs "h20"/"h200" and "l4"/"l40"/"l40s" during validation.
 func hasTokenPrefix(tokens, prefix []string) bool {
 	return len(prefix) <= len(tokens) && slices.Equal(tokens[:len(prefix)], prefix)
+}
+
+// hasTokenSuffix reports whether prefix ends with suffix. Matching whole tokens is what keeps a
+// bare "v100" from standing in for the "bi-v100" board and the "v100" part alike.
+func hasTokenSuffix(prefix, suffix []string) bool {
+	return len(suffix) <= len(prefix) && slices.Equal(prefix[len(prefix)-len(suffix):], suffix)
 }
 
 // mustLoadUnitResourcesPresets loads the embedded table, panicking on a malformed one.
