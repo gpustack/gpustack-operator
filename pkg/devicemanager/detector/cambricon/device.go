@@ -124,12 +124,7 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 				continue
 			}
 			memory = uint64(memInfo.PhysicalMemoryTotal)
-
-			healthHandler := dev.GetCardHealthStateV()
-			healthInfo, ret := healthHandler.V2()
-			if ret.IsSuccess() {
-				memoryUnhealthy = healthInfo.Health == 0
-			}
+			memoryUnhealthy = isCardUnhealthy(dev)
 		}
 
 		grpIndex := slices.IndexFunc(grpList, func(grp device.DevicesGroup) bool {
@@ -251,12 +246,7 @@ func (in *cambricon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupL
 			memory = uint64(memInfo.PhysicalMemoryTotal)
 			memoryUsage = uint64(memInfo.PhysicalMemoryUsed)
 			memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-
-			healthHandler := dev.GetCardHealthStateV()
-			healthInfo, ret := healthHandler.V2()
-			if ret.IsSuccess() {
-				memoryUnhealthy = healthInfo.Health == 0
-			}
+			memoryUnhealthy = isCardUnhealthy(dev)
 		}
 
 		var (
@@ -311,6 +301,24 @@ func (in *cambricon) init() {
 			in.logger.Error(ret, "failed to initialize CNDev library")
 		}
 	})
+}
+
+func isCardUnhealthy(dev cndev.Device) bool {
+	healthHandler := dev.GetCardHealthStateV()
+	return evaluateCardUnhealthy(healthHandler.V2, healthHandler.V1)
+}
+
+func evaluateCardUnhealthy(
+	readV2 func() (cndev.CardHealthStateV2, cndev.Return),
+	readV1 func() (cndev.CardHealthStateV2, cndev.Return),
+) bool {
+	if healthInfo, ret := readV2(); ret.IsSuccess() {
+		return healthInfo.Health == 0
+	}
+	if healthInfo, ret := readV1(); ret.IsSuccess() {
+		return healthInfo.Health == 0
+	}
+	return false
 }
 
 var versionRegexp = regexp.MustCompile(`\d+\.\d+\.\d+`)
