@@ -131,7 +131,13 @@ func (r *ModelDeploymentScalerWebhook) Default(ctx context.Context, obj runtime.
 	if !s.DeletionTimestamp.IsZero() {
 		return nil
 	}
+	_, _, err := r.defaultModelDeploymentScaler(ctx, s)
+	return err
+}
 
+func (r *ModelDeploymentScalerWebhook) defaultModelDeploymentScaler(
+	ctx context.Context, s *workercore.ModelDeploymentScaler,
+) (*workercore.ModelDeployment, bool, error) {
 	if s.Spec.Mode == "" {
 		s.Spec.Mode = workercore.ModelDeploymentScalerModeShadow
 	}
@@ -147,9 +153,9 @@ func (r *ModelDeploymentScalerWebhook) Default(ctx context.Context, obj runtime.
 		s.Spec.Algorithm.Type = modelDeploymentScalerAlgorithmTypeOf(s.Spec.Algorithm)
 	}
 	defaultModelDeploymentScalerCapacityPrior(s.Spec.Algorithm.CapacityPrior)
-	suppressDefaultSLOs, err := r.shouldSuppressDefaultSLOs(ctx, s)
+	suppressDefaultSLOs, md, targetRead, err := r.shouldSuppressDefaultSLOs(ctx, s)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	switch s.Spec.Algorithm.Type {
 	case workercore.ModelDeploymentScalerAlgorithmTypeProportional:
@@ -194,7 +200,7 @@ func (r *ModelDeploymentScalerWebhook) Default(ctx context.Context, obj runtime.
 		s.Spec.Rebalance.Policy = workercore.ModelDeploymentScalerRebalancePolicyOpposing
 	}
 
-	return nil
+	return md, targetRead, nil
 }
 
 // modelDeploymentScalerAlgorithmTypeOf picks the algorithm a scaler names by the block it filled.
@@ -228,18 +234,18 @@ func defaultModelDeploymentScalerCapacityPrior(cp *workercore.ModelDeploymentSca
 // catalog prior resolution requires explicit latency targets for roles lacking manual capacity.
 func (r *ModelDeploymentScalerWebhook) shouldSuppressDefaultSLOs(
 	ctx context.Context, s *workercore.ModelDeploymentScaler,
-) (bool, error) {
+) (bool, *workercore.ModelDeployment, bool, error) {
 	if !workerctrl.ModelDeploymentScalerNeedsCapacityPrior(s, nil) {
-		return false, nil
+		return false, nil, false, nil
 	}
 	if r.APIReader == nil || strings.TrimSpace(s.Spec.TargetRef.Name) == "" {
-		return true, nil
+		return true, nil, false, nil
 	}
 	md, err := r.readModelDeploymentScalerTarget(ctx, s)
 	if err != nil {
-		return false, err
+		return false, nil, false, err
 	}
-	return workerctrl.ModelDeploymentScalerNeedsCapacityPrior(s, md), nil
+	return workerctrl.ModelDeploymentScalerNeedsCapacityPrior(s, md), md, true, nil
 }
 
 // defaultModelDeploymentScalerTokenThroughput fills the values the token throughput algorithm
@@ -317,7 +323,8 @@ func (r *ModelDeploymentScalerWebhook) validateModelDeploymentScaler(
 	// object for a value that is about to be filled in, and the two halves cannot disagree about
 	// what a scaler that omitted a field means.
 	effective := s.DeepCopy()
-	if err := r.Default(ctx, effective); err != nil {
+	md, targetRead, err := r.defaultModelDeploymentScaler(ctx, effective)
+	if err != nil {
 		return nil, append(errs, field.InternalError(field.NewPath("spec"), err))
 	}
 
@@ -336,11 +343,18 @@ func (r *ModelDeploymentScalerWebhook) validateModelDeploymentScaler(
 
 	errs = append(errs, validateModelDeploymentScalerRatioFeasibility(effective)...)
 
-	md, err := r.readModelDeploymentScalerTarget(ctx, s)
-	if err != nil {
-		return nil, append(errs, field.InternalError(field.NewPath("spec", "targetRef", "name"), err))
+	if !targetRead {
+		md, err = r.readModelDeploymentScalerTarget(ctx, s)
+		if err != nil {
+			return nil, append(errs, field.InternalError(field.NewPath("spec", "targetRef", "name"), err))
+		}
 	}
 	if md == nil {
+		if workerctrl.ModelDeploymentScalerNeedsCapacityPrior(effective, nil) {
+			if sloErrs := validateModelDeploymentScalerUnresolvedTargetSLOs(effective); len(sloErrs) > 0 {
+				return nil, append(errs, sloErrs...)
+			}
+		}
 		if effective.Spec.Algorithm.CapacityPrior != nil {
 			warnings = append(warnings, fmt.Sprintf(
 				"target ModelDeployment %q does not exist yet; capacity prior compatibility will be verified by the controller once the target exists",
@@ -1469,6 +1483,50 @@ func modelDeploymentScalerRoleNeedsCapacityPrior(
 		},
 	}
 	return workerctrl.ModelDeploymentScalerNeedsCapacityPrior(s, probe)
+}
+
+// validateModelDeploymentScalerUnresolvedTargetSLOs refuses a scaler created before its target
+// exists when capacity-prior resolution suppressed the latency defaults and the scaler omits the
+// latency targets that any unstated capacity kind requires.
+func validateModelDeploymentScalerUnresolvedTargetSLOs(
+	s *workercore.ModelDeploymentScaler,
+) field.ErrorList {
+	var (
+		errs   field.ErrorList
+		tt     *workercore.ModelDeploymentScalerTokenThroughputSpec
+		ttPath *field.Path
+	)
+	switch s.Spec.Algorithm.Type {
+	case workercore.ModelDeploymentScalerAlgorithmTypeTokenThroughput:
+		tt = s.Spec.Algorithm.TokenThroughput
+		ttPath = field.NewPath("spec", "algorithm", "tokenThroughput")
+	case workercore.ModelDeploymentScalerAlgorithmTypePredictive:
+		if s.Spec.Algorithm.Predictive != nil {
+			tt = &s.Spec.Algorithm.Predictive.TokenThroughput
+		}
+		ttPath = field.NewPath("spec", "algorithm", "predictive", "tokenThroughput")
+	default:
+		return nil
+	}
+
+	needsServer := modelDeploymentScalerRoleNeedsCapacityPrior(s, workercore.ModelDeploymentRoleKindServer)
+	needsPrefill := modelDeploymentScalerRoleNeedsCapacityPrior(s, workercore.ModelDeploymentRoleKindPrefill)
+	needsDecode := modelDeploymentScalerRoleNeedsCapacityPrior(s, workercore.ModelDeploymentRoleKindDecode)
+
+	noSLOs := tt == nil || (tt.TTFTTargetMilliseconds == nil && tt.ITLTargetMilliseconds == nil)
+	if (noSLOs && (needsServer || needsPrefill)) || (!needsDecode && (needsServer || needsPrefill) && (tt == nil || tt.TTFTTargetMilliseconds == nil)) {
+		errs = append(errs, field.Required(
+			ttPath.Child("ttftTargetMilliseconds"),
+			"a scaler that resolves capacity from a catalog prior before its target exists requires an explicit ttftTargetMilliseconds",
+		))
+	}
+	if (noSLOs && (needsServer || needsDecode)) || (!needsPrefill && (needsServer || needsDecode) && (tt == nil || tt.ITLTargetMilliseconds == nil)) {
+		errs = append(errs, field.Required(
+			ttPath.Child("itlTargetMilliseconds"),
+			"a scaler that resolves capacity from a catalog prior before its target exists requires an explicit itlTargetMilliseconds",
+		))
+	}
+	return errs
 }
 
 // validateModelDeploymentScalerRoleNames refuses a bound that names an object the cluster

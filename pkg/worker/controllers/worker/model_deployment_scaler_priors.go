@@ -2,10 +2,12 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
 	"unicode/utf8"
 
 	core "k8s.io/api/core/v1"
@@ -125,6 +127,34 @@ func ResolveModelDeploymentScalerCapacityPriors(
 	return result, nil
 }
 
+const maxCachedConfigMapCatalogs = 32
+
+var (
+	configMapCatalogCacheMu sync.RWMutex
+	configMapCatalogCache   = make(map[[32]byte]*priors.Catalog, maxCachedConfigMapCatalogs)
+)
+
+func parseCachedConfigMapCatalog(data []byte) (*priors.Catalog, error) {
+	sum := sha256.Sum256(data)
+	configMapCatalogCacheMu.RLock()
+	cached, ok := configMapCatalogCache[sum]
+	configMapCatalogCacheMu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+	catalog, err := priors.ParseCatalog(data)
+	if err != nil {
+		return nil, err
+	}
+	configMapCatalogCacheMu.Lock()
+	if len(configMapCatalogCache) >= maxCachedConfigMapCatalogs {
+		clear(configMapCatalogCache)
+	}
+	configMapCatalogCache[sum] = catalog
+	configMapCatalogCacheMu.Unlock()
+	return catalog, nil
+}
+
 func modelDeploymentScalerLoadCatalog(ctx context.Context, reader ctrlcli.Reader, scaler *workercore.ModelDeploymentScaler) (*priors.Catalog, error) {
 	ref := scaler.Spec.Algorithm.CapacityPrior.CatalogRef
 	if ref == nil {
@@ -166,7 +196,7 @@ func modelDeploymentScalerLoadCatalog(ctx context.Context, reader ctrlcli.Reader
 	if !found {
 		return nil, modelDeploymentScalerPriorRefusal("", "catalog ConfigMap %q lacks key %q", ref.Name, key)
 	}
-	catalog, err := priors.ParseCatalog(catalogBytes)
+	catalog, err := parseCachedConfigMapCatalog(catalogBytes)
 	if err != nil {
 		return nil, modelDeploymentScalerPriorRefusal("", "catalog ConfigMap %q is invalid: %.512s", ref.Name, err)
 	}
@@ -247,6 +277,9 @@ func modelDeploymentScalerResolveRolePrior(
 	status.Metric, status.Quantile, status.WorkloadID = basis.Metric, basis.Quantile, basis.WorkloadID
 	status.Denominator, status.CatalogDigest, status.SourceRevision = basis.Denominator, catalog.Digest, basis.SourceRevision
 	status.WorkloadRevision = resolution.WorkloadRevision
+	if resolution.GPUsPerReplica > math.MaxInt32 || resolution.MeasuredReplicas > math.MaxInt32 {
+		return priors.Resolution{}, status, modelDeploymentScalerPriorRefusal(role.Name, "measured replica denominator exceeds the supported status range")
+	}
 	status.GPUsPerReplica, status.MeasuredReplicas = int32(resolution.GPUsPerReplica), int32(resolution.MeasuredReplicas)
 	status.Headroom, err = modelDeploymentScalerPriorQuantity(basis.Headroom)
 	if err != nil {
@@ -260,9 +293,6 @@ func modelDeploymentScalerResolveRolePrior(
 		if utf8.RuneCountInString(value) > 253 {
 			return priors.Resolution{}, status, modelDeploymentScalerPriorRefusal(role.Name, "catalog provenance identifiers must not exceed 253 characters")
 		}
-	}
-	if profile.MeasuredReplicas > math.MaxInt32 {
-		return priors.Resolution{}, status, modelDeploymentScalerPriorRefusal(role.Name, "measured replica denominator exceeds the supported status range")
 	}
 	selectedQuantile := 0.0
 	for _, bound := range basis.LatencyBounds {

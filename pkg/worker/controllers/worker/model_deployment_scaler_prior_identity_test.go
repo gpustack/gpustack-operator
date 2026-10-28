@@ -269,6 +269,8 @@ func TestModelDeploymentScalerPriorRequestEngineEnv(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "SGLANG_USE_AITER")
 		assert.NotContains(t, err.Error(), "super-secret-token")
+		redacted := modelDeploymentScalerRedactEnvValues("foo_super-secret-token_bar", []string{"super-secret-token"})
+		assert.NotContains(t, redacted, "super-secret-token")
 	})
 
 	t.Run("a runtime expansion ref in a deployment env value is refused", func(t *testing.T) {

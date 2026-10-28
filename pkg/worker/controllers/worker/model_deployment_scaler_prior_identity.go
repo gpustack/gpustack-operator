@@ -883,6 +883,9 @@ func modelDeploymentScalerRedactEnvValues(message string, values []string) strin
 			message, strconv.Quote(value), strconv.Quote(modelDeploymentScalerRedactedValue),
 		)
 		message = modelDeploymentScalerRedactWholeToken(message, value)
+		if len(value) >= 4 && !strings.Contains(modelDeploymentScalerRedactedValue, value) {
+			message = strings.ReplaceAll(message, value, modelDeploymentScalerRedactedValue)
+		}
 	}
 	return message
 }
