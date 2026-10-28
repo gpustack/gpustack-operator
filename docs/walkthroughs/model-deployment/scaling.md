@@ -268,7 +268,7 @@ in the [recorded comparison](../../modules/model-deployment/scaling-benchmark.md
 ### Catalog priors
 
 *`spec.algorithm.capacityPrior`* resolves omitted `TokenThroughput` or `Predictive` capacities from
-a `gpustack.ai/v1` catalog. The embedded catalog carries the verified public sweeps imported from
+a `worker.gpustack.ai/v1alpha1` `ModelDeploymentScalerCapacityPriorCatalog`. The embedded catalog carries the verified public sweeps imported from
 InferenceX; the `gpustack-operator-priors` skill's provenance records list every dataset.
 
 For other evidence, supply a reviewed same-namespace `ConfigMap` through *`catalogRef`* (key
