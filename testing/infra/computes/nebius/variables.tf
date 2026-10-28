@@ -57,13 +57,25 @@ variable "instance_type" {
     # ID of an already-existing GPU cluster in the project (a "computegpucluster-..." resource)
     # whose InfiniBand fabric the VM joins at creation -- the thing that puts RDMA devices on it.
     # The API accepts this only when the VM is created (never afterwards), and only for a preset
-    # whose allow_gpu_clustering is true; that flag is checked at plan on the unpinned path, where
-    # the module asks the platform list anyway. Pinning image_family skips every live check.
-    gpu_cluster_id = optional(string)
+    # whose allow_gpu_clustering is true; preparation checks the preset even for a pinned image.
+    gpu_cluster_id            = optional(string)
+    infiniband_fabric         = optional(string)
+    reuse_gpu_cluster         = optional(bool, true)
+    fabric_selection_revision = optional(string, "")
+    preemptible               = optional(bool, false)
+    spot_price_from_history   = optional(bool, false)
+    spot_price_ceiling        = optional(string)
+    spot_max_price            = optional(string)
+    spot_pricing_policy_id    = optional(string)
   })
   default = {
     platform = "gpu-h100-sxm"
     preset   = "1gpu-16vcpu-200gb"
+  }
+
+  validation {
+    condition     = var.instance_type.gpu_cluster_id == null || var.instance_type.infiniband_fabric == null
+    error_message = "gpu_cluster_id and infiniband_fabric are mutually exclusive."
   }
 
   validation {
@@ -82,6 +94,17 @@ variable "instance_type" {
     condition     = var.instance_type.gpu_cluster_id == null || can(regex("^computegpucluster-", var.instance_type.gpu_cluster_id))
     error_message = "instance_type.gpu_cluster_id must be a Nebius GPU cluster ID, e.g. 'computegpucluster-...'."
   }
+  validation {
+    condition = (
+      (var.instance_type.spot_max_price == null || (can(regex("^[0-9]+(\\.[0-9]{1,3})?$", var.instance_type.spot_max_price)) && try(tonumber(var.instance_type.spot_max_price) > 0, false))) &&
+      (var.instance_type.spot_max_price == null || var.instance_type.spot_pricing_policy_id == null) &&
+      (var.instance_type.preemptible || (var.instance_type.spot_max_price == null && var.instance_type.spot_pricing_policy_id == null && !var.instance_type.spot_price_from_history)) &&
+      (!var.instance_type.spot_price_from_history || (var.instance_type.spot_max_price == null && var.instance_type.spot_pricing_policy_id == null)) &&
+      (var.instance_type.spot_price_ceiling == null || (var.instance_type.spot_price_from_history && (can(regex("^[0-9]+(\\.[0-9]{1,3})?$", var.instance_type.spot_price_ceiling)) && try(tonumber(var.instance_type.spot_price_ceiling) > 0, false))))
+    )
+    error_message = "Select at most one of spot_max_price, spot_pricing_policy_id, and spot_price_from_history on a preemptible instance. Prices must be positive decimals with at most three fractional digits; the ceiling requires history pricing."
+  }
+
 }
 
 variable "boot_disk_type" {
@@ -116,4 +139,16 @@ variable "boot_disk_size_gb" {
     )
     error_message = "NETWORK_SSD_NON_REPLICATED and NETWORK_SSD_IO_M3 are allocated in whole 93 GiB units (93, 186, 279, ...); NETWORK_SSD must be 1-8192 GiB."
   }
+}
+
+variable "public_ip" {
+  description = "Allocate a public IPv4 address for the VM."
+  type        = bool
+  default     = true
+}
+
+variable "nebius_resolved" {
+  description = "Internal snapshot written by null_resource.prepare."
+  type        = any
+  default     = null
 }

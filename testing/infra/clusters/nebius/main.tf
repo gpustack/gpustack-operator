@@ -44,7 +44,10 @@ locals {
         # A CPU group never joins a fabric.
         gpu_cluster_id = null
         # The CPU group pulls no engine images, so it never outgrows the module-wide default.
-        boot_disk_size_gb = null
+        boot_disk_size_gb      = null
+        boot_disk_type         = null
+        spot_max_price         = null
+        spot_pricing_policy_id = null
       }
     },
     {
@@ -78,7 +81,10 @@ locals {
         # creates. Null leaves the group without RDMA.
         gpu_cluster_id = local.gpu_cluster_ids[name]
         # Null falls through to var.node_boot_disk_size_gb in the boot_disk block below.
-        boot_disk_size_gb = cfg.boot_disk_size_gb
+        boot_disk_size_gb      = cfg.boot_disk_size_gb
+        boot_disk_type         = cfg.boot_disk_type
+        spot_max_price         = cfg.spot_price_from_history ? try(var.nebius_resolved.prices[name].max_price, "0.001") : cfg.spot_max_price
+        spot_pricing_policy_id = cfg.spot_pricing_policy_id
       }
     },
   )
@@ -88,28 +94,10 @@ locals {
   # existing cluster -- no entry here -- never touches a resource address that does not exist.
   created_gpu_cluster_ids = { for name, cluster in nebius_compute_v1_gpu_cluster.this : name => cluster.id }
 
-  # Existing project GPU clusters by fabric, from data.external.gpu_clusters above. {} when the
-  # lookup is switched off (no group asked for reuse), and a miss behaves the same either way
-  # through lookup()'s default.
-  reusable_gpu_clusters = coalesce(one(data.external.gpu_clusters[*].result), {})
-
-  # The GPU cluster each GPU group joins, resolved once and consumed by both the node-group
-  # template and the creation decision below. First match wins: an explicit gpu_cluster_id; else,
-  # when a fabric is named and reuse_gpu_cluster is true, an existing project cluster on that
-  # fabric; else the cluster this module creates. Null when the group asked for neither, which is
-  # what keeps a plain group's template exactly as it was before reuse existed.
-  #
-  # Note: reuse_gpu_cluster picks the lexicographically smallest existing cluster ID on the fabric
-  # at plan time, assuming no concurrent out-of-band creation or deletion of lower-ID clusters on
-  # the same fabric (pin gpu_cluster_id explicitly when sharing a project with concurrent writers,
-  # because changing a node group's gpu_cluster forces replacement).
   gpu_cluster_ids = {
     for name, cfg in var.gpu_instance_types : name =>
     cfg.gpu_cluster_id != null ? cfg.gpu_cluster_id :
-    (cfg.infiniband_fabric != null ? coalesce(
-      cfg.reuse_gpu_cluster ? lookup(local.reusable_gpu_clusters, cfg.infiniband_fabric, null) : null,
-      lookup(local.created_gpu_cluster_ids, name, null),
-    ) : null)
+    (cfg.infiniband_fabric != null ? coalesce(try(var.nebius_resolved.bindings[name].cluster_id, null), lookup(local.created_gpu_cluster_ids, name, null), "pending") : null)
   }
 
   # Node preparation, per GPU node group — keyed by group because half of it is MIG-only. The
@@ -238,62 +226,6 @@ data "external" "gpu_compat" {
   }
 }
 
-# Lists the GPU clusters already present in the project as a flat fabric->id map, so a group that
-# names a fabric with reuse_gpu_cluster = true (the default) attaches to an existing cluster and
-# leaves a compute.gpucluster.count unit unspent. When several clusters share a fabric the map
-# keeps the lowest cluster ID, so the pick is stable across runs. data.external accepts one flat
-# object of strings and nothing else, which is exactly what a fabric->id map is. Gated on count:
-# a run that names no fabric, or pins every group by gpu_cluster_id, pays no CLI round trip.
-# NOTE the same bargain gpu_compat makes: when live, this runs on every plan, apply and destroy,
-# and needs the CLI authenticated each time.
-data "external" "gpu_clusters" {
-  count = anytrue([
-    for cfg in values(var.gpu_instance_types) :
-    cfg.infiniband_fabric != null && cfg.gpu_cluster_id == null && cfg.reuse_gpu_cluster
-  ]) ? 1 : 0
-
-  program = ["bash", "-c", <<-EOT
-    set -euo pipefail
-    for tool in jq nebius; do
-      command -v "$tool" >/dev/null || { echo "$tool is required to look up reusable GPU clusters; install it, or set reuse_gpu_cluster = false on every fabric group to skip the lookup" >&2; exit 1; }
-    done
-    eval "$(jq -r '@sh "PROJECT=\(.project_id) STATE_PATH=\(.state_path) CLUSTER_PREFIX=\(.cluster_prefix)"')"
-    # Exclude GPU clusters owned by this module (by name prefix "${local.cluster_name}-*" and by any
-    # IDs recorded in this module's Terraform state) so a second plan/apply never treats the module's
-    # own created cluster as an external reusable one.
-    OWN_IDS="[]"
-    STATE_DIR="$(dirname "$STATE_PATH")"
-    if [ -s "$STATE_PATH" ]; then
-      OWN_IDS="$(jq -ec '[.resources[]? | select(.type == "nebius_compute_v1_gpu_cluster" and .name == "this") | .instances[]?.attributes.id // empty]' "$STATE_PATH")"
-    elif [ -d "$STATE_DIR/.terraform" ]; then
-      command -v terraform >/dev/null || { echo "terraform is required to inspect state in $STATE_DIR/.terraform" >&2; exit 1; }
-      STATE_JSON="$(terraform -chdir="$STATE_DIR" state pull)"
-      if [ -n "$STATE_JSON" ]; then
-        OWN_IDS="$(printf '%s\n' "$STATE_JSON" | jq -ec '[.resources[]? | select(.type == "nebius_compute_v1_gpu_cluster" and .name == "this") | .instances[]?.attributes.id // empty]')"
-      fi
-    fi
-    nebius compute gpu-cluster list --parent-id "$PROJECT" --format json \
-    | jq -e --argjson own_ids "$OWN_IDS" --arg prefix "$CLUSTER_PREFIX" '
-        [ (.items // [])[]
-          | select((.spec.infiniband_fabric // "") != "")
-          | select(((.metadata.name // "") | startswith($prefix)) | not)
-          | select((.metadata.id as $id | $own_ids | index($id)) | not)
-          | { key: .spec.infiniband_fabric, value: .metadata.id } ]
-        | sort_by(.value)
-        # First assignment per fabric wins -- the map keeps the lowest cluster ID, which is what
-        # makes the pick stable across runs; setpath alone would let the highest overwrite it.
-        | reduce .[] as $e ({}; if has($e.key) then . else setpath([$e.key]; $e.value) end)
-      '
-  EOT
-  ]
-
-  query = {
-    project_id     = var.project_id
-    state_path     = "${path.root}/terraform.tfstate"
-    cluster_prefix = "${local.cluster_name}-"
-  }
-}
-
 resource "nebius_vpc_v1_network" "this" {
   parent_id = var.project_id
   name      = local.cluster_name
@@ -405,19 +337,34 @@ resource "nebius_mk8s_v1_cluster" "this" {
 resource "nebius_compute_v1_gpu_cluster" "this" {
   for_each = {
     for name, cfg in var.gpu_instance_types : name => cfg
-    if cfg.infiniband_fabric != null &&
-    !(cfg.reuse_gpu_cluster && lookup(local.reusable_gpu_clusters, cfg.infiniband_fabric, null) != null)
+    if cfg.infiniband_fabric != null && try(var.nebius_resolved.bindings[name].cluster_id, null) == null
   }
 
   parent_id         = var.project_id
   name              = "${local.cluster_name}-${each.key}"
-  infiniband_fabric = each.value.infiniband_fabric
+  infiniband_fabric = try(var.nebius_resolved.bindings[each.key].fabric, "pending")
 }
 
 resource "nebius_mk8s_v1_node_group" "this" {
   for_each  = local.node_groups
   parent_id = nebius_mk8s_v1_cluster.this.id
   name      = each.key
+
+  lifecycle {
+    replace_triggered_by = [null_resource.price[each.key]]
+    precondition {
+      condition     = contains(["NETWORK_SSD_NON_REPLICATED", "NETWORK_SSD_IO_M3"], coalesce(each.value.boot_disk_type, var.node_boot_disk_type)) ? (coalesce(each.value.boot_disk_size_gb, var.node_boot_disk_size_gb) >= 93 && coalesce(each.value.boot_disk_size_gb, var.node_boot_disk_size_gb) % 93 == 0) : (coalesce(each.value.boot_disk_type, var.node_boot_disk_type) != "NETWORK_SSD" || coalesce(each.value.boot_disk_size_gb, var.node_boot_disk_size_gb) <= 8192)
+      error_message = "Non-replicated and IO_M3 disks require multiples of 93 GiB; NETWORK_SSD permits at most 8192 GiB."
+    }
+    precondition {
+      condition     = (!try(var.gpu_instance_types[each.key].spot_price_from_history, false) && !try(var.gpu_instance_types[each.key].infiniband_fabric != null || var.gpu_instance_types[each.key].gpu_cluster_id != null, false)) || (local.snapshot_valid && (!try(var.gpu_instance_types[each.key].spot_price_from_history, false) || can(var.nebius_resolved.prices[each.key].max_price)) && (!try(var.gpu_instance_types[each.key].infiniband_fabric != null || var.gpu_instance_types[each.key].gpu_cluster_id != null, false) || can(var.nebius_resolved.bindings[each.key].fabric)))
+      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning history pricing."
+    }
+    precondition {
+      condition     = each.value.spot_pricing_policy_id == null ? true : (data.nebius_billing_v1_pricing_policy.external[each.key].parent_id == var.project_id && data.nebius_billing_v1_pricing_policy.external[each.key].compute_instance_spec.v1.platform == each.value.instance_type.platform)
+      error_message = "The pricing policy must belong to this project and platform."
+    }
+  }
 
   fixed_node_count = each.value.node_count
 
@@ -430,7 +377,7 @@ resource "nebius_mk8s_v1_node_group" "this" {
     os = each.value.os
 
     boot_disk = {
-      type           = var.node_boot_disk_type
+      type           = coalesce(each.value.boot_disk_type, var.node_boot_disk_type)
       size_gibibytes = coalesce(each.value.boot_disk_size_gb, var.node_boot_disk_size_gb)
     }
 
@@ -466,8 +413,9 @@ resource "nebius_mk8s_v1_node_group" "this" {
     # Preemptible capacity is cheaper, and the platform may reclaim a node at any time. Nebius now
     # requires a spot pricing model on preemptible templates: without follows_spot_price the mk8s
     # API rejects the generated NebiusMachineTemplate with "spec.pricing_model is invalid".
-    preemptible        = each.value.preemptible ? {} : null
-    follows_spot_price = each.value.preemptible ? {} : null
+    preemptible         = each.value.preemptible ? {} : null
+    follows_spot_price  = each.value.preemptible && each.value.spot_max_price == null && each.value.spot_pricing_policy_id == null ? {} : null
+    spot_pricing_policy = each.value.spot_pricing_policy_id != null ? { id = data.nebius_billing_v1_pricing_policy.external[each.key].id } : (each.value.spot_max_price != null ? { id = nebius_billing_v1_pricing_policy.this[each.key].id } : null)
 
     gpu_settings = each.value.gpu != null ? {
       drivers_preset = each.value.gpu.drivers_preset
@@ -590,4 +538,30 @@ resource "null_resource" "last_apply" {
     interpreter = ["/bin/bash", "-c"]
     command     = "cat > '${path.module}/.last-apply.auto.tfvars.json' <<'EOF'\n${self.triggers.snapshot}\nEOF"
   }
+}
+
+resource "null_resource" "price" {
+  for_each = local.node_groups
+  triggers = {
+    max_price   = each.value.spot_max_price
+    preemptible = each.value.preemptible
+    policy_id   = each.value.spot_pricing_policy_id
+    platform    = each.value.spot_max_price == null ? null : each.value.instance_type.platform
+  }
+}
+
+resource "nebius_billing_v1_pricing_policy" "this" {
+  for_each              = { for name, cfg in var.gpu_instance_types : name => cfg if cfg.spot_max_price != null || cfg.spot_price_from_history }
+  parent_id             = var.project_id
+  name                  = "${local.cluster_name}-${each.key}-spot"
+  compute_instance_spec = { v1 = { platform = each.value.platform } }
+  pricing               = { max_price_v1 = { max_price = local.node_groups[each.key].spot_max_price } }
+  lifecycle {
+    replace_triggered_by = [null_resource.price[each.key]]
+  }
+}
+
+data "nebius_billing_v1_pricing_policy" "external" {
+  for_each = { for name, cfg in var.gpu_instance_types : name => cfg if cfg.spot_pricing_policy_id != null }
+  id       = each.value.spot_pricing_policy_id
 }

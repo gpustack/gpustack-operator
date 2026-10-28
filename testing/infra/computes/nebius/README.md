@@ -14,7 +14,7 @@ Provision a single Nebius AI Cloud VM with a public IP reachable over SSH.
 
 ## Prerequisites
 
-1. Install the [Nebius CLI](https://docs.nebius.com/cli) and `terraform`.
+1. Install the [Nebius CLI](https://docs.nebius.com/cli) (version 0.12.296 is recommended) and `terraform`.
 2. A Nebius Service Account with an authorized key. Export:
    ```bash
    export NEBIUS_SA_ID="serviceaccount-..."
@@ -52,6 +52,7 @@ VM only accepts key-based auth via `ssh_public_key`.
 | `name_prefix` | Prefix for the VM and its network/subnet/security-group names (a random suffix is appended) | `gpustack-nebius` |
 | `ssh_public_key` | Path to the SSH public key injected into the VM via cloud-init | `~/.ssh/id_ed25519.pub` |
 | `instance_type` | `platform` and `preset` are required; `image_family` is optional and resolved from the live catalogue when omitted; `gpu_cluster_id` is optional and joins the VM to an already-existing GPU cluster's InfiniBand fabric | `{ platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }` |
+| `public_ip` | Allocate a public IPv4 address | `true` |
 | `boot_disk_type` | Boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `boot_disk_size_gb` | Boot disk size, in GiB | `100` |
 
@@ -111,10 +112,9 @@ terraform apply -var='project_id=project-...' \
   -var='instance_type={platform="cpu-d3",preset="4vcpu-16gb",image_family="ubuntu24.04-driverless"}'
 ```
 
-Pinning skips the lookup **entirely** -- no `nebius` CLI and no `jq` are needed
-on plan, apply or destroy. It also skips the platform/preset check, the
-`allow_gpu_clustering` check that guards `gpu_cluster_id`, and the boot-disk
-minimum check, since all of them come from the same call.
+Pinning skips image selection and its boot-disk minimum check. When a GPU
+cluster or fabric is requested, the preparation step still checks the platform
+and preset, even with a pinned image.
 
 ### Joining an InfiniBand GPU cluster
 
@@ -128,15 +128,13 @@ it can join only when it is created -- adding `gpu_cluster_id` afterwards
 replaces the VM. Find the ID with
 `nebius compute gpu-cluster list --parent-id <project-id> --format json`.
 
-The module checks at **plan** that the preset can join at all
-(`allow_gpu_clustering` is a property of the preset, not the platform -- on the
-same accelerator the whole-node preset permits it and the single-card preset
-does not) and fails naming the presets of that platform which do; the check
-rides the same platform-list call that resolves the image family, so pinning
-`image_family` skips it. Reusing an existing cluster is the point: a project at
-its `compute.gpucluster.count` limit cannot create a new one, and this module
-never does -- it only attaches to the cluster the ID names. To create one for a
-Kubernetes node group instead, see `clusters/nebius`.
+Preparation checks `allow_gpu_clustering` for the preset and verifies that an
+explicit cluster belongs to the project. Alternatively set `infiniband_fabric`
+to a name or `auto`; the module reuses an existing GPU cluster on that fabric
+by default, or creates one if needed. Set `reuse_gpu_cluster = false` to create
+one. A GPU cluster is an isolation boundary: two clusters on the same fabric
+do not automatically share RDMA connectivity. Run the preparation workflow
+below with the same variables before applying the example above.
 
 Two consequences worth knowing before you pin:
 
@@ -155,3 +153,74 @@ granularity (`NETWORK_SSD_NON_REPLICATED` and `NETWORK_SSD_IO_M3` are allocated
 in whole 93 GiB units; `NETWORK_SSD` is 1-8192 GiB), and -- when the family is
 resolved rather than pinned -- against the minimum the image itself publishes
 (10 GiB driverless, 40 GiB CUDA), rounded up from the bytes the API reports.
+
+## Preemptible instances
+
+Set `instance_type.preemptible = true` to use preemptible capacity and follow
+the spot price. Optionally set `spot_max_price` to a decimal string with up to
+three fractional digits, or set `spot_pricing_policy_id` to an existing policy
+in the same project and platform. These fields are mutually exclusive. A max
+price creates a policy owned by this module; a policy ID remains externally
+owned. The maximum is per GPU per hour in USD, not a fixed charge or total
+budget. Changing the max price replaces the policy and VM. This path has been
+checked with mocked Terraform plans, but not with a live Nebius apply.
+
+Set `public_ip = false` to omit the VM's public IPv4 address; the `ssh_command`
+output is then null.
+
+## Preparing dynamic settings
+
+For history pricing or any GPU cluster/fabric selection, put the complete
+configuration in a variable file and run these commands in this module:
+
+```bash
+terraform apply -var-file=nebius.tfvars -target=null_resource.prepare
+terraform plan -var-file=nebius.tfvars
+terraform apply -var-file=nebius.tfvars
+```
+
+For example, `nebius.tfvars` can contain:
+
+```hcl
+project_id = "project-..."
+instance_type = {
+  platform                = "gpu-h100-sxm"
+  preset                  = "8gpu-128vcpu-1600gb"
+  preemptible             = true
+  spot_price_from_history = true
+  spot_price_ceiling      = "2.000"
+  infiniband_fabric       = "auto"
+}
+```
+
+The first command reads project and pricing or capacity information and writes
+`.nebius-resolved.auto.tfvars.json` locally. It creates no Nebius resources.
+The full plan checks that the snapshot matches the inputs. To refresh prices,
+run the first command again with `-replace='null_resource.prepare[0]'`. A refresh
+keeps the fabric and GPU cluster binding; change `fabric_selection_revision`
+to request a new selection. Review the full plan before applying: a changed
+price replaces its VM or node group and owned pricing policy. Managed boot disks
+are deleted when their VM is destroyed.
+
+Set `spot_price_from_history = true` on a preemptible entry to use the larger
+of the current price and the highest 15-minute last-price sample over six
+hours, multiplied by 1.10 and rounded up to 0.001 USD per GPU-hour. The sampled
+high is not necessarily the highest instantaneous price. Optionally set
+`spot_price_ceiling` to a decimal string; the bid is capped at that value, so
+it may be below the current market and prevent scheduling. A failed or incomplete
+query leaves the previous snapshot untouched. Older CLI versions without the
+spot-price commands use the public REST API through `curl`; automatic fabric
+selection requires the Resource Advice CLI command. Explicit fabric or cluster
+selection remains available when Resource Advice is unavailable, with its
+availability recorded as unknown.
+
+`infiniband_fabric = "auto"` selects among matching project-region, platform and
+preset rows with fresh, positive availability for the requested capacity type.
+It prefers the highest available count, breaking ties by fabric name. Capacity
+advice is not a reservation. Set `gpu_cluster_id` to join a specific existing
+cluster; it is mutually exclusive with `infiniband_fabric`.
+
+Preparation requires `python3`, `curl`, and the authenticated Nebius CLI;
+existing image and compatibility lookups also require `bash` and `jq`. The
+examples and mocked checks use CLI 0.12.296; this is a recommendation, not a
+minimum for every operation.
