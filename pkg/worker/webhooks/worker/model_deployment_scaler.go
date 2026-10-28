@@ -1513,14 +1513,15 @@ func validateModelDeploymentScalerUnresolvedTargetSLOs(
 	needsPrefill := modelDeploymentScalerRoleNeedsCapacityPrior(s, workercore.ModelDeploymentRoleKindPrefill)
 	needsDecode := modelDeploymentScalerRoleNeedsCapacityPrior(s, workercore.ModelDeploymentRoleKindDecode)
 
-	noSLOs := tt == nil || (tt.TTFTTargetMilliseconds == nil && tt.ITLTargetMilliseconds == nil)
-	if (noSLOs && (needsServer || needsPrefill)) || (!needsDecode && (needsServer || needsPrefill) && (tt == nil || tt.TTFTTargetMilliseconds == nil)) {
+	needsTTFT := needsServer || needsPrefill
+	needsITL := needsServer || needsDecode
+	if needsTTFT && (tt == nil || tt.TTFTTargetMilliseconds == nil) {
 		errs = append(errs, field.Required(
 			ttPath.Child("ttftTargetMilliseconds"),
 			"a scaler that resolves capacity from a catalog prior before its target exists requires an explicit ttftTargetMilliseconds",
 		))
 	}
-	if (noSLOs && (needsServer || needsDecode)) || (!needsPrefill && (needsServer || needsDecode) && (tt == nil || tt.ITLTargetMilliseconds == nil)) {
+	if needsITL && (tt == nil || tt.ITLTargetMilliseconds == nil) {
 		errs = append(errs, field.Required(
 			ttPath.Child("itlTargetMilliseconds"),
 			"a scaler that resolves capacity from a catalog prior before its target exists requires an explicit itlTargetMilliseconds",

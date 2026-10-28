@@ -148,7 +148,12 @@ func parseCachedConfigMapCatalog(data []byte) (*priors.Catalog, error) {
 	}
 	configMapCatalogCacheMu.Lock()
 	if len(configMapCatalogCache) >= maxCachedConfigMapCatalogs {
-		clear(configMapCatalogCache)
+		for key := range configMapCatalogCache {
+			delete(configMapCatalogCache, key)
+			if len(configMapCatalogCache) < maxCachedConfigMapCatalogs {
+				break
+			}
+		}
 	}
 	configMapCatalogCache[sum] = catalog
 	configMapCatalogCacheMu.Unlock()

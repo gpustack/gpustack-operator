@@ -1,8 +1,10 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 	"time"
 
@@ -54,7 +56,11 @@ func (r *ModelDeploymentScalerReconciler) SetupController(ctx context.Context, o
 			&workercore.ModelDeployment{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapTargetDeployment),
 		).
-		Watches(&core.ConfigMap{}, ctrlhandler.EnqueueRequestsFromMapFunc(r.mapCapacityPriorCatalog)).
+		Watches(
+			&core.ConfigMap{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapCapacityPriorCatalog),
+			ctrlbuilder.WithPredicates(modelDeploymentScalerCatalogPredicate()),
+		).
 		Watches(
 			&kueue.Workload{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapTargetWorkload),
@@ -230,6 +236,7 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 	} else if scaler.Status.Binding != nil {
 		term = maxInt64(modelDeploymentScalerInitialTerm, scaler.Status.Binding.Term+1)
 	}
+	var preResolved *ModelDeploymentScalerCapacityPriors
 	if !hasBinding || binding.ScalerUID != string(scaler.UID) || binding.Term != term {
 		resolved, resolutionErr := ResolveModelDeploymentScalerCapacityPriors(ctx, r.priorReader(), scaler, md)
 		if resolutionErr != nil {
@@ -239,6 +246,7 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 				workercore.ModelDeploymentScalerReasonCapacityPriorUnresolved, "capacity priors must resolve before acquiring a binding", now)
 			return r.stopForCapacityPrior(ctx, before, scaler, resolutionErr, now)
 		}
+		preResolved = resolved
 		if md.Annotations == nil {
 			md.Annotations = make(map[string]string)
 		}
@@ -265,7 +273,7 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 		meta.ConditionTrue, "Active", "the scaler is planning replica changes", now,
 	)
 
-	return r.plan(ctx, before, scaler, md, now, true)
+	return r.planWithPriors(ctx, before, scaler, md, preResolved, now, true)
 }
 
 // modelDeploymentScalerPredicate decides which changes of a scaler wake its reconciler.
@@ -289,6 +297,43 @@ func modelDeploymentScalerPredicate() ctrlpredicate.Predicate {
 				return true
 			}
 			return !slices.Equal(e.ObjectOld.GetFinalizers(), e.ObjectNew.GetFinalizers())
+		},
+	}
+}
+
+// modelDeploymentScalerCatalogPredicate filters ConfigMap events to payload changes and deletions.
+func modelDeploymentScalerCatalogPredicate() ctrlpredicate.Predicate {
+	return ctrlpredicate.Funcs{
+		CreateFunc: func(e ctrlevent.CreateEvent) bool {
+			cm, ok := e.Object.(*core.ConfigMap)
+			return ok && (len(cm.Data) > 0 || len(cm.BinaryData) > 0)
+		},
+		DeleteFunc: func(ctrlevent.DeleteEvent) bool { return true },
+		GenericFunc: func(e ctrlevent.GenericEvent) bool {
+			cm, ok := e.Object.(*core.ConfigMap)
+			return ok && (len(cm.Data) > 0 || len(cm.BinaryData) > 0)
+		},
+		UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+			oldCM, okOld := e.ObjectOld.(*core.ConfigMap)
+			newCM, okNew := e.ObjectNew.(*core.ConfigMap)
+			if !okOld || !okNew {
+				return true
+			}
+			if oldCM.GetDeletionTimestamp().IsZero() != newCM.GetDeletionTimestamp().IsZero() {
+				return true
+			}
+			if !maps.Equal(oldCM.Data, newCM.Data) {
+				return true
+			}
+			if len(oldCM.BinaryData) != len(newCM.BinaryData) {
+				return true
+			}
+			for k, v := range oldCM.BinaryData {
+				if other, ok := newCM.BinaryData[k]; !ok || !bytes.Equal(v, other) {
+					return true
+				}
+			}
+			return false
 		},
 	}
 }

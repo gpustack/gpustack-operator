@@ -895,6 +895,15 @@ func TestModelDeploymentScalerValidate_CapacityPrior(t *testing.T) {
 			wantErr: "spec.algorithm.tokenThroughput.ttftTargetMilliseconds",
 		},
 		{
+			name: "missing target on create with mixed unstated prefill and decode capacities and missing ttftTargetMilliseconds is refused",
+			scaler: fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput.ServerTargetTokensPerSecond = ptr.To(resource.MustParse("1000"))
+				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = nil
+				s.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = ptr.To(resource.MustParse("50"))
+			}),
+			wantErr: "spec.algorithm.tokenThroughput.ttftTargetMilliseconds",
+		},
+		{
 			name:    "existing target on create with valid catalog and deployment identity succeeds",
 			objects: fx.allObjects(),
 			scaler:  fx.scalerWith(),

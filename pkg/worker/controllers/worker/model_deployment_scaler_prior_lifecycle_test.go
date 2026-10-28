@@ -12,6 +12,7 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -234,6 +235,23 @@ func TestModelDeploymentScalerCapacityPriorCatalogWatch(t *testing.T) {
 	got := r.mapCapacityPriorCatalog(context.Background(), cm)
 	if len(got) != 1 || got[0].Name != scaler.Name || got[0].Namespace != scaler.Namespace {
 		t.Fatalf("catalog requests = %#v", got)
+	}
+	pred := modelDeploymentScalerCatalogPredicate()
+	if pred.Create(ctrlevent.CreateEvent{Object: &core.ConfigMap{}}) {
+		t.Fatal("empty ConfigMap should be filtered on create")
+	}
+	if !pred.Create(ctrlevent.CreateEvent{Object: cm}) {
+		t.Fatal("populated ConfigMap should pass on create")
+	}
+	metaUpdated := cm.DeepCopy()
+	metaUpdated.ResourceVersion = "999"
+	if pred.Update(ctrlevent.UpdateEvent{ObjectOld: cm, ObjectNew: metaUpdated}) {
+		t.Fatal("metadata-only ConfigMap update should be filtered")
+	}
+	dataUpdated := cm.DeepCopy()
+	dataUpdated.Data["priors.yaml"] = "updated"
+	if !pred.Update(ctrlevent.UpdateEvent{ObjectOld: cm, ObjectNew: dataUpdated}) {
+		t.Fatal("data-changed ConfigMap update should pass")
 	}
 }
 

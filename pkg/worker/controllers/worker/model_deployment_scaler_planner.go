@@ -35,7 +35,27 @@ func (r *ModelDeploymentScalerReconciler) plan(
 	now time.Time,
 	active bool,
 ) (ctrlreconcile.Result, error) {
-	resolved, resolutionErr := ResolveModelDeploymentScalerCapacityPriors(ctx, r.priorReader(), scaler, md)
+	return r.planWithPriors(ctx, before, scaler, md, nil, now, active)
+}
+
+func (r *ModelDeploymentScalerReconciler) planWithPriors(
+	ctx context.Context,
+	before *workercore.ModelDeploymentScaler,
+	scaler *workercore.ModelDeploymentScaler,
+	md *workercore.ModelDeployment,
+	preResolved *ModelDeploymentScalerCapacityPriors,
+	now time.Time,
+	active bool,
+) (ctrlreconcile.Result, error) {
+	var (
+		resolved      *ModelDeploymentScalerCapacityPriors
+		resolutionErr error
+	)
+	if preResolved != nil {
+		resolved = preResolved
+	} else {
+		resolved, resolutionErr = ResolveModelDeploymentScalerCapacityPriors(ctx, r.priorReader(), scaler, md)
+	}
 	r.applyCapacityPriorResolution(scaler, resolved, resolutionErr, now)
 	pods, pendingByRole, cohorts, err := r.executionState(ctx, md)
 	if err != nil {
