@@ -1442,3 +1442,40 @@ func TestResolveDoesNotInterpolateAnOutOfOrderCurve(t *testing.T) {
 		t.Fatalf("measured quantile %q is not %q", resolution.Basis.Quantile, FormatLatencyQuantile(0.99))
 	}
 }
+
+// TestResolveAcceptsUnstatedDeploymentQuantization asserts a deployment that
+// leaves quantization empty resolves against a unique matching profile whose
+// quantization is stated, and a revision mismatch reports model.revision rather
+// than model.name.
+func TestResolveAcceptsUnstatedDeploymentQuantization(t *testing.T) {
+	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+		serverPoint(4, 1000, 500, 20),
+		serverPoint(8, 1200, 5000, 20),
+	})
+	profile.Identity.Model.Quantization = "fp8"
+	profile.Identity.Model.Revision = "rev-a"
+	profile = redigest(t, profile)
+	catalog := testCatalog(t, profile)
+
+	request := testRequest()
+	request.Identity.Model.Quantization = ""
+	request.Identity.Model.Revision = ""
+
+	resolution, err := catalog.Resolve(request)
+	if err != nil {
+		t.Fatalf("resolve with unstated deployment quantization: %v", err)
+	}
+	if resolution.SeedTokensPerSecond != 1000 {
+		t.Fatalf("seed %v is not 1000", resolution.SeedTokensPerSecond)
+	}
+
+	request.Identity.Model.Revision = "rev-b"
+	_, err = catalog.Resolve(request)
+	if err == nil {
+		t.Fatal("expected a refusal on mismatched model.revision")
+	}
+	refusal := refusalOf(t, err)
+	if refusal.Detail["mismatch"] != "model.revision" {
+		t.Fatalf("mismatch = %q, want model.revision", refusal.Detail["mismatch"])
+	}
+}

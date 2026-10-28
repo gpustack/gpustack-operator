@@ -231,7 +231,7 @@ func validateProfile(profile Profile) error {
 	}
 
 	if incoherent := loadAxisIncoherence(profile); incoherent != "" {
-		return fmt.Errorf("%s", incoherent)
+		return fmt.Errorf("load axis is incoherent: %s", incoherent)
 	}
 
 	// THE DIGEST IS NOT DERIVED, because the catalog is written by a person and a

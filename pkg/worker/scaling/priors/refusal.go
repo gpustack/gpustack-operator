@@ -120,7 +120,7 @@ func identityMismatch(want, got Identity) []string {
 	// THE MODEL IS COMPARED THROUGH ITS NORMALIZED FORM, because a deployment
 	// declares the model without its organization and a source declares it with
 	// one, and the same recipe is spelled several ways.
-	appendIf("model.name", ModelIdentityMatches(want.Model, got.Model))
+	appendIf("model.name", ModelNameMatches(want.Model.Name, got.Model.Name))
 	appendIf("model.revision", RevisionMatches(want.Model.Revision, got.Model.Revision))
 	appendIf("model.tokenizer", TokenizerMatches(want.Model.Tokenizer, got.Model.Tokenizer))
 	if got.Model.Quantization != "" {
