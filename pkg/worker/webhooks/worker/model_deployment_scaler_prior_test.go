@@ -887,6 +887,14 @@ func TestModelDeploymentScalerValidate_CapacityPrior(t *testing.T) {
 			wantWarning: "qwen-72b",
 		},
 		{
+			name: "missing target on create without explicit latency targets is refused",
+			scaler: fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = nil
+				s.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = nil
+			}),
+			wantErr: "spec.algorithm.tokenThroughput.ttftTargetMilliseconds",
+		},
+		{
 			name:    "existing target on create with valid catalog and deployment identity succeeds",
 			objects: fx.allObjects(),
 			scaler:  fx.scalerWith(),

@@ -177,22 +177,28 @@ func validateProfile(profile Profile) error {
 	//
 	// CONTEXT AND EXPERT PARALLEL MAY BE ZERO, because a measured system that
 	// does not use them states so with a zero width.
-	for name, width := range map[string]int{
-		"tensor parallel":     profile.Topology.TensorParallel,
-		"pipeline parallel":   profile.Topology.PipelineParallel,
-		"data parallel":       profile.Topology.DataParallel,
-		"local data parallel": profile.Topology.LocalDataParallel,
+	for _, entry := range []struct {
+		name  string
+		width int
+	}{
+		{"tensor parallel", profile.Topology.TensorParallel},
+		{"pipeline parallel", profile.Topology.PipelineParallel},
+		{"data parallel", profile.Topology.DataParallel},
+		{"local data parallel", profile.Topology.LocalDataParallel},
 	} {
-		if width <= 0 {
-			return fmt.Errorf("%s width %d is not positive", name, width)
+		if entry.width <= 0 {
+			return fmt.Errorf("%s width %d is not positive", entry.name, entry.width)
 		}
 	}
-	for name, width := range map[string]int{
-		"context parallel": profile.Topology.ContextParallel,
-		"expert parallel":  profile.Topology.ExpertParallel,
+	for _, entry := range []struct {
+		name  string
+		width int
+	}{
+		{"context parallel", profile.Topology.ContextParallel},
+		{"expert parallel", profile.Topology.ExpertParallel},
 	} {
-		if width < 0 {
-			return fmt.Errorf("%s width %d is negative", name, width)
+		if entry.width < 0 {
+			return fmt.Errorf("%s width %d is negative", entry.name, entry.width)
 		}
 	}
 	switch profile.Workload.CacheBehavior {

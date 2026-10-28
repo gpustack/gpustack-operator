@@ -258,6 +258,9 @@ func toProfile(d ProfileDocument) (Profile, error) {
 			ID: shape.String(),
 			// THE DOCUMENT PINS NO WEIGHT COMMIT AND NO WORKLOAD REVISION,
 			// because a public benchmark publishes a model name and a sweep.
+			// FLAT CATALOG DOCUMENTS ONLY CARRY PROFILES QUALIFIED UNDER
+			// ALL-MISS PROMPT ACCOUNTING (inputTokensPerSecond and
+			// totalTokensPerSecond count cache-missed prompt tokens).
 			Revision:      UnspecifiedRevision,
 			Modality:      "text",
 			CacheBehavior: CacheBehaviorAllMisses,
@@ -278,7 +281,12 @@ func toProfile(d ProfileDocument) (Profile, error) {
 				highest = i
 			}
 		}
-		profile.Points[highest].Saturation = &Saturation{Measured: true}
+		// THE HIGHEST CONCURRENCY POINT OF A MULTI-POINT SWEEP CAPS THE
+		// FEASIBLE CURVE WHEN EVERY MEASURED POINT MEETS THE LATENCY TARGET.
+		profile.Points[highest].Saturation = &Saturation{
+			Measured: true,
+			Note:     "highest concurrency point of the measured sweep",
+		}
 	}
 	digest, err := ProfileDigest(profile)
 	if err != nil {

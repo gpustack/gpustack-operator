@@ -3,10 +3,10 @@
 
 The suites prepare the node (engine images, model weights, the bench driver), measure a
 concurrency sweep into a valid priors.yaml catalog ConfigMap, run the frozen-manual versus
-tuned-manual versus catalog capacity arms on two parallel 4-GPU slots, drive Proportional,
-TokenThroughput and Predictive through a four-phase load wave with a two-second sampler,
-exercise the embedded catalog with zero configuration, and delegate the P/D and E/P/D legs
-to the scenario case. Every case is bounded: a case that fails or overruns its timeout dumps
+tuned-manual versus catalog capacity arms serially across TokenThroughput and Predictive, drive
+Proportional, TokenThroughput and Predictive through a four-phase load wave with a two-second
+sampler, exercise the embedded catalog with zero configuration, and delegate the P/D and E/P/D
+legs to the scenario case. Every case is bounded: a case that fails or overruns its timeout dumps
 a structured failure summary and the suite moves on to the next case.
 """
 
@@ -731,31 +731,34 @@ def run_load_phase(cluster, root, endpoint, workload, phase, concurrency, durati
         "--timeout", str(workload["requestTimeoutSeconds"]),
         "--out", f"{root}/{phase}.json", "--requests-out", f"{root}/{phase}_reqs.jsonl",
     ]
-    process = subprocess.Popen(
-        cluster.command(
-            ["exec", DRIVER["pod"], "-c", DRIVER["container"], "--",
-             "python3", "-c", rounds.REMOTE, "run", root, phase, str(seed), *arguments],
-            DRIVER["namespace"],
-        ),
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True,
-    )
-    try:
-        while process.poll() is None:
-            if sampler is not None:
-                sampler()
-            time.sleep(SAMPLER_INTERVAL_SECONDS)
-        _, stderr = process.communicate()
-        if process.returncode != 0:
-            raise ClusterError(f"load phase {phase} failed ({process.returncode}): {stderr.strip()[-2000:]}")
-        for artifact in (f"{phase}_reqs.jsonl", f"{phase}.json"):
-            (Path(out_dir) / artifact).write_text(cluster.exec_driver(root, "read", artifact))
-    finally:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                process.kill()
+    log_path = Path(out_dir) / f"{phase}.log"
+    with log_path.open("w") as log:
+        process = subprocess.Popen(
+            cluster.command(
+                ["exec", DRIVER["pod"], "-c", DRIVER["container"], "--",
+                 "python3", "-c", rounds.REMOTE, "run", root, phase, str(seed), *arguments],
+                DRIVER["namespace"],
+            ),
+            stdout=subprocess.DEVNULL, stderr=log, stdin=subprocess.DEVNULL, text=True,
+        )
+        try:
+            while process.poll() is None:
+                if sampler is not None:
+                    sampler()
+                time.sleep(SAMPLER_INTERVAL_SECONDS)
+            process.wait()
+            if process.returncode != 0:
+                stderr = log_path.read_text() if log_path.exists() else ""
+                raise ClusterError(f"load phase {phase} failed ({process.returncode}): {stderr.strip()[-2000:]}")
+            for artifact in (f"{phase}_reqs.jsonl", f"{phase}.json"):
+                (Path(out_dir) / artifact).write_text(cluster.exec_driver(root, "read", artifact))
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    process.kill()
 
 
 def read_request_records(out_dir, phase):
@@ -1073,11 +1076,11 @@ def write_capacity_inputs(directory, prefix, algorithm, options, tuned_capacity,
 
 
 def suite_capacity_arms(cluster, out_dir, options):
-    """Frozen-manual versus tuned-manual versus catalog, one slot per algorithm in parallel.
+    """Frozen-manual versus tuned-manual versus catalog, run serially per algorithm.
 
     The sweep catalog names the truth on this node, so the tuned arm reads its capacity
-    from the measured profile and the catalog arm resolves with none stated at all. Two
-    4-GPU slots run the TokenThroughput and the Predictive comparison side by side.
+    from the measured profile and the catalog arm resolves with none stated at all. The
+    TokenThroughput and Predictive comparisons run serially on the 4-GPU slot.
     """
     directory = Path(out_dir) / "capacity-arms"
     directory.mkdir(parents=True, exist_ok=True)
