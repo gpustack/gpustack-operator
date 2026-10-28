@@ -138,8 +138,14 @@ nebius compute platform list --parent-id <project-id> --format json \
            | .spec.presets[] | "\($p) \(.name) \(.allow_gpu_clustering)"'
 ```
 
-Fabric names are region-scoped, and there is no call that lists them. A name the
-region does not have is refused outright:
+Fabric names are region-scoped. Resource Advice lists configuration and fabric
+rows for a tenant; filter by the project's region, platform and preset:
+
+```bash
+nebius capacity resource-advice list --parent-id <tenant-id> --all --format json
+```
+
+A name the region does not have is refused outright:
 
 ```text
 code = NotFound desc = no infiniband fabric found with name = "<fabric>"
@@ -161,7 +167,7 @@ terraform apply \
   -var="project_id=$NEBIUS_PROJECT_ID" \
   -var='gpu_instance_types={
           gpu-sxm = { platform = "gpu-h100-sxm", preset = "8gpu-128vcpu-1600gb",
-                      infiniband_fabric = "fabric-5", boot_disk_size_gb = 400, node_count = 1 }
+                      infiniband_fabric = "fabric-2", boot_disk_size_gb = 400, node_count = 1 }
         }'
 ```
 
@@ -180,10 +186,9 @@ creating anything:
 clusters (`nebius compute gpu-cluster list`) and attaches to one whose fabric
 matches; it creates a cluster only when no match exists. When several clusters
 share the fabric, the lowest cluster ID wins, so the pick is stable across runs.
-The lookup is a `data.external`: it adds one CLI round trip to every `plan`,
-`apply` **and `destroy`** of a run that uses it (the same bargain the
-os/driver resolution makes), and it is skipped entirely when no group asks for a
-fabric — set `reuse_gpu_cluster = false` on the group to skip it there too.
+Preparation records this choice in a local snapshot. Price refreshes retain the
+binding; set a new `fabric_selection_revision` to select again. The examples
+below require the preparation workflow before `terraform apply`.
 
 **By ID, explicitly.** Name the cluster instead of the fabric — the two are
 mutually exclusive on one group, because the cluster already carries its fabric:
@@ -221,12 +226,21 @@ node can disappear mid-test and its Pods go with it. Use it for a group whose
 loss the test can absorb (a second accelerator flavour, a scale-out node), not
 for the one hosting the thing under test. The CPU group is always on-demand.
 
-On the node template, `preemptible = true` sets both `preemptible = {}` and
+Without a policy, on the node template, `preemptible = true` sets both `preemptible = {}` and
 `follows_spot_price = {}`. The spot pricing model is required by the Nebius API
 whenever a template is preemptible — a template naming only `preemptible` is
 rejected at apply time with `spec.pricing_model is invalid` — so the two always
 travel together. The `nebius` CLI equivalents (`>= 0.12.289`) are
 `--template-preemptible --template-follows-spot-price`.
+
+A preemptible GPU group can set `spot_max_price` to a decimal string with up to
+three fractional digits, or set `spot_pricing_policy_id` to an existing policy
+in the same project and platform. The fields are mutually exclusive. A max
+price creates a policy owned by this module; a policy ID remains externally
+owned. The maximum is per GPU per hour in USD, not a fixed charge or total
+budget. Changing the max price replaces the policy and node group. This path
+has been checked with mocked Terraform plans, but not with a live Nebius apply.
+`boot_disk_type` can also be overridden per GPU group.
 
 `preemptible` is per group, so a cluster can mix both: below, an on-demand H100
 group and a preemptible L40S one.
@@ -325,7 +339,7 @@ would be an image pull timing out.
 
 ## Prerequisites
 
-1. Install the [Nebius CLI](https://docs.nebius.com/cli), `terraform`, and
+1. Install the [Nebius CLI](https://docs.nebius.com/cli) (version 0.12.296 is recommended), `terraform`, and
    `kubectl`.
 2. A Nebius Service Account with an authorized key. Export:
    ```bash
@@ -572,3 +586,64 @@ out-of-band; otherwise pass a real preset from the matrix above.
 
 See `variables.tf` for the platform -> region and platform -> preset catalogs
 (shared with `computes/nebius`).
+
+## Preparing dynamic settings
+
+For history pricing or any GPU cluster/fabric selection, put the complete
+configuration in a variable file and run these commands in this module:
+
+```bash
+terraform apply -var-file=nebius.tfvars -target=null_resource.prepare
+terraform plan -var-file=nebius.tfvars
+terraform apply -var-file=nebius.tfvars
+```
+
+For example, `nebius.tfvars` can contain:
+
+```hcl
+project_id = "project-..."
+cpu_instance_types = {}
+gpu_instance_types = {
+  gpu = {
+    platform                = "gpu-h100-sxm"
+    preset                  = "8gpu-128vcpu-1600gb"
+    node_count              = 1
+    preemptible             = true
+    spot_price_from_history = true
+    spot_price_ceiling      = "2.000"
+    infiniband_fabric       = "auto"
+  }
+}
+```
+
+The first command reads project and pricing or capacity information and writes
+`.nebius-resolved.auto.tfvars.json` locally. It creates no Nebius resources.
+The full plan checks that the snapshot matches the inputs. To refresh prices,
+run the first command again with `-replace='null_resource.prepare[0]'`. A refresh
+keeps the fabric and GPU cluster binding; change `fabric_selection_revision`
+to request a new selection. Review the full plan before applying: a changed
+price replaces its VM or node group and owned pricing policy. Managed boot disks
+are deleted when their VM is destroyed.
+
+Set `spot_price_from_history = true` on a preemptible entry to use the larger
+of the current price and the highest 15-minute last-price sample over six
+hours, multiplied by 1.10 and rounded up to 0.001 USD per GPU-hour. The sampled
+high is not necessarily the highest instantaneous price. Optionally set
+`spot_price_ceiling` to a decimal string; the bid is capped at that value, so
+it may be below the current market and prevent scheduling. A failed or incomplete
+query leaves the previous snapshot untouched. Older CLI versions without the
+spot-price commands use the public REST API through `curl`; automatic fabric
+selection requires the Resource Advice CLI command. Explicit fabric or cluster
+selection remains available when Resource Advice is unavailable, with its
+availability recorded as unknown.
+
+`infiniband_fabric = "auto"` selects among matching project-region, platform and
+preset rows with fresh, positive availability for the requested capacity type.
+It prefers the highest available count, breaking ties by fabric name. Capacity
+advice is not a reservation. Set `gpu_cluster_id` to join a specific existing
+cluster; it is mutually exclusive with `infiniband_fabric`.
+
+Preparation requires `python3`, `curl`, and the authenticated Nebius CLI;
+existing image and compatibility lookups also require `bash` and `jq`. The
+examples and mocked checks use CLI 0.12.296; this is a recommendation, not a
+minimum for every operation.

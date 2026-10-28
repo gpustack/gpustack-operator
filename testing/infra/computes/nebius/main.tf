@@ -13,11 +13,15 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  vm_name = "${var.name_prefix}-${random_string.suffix.result}"
+  fabric_requested = var.instance_type.gpu_cluster_id != null || var.instance_type.infiniband_fabric != null
+  binding          = try(var.nebius_resolved.bindings.vm, null)
+  gpu_cluster_id   = var.instance_type.gpu_cluster_id != null ? var.instance_type.gpu_cluster_id : (var.instance_type.infiniband_fabric != null ? (try(local.binding.cluster_id, null) != null ? local.binding.cluster_id : try(nebius_compute_v1_gpu_cluster.this[0].id, null)) : null)
+  effective_price  = var.instance_type.spot_price_from_history ? try(var.nebius_resolved.prices.vm.max_price, "0.001") : var.instance_type.spot_max_price
+  vm_name          = "${var.name_prefix}-${random_string.suffix.result}"
 
   # Nebius returns network interface addresses as a CIDR (e.g. "1.2.3.4/32"); strip the suffix.
-  public_ip  = split("/", nebius_compute_v1_instance.this.status.network_interfaces[0].public_ip_address.address)[0]
-  private_ip = split("/", nebius_compute_v1_instance.this.status.network_interfaces[0].ip_address.address)[0]
+  public_ip  = var.public_ip ? try(split("/", nebius_compute_v1_instance.this.status.network_interfaces[0].public_ip_address.address)[0], null) : null
+  private_ip = try(split("/", nebius_compute_v1_instance.this.status.network_interfaces[0].ip_address.address)[0], null)
 }
 
 resource "nebius_vpc_v1_network" "this" {
@@ -180,6 +184,11 @@ resource "nebius_compute_v1_instance" "this" {
   parent_id = var.project_id
   name      = local.vm_name
 
+  preemptible         = var.instance_type.preemptible ? { on_preemption = "STOP" } : null
+  recovery_policy     = var.instance_type.preemptible ? "FAIL" : null
+  follows_spot_price  = var.instance_type.preemptible && local.effective_price == null && var.instance_type.spot_pricing_policy_id == null ? {} : null
+  spot_pricing_policy = var.instance_type.spot_pricing_policy_id != null ? { id = data.nebius_billing_v1_pricing_policy.external[0].id } : (local.effective_price != null ? { id = nebius_billing_v1_pricing_policy.this[0].id } : null)
+
   resources = {
     platform = var.instance_type.platform
     preset   = var.instance_type.preset
@@ -199,15 +208,22 @@ resource "nebius_compute_v1_instance" "this" {
     }
   }
 
-  # Joins the VM to an already-existing GPU cluster's InfiniBand fabric when instance_type
-  # names a gpu_cluster_id -- the thing that puts RDMA devices on it. The API accepts this only
-  # when the VM is created (never afterwards), and only for a preset whose allow_gpu_clustering
-  # is true; that flag is checked at plan in the data source above, on the unpinned path.
-  gpu_cluster = var.instance_type.gpu_cluster_id != null ? {
-    id = var.instance_type.gpu_cluster_id
+  # The binding comes from the explicit ID or the GPU cluster selected during preparation.
+  # Nebius only permits attaching the VM at creation.
+  gpu_cluster = local.gpu_cluster_id != null ? {
+    id = local.gpu_cluster_id
   } : null
 
   lifecycle {
+    replace_triggered_by = [null_resource.price]
+    precondition {
+      condition     = (!var.instance_type.spot_price_from_history && !local.fabric_requested) || (local.snapshot_valid && (!var.instance_type.spot_price_from_history || can(var.nebius_resolved.prices.vm.max_price)) && (!local.fabric_requested || can(var.nebius_resolved.bindings.vm.fabric)))
+      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning history pricing or fabric selection."
+    }
+    precondition {
+      condition     = var.instance_type.spot_pricing_policy_id == null ? true : (data.nebius_billing_v1_pricing_policy.external[0].parent_id == var.project_id && data.nebius_billing_v1_pricing_policy.external[0].compute_instance_spec.v1.platform == var.instance_type.platform)
+      error_message = "The pricing policy must belong to this project and platform."
+    }
     # The image publishes its own minimum (10 GiB driverless, 40 GiB CUDA) and the provider only
     # reports it as an apply-time error. Short-circuited with || so the pinned path -- where there is
     # nothing to compare against -- is not an error in itself.
@@ -221,7 +237,7 @@ resource "nebius_compute_v1_instance" "this" {
     name              = "eth0"
     subnet_id         = nebius_vpc_v1_subnet.this.id
     ip_address        = {}
-    public_ip_address = {}
+    public_ip_address = var.public_ip ? {} : null
     security_groups   = [{ id = nebius_vpc_v1_security_group.this.id }]
   }]
 
@@ -261,3 +277,45 @@ resource "null_resource" "last_apply" {
   }
 }
 
+
+resource "null_resource" "price" {
+  triggers = {
+    max_price   = local.effective_price
+    preemptible = var.instance_type.preemptible
+    policy_id   = var.instance_type.spot_pricing_policy_id
+    platform    = local.effective_price == null ? null : var.instance_type.platform
+  }
+}
+
+resource "nebius_billing_v1_pricing_policy" "this" {
+  count                 = local.effective_price != null ? 1 : 0
+  parent_id             = var.project_id
+  name                  = "${local.vm_name}-spot"
+  compute_instance_spec = { v1 = { platform = var.instance_type.platform } }
+  pricing               = { max_price_v1 = { max_price = local.effective_price } }
+  lifecycle {
+    replace_triggered_by = [null_resource.price]
+    precondition {
+      condition     = !var.instance_type.spot_price_from_history || (local.snapshot_valid && try(var.nebius_resolved.prices.vm.max_price != null && var.nebius_resolved.prices.vm.max_price != "", false))
+      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning history pricing."
+    }
+  }
+}
+
+data "nebius_billing_v1_pricing_policy" "external" {
+  count = var.instance_type.spot_pricing_policy_id != null ? 1 : 0
+  id    = var.instance_type.spot_pricing_policy_id
+}
+
+resource "nebius_compute_v1_gpu_cluster" "this" {
+  count             = var.instance_type.infiniband_fabric != null && try(var.nebius_resolved.bindings.vm.cluster_id, null) == null ? 1 : 0
+  parent_id         = var.project_id
+  name              = "${local.vm_name}-gpu"
+  infiniband_fabric = try(var.nebius_resolved.bindings.vm.fabric, null)
+  lifecycle {
+    precondition {
+      condition     = local.snapshot_valid && try(var.nebius_resolved.bindings.vm.fabric != null && var.nebius_resolved.bindings.vm.fabric != "", false)
+      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning fabric selection."
+    }
+  }
+}
