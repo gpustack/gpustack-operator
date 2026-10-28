@@ -117,3 +117,83 @@ func TestGetLogicalSliced(t *testing.T) {
 		})
 	}
 }
+
+func TestEvaluateDeviceUnhealthy(t *testing.T) {
+	testCases := []struct {
+		name      string
+		health    uint32
+		healthRet dcmi.Return
+		eccInfo   dcmi.EccInfo
+		eccRet    dcmi.Return
+		want      bool
+	}{
+		{
+			name:      "normal health status is healthy",
+			health:    0,
+			healthRet: dcmi.SUCCESS,
+			want:      false,
+		},
+		{
+			name:      "minor alarm health status remains healthy even with single-bit ECC",
+			health:    1,
+			healthRet: dcmi.SUCCESS,
+			eccInfo:   dcmi.EccInfo{Enable_flag: 1, Single_bit_error_cnt: 12},
+			eccRet:    dcmi.SUCCESS,
+			want:      false,
+		},
+		{
+			name:      "major alarm health status is unhealthy",
+			health:    2,
+			healthRet: dcmi.SUCCESS,
+			want:      true,
+		},
+		{
+			name:      "critical alarm health status is unhealthy",
+			health:    3,
+			healthRet: dcmi.SUCCESS,
+			want:      true,
+		},
+		{
+			name:      "not-found sentinel health status is unhealthy",
+			health:    0xFFFFFFFF,
+			healthRet: dcmi.SUCCESS,
+			want:      true,
+		},
+		{
+			name:      "health query unavailable falls back to ECC and ignores single-bit error",
+			healthRet: dcmi.ERROR_FUNCTION_NOT_FOUND,
+			eccInfo:   dcmi.EccInfo{Enable_flag: 1, Single_bit_error_cnt: 5, Double_bit_error_cnt: 0},
+			eccRet:    dcmi.SUCCESS,
+			want:      false,
+		},
+		{
+			name:      "health query unavailable falls back to ECC and marks double-bit error unhealthy",
+			healthRet: dcmi.ERROR_FUNCTION_NOT_FOUND,
+			eccInfo:   dcmi.EccInfo{Enable_flag: 1, Single_bit_error_cnt: 5, Double_bit_error_cnt: 1},
+			eccRet:    dcmi.SUCCESS,
+			want:      true,
+		},
+		{
+			name:      "health query unavailable with ECC disabled is healthy",
+			healthRet: dcmi.ERROR_FUNCTION_NOT_FOUND,
+			eccInfo:   dcmi.EccInfo{Enable_flag: 0, Double_bit_error_cnt: 1},
+			eccRet:    dcmi.SUCCESS,
+			want:      false,
+		},
+		{
+			name:      "both health and ECC queries unavailable is healthy",
+			healthRet: dcmi.ERROR_FUNCTION_NOT_FOUND,
+			eccRet:    dcmi.ERROR_NOT_SUPPORT,
+			want:      false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := evaluateDeviceUnhealthy(tc.health, tc.healthRet, func() (dcmi.EccInfo, dcmi.Return) {
+				return tc.eccInfo, tc.eccRet
+			})
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

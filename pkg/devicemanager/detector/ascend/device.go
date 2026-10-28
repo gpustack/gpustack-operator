@@ -179,18 +179,10 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 						continue
 					}
 					memory = memInfo.Memory_size
-
-					eccInfo, ret := dev.GetEccInfo(dcmi.DEVICE_TYPE_DDR)
-					if ret.IsSuccess() && eccInfo.Enable_flag > 0 {
-						memoryUnhealthy = eccInfo.Single_bit_error_cnt > 0 || eccInfo.Double_bit_error_cnt > 0
-					}
+					memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_DDR)
 				} else {
 					memory = hbmInfo.Memory_size
-
-					eccInfo, ret := dev.GetEccInfo(dcmi.DEVICE_TYPE_HBM)
-					if ret.IsSuccess() && eccInfo.Enable_flag > 0 {
-						memoryUnhealthy = eccInfo.Single_bit_error_cnt > 0 || eccInfo.Double_bit_error_cnt > 0
-					}
+					memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_HBM)
 				}
 			}
 
@@ -363,20 +355,12 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 					memory = memInfo.Memory_size
 					memoryUsage = memInfo.Memory_size - memInfo.Memory_available
 					memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-
-					eccInfo, ret := dev.GetEccInfo(dcmi.DEVICE_TYPE_DDR)
-					if ret.IsSuccess() && eccInfo.Enable_flag > 0 {
-						memoryUnhealthy = eccInfo.Single_bit_error_cnt > 0 || eccInfo.Double_bit_error_cnt > 0
-					}
+					memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_DDR)
 				} else {
 					memory = hbmInfo.Memory_size
 					memoryUsage = hbmInfo.Memory_usage
 					memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-
-					eccInfo, ret := dev.GetEccInfo(dcmi.DEVICE_TYPE_HBM)
-					if ret.IsSuccess() && eccInfo.Enable_flag > 0 {
-						memoryUnhealthy = eccInfo.Single_bit_error_cnt > 0 || eccInfo.Double_bit_error_cnt > 0
-					}
+					memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_HBM)
 				}
 			}
 
@@ -595,6 +579,25 @@ func getLogicalSliced(family, runtimeVersion string) device.AcceleratorLogicalSl
 		Count:                     63,
 		CoresPercentageOvercommit: true,
 	}
+}
+
+// isDeviceUnhealthy checks the DCMI device health state first (0 = Normal, 1 = Minor alarm,
+// >= 2 = Major/Critical/Not-Found) and falls back to uncorrectable double-bit ECC errors
+// only when the health query fails.
+func isDeviceUnhealthy(dev dcmi.Device, memType dcmi.DeviceType) bool {
+	health, ret := dev.GetHealth()
+	return evaluateDeviceUnhealthy(health, ret, func() (dcmi.EccInfo, dcmi.Return) {
+		return dev.GetEccInfo(memType)
+	})
+}
+
+func evaluateDeviceUnhealthy(health uint32, healthRet dcmi.Return, readECC func() (dcmi.EccInfo, dcmi.Return)) bool {
+	if healthRet.IsSuccess() {
+		return health >= 2
+	}
+
+	eccInfo, eccRet := readECC()
+	return eccRet.IsSuccess() && eccInfo.Enable_flag > 0 && eccInfo.Double_bit_error_cnt > 0
 }
 
 func getFamilyFromSocName(socName string) string {

@@ -350,6 +350,26 @@ func (l Device) GetPowerInfo() (int32, Return) {
 	return power, ret
 }
 
+// GetHealth retrieves the overall health status of the device.
+// Status values: 0 = Normal, 1 = Minor alarm, 2 = Major alarm, 3 = Critical alarm, 0xFFFFFFFF = Device not found.
+func (l Device) GetHealth() (uint32, Return) {
+	var health uint32
+
+	if apiVersion() == APIVersionV2 {
+		devId, ret := l.devID()
+		if !ret.IsSuccess() {
+			return 0, ret
+		}
+		ret = Return(dcmiv2GetDeviceHealth(devId, &health))
+
+		return health, ret
+	}
+
+	ret := Return(dcmiGetDeviceHealth(l.cardId, l.deviceId, &health))
+
+	return health, ret
+}
+
 // GetPhysicalID retrieves the physical ID of the device,
 // which is used for identifying the device in a physical topology.
 //
