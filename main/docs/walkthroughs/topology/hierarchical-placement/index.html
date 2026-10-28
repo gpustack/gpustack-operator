@@ -1571,7 +1571,8 @@ stored in a <code>ConfigMap</code>:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-system</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">data</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">snapshot.yaml</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
-</span></span></span><span class="line"><span class="cl"><span class="sd">    apiVersion: topology.gpustack.ai/v1alpha1
+</span></span></span><span class="line"><span class="cl"><span class="sd">    apiVersion: worker.gpustack.ai/v1alpha1
+</span></span></span><span class="line"><span class="cl"><span class="sd">    kind: TopologySourceConfiguration
 </span></span></span><span class="line"><span class="cl"><span class="sd">    revision: inventory-42
 </span></span></span><span class="line"><span class="cl"><span class="sd">    nodes:
 </span></span></span><span class="line"><span class="cl"><span class="sd">      worker-a:
@@ -1630,7 +1631,8 @@ network latency.</p>
 </span></span><span class="line"><span class="cl">   namespace: gpustack-system
 </span></span><span class="line"><span class="cl"> data:
 </span></span><span class="line"><span class="cl">   snapshot.yaml: |
-</span></span><span class="line"><span class="cl">     apiVersion: topology.gpustack.ai/v1alpha1
+</span></span><span class="line"><span class="cl">     apiVersion: worker.gpustack.ai/v1alpha1
+</span></span><span class="line"><span class="cl">     kind: TopologySourceConfiguration
 </span></span><span class="line"><span class="cl"><span class="gd">-    revision: inventory-42
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    revision: inventory-43
 </span></span></span><span class="line"><span class="cl"><span class="gi"></span>     nodes:
@@ -1726,7 +1728,7 @@ and <a href="/gpustack-operator/main/docs/modules/topology/operations/#change-a-
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/ddd2578fb3275ed991fb5f32890f27e76e43ebbc/docs/walkthroughs/topology/hierarchical-placement.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/fb0b75810cc391698292efe6d9af84047ae7c4f0/docs/walkthroughs/topology/hierarchical-placement.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/topology/hierarchical-placement.md">Edit this page</a>
             

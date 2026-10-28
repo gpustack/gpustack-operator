@@ -124,7 +124,8 @@ metadata:
   namespace: gpustack-system
 data:
   snapshot.yaml: |
-    apiVersion: topology.gpustack.ai/v1alpha1
+    apiVersion: worker.gpustack.ai/v1alpha1
+    kind: TopologySourceConfiguration
     revision: inventory-42
     nodes:
       worker-a:
@@ -190,7 +191,8 @@ When a node is cabled into a new rack, update the `ConfigMap` snapshot with an i
    namespace: gpustack-system
  data:
    snapshot.yaml: |
-     apiVersion: topology.gpustack.ai/v1alpha1
+     apiVersion: worker.gpustack.ai/v1alpha1
+     kind: TopologySourceConfiguration
 -    revision: inventory-42
 +    revision: inventory-43
      nodes:

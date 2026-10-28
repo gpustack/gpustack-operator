@@ -128,7 +128,8 @@ The `ConfigMap` and its `TopologySource` reference must be in the worker namespa
 contains YAML or JSON with this schema:
 
 ```yaml
-apiVersion: topology.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: TopologySourceConfiguration
 revision: inventory-42
 nodes:
   worker-a:
