@@ -785,6 +785,7 @@ var presetFamilyCases = []struct {
 	{"a bare name two families answer to", "v100", ""},
 	{"the same name with its vendor", "NVIDIA V100", "nvidia-v100"},
 	{"the board of another vendor", "Iluvatar BI-V100", "iluvatar-bi-v100"},
+	{"a vendor-led name does not fall through to another vendor's family", "NVIDIA BI-V100", ""},
 }
 
 // TestResolveAcceleratorFamily asserts the family a raw accelerator name resolves to.

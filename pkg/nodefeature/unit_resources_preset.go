@@ -189,9 +189,7 @@ func (t *unitResourcesPresets) resolveAcceleratorFamily(raw string) string {
 	// A name that leads with a manufacturer is resolved against that
 	// manufacturer alone, because the vendor settles what the product is.
 	if _UnitResourcesPresetManufacturers.Has(tokens[0]) {
-		if family := t.acceleratorFamily(tokens[0], raw); family != "" {
-			return family
-		}
+		return t.acceleratorFamily(tokens[0], raw)
 	}
 
 	return t.resolveFamilyTokens(tokens)

@@ -2,6 +2,7 @@ package priors
 
 import (
 	"fmt"
+	"sync"
 
 	_ "embed"
 )
@@ -30,16 +31,20 @@ const LegacyCatalogConfigMapKey = "priors.json"
 //go:embed priors.yaml
 var embeddedCatalog []byte
 
-// LoadEmbedded returns the catalog shipped with the operator.
-//
-// IT IS PARSED AND CHECKED, so a catalog that was generated wrong fails here
-// instead of at the first resolution.
-func LoadEmbedded() (*Catalog, error) {
+var loadEmbeddedOnce = sync.OnceValues(func() (*Catalog, error) {
 	catalog, err := ParseCatalog(embeddedCatalog)
 	if err != nil {
 		return nil, fmt.Errorf("parse embedded catalog: %w", err)
 	}
 	return catalog, nil
+})
+
+// LoadEmbedded returns the catalog shipped with the operator.
+//
+// IT IS PARSED AND CHECKED ONCE, so a catalog that was generated wrong fails
+// here instead of at the first resolution without re-parsing on every call.
+func LoadEmbedded() (*Catalog, error) {
+	return loadEmbeddedOnce()
 }
 
 // EmbeddedBytes returns the raw bytes of the catalog shipped with the
