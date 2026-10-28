@@ -15,7 +15,7 @@ resource "random_string" "suffix" {
 locals {
   fabric_requested = var.instance_type.gpu_cluster_id != null || var.instance_type.infiniband_fabric != null
   binding          = try(var.nebius_resolved.bindings.vm, null)
-  gpu_cluster_id   = var.instance_type.gpu_cluster_id != null ? var.instance_type.gpu_cluster_id : (var.instance_type.infiniband_fabric != null ? coalesce(try(local.binding.cluster_id, null), try(nebius_compute_v1_gpu_cluster.this[0].id, null), "pending") : null)
+  gpu_cluster_id   = var.instance_type.gpu_cluster_id != null ? var.instance_type.gpu_cluster_id : (var.instance_type.infiniband_fabric != null ? (try(local.binding.cluster_id, null) != null ? local.binding.cluster_id : try(nebius_compute_v1_gpu_cluster.this[0].id, null)) : null)
   effective_price  = var.instance_type.spot_price_from_history ? try(var.nebius_resolved.prices.vm.max_price, "0.001") : var.instance_type.spot_max_price
   vm_name          = "${var.name_prefix}-${random_string.suffix.result}"
 
@@ -218,7 +218,7 @@ resource "nebius_compute_v1_instance" "this" {
     replace_triggered_by = [null_resource.price]
     precondition {
       condition     = (!var.instance_type.spot_price_from_history && !local.fabric_requested) || (local.snapshot_valid && (!var.instance_type.spot_price_from_history || can(var.nebius_resolved.prices.vm.max_price)) && (!local.fabric_requested || can(var.nebius_resolved.bindings.vm.fabric)))
-      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning history pricing."
+      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning history pricing or fabric selection."
     }
     precondition {
       condition     = var.instance_type.spot_pricing_policy_id == null ? true : (data.nebius_billing_v1_pricing_policy.external[0].parent_id == var.project_id && data.nebius_billing_v1_pricing_policy.external[0].compute_instance_spec.v1.platform == var.instance_type.platform)
@@ -295,6 +295,10 @@ resource "nebius_billing_v1_pricing_policy" "this" {
   pricing               = { max_price_v1 = { max_price = local.effective_price } }
   lifecycle {
     replace_triggered_by = [null_resource.price]
+    precondition {
+      condition     = !var.instance_type.spot_price_from_history || (local.snapshot_valid && try(var.nebius_resolved.prices.vm.max_price != null && var.nebius_resolved.prices.vm.max_price != "", false))
+      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning history pricing."
+    }
   }
 }
 
@@ -307,5 +311,11 @@ resource "nebius_compute_v1_gpu_cluster" "this" {
   count             = var.instance_type.infiniband_fabric != null && try(var.nebius_resolved.bindings.vm.cluster_id, null) == null ? 1 : 0
   parent_id         = var.project_id
   name              = "${local.vm_name}-gpu"
-  infiniband_fabric = try(var.nebius_resolved.bindings.vm.fabric, "pending")
+  infiniband_fabric = try(var.nebius_resolved.bindings.vm.fabric, null)
+  lifecycle {
+    precondition {
+      condition     = local.snapshot_valid && try(var.nebius_resolved.bindings.vm.fabric != null && var.nebius_resolved.bindings.vm.fabric != "", false)
+      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning fabric selection."
+    }
+  }
 }

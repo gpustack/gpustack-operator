@@ -267,7 +267,7 @@ variable "switch_kube_context" {
 }
 
 variable "nebius_resolved" {
-  description = "Internal snapshot written by null_resource.prepare."
+  description = "Internal snapshot written by null_resource.prepare: fingerprint, project_id, region, prices by group, and bindings by group."
   type        = any
   default     = null
 }

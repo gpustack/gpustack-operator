@@ -40,7 +40,7 @@ run "history_requires_snapshot" {
   variables {
     gpu_instance_types = { gpu = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb", node_count = 1, preemptible = true, spot_price_from_history = true } }
   }
-  expect_failures = [nebius_mk8s_v1_node_group.this["gpu"]]
+  expect_failures = [nebius_billing_v1_pricing_policy.this["gpu"]]
 }
 
 run "fabric_requires_snapshot" {
@@ -48,5 +48,16 @@ run "fabric_requires_snapshot" {
   variables {
     gpu_instance_types = { gpu = { platform = "gpu-h100-sxm", preset = "8gpu-128vcpu-1600gb", node_count = 1, infiniband_fabric = "auto" } }
   }
-  expect_failures = [nebius_mk8s_v1_node_group.this["gpu"]]
+  expect_failures = [nebius_compute_v1_gpu_cluster.this["gpu"]]
+}
+
+run "targeted_policy_requires_snapshot" {
+  command = plan
+  plan_options {
+    target = [nebius_billing_v1_pricing_policy.this["gpu"]]
+  }
+  variables {
+    gpu_instance_types = { gpu = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb", node_count = 1, preemptible = true, spot_price_from_history = true } }
+  }
+  expect_failures = [nebius_billing_v1_pricing_policy.this["gpu"]]
 }

@@ -97,7 +97,7 @@ locals {
   gpu_cluster_ids = {
     for name, cfg in var.gpu_instance_types : name =>
     cfg.gpu_cluster_id != null ? cfg.gpu_cluster_id :
-    (cfg.infiniband_fabric != null ? coalesce(try(var.nebius_resolved.bindings[name].cluster_id, null), lookup(local.created_gpu_cluster_ids, name, null), "pending") : null)
+    (cfg.infiniband_fabric != null ? (try(var.nebius_resolved.bindings[name].cluster_id, null) != null ? var.nebius_resolved.bindings[name].cluster_id : lookup(local.created_gpu_cluster_ids, name, null)) : null)
   }
 
   # Node preparation, per GPU node group — keyed by group because half of it is MIG-only. The
@@ -342,7 +342,13 @@ resource "nebius_compute_v1_gpu_cluster" "this" {
 
   parent_id         = var.project_id
   name              = "${local.cluster_name}-${each.key}"
-  infiniband_fabric = try(var.nebius_resolved.bindings[each.key].fabric, "pending")
+  infiniband_fabric = try(var.nebius_resolved.bindings[each.key].fabric, null)
+  lifecycle {
+    precondition {
+      condition     = local.snapshot_valid && try(var.nebius_resolved.bindings[each.key].fabric != null && var.nebius_resolved.bindings[each.key].fabric != "", false)
+      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning fabric selection."
+    }
+  }
 }
 
 resource "nebius_mk8s_v1_node_group" "this" {
@@ -358,7 +364,7 @@ resource "nebius_mk8s_v1_node_group" "this" {
     }
     precondition {
       condition     = (!try(var.gpu_instance_types[each.key].spot_price_from_history, false) && !try(var.gpu_instance_types[each.key].infiniband_fabric != null || var.gpu_instance_types[each.key].gpu_cluster_id != null, false)) || (local.snapshot_valid && (!try(var.gpu_instance_types[each.key].spot_price_from_history, false) || can(var.nebius_resolved.prices[each.key].max_price)) && (!try(var.gpu_instance_types[each.key].infiniband_fabric != null || var.gpu_instance_types[each.key].gpu_cluster_id != null, false) || can(var.nebius_resolved.bindings[each.key].fabric)))
-      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning history pricing."
+      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning history pricing or fabric selection."
     }
     precondition {
       condition     = each.value.spot_pricing_policy_id == null ? true : (data.nebius_billing_v1_pricing_policy.external[each.key].parent_id == var.project_id && data.nebius_billing_v1_pricing_policy.external[each.key].compute_instance_spec.v1.platform == each.value.instance_type.platform)
@@ -558,6 +564,10 @@ resource "nebius_billing_v1_pricing_policy" "this" {
   pricing               = { max_price_v1 = { max_price = local.node_groups[each.key].spot_max_price } }
   lifecycle {
     replace_triggered_by = [null_resource.price[each.key]]
+    precondition {
+      condition     = !each.value.spot_price_from_history || (local.snapshot_valid && try(var.nebius_resolved.prices[each.key].max_price != null && var.nebius_resolved.prices[each.key].max_price != "", false))
+      error_message = "Run terraform apply -target=null_resource.prepare with the same variables before planning history pricing."
+    }
   }
 }
 
