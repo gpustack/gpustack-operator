@@ -93,6 +93,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&NodeModelStore{},
 		&NodeModelStoreList{},
 		&TopologySource{},
+		&TopologySourceConfiguration{},
 		&TopologySourceList{},
 	)
 	// AddToGroupVersion allows the serialization of client types like ListOptions.

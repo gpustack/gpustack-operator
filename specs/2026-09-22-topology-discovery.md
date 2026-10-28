@@ -133,7 +133,8 @@ validated HTTPS URL itself and never forwards caller-controlled authorization he
 ConfigMap and webhook use one JSON or YAML snapshot schema:
 
 ```yaml
-apiVersion: topology.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: TopologySourceConfiguration
 revision: inventory-42
 nodes:
   worker-a:

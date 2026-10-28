@@ -39,7 +39,7 @@ func TestFetchTopologyWebhookUsesConfiguredCAAndBearerToken(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_, _ = w.Write([]byte(`{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"inventory-1","nodes":{}}`))
+		_, _ = w.Write([]byte(`{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"inventory-1","nodes":{}}`))
 	}))
 	defer server.Close()
 	certificate := server.Certificate()
@@ -62,7 +62,7 @@ func TestFetchTopologyWebhookUsesMutualTLS(t *testing.T) {
 	clientPool := x509.NewCertPool()
 	clientPool.AddCert(clientCertificate)
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"mtls-1","nodes":{}}`))
+		_, _ = w.Write([]byte(`{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"mtls-1","nodes":{}}`))
 	}))
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: clientPool}
 	server.StartTLS()
@@ -130,7 +130,7 @@ func TestFetchTopologyWebhookRejectsBadCertificateAndHonorsDeadline(t *testing.T
 		{
 			name: "bad certificate",
 			handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(`{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"bad-ca","nodes":{}}`))
+				_, _ = w.Write([]byte(`{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"bad-ca","nodes":{}}`))
 			}),
 			configure: func(source *workercore.TopologySource, _ *core.ConfigMap) {
 				source.Spec.Webhook.CABundleConfigMapRef = nil
@@ -141,7 +141,7 @@ func TestFetchTopologyWebhookRejectsBadCertificateAndHonorsDeadline(t *testing.T
 			name: "deadline",
 			handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				time.Sleep(100 * time.Millisecond)
-				_, _ = w.Write([]byte(`{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"late","nodes":{}}`))
+				_, _ = w.Write([]byte(`{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"late","nodes":{}}`))
 			}),
 			timeout: 10 * time.Millisecond,
 		},
@@ -174,7 +174,7 @@ func TestFetchTopologyWebhookReloadsBearerToken(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_, _ = w.Write([]byte(`{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"rotated","nodes":{}}`))
+		_, _ = w.Write([]byte(`{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"rotated","nodes":{}}`))
 	}))
 	defer server.Close()
 	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
@@ -200,7 +200,7 @@ func TestFetchTopologyWebhookReadsCredentialFromAPI(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_, _ = w.Write([]byte(`{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"current","nodes":{}}`))
+		_, _ = w.Write([]byte(`{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"current","nodes":{}}`))
 	}))
 	defer server.Close()
 	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
@@ -265,7 +265,7 @@ func TestTopologySourceWebhookStalenessExpiryAndRecovery(t *testing.T) {
 			w.WriteHeader(code)
 			return
 		}
-		_, _ = w.Write([]byte(`{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"inventory-1","nodes":{"node-a":{"topology.gpustack.ai/rack":"rack-a"}}}`))
+		_, _ = w.Write([]byte(`{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"inventory-1","nodes":{"node-a":{"topology.gpustack.ai/rack":"rack-a"}}}`))
 	}))
 	defer server.Close()
 	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
@@ -311,7 +311,7 @@ func TestTopologySourceWebhookStalenessExpiryAndRecovery(t *testing.T) {
 
 func TestTopologySourceWebhookConflictUsesShorterRequeue(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"inventory-1","nodes":{"node-a":{"topology.gpustack.ai/rack":"rack-a"}}}`))
+		_, _ = w.Write([]byte(`{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"inventory-1","nodes":{"node-a":{"topology.gpustack.ai/rack":"rack-a"}}}`))
 	}))
 	defer server.Close()
 	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
@@ -426,13 +426,13 @@ func (zeroReader) Read(data []byte) (int, error) {
 // any success the source reports the rejection, after a success the last valid NodeFeature is
 // retained as Stale, and once maxStaleness passes it is removed as Expired.
 func TestTopologySourceWebhookRejectsInvalidSnapshotContent(t *testing.T) {
-	const valid = `{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"inventory-1","nodes":{"node-a":{"topology.kubernetes.io/zone":"zone-a","topology.gpustack.ai/rack":"rack-a"}}}`
+	const valid = `{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"inventory-1","nodes":{"node-a":{"topology.kubernetes.io/zone":"zone-a","topology.gpustack.ai/rack":"rack-a"}}}`
 	tests := []struct {
 		name    string
 		invalid string
 	}{
-		{name: "unknown node", invalid: `{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"inventory-2","nodes":{"ghost":{"topology.kubernetes.io/zone":"zone-a","topology.gpustack.ai/rack":"rack-a"}}}`},
-		{name: "different standard zone", invalid: `{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"inventory-2","nodes":{"node-a":{"topology.kubernetes.io/zone":"zone-b","topology.gpustack.ai/rack":"rack-a"}}}`},
+		{name: "unknown node", invalid: `{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"inventory-2","nodes":{"ghost":{"topology.kubernetes.io/zone":"zone-a","topology.gpustack.ai/rack":"rack-a"}}}`},
+		{name: "different standard zone", invalid: `{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"inventory-2","nodes":{"node-a":{"topology.kubernetes.io/zone":"zone-b","topology.gpustack.ai/rack":"rack-a"}}}`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

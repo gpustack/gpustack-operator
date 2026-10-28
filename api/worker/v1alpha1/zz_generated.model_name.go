@@ -946,6 +946,11 @@ func (in TopologySourceConfigMap) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in TopologySourceConfiguration) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.TopologySourceConfiguration"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in TopologySourceList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.TopologySourceList"
 }

@@ -286,7 +286,7 @@ YAML
 snapshot_yaml() {
   local revision="$1" label="$2" mode="$3"
   kubectl get nodes -o json | jq -r --arg revision "$revision" --arg label "$label" --arg mode "$mode" '
-    "apiVersion: topology.gpustack.ai/v1alpha1\nrevision: " + $revision + "\nnodes:\n" +
+    "apiVersion: worker.gpustack.ai/v1alpha1\nkind: TopologySourceConfiguration\nrevision: " + $revision + "\nnodes:\n" +
     ([.items | map(select(.metadata.labels["topology.gpustack.ai/e2e-rack"] == "enabled"))
       | sort_by(.metadata.name) | to_entries[] |
       "  " + .value.metadata.name + ":\n" +

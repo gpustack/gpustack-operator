@@ -65,9 +65,12 @@ func TestValidateTopologySnapshot(t *testing.T) {
 		Levels: []string{core.LabelTopologyRegion, core.LabelTopologyZone, "topology.gpustack.ai/rack"},
 	}}
 	selected := map[string]struct{}{"node-a": {}, "node-b": {}}
-	valid := topologySnapshot{
-		APIVersion: topologySnapshotAPIVersion,
-		Revision:   "inventory-1",
+	valid := workercore.TopologySourceConfiguration{
+		TypeMeta: meta.TypeMeta{
+			APIVersion: workercore.GroupVersion.String(),
+			Kind:       topologySourceConfigurationKind,
+		},
+		Revision: "inventory-1",
 		Nodes: map[string]map[string]string{
 			"node-a": {core.LabelTopologyRegion: "region-a", core.LabelTopologyZone: "zone-a", "topology.gpustack.ai/rack": "rack-a"},
 			"node-b": {core.LabelTopologyRegion: "region-a", core.LabelTopologyZone: "zone-a", "topology.gpustack.ai/rack": "rack-b"},
@@ -75,21 +78,29 @@ func TestValidateTopologySnapshot(t *testing.T) {
 	}
 	tests := []struct {
 		name  string
-		edit  func(*topologySnapshot)
+		edit  func(*workercore.TopologySourceConfiguration)
 		valid bool
 	}{
-		{name: "valid", edit: func(*topologySnapshot) {}, valid: true},
-		{name: "unknown node", edit: func(snapshot *topologySnapshot) {
+		{name: "valid", edit: func(*workercore.TopologySourceConfiguration) {}, valid: true},
+		{name: "unsupported apiVersion", edit: func(snapshot *workercore.TopologySourceConfiguration) {
+			snapshot.APIVersion = "topology.gpustack.ai/v1alpha1"
+		}},
+		{name: "unsupported kind", edit: func(snapshot *workercore.TopologySourceConfiguration) {
+			snapshot.Kind = "TopologySnapshot"
+		}},
+		{name: "unknown node", edit: func(snapshot *workercore.TopologySourceConfiguration) {
 			snapshot.Nodes["unknown"] = map[string]string{core.LabelTopologyRegion: "region-a"}
 		}},
-		{name: "incomplete parent chain", edit: func(snapshot *topologySnapshot) {
+		{name: "incomplete parent chain", edit: func(snapshot *workercore.TopologySourceConfiguration) {
 			snapshot.Nodes["node-b"] = map[string]string{core.LabelTopologyZone: "zone-a"}
 		}},
-		{name: "non-tree hierarchy", edit: func(snapshot *topologySnapshot) {
+		{name: "non-tree hierarchy", edit: func(snapshot *workercore.TopologySourceConfiguration) {
 			snapshot.Nodes["node-b"][core.LabelTopologyZone] = "zone-b"
 			snapshot.Nodes["node-b"]["topology.gpustack.ai/rack"] = "rack-a"
 		}},
-		{name: "undeclared label", edit: func(snapshot *topologySnapshot) { snapshot.Nodes["node-a"]["topology.gpustack.ai/fabric"] = "fabric-a" }},
+		{name: "undeclared label", edit: func(snapshot *workercore.TopologySourceConfiguration) {
+			snapshot.Nodes["node-a"]["topology.gpustack.ai/fabric"] = "fabric-a"
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
