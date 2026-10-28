@@ -103,6 +103,7 @@ var (
 	_ func(Device) UtilizationRateHandler                         = Device.GetUtilizationRateV
 	_ func(Device) (int32, Return)                                = Device.GetTemperature
 	_ func(Device) (int32, Return)                                = Device.GetPowerInfo
+	_ func(Device) (uint32, Return)                               = Device.GetHealth
 	_ func(Device) (uint32, Return)                               = Device.GetPhysicalID
 	_ func(Device) PcieInfoHandler                                = Device.GetPcieInfoV
 	_ func(Device) (HbmInfo, Return)                              = Device.GetHbmInfo

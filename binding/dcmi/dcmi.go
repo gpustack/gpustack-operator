@@ -189,6 +189,19 @@ func dcmiGetDeviceHbmInfo(CardId int32, DeviceId int32, HbmInfo *HbmInfo) int32 
 	return __v
 }
 
+// dcmiGetDeviceHealth function as declared in dcmi/dcmi_wrapper.h:59
+func dcmiGetDeviceHealth(CardId int32, DeviceId int32, Health *uint32) int32 {
+	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
+	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
+	cHealth, cHealthAllocMap := (*C.uint)(unsafe.Pointer(Health)), cgoAllocsUnknown
+	__ret := C.w_dcmi_get_device_health(cCardId, cDeviceId, cHealth)
+	runtime.KeepAlive(cHealthAllocMap)
+	runtime.KeepAlive(cDeviceIdAllocMap)
+	runtime.KeepAlive(cCardIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
 // dcmiGetDeviceInfo function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceInfo(CardId int32, DeviceId int32, MainCmd MainCmd, SubCmd uint32, Buf unsafe.Pointer, Size *uint32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown

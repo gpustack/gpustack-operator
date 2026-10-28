@@ -11,6 +11,7 @@
     X(int, dcmi_get_device_utilization_rate_v2, (int card_id, int device_id, struct dcmi_multi_utilization_info *util_info), (card_id, device_id, util_info)) \
     X(int, dcmi_get_device_temperature, (int card_id, int device_id, int *temperature), (card_id, device_id, temperature)) \
     X(int, dcmi_get_device_power_info, (int card_id, int device_id, int *power), (card_id, device_id, power)) \
+    X(int, dcmi_get_device_health, (int card_id, int device_id, unsigned int *health), (card_id, device_id, health)) \
     X(int, dcmi_get_device_logic_id, (int *device_logic_id, int card_id, int device_id), (device_logic_id, card_id, device_id)) \
     X(int, dcmi_get_device_phyid_from_logicid, (unsigned int logicid, unsigned int *phyid), (logicid, phyid)) \
     X(int, dcmi_get_device_pcie_info, (int card_id, int device_id, struct dcmi_pcie_info *pcie_info), (card_id, device_id, pcie_info)) \
