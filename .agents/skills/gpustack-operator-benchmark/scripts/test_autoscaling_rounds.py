@@ -348,7 +348,8 @@ def fixture(root, algorithm="TokenThroughput"):
         "headroom": "0.75",
     }
     catalog = {
-        "schemaVersion": "gpustack.ai/v1",
+        "apiVersion": "worker.gpustack.ai/v1alpha1",
+        "kind": "ModelDeploymentScalerCapacityPriorCatalog",
         "profiles": [{
             "role": "Server", "model": "local-model", "quantization": "bf16",
             "engine": "vllm", "hardware": "local-gpu",
@@ -733,6 +734,8 @@ class ValidationTests(unittest.TestCase):
             ("yaml document", lambda document: yaml.safe_dump(document), True),
             ("quantiles the source did not publish stay absent",
              lambda document: document["profiles"][0]["points"][0].update({"ttftMilliseconds": {}, "itlMilliseconds": {}}), True),
+            ("arbitrary percentile quantiles such as p25 and p70",
+             lambda document: document["profiles"][0]["points"][0].update({"ttftMilliseconds": {"p25": 9.0, "p70": 11.0}, "itlMilliseconds": {"p25": 4.0, "p70": 5.0}}), True),
             ("duplicate profile identity",
              lambda document: document["profiles"].append({**copy.deepcopy(document["profiles"][0]), "points": [catalog_point(9, 900.0, 20.0)]}), False),
             ("removed profile id field", lambda document: document["profiles"][0].update({"id": "pri-local"}), False),

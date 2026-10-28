@@ -151,11 +151,19 @@ def present(mapping, path):
     return isinstance(parent, dict) and path[-1] in parent
 
 
-CATALOG_SCHEMA_VERSION = "gpustack.ai/v1"
+CATALOG_API_VERSION = "worker.gpustack.ai/v1alpha1"
+CATALOG_KIND = "ModelDeploymentScalerCapacityPriorCatalog"
 CATALOG_TOPOLOGY_KEYS = ("gpusPerReplica", "tensorParallel", "pipelineParallel", "dataParallel", "localDataParallel", "contextParallel", "expertParallel")
 CATALOG_PROFILE_KEYS = {"role", "model", "quantization", "engine", "hardware", "topology", "points"}
 CATALOG_POINT_KEYS = {"concurrency", "totalTokensPerSecond", "inputTokensPerSecond", "outputTokensPerSecond", "ttftMilliseconds", "itlMilliseconds"}
-CATALOG_QUANTILE_KEYS = {"p50", "p90", "p95", "p99"}
+CATALOG_QUANTILE_RE = re.compile(r"^p(?:100|[1-9][0-9]?(?:\.[0-9]*[1-9])?|0\.[0-9]*[1-9])$")
+
+
+def valid_quantile_key(name):
+    if not isinstance(name, str) or not CATALOG_QUANTILE_RE.match(name):
+        return False
+    value = float(name[1:])
+    return 0 < value <= 100
 
 
 def load_catalog_document(text):
@@ -218,8 +226,9 @@ def validate_catalog_document(document):
     identity is the 6-tuple itself and the same identity twice is refused the
     way the operator refuses it - a resolution could not choose between the two.
     """
-    require(set(document) == {"schemaVersion", "profiles"}, "catalog carries fields outside schemaVersion and profiles")
-    require(document.get("schemaVersion") == CATALOG_SCHEMA_VERSION, f"catalog schemaVersion must be {CATALOG_SCHEMA_VERSION}")
+    require(set(document) == {"apiVersion", "kind", "profiles"}, "catalog carries fields outside apiVersion, kind and profiles")
+    require(document.get("apiVersion") == CATALOG_API_VERSION, f"catalog apiVersion must be {CATALOG_API_VERSION}")
+    require(document.get("kind") == CATALOG_KIND, f"catalog kind must be {CATALOG_KIND}")
     profiles = document.get("profiles")
     require(isinstance(profiles, list) and profiles, "catalog must carry profiles")
     seen = set()
@@ -239,7 +248,7 @@ def validate_catalog_document(document):
                 require(positive(point[field]), f"point {field} must be a positive number")
             for field in ("ttftMilliseconds", "itlMilliseconds"):
                 quantiles = point[field]
-                require(isinstance(quantiles, dict) and set(quantiles) <= CATALOG_QUANTILE_KEYS, f"{field} carries unknown quantiles")
+                require(isinstance(quantiles, dict) and all(valid_quantile_key(name) for name in quantiles), f"{field} carries unknown quantiles")
                 for name, value in quantiles.items():
                     require(positive(value), f"{field} {name} must be a positive number")
     return document

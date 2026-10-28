@@ -3,10 +3,16 @@ package priors
 import (
 	"bytes"
 	"fmt"
+	"math/big"
 	"sort"
+	"strconv"
+	"strings"
 
 	yamlv3 "gopkg.in/yaml.v3"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
+
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
 // CatalogDocument is the catalog as it is written.
@@ -20,116 +26,50 @@ import (
 // provenance the reader has to trust. The digest of the catalog is computed at
 // load, and the source of a measurement is the name of the file it was read
 // from.
-type CatalogDocument struct {
-	// SchemaVersion is the schema the document was written in.
-	SchemaVersion string `json:"schemaVersion" yaml:"schemaVersion"`
-
-	// Profiles holds the measured profiles.
-	Profiles []ProfileDocument `json:"profiles" yaml:"profiles"`
-}
+type CatalogDocument = workercore.ModelDeploymentScalerCapacityPriorCatalog
 
 // ProfileDocument is one profile as it is written.
-type ProfileDocument struct {
-	// Role is the serving role the measurements describe.
-	Role string `json:"role" yaml:"role"`
-
-	// Model is the served model.
-	Model string `json:"model" yaml:"model"`
-
-	// Quantization is the quantization recipe.
-	Quantization string `json:"quantization" yaml:"quantization"`
-
-	// Engine is the serving engine family.
-	Engine string `json:"engine" yaml:"engine"`
-
-	// Hardware is the accelerator family.
-	Hardware string `json:"hardware" yaml:"hardware"`
-
-	// Topology is the shape of one scaling replica.
-	Topology TopologyDocument `json:"topology" yaml:"topology"`
-
-	// Points are the measured load points.
-	Points []PointDocument `json:"points" yaml:"points"`
-}
+type ProfileDocument = workercore.ModelDeploymentScalerCapacityPriorProfile
 
 // TopologyDocument is the shape of one scaling replica as it is written.
 //
 // IT NAMES THE WIDTHS THE MEASUREMENT STATES, because a width a source did not
 // state is a width of one and a reader has to know which widths were measured.
-type TopologyDocument struct {
-	// GPUsPerReplica is how many GPUs one scaling replica uses.
-	GPUsPerReplica int `json:"gpusPerReplica,omitempty" yaml:"gpusPerReplica,omitempty"`
-
-	// TensorParallel is the tensor parallel width.
-	TensorParallel int `json:"tensorParallel,omitempty" yaml:"tensorParallel,omitempty"`
-
-	// PipelineParallel is the pipeline parallel width.
-	PipelineParallel int `json:"pipelineParallel,omitempty" yaml:"pipelineParallel,omitempty"`
-
-	// DataParallel is the data parallel width.
-	DataParallel int `json:"dataParallel,omitempty" yaml:"dataParallel,omitempty"`
-
-	// LocalDataParallel is the local data parallel width.
-	LocalDataParallel int `json:"localDataParallel,omitempty" yaml:"localDataParallel,omitempty"`
-
-	// ContextParallel is the context parallel width.
-	ContextParallel int `json:"contextParallel,omitempty" yaml:"contextParallel,omitempty"`
-
-	// ExpertParallel is the expert parallel width.
-	ExpertParallel int `json:"expertParallel,omitempty" yaml:"expertParallel,omitempty"`
-}
-
-// Normalized returns the topology in its canonical form.
-//
-// IT REPLACES AN UNSTATED WIDTH WITH ONE, because a width a source did not
-// state is the width of one and a width of zero names no deployment.
-func (d TopologyDocument) Normalized() Topology {
-	topology := Topology(d)
-	return topology.Normalized()
-}
+type TopologyDocument = workercore.ModelDeploymentScalerCapacityPriorTopology
 
 // PointDocument is one measured load point as it is written.
 //
 // IT NAMES THE THREE RATES THE MEASUREMENT PRODUCED, because a reader asks
 // about the prompt tokens, the generated tokens and the total before it asks
 // about any one of them.
-type PointDocument struct {
-	// Concurrency is how many requests ran at the same time.
-	Concurrency int `json:"concurrency" yaml:"concurrency"`
+type PointDocument = workercore.ModelDeploymentScalerCapacityPriorPoint
 
-	// TotalTokensPerSecond is the prompt and generated token rate.
-	TotalTokensPerSecond float64 `json:"totalTokensPerSecond" yaml:"totalTokensPerSecond"`
-
-	// InputTokensPerSecond is the prompt token rate.
-	InputTokensPerSecond float64 `json:"inputTokensPerSecond" yaml:"inputTokensPerSecond"`
-
-	// OutputTokensPerSecond is the generated token rate.
-	OutputTokensPerSecond float64 `json:"outputTokensPerSecond" yaml:"outputTokensPerSecond"`
-
-	// TTFTMilliseconds is the measured time to first token.
-	TTFTMilliseconds LatencyQuantiles `json:"ttftMilliseconds" yaml:"ttftMilliseconds"`
-
-	// ITLMilliseconds is the measured inter-token latency.
-	ITLMilliseconds LatencyQuantiles `json:"itlMilliseconds" yaml:"itlMilliseconds"`
-}
-
-// LatencyQuantiles holds the measured latency quantiles of one point.
+// LatencyQuantiles holds the measured latency quantiles of one point, keyed by
+// percentile names such as p25, p50, p70, p90, p95, or p99.
 //
 // A QUANTILE THE SOURCE DID NOT PUBLISH IS ABSENT, because a zero latency is a
 // measurement and a missing one is not. The reader decides what a missing
 // quantile means.
-type LatencyQuantiles struct {
-	// P50 is the median.
-	P50 *float64 `json:"p50,omitempty" yaml:"p50,omitempty"`
+type LatencyQuantiles = map[string]float64
 
-	// P90 is the ninetieth percentile.
-	P90 *float64 `json:"p90,omitempty" yaml:"p90,omitempty"`
+// NewCatalogDocument returns a catalog document with the canonical TypeMeta
+// header and the given profiles.
+func NewCatalogDocument(profiles ...ProfileDocument) CatalogDocument {
+	return CatalogDocument{
+		TypeMeta: meta.TypeMeta{
+			APIVersion: CatalogAPIVersion,
+			Kind:       CatalogKind,
+		},
+		Profiles: profiles,
+	}
+}
 
-	// P95 is the ninety-fifth percentile.
-	P95 *float64 `json:"p95,omitempty" yaml:"p95,omitempty"`
-
-	// P99 is the ninety-ninth percentile.
-	P99 *float64 `json:"p99,omitempty" yaml:"p99,omitempty"`
+// catalogDocumentWire orders the top-level fields of a written catalog so
+// apiVersion and kind always precede profiles when encoded by yaml.v3.
+type catalogDocumentWire struct {
+	APIVersion string            `yaml:"apiVersion"`
+	Kind       string            `yaml:"kind"`
+	Profiles   []ProfileDocument `yaml:"profiles"`
 }
 
 // ParseCatalogDocument reads a catalog document.
@@ -154,11 +94,30 @@ func ParseCatalogDocument(data []byte) (CatalogDocument, error) {
 // IT KEEPS THE ORDER THE FIELDS ARE DECLARED IN, because a reader reads a
 // profile from its name to its measurements and not from the alphabet.
 func MarshalCatalogDocument(document CatalogDocument) ([]byte, error) {
-	document.sort()
+	if document.APIVersion == "" {
+		document.APIVersion = CatalogAPIVersion
+	}
+	if document.Kind == "" {
+		document.Kind = CatalogKind
+	}
+	sortCatalogDocument(&document)
+	wire := catalogDocumentWire{
+		APIVersion: document.APIVersion,
+		Kind:       document.Kind,
+		Profiles:   document.Profiles,
+	}
+	if wire.Profiles == nil {
+		wire.Profiles = []ProfileDocument{}
+	}
+	var node yamlv3.Node
+	if err := node.Encode(wire); err != nil {
+		return nil, fmt.Errorf("encode catalog: %w", err)
+	}
+	sortQuantileMappingNodes(&node)
 	var buffer bytes.Buffer
 	encoder := yamlv3.NewEncoder(&buffer)
 	encoder.SetIndent(2)
-	if err := encoder.Encode(document); err != nil {
+	if err := encoder.Encode(&node); err != nil {
 		return nil, fmt.Errorf("encode catalog: %w", err)
 	}
 	if err := encoder.Close(); err != nil {
@@ -167,14 +126,14 @@ func MarshalCatalogDocument(document CatalogDocument) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-// sort puts the profiles and their points in a stable order.
+// sortCatalogDocument puts the profiles and their points in a stable order.
 //
 // IT SORTS BY SHAPE AND BY LOAD, because a catalog that is written in the order
 // the profiles were measured changes its bytes every time a measurement is
 // added.
-func (d *CatalogDocument) sort() {
+func sortCatalogDocument(d *CatalogDocument) {
 	sort.SliceStable(d.Profiles, func(i, j int) bool {
-		return CompareShapes(d.Profiles[i].Shape(), d.Profiles[j].Shape()) < 0
+		return CompareShapes(DocumentShape(d.Profiles[i]), DocumentShape(d.Profiles[j])) < 0
 	})
 	for i := range d.Profiles {
 		points := d.Profiles[i].Points
@@ -184,13 +143,72 @@ func (d *CatalogDocument) sort() {
 	}
 }
 
+// sortQuantileMappingNodes orders latency quantile keys in ascending numeric
+// percentile order inside ttftMilliseconds and itlMilliseconds mappings.
+func sortQuantileMappingNodes(node *yamlv3.Node) {
+	if node == nil {
+		return
+	}
+	if node.Kind == yamlv3.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := node.Content[i].Value
+			val := node.Content[i+1]
+			if (key == "ttftMilliseconds" || key == "itlMilliseconds") && val.Kind == yamlv3.MappingNode {
+				sortQuantilePairs(val)
+			} else {
+				sortQuantileMappingNodes(val)
+			}
+		}
+		return
+	}
+	for _, child := range node.Content {
+		sortQuantileMappingNodes(child)
+	}
+}
+
+func sortQuantilePairs(mapping *yamlv3.Node) {
+	type pair struct {
+		key *yamlv3.Node
+		val *yamlv3.Node
+	}
+	pairs := make([]pair, 0, len(mapping.Content)/2)
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		pairs = append(pairs, pair{key: mapping.Content[i], val: mapping.Content[i+1]})
+	}
+	sort.SliceStable(pairs, func(i, j int) bool {
+		return compareQuantileKeys(pairs[i].key.Value, pairs[j].key.Value) < 0
+	})
+	for i, entry := range pairs {
+		mapping.Content[2*i] = entry.key
+		mapping.Content[2*i+1] = entry.val
+	}
+}
+
+func compareQuantileKeys(left, right string) int {
+	leftLevel, leftErr := parseQuantileKey(left)
+	rightLevel, rightErr := parseQuantileKey(right)
+	if leftErr == nil && rightErr == nil && leftLevel != rightLevel {
+		if leftLevel < rightLevel {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(left, right)
+}
+
 // toCatalog turns a document into the catalog the resolver reads.
-func (d CatalogDocument) toCatalog() (*Catalog, error) {
-	catalog := Catalog{SchemaVersion: d.SchemaVersion}
+func toCatalog(d CatalogDocument) (*Catalog, error) {
+	if d.APIVersion != CatalogAPIVersion {
+		return nil, fmt.Errorf("catalog apiVersion %q is not supported, want %q", d.APIVersion, CatalogAPIVersion)
+	}
+	if d.Kind != CatalogKind {
+		return nil, fmt.Errorf("catalog kind %q is not supported, want %q", d.Kind, CatalogKind)
+	}
+	catalog := Catalog{SchemaVersion: d.APIVersion}
 	for _, profile := range d.Profiles {
-		converted, err := profile.toProfile()
+		converted, err := toProfile(profile)
 		if err != nil {
-			return nil, fmt.Errorf("profile %s: %w", profile.Shape(), err)
+			return nil, fmt.Errorf("profile %s: %w", DocumentShape(profile), err)
 		}
 		catalog.Profiles = append(catalog.Profiles, converted)
 	}
@@ -207,12 +225,12 @@ func (d CatalogDocument) toCatalog() (*Catalog, error) {
 // IT FILLS THE FIELDS THE DOCUMENT DOES NOT STATE, because the document is a
 // measurement and not a configuration: a measurement says how fast the replica
 // was, not which serving settings it ran under.
-func (d ProfileDocument) toProfile() (Profile, error) {
+func toProfile(d ProfileDocument) (Profile, error) {
 	role := RoleKind(d.Role)
 	if _, known := requirementFor(role); !known {
 		return Profile{}, fmt.Errorf("carries the unknown role %q", d.Role)
 	}
-	shape := d.Shape()
+	shape := DocumentShape(d)
 	profile := Profile{
 		Role: role,
 		Identity: Identity{
@@ -231,7 +249,7 @@ func (d ProfileDocument) toProfile() (Profile, error) {
 			Hardware: NormalizeHardwareIdentity(HardwareIdentity{Accelerator: d.Hardware}),
 		},
 		ServingConfig:    ServingConfig{},
-		Topology:         d.Topology.Normalized(),
+		Topology:         NormalizeTopologyDocument(d.Topology),
 		MeasuredReplicas: 1,
 		Workload: Workload{
 			// THE WORKLOAD IS NAMED AFTER THE SHAPE, because the document names
@@ -247,7 +265,11 @@ func (d ProfileDocument) toProfile() (Profile, error) {
 		},
 	}
 	for _, point := range d.Points {
-		profile.Points = append(profile.Points, point.toPoint(role))
+		converted, err := toPoint(point, role)
+		if err != nil {
+			return Profile{}, err
+		}
+		profile.Points = append(profile.Points, converted)
 	}
 	if len(profile.Points) >= 2 {
 		highest := 0
@@ -270,7 +292,7 @@ func (d ProfileDocument) toProfile() (Profile, error) {
 //
 // IT PICKS THE RATE THE ROLE NEEDS, because the document holds the three rates
 // the measurement produced and the resolver asks for one of them.
-func (d PointDocument) toPoint(role RoleKind) MeasuredPoint {
+func toPoint(d PointDocument, role RoleKind) (MeasuredPoint, error) {
 	requirement, _ := requirementFor(role)
 	rate := d.TotalTokensPerSecond
 	switch requirement.metric {
@@ -294,45 +316,71 @@ func (d PointDocument) toPoint(role RoleKind) MeasuredPoint {
 			TokenCountConvention: requirement.convention,
 		},
 	}
-	point.Latencies = append(point.Latencies, latencyReadings(LatencyMetricTTFT, d.TTFTMilliseconds)...)
-	point.Latencies = append(point.Latencies, latencyReadings(LatencyMetricITL, d.ITLMilliseconds)...)
-	return point
+	ttftReadings, err := latencyReadings(LatencyMetricTTFT, d.TTFTMilliseconds)
+	if err != nil {
+		return MeasuredPoint{}, err
+	}
+	itlReadings, err := latencyReadings(LatencyMetricITL, d.ITLMilliseconds)
+	if err != nil {
+		return MeasuredPoint{}, err
+	}
+	point.Latencies = append(point.Latencies, ttftReadings...)
+	point.Latencies = append(point.Latencies, itlReadings...)
+	return point, nil
 }
 
 // latencyReadings turns the written quantiles of one metric into latency
-// readings.
-//
-// IT KEEPS THE ORDER OF THE QUANTILES, because a reader reads the readings in
-// the order they are written.
-func latencyReadings(metric LatencyMetric, quantiles LatencyQuantiles) []Latency {
-	readings := make([]Latency, 0, 4)
-	for _, quantile := range []struct {
-		value float64
-		level float64
-	}{
-		{value: quantileValue(quantiles.P50), level: 0.50},
-		{value: quantileValue(quantiles.P90), level: 0.90},
-		{value: quantileValue(quantiles.P95), level: 0.95},
-		{value: quantileValue(quantiles.P99), level: 0.99},
-	} {
-		if quantile.value == 0 {
-			continue
+// readings ordered by ascending quantile.
+func latencyReadings(metric LatencyMetric, quantiles LatencyQuantiles) ([]Latency, error) {
+	if len(quantiles) == 0 {
+		return nil, nil
+	}
+	readings := make([]Latency, 0, len(quantiles))
+	for key, value := range quantiles {
+		level, err := parseQuantileKey(key)
+		if err != nil {
+			return nil, fmt.Errorf("%s latency quantile %q: %w", metric, key, err)
 		}
 		readings = append(readings, Latency{
 			Metric:   metric,
-			Quantile: quantile.level,
-			Value:    quantile.value,
+			Quantile: level,
+			Value:    value,
 			Unit:     UnitMilliseconds,
 		})
 	}
-	return readings
+	sort.Slice(readings, func(i, j int) bool {
+		return readings[i].Quantile < readings[j].Quantile
+	})
+	for i := 1; i < len(readings); i++ {
+		if readings[i].Quantile == readings[i-1].Quantile {
+			return nil, fmt.Errorf("%s latency quantiles resolve to the same quantile %v", metric, readings[i].Quantile)
+		}
+	}
+	return readings, nil
 }
 
-// quantileValue returns the value of a written quantile, or zero when the
-// source did not publish it.
-func quantileValue(value *float64) float64 {
-	if value == nil {
-		return 0
+// parseQuantileKey turns a quantile key such as p25, p50, p70, p90, p95, p99,
+// or p99.9 into its quantile level in (0, 1].
+func parseQuantileKey(key string) (float64, error) {
+	if !strings.HasPrefix(key, "p") {
+		return 0, fmt.Errorf("quantile key %q must start with \"p\"", key)
 	}
-	return *value
+	rest := strings.TrimPrefix(key, "p")
+	if rest == "" {
+		return 0, fmt.Errorf("quantile key %q names no percentile", key)
+	}
+	percentile, err := strconv.ParseFloat(rest, 64)
+	if err != nil || !isFinite(percentile) || percentile <= 0 || percentile > 100 {
+		return 0, fmt.Errorf("quantile key %q must name a percentile in (0, 100]", key)
+	}
+	if canonical := strconv.FormatFloat(percentile, 'f', -1, 64); canonical != rest {
+		return 0, fmt.Errorf("quantile key %q is not in canonical form %q", key, "p"+canonical)
+	}
+	rat, ok := new(big.Rat).SetString(rest)
+	if !ok {
+		return 0, fmt.Errorf("quantile key %q is not a decimal percentile", key)
+	}
+	rat.Mul(rat, big.NewRat(1, 100))
+	level, _ := rat.Float64()
+	return level, nil
 }

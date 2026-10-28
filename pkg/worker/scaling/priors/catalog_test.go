@@ -10,7 +10,7 @@ import (
 //
 // IT NAMES THE SCHEMA THE READER EXPECTS, because a document that states no
 // schema is a document the reader refuses.
-const flatCatalogHeader = "schemaVersion: gpustack.ai/v1\nprofiles:\n"
+const flatCatalogHeader = "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelDeploymentScalerCapacityPriorCatalog\nprofiles:\n"
 
 // flatProfileDocument is one measured profile in the flat catalog format.
 //
@@ -83,9 +83,14 @@ func TestParseCatalogRefusesBadCatalogs(t *testing.T) {
 		reason   string
 	}{
 		{
-			name:     "an unsupported schema version",
-			document: "schemaVersion: gpustack.ai/v2\nprofiles: []\n",
-			reason:   "schema version",
+			name:     "an unsupported apiVersion",
+			document: "apiVersion: worker.gpustack.ai/v2\nkind: ModelDeploymentScalerCapacityPriorCatalog\nprofiles: []\n",
+			reason:   "apiVersion",
+		},
+		{
+			name:     "an unsupported kind",
+			document: "apiVersion: worker.gpustack.ai/v1alpha1\nkind: WrongKind\nprofiles: []\n",
+			reason:   "kind",
 		},
 		{
 			name:     "a profile with no measured point",
@@ -297,7 +302,7 @@ func TestParseCatalogIsStrict(t *testing.T) {
 		},
 		{
 			name:     "a truncated catalog",
-			document: "schemaVersion: gpustack.ai/v1\nprofiles:\n  - role: Server\n    model: \"deepseek-ai/DeepSeek-R1-0528\n",
+			document: "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelDeploymentScalerCapacityPriorCatalog\nprofiles:\n  - role: Server\n    model: \"deepseek-ai/DeepSeek-R1-0528\n",
 		},
 	}
 

@@ -52,19 +52,28 @@ func (p Profile) Shape() Shape {
 	}
 }
 
-// Shape returns the shape of a written profile.
+// DocumentShape returns the shape of a written profile.
 //
 // IT NORMALIZES EVERY ELEMENT, because the shape is what a profile is known by
 // and a reader has to reach the same shape from the file and from the runtime.
-func (d ProfileDocument) Shape() Shape {
+func DocumentShape(d ProfileDocument) Shape {
 	return Shape{
 		Role:         RoleKind(d.Role),
 		Model:        CanonicalModelName(d.Model),
 		Quantization: CanonicalQuantization(d.Quantization),
 		Engine:       CanonicalEngineFamily(d.Engine),
 		Hardware:     CanonicalAcceleratorFamily(d.Hardware),
-		Topology:     d.Topology.Normalized(),
+		Topology:     NormalizeTopologyDocument(d.Topology),
 	}
+}
+
+// NormalizeTopologyDocument returns a written topology in its canonical form.
+//
+// IT REPLACES AN UNSTATED WIDTH WITH ONE, because a width a source did not
+// state is the width of one and a width of zero names no deployment.
+func NormalizeTopologyDocument(d TopologyDocument) Topology {
+	topology := Topology(d)
+	return topology.Normalized()
 }
 
 // Shape returns the shape a request names.

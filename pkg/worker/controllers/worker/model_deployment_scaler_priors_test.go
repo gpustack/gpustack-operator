@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -189,17 +188,14 @@ func capacityPriorFixture(t *testing.T) (*workercore.ModelDeploymentScaler, *wor
 	// THE FIXTURE WRITES THE CATALOG IN THE FORMAT THE OPERATOR SHIPS, because a
 	// fixture in another format proves nothing about the format the operator
 	// reads.
-	document := priors.CatalogDocument{
-		SchemaVersion: priors.SchemaVersion,
-		Profiles: []priors.ProfileDocument{{
-			Role:         string(priors.RoleKindServer),
-			Model:        modelName,
-			Quantization: "none",
-			Engine:       "vllm",
-			Hardware:     "nvidia-h100",
-			Topology:     priors.TopologyDocument{GPUsPerReplica: 1, TensorParallel: 1},
-		}},
-	}
+	document := priors.NewCatalogDocument(priors.ProfileDocument{
+		Role:         string(priors.RoleKindServer),
+		Model:        modelName,
+		Quantization: "none",
+		Engine:       "vllm",
+		Hardware:     "nvidia-h100",
+		Topology:     priors.TopologyDocument{GPUsPerReplica: 1, TensorParallel: 1},
+	})
 	for i, throughput := range []float64{1000, 2000, 2100} {
 		ttft, itl := float64(100*(i+1)), float64(10*(i+1))
 		if i == 2 {
@@ -210,8 +206,8 @@ func capacityPriorFixture(t *testing.T) (*workercore.ModelDeploymentScaler, *wor
 			TotalTokensPerSecond:  throughput,
 			InputTokensPerSecond:  throughput,
 			OutputTokensPerSecond: throughput,
-			TTFTMilliseconds:      priors.LatencyQuantiles{P90: ptr.To(ttft * 0.9), P95: ptr.To(ttft)},
-			ITLMilliseconds:       priors.LatencyQuantiles{P90: ptr.To(itl * 0.9), P95: ptr.To(itl)},
+			TTFTMilliseconds:      priors.LatencyQuantiles{"p90": ttft * 0.9, "p95": ttft},
+			ITLMilliseconds:       priors.LatencyQuantiles{"p90": itl * 0.9, "p95": itl},
 		})
 	}
 	data, err := priors.MarshalCatalogDocument(document)

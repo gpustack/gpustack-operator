@@ -1490,3 +1490,140 @@ type ModelDeploymentScalerResolvedCapacityFieldStatus struct {
 	// +required
 	EffectiveTokensPerSecond resource.Quantity `json:"effectiveTokensPerSecond" protobuf:"bytes,3,name=effectiveTokensPerSecond"` // nolint: lll
 }
+
+// ModelDeploymentScalerCapacityPriorCatalog is an offline catalog of measured per-replica token
+// capacities and latency quantiles across load levels.
+//
+// +protobuf=false
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type ModelDeploymentScalerCapacityPriorCatalog struct {
+	meta.TypeMeta `json:",inline"`
+
+	// Profiles holds the measured profiles in this catalog.
+	//
+	// +optional
+	// +listType=atomic
+	Profiles []ModelDeploymentScalerCapacityPriorProfile `json:"profiles" yaml:"profiles"`
+}
+
+var _ runtime.Object = (*ModelDeploymentScalerCapacityPriorCatalog)(nil)
+
+// ModelDeploymentScalerCapacityPriorProfile is one measured serving profile in a capacity prior
+// catalog.
+//
+// +protobuf=false
+type ModelDeploymentScalerCapacityPriorProfile struct {
+	// Role is the serving role the measurements describe.
+	//
+	// +required
+	Role string `json:"role" yaml:"role"`
+
+	// Model is the served model identifier.
+	//
+	// +required
+	Model string `json:"model" yaml:"model"`
+
+	// Quantization is the model quantization recipe.
+	//
+	// +required
+	Quantization string `json:"quantization" yaml:"quantization"`
+
+	// Engine is the serving engine family.
+	//
+	// +required
+	Engine string `json:"engine" yaml:"engine"`
+
+	// Hardware is the accelerator family.
+	//
+	// +required
+	Hardware string `json:"hardware" yaml:"hardware"`
+
+	// Topology is the parallelism shape of one scaling replica.
+	//
+	// +required
+	Topology ModelDeploymentScalerCapacityPriorTopology `json:"topology" yaml:"topology"`
+
+	// Points are the load points measured for this profile.
+	//
+	// +required
+	// +listType=atomic
+	Points []ModelDeploymentScalerCapacityPriorPoint `json:"points" yaml:"points"`
+}
+
+// ModelDeploymentScalerCapacityPriorTopology is the parallelism shape of one scaling replica in a
+// capacity prior profile.
+//
+// +protobuf=false
+type ModelDeploymentScalerCapacityPriorTopology struct {
+	// GPUsPerReplica is how many accelerators one scaling replica uses.
+	//
+	// +optional
+	GPUsPerReplica int `json:"gpusPerReplica,omitempty" yaml:"gpusPerReplica,omitempty"`
+
+	// TensorParallel is the tensor parallel width.
+	//
+	// +optional
+	TensorParallel int `json:"tensorParallel,omitempty" yaml:"tensorParallel,omitempty"`
+
+	// PipelineParallel is the pipeline parallel width.
+	//
+	// +optional
+	PipelineParallel int `json:"pipelineParallel,omitempty" yaml:"pipelineParallel,omitempty"`
+
+	// DataParallel is the data parallel width.
+	//
+	// +optional
+	DataParallel int `json:"dataParallel,omitempty" yaml:"dataParallel,omitempty"`
+
+	// LocalDataParallel is the local data parallel width.
+	//
+	// +optional
+	LocalDataParallel int `json:"localDataParallel,omitempty" yaml:"localDataParallel,omitempty"`
+
+	// ContextParallel is the context parallel width.
+	//
+	// +optional
+	ContextParallel int `json:"contextParallel,omitempty" yaml:"contextParallel,omitempty"`
+
+	// ExpertParallel is the expert parallel width.
+	//
+	// +optional
+	ExpertParallel int `json:"expertParallel,omitempty" yaml:"expertParallel,omitempty"`
+}
+
+// ModelDeploymentScalerCapacityPriorPoint is one measured load point in a capacity prior profile.
+//
+// +protobuf=false
+type ModelDeploymentScalerCapacityPriorPoint struct {
+	// Concurrency is how many requests ran at the same time.
+	//
+	// +required
+	Concurrency int `json:"concurrency" yaml:"concurrency"`
+
+	// TotalTokensPerSecond is the combined prompt and generated token rate of one replica.
+	//
+	// +required
+	TotalTokensPerSecond float64 `json:"totalTokensPerSecond" yaml:"totalTokensPerSecond"`
+
+	// InputTokensPerSecond is the prompt token rate of one replica.
+	//
+	// +required
+	InputTokensPerSecond float64 `json:"inputTokensPerSecond" yaml:"inputTokensPerSecond"`
+
+	// OutputTokensPerSecond is the generated token rate of one replica.
+	//
+	// +required
+	OutputTokensPerSecond float64 `json:"outputTokensPerSecond" yaml:"outputTokensPerSecond"`
+
+	// TTFTMilliseconds maps latency quantile keys such as p25, p50, p70, p90, p95, or p99 to
+	// measured time to first token in milliseconds.
+	//
+	// +optional
+	TTFTMilliseconds map[string]float64 `json:"ttftMilliseconds,omitempty" yaml:"ttftMilliseconds,omitempty"`
+
+	// ITLMilliseconds maps latency quantile keys such as p25, p50, p70, p90, p95, or p99 to
+	// measured inter-token latency in milliseconds.
+	//
+	// +optional
+	ITLMilliseconds map[string]float64 `json:"itlMilliseconds,omitempty" yaml:"itlMilliseconds,omitempty"`
+}

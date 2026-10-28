@@ -236,8 +236,9 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(builtin["spec"]["algorithm"]["capacityPrior"], {})
 
     def test_catalog_configmap_uses_the_priors_yaml_key(self):
-        configmap = qualification.catalog_configmap("qual-sweep-priors", "schemaVersion: gpustack.ai/v1\n")
-        self.assertEqual(configmap["data"]["priors.yaml"], "schemaVersion: gpustack.ai/v1\n")
+        header = "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelDeploymentScalerCapacityPriorCatalog\n"
+        configmap = qualification.catalog_configmap("qual-sweep-priors", header)
+        self.assertEqual(configmap["data"]["priors.yaml"], header)
 
 
 class MetricsTests(unittest.TestCase):
@@ -508,7 +509,8 @@ class CapacityArmsTests(unittest.TestCase):
                 "ttftMilliseconds": {"p90": ttft}, "itlMilliseconds": {"p90": 5.0},
             })
         return {
-            "schemaVersion": rounds.CATALOG_SCHEMA_VERSION,
+            "apiVersion": rounds.CATALOG_API_VERSION,
+            "kind": rounds.CATALOG_KIND,
             "profiles": [{
                 "role": "Server", "model": "Qwen/Qwen3-8B", "quantization": "bf16", "engine": "vllm",
                 "hardware": "nvidia-h200", "topology": {"gpusPerReplica": 1, "tensorParallel": 1},

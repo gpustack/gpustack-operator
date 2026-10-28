@@ -79,7 +79,8 @@ const measuredRows = `[
 ]`
 
 // twoProfileCatalog is a catalog that holds two profiles of two shapes.
-const twoProfileCatalog = `schemaVersion: gpustack.ai/v1
+const twoProfileCatalog = `apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScalerCapacityPriorCatalog
 profiles:
   - role: Server
     model: org/b-model
@@ -123,7 +124,8 @@ profiles:
 //
 // THE TWO PROFILES OF THE SAME MODEL DIFFER IN THE ENGINE, because a filter
 // that names a model and an engine has to retire only one of them.
-const threeProfileCatalog = `schemaVersion: gpustack.ai/v1
+const threeProfileCatalog = `apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScalerCapacityPriorCatalog
 profiles:
   - role: Server
     model: deepseek-ai/DeepSeek-R1-0528
@@ -277,7 +279,7 @@ func TestFormatCatalogWritesTheCanonicalCatalog(t *testing.T) {
 // IT MATTERS BECAUSE THE CATALOG IS BUILT FROM MEASUREMENTS AND NOT FROM
 // ASSERTIONS, and the merge is how a measurement reaches the catalog.
 func TestMergeIntoAddsTheMeasuredProfiles(t *testing.T) {
-	path := writeCatalog(t, "schemaVersion: gpustack.ai/v1\nprofiles: []\n")
+	path := writeCatalog(t, "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelDeploymentScalerCapacityPriorCatalog\nprofiles: []\n")
 	source := writeRows(t, measuredRows)
 
 	if err := mergeInto(path, source); err != nil {
@@ -318,7 +320,7 @@ func TestMergeIntoAddsTheMeasuredProfiles(t *testing.T) {
 //
 // IT MATTERS BECAUSE ONE SHAPE MEASURED TWICE IS ONE PROFILE AND NOT TWO.
 func TestMergeIntoReplacesTheProfileItHolds(t *testing.T) {
-	path := writeCatalog(t, "schemaVersion: gpustack.ai/v1\nprofiles: []\n")
+	path := writeCatalog(t, "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelDeploymentScalerCapacityPriorCatalog\nprofiles: []\n")
 	source := writeRows(t, measuredRows)
 
 	if err := mergeInto(path, source); err != nil {
@@ -342,7 +344,7 @@ func TestMergeIntoReplacesTheProfileItHolds(t *testing.T) {
 // IT MATTERS BECAUSE A CATALOG THAT HOLDS A PROFILE OF A MEASUREMENT IT NEVER
 // MADE IS A CATALOG NOBODY CAN ACCOUNT FOR.
 func TestMergeIntoRefusesASweepItCannotUse(t *testing.T) {
-	path := writeCatalog(t, "schemaVersion: gpustack.ai/v1\nprofiles: []\n")
+	path := writeCatalog(t, "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelDeploymentScalerCapacityPriorCatalog\nprofiles: []\n")
 	source := writeRows(t, `[{"model":"dsr1","framework":"trt","hardware":"mi325x","precision":"fp8","conc":4}]`)
 
 	if err := mergeInto(path, source); err != nil {
@@ -360,7 +362,7 @@ func TestMergeIntoRefusesASweepItCannotUse(t *testing.T) {
 // IT MATTERS BECAUSE A MERGE THAT SILENTLY ADDED NOTHING WOULD LOOK LIKE A
 // SOURCE THAT MEASURED NOTHING.
 func TestMergeIntoRefusesRowsItCannotRead(t *testing.T) {
-	path := writeCatalog(t, "schemaVersion: gpustack.ai/v1\nprofiles: []\n")
+	path := writeCatalog(t, "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelDeploymentScalerCapacityPriorCatalog\nprofiles: []\n")
 	source := writeRows(t, "not json")
 
 	if err := mergeInto(path, source); err == nil {
@@ -483,8 +485,8 @@ func TestReadDocumentReadsAnEmptyCatalogWhenTheFileIsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the catalog: %v", err)
 	}
-	if document.SchemaVersion != priors.SchemaVersion {
-		t.Fatalf("the catalog carries the schema %q", document.SchemaVersion)
+	if document.APIVersion != priors.CatalogAPIVersion || document.Kind != priors.CatalogKind {
+		t.Fatalf("the catalog carries %s/%s", document.APIVersion, document.Kind)
 	}
 	if len(document.Profiles) != 0 {
 		t.Fatalf("the catalog holds %d profiles, want 0", len(document.Profiles))
@@ -510,7 +512,7 @@ func TestResolvePathKeepsAnAbsolutePath(t *testing.T) {
 //
 // IT MATTERS BECAUSE A CATALOG THE READER REFUSES REFUSES EVERY RESOLUTION.
 func TestTheMergedCatalogIsReadable(t *testing.T) {
-	path := writeCatalog(t, "schemaVersion: gpustack.ai/v1\nprofiles: []\n")
+	path := writeCatalog(t, "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelDeploymentScalerCapacityPriorCatalog\nprofiles: []\n")
 	source := writeRows(t, measuredRows)
 	if err := mergeInto(path, source); err != nil {
 		t.Fatalf("merge the rows: %v", err)

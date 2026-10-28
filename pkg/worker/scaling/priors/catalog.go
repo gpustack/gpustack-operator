@@ -14,11 +14,17 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/scaling/algorithm"
 )
 
+// CatalogAPIVersion is the API group and version of a capacity prior catalog document.
+const CatalogAPIVersion = "worker.gpustack.ai/v1alpha1"
+
+// CatalogKind is the kind of a capacity prior catalog document.
+const CatalogKind = "ModelDeploymentScalerCapacityPriorCatalog"
+
 // SchemaVersion is the catalog schema this package reads.
 //
 // A catalog written by another schema version is refused rather than guessed
 // at, because the fields it carries decide which measurements are usable.
-const SchemaVersion = "gpustack.ai/v1"
+const SchemaVersion = CatalogAPIVersion
 
 // The bounds a decoded catalog may not exceed.
 //

@@ -243,8 +243,8 @@ deployment into offline catalog resolution. The contract is:
 | `catalogRef` | Optional same-namespace ConfigMap name and key; key defaults to `priors.yaml` (the parser accepts YAML and JSON). When present, this is the sole catalog source. Otherwise use the embedded catalog. No silent fallback or merge. |
 | `headroom` | Positive quantity no greater than 1; default 0.75. Applies only to catalog-derived values. The default is an initial configurable engineering margin — not measured or optimized. Local mock rounds and later user-provided hardware experiments should compare margins and performance; no warranty. |
 
-The committed catalog is one `pkg/worker/scaling/priors/priors.yaml` of lean profiles — `role`,
-`model`, `quantization`, `engine`, `hardware`, `topology` and `points[]` with fixed units. A
+The committed catalog is one `pkg/worker/scaling/priors/priors.yaml` document (`apiVersion: worker.gpustack.ai/v1alpha1`, `kind: ModelDeploymentScalerCapacityPriorCatalog`) of lean profiles — `role`,
+`model`, `quantization`, `engine`, `hardware`, `topology` and `points[]` with fixed units and arbitrary `p<N>` latency quantiles in `(0, 100]`. A
 profile is identified by its normalized `(role, model, quantization, engine, hardware, topology)`
 tuple; any `Server`, `Prefill` or `Decode` role that omits a capacity field under a present
 `capacityPrior` resolves automatically by that tuple, and `Encode` never resolves from the

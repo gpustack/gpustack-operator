@@ -450,11 +450,11 @@ func buildPoint(row InferenceXRow) priors.PointDocument {
 		TotalTokensPerSecond:  round(row.Metrics.ThroughputPerGPU*gpus, 2),
 		InputTokensPerSecond:  round(row.Metrics.InputThroughputPerGPU*gpus, 2),
 		OutputTokensPerSecond: round(row.Metrics.OutputThroughputPerGPU*gpus, 2),
-		TTFTMilliseconds: priors.LatencyQuantiles{
-			P50: seconds(row.Metrics.MedianTTFT),
-			P90: seconds(row.Metrics.P90TTFT),
-			P99: seconds(row.Metrics.P99TTFT),
-		},
+		TTFTMilliseconds: latencyQuantiles(
+			row.Metrics.MedianTTFT,
+			row.Metrics.P90TTFT,
+			row.Metrics.P99TTFT,
+		),
 	}
 	point.ITLMilliseconds = interTokenLatency(row.Metrics, ratio)
 	return point
@@ -482,29 +482,42 @@ func interTokenRatio(metrics InferenceXMetrics) float64 {
 // no gap published the per-token latency under another name.
 func interTokenLatency(metrics InferenceXMetrics, ratio float64) priors.LatencyQuantiles {
 	if metrics.MedianITL > 0 {
-		return priors.LatencyQuantiles{
-			P50: seconds(metrics.MedianITL / ratio),
-			P90: seconds(metrics.P90ITL / ratio),
-			P99: seconds(metrics.P99ITL / ratio),
-		}
+		return latencyQuantiles(
+			metrics.MedianITL/ratio,
+			metrics.P90ITL/ratio,
+			metrics.P99ITL/ratio,
+		)
 	}
-	return priors.LatencyQuantiles{
-		P50: seconds(metrics.MedianTPOT),
-		P90: seconds(metrics.P90TPOT),
-		P99: seconds(metrics.P99TPOT),
-	}
+	return latencyQuantiles(
+		metrics.MedianTPOT,
+		metrics.P90TPOT,
+		metrics.P99TPOT,
+	)
 }
 
-// seconds returns a duration in seconds as milliseconds.
+// latencyQuantiles turns published seconds into millisecond quantile entries.
 //
-// IT RETURNS NOTHING FOR A DURATION THE SOURCE DID NOT PUBLISH, because a zero
-// latency is a measurement and a missing one is not.
-func seconds(value float64) *float64 {
-	if value <= 0 {
+// IT LEAVES OUT A DURATION THE SOURCE DID NOT PUBLISH, because a zero latency
+// is a measurement and a missing one is not.
+func latencyQuantiles(p50, p90, p99 float64) priors.LatencyQuantiles {
+	quantiles := priors.LatencyQuantiles{}
+	for _, entry := range []struct {
+		key     string
+		seconds float64
+	}{
+		{key: "p50", seconds: p50},
+		{key: "p90", seconds: p90},
+		{key: "p99", seconds: p99},
+	} {
+		if entry.seconds <= 0 {
+			continue
+		}
+		quantiles[entry.key] = round(entry.seconds*1000, 4)
+	}
+	if len(quantiles) == 0 {
 		return nil
 	}
-	milliseconds := round(value*1000, 4)
-	return &milliseconds
+	return quantiles
 }
 
 // round rounds a number to the given number of decimal places.

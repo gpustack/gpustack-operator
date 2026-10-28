@@ -812,7 +812,8 @@ def sweep_catalog_document(rows, model=SWEEP_MODEL, engine=SWEEP_ENGINE, hardwar
             "itlMilliseconds": row["itlMilliseconds"],
         })
     return {
-        "schemaVersion": rounds.CATALOG_SCHEMA_VERSION,
+        "apiVersion": rounds.CATALOG_API_VERSION,
+        "kind": rounds.CATALOG_KIND,
         "profiles": [{
             "role": "Server",
             "model": model,

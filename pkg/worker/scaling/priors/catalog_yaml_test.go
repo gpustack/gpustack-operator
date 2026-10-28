@@ -5,7 +5,8 @@ import (
 )
 
 // flatCatalog is a catalog in the format the operator ships.
-const flatCatalog = `schemaVersion: gpustack.ai/v1
+const flatCatalog = `apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScalerCapacityPriorCatalog
 profiles:
   - role: Server
     model: deepseek-ai/DeepSeek-R1-0528
@@ -120,7 +121,7 @@ func TestParseCatalogReadsTheFlatCatalog(t *testing.T) {
 // IT MATTERS BECAUSE THE READER TAKES ITS BYTES FROM A CONFIGMAP, and a
 // ConfigMap holds whatever the operator wrote into it.
 func TestParseCatalogReadsTheJSONCatalog(t *testing.T) {
-	const jsonCatalog = `{"schemaVersion":"gpustack.ai/v1","profiles":[` +
+	const jsonCatalog = `{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"ModelDeploymentScalerCapacityPriorCatalog","profiles":[` +
 		`{"role":"Server","model":"org/model",` +
 		`"quantization":"fp8","engine":"vllm","hardware":"amd-mi325x",` +
 		`"topology":{"gpusPerReplica":8,"tensorParallel":8,"expertParallel":1},"points":[` +
@@ -152,7 +153,7 @@ func TestParseCatalogReadsTheJSONCatalog(t *testing.T) {
 // IT MATTERS BECAUSE A FIELD THE READER IGNORES IS A FIELD THE READER DID NOT
 // CHECK, and a catalog nobody checked is a catalog nobody can trust.
 func TestParseCatalogRefusesAnUnknownField(t *testing.T) {
-	document := "schemaVersion: gpustack.ai/v1\nunknownField: 1\nprofiles: []\n"
+	document := "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelDeploymentScalerCapacityPriorCatalog\nunknownField: 1\nprofiles: []\n"
 	if _, err := ParseCatalog([]byte(document)); err == nil {
 		t.Fatal("the catalog with an unknown field was read")
 	}
@@ -190,13 +191,10 @@ func TestMarshalCatalogDocumentIsStable(t *testing.T) {
 // IT MATTERS BECAUSE A CATALOG THAT IS WRITTEN IN THE ORDER THE MEASUREMENTS
 // ARRIVED CHANGES ITS BYTES EVERY TIME A MEASUREMENT IS ADDED.
 func TestMarshalCatalogDocumentSortsTheProfiles(t *testing.T) {
-	document := CatalogDocument{
-		SchemaVersion: SchemaVersion,
-		Profiles: []ProfileDocument{
-			{Role: "Server", Model: "org/b-model", Points: []PointDocument{{Concurrency: 8}, {Concurrency: 4}}},
-			{Role: "Server", Model: "org/a-model"},
-		},
-	}
+	document := NewCatalogDocument(
+		ProfileDocument{Role: "Server", Model: "org/b-model", Points: []PointDocument{{Concurrency: 8}, {Concurrency: 4}}},
+		ProfileDocument{Role: "Server", Model: "org/a-model"},
+	)
 	encoded, err := MarshalCatalogDocument(document)
 	if err != nil {
 		t.Fatalf("write the catalog: %v", err)
@@ -209,6 +207,106 @@ func TestMarshalCatalogDocumentSortsTheProfiles(t *testing.T) {
 	}
 	if indexOf(written, "concurrency: 4") > indexOf(written, "concurrency: 8") {
 		t.Fatalf("the points are not written in order:\n%s", written)
+	}
+}
+
+// TestParseCatalogSupportsArbitraryLatencyQuantiles asserts the reader accepts
+// arbitrary percentile keys such as p25, p70, or p99.9 and sorts them in
+// numeric percentile order when marshaling.
+func TestParseCatalogSupportsArbitraryLatencyQuantiles(t *testing.T) {
+	document := NewCatalogDocument(ProfileDocument{
+		Role:         "Server",
+		Model:        "org/model",
+		Quantization: "fp8",
+		Engine:       "vllm",
+		Hardware:     "amd-mi325x",
+		Topology:     TopologyDocument{GPUsPerReplica: 8, TensorParallel: 8},
+		Points: []PointDocument{
+			{
+				Concurrency:           4,
+				TotalTokensPerSecond:  1000,
+				InputTokensPerSecond:  900,
+				OutputTokensPerSecond: 100,
+				TTFTMilliseconds:      LatencyQuantiles{"p99.9": 900, "p70": 310, "p25": 180},
+				ITLMilliseconds:       LatencyQuantiles{"p99.9": 30, "p70": 14, "p25": 9},
+			},
+			{
+				Concurrency:           8,
+				TotalTokensPerSecond:  1800,
+				InputTokensPerSecond:  1600,
+				OutputTokensPerSecond: 200,
+				TTFTMilliseconds:      LatencyQuantiles{"p99.9": 1800, "p70": 620, "p25": 290},
+				ITLMilliseconds:       LatencyQuantiles{"p99.9": 70, "p70": 28, "p25": 15},
+			},
+		},
+	})
+	encoded, err := MarshalCatalogDocument(document)
+	if err != nil {
+		t.Fatalf("write the catalog: %v", err)
+	}
+	written := string(encoded)
+	if indexOf(written, "p25:") > indexOf(written, "p70:") || indexOf(written, "p70:") > indexOf(written, "p99.9:") {
+		t.Fatalf("quantiles were not written in ascending percentile order:\n%s", written)
+	}
+	catalog, err := ParseCatalog(encoded)
+	if err != nil {
+		t.Fatalf("parse catalog with custom quantiles: %v", err)
+	}
+	profile := catalog.Profiles[0]
+	resolution, err := catalog.Resolve(Request{
+		Role:          profile.Role,
+		Identity:      profile.Identity,
+		ServingConfig: profile.ServingConfig,
+		Topology:      profile.Topology,
+		Constraints: Constraints{
+			TTFTTargetMilliseconds: 400,
+			ITLTargetMilliseconds:  20,
+			Headroom:               0.75,
+			LatencyQuantile:        0.70,
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolve at p70: %v", err)
+	}
+	if resolution.SeedTokensPerSecond != 1000 {
+		t.Fatalf("seed tokens/s at p70 = %v, want 1000", resolution.SeedTokensPerSecond)
+	}
+	if resolution.Basis.Quantile != "0.7" || resolution.Basis.Conservative {
+		t.Fatalf("basis quantile = %q (conservative=%v), want 0.7 (conservative=false)", resolution.Basis.Quantile, resolution.Basis.Conservative)
+	}
+}
+
+// TestParseCatalogRefusesInvalidLatencyQuantileKeys asserts invalid quantile
+// keys in ttftMilliseconds or itlMilliseconds are rejected.
+func TestParseCatalogRefusesInvalidLatencyQuantileKeys(t *testing.T) {
+	for _, badKey := range []string{"unknown", "P50", "p0", "p101", "p-50", "p50.0", "p050"} {
+		t.Run(badKey, func(t *testing.T) {
+			document := NewCatalogDocument(ProfileDocument{
+				Role:         "Server",
+				Model:        "org/model",
+				Quantization: "fp8",
+				Engine:       "vllm",
+				Hardware:     "amd-mi325x",
+				Topology:     TopologyDocument{GPUsPerReplica: 8, TensorParallel: 8},
+				Points: []PointDocument{
+					{
+						Concurrency:           4,
+						TotalTokensPerSecond:  1000,
+						InputTokensPerSecond:  900,
+						OutputTokensPerSecond: 100,
+						TTFTMilliseconds:      LatencyQuantiles{badKey: 200},
+						ITLMilliseconds:       LatencyQuantiles{"p95": 10},
+					},
+				},
+			})
+			raw, err := MarshalCatalogDocument(document)
+			if err != nil {
+				t.Fatalf("marshal catalog: %v", err)
+			}
+			if _, err := ParseCatalog(raw); err == nil {
+				t.Fatalf("expected invalid quantile key %q to be refused", badKey)
+			}
+		})
 	}
 }
 

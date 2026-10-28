@@ -75,25 +75,22 @@ func newModelDeploymentScalerPriorFixture(t *testing.T) modelDeploymentScalerPri
 				OutputTokensPerSecond: rate,
 			}
 			if role != priors.RoleKindDecode {
-				point.TTFTMilliseconds = priors.LatencyQuantiles{P95: ptr.To(ttft)}
+				point.TTFTMilliseconds = priors.LatencyQuantiles{"p95": ttft}
 			}
 			if role != priors.RoleKindPrefill {
-				point.ITLMilliseconds = priors.LatencyQuantiles{P95: ptr.To(itl)}
+				point.ITLMilliseconds = priors.LatencyQuantiles{"p95": itl}
 			}
 			document.Points = append(document.Points, point)
 		}
 		return document
 	}
 
-	document := priors.CatalogDocument{
-		SchemaVersion: priors.SchemaVersion,
-		Profiles: []priors.ProfileDocument{
-			buildProfile(priors.RoleKindServer, 1, "none", 1000),
-			buildProfile(priors.RoleKindPrefill, 1, "none", 1200),
-			buildProfile(priors.RoleKindPrefill, 2, "none", 800),
-			buildProfile(priors.RoleKindDecode, 1, "none", 600),
-		},
-	}
+	document := priors.NewCatalogDocument(
+		buildProfile(priors.RoleKindServer, 1, "none", 1000),
+		buildProfile(priors.RoleKindPrefill, 1, "none", 1200),
+		buildProfile(priors.RoleKindPrefill, 2, "none", 800),
+		buildProfile(priors.RoleKindDecode, 1, "none", 600),
+	)
 	rawCatalog, err := priors.MarshalCatalogDocument(document)
 	require.NoError(t, err)
 
@@ -248,10 +245,7 @@ func (fx modelDeploymentScalerPriorFixture) targetWith(mutate ...func(*workercor
 // another format proves nothing about the format the operator ships.
 func (fx modelDeploymentScalerPriorFixture) catalogWith(t *testing.T, profiles ...priors.ProfileDocument) *core.ConfigMap {
 	t.Helper()
-	raw, err := priors.MarshalCatalogDocument(priors.CatalogDocument{
-		SchemaVersion: priors.SchemaVersion,
-		Profiles:      profiles,
-	})
+	raw, err := priors.MarshalCatalogDocument(priors.NewCatalogDocument(profiles...))
 	require.NoError(t, err)
 	return &core.ConfigMap{
 		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "test-priors"},

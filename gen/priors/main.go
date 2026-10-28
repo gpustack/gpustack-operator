@@ -150,11 +150,11 @@ func sortedReasons(skipped map[string]int) []string {
 func mergeProfiles(document *priors.CatalogDocument, imported []priors.ProfileDocument) (int, int) {
 	indexes := make(map[string]int, len(document.Profiles))
 	for index, profile := range document.Profiles {
-		indexes[profile.Shape().String()] = index
+		indexes[priors.DocumentShape(profile).String()] = index
 	}
 	added, updated := 0, 0
 	for _, profile := range imported {
-		key := profile.Shape().String()
+		key := priors.DocumentShape(profile).String()
 		if index, seen := indexes[key]; seen {
 			document.Profiles[index] = profile
 			updated++
@@ -221,7 +221,7 @@ func retireFrom(path string, filter retireFilter) error {
 	removed := make([]string, 0, len(document.Profiles))
 	for _, profile := range document.Profiles {
 		if filter.retires(profile) {
-			removed = append(removed, profile.Shape().String())
+			removed = append(removed, priors.DocumentShape(profile).String())
 			continue
 		}
 		kept = append(kept, profile)
@@ -240,7 +240,7 @@ func retireFrom(path string, filter retireFilter) error {
 // measurement and a filter that matched on one field alone would retire a
 // family of measurements.
 func (f retireFilter) retires(profile priors.ProfileDocument) bool {
-	shape := profile.Shape()
+	shape := priors.DocumentShape(profile)
 	if f.Role != "" && !strings.EqualFold(f.Role, string(shape.Role)) {
 		return false
 	}
@@ -272,7 +272,7 @@ func (f retireFilter) retires(profile priors.ProfileDocument) bool {
 func readDocument(path string) (priors.CatalogDocument, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return priors.CatalogDocument{SchemaVersion: priors.SchemaVersion}, nil
+		return priors.NewCatalogDocument(), nil
 	}
 	if err != nil {
 		return priors.CatalogDocument{}, fmt.Errorf("read catalog %s: %w", path, err)

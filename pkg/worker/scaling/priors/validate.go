@@ -24,7 +24,7 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 	if err != nil {
 		return nil, err
 	}
-	catalog, err := document.toCatalog()
+	catalog, err := toCatalog(document)
 	if err != nil {
 		return nil, err
 	}

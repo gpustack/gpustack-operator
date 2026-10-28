@@ -25,21 +25,32 @@ blocks — qualification and provenance live in the generator and in `references
 which keeps user `ConfigMap` catalogs concise. Each profile is:
 
 ```yaml
-schemaVersion: gpustack.ai/v1
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScalerCapacityPriorCatalog
 profiles:
-  - role: Server                        # Server, Prefill or Decode
-    model: deepseek-ai/DeepSeek-R1-0528 # verified Hugging Face org/repo ID
-    quantization: fp8                   # canonical lowercase token
-    engine: vllm                        # vllm or sglang
-    hardware: amd-mi325x                # canonical Family identifier
-    topology: {gpusPerReplica: 8, tensorParallel: 8} # measured replica shape
-    points:                             # measured load points, fixed units
+  - role: Server                         # Server, Prefill or Decode
+    model: deepseek-ai/DeepSeek-R1-0528  # verified Hugging Face org/repo ID
+    quantization: fp8                    # canonical lowercase token
+    engine: vllm                         # vllm or sglang
+    hardware: amd-mi325x                 # canonical Family identifier
+    topology:                            # measured replica shape
+      gpusPerReplica: 8
+      tensorParallel: 8
+    points:                              # measured load points, fixed units
       - concurrency: 4
-        totalTokensPerSecond: 2130      # per-replica tokens/s
-        inputTokensPerSecond: 1840      # per-replica tokens/s
-        outputTokensPerSecond: 290      # per-replica tokens/s
-        ttftMilliseconds: {p50: 320, p90: 410, p95: 455, p99: 512}
-        itlMilliseconds: {p50: 18, p90: 24, p95: 27, p99: 33}  # per token
+        totalTokensPerSecond: 2130       # per-replica tokens/s
+        inputTokensPerSecond: 1840       # per-replica tokens/s
+        outputTokensPerSecond: 290       # per-replica tokens/s
+        ttftMilliseconds:                # any canonical p<N> quantile in (0, 100]
+          p50: 320
+          p90: 410
+          p95: 455
+          p99: 512
+        itlMilliseconds:                 # per token
+          p50: 18
+          p90: 24
+          p95: 27
+          p99: 33
 ```
 
 - A profile is identified by its normalized `(role, model, quantization, engine, hardware,
@@ -47,7 +58,9 @@ profiles:
   entries normalize to the same tuple; `--merge` instead upserts one canonical sweep
   deterministically and sorts profiles by role, model, quantization, engine, hardware and
   parallelism widths.
-- Latency quantiles a source did not publish stay absent.
+- `ttftMilliseconds` and `itlMilliseconds` accept any canonical `p<N>` percentile key in
+  `(0, 100]` (for example `p25`, `p50`, `p70`, `p90`, `p95`, `p99`, `p99.9`). Latency quantiles
+  a source did not publish stay absent.
 - Throughput units are per-replica `tokens/s`; latencies are milliseconds, and
   `itlMilliseconds` is per token. Point values above are illustrative shapes, not measurements.
 

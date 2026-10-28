@@ -322,31 +322,42 @@ of the catalog file. Upstream evidence pins live in the `gpustack-operator-prior
 provenance records (`.agents/skills/gpustack-operator-priors/references/records.md`).
 
 ```yaml
-schemaVersion: gpustack.ai/v1
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScalerCapacityPriorCatalog
 profiles:
-  - role: Server                        # Server, Prefill or Decode
-    model: deepseek-ai/DeepSeek-R1-0528 # verified Hugging Face org/repo ID
-    quantization: fp8                   # canonical lowercase token
-    engine: vllm                        # vllm or sglang
-    hardware: amd-mi325x                # canonical Family identifier
-    topology: {gpusPerReplica: 8, tensorParallel: 8} # measured replica shape
-    points:                             # fixed units; values illustrative
+  - role: Server                         # Server, Prefill or Decode
+    model: deepseek-ai/DeepSeek-R1-0528  # verified Hugging Face org/repo ID
+    quantization: fp8                    # canonical lowercase token
+    engine: vllm                         # vllm or sglang
+    hardware: amd-mi325x                 # canonical Family identifier
+    topology:                            # measured replica shape
+      gpusPerReplica: 8
+      tensorParallel: 8
+    points:                              # fixed units; values illustrative
       - concurrency: 4
-        totalTokensPerSecond: 2130      # per-replica tokens/s
-        inputTokensPerSecond: 1840      # per-replica tokens/s
-        outputTokensPerSecond: 290      # per-replica tokens/s
-        ttftMilliseconds: {p50: 320, p90: 410, p95: 455, p99: 512}
-        itlMilliseconds: {p50: 18, p90: 24, p95: 27, p99: 33}  # per token
+        totalTokensPerSecond: 2130       # per-replica tokens/s
+        inputTokensPerSecond: 1840       # per-replica tokens/s
+        outputTokensPerSecond: 290       # per-replica tokens/s
+        ttftMilliseconds:                # any canonical p<N> quantile in (0, 100]
+          p50: 320
+          p90: 410
+          p95: 455
+          p99: 512
+        itlMilliseconds:                 # milliseconds per token
+          p50: 18
+          p90: 24
+          p95: 27
+          p99: 33
 ```
 
 A profile is identified by its normalized `(role, model, quantization, engine, hardware,
-topology)` tuple; a latency quantile the source did not publish stays absent. `ParseCatalog`
-fails closed when two entries normalize to the same tuple — naming both — while
-`gen/priors --merge` resolves the same collision offline by upserting one canonical sweep
-deterministically, sorted by role, model, quantization, engine, hardware and parallelism widths.
+topology)` tuple. `ParseCatalog` fails closed when two entries normalize to the same tuple —
+naming both — while `gen/priors --merge` upserts one canonical sweep deterministically, sorted by
+role, model, quantization, engine, hardware and parallelism widths.
 
-Throughput units are per-replica `tokens/s`; latencies are milliseconds, and `itlMilliseconds`
-is per token.
+Throughput units are per-replica `tokens/s`; latencies are milliseconds (`itlMilliseconds` per
+token). Both latency maps accept any canonical `p<N>` quantile key in `(0, 100]` (`p25`, `p50`,
+`p70`, `p95`, `p99`, `p99.9`), and unmeasured quantiles stay absent.
 
 When any serving role omits a capacity field under a present *`capacityPrior`*, the webhook
 suppresses the `500` ms and `50` ms latency defaults. Each catalog-backed role must set explicit
@@ -366,13 +377,13 @@ by its own identity, without overwriting another role's effective values.
 
 `Catalog` requires a verifiable target identity and a single-serving-`Pod` replica shape before
 deriving capacity. The controller infers the model and hardware identity from the target itself —
-*`spec.model`* (the Hugging Face or ModelScope repository) or the engine `--model` flag, and the
-role's `InstanceType` — so the identity annotations below are optional. Each accepts a natural
-name that resolves through [identity normalization](#identity-normalization):
+*`spec.model`* (the `ModelArtifact` repository from *`spec.model.artifactRef`*, or
+*`spec.model.name`*) and the role's `InstanceType` — so the identity annotations below are
+optional and resolve through [identity normalization](#identity-normalization):
 
 | Annotation | Accepted values |
 |---|---|
-| `worker.gpustack.ai/model-id` | Natural model name (`deepseek-ai/DeepSeek-R1-0528`); a ModelScope mirror org or vendor-repackaged checkpoint name adapts to the profile's canonical Hugging Face repository. Inferred from *`spec.model`* or the engine `--model` flag when omitted. |
+| `worker.gpustack.ai/model-id` | Natural model name (`deepseek-ai/DeepSeek-R1-0528`); a ModelScope mirror org or vendor-repackaged checkpoint name adapts to the profile's canonical Hugging Face repository. Inferred from *`spec.model.artifactRef`* (`ModelArtifact` repository) or *`spec.model.name`* when omitted. |
 | `worker.gpustack.ai/hardware-id` | Natural accelerator name or slug (`amd-mi325x`, `mi325x`, `AMD Instinct MI325X`, `nvidia-h100`). |
 | `worker.gpustack.ai/prefill-hardware-id` | Optional override for *Prefill* roles on heterogeneous targets; same accepted values. |
 | `worker.gpustack.ai/decode-hardware-id` | Optional override for *Decode* roles on heterogeneous targets; same accepted values. |
@@ -398,10 +409,10 @@ a complete single-`Pod` metric denominator.
 ### Catalog qualification
 
 All prior acquisition and qualification is offline. At runtime, admission and reconciliation read
-only the embedded catalog or the referenced same-namespace `ConfigMap` (`gpustack.ai/v1`, up to
-512 KiB, 256 profiles and 128 points per profile) plus existing live engine metrics; the operator
-never calls external benchmark services, executes benchmarks or profiles live traffic to create a
-prior.
+only the embedded catalog or the referenced same-namespace `ConfigMap`
+(`ModelDeploymentScalerCapacityPriorCatalog`, up to 512 KiB, 256 profiles and 128 points per
+profile) plus live engine metrics; the operator never calls external benchmark services or
+profiles live traffic to create a prior.
 
 A profile qualifies when its normalized `(role, model, quantization, engine, hardware, topology)`
 tuple matches the serving role and its points carry the concurrency, per-replica token rates and

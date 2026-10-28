@@ -211,7 +211,11 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentScalerBehaviorSpec{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerBehaviorSpec(ref),
 		v1alpha1.ModelDeploymentScalerBinding{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerBinding(ref),
 		v1alpha1.ModelDeploymentScalerBindingStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerBindingStatus(ref),
+		v1alpha1.ModelDeploymentScalerCapacityPriorCatalog{}.OpenAPIModelName():        schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorCatalog(ref),
+		v1alpha1.ModelDeploymentScalerCapacityPriorPoint{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorPoint(ref),
+		v1alpha1.ModelDeploymentScalerCapacityPriorProfile{}.OpenAPIModelName():        schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorProfile(ref),
 		v1alpha1.ModelDeploymentScalerCapacityPriorSpec{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorSpec(ref),
+		v1alpha1.ModelDeploymentScalerCapacityPriorTopology{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorTopology(ref),
 		v1alpha1.ModelDeploymentScalerCatalogReference{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCatalogReference(ref),
 		v1alpha1.ModelDeploymentScalerCommitStatus{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCommitStatus(ref),
 		v1alpha1.ModelDeploymentScalerDecision{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerDecision(ref),
@@ -11071,6 +11075,210 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerBindingStatus(ref 
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorCatalog(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerCapacityPriorCatalog is an offline catalog of measured per-replica token capacities and latency quantiles across load levels.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"profiles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Profiles holds the measured profiles in this catalog.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentScalerCapacityPriorProfile{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerCapacityPriorProfile{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorPoint(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerCapacityPriorPoint is one measured load point in a capacity prior profile.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"concurrency": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Concurrency is how many requests ran at the same time.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"totalTokensPerSecond": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TotalTokensPerSecond is the combined prompt and generated token rate of one replica.",
+							Default:     0,
+							Type:        []string{"number"},
+							Format:      "double",
+						},
+					},
+					"inputTokensPerSecond": {
+						SchemaProps: spec.SchemaProps{
+							Description: "InputTokensPerSecond is the prompt token rate of one replica.",
+							Default:     0,
+							Type:        []string{"number"},
+							Format:      "double",
+						},
+					},
+					"outputTokensPerSecond": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OutputTokensPerSecond is the generated token rate of one replica.",
+							Default:     0,
+							Type:        []string{"number"},
+							Format:      "double",
+						},
+					},
+					"ttftMilliseconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TTFTMilliseconds maps latency quantile keys such as p25, p50, p70, p90, p95, or p99 to measured time to first token in milliseconds.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"number"},
+										Format: "double",
+									},
+								},
+							},
+						},
+					},
+					"itlMilliseconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ITLMilliseconds maps latency quantile keys such as p25, p50, p70, p90, p95, or p99 to measured inter-token latency in milliseconds.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"number"},
+										Format: "double",
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"concurrency", "totalTokensPerSecond", "inputTokensPerSecond", "outputTokensPerSecond"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorProfile(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerCapacityPriorProfile is one measured serving profile in a capacity prior catalog.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"role": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Role is the serving role the measurements describe.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"model": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Model is the served model identifier.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"quantization": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Quantization is the model quantization recipe.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"engine": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Engine is the serving engine family.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"hardware": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Hardware is the accelerator family.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"topology": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Topology is the parallelism shape of one scaling replica.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentScalerCapacityPriorTopology{}.OpenAPIModelName()),
+						},
+					},
+					"points": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Points are the load points measured for this profile.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentScalerCapacityPriorPoint{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"role", "model", "quantization", "engine", "hardware", "topology", "points"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerCapacityPriorPoint{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerCapacityPriorTopology{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -11095,6 +11303,68 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorSpec(
 		},
 		Dependencies: []string{
 			v1alpha1.ModelDeploymentScalerCatalogReference{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorTopology(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerCapacityPriorTopology is the parallelism shape of one scaling replica in a capacity prior profile.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"gpusPerReplica": {
+						SchemaProps: spec.SchemaProps{
+							Description: "GPUsPerReplica is how many accelerators one scaling replica uses.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"tensorParallel": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TensorParallel is the tensor parallel width.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"pipelineParallel": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PipelineParallel is the pipeline parallel width.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"dataParallel": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DataParallel is the data parallel width.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"localDataParallel": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LocalDataParallel is the local data parallel width.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"contextParallel": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ContextParallel is the context parallel width.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"expertParallel": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ExpertParallel is the expert parallel width.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
 	}
 }
 

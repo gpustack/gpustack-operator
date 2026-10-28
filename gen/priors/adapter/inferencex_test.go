@@ -130,11 +130,12 @@ func TestImportInferenceXRowsAlignsTheInterTokenLatency(t *testing.T) {
 	rows[0].Metrics.MeanTPOT = 0.01
 	documents, _ := ImportInferenceXRows(rows)
 	itl := documents[0].Points[0].ITLMilliseconds
-	if itl.P50 == nil {
+	p50, ok := itl["p50"]
+	if !ok {
 		t.Fatal("the point holds no inter-token latency")
 	}
-	if *itl.P50 != 5 {
-		t.Fatalf("the inter-token latency is %v milliseconds, want 5", *itl.P50)
+	if p50 != 5 {
+		t.Fatalf("the inter-token latency is %v milliseconds, want 5", p50)
 	}
 }
 
@@ -252,7 +253,7 @@ func TestImportedProfilesAreEligible(t *testing.T) {
 		row("dsr1", "sglang", "mi325x", "fp8", 8, 8),
 	}
 	documents, _ := ImportInferenceXRows(rows)
-	catalog := priors.CatalogDocument{SchemaVersion: priors.SchemaVersion, Profiles: documents}
+	catalog := priors.NewCatalogDocument(documents...)
 	encoded, err := priors.MarshalCatalogDocument(catalog)
 	if err != nil {
 		t.Fatalf("write the catalog: %v", err)

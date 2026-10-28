@@ -1,4 +1,5 @@
-schemaVersion: gpustack.ai/v1
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScalerCapacityPriorCatalog
 profiles:
   - role: Server
     model: MiniMaxAI/MiniMax-M3
