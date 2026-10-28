@@ -907,6 +907,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -968,6 +971,14 @@
   
 
   
+
+  
+    
+      
+      
+        
+        
+      
     
       
       
@@ -1104,12 +1115,19 @@
             <div class="nav-children">
               
                 
+                  <a title="Model Deployment Scaling Simulation" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/" >Simulation</a>
+                
+              
+                
                   <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
                 
               
             </div>
           
         
+      
+    
+      
       
     
       
@@ -1473,6 +1491,14 @@ serving instances that count requires.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   tokenThroughput:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#     serverTargetTokensPerSecond: &#34;2000&#34;  # fallback capacity</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   serverTokenCapacityPerReplica: &#34;2000&#34;  # forecast capacity</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Optional offline catalog resolution for missing TokenThroughput or Predictive</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># capacities. An absent capacityPrior is manual; a present one resolves missing</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># fields from the catalog (explicit fields always win; failures fail closed).</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># capacityPrior:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   catalogRef:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#     name: llm-serving-priors  # optional ConfigMap in this namespace</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#     key: priors.yaml          # default when catalogRef is present; YAML or JSON</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   headroom: &#34;0.75&#34;  # default; (0, 1], applies only to catalog-derived fields</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">behavior</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">scaleUp</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stabilizationWindowSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">  </span><span class="c"># default; 0 to 600, zero disables the wait</span><span class="w">
@@ -1514,6 +1540,14 @@ compares one live measurement against a fixed target, <code>TokenThroughput</cod
 windows, and <code>Predictive</code> forecasts those rates ahead of the peak. The workload decides which one
 fits: a request count that tracks GPU load, a compute load that request counts misstate, or traffic
 that climbs before the capacity arrives.</p>
+<p>A deterministic local simulation compares all three on identical synthetic traffic and records
+replica adjustments, request outcomes and true per-token latencies in
+<a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/">Model Deployment Scaling Simulation</a>
+. For H100 and H200 hardware results and
+practical tuning guidance, see <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">Scaling Benchmark</a>
+ and
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/#step-3-choose-an-algorithm">Step 3: Choose an algorithm</a>
+.</p>
 <table>
   <thead>
       <tr>
@@ -1602,7 +1636,8 @@ It also works with vLLM: the scaler reads the target engine and needs no engine 
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">panicWindowSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">60</span><span class="w">    </span><span class="c"># default; 10 to 300 seconds</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">panicThreshold</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">       </span><span class="c"># default; positive quantity</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;500&#34;</span><span class="w">  </span><span class="c"># default; positive quantity</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">    </span><span class="c"># default; positive quantity</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">    </span><span class="c"># default; positive quantity</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">latencyQuantile</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.95&#34;</span><span class="w">       </span><span class="c"># default; P95</span></span></span></code></pre></div>
 </div><p>The three token target fields describe the capacity of one replica of their role kind.
 A <em>prefill</em> replica serves cache-missed prompt tokens; a <em>decode</em> replica serves generation tokens.
 A <em>server</em> replica serves both. Supply a positive capacity for every scaled non-<em>encode</em> kind.
@@ -1615,6 +1650,11 @@ recommendation and prevents scale-down. A threshold at or below <code>1</code> s
 Admission validates each window&rsquo;s range but does not enforce their order.
 The latency guard also checks <em>TTFT</em> for <em>prefill</em> and <em>ITL</em> for <em>decode</em>. A <em>server</em> role checks both
 and uses the larger relative breach.</p>
+<p><em><code>latencyQuantile</code></em> selects the quantile used for online TTFT and ITL observations and for any
+capacity prior. It accepts a quantity in <code>(0, 1]</code>: for example, <code>&quot;0.25&quot;</code> is P25, <code>&quot;0.9&quot;</code> is P90,
+and <code>&quot;0.99&quot;</code> is P99. When omitted, it defaults to P95. <code>Predictive</code> uses the same field inside
+its nested <em><code>tokenThroughput</code></em> configuration. Quantities resolve to nanounit precision; values
+with finer precision are rounded by Kubernetes before the scaler uses them.</p>
 <p>A latency above its target prevents scale-down. Above <code>1.2</code> times the target, the guard recommends
 at least one more replica. Missing latency holds scale-down while allowing a throughput-driven
 increase. Bounds, ratios and pacing still constrain every recommendation.</p>
@@ -1698,6 +1738,275 @@ no more than 80% of their per-replica capacity. The scale-down step policy and o
 .
 Its Kalman predictor estimates a local linear trend, and its load-based loop reacts to live metrics
 below the predicted capacity.</p>
+<h3 id="capacity-priors">Capacity priors</h3>
+<p><em><code>spec.algorithm.capacityPrior</code></em> resolves missing token capacities for <code>TokenThroughput</code> and
+<code>Predictive</code> from an immutable catalog of measured profiles. Admission rejects <em><code>capacityPrior</code></em>
+on <code>Proportional</code>. Omit it for manual mode, where every scaled non-<em>encode</em> kind requires explicit
+positive token capacities. Catalog resolution fails closed, with no online fallback.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Field</th>
+          <th>Default</th>
+          <th>Contract</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><em><code>capacityPrior</code></em></td>
+          <td>absent (manual mode)</td>
+          <td>Present: the offline catalog may resolve missing capacity fields for <code>TokenThroughput</code>/<code>Predictive</code>; explicit capacity fields always win; failures fail closed. <code>Proportional</code> rejects a present <em><code>capacityPrior</code></em>.</td>
+      </tr>
+      <tr>
+          <td><em><code>catalogRef</code></em></td>
+          <td>omitted (embedded catalog)</td>
+          <td>Optional <em><code>name</code></em> and <em><code>key</code></em> (<code>priors.yaml</code> default; the parser accepts YAML and JSON) for a same-namespace <code>ConfigMap</code>; sole catalog source with no fallback or merge.</td>
+      </tr>
+      <tr>
+          <td><em><code>headroom</code></em></td>
+          <td><code>&quot;0.75&quot;</code> when <em><code>capacityPrior</code></em> is present</td>
+          <td>Quantity in <code>(0, 1]</code> multiplying catalog seed capacity; explicit capacity fields keep their configured values. The default is an initial configurable engineering margin — not a universal optimum; <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/#suite-2-capacity-priors">Scaling Benchmark</a>
+ compares <code>0.75</code> catalog headroom against unmargined manual capacities on H200 hardware, with no warranty.</td>
+      </tr>
+  </tbody>
+</table>
+<p>The committed catalog, <code>pkg/worker/scaling/priors/priors.yaml</code>, is human-editable YAML. The parser
+also accepts JSON, so a hand-written <code>ConfigMap</code> catalog can use either format. Profiles are flat
+records without provenance, serving configuration or workload details. Upstream evidence pins live
+in <code>.agents/skills/gpustack-operator-priors/references/records.md</code>.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1alpha1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScalerCapacityPriorCatalog</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">profiles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l">Server                        </span><span class="w"> </span><span class="c"># Server, Prefill or Decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-ai/DeepSeek-R1-0528 </span><span class="w"> </span><span class="c"># verified Hugging Face org/repo ID</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">quantization</span><span class="p">:</span><span class="w"> </span><span class="l">fp8                   </span><span class="w"> </span><span class="c"># canonical lowercase token</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l">vllm                        </span><span class="w"> </span><span class="c"># vllm or sglang</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">hardware</span><span class="p">:</span><span class="w"> </span><span class="l">amd-mi325x                </span><span class="w"> </span><span class="c"># canonical Family identifier</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology</span><span class="p">:</span><span class="w">                            </span><span class="c"># measured replica shape</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">gpusPerReplica</span><span class="p">:</span><span class="w"> </span><span class="m">8</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">tensorParallel</span><span class="p">:</span><span class="w"> </span><span class="m">8</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">points</span><span class="p">:</span><span class="w">                              </span><span class="c"># fixed units; values illustrative</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">concurrency</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">totalTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="m">2130</span><span class="w">       </span><span class="c"># per-replica tokens/s</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">inputTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="m">1840</span><span class="w">       </span><span class="c"># per-replica tokens/s</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">outputTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="m">290</span><span class="w">       </span><span class="c"># per-replica tokens/s</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">ttftMilliseconds</span><span class="p">:</span><span class="w">                </span><span class="c"># any canonical p&lt;N&gt; quantile in (0, 100]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">p50</span><span class="p">:</span><span class="w"> </span><span class="m">320</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">p90</span><span class="p">:</span><span class="w"> </span><span class="m">410</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">p95</span><span class="p">:</span><span class="w"> </span><span class="m">455</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">p99</span><span class="p">:</span><span class="w"> </span><span class="m">512</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">itlMilliseconds</span><span class="p">:</span><span class="w">                 </span><span class="c"># milliseconds per token</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">p50</span><span class="p">:</span><span class="w"> </span><span class="m">18</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">p90</span><span class="p">:</span><span class="w"> </span><span class="m">24</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">p95</span><span class="p">:</span><span class="w"> </span><span class="m">27</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">p99</span><span class="p">:</span><span class="w"> </span><span class="m">33</span></span></span></code></pre></div>
+</div><p>A profile is identified by its normalized <code>(role, model, quantization, engine, hardware, topology)</code> tuple. <code>ParseCatalog</code> fails closed when two entries normalize to the same tuple —
+naming both — while <code>gen/priors --merge</code> upserts one canonical sweep deterministically, sorted by
+role, model, quantization, engine, hardware and parallelism widths.</p>
+<p>Throughput units are per-replica <code>tokens/s</code>; latencies are milliseconds (<code>itlMilliseconds</code> per
+token). Both latency maps accept any canonical <code>p&lt;N&gt;</code> quantile key in <code>(0, 100]</code> (<code>p25</code>, <code>p50</code>,
+<code>p70</code>, <code>p95</code>, <code>p99</code>, <code>p99.9</code>), and unmeasured quantiles stay absent.</p>
+<p>When any serving role omits a capacity field under a present <em><code>capacityPrior</code></em>, the webhook
+suppresses the <code>500</code> ms and <code>50</code> ms latency defaults. Each catalog-backed role must set explicit
+positive latency targets for its kind: <em><code>ttftTargetMilliseconds</code></em> for <em>Prefill</em>,
+<em><code>itlTargetMilliseconds</code></em> for <em>Decode</em>, and both for <em>Server</em>. Manual mode retains the <code>500</code> ms
+and <code>50</code> ms defaults.</p>
+<p><code>Predictive</code> resolves forecast capacity (<em><code>predictive.*TokenCapacityPerReplica</code></em>) and fallback
+capacity (<em><code>predictive.tokenThroughput.*TargetTokensPerSecond</code></em>) independently per field. Setting one
+explicitly records <code>Explicit</code> for that field while an omitted sibling resolves from <code>Catalog</code> and
+applies <em><code>headroom</code></em>.</p>
+<p>Each scaled serving role that omits a capacity field resolves independently against the catalog
+by its own identity, without overwriting another role&rsquo;s effective values.</p>
+<h3 id="target-eligibility">Target eligibility</h3>
+<p><code>Catalog</code> requires a verifiable target identity and a single-serving-<code>Pod</code> replica shape before
+deriving capacity. The controller infers the model and hardware identity from the target itself —
+<em><code>spec.model</code></em> (the <code>ModelArtifact</code> repository from <em><code>spec.model.artifactRef</code></em>, or
+<em><code>spec.model.name</code></em>) and the role&rsquo;s <code>InstanceType</code> — so the identity annotations below are
+optional and resolve through <a href="#identity-normalization">identity normalization</a>
+:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Annotation</th>
+          <th>Accepted values</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>worker.gpustack.ai/model-id</code></td>
+          <td>Natural model name (<code>deepseek-ai/DeepSeek-R1-0528</code>); a ModelScope mirror org or vendor-repackaged checkpoint name adapts to the profile&rsquo;s canonical Hugging Face repository. Inferred from <em><code>spec.model.artifactRef</code></em> (<code>ModelArtifact</code> repository) or <em><code>spec.model.name</code></em> when omitted.</td>
+      </tr>
+      <tr>
+          <td><code>worker.gpustack.ai/hardware-id</code></td>
+          <td>Natural accelerator name or slug (<code>amd-mi325x</code>, <code>mi325x</code>, <code>AMD Instinct MI325X</code>, <code>nvidia-h100</code>).</td>
+      </tr>
+      <tr>
+          <td><code>worker.gpustack.ai/prefill-hardware-id</code></td>
+          <td>Optional override for <em>Prefill</em> roles on heterogeneous targets; same accepted values.</td>
+      </tr>
+      <tr>
+          <td><code>worker.gpustack.ai/decode-hardware-id</code></td>
+          <td>Optional override for <em>Decode</em> roles on heterogeneous targets; same accepted values.</td>
+      </tr>
+      <tr>
+          <td><code>worker.gpustack.ai/precision</code></td>
+          <td>Optional; read from the annotation, the engine quantization or dtype flags, or the selected profile&rsquo;s quantization.</td>
+      </tr>
+  </tbody>
+</table>
+<p>Model name and weight revision must match <em><code>spec.model</code></em> (or the resolved Hugging Face or ModelScope
+<code>ModelArtifact</code> repository and <em><code>status.resolved.revision</code></em>) and any <code>--revision</code>, <code>--quantization</code>,
+<code>--tokenizer</code>, <code>--tokenizer-path</code> or <code>--tokenizer-revision</code> flags. The role&rsquo;s <code>InstanceType</code> must be
+acceleratable and match the declared product and <code>memoryGB</code> (<code>Gi</code> by semantic <code>Quantity</code> equality).</p>
+<p>The effective engine image (<em><code>role.image</code></em> or <em><code>spec.engine.image</code></em>) matches the profile by engine
+family (<code>vllm</code> / <code>sglang</code>); registry or model aliases are never inferred.</p>
+<p>Each catalog-backed role must run as a managed single-serving-<code>Pod</code> replica (<em><code>size</code></em> at most <code>1</code>,
+no custom <em><code>command</code></em> and no <em><code>elasticEp</code></em>). The target must omit <em><code>spec.router</code></em>,
+<em><code>spec.kvCache</code></em>, <em><code>spec.kvTransfer</code></em> and any <em><code>Encode</code></em> role whenever a serving role uses
+<code>Catalog</code>, and <em><code>resources.accelerator</code></em> must be an explicit whole-accelerator integer without
+slicing or partitioning.</p>
+<p>Supported engines are <code>vLLM</code> and <code>SGLang</code> with internal load balance, <code>DP = 1</code>, <code>localDP &lt;= 1</code>, and
+a complete single-<code>Pod</code> metric denominator.</p>
+<h3 id="catalog-qualification">Catalog qualification</h3>
+<p>All prior acquisition and qualification is offline. At runtime, admission and reconciliation read
+only the embedded catalog or the referenced same-namespace <code>ConfigMap</code>
+(<code>ModelDeploymentScalerCapacityPriorCatalog</code>, up to 512 KiB, 256 profiles and 128 points per
+profile) plus live engine metrics; the operator never calls external benchmark services or
+profiles live traffic to create a prior.</p>
+<p>A profile qualifies when its normalized <code>(role, model, quantization, engine, hardware, topology)</code>
+tuple matches the serving role and its points carry the concurrency, per-replica token rates and
+latency quantiles the resolver needs.</p>
+<p>The throughput numerator follows the sampler&rsquo;s token convention — cache-missed input tokens/s for
+<em>Prefill</em>, output tokens/s for <em>Decode</em>, their sum for <em>Server</em> — and a latency quantile the
+source did not publish stays missing; it is never reconstructed from a different metric.</p>
+<p>An unresolved match fails closed with <code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code> or
+<code>IncompatibleMetric</code>; a missing or incompatible profile never supplies borrowed or zero capacity.</p>
+<p>Resolving a prior walks one measured sweep along its two axes. As concurrency rises, per-replica
+throughput — proportional to power efficiency, <code>tokens/s/MW</code> at a fixed replica power — climbs
+toward hardware saturation, while per-user interactivity (<code>tokens/s/user</code> ≈ <code>1000 / ITL</code>
+milliseconds) falls and <em>TTFT</em> grows.</p>
+<p>The role&rsquo;s <code>latencyQuantile</code> (default <code>0.95</code>) and its <code>ttftTargetMilliseconds</code> /
+<code>itlTargetMilliseconds</code> set the interactivity floor and split <code>points[]</code> into feasible and failed:
+a point is feasible when the measured quantile meets both targets, interpolating bracketing
+quantiles linearly or bounding conservatively from a single higher measured quantile.</p>
+<p>Among the feasible points of a sweep with at least two distinct concurrency levels, the resolver
+selects the highest per-replica <code>tokens/s</code> — the maximum of <code>tokens/s/MW</code> under the interactivity
+and <em>TTFT</em> targets — as the seed, and <em><code>headroom</code></em> multiplies it into the effective capacity.</p>
+<p>A higher concurrency point that breaches a target establishes <code>HigherLoadSLOFailure</code>; when every
+measured point passes, the resolver never extrapolates beyond the measured concurrency and caps
+conservatively at the highest measured point (<code>ExplicitSaturation</code>). The
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/#resolving-a-catalog-prior">Scaling Walkthrough</a>
+
+traces this selection on a shipped InferenceX sweep.</p>
+<p>The embedded catalog carries the verified public sweeps imported from InferenceX; the
+<code>gpustack-operator-priors</code> skill&rsquo;s provenance records list every upstream dataset, its digest and
+the refused sources. To use other evidence, provide a reviewed offline <code>ConfigMap</code> catalog whose
+profiles match the deployment.</p>
+<h3 id="public-data-sources">Public data sources</h3>
+<p>Public benchmark sources (InferenceX and similar) qualify into <em><code>priors.yaml</code></em> under the
+following contract. Every import pins its upstream evidence; unattributed numbers are refused.
+The pins — source URLs, capture dates, artifact digests and refusal records — live in the
+<code>gpustack-operator-priors</code> skill&rsquo;s provenance records
+(<code>.agents/skills/gpustack-operator-priors/references/records.md</code>), not inside the catalog file.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Data point</th>
+          <th>Requirement</th>
+          <th>Handling when optional, missing or non-standard</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Model and hardware identity</td>
+          <td>Verified Hugging Face repository; canonical accelerator <code>Family</code></td>
+          <td>Normalized by the <a href="#identity-normalization">identity normalization</a>
+ rules; source slugs, mirror orgs and vendor checkpoints adapt to the canonical identity.</td>
+      </tr>
+      <tr>
+          <td>Load points</td>
+          <td><code>concurrency</code>, per-replica <code>tokens/s</code> throughput and latency quantiles in milliseconds</td>
+          <td>Quantiles the source did not publish stay absent; chunk-gap percentiles normalize to per-token <em>ITL</em> at import.</td>
+      </tr>
+      <tr>
+          <td>Source attribution</td>
+          <td>Upstream URL, capture date and artifact SHA-256 per dataset</td>
+          <td>Recorded in the skill&rsquo;s provenance records; unattributed numbers are refused.</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="identity-normalization">Identity normalization</h3>
+<p>One yardstick normalizes identity on both sides — when importing any public source into
+<em><code>priors.yaml</code></em> and when matching a <code>ModelDeployment</code> at runtime.</p>
+<p>The canonical model name trims whitespace, preserves organization and variant suffixes
+(<code>-Instruct</code>, <code>-0528</code>, <code>-Thinking</code>, a parameter size such as <code>70B</code>) and compares
+case-insensitively; distinct model variants or parameter sizes are never merged.</p>
+<p>The canonical model identity recorded in <em><code>priors.yaml</code></em> is the verified Hugging Face
+<code>&lt;org&gt;/&lt;repo&gt;</code> repository — <code>deepseek-ai/DeepSeek-R1-0528</code>, <code>Qwen/Qwen3.5-397B-A17B</code>,
+<code>meta-llama/Llama-3.3-70B-Instruct</code>, <code>openai/gpt-oss-120b</code>, <code>moonshotai/Kimi-K2.5</code>,
+<code>moonshotai/Kimi-K3</code>, <code>MiniMaxAI/MiniMax-M2.5</code>, <code>MiniMaxAI/MiniMax-M3</code>, <code>zai-org/GLM-5</code>,
+<code>zai-org/GLM-5.2</code>, <code>deepseek-ai/DeepSeek-V4-Pro</code> and <code>Qwen/Qwen3.8-Flash-Next</code> are examples.</p>
+<p>Source-internal slugs (<code>dsr1</code>, <code>qwen3.5</code>, <code>llama70b</code>), ModelScope mirror orgs (<code>ZhipuAI/</code>,
+<code>MiniMax/</code>, <code>LLM-Research/</code>) and vendor-repackaged checkpoint names
+(<code>amd/DeepSeek-R1-0528-MXFP4</code>, <code>nvidia/Llama-3.3-70B-Instruct-FP8</code>) are automatically adapted to
+that canonical Hugging Face ID; a vendor repackaging shows up in the quantization token, not the
+model name. A source with no verified upstream repository is refused rather than guessed.</p>
+<p>Source-specific precision labels fold into canonical lowercase tokens: <code>fp8</code> (also <code>fp8_e4m3</code>,
+<code>fp8-e4m3</code>, <code>w8a8-fp8</code>), <code>bf16</code> (<code>bfloat16</code>), <code>fp16</code> (<code>float16</code>, <code>half</code>), <code>fp4</code> (<code>nvfp4</code>,
+<code>mxfp4</code>), <code>int8</code> (<code>w8a8</code>, <code>smoothquant</code>), and <code>int4</code>, <code>awq</code> and <code>gptq</code> kept distinct. An unpinned
+revision resolves as <code>unspecified</code>; an omitted tokenizer defaults to the model name.</p>
+<p><code>hardware-id</code> normalization reuses the accelerator <code>Family</code> rules and table from
+<a href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/">Instance Type Unit Resources</a>
+
+(<code>pkg/nodefeature/unit_resources_preset.yaml</code>).</p>
+<p>Product strings tokenize on <code>-</code>, <code>_</code> and <code>.</code>, leading vendor and marketing tokens (<code>tesla</code>,
+<code>geforce</code>, <code>quadro</code>, <code>radeon</code>, <code>instinct</code>) are stripped, whole-token prefixes are matched per
+vendor, and capacity tokens (<code>80gb</code>, <code>40gb</code>, <code>32gb</code>) refine multi-capacity families such as
+<code>nvidia-a100-80gb</code> versus <code>nvidia-a100-40gb</code>.</p>
+<p>At runtime the same yardstick applies: the <code>worker.gpustack.ai/model-id</code> and
+<code>worker.gpustack.ai/hardware-id</code> annotations accept the natural names above and are inferred from
+<em><code>spec.model</code></em>, the engine flags and the role&rsquo;s <code>InstanceType</code> when omitted. See
+<a href="#target-eligibility">Target eligibility</a>
+ for the full resolution order.</p>
+<h3 id="prior-lifecycle">Prior lifecycle</h3>
+<p>When the target <code>ModelDeployment</code> is absent, admission allows the scaler with a warning so GitOps
+manifests can apply in any order. When the target exists, <code>CREATE</code> rejects an unresolved catalog
+prior; API read errors propagate directly.</p>
+<p><code>UPDATE</code> admission returns a warning without writing <code>status</code> so operators can suspend, switch to
+<code>Shadow</code>, remove <em><code>capacityPrior</code></em> or repair capacity fields. On reconciliation, the controller sets
+<code>CapacityPriorsReady=False</code>, <code>Active=False</code> and <code>Blocked=True</code> (eventual consistency) and stops new
+replica commits.</p>
+<p>On an already-owned binding, <em><code>pendingCohort</code></em> timeout rollback and aborted retirement restoration
+still run before the capacity-prior gate so in-flight recovery can finish. Before committing an
+<code>Active</code> replica write, the reconciler re-reads the scaler, target and catalog to verify that the
+compatibility fingerprint is unchanged.</p>
+<p>Each resolved role records a <em><code>compatibilityFingerprint</code></em> covering target UID, role configuration
+(excluding ordinary replica count changes), model, engine, router/cache/transfer specs, identity
+annotations, effective algorithm, catalog digest, latency targets and headroom.</p>
+<p>Any fingerprint change or unresolved prior clears both the in-memory sampler window and persisted
+<em><code>status.predictors</code></em> and <em><code>stabilizationHistory</code></em> across restarts. Steady passes compare resolved
+prior quantities by semantic <code>Quantity</code> equality, keep the 256-sample <code>RingBuffer</code> in memory, and
+suppress <code>status</code> writes until control-plane state changes or a predictor advances by 16 samples.</p>
+<h3 id="local-evaluation">Local evaluation</h3>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/20d2aa3648161642f08c63506ee722c9e04ae306/specs/2026-10-26-inferencex-model-deployment-scaling.md">capacity priors and local evaluation spec</a>
+
+records 48 deterministic synthetic result rows across eight tuning traces (<code>manual</code>, <code>resolved</code> and
+one <code>passive</code> candidate at seed factor <code>1</code>) plus two open-loop versus closed-loop examples.</p>
+<p>It also evaluates two held-out traces (<code>heldout_bursts</code> and <code>heldout_length_cache_shift</code>, 11 rows
+each across <code>manual</code> at factor <code>1</code> plus <code>resolved</code> and one <code>passive</code> candidate at seed factors
+<code>0.5</code>, <code>0.75</code>, <code>1</code>, <code>1.5</code> and <code>2</code>). Those rows are synthetic simulation outputs, not live hardware
+measurements.</p>
+<p>Online capacity calibration (<code>Auto</code>) is deferred from the production API. In the synthetic
+evaluation, the passive candidate showed mixed latency-SLO and cost trade-offs, and on
+<code>steady_noise</code> plus <code>heldout_length_cache_shift</code> at seed factors <code>1.5</code> and <code>2</code> it exceeded the
+<code>10%</code> paired replica-seconds tolerance against the static seed control (paired excess is reported
+against the named static manual control with no optimal oracle claimed).</p>
+<p>For offline validation or live execution of the single-<em>Server</em> comparison across <code>frozen-manual</code>,
+<code>tuned-manual</code> and <code>catalog</code> (<code>case-5-autoscaling.sh --capacity-comparison</code>), see
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/#capacity-comparison">Capacity comparison</a>
+.</p>
 <h2 id="bounds-and-ratios">Bounds and ratios</h2>
 <p><em><code>roles[]</code></em> gives each target role a unique <em><code>name</code></em>, a <em><code>minReplicas</code></em> floor and a <em><code>maxReplicas</code></em>
 ceiling. Every target role needs bounds; an incomplete set blocks planning with <code>BoundsConflict</code>.
@@ -1996,14 +2305,49 @@ the two-step transaction. <em><code>exhaustionEpisodeGeneration</code></em> iden
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">tokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2400&#34;</span></span></span></code></pre></div>
 </div><p><em><code>predictors[]</code></em> persists demand history for <code>TokenThroughput</code> and filter state for <code>Predictive</code>.
 The <em><code>level</code></em>, <em><code>trend</code></em> and <em><code>covariance</code></em> fields describe the filter estimate and its uncertainty.
-The scaler restores this state from status when it resumes planning, and keeps it in memory while
-it plans, so the predictor warms up without a status write per pass.</p>
+The scaler restores this state from status when it resumes planning, keeps the 256-sample window in
+memory while it plans, and checkpoints steady predictor progress to <code>status</code> every 16 samples.</p>
+<h3 id="resolved-priors">Resolved priors</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resolvedCapacityPriors</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">profileDigest</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;sha256:&lt;profile digest&gt;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">compatibilityFingerprint</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;sha256:&lt;fingerprint&gt;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l">CacheMissedTotalTokensPerSecond</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">quantile</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.9500&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">seedTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2400&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">latencyBounds</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l">TTFT</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">quantile</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.9500&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">conservative</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l">ITL</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">quantile</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.9500&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">conservative</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">fields</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">field</span><span class="p">:</span><span class="w"> </span><span class="l">predictive.serverTokenCapacityPerReplica</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l">Catalog</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">effectiveTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1800&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">field</span><span class="p">:</span><span class="w"> </span><span class="l">predictive.tokenThroughput.serverTargetTokensPerSecond</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l">Explicit</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">effectiveTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1200&#34;</span></span></span></code></pre></div>
+</div><p><em><code>resolvedCapacityPriors[]</code></em> records per-role catalog provenance and per-field effective capacities
+whenever <code>Catalog</code> is active. <em><code>fields[]</code></em> distinguishes <code>Explicit</code> spec fields from <code>Catalog</code>
+fields derived by multiplying <em><code>seedTokensPerSecond</code></em> by <em><code>headroom</code></em>. <em><code>latencyBounds[]</code></em> records
+the quantile statistic used for each required latency metric and whether a higher quantile bounded
+<code>0.95</code> conservatively.</p>
+<p>Quantities in <em><code>resolvedCapacityPriors[]</code></em> (<em><code>headroom</code></em>, <em><code>seedTokensPerSecond</code></em> and
+<em><code>effectiveTokensPerSecond</code></em>) compare by semantic <code>Quantity</code> equality (<code>1.5k</code> equals <code>1500</code>).
+All sample status numbers, capacities and digests above are illustrative schema examples and do
+not represent measured hardware capacity.</p>
 <h3 id="conditions">Conditions</h3>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">status</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">conditions</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">MetricsReady </span><span class="w"> </span><span class="c"># Bound, Active, MetricsReady or Blocked</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">MetricsReady </span><span class="w"> </span><span class="c"># Bound, Active, MetricsReady, CapacityPriorsReady or Blocked</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;True&#34;</span><span class="w">      </span><span class="c"># True, False or Unknown</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">Observed</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">message</span><span class="p">:</span><span class="w"> </span><span class="l">all required role signals are available</span><span class="w">
@@ -2011,8 +2355,9 @@ it plans, so the predictor warms up without a status write per pass.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">lastTransitionTime</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;last condition transition time&gt;&#34;</span></span></span></code></pre></div>
 </div><p><code>Bound=True</code> means the target is available to this scaler. In <code>Active</code> mode, it also holds the
 binding. A <code>Shadow</code> scaler can report <code>Bound=True</code> without an ownership annotation.
-<code>Active</code> reports permission to commit, <code>MetricsReady</code> reports signal coverage, and <code>Blocked</code>
-reports planning constraints. Inspect each condition&rsquo;s generation because early exits can leave older conditions.</p>
+<code>Active</code> reports permission to commit, <code>MetricsReady</code> reports live engine signal coverage,
+<code>CapacityPriorsReady</code> reports catalog capacity resolution, and <code>Blocked</code> reports planning
+constraints. Inspect each condition&rsquo;s generation because early exits can leave older conditions.</p>
 <table>
   <thead>
       <tr>
@@ -2030,7 +2375,7 @@ reports planning constraints. Inspect each condition&rsquo;s generation because 
       <tr>
           <td><code>Active</code></td>
           <td><code>Active</code></td>
-          <td><code>TargetNotFound</code>, <code>AlreadyBound</code>, <code>TargetReplaced</code>, <code>InvalidBinding</code>, <code>Suspended</code>, <code>ShadowMode</code></td>
+          <td><code>TargetNotFound</code>, <code>AlreadyBound</code>, <code>TargetReplaced</code>, <code>InvalidBinding</code>, <code>Suspended</code>, <code>ShadowMode</code>, <code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, <code>IncompatibleMetric</code></td>
       </tr>
       <tr>
           <td><code>MetricsReady</code></td>
@@ -2038,16 +2383,23 @@ reports planning constraints. Inspect each condition&rsquo;s generation because 
           <td><code>WaitingForMetrics</code>, <code>ResourceExhausted</code>, <code>BoundsConflict</code>, <code>RatioConflict</code></td>
       </tr>
       <tr>
+          <td><code>CapacityPriorsReady</code></td>
+          <td><code>Resolved</code>, <code>Disabled</code></td>
+          <td><code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, <code>IncompatibleMetric</code>, <code>TargetNotFound</code>, <code>TargetReplaced</code>, <code>InvalidBinding</code>, <code>Suspended</code></td>
+      </tr>
+      <tr>
           <td><code>Blocked</code></td>
           <td><code>Ready</code> (<code>False</code>)</td>
-          <td><code>BoundsConflict</code>, <code>RatioConflict</code>, <code>PacingBounded</code>, <code>ResourceExhausted</code>, <code>ScaleDownAborted</code>, <code>RebalanceNotApplicable</code>, <code>RebalanceBlocked</code></td>
+          <td><code>BoundsConflict</code>, <code>RatioConflict</code>, <code>PacingBounded</code>, <code>ResourceExhausted</code>, <code>ScaleDownAborted</code>, <code>RebalanceNotApplicable</code>, <code>RebalanceBlocked</code>, <code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, <code>IncompatibleMetric</code></td>
       </tr>
   </tbody>
 </table>
 <p><code>BoundsConflict</code> means bounds are missing, inconsistent or exclude the current vector.
 <code>RatioConflict</code> means the current vector violates a ratio band or no feasible projection was found.
-<code>PacingBounded</code> means a step limit or guard held the recommendation. <code>WaitingForMetrics</code> means
-required readings or complete coverage are unavailable. <code>PredictorWarmingUp</code> is a role reason.</p>
+<code>PacingBounded</code> means a step limit or guard held the recommendation.</p>
+<p><code>WaitingForMetrics</code> means required readings or complete coverage are unavailable, and
+<code>PredictorWarmingUp</code> is a role reason. <code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code> and
+<code>IncompatibleMetric</code> report why a catalog prior could not be resolved.</p>
 <h2 id="limitations">Limitations</h2>
 <p>Admission refuses roles with a custom <em><code>command</code></em> because their serving signals are unmanaged.
 It also refuses <em><code>elasticEp</code></em> roles, whose width grows one collective rather than adding independent
@@ -2089,6 +2441,11 @@ unchecked writes through the binding fence.</p>
       </tr>
       <tr>
           <td>Counts never change</td>
+          <td>Condition: <code>CapacityPriorsReady</code></td>
+          <td>Verify <code>catalogRef</code>, the target identity (annotations or inferred model/hardware identity), engine-family image, single-<code>Pod</code> topology and explicit latency targets, or supply explicit capacities / remove <em><code>capacityPrior</code></em>.</td>
+      </tr>
+      <tr>
+          <td>Counts never change</td>
           <td>Condition: <code>Blocked</code>, Status: role <code>reason</code></td>
           <td>Correct bounds or ratios, or wait for the named pacing or retirement guard.</td>
       </tr>
@@ -2119,13 +2476,14 @@ unchecked writes through the binding fence.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
-      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
- (target roles and replica counts)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">Scaling Benchmark</a>
- (H100 measurements and observed failures)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Scaling Walkthrough</a>
- (configuration and observation)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Model Deployment Status</a>
- (target phase and conditions)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/">Model Deployment Shutdown</a>
- (retirement during scale-down)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
- (engine signals and scraping).</li></ul>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Configuration</a>
+ (roles and counts)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">Benchmark</a>
+ (H100 and H200 results)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/">Simulation</a>
+ (synthetic comparison)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Walkthrough</a>
+ (configure and observe)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Status</a>
+ (phase and conditions)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/">Shutdown</a>
+ (retirement)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Metrics</a>
+ (engine signals).</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
         <div><a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Model Deployment Status</a>
@@ -2141,7 +2499,7 @@ unchecked writes through the binding fence.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/fb0b75810cc391698292efe6d9af84047ae7c4f0/docs/modules/model-deployment/scaling.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/20d2aa3648161642f08c63506ee722c9e04ae306/docs/modules/model-deployment/scaling.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/scaling.md">Edit this page</a>
             
@@ -2159,6 +2517,13 @@ unchecked writes through the binding fence.</p>
         <li><a href="#token-throughput">Token throughput</a></li>
         <li><a href="#engine-signals">Engine signals</a></li>
         <li><a href="#predictive">Predictive</a></li>
+        <li><a href="#capacity-priors">Capacity priors</a></li>
+        <li><a href="#target-eligibility">Target eligibility</a></li>
+        <li><a href="#catalog-qualification">Catalog qualification</a></li>
+        <li><a href="#public-data-sources">Public data sources</a></li>
+        <li><a href="#identity-normalization">Identity normalization</a></li>
+        <li><a href="#prior-lifecycle">Prior lifecycle</a></li>
+        <li><a href="#local-evaluation">Local evaluation</a></li>
       </ul>
     </li>
     <li><a href="#bounds-and-ratios">Bounds and ratios</a></li>
@@ -2171,6 +2536,7 @@ unchecked writes through the binding fence.</p>
         <li><a href="#role-observations">Role observations</a></li>
         <li><a href="#decisions-and-recovery">Decisions and recovery</a></li>
         <li><a href="#predictor-state">Predictor state</a></li>
+        <li><a href="#resolved-priors">Resolved priors</a></li>
         <li><a href="#conditions">Conditions</a></li>
       </ul>
     </li>

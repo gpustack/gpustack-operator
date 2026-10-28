@@ -90,6 +90,8 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/</loc>
   </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/</loc>
+  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/shutdown/</loc>

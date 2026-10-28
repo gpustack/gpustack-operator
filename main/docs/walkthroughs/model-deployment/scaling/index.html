@@ -907,6 +907,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -968,6 +971,14 @@
   
 
   
+
+  
+    
+      
+      
+        
+        
+      
     
       
       
@@ -1104,12 +1115,19 @@
             <div class="nav-children">
               
                 
+                  <a title="Model Deployment Scaling Simulation" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/" >Simulation</a>
+                
+              
+                
                   <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
                 
               
             </div>
           
         
+      
+    
+      
       
     
       
@@ -1437,7 +1455,7 @@ separately from the reusable configuration.</p>
 </li>
 </ul>
 <h2 id="summary">Summary</h2>
-<p>Observe a <code>ModelDeploymentScaler</code> in <code>Shadow</code>, choose an algorithm, activate it in <code>Active</code>, and
+<p>Observe a <code>ModelDeploymentScaler</code> in <code>Shadow</code>, choose an algorithm, switch to <code>Active</code> mode, and
 watch a replica retire.</p>
 <table>
   <thead>
@@ -1669,6 +1687,32 @@ sampling stopped. Read engine metrics when a current signal value is needed.</p>
 <p>Replace the complete <em><code>spec.algorithm</code></em> mapping in <code>scaling-policy.yaml</code> when changing algorithms.
 Only the block matching <em><code>type</code></em> is accepted. Apply the edited file while it remains in <code>Shadow</code>.
 Capacity values below reproduce the benchmark&rsquo;s settings; tune them from measured per-replica capacity.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Choice</th>
+          <th>When to use</th>
+          <th>Configuration guidance</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Predictive</code> + <em><code>capacityPrior</code></em></td>
+          <td>Latency-sensitive online serving and traffic ramps where engine startup (~76 s on H200) must begin before sustained peak load arrives.</td>
+          <td>Set <em><code>horizonSeconds</code></em> above replica startup time (<code>180–300</code> s), keep <em><code>headroom: &quot;0.75&quot;</code></em>, and bound slope spikes with <em><code>behavior.scaleUp.maxStepReplicas</code></em>.</td>
+      </tr>
+      <tr>
+          <td><code>TokenThroughput</code> + <em><code>capacityPrior</code></em></td>
+          <td>General serving with variable prompt lengths and prefix caching when GPU replica-seconds must track sustained token demand.</td>
+          <td>Use <em><code>capacityPrior</code></em> (<code>&quot;0.75&quot;</code> headroom) or set manual targets at 70–75% of single-replica saturation; unmargined saturation targets fail to trigger before <em>TTFT</em> climbs.</td>
+      </tr>
+      <tr>
+          <td><code>Proportional</code></td>
+          <td>Uniform request lengths or simple concurrency control (<code>RunningRequests</code>, <code>QueueDepth</code>) without offline token-capacity sweeps.</td>
+          <td>Set <em><code>roleTargets[].target</code></em> to the per-replica concurrency where <em>TTFT</em> remains within target; <code>Proportional</code> does not accept <em><code>capacityPrior</code></em>.</td>
+      </tr>
+  </tbody>
+</table>
 <h3 id="token-throughput">Token throughput</h3>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1704,6 +1748,64 @@ Inspect <em><code>status.predictors</code></em> and the role reasons to distingu
 Earlier growth alone does not prove a forecast caused it; token throughput also grew during baseline
 in the <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/#scale-out-timing">recorded comparison</a>
 .</p>
+<h3 id="catalog-priors">Catalog priors</h3>
+<p><em><code>spec.algorithm.capacityPrior</code></em> resolves omitted <code>TokenThroughput</code> or <code>Predictive</code> capacities from
+a <code>worker.gpustack.ai/v1alpha1</code> <code>ModelDeploymentScalerCapacityPriorCatalog</code>. The embedded catalog carries the verified public sweeps imported from
+InferenceX; the <code>gpustack-operator-priors</code> skill&rsquo;s provenance records list every dataset.</p>
+<p>For other evidence, supply a reviewed same-namespace <code>ConfigMap</code> through <em><code>catalogRef</code></em> (key
+<code>priors.yaml</code> by default; the parser accepts YAML and JSON) with a qualified profile that
+matches the deployment.</p>
+<p>The <em><code>PD</code></em> target in Step 1 sets <em><code>spec.router</code></em>, so it requires manual capacities.
+To use <code>Catalog</code>, create a separate single-<code>Pod</code> <em>Server</em> target that satisfies
+<a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/#target-eligibility">Target eligibility</a>
+. A deployment
+whose identity matches an embedded profile resolves against the catalog with no extra setup.</p>
+<p>The model and hardware identity are inferred from the target — natural names in the optional
+identity annotations also work, and bare <code>mi325x</code> or <code>AMD Instinct MI325X</code> normalize to the
+canonical family <code>amd-mi325x</code> via the
+<a href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/">Instance Type Unit Resources</a>
+ family rules.</p>
+<p>The engine image matches by family, so no hand-computed digests or <code>@sha256</code> pinning are required.</p>
+<p>Omit <em><code>spec.router</code></em>, <em><code>spec.kvCache</code></em>, <em><code>spec.kvTransfer</code></em> and <em><code>Encode</code></em>. The fragment and
+command below are configuration examples, not captured output from a live cluster run:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Predictive</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">predictive</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">horizonSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minPoints</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">serverTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1200&#34;</span><span class="w">  </span><span class="c"># explicit fallback override</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;500&#34;</span><span class="w">        </span><span class="c"># required when Server uses Catalog</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">          </span><span class="c"># required when Server uses Catalog</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPrior</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">catalogRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-priors</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">priors.yaml</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span></span></span></code></pre></div>
+</div><p>In this <em>Server</em> partial override, <em><code>serverTargetTokensPerSecond</code></em> stays <code>Explicit</code> at <code>&quot;1200&quot;</code>
+while the omitted <em><code>serverTokenCapacityPerReplica</code></em> forecast capacity resolves from <code>Catalog</code> by
+the role&rsquo;s identity and multiplies its profile seed capacity by <em><code>headroom</code></em>. Both <code>&quot;1200&quot;</code> and
+<code>&quot;0.75&quot;</code> are illustrative configuration values rather than measured hardware capacities; removing
+<em><code>capacityPrior</code></em> restores manual capacity validation.</p>
+<p>When the target matches an embedded profile, drop the explicit fallback and the <code>ConfigMap</code>: the
+embedded catalog supplies the capacity and the identity resolves from the target.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-vllm-server -o json <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{priors: .status.resolvedCapacityPriors,
+</span></span></span><span class="line"><span class="cl"><span class="s1">         conditions: [.status.conditions[] | select(.type == &#34;CapacityPriorsReady&#34; or .type == &#34;Blocked&#34;)]}&#39;</span></span></span></code></pre></div>
+</div><p>When the target exists, <code>CREATE</code> rejects an unresolved catalog prior. <code>UPDATE</code> admission returns a
+warning without writing <code>status</code> so you can suspend the scaler, switch to <code>Shadow</code>, remove
+<em><code>capacityPrior</code></em> or supply explicit capacities; the controller then sets
+<code>CapacityPriorsReady=False</code>, <code>Active=False</code> and <code>Blocked=True</code> on reconciliation (eventual
+consistency) and stops new replica commits.</p>
 <h3 id="encode-ratios">Encode ratios</h3>
 <p>For a separate multimodal target, follow the
 <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/">EPD Walkthrough</a>
@@ -1808,6 +1910,138 @@ for exact counts and measurement limits.</p>
 <p>For a new run, retain client outcomes, new-replica counters, Ready counts and retirement transitions.
 Require successful requests during the tested transition before claiming uninterrupted serving.
 Missing state samples do not establish a complete <code>Draining</code>-to-deletion trace.</p>
+<h3 id="resolving-a-catalog-prior">Resolving a catalog prior</h3>
+<p><code>Catalog.Resolve</code> turns one measured sweep into a capacity seed by walking the trade-off every
+benchmark sweep records: as concurrency rises, per-replica throughput — proportional to power
+efficiency (<code>tokens/s/MW</code> at a fixed node power) — climbs toward saturation, while per-user
+interactivity (<code>tokens/s/user</code> ≈ <code>1000 / ITL</code> milliseconds) falls.</p>
+<p>This example resolves the shipped public profile <code>(Server, deepseek-ai/DeepSeek-R1-0528, fp8, sglang, amd-mi325x, gpusPerReplica: 8, tensorParallel: 8)</code> from
+<code>pkg/worker/scaling/priors/priors.yaml</code>. Its five measured points follow; power efficiency is
+illustrative at a ~0.0115 MW eight-accelerator node, and interactivity is <code>1000 / ITL P90</code>:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Concurrency</th>
+          <th style="text-align: right">Per-replica <code>tokens/s</code></th>
+          <th style="text-align: right"><code>tokens/s/MW</code></th>
+          <th style="text-align: right">TTFT P90 (ms)</th>
+          <th style="text-align: right">ITL P90 (ms)</th>
+          <th style="text-align: right"><code>tokens/s/user</code></th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>4</td>
+          <td style="text-align: right">1875.02</td>
+          <td style="text-align: right">~163k</td>
+          <td style="text-align: right">665.4</td>
+          <td style="text-align: right">16.95</td>
+          <td style="text-align: right">59.0</td>
+      </tr>
+      <tr>
+          <td>8</td>
+          <td style="text-align: right">3167.82</td>
+          <td style="text-align: right">~275k</td>
+          <td style="text-align: right">1001.7</td>
+          <td style="text-align: right">18.47</td>
+          <td style="text-align: right">54.1</td>
+      </tr>
+      <tr>
+          <td>16</td>
+          <td style="text-align: right">4988.96</td>
+          <td style="text-align: right">~434k</td>
+          <td style="text-align: right">1119.7</td>
+          <td style="text-align: right">20.82</td>
+          <td style="text-align: right">48.0</td>
+      </tr>
+      <tr>
+          <td>32</td>
+          <td style="text-align: right">6496.65</td>
+          <td style="text-align: right">~565k</td>
+          <td style="text-align: right">1516.6</td>
+          <td style="text-align: right">28.32</td>
+          <td style="text-align: right">35.3</td>
+      </tr>
+      <tr>
+          <td>64</td>
+          <td style="text-align: right">7630.2</td>
+          <td style="text-align: right">~663k</td>
+          <td style="text-align: right">2636.2</td>
+          <td style="text-align: right">44.44</td>
+          <td style="text-align: right">22.5</td>
+      </tr>
+  </tbody>
+</table>
+<p>A <code>Server</code> role held to P90 <em>TTFT</em> of <code>2000</code> ms and P90 <em>ITL</em> of <code>33</code> ms — a floor of about
+<code>30.3 tokens/s/user</code> — configures as:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">TokenThroughput</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">latencyQuantile</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.90&#34;</span><span class="w">        </span><span class="c"># resolve the prior at P90, not the P95 default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;33&#34;</span><span class="w">    </span><span class="c"># a 30.3 tokens/s/user floor</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># serverTargetTokensPerSecond omitted: it resolves from the catalog</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">capacityPrior</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span><span class="w">                 </span><span class="c"># catalogRef omitted: the embedded catalog</span></span></span></code></pre></div>
+</div><p>The resolver then:</p>
+<ol>
+<li>Matches the profile by the target&rsquo;s normalized <code>(role, model, quantization, engine, hardware, topology)</code> tuple — no profile identifier is configured.</li>
+<li>Filters the points against the P90 targets: concurrency <code>4</code>, <code>8</code>, <code>16</code> and <code>32</code> meet both;
+concurrency <code>64</code> breaches them (TTFT P90 <code>2636.2</code> ms, ITL P90 <code>44.44</code> ms ≈ <code>22.5 tokens/s/user</code>),
+establishing <code>HigherLoadSLOFailure</code>. Looser targets that let every point pass would instead cap
+at the measured concurrency <code>64</code> — never extrapolated (<code>ExplicitSaturation</code>).</li>
+<li>Selects the feasible point with the highest per-replica <code>tokens/s</code> — the <code>tokens/s/MW</code> maximum
+under the targets — so <code>concurrency: 32</code> seeds the capacity: <code>6496.65</code> tokens/s, about
+<code>565k tokens/s/MW</code> at <code>35.3 tokens/s/user</code>.</li>
+<li>Applies the headroom: <code>6496.65 * 0.75 = 4872.49</code> effective tokens/s per replica. A live demand
+of <code>15,000</code> tokens/s therefore plans <code>ceil(15000 / 4872.49) = 4</code> replicas — about <code>3,750</code>
+tokens/s per replica — keeping every replica inside its interactivity target.</li>
+</ol>
+<p>Bounds, pacing and the other guards still apply to that recommendation;
+<a href="#capacity-comparison">Capacity comparison</a>
+ then measures the dynamics these seeds produce.</p>
+<h3 id="capacity-comparison">Capacity comparison</h3>
+<p>The initial comparison helper accepts a single-<em>Server</em> <code>ModelDeployment</code> (<code>len(roles) == 1</code> and
+<code>kind: Server</code>) with no <em><code>spec.router</code></em>, <em><code>spec.kvCache</code></em> or <em><code>spec.kvTransfer</code></em>, and a target-owned
+<code>Service</code> (<code>&lt;target&gt;-&lt;role&gt;</code>) publishing one HTTP port.</p>
+<p>Its engine-family image, identity (annotations or inferred) and effective launch flags must match
+the offline qualified catalog (<code>outcome: Accepted</code> and <code>evaluationTraceID</code> disjoint from
+<code>fitRunIDs</code>). It does not run <em>Prefill</em>/<em>Decode</em> comparison or require eight GPUs.</p>
+<p>The helper compares <code>frozen-manual</code>, <code>tuned-manual</code> and <code>catalog</code> across at least three serial
+repeats (<code>alternating</code> or <code>seeded</code>). Apart from capacity fields, the arms share <code>Active</code> mode,
+<code>TokenThroughput</code> or <code>Predictive</code>, latency targets, bounds, pacing, image, phases, seed and start
+condition.</p>
+<p>For <code>Predictive</code>, the manual arms set both forecast and fallback capacities;
+the full-Catalog arm omits both. The API still supports partial overrides outside this comparison.
+Every scaler sets a positive downward <em><code>stabilizationWindowSeconds</code></em>, and the quiet <code>cooldown</code> phase
+(<code>concurrency: 0</code>) spans at least <code>stabilizationWindowSeconds</code> plus startup and retirement allowances.</p>
+<p>Copy <code>.agents/skills/gpustack-operator-benchmark/manifests/autoscaling-comparison.json</code>
+(<code>REPLACE_WITH_*</code> values are template placeholders, not a runnable profile) and supply your context,
+<code>clusterQueues</code>, disjoint <code>fitRunIDs</code> and <code>evaluationTraceID</code>, prepared driver <code>Pod</code>, JSON
+deployment/scaler manifests and offline qualified catalog <code>ConfigMap</code>. Priors are acquired offline
+only, never from live evaluation traffic.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">bash .agents/skills/gpustack-operator-benchmark/cases/case-5-autoscaling.sh <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --capacity-comparison --config FILE --out DIR --validate-only
+</span></span><span class="line"><span class="cl">python3 .agents/skills/gpustack-operator-benchmark/scripts/autoscaling_report.py <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  ARM_DIR --out REPORT_JSON</span></span></code></pre></div>
+</div><p><code>--validate-only</code> makes zero cluster API or driver calls, writes <code>validated-plan.json</code> and <code>catalog-input.json</code> under <code>--out</code>, and
+exits <code>0</code> when valid or <code>2</code> on validation or input error. On a live hardware gate, <code>--execute</code> writes per-round <code>&lt;NN&gt;-&lt;arm&gt;/</code>
+artifacts (<code>inputs/*.json</code>, <code>run.json</code>, <code>timeline.jsonl</code>, <code>prepare_reqs.jsonl</code>, <code>&lt;phase&gt;_reqs.jsonl</code>, <code>&lt;phase&gt;.json</code>, <code>cleanup.json</code>,
+<code>report.json</code>) and root <code>comparison.json</code> (<code>readyReplicaSeconds</code> and <code>latenciesByRun</code>).</p>
+<p><code>--execute</code> exits <code>0</code> when all rounds, parser checks and UID-preconditioned raw <code>DELETE</code> cleanups
+succeed across at least three valid repeats per arm, <code>1</code> on round or cleanup failure (<code>130</code> on
+interrupt), and <code>2</code> on validation error.</p>
+<p><code>autoscaling_report.py</code> writes schema <code>1</code> diagnostics (<code>null</code> metrics with reasons and no win
+verdict when evidence is missing) and exits <code>0</code> when valid, <code>1</code> when invalid, and <code>2</code> when
+<code>ARM_DIR</code> is missing or the output cannot be written.</p>
+<p>See <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/#capacity-arm-rounds">Scaling Benchmark</a>
+
+for the recorded 18-round H200 comparison. Legacy invocations (<code>case-5-autoscaling.sh [OUT_DIR] ...</code>
+or <code>--legacy-topology</code>) remain aliases for the five-configuration topology benchmark.</p>
 <h2 id="cleanup">Cleanup</h2>
 <p>Delete the scaler first so its finalizer can release the binding. Deleting a scaler leaves its
 target serving at the current counts. Delete the target separately when it is no longer needed.</p>
@@ -1855,6 +2089,11 @@ Keep shared prefetched artifacts and <code>default/bench-driver</code> when othe
           <td>Allow valid successive samples from role signals and engine metrics; investigate missing or restarted endpoints.</td>
       </tr>
       <tr>
+          <td>Catalog prior fails to resolve</td>
+          <td>Condition: <code>CapacityPriorsReady=False</code> (<code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code> or <code>IncompatibleMetric</code>)</td>
+          <td>Check <code>catalogRef</code>, the target identity (annotations or inferred), engine-family image, single-<code>Pod</code> topology and explicit latency targets, or remove <em><code>capacityPrior</code></em> / supply explicit capacities.</td>
+      </tr>
+      <tr>
           <td>Growth stops at admission</td>
           <td>Reason: <code>ResourceExhausted</code></td>
           <td>Read <em><code>pendingCohort</code></em>, <code>Workload</code>s and quota; restore admission capacity before retrying growth.</td>
@@ -1887,7 +2126,7 @@ Keep shared prefetched artifacts and <code>default/bench-driver</code> when othe
       <h2>See also</h2>
       <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
  (public field contracts)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">Scaling Benchmark</a>
- (H100 measurements and limits)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/">Model Deployment Shutdown</a>
+ (H100 and H200 measurements and limits)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/">Model Deployment Shutdown</a>
  (retirement behavior)</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
@@ -1903,7 +2142,7 @@ Keep shared prefetched artifacts and <code>default/bench-driver</code> when othe
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/fb0b75810cc391698292efe6d9af84047ae7c4f0/docs/walkthroughs/model-deployment/scaling.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/20d2aa3648161642f08c63506ee722c9e04ae306/docs/walkthroughs/model-deployment/scaling.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/scaling.md">Edit this page</a>
             
@@ -1926,12 +2165,18 @@ Keep shared prefetched artifacts and <code>default/bench-driver</code> when othe
       <ul>
         <li><a href="#token-throughput">Token throughput</a></li>
         <li><a href="#predictive">Predictive</a></li>
+        <li><a href="#catalog-priors">Catalog priors</a></li>
         <li><a href="#encode-ratios">Encode ratios</a></li>
       </ul>
     </li>
     <li><a href="#step-4-activate-scaling">Step 4: Activate scaling</a></li>
     <li><a href="#step-5-observe-retirement">Step 5: Observe retirement</a></li>
-    <li><a href="#verification">Verification</a></li>
+    <li><a href="#verification">Verification</a>
+      <ul>
+        <li><a href="#resolving-a-catalog-prior">Resolving a catalog prior</a></li>
+        <li><a href="#capacity-comparison">Capacity comparison</a></li>
+      </ul>
+    </li>
     <li><a href="#cleanup">Cleanup</a></li>
     <li><a href="#troubleshooting">Troubleshooting</a></li>
   </ul>

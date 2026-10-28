@@ -1,0 +1,2195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Model Deployment Scaling Simulation · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">main</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">main</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/main/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling Chain</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Network Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod Injection</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-Heavy Nodes</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image Source</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node Store</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+          
+        
+      
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Simulation" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/" aria-current="page">Simulation</a>
+                
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Deployment Scaling Simulation</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-deployment-scaling-simulation">Model Deployment Scaling Simulation</h1>
+<p>A deterministic local simulation compares the three <code>ModelDeploymentScaler</code> algorithms on identical
+synthetic traffic. It records replica adjustments, request outcomes, <em>time to first token (TTFT)</em>,
+<em>time per output token (TPOT)</em> and <em>inter-token latency (ITL)</em>. These results are not hardware
+measurements and are not tuning or purchasing recommendations.</p>
+<p>The measured hardware comparison — including a four-node H200 sensitivity wave scored against the
+same true-SLO and goodput metrics — lives in
+<a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/#algorithm-sensitivity">Model Deployment Scaling Benchmark</a>
+; the scaler
+contract lives in <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
+.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#fixture-and-provenance">Fixture and provenance</a>
+</li>
+<li><a href="#results">Results</a>
+</li>
+<li><a href="#adjustment-dynamics">Adjustment dynamics</a>
+</li>
+<li><a href="#quota-shortfall">Quota shortfall</a>
+</li>
+<li><a href="#reading-the-numbers">Reading the numbers</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+</ul>
+<h2 id="fixture-and-provenance">Fixture and provenance</h2>
+<p>Every configuration uses the same synthetic plant, fleet lifecycle and clock. Each receives the
+same open-loop arrivals for a given scenario seed; only the scaler algorithm differs. Runs replay
+identically for each seed. A separate fixed <code>Shadow</code> control observes the same traffic without
+committing changes.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Item</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Engine</td>
+          <td>vLLM exposition (synthetic plant counters and histograms)</td>
+      </tr>
+      <tr>
+          <td>Plant capacity</td>
+          <td>300 tokens/s per replica, batch 4, batch gain 0.05, contention 0.02</td>
+      </tr>
+      <tr>
+          <td>Request timeout</td>
+          <td>30 s</td>
+      </tr>
+      <tr>
+          <td>SLO targets</td>
+          <td><em>TTFT</em> 2 s; <em>ITL</em> 100 ms; no <em>TPOT</em> target</td>
+      </tr>
+      <tr>
+          <td>Fleet</td>
+          <td>1 initial replica; quota 6 (4 in <code>quota-shortfall</code>); 10 s admission; 20 s boot; 30 s retirement</td>
+      </tr>
+      <tr>
+          <td>Scaler</td>
+          <td>10 s sampling; <em><code>maxReplicas</code></em> <code>6</code>; scale-up step 1; 60 s scale-down stabilization</td>
+      </tr>
+      <tr>
+          <td>Configurations</td>
+          <td><code>Proportional</code> on <code>QueueDepth</code> target 4 tolerance 0.1; <code>TokenThroughput</code> at 300 tokens/s; <code>Predictive</code> with the same capacity, 30 s horizon and 4-point warm-up; fixed <code>Shadow</code> control</td>
+      </tr>
+      <tr>
+          <td>Traffic</td>
+          <td>Open loop, 1 s steps, jittered request lengths, quantized to whole tokens per request; scenario seeds 20261026 through 20261034</td>
+      </tr>
+      <tr>
+          <td>Token truth</td>
+          <td>Opt-in whole-token recording; TTFT, TPOT and ITL statistics derive from recorded token timestamps</td>
+      </tr>
+  </tbody>
+</table>
+<p>Scenarios: <code>idle</code> (no traffic), <code>step</code> (1 to 3 requests/s at 60 s), <code>burst-fault-reset</code> (burst, a
+70–90 s scrape outage, a counter reset at 100 s and a controller restart at 120 s),
+<code>holdout-cache-shift</code> (prefix-cache fraction rises from 0 to 0.5 at 120 s; holdout), and <code>noise</code>
+(constant 2 requests/s with strongly jittered lengths).</p>
+<p>The remaining scenarios are <code>ramp</code> (0.5 to 4 requests/s in five steps), <code>quota-ceiling</code> (10
+requests/s against a 6-replica quota equal to the scaler maximum), <code>quota-shortfall</code> (8 requests/s
+against a 4-replica quota below the maximum, then 0.5 requests/s), and <code>length-shift</code> (50/50-token
+requests switch to 200/400-token requests at 120 s).</p>
+<p>The fixture lives beside the scaler controller tests. Its comparison suite rewrites two deterministic
+artifacts in the OS temp directory: a summary for each scenario and configuration, with provenance
+notes, and a timeline with one sampled instant per line. The timeline records offered traffic,
+signals read by each algorithm (null when missing), the raw recommendation, committed count,
+ready replicas and reasons.</p>
+<h2 id="results">Results</h2>
+<p>True SLO is the share of offered requests whose recorded <em>TTFT</em> and adjacent <em>ITL</em> gaps stayed
+within the targets; failed and outstanding requests count as non-compliant. Goodput counts
+compliant requests per simulated second.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Scenario</th>
+          <th>Configuration</th>
+          <th>Offered</th>
+          <th>Done</th>
+          <th>Failed</th>
+          <th>Outstanding</th>
+          <th>True SLO</th>
+          <th>Goodput (req/s)</th>
+          <th>Changes</th>
+          <th>Peak committed</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>idle</td>
+          <td>Proportional</td>
+          <td>0</td>
+          <td>0</td>
+          <td>0</td>
+          <td>0</td>
+          <td>null</td>
+          <td>null</td>
+          <td>0</td>
+          <td>1</td>
+      </tr>
+      <tr>
+          <td>idle</td>
+          <td>TokenThroughput</td>
+          <td>0</td>
+          <td>0</td>
+          <td>0</td>
+          <td>0</td>
+          <td>null</td>
+          <td>null</td>
+          <td>0</td>
+          <td>1</td>
+      </tr>
+      <tr>
+          <td>idle</td>
+          <td>Predictive</td>
+          <td>0</td>
+          <td>0</td>
+          <td>0</td>
+          <td>0</td>
+          <td>null</td>
+          <td>null</td>
+          <td>0</td>
+          <td>1</td>
+      </tr>
+      <tr>
+          <td>step</td>
+          <td>Proportional</td>
+          <td>600</td>
+          <td>600</td>
+          <td>0</td>
+          <td>0</td>
+          <td>63.2%</td>
+          <td>1.58</td>
+          <td>5</td>
+          <td>6</td>
+      </tr>
+      <tr>
+          <td>step</td>
+          <td>TokenThroughput</td>
+          <td>600</td>
+          <td>600</td>
+          <td>0</td>
+          <td>0</td>
+          <td>61.7%</td>
+          <td>1.54</td>
+          <td>6</td>
+          <td>6</td>
+      </tr>
+      <tr>
+          <td>step</td>
+          <td>Predictive</td>
+          <td>600</td>
+          <td>600</td>
+          <td>0</td>
+          <td>0</td>
+          <td>61.7%</td>
+          <td>1.54</td>
+          <td>6</td>
+          <td>6</td>
+      </tr>
+      <tr>
+          <td>burst-fault-reset</td>
+          <td>Proportional</td>
+          <td>450</td>
+          <td>450</td>
+          <td>0</td>
+          <td>0</td>
+          <td>40.4%</td>
+          <td>0.91</td>
+          <td>5</td>
+          <td>6</td>
+      </tr>
+      <tr>
+          <td>burst-fault-reset</td>
+          <td>TokenThroughput</td>
+          <td>450</td>
+          <td>450</td>
+          <td>0</td>
+          <td>0</td>
+          <td>38.9%</td>
+          <td>0.88</td>
+          <td>4</td>
+          <td>4</td>
+      </tr>
+      <tr>
+          <td>burst-fault-reset</td>
+          <td>Predictive</td>
+          <td>450</td>
+          <td>450</td>
+          <td>0</td>
+          <td>0</td>
+          <td>38.9%</td>
+          <td>0.88</td>
+          <td>4</td>
+          <td>4</td>
+      </tr>
+      <tr>
+          <td>holdout-cache-shift</td>
+          <td>Proportional</td>
+          <td>480</td>
+          <td>480</td>
+          <td>0</td>
+          <td>0</td>
+          <td>79.4%</td>
+          <td>1.59</td>
+          <td>4</td>
+          <td>5</td>
+      </tr>
+      <tr>
+          <td>holdout-cache-shift</td>
+          <td>TokenThroughput</td>
+          <td>480</td>
+          <td>480</td>
+          <td>0</td>
+          <td>0</td>
+          <td>79.4%</td>
+          <td>1.59</td>
+          <td>5</td>
+          <td>4</td>
+      </tr>
+      <tr>
+          <td>holdout-cache-shift</td>
+          <td>Predictive</td>
+          <td>480</td>
+          <td>480</td>
+          <td>0</td>
+          <td>0</td>
+          <td>79.4%</td>
+          <td>1.59</td>
+          <td>5</td>
+          <td>4</td>
+      </tr>
+      <tr>
+          <td>noise</td>
+          <td>Proportional</td>
+          <td>360</td>
+          <td>360</td>
+          <td>0</td>
+          <td>0</td>
+          <td>71.1%</td>
+          <td>1.42</td>
+          <td>5</td>
+          <td>6</td>
+      </tr>
+      <tr>
+          <td>noise</td>
+          <td>TokenThroughput</td>
+          <td>360</td>
+          <td>360</td>
+          <td>0</td>
+          <td>0</td>
+          <td>71.1%</td>
+          <td>1.42</td>
+          <td>5</td>
+          <td>4</td>
+      </tr>
+      <tr>
+          <td>noise</td>
+          <td>Predictive</td>
+          <td>360</td>
+          <td>360</td>
+          <td>0</td>
+          <td>0</td>
+          <td>71.1%</td>
+          <td>1.42</td>
+          <td>4</td>
+          <td>4</td>
+      </tr>
+      <tr>
+          <td>ramp</td>
+          <td>Proportional</td>
+          <td>532</td>
+          <td>532</td>
+          <td>0</td>
+          <td>0</td>
+          <td>76.1%</td>
+          <td>1.69</td>
+          <td>5</td>
+          <td>6</td>
+      </tr>
+      <tr>
+          <td>ramp</td>
+          <td>TokenThroughput</td>
+          <td>532</td>
+          <td>532</td>
+          <td>0</td>
+          <td>0</td>
+          <td>76.1%</td>
+          <td>1.69</td>
+          <td>4</td>
+          <td>5</td>
+      </tr>
+      <tr>
+          <td>ramp</td>
+          <td>Predictive</td>
+          <td>532</td>
+          <td>531</td>
+          <td>0</td>
+          <td>1</td>
+          <td>99.4%</td>
+          <td>2.20</td>
+          <td>3</td>
+          <td>4</td>
+      </tr>
+      <tr>
+          <td>quota-ceiling</td>
+          <td>Proportional</td>
+          <td>1170</td>
+          <td>563</td>
+          <td>607</td>
+          <td>0</td>
+          <td>12.7%</td>
+          <td>0.83</td>
+          <td>5</td>
+          <td>6</td>
+      </tr>
+      <tr>
+          <td>quota-ceiling</td>
+          <td>TokenThroughput</td>
+          <td>1170</td>
+          <td>435</td>
+          <td>735</td>
+          <td>0</td>
+          <td>12.7%</td>
+          <td>0.83</td>
+          <td>5</td>
+          <td>6</td>
+      </tr>
+      <tr>
+          <td>quota-ceiling</td>
+          <td>Predictive</td>
+          <td>1170</td>
+          <td>435</td>
+          <td>735</td>
+          <td>0</td>
+          <td>12.7%</td>
+          <td>0.83</td>
+          <td>5</td>
+          <td>6</td>
+      </tr>
+      <tr>
+          <td>quota-shortfall</td>
+          <td>Proportional</td>
+          <td>850</td>
+          <td>202</td>
+          <td>648</td>
+          <td>0</td>
+          <td>4.7%</td>
+          <td>0.20</td>
+          <td>5</td>
+          <td>5</td>
+      </tr>
+      <tr>
+          <td>quota-shortfall</td>
+          <td>TokenThroughput</td>
+          <td>850</td>
+          <td>202</td>
+          <td>648</td>
+          <td>0</td>
+          <td>4.7%</td>
+          <td>0.20</td>
+          <td>5</td>
+          <td>5</td>
+      </tr>
+      <tr>
+          <td>quota-shortfall</td>
+          <td>Predictive</td>
+          <td>850</td>
+          <td>202</td>
+          <td>648</td>
+          <td>0</td>
+          <td>4.7%</td>
+          <td>0.20</td>
+          <td>5</td>
+          <td>5</td>
+      </tr>
+      <tr>
+          <td>length-shift</td>
+          <td>Proportional</td>
+          <td>480</td>
+          <td>410</td>
+          <td>59</td>
+          <td>11</td>
+          <td>51.0%</td>
+          <td>1.02</td>
+          <td>5</td>
+          <td>6</td>
+      </tr>
+      <tr>
+          <td>length-shift</td>
+          <td>TokenThroughput</td>
+          <td>480</td>
+          <td>368</td>
+          <td>70</td>
+          <td>42</td>
+          <td>50.4%</td>
+          <td>1.01</td>
+          <td>5</td>
+          <td>6</td>
+      </tr>
+      <tr>
+          <td>length-shift</td>
+          <td>Predictive</td>
+          <td>480</td>
+          <td>368</td>
+          <td>70</td>
+          <td>42</td>
+          <td>50.4%</td>
+          <td>1.01</td>
+          <td>5</td>
+          <td>6</td>
+      </tr>
+  </tbody>
+</table>
+<p>The fixed <code>Shadow</code> control never commits a change: it stays at the initial replica in every
+scenario and therefore completes the least work under load — in <code>step</code>, 153 of 600 requests
+finish and 357 time out. The completed-request columns for the three active configurations are
+the effect of their scaling. Idle rows carry null fractions because no request was offered; the
+absence of traffic is not a 0% or 100% compliance measurement.</p>
+<h2 id="adjustment-dynamics">Adjustment dynamics</h2>
+<p>Selected instants from the <code>step</code> scenario timeline (raw recommendation, committed replicas, ready
+replicas, throughput signal, observed processed tokens per second, observed waiting requests):</p>
+<table>
+  <thead>
+      <tr>
+          <th>Second</th>
+          <th>Configuration</th>
+          <th>Raw</th>
+          <th>Committed</th>
+          <th>Ready</th>
+          <th>Signal</th>
+          <th>Tokens/s observed</th>
+          <th>Waiting</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>0</td>
+          <td>all</td>
+          <td>1</td>
+          <td>1</td>
+          <td>1</td>
+          <td>Missing</td>
+          <td>null</td>
+          <td>0</td>
+      </tr>
+      <tr>
+          <td>60</td>
+          <td>all</td>
+          <td>1</td>
+          <td>1</td>
+          <td>1</td>
+          <td>Fresh</td>
+          <td>200.4</td>
+          <td>0</td>
+      </tr>
+      <tr>
+          <td>70</td>
+          <td>Proportional</td>
+          <td>5</td>
+          <td>2</td>
+          <td>1</td>
+          <td>Fresh</td>
+          <td>270.8</td>
+          <td>16</td>
+      </tr>
+      <tr>
+          <td>70</td>
+          <td>TokenThroughput</td>
+          <td>2</td>
+          <td>2</td>
+          <td>1</td>
+          <td>Fresh</td>
+          <td>270.8</td>
+          <td>16</td>
+      </tr>
+      <tr>
+          <td>70</td>
+          <td>Predictive</td>
+          <td>2</td>
+          <td>2</td>
+          <td>1</td>
+          <td>Fresh</td>
+          <td>270.8</td>
+          <td>16</td>
+      </tr>
+      <tr>
+          <td>90</td>
+          <td>Proportional</td>
+          <td>13</td>
+          <td>4</td>
+          <td>1</td>
+          <td>Fresh</td>
+          <td>273.9</td>
+          <td>46</td>
+      </tr>
+      <tr>
+          <td>90</td>
+          <td>TokenThroughput</td>
+          <td>4</td>
+          <td>4</td>
+          <td>1</td>
+          <td>Fresh</td>
+          <td>273.9</td>
+          <td>46</td>
+      </tr>
+      <tr>
+          <td>90</td>
+          <td>Predictive</td>
+          <td>4</td>
+          <td>4</td>
+          <td>1</td>
+          <td>Fresh</td>
+          <td>273.9</td>
+          <td>46</td>
+      </tr>
+      <tr>
+          <td>110</td>
+          <td>Proportional</td>
+          <td>18</td>
+          <td>6</td>
+          <td>3</td>
+          <td>Missing</td>
+          <td>null</td>
+          <td>64</td>
+      </tr>
+      <tr>
+          <td>110</td>
+          <td>TokenThroughput</td>
+          <td>4</td>
+          <td>4</td>
+          <td>3</td>
+          <td>Missing</td>
+          <td>null</td>
+          <td>64</td>
+      </tr>
+      <tr>
+          <td>110</td>
+          <td>Predictive</td>
+          <td>4</td>
+          <td>4</td>
+          <td>3</td>
+          <td>Missing</td>
+          <td>null</td>
+          <td>64</td>
+      </tr>
+      <tr>
+          <td>130</td>
+          <td>Proportional</td>
+          <td>9</td>
+          <td>6</td>
+          <td>5</td>
+          <td>Missing</td>
+          <td>null</td>
+          <td>23</td>
+      </tr>
+      <tr>
+          <td>130</td>
+          <td>TokenThroughput</td>
+          <td>5</td>
+          <td>5</td>
+          <td>4</td>
+          <td>Fresh</td>
+          <td>1097.9</td>
+          <td>23</td>
+      </tr>
+      <tr>
+          <td>130</td>
+          <td>Predictive</td>
+          <td>7</td>
+          <td>5</td>
+          <td>4</td>
+          <td>Fresh</td>
+          <td>1097.9</td>
+          <td>23</td>
+      </tr>
+      <tr>
+          <td>150</td>
+          <td>Proportional</td>
+          <td>6</td>
+          <td>6</td>
+          <td>6</td>
+          <td>Fresh</td>
+          <td>629.2</td>
+          <td>0</td>
+      </tr>
+      <tr>
+          <td>150</td>
+          <td>TokenThroughput</td>
+          <td>7</td>
+          <td>6</td>
+          <td>4</td>
+          <td>Fresh</td>
+          <td>724.4</td>
+          <td>0</td>
+      </tr>
+      <tr>
+          <td>150</td>
+          <td>Predictive</td>
+          <td>7</td>
+          <td>6</td>
+          <td>4</td>
+          <td>Fresh</td>
+          <td>724.4</td>
+          <td>0</td>
+      </tr>
+      <tr>
+          <td>240</td>
+          <td>Proportional</td>
+          <td>6</td>
+          <td>6</td>
+          <td>6</td>
+          <td>Fresh</td>
+          <td>590.2</td>
+          <td>0</td>
+      </tr>
+      <tr>
+          <td>240</td>
+          <td>TokenThroughput</td>
+          <td>3</td>
+          <td>5</td>
+          <td>5</td>
+          <td>Fresh</td>
+          <td>590.2</td>
+          <td>0</td>
+      </tr>
+      <tr>
+          <td>240</td>
+          <td>Predictive</td>
+          <td>5</td>
+          <td>5</td>
+          <td>5</td>
+          <td>Fresh</td>
+          <td>590.2</td>
+          <td>0</td>
+      </tr>
+  </tbody>
+</table>
+<p>Three behaviors are visible. First, <code>Proportional</code> overshoots its raw recommendation under a queue
+backlog (18 at 110 s) because one instantaneous queue depth reflects the whole backlog, while the
+windowed algorithms stay nearer capacity. Second, every configuration shows <code>Missing</code> throughput
+windows while newly committed replicas boot (110–130 s for <code>Proportional</code>); the timeline records
+those as missing readings, not zeros.</p>
+<p>Third, all three configurations reach 6 replicas during 150–230 s, after which <code>TokenThroughput</code>
+and <code>Predictive</code> scale down to 5 at 240 s while <code>Proportional</code> holds 6 — the source of their
+differing change counts. In the <code>ramp</code> scenario the differences do change outcomes: <code>Predictive</code>
+committed its first growth 15 s after the load event against 55 s for the reactive configurations
+and completed 99.4% of requests within the true SLO against 76.1%.</p>
+<h2 id="quota-shortfall">Quota shortfall</h2>
+<p><code>quota-shortfall</code> caps the fleet at 4 replicas while the scaler maximum stays 6, so the overload
+phase strands desired replicas in the pending cohort with admission pinned at the quota and the
+block reason <code>ResourceExhausted</code>. When a cohort has waited <em><code>pendingTimeoutSeconds</code></em> (60 s), the
+scaler rolls back to its last committed count of 4 while the raw recommendation still exceeds the
+quota — 60 for <code>Proportional</code> at 100 s, 6 for the token configurations at 130 s.</p>
+<p>When demand later drops to 0.5 requests/s, the recommendation falls to 4 or fewer and no new cohort
+forms.</p>
+<p>Clearance here is the pending timeout&rsquo;s rollback, not a quota change. The fixture contains no
+quota raise, so recovery from an enlarged quota is not exercised and remains unverified.</p>
+<h2 id="reading-the-numbers">Reading the numbers</h2>
+<ul>
+<li>True <em>TTFT</em>, <em>TPOT</em> and <em>ITL</em> statistics are computed from recorded whole-token timestamps.
+TTFT and TPOT percentiles weight completed requests; ITL percentiles pool every adjacent gap of
+completed requests, so longer responses contribute more samples. Failed partial traces and
+outstanding requests enter no percentile but stay non-compliant in the offered-based SLO
+denominator.</li>
+<li>The timeline distinguishes missing readings from true zeros. A gauge or latency field is null
+unless the sampler read it fresh; the observed token rate is null while the throughput signal is
+missing. A zero appears only where the sampler read a fresh zero.</li>
+<li>The plant&rsquo;s exposition histograms and per-request latency summaries are per-step approximations
+of the engine metrics the configurations consume. They are reported separately as observed
+values and are never relabeled as the timestamp-derived statistics above. In these scenarios the
+two coincide because per-request service rates stay constant within a request; they diverge when
+the rate changes between quanta, which the plant&rsquo;s own boundary tests cover.</li>
+<li>No <em>TPOT</em> SLO target is configured. TPOT is reported as a distribution only and is never scored.</li>
+<li><code>Proportional</code> reads <code>QueueDepth</code> against its target. It does not read <em>TTFT</em>, <em>ITL</em> or <em>TPOT</em>;
+those appear in its rows only as evaluation metrics.</li>
+</ul>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>The plant is a synthetic constant-rate service model with one capacity setting. It exercises the
+scaler&rsquo;s control loop, not engine or accelerator behavior; no hardware conclusion follows from it.</li>
+<li>The controller restart in <code>burst-fault-reset</code> reconstructs the scaler and sampler state; it is
+not a serving <code>Pod</code> restart.</li>
+<li><code>noise</code> jitters correlated request lengths, not the arrival rate; <code>ramp</code> is a five-step rate ramp.</li>
+<li>Holdout scenarios are reported unmodified and no configuration is tuned on them within this
+fixture. That demonstrates independence from the current configuration only; it does not verify
+historical tuning.</li>
+<li><code>quota-shortfall</code> clears its pending cohort through the pending timeout&rsquo;s rollback. No
+quota-raise or capacity-release event exists in the fixture.</li>
+<li>The comparison records measurements and does not declare a winning algorithm. Recommendation
+differences under one synthetic capacity do not establish general algorithm superiority.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
+ (the scaler contract, algorithms and guards)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">Model Deployment Scaling Benchmark</a>
+ (the measured hardware comparison)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Model Deployment Scaling Walkthrough</a>
+ (configure
+and observe the scaler on a cluster).</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">Model Deployment Scaling Benchmark</a>
+ — the measured hardware
+comparison for the same three algorithms.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/20d2aa3648161642f08c63506ee722c9e04ae306/docs/modules/model-deployment/scaling-simulation.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/scaling-simulation.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#fixture-and-provenance">Fixture and provenance</a></li>
+    <li><a href="#results">Results</a></li>
+    <li><a href="#adjustment-dynamics">Adjustment dynamics</a></li>
+    <li><a href="#quota-shortfall">Quota shortfall</a></li>
+    <li><a href="#reading-the-numbers">Reading the numbers</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+</body>
+</html>

@@ -907,6 +907,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -968,6 +971,14 @@
   
 
   
+
+  
+    
+      
+      
+        
+        
+      
     
       
       
@@ -1106,12 +1117,19 @@
             <div class="nav-children">
               
                 
+                  <a title="Model Deployment Scaling Simulation" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/" >Simulation</a>
+                
+              
+                
                   <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" aria-current="page">Benchmark</a>
                 
               
             </div>
           
         
+      
+    
+      
       
     
       
@@ -1411,13 +1429,14 @@
       <article>
         
   <h1 id="model-deployment-scaling-benchmark">Model Deployment Scaling Benchmark</h1>
-<p>On one node with eight H100 GPUs, <code>ModelDeploymentScaler</code> increased serving replica counts
-under live traffic. Four vLLM configurations completed every measured request. SGLang failed under
-sustained load, and a separate scale-out check recorded request failures at the Router.</p>
-<p>The measurements demonstrate that <code>ModelDeploymentScaler</code> observes load changes and drives
-<code>ModelDeployment</code> <em><code>replicas</code></em> updates promptly. End-to-end scale-out landing time in production
-varies with deployment-environment factors outside the scaler&rsquo;s control: model weight loading,
-engine startup and compute-graph compilation, and accelerator resource availability or queueing.</p>
+<p>Two hardware suites evaluate <code>ModelDeploymentScaler</code>. Suite 1 ran five disaggregated configurations
+on one node with eight H100 GPUs. Suite 2 evaluated offline capacity priors, three-arm serial
+comparisons, algorithm sensitivity, embedded InferenceX priors and multi-node disaggregation on
+four nodes with one H200 GPU each.</p>
+<p>In these runs, <code>ModelDeploymentScaler</code> observed load changes, resolved offline capacity priors and
+updated <code>ModelDeployment</code> <em><code>replicas</code></em> promptly. Production scale-out times also depend on model
+weight loading, engine startup, compute-graph compilation and accelerator queueing, all outside the
+scaler&rsquo;s control.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#summary">Summary</a>
@@ -1427,6 +1446,8 @@ engine startup and compute-graph compilation, and accelerator resource availabil
 <li><a href="#configuration">Configuration</a>
 </li>
 <li><a href="#suite-1-scaling-comparison">Suite 1: Scaling comparison</a>
+</li>
+<li><a href="#suite-2-capacity-priors">Suite 2: Capacity priors</a>
 </li>
 <li><a href="#verification">Verification</a>
 </li>
@@ -1440,65 +1461,74 @@ engine startup and compute-graph compilation, and accelerator resource availabil
 <h2 id="summary">Summary</h2>
 <p>A <em>prefill/decode (PD)</em> pair separates prompt processing from token generation.
 An <em>encode/prefill/decode (EPD)</em> deployment adds a separate image encoder.
-The text configurations compared <code>Proportional</code>, <code>TokenThroughput</code> and <code>Predictive</code> scaling.
-The multimodal configuration used <code>Predictive</code>.
+Suite 1 compared <code>Proportional</code>, <code>TokenThroughput</code> and <code>Predictive</code> scaling on an eight-H100 node.
+Suite 2 evaluated <code>Server</code> capacity priors and multi-node <em>PD</em>/<em>EPD</em> scaling across four H200 nodes.
 <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
- defines the algorithms and replica guards.</p>
-<p>Four vLLM configurations completed every measured request.
-The separate lifecycle check lost requests during scale-out, so these results do not establish
-uninterrupted serving. Its scale-down and post-retirement phases completed without request failures.</p>
+ defines the algorithms, capacity priors and replica guards.</p>
+<p>In Suite 1, four vLLM configurations completed every measured request, while a separate lifecycle
+check lost requests during scale-out. In Suite 2, all 18 single-<em>Server</em> capacity-comparison rounds,
+all three 360-second sensitivity runs, the embedded <code>openai/gpt-oss-120b</code> catalog check, and the
+vLLM <em>PD</em> <code>Proportional</code> and <em>EPD</em> <code>Predictive</code> runs completed with zero failed requests or full
+retirement recovery.</p>
 <h2 id="environment">Environment</h2>
 <table>
   <thead>
       <tr>
           <th>Item</th>
-          <th>Captured value</th>
+          <th>Suite 1 (H100 single-node)</th>
+          <th>Suite 2 (H200 multi-node)</th>
       </tr>
   </thead>
   <tbody>
       <tr>
           <td>Cluster</td>
           <td>Kubernetes v1.35.7; one CPU node and one GPU node</td>
+          <td>Kubernetes v1.35.7; one CPU node (<code>4</code> vCPU, <code>16</code> GB) and four GPU nodes</td>
       </tr>
       <tr>
           <td>Hardware</td>
-          <td>8 × NVIDIA H100 80 GB SXM GPUs; 128 vCPUs and 1600 GB host memory</td>
+          <td>8 × NVIDIA H100 80 GB SXM GPUs; 128 vCPUs, 1600 GB RAM</td>
+          <td>4 × NVIDIA H200 140 GB SXM GPUs (<code>1</code> GPU, <code>16</code> vCPUs, <code>200</code> GB RAM per node)</td>
       </tr>
       <tr>
-          <td>Text model</td>
-          <td><code>Qwen/Qwen3-8B</code>, artifact <code>qwen3-8b</code>, revision <code>b968826d9c46dd6066d109eabc6255188de91218</code></td>
+          <td>Text models</td>
+          <td><code>Qwen/Qwen3-8B</code> (<code>b968826d9c46dd6066d109eabc6255188de91218</code>)</td>
+          <td><code>Qwen/Qwen3-8B</code> (<code>bf16</code>) and <code>openai/gpt-oss-120b</code> (<code>fp4</code>, <code>d782fd43...</code>)</td>
       </tr>
       <tr>
           <td>Multimodal model</td>
-          <td><code>Qwen/Qwen2.5-VL-7B-Instruct</code>, artifact <code>qwen2-5-vl-7b-instruct</code>, revision <code>cc594898137f460bfe9f0759e9844b3ce807cfb5</code></td>
+          <td><code>Qwen/Qwen2.5-VL-7B-Instruct</code> (<code>cc594898...</code>)</td>
+          <td><code>Qwen/Qwen3-VL-8B-Instruct</code> (<code>0c351dd0...</code>)</td>
       </tr>
       <tr>
           <td>Model delivery</td>
+          <td>Prefetched node cache, mounted at <code>/models</code></td>
           <td>Prefetched node cache, mounted at <code>/models</code></td>
       </tr>
       <tr>
           <td>vLLM image</td>
           <td><code>gpustack/runner:cuda13.0-vllm0.30.0</code></td>
+          <td><code>gpustack/runner:cuda13.0-vllm0.30.0</code></td>
       </tr>
       <tr>
           <td>SGLang image</td>
           <td><code>gpustack/runner:cuda12.9-sglang0.5.18</code></td>
+          <td><code>gpustack/runner:cuda12.9-sglang0.5.18</code></td>
       </tr>
       <tr>
-          <td>Router</td>
+          <td>Router / Service</td>
           <td><code>llm-d-router</code> with cluster-internal <code>Service</code> endpoints</td>
+          <td>Target-owned <code>Service</code> for <code>Server</code>; <code>llm-d-router</code> / <code>sglang-router</code> for <em>PD</em>/<em>EPD</em></td>
       </tr>
       <tr>
           <td>Load driver</td>
-          <td>In-cluster <code>default/bench-driver</code>; the separate lifecycle check used <code>case129-probe</code></td>
+          <td>In-cluster <code>default/bench-driver</code>; <code>case129-probe</code> for lifecycle</td>
+          <td>In-cluster <code>default/bench-driver</code> on the dedicated CPU node</td>
       </tr>
       <tr>
           <td>GPU allocation</td>
-          <td><code>bench-gpu</code> <code>InstanceType</code>; one GPU per role replica, <em>tensor parallelism (TP)</em> = 1</td>
-      </tr>
-      <tr>
-          <td>KV transfer</td>
-          <td>Default TCP path between <em>prefill</em> and <em>decode</em></td>
+          <td><code>bench-gpu</code> <code>InstanceType</code>; 1 GPU per replica, <em>TP</em> = 1</td>
+          <td><code>gpustack--nvidia-h200-linux-amd64</code>; 1 GPU per replica, <em>TP</em> = 1</td>
       </tr>
   </tbody>
 </table>
@@ -1690,21 +1720,24 @@ Latency percentiles use successful requests and the client&rsquo;s percentile ca
 Output throughput divides successful output tokens by the phase&rsquo;s recorded wall time.
 Failed requests remain in the request and error columns.</p>
 <h2 id="suite-1-scaling-comparison">Suite 1: Scaling comparison</h2>
-<p>The charts show <em>TTFT</em> p50 and output throughput per phase for the three vLLM <em>PD</em> configurations.
-The lines are, in order, <code>vllm-pd-proportional</code>, <code>vllm-pd-token-throughput</code> and <code>vllm-pd-predictive</code>.</p>
+<p>The charts trace algorithm feedback sensitivity (<code>rawRecommendedReplicas</code>), Ready serving replicas
+(<code>readyReplicas</code>) across phase checkpoints (<code>B1–B2</code> baseline, <code>R1–R3</code> ramp, <code>S1–S3</code> sustain,
+<code>C1–C3</code> cooldown) and resulting <em>TTFT</em> p50 for <strong>blue</strong> (<code>vllm-pd-proportional</code>), <strong>amber</strong>
+(<code>vllm-pd-token-throughput</code>) and <strong>green</strong> (<code>vllm-pd-predictive</code>).</p>
 <div class="diagram-block">
   <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
   <p class="diagram-status" role="status">Rendering diagram…</p>
   <details class="diagram-source"><summary>Mermaid source</summary>
     <div class="code-block">
       <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>xychart-beta
-    title &#34;TTFT p50 by phase&#34;
-    x-axis [&#34;baseline&#34;, &#34;ramp&#34;, &#34;sustain&#34;, &#34;cooldown&#34;]
-    y-axis &#34;TTFT p50 (ms)&#34; 0 --&gt; 3000
-    line [298.564, 2540.853, 506.734, 188.231]
-    line [284.481, 2325.222, 480.418, 182.044]
-    line [164.044, 467.906, 447.864, 60.883]</code></pre>
+      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
+xychart-beta
+    title &#34;Feedback sensitivity (rawRecommendedReplicas)&#34;
+    x-axis &#34;Blue: Proportional | Amber: TokenThroughput | Green: Predictive&#34; [&#34;B1&#34;, &#34;B2&#34;, &#34;R1&#34;, &#34;R2&#34;, &#34;R3&#34;, &#34;S1&#34;, &#34;S2&#34;, &#34;S3&#34;, &#34;C1&#34;, &#34;C2&#34;, &#34;C3&#34;]
+    y-axis &#34;rawRecommendedReplicas&#34; 0 --&gt; 80
+    line &#34;Proportional&#34; [1, 1, 1, 2, 2, 2, 2, 2, 1, 1, 1]
+    line &#34;TokenThroughput&#34; [1, 2, 2, 12, 25, 25, 23, 23, 19, 1, 1]
+    line &#34;Predictive&#34; [1, 7, 1, 47, 75, 22, 22, 24, 3, 1, 1]</code></pre>
     </div>
   </details>
 </div><div class="diagram-block">
@@ -1713,20 +1746,36 @@ The lines are, in order, <code>vllm-pd-proportional</code>, <code>vllm-pd-token-
   <details class="diagram-source"><summary>Mermaid source</summary>
     <div class="code-block">
       <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>xychart-beta
-    title &#34;Output throughput by phase&#34;
-    x-axis [&#34;baseline&#34;, &#34;ramp&#34;, &#34;sustain&#34;, &#34;cooldown&#34;]
-    y-axis &#34;Output (tok/s)&#34; 0 --&gt; 2500
-    line [258.325, 1117.481, 2044.782, 274.402]
-    line [256.117, 1230.879, 2054.687, 276.51]
-    line [282.371, 2109.251, 2128.27, 288.484]</code></pre>
+      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
+xychart-beta
+    title &#34;Ready replicas by checkpoint&#34;
+    x-axis &#34;Blue: Proportional | Amber: TokenThroughput | Green: Predictive&#34; [&#34;B1&#34;, &#34;B2&#34;, &#34;R1&#34;, &#34;R2&#34;, &#34;R3&#34;, &#34;S1&#34;, &#34;S2&#34;, &#34;S3&#34;, &#34;C1&#34;, &#34;C2&#34;, &#34;C3&#34;]
+    y-axis &#34;readyReplicas&#34; 0 --&gt; 3
+    line &#34;Proportional&#34; [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
+    line &#34;TokenThroughput&#34; [1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2]
+    line &#34;Predictive&#34; [1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2]</code></pre>
     </div>
   </details>
-</div><p>Both <code>ramp</code> and <code>sustain</code> run at concurrency 24. In <code>ramp</code>, <code>vllm-pd-proportional</code> and
-<code>vllm-pd-token-throughput</code> exceed 2300 ms <em>TTFT</em> p50 and cap near single-replica throughput
-(1117–1231 tok/s) while the second replica starts. Once that replica is Ready in <code>sustain</code>,
-<em>TTFT</em> p50 drops below 510 ms and output throughput nearly doubles above 2040 tok/s at the same
-concurrency, while <code>vllm-pd-predictive</code> enters <code>ramp</code> already scaled and holds below 470 ms.</p>
+</div><div class="diagram-block">
+  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
+  <p class="diagram-status" role="status">Rendering diagram…</p>
+  <details class="diagram-source"><summary>Mermaid source</summary>
+    <div class="code-block">
+      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
+xychart-beta
+    title &#34;TTFT p50 by phase&#34;
+    x-axis &#34;Blue: Proportional | Amber: TokenThroughput | Green: Predictive&#34; [&#34;baseline&#34;, &#34;ramp&#34;, &#34;sustain&#34;, &#34;cooldown&#34;]
+    y-axis &#34;TTFT p50 (ms)&#34; 0 --&gt; 3000
+    line &#34;Proportional&#34; [298.564, 2540.853, 506.734, 188.231]
+    line &#34;TokenThroughput&#34; [284.481, 2325.222, 480.418, 182.044]
+    line &#34;Predictive&#34; [164.044, 467.906, 447.864, 60.883]</code></pre>
+    </div>
+  </details>
+</div><p>Both <code>ramp</code> and <code>sustain</code> run at concurrency 24. Because manual token targets sat below baseline
+traffic, <code>vllm-pd-token-throughput</code> (<code>raw = 2</code>) and <code>vllm-pd-predictive</code> (<code>raw = 7</code>) requested scale-out
+at <code>B2</code>, so <code>vllm-pd-predictive</code> entered <code>ramp</code> (<code>R1</code>) with two Ready replicas and held <em>TTFT</em> p50
+below 470 ms while <code>vllm-pd-proportional</code> waited until <code>R2</code> (<code>2540.853</code> ms in <code>ramp</code>, <code>506.734</code> ms in <code>sustain</code>).</p>
 <h3 id="vllm-proportional-pd">vLLM proportional PD</h3>
 <p>Configuration: <code>vllm-pd-proportional</code>.</p>
 <table>
@@ -2024,6 +2073,483 @@ associated the failures with the documented <a href="/gpustack-operator/main/doc
 limitation. The <a href="/gpustack-operator/main/docs/reference/settings/#sglang-time-wait-reuse">TIME-WAIT reuse setting</a>
  needs
 kubelet configuration before use; a successful rerun with that setting was not captured.</p>
+<h2 id="suite-2-capacity-priors">Suite 2: Capacity priors</h2>
+<p>Suite 2 ran across four single-GPU H200 nodes and a dedicated CPU load-driver node. It evaluated
+offline capacity priors on unrouted single-<code>Pod</code> <code>Server</code> deployments before re-running the
+five disaggregated <em>PD</em> and <em>EPD</em> configurations across multiple nodes.</p>
+<h3 id="single-replica-sweep">Single-replica sweep</h3>
+<p>One <code>Qwen/Qwen3-8B</code> (<code>bf16</code>, <code>vllm</code>, <code>gpusPerReplica: 1</code>, <code>tensorParallel: 1</code>) <code>Server</code> replica
+served six 60-second concurrency levels (<code>1024</code> input and <code>256</code> output tokens, zero failed
+requests) to construct the offline <code>ConfigMap</code> catalog profile:</p>
+<table>
+  <thead>
+      <tr>
+          <th style="text-align: right">Concurrency</th>
+          <th style="text-align: right">Requests</th>
+          <th style="text-align: right">Total (<code>tok/s</code>)</th>
+          <th style="text-align: right">Output (<code>tok/s</code>)</th>
+          <th><em>TTFT</em> p50 / p90 / p99 (ms)</th>
+          <th><em>ITL</em> p50 / p90 / p99 (ms)</th>
+          <th style="text-align: right"><code>tok/s/user</code></th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td style="text-align: right">2</td>
+          <td style="text-align: right">88</td>
+          <td style="text-align: right">1882.56</td>
+          <td style="text-align: right">370.234</td>
+          <td>48.084 / 50.489 / 120.712</td>
+          <td>5.217 / 5.341 / 5.623</td>
+          <td style="text-align: right">185.228</td>
+      </tr>
+      <tr>
+          <td style="text-align: right">4</td>
+          <td style="text-align: right">172</td>
+          <td style="text-align: right">3653.261</td>
+          <td style="text-align: right">718.409</td>
+          <td>58.658 / 94.228 / 98.486</td>
+          <td>5.291 / 5.421 / 5.768</td>
+          <td style="text-align: right">179.723</td>
+      </tr>
+      <tr>
+          <td style="text-align: right">8</td>
+          <td style="text-align: right">296</td>
+          <td style="text-align: right">6414.232</td>
+          <td style="text-align: right">1261.357</td>
+          <td>166.364 / 190.725 / 193.563</td>
+          <td>5.658 / 5.796 / 6.398</td>
+          <td style="text-align: right">157.755</td>
+      </tr>
+      <tr>
+          <td style="text-align: right">16</td>
+          <td style="text-align: right">544</td>
+          <td style="text-align: right">11477.608</td>
+          <td style="text-align: right">2257.225</td>
+          <td>224.723 / 362.343 / 384.708</td>
+          <td>5.774 / 5.944 / 6.838</td>
+          <td style="text-align: right">141.231</td>
+      </tr>
+      <tr>
+          <td style="text-align: right">24</td>
+          <td style="text-align: right">672</td>
+          <td style="text-align: right">14527.811</td>
+          <td style="text-align: right">2857.152</td>
+          <td>352.587 / 527.173 / 547.8</td>
+          <td>6.346 / 6.556 / 9.713</td>
+          <td style="text-align: right">119.205</td>
+      </tr>
+      <tr>
+          <td style="text-align: right">32</td>
+          <td style="text-align: right">800</td>
+          <td style="text-align: right">17135.159</td>
+          <td style="text-align: right">3369.918</td>
+          <td>490.591 / 689.956 / 736.115</td>
+          <td>6.576 / 6.824 / 20.012</td>
+          <td style="text-align: right">105.395</td>
+      </tr>
+  </tbody>
+</table>
+<div class="diagram-block">
+  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
+  <p class="diagram-status" role="status">Rendering diagram…</p>
+  <details class="diagram-source"><summary>Mermaid source</summary>
+    <div class="code-block">
+      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #dc2626, #16a34a&#34;}}}}%%
+xychart-beta
+    title &#34;Single-replica total throughput vs capacity targets (tok/s)&#34;
+    x-axis &#34;Blue: Measured tok/s | Red: Tuned Manual (17135.2) | Green: Catalog 0.75 (12851.4)&#34; [&#34;c=2&#34;, &#34;c=4&#34;, &#34;c=8&#34;, &#34;c=16&#34;, &#34;c=24&#34;, &#34;c=32&#34;]
+    y-axis &#34;Total throughput (tok/s)&#34; 0 --&gt; 18000
+    line &#34;Measured tok/s&#34; [1882.56, 3653.261, 6414.232, 11477.608, 14527.811, 17135.159]
+    line &#34;Tuned Manual (17135.2)&#34; [17135.159, 17135.159, 17135.159, 17135.159, 17135.159, 17135.159]
+    line &#34;Catalog 0.75 (12851.4)&#34; [12851.37, 12851.37, 12851.37, 12851.37, 12851.37, 12851.37]</code></pre>
+    </div>
+  </details>
+</div><div class="diagram-block">
+  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
+  <p class="diagram-status" role="status">Rendering diagram…</p>
+  <details class="diagram-source"><summary>Mermaid source</summary>
+    <div class="code-block">
+      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#16a34a, #f59e0b, #dc2626&#34;}}}}%%
+xychart-beta
+    title &#34;Single-replica TTFT percentiles by concurrency (ms)&#34;
+    x-axis &#34;Green: TTFT p50 | Amber: TTFT p90 | Red: TTFT p99&#34; [&#34;c=2&#34;, &#34;c=4&#34;, &#34;c=8&#34;, &#34;c=16&#34;, &#34;c=24&#34;, &#34;c=32&#34;]
+    y-axis &#34;TTFT (ms)&#34; 0 --&gt; 800
+    line &#34;TTFT p50&#34; [48.084, 58.658, 166.364, 224.723, 352.587, 490.591]
+    line &#34;TTFT p90&#34; [50.489, 94.228, 190.725, 362.343, 527.173, 689.956]
+    line &#34;TTFT p99&#34; [120.712, 98.486, 193.563, 384.708, 547.8, 736.115]</code></pre>
+    </div>
+  </details>
+</div><p>Under the P95 targets of <em><code>ttftTargetMilliseconds: &quot;2000&quot;</code></em> and <em><code>itlTargetMilliseconds: &quot;33&quot;</code></em>,
+every measured point passed (<code>ExplicitSaturation</code>). <code>Catalog.Resolve</code> selected <code>17135.159</code>
+tokens/s at concurrency <code>32</code> (<strong>red</strong>) as the seed capacity and applied <em><code>headroom: &quot;0.75&quot;</code></em>
+to derive <code>12851.37</code> tokens/s (<strong>green</strong>), which crosses the measured throughput curve (<strong>blue</strong>)
+between <code>c = 16</code> (<code>11477.608</code> tok/s) and <code>c = 24</code> (<code>14527.811</code> tok/s).</p>
+<h3 id="capacity-arm-rounds">Capacity-arm rounds</h3>
+<p>Eighteen serial rounds (<code>3</code> alternating repeats per arm for <code>TokenThroughput</code> and <code>3</code> for
+<code>Predictive</code>) compared <code>frozen-manual</code> (<code>20000</code> tok/s), <code>tuned-manual</code> (<code>17135.159</code> tok/s) and
+<code>catalog</code> (<code>12851.37</code> effective tok/s from the sweep <code>ConfigMap</code>) across <code>baseline</code> (<code>30</code> s,
+<code>c = 2</code>), <code>ramp</code> (<code>45</code> s, <code>c = 24</code>), <code>sustain</code> (<code>45</code> s, <code>c = 24</code>) and <code>cooldown</code> (<code>30</code> s, <code>c = 0</code>):</p>
+<table>
+  <thead>
+      <tr>
+          <th>Algorithm</th>
+          <th>Arm</th>
+          <th style="text-align: right">Valid repeats</th>
+          <th>Ready replica-s (median / min–max)</th>
+          <th style="text-align: right">Peak Ready</th>
+          <th>Ramp <em>TTFT</em> p50 / p99 (ms)</th>
+          <th>Sustain <em>TTFT</em> p50 / p99 (ms)</th>
+          <th>Sustain <em>ITL</em> p50 / p99 (ms)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>TokenThroughput</code></td>
+          <td><code>frozen-manual</code></td>
+          <td style="text-align: right">3 / 3</td>
+          <td>237.239 (232.445–309.809)</td>
+          <td style="text-align: right">1</td>
+          <td>350.355 / 551.351</td>
+          <td>319.235 / 529.512</td>
+          <td>6.349 / 9.931</td>
+      </tr>
+      <tr>
+          <td><code>TokenThroughput</code></td>
+          <td><code>tuned-manual</code></td>
+          <td style="text-align: right">3 / 3</td>
+          <td>237.094 (234.374–304.551)</td>
+          <td style="text-align: right">1</td>
+          <td>348.907 / 548.91</td>
+          <td>321.352 / 517.771</td>
+          <td>6.345 / 9.776</td>
+      </tr>
+      <tr>
+          <td><code>TokenThroughput</code></td>
+          <td><code>catalog</code></td>
+          <td style="text-align: right">3 / 3</td>
+          <td>317.04 (289.786–331.45)</td>
+          <td style="text-align: right">2</td>
+          <td>350.432 / 553.104</td>
+          <td>343.842 / 522.326</td>
+          <td>6.346 / 9.365</td>
+      </tr>
+      <tr>
+          <td><code>Predictive</code></td>
+          <td><code>frozen-manual</code></td>
+          <td style="text-align: right">3 / 3</td>
+          <td>393.755 (366.408–396.625)</td>
+          <td style="text-align: right">2</td>
+          <td>336.061 / 549.38</td>
+          <td>194.733 / 315.066</td>
+          <td>5.797 / 7.679</td>
+      </tr>
+      <tr>
+          <td><code>Predictive</code></td>
+          <td><code>tuned-manual</code></td>
+          <td style="text-align: right">3 / 3</td>
+          <td>392.089 (370.123–392.919)</td>
+          <td style="text-align: right">2</td>
+          <td>350.769 / 564.252</td>
+          <td>206.453 / 370.607</td>
+          <td>5.744 / 8.301</td>
+      </tr>
+      <tr>
+          <td><code>Predictive</code></td>
+          <td><code>catalog</code></td>
+          <td style="text-align: right">3 / 3</td>
+          <td>423.031 (392.662–679.002)</td>
+          <td style="text-align: right">2</td>
+          <td>349.685 / 554.122</td>
+          <td>189.511 / 364.141</td>
+          <td>5.741 / 9.839</td>
+      </tr>
+  </tbody>
+</table>
+<div class="diagram-block">
+  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
+  <p class="diagram-status" role="status">Rendering diagram…</p>
+  <details class="diagram-source"><summary>Mermaid source</summary>
+    <div class="code-block">
+      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#dc2626, #f59e0b, #16a34a&#34;}}}}%%
+xychart-beta
+    title &#34;Capacity-arm feedback sensitivity (rawRecommendedReplicas)&#34;
+    x-axis &#34;Red: TT (tuned-manual) | Amber: TT (catalog) | Green: Predictive (catalog)&#34; [&#34;B1&#34;, &#34;B2&#34;, &#34;R1&#34;, &#34;R2&#34;, &#34;R3&#34;, &#34;S1&#34;, &#34;S2&#34;, &#34;S3&#34;, &#34;C1&#34;, &#34;C2&#34;, &#34;C3&#34;]
+    y-axis &#34;rawRecommendedReplicas&#34; 0 --&gt; 5
+    line &#34;TT (tuned-manual)&#34; [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    line &#34;TT (catalog)&#34; [1, 1, 1, 2, 2, 1, 1, 2, 1, 1, 1]
+    line &#34;Predictive (catalog)&#34; [1, 1, 1, 2, 4, 1, 4, 3, 1, 1, 1]</code></pre>
+    </div>
+  </details>
+</div><div class="diagram-block">
+  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
+  <p class="diagram-status" role="status">Rendering diagram…</p>
+  <details class="diagram-source"><summary>Mermaid source</summary>
+    <div class="code-block">
+      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#dc2626, #f59e0b, #16a34a&#34;}}}}%%
+xychart-beta
+    title &#34;Capacity-arm Ready replicas by checkpoint&#34;
+    x-axis &#34;Red: TT (tuned-manual) | Amber: TT (catalog) | Green: Predictive (catalog)&#34; [&#34;B1&#34;, &#34;B2&#34;, &#34;R1&#34;, &#34;R2&#34;, &#34;R3&#34;, &#34;S1&#34;, &#34;S2&#34;, &#34;S3&#34;, &#34;C1&#34;, &#34;C2&#34;, &#34;C3&#34;]
+    y-axis &#34;readyReplicas&#34; 0 --&gt; 3
+    line &#34;TT (tuned-manual)&#34; [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    line &#34;TT (catalog)&#34; [1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 1]
+    line &#34;Predictive (catalog)&#34; [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 1]</code></pre>
+    </div>
+  </details>
+</div><p>The three lines in both checkpoint charts plot <strong>red</strong> (<code>TokenThroughput</code> <code>tuned-manual</code>),
+<strong>amber</strong> (<code>TokenThroughput</code> <code>catalog</code>) and <strong>green</strong> (<code>Predictive</code> <code>catalog</code>).
+All 18 rounds completed with zero failed requests, verified UID-preconditioned cleanup and full
+return to the one-replica baseline.</p>
+<p>Under <code>TokenThroughput</code>, both unmargined manual arms stayed at one replica (<code>raw = 1</code> throughout)
+because single-replica throughput at concurrency 24 (<code>~14.5k</code> tok/s) sat below the <code>17135.159</code>
+tok/s saturation seed.</p>
+<p>The <code>TokenThroughput</code> <code>catalog</code> arm (<code>0.75</code> headroom) grew to two replicas (<code>raw = 2</code> at <code>R2</code>) in
+all three repeats, but vLLM startup and CUDA graph compilation took ~76 s (<code>99.6–105.6</code> s from ramp
+start), so the second replica became Ready at <code>S3</code> near the end of the 45 s <code>sustain</code> window and
+produced no <code>sustain</code> <em>TTFT</em> reduction (<code>343.842</code> ms vs <code>321.352</code> ms).</p>
+<p>Under <code>Predictive</code>, the 300 s Kalman linear-trend forecast scaled all three arms early (<code>15.1–21.9</code>
+s from ramp start; Ready at <code>R3</code>, <code>81.9–94.6</code> s), cutting <code>sustain</code> median <em>TTFT</em> p50 to <code>189.511</code>
+ms (<code>catalog</code>), <code>194.733</code> ms (<code>frozen-manual</code>) and <code>206.453</code> ms (<code>tuned-manual</code>).</p>
+<h3 id="algorithm-sensitivity">Algorithm sensitivity</h3>
+<p>A longer 360-second wave (<code>baseline</code> 60 s at <code>c = 2</code>, <code>ramp</code> 90 s at <code>c = 24</code>, <code>sustain</code> 90 s at
+<code>c = 24</code>, <code>cooldown</code> 120 s at <code>c = 0</code>, <code>maxReplicas: 4</code>) compared <code>Proportional</code> (<code>RunningRequests</code>
+target <code>8</code>), <code>TokenThroughput</code> (<code>14000</code> tok/s) and catalog-backed <code>Predictive</code> (<code>12851.37</code>
+effective tok/s) against the <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/">Scaling Simulation</a>
+ metrics (<em>TTFT</em> &lt;= <code>2000</code> ms, <em>ITL</em> &lt;= <code>33</code> ms):</p>
+<table>
+  <thead>
+      <tr>
+          <th>Algorithm</th>
+          <th>Phase</th>
+          <th style="text-align: right">Requests</th>
+          <th style="text-align: right">Failed</th>
+          <th style="text-align: right">True SLO</th>
+          <th style="text-align: right">Goodput (<code>req/s</code>)</th>
+          <th><em>TTFT</em> p50 / p90 / p99 (ms)</th>
+          <th><em>ITL</em> p50 / p90 / p99 (ms)</th>
+          <th style="text-align: right">Output (<code>tok/s</code>)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Proportional</code></td>
+          <td><code>baseline</code></td>
+          <td style="text-align: right">88</td>
+          <td style="text-align: right">0</td>
+          <td style="text-align: right">1.0</td>
+          <td style="text-align: right">1.447</td>
+          <td>49.439 / 50.846 / 75.688</td>
+          <td>5.217 / 5.346 / 5.61</td>
+          <td style="text-align: right">370.386</td>
+      </tr>
+      <tr>
+          <td><code>Proportional</code></td>
+          <td><code>ramp</code></td>
+          <td style="text-align: right">1008</td>
+          <td style="text-align: right">0</td>
+          <td style="text-align: right">1.0</td>
+          <td style="text-align: right">11.045</td>
+          <td>347.282 / 527.093 / 545.355</td>
+          <td>6.349 / 6.681 / 11.18</td>
+          <td style="text-align: right">2827.554</td>
+      </tr>
+      <tr>
+          <td><code>Proportional</code></td>
+          <td><code>sustain</code></td>
+          <td style="text-align: right">1244</td>
+          <td style="text-align: right">0</td>
+          <td style="text-align: right">1.0</td>
+          <td style="text-align: right">13.618</td>
+          <td>190.555 / 325.042 / 338.779</td>
+          <td>5.75 / 6.008 / 7.864</td>
+          <td style="text-align: right">3486.167</td>
+      </tr>
+      <tr>
+          <td><code>TokenThroughput</code></td>
+          <td><code>baseline</code></td>
+          <td style="text-align: right">88</td>
+          <td style="text-align: right">0</td>
+          <td style="text-align: right">1.0</td>
+          <td style="text-align: right">1.448</td>
+          <td>49.263 / 51.251 / 76.935</td>
+          <td>5.213 / 5.339 / 5.606</td>
+          <td style="text-align: right">370.565</td>
+      </tr>
+      <tr>
+          <td><code>TokenThroughput</code></td>
+          <td><code>ramp</code></td>
+          <td style="text-align: right">1008</td>
+          <td style="text-align: right">0</td>
+          <td style="text-align: right">1.0</td>
+          <td style="text-align: right">11.041</td>
+          <td>350.591 / 527.408 / 551.491</td>
+          <td>6.345 / 6.693 / 10.942</td>
+          <td style="text-align: right">2826.369</td>
+      </tr>
+      <tr>
+          <td><code>TokenThroughput</code></td>
+          <td><code>sustain</code></td>
+          <td style="text-align: right">1272</td>
+          <td style="text-align: right">11</td>
+          <td style="text-align: right">0.9914</td>
+          <td style="text-align: right">13.807</td>
+          <td>145.939 / 171.786 / 262.921</td>
+          <td>5.795 / 6.025 / 12.969</td>
+          <td style="text-align: right">3534.61</td>
+      </tr>
+      <tr>
+          <td><code>Predictive</code></td>
+          <td><code>baseline</code></td>
+          <td style="text-align: right">88</td>
+          <td style="text-align: right">0</td>
+          <td style="text-align: right">1.0</td>
+          <td style="text-align: right">1.447</td>
+          <td>49.742 / 51.305 / 76.375</td>
+          <td>5.214 / 5.344 / 5.598</td>
+          <td style="text-align: right">370.495</td>
+      </tr>
+      <tr>
+          <td><code>Predictive</code></td>
+          <td><code>ramp</code></td>
+          <td style="text-align: right">1244</td>
+          <td style="text-align: right">0</td>
+          <td style="text-align: right">1.0</td>
+          <td style="text-align: right">13.625</td>
+          <td>192.093 / 325.727 / 340.679</td>
+          <td>5.746 / 6.004 / 7.8</td>
+          <td style="text-align: right">3487.99</td>
+      </tr>
+      <tr>
+          <td><code>Predictive</code></td>
+          <td><code>sustain</code></td>
+          <td style="text-align: right">1383</td>
+          <td style="text-align: right">0</td>
+          <td style="text-align: right">1.0</td>
+          <td style="text-align: right">15.18</td>
+          <td>120.59 / 187.599 / 195.3</td>
+          <td>5.596 / 5.847 / 7.21</td>
+          <td style="text-align: right">3886.136</td>
+      </tr>
+  </tbody>
+</table>
+<div class="diagram-block">
+  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
+  <p class="diagram-status" role="status">Rendering diagram…</p>
+  <details class="diagram-source"><summary>Mermaid source</summary>
+    <div class="code-block">
+      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
+xychart-beta
+    title &#34;360 s wave Ready replicas by checkpoint&#34;
+    x-axis &#34;Blue: Proportional | Amber: TokenThroughput | Green: Predictive (catalog)&#34; [&#34;B1&#34;, &#34;B2&#34;, &#34;R1&#34;, &#34;R2&#34;, &#34;R3&#34;, &#34;S1&#34;, &#34;S2&#34;, &#34;S3&#34;, &#34;C1&#34;, &#34;C2&#34;, &#34;C3&#34;]
+    y-axis &#34;readyReplicas&#34; 0 --&gt; 5
+    line &#34;Proportional&#34; [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
+    line &#34;TokenThroughput&#34; [1, 1, 1, 1, 3, 3, 4, 4, 4, 4, 4]
+    line &#34;Predictive (catalog)&#34; [1, 1, 1, 3, 4, 4, 4, 4, 4, 4, 4]</code></pre>
+    </div>
+  </details>
+</div><div class="diagram-block">
+  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
+  <p class="diagram-status" role="status">Rendering diagram…</p>
+  <details class="diagram-source"><summary>Mermaid source</summary>
+    <div class="code-block">
+      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
+xychart-beta
+    title &#34;360 s wave TTFT p50 by phase (ms)&#34;
+    x-axis &#34;Blue: Proportional | Amber: TokenThroughput | Green: Predictive (catalog)&#34; [&#34;baseline&#34;, &#34;ramp&#34;, &#34;sustain&#34;]
+    y-axis &#34;TTFT p50 (ms)&#34; 0 --&gt; 400
+    line &#34;Proportional&#34; [49.439, 347.282, 190.555]
+    line &#34;TokenThroughput&#34; [49.263, 350.591, 145.939]
+    line &#34;Predictive (catalog)&#34; [49.742, 192.093, 120.59]</code></pre>
+    </div>
+  </details>
+</div><p>In the 360-second wave (<strong>blue</strong> <code>Proportional</code>, <strong>amber</strong> <code>TokenThroughput</code>, <strong>green</strong>
+<code>Predictive</code>), catalog-backed <code>Predictive</code> brought three replicas Ready by <code>R2</code>
+and all four Ready by <code>R3</code>, lowering <code>ramp</code> <em>TTFT</em> p50 from <code>347.282–350.591</code> ms to <code>192.093</code> ms
+and <code>sustain</code> <em>TTFT</em> p50 to <code>120.59</code> ms (<code>3886.136</code> output tok/s, zero failed requests).</p>
+<h3 id="embedded-catalog">Embedded catalog</h3>
+<p>To verify zero-configuration resolution against the embedded <code>pkg/worker/scaling/priors/priors.yaml</code>
+catalog, an <code>openai/gpt-oss-120b</code> (<code>fp4</code>, <code>vllm</code>, <code>1 × H200</code>) <code>Server</code> deployment ran with
+<em><code>capacityPrior: {}</code></em> and no <code>catalogRef</code> or identity annotations.</p>
+<p>The controller inferred <code>Server/openai/gpt-oss-120b/fp4/vllm/nvidia-h200/gpus=1,tp=1,ep=1,pp=1,dp=1,ldp=1,cp=1</code>
+(<code>profileDigest: sha256:47d96f0e...</code>), selected <code>seedTokensPerSecond: &quot;6405.44&quot;</code> (<code>ExplicitSaturation</code>
+under P95 <em>TTFT</em> <code>2000</code> ms and <em>ITL</em> <code>33</code> ms) and set <code>effectiveTokensPerSecond: &quot;4804.08&quot;</code>.</p>
+<p>A 60-second sustain check at concurrency 8 completed <code>176</code> requests with zero errors at <code>4862.388</code>
+total tokens/s (<code>915.002</code> output tokens/s, <em>TTFT</em> p50 / p90 / p95 <code>96.185 / 225.437 / 238.947</code> ms,
+<em>ITL</em> p50 / p90 / p95 <code>10.958 / 11.713 / 12.014</code> ms) — within 1.2% of the embedded effective prior.</p>
+<h3 id="disaggregated-h200-rerun">Disaggregated H200 rerun</h3>
+<p>Re-running the five disaggregated configurations across the four single-GPU H200 nodes (<code>Qwen3-8B</code>
+for <em>PD</em> and <code>Qwen3-VL-8B-Instruct</code> in <code>1R1E2P1D</code> for <em>EPD</em>) produced these phase summaries:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Configuration</th>
+          <th>Phase</th>
+          <th style="text-align: right">Requests</th>
+          <th style="text-align: right">Errors</th>
+          <th><em>TTFT</em> p50 / p99 (ms)</th>
+          <th><em>ITL</em> p50 / p99 (ms)</th>
+          <th style="text-align: right">Output (<code>tok/s</code>)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>vllm-pd-proportional</code></td>
+          <td><code>ramp</code> / <code>sustain</code></td>
+          <td style="text-align: right">405 / 396</td>
+          <td style="text-align: right">0 / 0</td>
+          <td>2302.954 / 3049.929 (p99: 4451.863 / 3960.101)</td>
+          <td>8.443 / 8.305 (p99: 17.251 / 16.239)</td>
+          <td style="text-align: right">1317.793 / 1277.5</td>
+      </tr>
+      <tr>
+          <td><code>vllm-pd-token-throughput</code></td>
+          <td><code>ramp</code> / <code>sustain</code></td>
+          <td style="text-align: right">106047 / 379</td>
+          <td style="text-align: right">105965 / 0</td>
+          <td>2893.8 / 3009.197 (p99: 5559.696 / 4658.621)</td>
+          <td>8.073 / 8.122 (p99: 15.248 / 15.483)</td>
+          <td style="text-align: right">279.875 / 1227.049</td>
+      </tr>
+      <tr>
+          <td><code>vllm-pd-predictive</code></td>
+          <td><code>ramp</code> / <code>sustain</code></td>
+          <td style="text-align: right">107447 / 364</td>
+          <td style="text-align: right">107367 / 0</td>
+          <td>2719.156 / 3146.237 (p99: 30051.934 / 6013.353)</td>
+          <td>8.282 / 8.309 (p99: 16.401 / 16.66)</td>
+          <td style="text-align: right">273.052 / 1177.547</td>
+      </tr>
+      <tr>
+          <td><code>sglang-pd-token-throughput</code></td>
+          <td><code>ramp</code> / <code>sustain</code></td>
+          <td style="text-align: right">1245 / 2904</td>
+          <td style="text-align: right">906 / 2904</td>
+          <td>2203.669 / - (p99: 3620.957 / -)</td>
+          <td>5.723 / - (p99: 22.806 / -)</td>
+          <td style="text-align: right">1151.088 / 0</td>
+      </tr>
+      <tr>
+          <td><code>vllm-epd-predictive</code></td>
+          <td><code>ramp</code> / <code>sustain</code></td>
+          <td style="text-align: right">180 / 180</td>
+          <td style="text-align: right">0 / 0</td>
+          <td>943.066 / 1044.397 (p99: 3678.427 / 3493.704)</td>
+          <td>8.285 / 8.215 (p99: 15.968 / 16.934)</td>
+          <td style="text-align: right">1617.037 / 1475.286</td>
+      </tr>
+  </tbody>
+</table>
+<p>On four 1-GPU nodes, <code>vllm-pd-proportional</code> scaled <em>decode</em> (<code>1 -&gt; 2</code>, lead <code>24</code> s) and
+<code>vllm-epd-predictive</code> scaled <em>prefill</em> (<code>1 -&gt; 2</code>) with zero errors across all four phases.
+When <code>vllm-pd-token-throughput</code> and <code>vllm-pd-predictive</code> added a second <em>prefill</em> replica during
+high-rate text <code>ramp</code>, the Router returned fast HTTP 503s until the new prefill worker finished
+registration, then served <code>sustain</code> and <code>cooldown</code> with zero errors.</p>
 <h2 id="verification">Verification</h2>
 <h3 id="scale-out-timing">Scale-out timing</h3>
 <p>Scale-out lead measures the interval from ramp start to the first sampled desired count above one.
@@ -2041,45 +2567,60 @@ or served a request. A count already above one at ramp start is reported as zero
   </thead>
   <tbody>
       <tr>
-          <td><code>vllm-pd-proportional</code></td>
+          <td><code>vllm-pd-proportional</code> (H100)</td>
           <td style="text-align: right">30</td>
           <td>No</td>
           <td><em>Prefill</em> 2, <em>decode</em> 2</td>
           <td><em>Prefill</em> 2, <em>decode</em> 2</td>
       </tr>
       <tr>
-          <td><code>vllm-pd-token-throughput</code></td>
+          <td><code>vllm-pd-token-throughput</code> (H100)</td>
           <td style="text-align: right">0</td>
           <td>Yes</td>
           <td><em>Prefill</em> 2, <em>decode</em> 2</td>
           <td><em>Prefill</em> 2, <em>decode</em> 2</td>
       </tr>
       <tr>
-          <td><code>vllm-pd-predictive</code></td>
+          <td><code>vllm-pd-predictive</code> (H100)</td>
           <td style="text-align: right">0</td>
           <td>Yes</td>
           <td><em>Prefill</em> 2, <em>decode</em> 2</td>
           <td><em>Prefill</em> 2, <em>decode</em> 2</td>
       </tr>
       <tr>
-          <td><code>sglang-pd-token-throughput</code></td>
+          <td><code>sglang-pd-token-throughput</code> (H100)</td>
           <td style="text-align: right">0</td>
           <td>Yes</td>
           <td><em>Prefill</em> 2, <em>decode</em> 2</td>
           <td><em>Prefill</em> 2, <em>decode</em> 2</td>
       </tr>
       <tr>
-          <td><code>vllm-epd-predictive</code></td>
+          <td><code>vllm-epd-predictive</code> (H100)</td>
           <td style="text-align: right">0</td>
           <td>Yes</td>
           <td><em>Encode</em> 1, <em>prefill</em> 2, <em>decode</em> 2</td>
           <td><em>Encode</em> 1, <em>prefill</em> 2, <em>decode</em> 2</td>
+      </tr>
+      <tr>
+          <td><code>Server</code> <code>TokenThroughput</code> <code>catalog</code> (H200)</td>
+          <td style="text-align: right">22–28</td>
+          <td>No</td>
+          <td><em>Server</em> 2</td>
+          <td><em>Server</em> 2</td>
+      </tr>
+      <tr>
+          <td><code>Server</code> <code>Predictive</code> <code>catalog</code> (H200)</td>
+          <td style="text-align: right">15–22</td>
+          <td>No</td>
+          <td><em>Server</em> 2</td>
+          <td><em>Server</em> 2</td>
       </tr>
   </tbody>
 </table>
-<p>Both token throughput and predictive configurations scaled during baseline.
-The zero lead therefore does not isolate a forecasting benefit.
-The recorded maxima summarize each role across samples; they are not a synchronized GPU utilization trace.</p>
+<p>In Suite 1, both token throughput and predictive configurations scaled during baseline, so the zero
+lead does not isolate a forecasting benefit. In Suite 2, all single-<code>Server</code> configurations started
+<code>ramp</code> at one Ready replica; <code>Predictive</code> committed growth at <code>15.1–21.9</code> s into <code>ramp</code> against
+<code>22.2–28.2</code> s for <code>TokenThroughput</code> <code>catalog</code>.</p>
 <h3 id="retirement">Retirement</h3>
 <p>The separate single-role lifecycle check confirmed a new Ready replica served requests, then reduced
 the desired count from two to one. It observed <code>Disqualified</code> and <code>Draining</code>, followed by one Ready survivor.
@@ -2152,25 +2693,42 @@ Mooncake transfer over the direct leg moved 54 MB across six transfers with zero
 <p>The scaler read the engine&rsquo;s waiting-request counter during a transfer and recorded 24 waiting
 requests on the <em>decode</em> role; under load the <em>decode</em> role grew to two replicas, and both roles
 returned to their floor of one with no retirement outstanding.</p>
-<p>The three runs cover one node, one shape each and one recorded cycle. They do not establish
-multi-node behavior or a general scaling claim.</p>
+<p>In Suite 2, all 12 single-<code>Server</code> rounds that scaled to two replicas (<code>3</code> <code>TokenThroughput</code>
+<code>catalog</code> rounds and all <code>9</code> <code>Predictive</code> rounds) completed retirement and returned to one Ready
+replica with zero failed requests before cleanup.</p>
 <h2 id="benefits">Benefits</h2>
-<p>Predictive <em>PD</em> had lower ramp median <em>TTFT</em> than proportional <em>PD</em>: 467.906 versus 2540.853 ms.
-Its ramp throughput was 2109.251 versus 1117.481 tok/s. It entered the ramp with extra replicas
-already requested, so this comparison includes different capacity at ramp start.</p>
+<p>In Suite 1, predictive <em>PD</em> had lower ramp median <em>TTFT</em> than proportional <em>PD</em> (<code>467.906</code> vs
+<code>2540.853</code> ms) and higher ramp throughput (<code>2109.251</code> vs <code>1117.481</code> tok/s), though low manual
+targets caused it to enter <code>ramp</code> already scaled.</p>
+<p>In Suite 2, starting from an equal one-replica baseline on H200, applying the <code>0.75</code> catalog
+headroom resolved both manual-threshold failure modes: <code>TokenThroughput</code> scaled <code>1 -&gt; 2</code> at <code>c = 24</code>
+where unmargined saturation capacities (<code>17135.159</code> tok/s) stayed at one replica, and the embedded
+<code>openai/gpt-oss-120b</code> (<code>fp4</code>) prior matched measured sustain throughput within 1.2% (<code>4862.388</code> vs
+<code>4804.08</code> tok/s).</p>
+<p>When paired with <code>Predictive</code>, the 300 s Kalman forecast offset the ~76 s vLLM startup to cut
+45-second <code>sustain</code> <em>TTFT</em> p50 from <code>343.842</code> ms to <code>189.511</code> ms (<code>maxReplicas: 2</code>) and 90-second
+<code>sustain</code> <em>TTFT</em> p50 from <code>145.939–190.555</code> ms to <code>120.59</code> ms (<code>maxReplicas: 4</code>, <code>3886.136</code> output
+tok/s, zero failed requests).</p>
 <h2 id="trade-offs">Trade-offs</h2>
-<p>Cooldown lasted 90 s for text configurations, while the stored downward stabilization window was
-300 s. Several final snapshots still requested two replicas per role.
-Cooldown completion therefore does not establish a full return to the initial allocation.</p>
+<p>In Suite 1, cooldown lasted 90 s while downward stabilization was 300 s, so several final snapshots
+still requested two replicas. In Suite 2&rsquo;s 45-second <code>sustain</code> rounds, <code>TokenThroughput</code> <code>catalog</code>
+expended <code>317.04</code> median <code>readyReplicaSeconds</code> (<code>+33.7%</code> over manual&rsquo;s <code>237.094</code> s) without
+lowering <code>sustain</code> <em>TTFT</em> p50 because vLLM startup (~76 s) consumed most of the short load window.</p>
+<p>Because <code>Predictive</code> amplifies initial ramp slopes (<code>rawRecommendedReplicas</code> reaching <code>4–75</code> during
+<code>ramp</code>), production configurations pair <em><code>horizonSeconds</code></em> (<code>180–300</code> s) with
+<em><code>behavior.scaleUp.maxStepReplicas</code></em> to bound single-pass growth; see
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/#step-3-choose-an-algorithm">Step 3: Choose an algorithm</a>
+.</p>
 <h2 id="limitations">Limitations</h2>
-<p>The measurements cover one node, two models and one recorded comparison per configuration, with
-a separate SGLang retry. They do not establish multi-node performance or general algorithm rankings.
-The SGLang table uses the retry&rsquo;s complete phase artifacts; its earlier interrupted run is excluded.</p>
+<p>Suite 1 covers one eight-H100 node and one recorded comparison per configuration. Suite 2 covers
+four single-H200 nodes (<code>Qwen3-8B</code>, <code>gpt-oss-120b</code>, <code>Qwen3-VL-8B-Instruct</code>). Neither suite
+establishes a universal algorithm ranking or an optimal headroom margin across workloads.</p>
 <p>The text and multimodal clients perform different work and use different phase stopping rules.
 Their throughput values cannot establish a serving-mode speedup. Image tags identify the configured
 builds; the capture does not establish identical installed engine package versions across configurations.</p>
-<p>Zero errors in the four vLLM benchmark configurations describe their measured requests.
-The independent scale-out failures and incomplete retirement traces prevent an availability guarantee.
+<p>Zero errors in the single-<code>Server</code> rounds and selected <em>PD</em>/<em>EPD</em> runs describe those measured
+requests only. Multi-node <em>PD</em> prefill scale-out under high-rate text traffic produced transient
+Router HTTP 503s during worker registration, and SGLang <em>PD</em> reproduced Mooncake KV transfer errors.
 The <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Scaling Walkthrough</a>
  distinguishes configuration
 examples from captured lifecycle evidence.</p>
@@ -2195,7 +2753,7 @@ examples from captured lifecycle evidence.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/fb0b75810cc391698292efe6d9af84047ae7c4f0/docs/modules/model-deployment/scaling-benchmark.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/20d2aa3648161642f08c63506ee722c9e04ae306/docs/modules/model-deployment/scaling-benchmark.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/scaling-benchmark.md">Edit this page</a>
             
@@ -2221,6 +2779,15 @@ examples from captured lifecycle evidence.</p>
         <li><a href="#vllm-predictive-pd">vLLM predictive PD</a></li>
         <li><a href="#sglang-token-throughput-pd">SGLang token throughput PD</a></li>
         <li><a href="#vllm-predictive-epd">vLLM predictive EPD</a></li>
+      </ul>
+    </li>
+    <li><a href="#suite-2-capacity-priors">Suite 2: Capacity priors</a>
+      <ul>
+        <li><a href="#single-replica-sweep">Single-replica sweep</a></li>
+        <li><a href="#capacity-arm-rounds">Capacity-arm rounds</a></li>
+        <li><a href="#algorithm-sensitivity">Algorithm sensitivity</a></li>
+        <li><a href="#embedded-catalog">Embedded catalog</a></li>
+        <li><a href="#disaggregated-h200-rerun">Disaggregated H200 rerun</a></li>
       </ul>
     </li>
     <li><a href="#verification">Verification</a>

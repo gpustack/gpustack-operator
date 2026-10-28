@@ -24,7 +24,7 @@ For cluster-backed tests, provide a kind cluster and its kubeconfig/context. Fol
 
 - `make deps` — vendor patched k8s staging modules into `staging/` **and** upstream Helm charts into `deploy/gpustack-operator/chart/charts/`, then `go mod tidy && go mod download`; `make deps update` adds `go get -u ./...`.
 - `make generate` — the `gen/api` generators: deepcopy, register, apiservice, CRDs, conversion, protobuf, webhooks. `make generate binding` regenerates the CGO bindings in `binding/` via c-for-go.
-- `make lint` — golangci-lint (`.golangci.yaml`); `make lint dirty` also fails on a dirty tree. `make lint docs` checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see [the docs skill](https://github.com/gpustack/gpustack-operator/blob/fb0b75810cc391698292efe6d9af84047ae7c4f0/.claude/skills/gpustack-operator-docs/SKILL.md).
+- `make lint` — golangci-lint (`.golangci.yaml`); `make lint dirty` also fails on a dirty tree. `make lint docs` checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see [the docs skill](https://github.com/gpustack/gpustack-operator/blob/20d2aa3648161642f08c63506ee722c9e04ae306/.claude/skills/gpustack-operator-docs/SKILL.md).
 - `make build` — cross-build `cmd/gpustack-operator` into `.dist/build/`, version ldflag-injected into `pkg/utils/version`; `VERSION=vX.y.z+l.m make build` sets it, `BUILD_PLATFORMS="linux/amd64 linux/arm64"` cross-compiles.
 - `make test` — `go test -v -failfast -race -cover -shuffle=on -timeout=30m ./...`, coverage to `.dist/test/coverage.out`. The order is shuffled on every run so an order-dependent test cannot hide behind the fixed one; a failure banner prints the seed, and `go test -shuffle=<seed>` reproduces that exact order. Trailing args are regexes of packages to **exclude**. `RACE=false make test` drops `-race` and changes nothing else.
 - `make package` — images via `docker buildx` from `pack/*/Dockerfile` (Linux only).
@@ -147,7 +147,7 @@ Edit documentation under `docs/`, navigation labels and order in `site/data/navi
 layouts and styles under `site/`. Run `make lint docs` before committing to check source links,
 page structure, index entries and rendered site links. CI runs the same gate.
 
-The [shared module map](https://github.com/gpustack/gpustack-operator/blob/fb0b75810cc391698292efe6d9af84047ae7c4f0/docs/README.md#module-map) connects guides, specs, code and skills for code
+The [shared module map](https://github.com/gpustack/gpustack-operator/blob/20d2aa3648161642f08c63506ee722c9e04ae306/docs/README.md#module-map) connects guides, specs, code and skills for code
 changes. Update its routing in the same PR when those entry points or associations change.
 `make site` also generates `/llms.txt` from that index and *`index.md`* beside each article's HTML.
 Markdown exports preserve the prose and code blocks, with links adjusted for the website.
@@ -347,4 +347,4 @@ are under `hack/deploy/`.
 **See also** — [Internals](/gpustack-operator/main/docs/contribute/internals/index.md) (the invariants the code keeps) ·
 [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) · [Settings](/gpustack-operator/main/docs/reference/settings/index.md)
 
-**Next** → [All documentation](https://github.com/gpustack/gpustack-operator/blob/fb0b75810cc391698292efe6d9af84047ae7c4f0/docs/README.md) — pick the next page on the contributor path.
+**Next** → [All documentation](https://github.com/gpustack/gpustack-operator/blob/20d2aa3648161642f08c63506ee722c9e04ae306/docs/README.md) — pick the next page on the contributor path.

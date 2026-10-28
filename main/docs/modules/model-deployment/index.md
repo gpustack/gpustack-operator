@@ -35,8 +35,8 @@ are directed.
 [Scaling](/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md) plans the replica count of a deployment from the signals it publishes, and
 [Shutdown](/gpustack-operator/main/docs/modules/model-deployment/shutdown/index.md) explains the retirement protocol a scale-down runs.
 The [Scaling Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) configures observation and
-active scaling. The [Scaling Benchmark](/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md) records H100 measurements and
-the limits observed during scale-out and retirement.
+active scaling. The [Scaling Benchmark](/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md) records H100 and H200 measurements
+and the limits observed during scale-out and retirement.
 
 [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) keeps one serving instance and changes its collective while it runs.
 [Elastic EP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) follows prefetch, startup with
