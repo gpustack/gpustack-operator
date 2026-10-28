@@ -174,14 +174,14 @@ Failed requests remain in the request and error columns.
 
 The charts trace algorithm feedback sensitivity (`rawRecommendedReplicas`), Ready serving replicas
 (`readyReplicas`) across phase checkpoints (`B1–B2` baseline, `R1–R3` ramp, `S1–S3` sustain,
-`C1–C3` cooldown) and resulting *TTFT* p50 for **blue** (`#2563eb`, `vllm-pd-proportional`),
-**amber** (`#f59e0b`, `vllm-pd-token-throughput`) and **green** (`#16a34a`, `vllm-pd-predictive`).
+`C1–C3` cooldown) and resulting *TTFT* p50 for **blue** (`vllm-pd-proportional`), **amber**
+(`vllm-pd-token-throughput`) and **green** (`vllm-pd-predictive`).
 
 ```mermaid
 %%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #f59e0b, #16a34a"}}}}%%
 xychart-beta
     title "Feedback sensitivity (rawRecommendedReplicas)"
-    x-axis "Blue (#2563eb): Proportional | Amber (#f59e0b): TokenThroughput | Green (#16a34a): Predictive" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
+    x-axis "Blue: Proportional | Amber: TokenThroughput | Green: Predictive" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
     y-axis "rawRecommendedReplicas" 0 --> 80
     line "Proportional" [1, 1, 1, 2, 2, 2, 2, 2, 1, 1, 1]
     line "TokenThroughput" [1, 2, 2, 12, 25, 25, 23, 23, 19, 1, 1]
@@ -192,7 +192,7 @@ xychart-beta
 %%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #f59e0b, #16a34a"}}}}%%
 xychart-beta
     title "Ready replicas by checkpoint"
-    x-axis "Blue (#2563eb): Proportional | Amber (#f59e0b): TokenThroughput | Green (#16a34a): Predictive" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
+    x-axis "Blue: Proportional | Amber: TokenThroughput | Green: Predictive" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
     y-axis "readyReplicas" 0 --> 3
     line "Proportional" [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
     line "TokenThroughput" [1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2]
@@ -203,7 +203,7 @@ xychart-beta
 %%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #f59e0b, #16a34a"}}}}%%
 xychart-beta
     title "TTFT p50 by phase"
-    x-axis "Blue (#2563eb): Proportional | Amber (#f59e0b): TokenThroughput | Green (#16a34a): Predictive" ["baseline", "ramp", "sustain", "cooldown"]
+    x-axis "Blue: Proportional | Amber: TokenThroughput | Green: Predictive" ["baseline", "ramp", "sustain", "cooldown"]
     y-axis "TTFT p50 (ms)" 0 --> 3000
     line "Proportional" [298.564, 2540.853, 506.734, 188.231]
     line "TokenThroughput" [284.481, 2325.222, 480.418, 182.044]
@@ -301,7 +301,7 @@ requests) to construct the offline `ConfigMap` catalog profile:
 %%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #dc2626, #16a34a"}}}}%%
 xychart-beta
     title "Single-replica total throughput vs capacity targets (tok/s)"
-    x-axis "Blue (#2563eb): Measured tok/s | Red (#dc2626): Tuned Manual (17135.2) | Green (#16a34a): Catalog 0.75 (12851.4)" ["c=2", "c=4", "c=8", "c=16", "c=24", "c=32"]
+    x-axis "Blue: Measured tok/s | Red: Tuned Manual (17135.2) | Green: Catalog 0.75 (12851.4)" ["c=2", "c=4", "c=8", "c=16", "c=24", "c=32"]
     y-axis "Total throughput (tok/s)" 0 --> 18000
     line "Measured tok/s" [1882.56, 3653.261, 6414.232, 11477.608, 14527.811, 17135.159]
     line "Tuned Manual (17135.2)" [17135.159, 17135.159, 17135.159, 17135.159, 17135.159, 17135.159]
@@ -312,7 +312,7 @@ xychart-beta
 %%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#16a34a, #f59e0b, #dc2626"}}}}%%
 xychart-beta
     title "Single-replica TTFT percentiles by concurrency (ms)"
-    x-axis "Green (#16a34a): TTFT p50 | Amber (#f59e0b): TTFT p90 | Red (#dc2626): TTFT p99" ["c=2", "c=4", "c=8", "c=16", "c=24", "c=32"]
+    x-axis "Green: TTFT p50 | Amber: TTFT p90 | Red: TTFT p99" ["c=2", "c=4", "c=8", "c=16", "c=24", "c=32"]
     y-axis "TTFT (ms)" 0 --> 800
     line "TTFT p50" [48.084, 58.658, 166.364, 224.723, 352.587, 490.591]
     line "TTFT p90" [50.489, 94.228, 190.725, 362.343, 527.173, 689.956]
@@ -321,9 +321,9 @@ xychart-beta
 
 Under the P95 targets of *`ttftTargetMilliseconds: "2000"`* and *`itlTargetMilliseconds: "33"`*,
 every measured point passed (`ExplicitSaturation`). `Catalog.Resolve` selected `17135.159`
-tokens/s at concurrency `32` (**red** `#dc2626`) as the seed capacity and applied *`headroom: "0.75"`*
-to derive `12851.37` tokens/s (**green** `#16a34a`), which crosses the measured throughput curve
-(**blue** `#2563eb`) between `c = 16` (`11477.608` tok/s) and `c = 24` (`14527.811` tok/s).
+tokens/s at concurrency `32` (**red**) as the seed capacity and applied *`headroom: "0.75"`*
+to derive `12851.37` tokens/s (**green**), which crosses the measured throughput curve (**blue**)
+between `c = 16` (`11477.608` tok/s) and `c = 24` (`14527.811` tok/s).
 
 ### Capacity-arm rounds
 
@@ -345,7 +345,7 @@ Eighteen serial rounds (`3` alternating repeats per arm for `TokenThroughput` an
 %%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#dc2626, #f59e0b, #16a34a"}}}}%%
 xychart-beta
     title "Capacity-arm feedback sensitivity (rawRecommendedReplicas)"
-    x-axis "Red (#dc2626): TT (tuned-manual) | Amber (#f59e0b): TT (catalog) | Green (#16a34a): Predictive (catalog)" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
+    x-axis "Red: TT (tuned-manual) | Amber: TT (catalog) | Green: Predictive (catalog)" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
     y-axis "rawRecommendedReplicas" 0 --> 5
     line "TT (tuned-manual)" [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
     line "TT (catalog)" [1, 1, 1, 2, 2, 1, 1, 2, 1, 1, 1]
@@ -356,15 +356,15 @@ xychart-beta
 %%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#dc2626, #f59e0b, #16a34a"}}}}%%
 xychart-beta
     title "Capacity-arm Ready replicas by checkpoint"
-    x-axis "Red (#dc2626): TT (tuned-manual) | Amber (#f59e0b): TT (catalog) | Green (#16a34a): Predictive (catalog)" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
+    x-axis "Red: TT (tuned-manual) | Amber: TT (catalog) | Green: Predictive (catalog)" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
     y-axis "readyReplicas" 0 --> 3
     line "TT (tuned-manual)" [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
     line "TT (catalog)" [1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 1]
     line "Predictive (catalog)" [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 1]
 ```
 
-The three lines in both checkpoint charts plot **red** (`#dc2626`, `TokenThroughput` `tuned-manual`),
-**amber** (`#f59e0b`, `TokenThroughput` `catalog`) and **green** (`#16a34a`, `Predictive` `catalog`).
+The three lines in both checkpoint charts plot **red** (`TokenThroughput` `tuned-manual`),
+**amber** (`TokenThroughput` `catalog`) and **green** (`Predictive` `catalog`).
 All 18 rounds completed with zero failed requests, verified UID-preconditioned cleanup and full
 return to the one-replica baseline.
 
@@ -404,7 +404,7 @@ effective tok/s) against the [Scaling Simulation](scaling-simulation.md) metrics
 %%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #f59e0b, #16a34a"}}}}%%
 xychart-beta
     title "360 s wave Ready replicas by checkpoint"
-    x-axis "Blue (#2563eb): Proportional | Amber (#f59e0b): TokenThroughput | Green (#16a34a): Predictive (catalog)" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
+    x-axis "Blue: Proportional | Amber: TokenThroughput | Green: Predictive (catalog)" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
     y-axis "readyReplicas" 0 --> 5
     line "Proportional" [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
     line "TokenThroughput" [1, 1, 1, 1, 3, 3, 4, 4, 4, 4, 4]
@@ -415,15 +415,15 @@ xychart-beta
 %%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #f59e0b, #16a34a"}}}}%%
 xychart-beta
     title "360 s wave TTFT p50 by phase (ms)"
-    x-axis "Blue (#2563eb): Proportional | Amber (#f59e0b): TokenThroughput | Green (#16a34a): Predictive (catalog)" ["baseline", "ramp", "sustain"]
+    x-axis "Blue: Proportional | Amber: TokenThroughput | Green: Predictive (catalog)" ["baseline", "ramp", "sustain"]
     y-axis "TTFT p50 (ms)" 0 --> 400
     line "Proportional" [49.439, 347.282, 190.555]
     line "TokenThroughput" [49.263, 350.591, 145.939]
     line "Predictive (catalog)" [49.742, 192.093, 120.59]
 ```
 
-In the 360-second wave (**blue** `#2563eb` `Proportional`, **amber** `#f59e0b` `TokenThroughput`,
-**green** `#16a34a` `Predictive`), catalog-backed `Predictive` brought three replicas Ready by `R2`
+In the 360-second wave (**blue** `Proportional`, **amber** `TokenThroughput`, **green**
+`Predictive`), catalog-backed `Predictive` brought three replicas Ready by `R2`
 and all four Ready by `R3`, lowering `ramp` *TTFT* p50 from `347.282–350.591` ms to `192.093` ms
 and `sustain` *TTFT* p50 to `120.59` ms (`3886.136` output tok/s, zero failed requests).
 
