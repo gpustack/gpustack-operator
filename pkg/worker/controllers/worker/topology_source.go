@@ -28,22 +28,16 @@ import (
 )
 
 const (
-	topologySnapshotAPIVersion = "topology.gpustack.ai/v1alpha1"
-	topologySourceFinalizer    = "worker.gpustack.ai/topology-source"
-	topologySourceRegionLabel  = "topology.gpustack.ai/region"
-	topologySourceZoneLabel    = "topology.gpustack.ai/zone"
-	topologySourceRackLabel    = "topology.gpustack.ai/rack"
+	topologySourceConfigurationKind = "TopologySourceConfiguration"
+	topologySourceFinalizer         = "worker.gpustack.ai/topology-source"
+	topologySourceRegionLabel       = "topology.gpustack.ai/region"
+	topologySourceZoneLabel         = "topology.gpustack.ai/zone"
+	topologySourceRackLabel         = "topology.gpustack.ai/rack"
 
 	TopologySourceConditionReady             kubeapistatus.ConditionType = "Ready"
 	TopologySourceConditionValid             kubeapistatus.ConditionType = "Valid"
 	TopologySourceConditionOwnershipConflict kubeapistatus.ConditionType = "OwnershipConflict"
 )
-
-type topologySnapshot struct {
-	APIVersion string                       `json:"apiVersion" yaml:"apiVersion"`
-	Revision   string                       `json:"revision" yaml:"revision"`
-	Nodes      map[string]map[string]string `json:"nodes" yaml:"nodes"`
-}
 
 // TopologySourceReconciler observes inventories and publishes writable labels through NodeFeatures.
 type TopologySourceReconciler struct {
@@ -326,9 +320,14 @@ func isTopologySourceStandardLabel(key string) bool {
 	return key == core.LabelTopologyRegion || key == core.LabelTopologyZone
 }
 
-func validateTopologySnapshot(source *workercore.TopologySource, snapshot topologySnapshot, selected map[string]struct{}) error {
-	if snapshot.APIVersion != topologySnapshotAPIVersion {
+func validateTopologySnapshot(
+	source *workercore.TopologySource, snapshot workercore.TopologySourceConfiguration, selected map[string]struct{},
+) error {
+	if snapshot.APIVersion != workercore.GroupVersion.String() {
 		return fmt.Errorf("unsupported topology snapshot apiVersion %q", snapshot.APIVersion)
+	}
+	if snapshot.Kind != topologySourceConfigurationKind {
+		return fmt.Errorf("unsupported topology snapshot kind %q", snapshot.Kind)
 	}
 	if strings.TrimSpace(snapshot.Revision) == "" {
 		return fmt.Errorf("topology snapshot revision is required")

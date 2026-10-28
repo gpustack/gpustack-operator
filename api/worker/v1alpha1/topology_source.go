@@ -127,3 +127,21 @@ type TopologySourceList struct {
 }
 
 var _ runtime.Object = (*TopologySourceList)(nil)
+
+// TopologySourceConfiguration is the versioned topology snapshot read from a ConfigMap or webhook.
+//
+// +protobuf=false
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type TopologySourceConfiguration struct {
+	meta.TypeMeta `json:",inline"`
+
+	// Revision identifies the snapshot version reported in TopologySourceStatus.
+	// +required
+	Revision string `json:"revision"`
+
+	// Nodes maps each Node name to its topology label key-value pairs.
+	// +optional
+	Nodes map[string]map[string]string `json:"nodes,omitempty"`
+}
+
+var _ runtime.Object = (*TopologySourceConfiguration)(nil)

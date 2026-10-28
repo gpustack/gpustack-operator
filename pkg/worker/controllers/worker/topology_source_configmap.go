@@ -20,21 +20,35 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
-func decodeTopologySnapshot(raw []byte) (topologySnapshot, error) {
+type rawTopologySourceConfiguration struct {
+	APIVersion string                       `yaml:"apiVersion"`
+	Kind       string                       `yaml:"kind"`
+	Revision   string                       `yaml:"revision"`
+	Nodes      map[string]map[string]string `yaml:"nodes"`
+}
+
+func decodeTopologySnapshot(raw []byte) (workercore.TopologySourceConfiguration, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(raw))
 	decoder.KnownFields(true)
-	var snapshot topologySnapshot
-	if err := decoder.Decode(&snapshot); err != nil {
-		return topologySnapshot{}, fmt.Errorf("decode topology snapshot: %w", err)
+	var decoded rawTopologySourceConfiguration
+	if err := decoder.Decode(&decoded); err != nil {
+		return workercore.TopologySourceConfiguration{}, fmt.Errorf("decode topology snapshot: %w", err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return topologySnapshot{}, fmt.Errorf("topology snapshot contains more than one document")
+			return workercore.TopologySourceConfiguration{}, fmt.Errorf("topology snapshot contains more than one document")
 		}
-		return topologySnapshot{}, fmt.Errorf("decode topology snapshot trailing document: %w", err)
+		return workercore.TopologySourceConfiguration{}, fmt.Errorf("decode topology snapshot trailing document: %w", err)
 	}
-	return snapshot, nil
+	return workercore.TopologySourceConfiguration{
+		TypeMeta: meta.TypeMeta{
+			APIVersion: decoded.APIVersion,
+			Kind:       decoded.Kind,
+		},
+		Revision: decoded.Revision,
+		Nodes:    decoded.Nodes,
+	}, nil
 }
 
 func (r *TopologySourceReconciler) reconcileTopologySourceConfigMap(
@@ -63,7 +77,7 @@ func (r *TopologySourceReconciler) applyTopologySourceSnapshot(
 	ctx context.Context,
 	source *workercore.TopologySource,
 	before workercore.TopologySourceStatus,
-	snapshot topologySnapshot,
+	snapshot workercore.TopologySourceConfiguration,
 ) (ctrl.Result, error) {
 	selector, err := meta.LabelSelectorAsSelector(&source.Spec.NodeSelector)
 	if err != nil {

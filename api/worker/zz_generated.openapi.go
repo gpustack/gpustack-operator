@@ -271,6 +271,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.NodeModelStoreWatermarks{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_NodeModelStoreWatermarks(ref),
 		v1alpha1.TopologySource{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1alpha1_TopologySource(ref),
 		v1alpha1.TopologySourceConfigMap{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_TopologySourceConfigMap(ref),
+		v1alpha1.TopologySourceConfiguration{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_TopologySourceConfiguration(ref),
 		v1alpha1.TopologySourceList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_TopologySourceList(ref),
 		v1alpha1.TopologySourceNodeLabels{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_TopologySourceNodeLabels(ref),
 		v1alpha1.TopologySourceObjectReference{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_TopologySourceObjectReference(ref),
@@ -14123,6 +14124,65 @@ func schema_gpustack_api_worker_v1alpha1_TopologySourceConfigMap(ref common.Refe
 		},
 		Dependencies: []string{
 			v1alpha1.TopologySourceObjectReference{}.OpenAPIModelName(), metav1.Duration{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_TopologySourceConfiguration(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TopologySourceConfiguration is the versioned topology snapshot read from a ConfigMap or webhook.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"revision": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Revision identifies the snapshot version reported in TopologySourceStatus.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"nodes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Nodes maps each Node name to its topology label key-value pairs.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type: []string{"object"},
+										AdditionalProperties: &spec.SchemaOrBool{
+											Allows: true,
+											Schema: &spec.Schema{
+												SchemaProps: spec.SchemaProps{
+													Type:   []string{"string"},
+													Format: "",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"revision"},
+			},
+		},
 	}
 }
 

@@ -28,18 +28,19 @@ func TestDecodeTopologySnapshot(t *testing.T) {
 		raw   string
 		valid bool
 	}{
-		{name: "yaml", raw: "apiVersion: topology.gpustack.ai/v1alpha1\nrevision: inventory-1\nnodes:\n  node-a:\n    topology.kubernetes.io/region: region-a\n" + "    topology.kubernetes.io/zone: zone-a\n", valid: true},
-		{name: "json", raw: `{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"inventory-1","nodes":{}}`, valid: true},
-		{name: "duplicate key", raw: "apiVersion: topology.gpustack.ai/v1alpha1\nrevision: first\nrevision: second\nnodes: {}\n"},
-		{name: "unknown field", raw: "apiVersion: topology.gpustack.ai/v1alpha1\nrevision: inventory-1\nnodes: {}\nextra: value\n"},
-		{name: "multiple documents", raw: "apiVersion: topology.gpustack.ai/v1alpha1\nrevision: inventory-1\nnodes: {}\n---\napiVersion: topology.gpustack.ai/v1alpha1\nrevision: inventory-2\nnodes: {}\n"},
+		{name: "yaml", raw: "apiVersion: worker.gpustack.ai/v1alpha1\nkind: TopologySourceConfiguration\nrevision: inventory-1\nnodes:\n  node-a:\n    topology.kubernetes.io/region: region-a\n" + "    topology.kubernetes.io/zone: zone-a\n", valid: true},
+		{name: "json", raw: `{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"TopologySourceConfiguration","revision":"inventory-1","nodes":{}}`, valid: true},
+		{name: "duplicate key", raw: "apiVersion: worker.gpustack.ai/v1alpha1\nkind: TopologySourceConfiguration\nrevision: first\nrevision: second\nnodes: {}\n"},
+		{name: "unknown field", raw: "apiVersion: worker.gpustack.ai/v1alpha1\nkind: TopologySourceConfiguration\nrevision: inventory-1\nnodes: {}\nextra: value\n"},
+		{name: "multiple documents", raw: "apiVersion: worker.gpustack.ai/v1alpha1\nkind: TopologySourceConfiguration\nrevision: inventory-1\nnodes: {}\n---\napiVersion: worker.gpustack.ai/v1alpha1\nkind: TopologySourceConfiguration\nrevision: inventory-2\nnodes: {}\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			snapshot, err := decodeTopologySnapshot([]byte(tc.raw))
 			assert.Equal(t, tc.valid, err == nil)
 			if tc.valid {
-				require.Equal(t, topologySnapshotAPIVersion, snapshot.APIVersion)
+				require.Equal(t, workercore.GroupVersion.String(), snapshot.APIVersion)
+				require.Equal(t, topologySourceConfigurationKind, snapshot.Kind)
 			}
 		})
 	}
@@ -54,7 +55,7 @@ func TestTopologySourceReconcileConfigMapAppliesSnapshot(t *testing.T) {
 			MaxStaleness: meta.Duration{Duration: time.Minute},
 		},
 	}}
-	configMap := &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Namespace: "gpustack-system", Name: "inventory"}, Data: map[string]string{"snapshot.yaml": "apiVersion: topology.gpustack.ai/v1alpha1\nrevision: inventory-1\nnodes:\n  node-a:\n    topology.gpustack.ai/region: region-a\n    topology.gpustack.ai/zone: zone-a\n"}}
+	configMap := &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Namespace: "gpustack-system", Name: "inventory"}, Data: map[string]string{"snapshot.yaml": "apiVersion: worker.gpustack.ai/v1alpha1\nkind: TopologySourceConfiguration\nrevision: inventory-1\nnodes:\n  node-a:\n    topology.gpustack.ai/region: region-a\n    topology.gpustack.ai/zone: zone-a\n"}}
 	node := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-a", Labels: map[string]string{"test.gpustack.ai/topology": "enabled"}}}
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(source, configMap, node).
 		WithStatusSubresource(&workercore.TopologySource{}).Build()
@@ -133,7 +134,7 @@ func TestTopologySourceStandardParentsAreReadOnly(t *testing.T) {
 				}, Key: "snapshot.yaml", MaxStaleness: meta.Duration{Duration: time.Minute}},
 			}}
 			configMap := &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Namespace: kuberess.SystemNamespaceName, Name: "inventory"}, Data: map[string]string{
-				"snapshot.yaml": "apiVersion: topology.gpustack.ai/v1alpha1\nrevision: inventory-1\nnodes:\n  node-a:\n    topology.kubernetes.io/region: region-a\n    topology.kubernetes.io/zone: zone-a\n    topology.gpustack.ai/rack: rack-a\n",
+				"snapshot.yaml": "apiVersion: worker.gpustack.ai/v1alpha1\nkind: TopologySourceConfiguration\nrevision: inventory-1\nnodes:\n  node-a:\n    topology.kubernetes.io/region: region-a\n    topology.kubernetes.io/zone: zone-a\n    topology.gpustack.ai/rack: rack-a\n",
 			}}
 			node := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-a", Labels: labels}}
 			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(source, configMap, node).
@@ -165,7 +166,7 @@ func TestTopologySourceRepairsAndRemovesNodeFeature(t *testing.T) {
 		}, Key: "snapshot.yaml", MaxStaleness: meta.Duration{Duration: time.Minute}},
 	}}
 	configMap := &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Namespace: kuberess.SystemNamespaceName, Name: "inventory"}, Data: map[string]string{
-		"snapshot.yaml": "apiVersion: topology.gpustack.ai/v1alpha1\nrevision: first\nnodes:\n  node-a:\n    topology.gpustack.ai/rack: rack-a\n",
+		"snapshot.yaml": "apiVersion: worker.gpustack.ai/v1alpha1\nkind: TopologySourceConfiguration\nrevision: first\nnodes:\n  node-a:\n    topology.gpustack.ai/rack: rack-a\n",
 	}}
 	node := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-a", Labels: map[string]string{"test.gpustack.ai/topology": "enabled"}}}
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(source, configMap, node).
@@ -203,7 +204,7 @@ func TestTopologySourceRepairsAndRemovesNodeFeature(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, cli.Get(context.Background(), key, feature))
 
-	configMap.Data["snapshot.yaml"] = "apiVersion: topology.gpustack.ai/v1alpha1\nrevision: second\nnodes: {}\n"
+	configMap.Data["snapshot.yaml"] = "apiVersion: worker.gpustack.ai/v1alpha1\nkind: TopologySourceConfiguration\nrevision: second\nnodes: {}\n"
 	require.NoError(t, cli.Update(context.Background(), configMap))
 	feature.OwnerReferences = nil
 	require.NoError(t, cli.Update(context.Background(), feature))
