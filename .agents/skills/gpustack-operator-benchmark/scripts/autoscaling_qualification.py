@@ -1194,6 +1194,7 @@ def suite_sim_sensitivity(cluster, out_dir, options):
             root = f"/tmp/gpustack-autoscaling-qual-sim-{os.getpid()}"
             stage_driver(cluster, root)
             timeline_path = case_dir / "timeline.jsonl"
+            timeline_path.write_text("")
 
             def sampler():
                 with timeline_path.open("a") as stream:
