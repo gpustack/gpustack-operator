@@ -479,7 +479,7 @@ def event_metrics(samples, events, baseline_by_role):
                     return {"value": None, "reason": reason}
                 if sample["epoch"] is None or started is None:
                     return {"value": None, "reason": "sample timestamps missing"}
-                return {"value": round((sample["epoch"] - started) * 1000.0, 3)}
+                return {"value": round((sample["epoch"] - started) * 1000.0, 3), "reason": None}
 
             rec_reason = ("no pre-event recommendation vector" if not is_number(pre_rec)
                           else "recommendation above the pre-event level never observed")
