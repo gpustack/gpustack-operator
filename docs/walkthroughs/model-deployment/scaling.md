@@ -220,6 +220,12 @@ Replace the complete *`spec.algorithm`* mapping in `scaling-policy.yaml` when ch
 Only the block matching *`type`* is accepted. Apply the edited file while it remains in `Shadow`.
 Capacity values below reproduce the benchmark's settings; tune them from measured per-replica capacity.
 
+| Choice | When to use | Configuration guidance |
+|---|---|---|
+| `Predictive` + *`capacityPrior`* | Latency-sensitive online serving and traffic ramps where engine startup (~76 s on H200) must begin before sustained peak load arrives. | Set *`horizonSeconds`* above replica startup time (`180–300` s), keep *`headroom: "0.75"`*, and bound slope spikes with *`behavior.scaleUp.maxStepReplicas`*. |
+| `TokenThroughput` + *`capacityPrior`* | General serving with variable prompt lengths and prefix caching when GPU replica-seconds must track sustained token demand. | Use *`capacityPrior`* (`"0.75"` headroom) or set manual targets at 70–75% of single-replica saturation; unmargined saturation targets fail to trigger before *TTFT* climbs. |
+| `Proportional` | Uniform request lengths or simple concurrency control (`RunningRequests`, `QueueDepth`) without offline token-capacity sweeps. | Set *`roleTargets[].target`* to the per-replica concurrency where *TTFT* remains within target; `Proportional` does not accept *`capacityPrior`*. |
+
 ### Token throughput
 
 ```yaml

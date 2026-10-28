@@ -112,7 +112,9 @@ that climbs before the capacity arrives.
 
 A deterministic local simulation compares all three on identical synthetic traffic and records the
 measured adjustment dynamics, request outcomes and true per-token latencies in
-[Model Deployment Scaling Simulation](scaling-simulation.md).
+[Model Deployment Scaling Simulation](scaling-simulation.md). For H100 and H200 hardware results and
+practical tuning guidance, see [Scaling Benchmark](scaling-benchmark.md) and
+[Step 3: Choose an algorithm](../../walkthroughs/model-deployment/scaling.md#step-3-choose-an-algorithm).
 
 | Algorithm | Mechanism | Suitable workload | Main constraint |
 |---|---|---|---|

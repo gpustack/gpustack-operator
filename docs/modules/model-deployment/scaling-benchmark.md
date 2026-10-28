@@ -541,13 +541,19 @@ replica with zero failed requests before cleanup.
 ## Benefits
 
 In Suite 1, predictive *PD* had lower ramp median *TTFT* than proportional *PD* (`467.906` vs
-`2540.853` ms) and higher ramp throughput (`2109.251` vs `1117.481` tok/s), though it entered
-`ramp` already scaled.
+`2540.853` ms) and higher ramp throughput (`2109.251` vs `1117.481` tok/s), though low manual
+targets caused it to enter `ramp` already scaled.
 
 In Suite 2, starting from an equal one-replica baseline on H200, applying the `0.75` catalog
-headroom enabled `TokenThroughput` to scale `1 -> 2` where unmargined saturation capacities stayed
-at one replica, and catalog-backed `Predictive` cut 90-second `sustain` *TTFT* p50 from
-`145.939–190.555` ms to `120.59` ms (`3886.136` output tok/s, zero failed requests).
+headroom resolved both manual-threshold failure modes: `TokenThroughput` scaled `1 -> 2` at `c = 24`
+where unmargined saturation capacities (`17135.159` tok/s) stayed at one replica, and the embedded
+`openai/gpt-oss-120b` (`fp4`) prior matched measured sustain throughput within 1.2% (`4862.388` vs
+`4804.08` tok/s).
+
+When paired with `Predictive`, the 300 s Kalman forecast offset the ~76 s vLLM startup to cut
+45-second `sustain` *TTFT* p50 from `343.842` ms to `189.511` ms (`maxReplicas: 2`) and 90-second
+`sustain` *TTFT* p50 from `145.939–190.555` ms to `120.59` ms (`maxReplicas: 4`, `3886.136` output
+tok/s, zero failed requests).
 
 ## Trade-offs
 
@@ -555,6 +561,11 @@ In Suite 1, cooldown lasted 90 s while downward stabilization was 300 s, so seve
 still requested two replicas. In Suite 2's 45-second `sustain` rounds, `TokenThroughput` `catalog`
 expended `317.04` median `readyReplicaSeconds` (`+33.7%` over manual's `237.094` s) without
 lowering `sustain` *TTFT* p50 because vLLM startup (~76 s) consumed most of the short load window.
+
+Because `Predictive` amplifies initial ramp slopes (`rawRecommendedReplicas` reaching `4–75` during
+`ramp`), production configurations pair *`horizonSeconds`* (`180–300` s) with
+*`behavior.scaleUp.maxStepReplicas`* to bound single-pass growth; see
+[Step 3: Choose an algorithm](../../walkthroughs/model-deployment/scaling.md#step-3-choose-an-algorithm).
 
 ## Limitations
 
