@@ -365,5 +365,7 @@ func Quantile(values []float64, q float64) float64 {
 	}
 	sorted := append([]float64(nil), values...)
 	sort.Float64s(sorted)
-	return sorted[int(math.Ceil(float64(len(sorted))*q))-1]
+	idx := int(math.Ceil(float64(len(sorted))*q)) - 1
+	idx = max(0, min(len(sorted)-1, idx))
+	return sorted[idx]
 }

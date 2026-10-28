@@ -12,6 +12,25 @@ func TestPlantPartialServiceQuantum(t *testing.T) {
 	if got := Quantile(values, 0.5); got != 20 || values[0] != 30 || values[1] != 10 || values[2] != 20 {
 		t.Fatalf("Quantile mutated caller slice or returned %v: %v", got, values)
 	}
+	if got := Quantile(values, 0); got != 10 {
+		t.Fatalf("Quantile at q=0 returned %v, want 10", got)
+	}
+	if got := Quantile(values, -0.5); got != 10 {
+		t.Fatalf("Quantile at q=-0.5 returned %v, want 10", got)
+	}
+	if got := Quantile(values, 1.5); got != 30 {
+		t.Fatalf("Quantile at q=1.5 returned %v, want 30", got)
+	}
+	traffic := NewTraffic(TrafficConfig{
+		Seed: 1,
+		Phases: []Phase{
+			{UntilSeconds: 20, RequestsPerSecond: 10, InputTokens: 100, OutputTokens: 100},
+			{UntilSeconds: 10, RequestsPerSecond: 2, InputTokens: 10, OutputTokens: 10},
+		},
+	})
+	if got := traffic.Arrivals(0, 1, 0); len(got) != 2 {
+		t.Fatalf("out-of-order phases served %d arrivals at t=0, want 2", len(got))
+	}
 	p := NewPlant(PlantConfig{TokensPerSecond: 100, BatchSize: 1, TimeoutSeconds: 3, TTFTSLOSeconds: 1, ITLSLOSeconds: 0.02})
 	p.Offer(Request{InputTokens: 10, OutputTokens: 20})
 	p.Step(0, 0.25, []int{0})

@@ -2,7 +2,11 @@
 // It has no dependency on the scaling algorithms or Kubernetes controllers.
 package sim
 
-import rand "math/rand/v2"
+import (
+	"cmp"
+	rand "math/rand/v2"
+	"slices"
+)
 
 // Phase describes offered traffic until an exclusive simulated time boundary.
 type Phase struct {
@@ -40,6 +44,8 @@ type Traffic struct {
 
 // NewTraffic returns a replayable traffic source. Positive Concurrency selects closed loop.
 func NewTraffic(config TrafficConfig) *Traffic {
+	config.Phases = slices.Clone(config.Phases)
+	slices.SortFunc(config.Phases, func(a, b Phase) int { return cmp.Compare(a.UntilSeconds, b.UntilSeconds) })
 	return &Traffic{config: config, random: rand.New(rand.NewPCG(config.Seed, config.Seed+1))}
 }
 
