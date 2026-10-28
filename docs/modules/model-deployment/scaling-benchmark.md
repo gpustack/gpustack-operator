@@ -1,14 +1,14 @@
 # Model Deployment Scaling Benchmark
 
 Two hardware suites evaluate `ModelDeploymentScaler`. Suite 1 ran five disaggregated configurations
-on one node with eight H100 GPUs. Suite 2 qualified offline capacity priors, three-arm serial
-comparisons, algorithm sensitivity, embedded InferenceX priors and multi-node disaggregation across
+on one node with eight H100 GPUs. Suite 2 evaluated offline capacity priors, three-arm serial
+comparisons, algorithm sensitivity, embedded InferenceX priors and multi-node disaggregation on
 four nodes with one H200 GPU each.
 
-The measurements demonstrate that `ModelDeploymentScaler` observes load changes, resolves offline
-capacity priors and drives `ModelDeployment` *`replicas`* updates promptly. End-to-end scale-out
-landing time in production varies with model weight loading, engine startup, compute-graph
-compilation and accelerator queueing outside the scaler's control.
+In these runs, `ModelDeploymentScaler` observed load changes, resolved offline capacity priors and
+updated `ModelDeployment` *`replicas`* promptly. Production scale-out times also depend on model
+weight loading, engine startup, compute-graph compilation and accelerator queueing, all outside the
+scaler's control.
 
 ## Contents
 

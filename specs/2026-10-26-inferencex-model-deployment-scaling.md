@@ -13,8 +13,8 @@ configuration recipes, single-request speed, and synthetic fixtures are not meas
 Acquire and qualify every prior offline. Publish reviewed catalog artifacts before deployment;
 the operator reads only the embedded artifact or the configured ConfigMap. It never queries
 InferenceX, MLPerf or another benchmark service, runs a benchmark, or creates priors from live
-traffic. Runtime workload metrics remain inputs to the existing scaling algorithm, separately
-from this offline capacity input.
+traffic. Runtime workload metrics remain inputs to the existing scaling algorithm; they are
+separate from the offline capacity input.
 
 Build a deterministic local simulation that exercises the real sampler, algorithms and planner.
 Use it to measure response time, sensitivity, stability, resource use and failure handling before

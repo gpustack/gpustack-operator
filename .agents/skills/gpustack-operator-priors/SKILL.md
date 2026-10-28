@@ -5,21 +5,21 @@ description: "Maintain pkg/worker/scaling/priors/priors.yaml: fetch and merge pu
 
 # Maintain the capacity prior catalog
 
-`pkg/worker/scaling/priors/priors.yaml` is the offline capacity catalog the
-`ModelDeploymentScaler` ships. At runtime the operator only reads the embedded file or a
-referenced same-namespace `ConfigMap`; it never fetches, benchmarks or profiles live traffic.
-This skill owns how catalog changes are made and how their provenance is recorded:
+`pkg/worker/scaling/priors/priors.yaml` is the offline capacity catalog shipped with
+`ModelDeploymentScaler`. At runtime, the operator reads only the embedded file or a referenced
+same-namespace `ConfigMap`; it never fetches, benchmarks or profiles live traffic. This skill
+describes how to change the catalog and record provenance:
 
 - `SKILL.md` (this file) — the workflows, the identity rules and the schema.
 - `references/records.md` — the provenance ledger: upstream URLs, capture dates, SHA-256
   checksums, alignment rules and retirement/refusal records.
 
-Every catalog change and its records entry land in the same change. A catalog edit without a
-records entry, or a records entry without a catalog edit, is an incomplete change.
+Include each catalog change and its records entry in the same change. Either one without the
+other is incomplete.
 
 ## The catalog file
 
-The committed catalog is one `priors.yaml` holding lean, human-editable profiles. The parser
+The committed catalog is a single `priors.yaml` with human-editable profiles. The parser
 also accepts JSON. Profiles carry no `digest`, `sources[]`, `servingConfig` or `workload`
 blocks — qualification and provenance live in the generator and in `references/records.md`,
 which keeps user `ConfigMap` catalogs concise. Each profile is:
@@ -118,9 +118,9 @@ Natural names (`mi325x`, `AMD Instinct MI325X`) normalize by the same Family rul
 
 ## Workflow 2 — Retire
 
-The Workflow 1 availability diff feeds this workflow: when the live upstream has removed,
-deprecated or superseded a model, hardware family or dataset that `priors.yaml` still carries,
-report the affected profiles proactively and offer the retirement — never remove silently.
+Use the availability diff from Workflow 1 to find models, hardware families or datasets that
+upstream has removed, deprecated or superseded but `priors.yaml` still carries. Report the affected
+profiles and offer to retire them; never remove them silently.
 
 Remove outdated or superseded profiles with `go run ./gen/priors --retire`, selecting by one or
 more of `--role`, `--model`, `--quantization`, `--engine`, `--hardware`, and optionally `--tp`

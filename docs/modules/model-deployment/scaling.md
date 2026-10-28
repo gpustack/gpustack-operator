@@ -110,8 +110,8 @@ windows, and `Predictive` forecasts those rates ahead of the peak. The workload 
 fits: a request count that tracks GPU load, a compute load that request counts misstate, or traffic
 that climbs before the capacity arrives.
 
-A deterministic local simulation compares all three on identical synthetic traffic and records the
-measured adjustment dynamics, request outcomes and true per-token latencies in
+A deterministic local simulation compares all three on identical synthetic traffic and records
+replica adjustments, request outcomes and true per-token latencies in
 [Model Deployment Scaling Simulation](scaling-simulation.md). For H100 and H200 hardware results and
 practical tuning guidance, see [Scaling Benchmark](scaling-benchmark.md) and
 [Step 3: Choose an algorithm](../../walkthroughs/model-deployment/scaling.md#step-3-choose-an-algorithm).
@@ -304,10 +304,9 @@ below the predicted capacity.
 ### Capacity priors
 
 *`spec.algorithm.capacityPrior`* resolves missing token capacities for `TokenThroughput` and
-`Predictive` from an immutable catalog of measured profiles. Admission refuses a present
-*`capacityPrior`* on `Proportional`. Omitting *`capacityPrior`* keeps manual mode, where every
-scaled non-*encode* kind requires explicit positive token capacities; resolution failures fail
-closed with no online fallback.
+`Predictive` from an immutable catalog of measured profiles. Admission rejects *`capacityPrior`*
+on `Proportional`. Omit it for manual mode, where every scaled non-*encode* kind requires explicit
+positive token capacities. Catalog resolution fails closed, with no online fallback.
 
 | Field | Default | Contract |
 |---|---|---|
@@ -315,11 +314,10 @@ closed with no online fallback.
 | *`catalogRef`* | omitted (embedded catalog) | Optional *`name`* and *`key`* (`priors.yaml` default; the parser accepts YAML and JSON) for a same-namespace `ConfigMap`; sole catalog source with no fallback or merge. |
 | *`headroom`* | `"0.75"` when *`capacityPrior`* is present | Quantity in `(0, 1]` multiplying catalog seed capacity; explicit capacity fields keep their configured values. The default is an initial configurable engineering margin — not a universal optimum; [Scaling Benchmark](scaling-benchmark.md#suite-2-capacity-priors) compares `0.75` catalog headroom against unmargined manual capacities on H200 hardware, with no warranty. |
 
-The committed catalog is `pkg/worker/scaling/priors/priors.yaml`, a lean, human-editable file;
-the parser also accepts the JSON encoding, so a hand-written `ConfigMap` catalog may use either.
-Profiles are flat records — provenance, serving configuration and workload detail are not part
-of the catalog file. Upstream evidence pins live in the `gpustack-operator-priors` skill's
-provenance records (`.agents/skills/gpustack-operator-priors/references/records.md`).
+The committed catalog, `pkg/worker/scaling/priors/priors.yaml`, is human-editable YAML. The parser
+also accepts JSON, so a hand-written `ConfigMap` catalog can use either format. Profiles are flat
+records without provenance, serving configuration or workload details. Upstream evidence pins live
+in `.agents/skills/gpustack-operator-priors/references/records.md`.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -978,13 +976,10 @@ unchecked writes through the binding fence.
 
 ---
 
-**See also** — [Model Deployment Configuration](deployment.md) (target roles and replica counts) ·
-[Scaling Benchmark](scaling-benchmark.md) (H100 and H200 measurements and observed failures) ·
-[Model Deployment Scaling Simulation](scaling-simulation.md) (the synthetic algorithm-dynamics
-comparison) ·
-[Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) (configuration and observation) ·
-[Model Deployment Status](status.md) (target phase and conditions) ·
-[Model Deployment Shutdown](shutdown.md) (retirement during scale-down) ·
-[Model Deployment Metrics](metrics.md) (engine signals and scraping).
+**See also** — [Configuration](deployment.md) (roles and counts) · [Benchmark](scaling-benchmark.md) (H100 and H200 results) ·
+[Simulation](scaling-simulation.md) (synthetic comparison) ·
+[Walkthrough](../../walkthroughs/model-deployment/scaling.md) (configure and observe) ·
+[Status](status.md) (phase and conditions) · [Shutdown](shutdown.md) (retirement) ·
+[Metrics](metrics.md) (engine signals).
 
 **Next** → [Model Deployment Status](status.md) — the target's status and scaler annotations.

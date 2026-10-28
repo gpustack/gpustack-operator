@@ -20,7 +20,7 @@ separately from the reusable configuration.
 
 ## Summary
 
-Observe a `ModelDeploymentScaler` in `Shadow`, choose an algorithm, activate it in `Active`, and
+Observe a `ModelDeploymentScaler` in `Shadow`, choose an algorithm, switch to `Active` mode, and
 watch a replica retire.
 
 | Object | Scope | Creator | Purpose |
@@ -521,9 +521,10 @@ Its engine-family image, identity (annotations or inferred) and effective launch
 the offline qualified catalog (`outcome: Accepted` and `evaluationTraceID` disjoint from
 `fitRunIDs`). It does not run *Prefill*/*Decode* comparison or require eight GPUs.
 
-The helper compares `frozen-manual`, `tuned-manual` and `catalog` across at least three serial repeats (`alternating` or `seeded`)
-that share `Active` mode, `TokenThroughput` or `Predictive`, latency targets, bounds, pacing, image, phases, seed and start condition
-outside capacity fields.
+The helper compares `frozen-manual`, `tuned-manual` and `catalog` across at least three serial
+repeats (`alternating` or `seeded`). Apart from capacity fields, the arms share `Active` mode,
+`TokenThroughput` or `Predictive`, latency targets, bounds, pacing, image, phases, seed and start
+condition.
 
 For `Predictive`, the manual arms set both forecast and fallback capacities;
 the full-Catalog arm omits both. The API still supports partial overrides outside this comparison.

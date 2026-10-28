@@ -1,12 +1,10 @@
 # Capacity prior provenance records
 
-The durable ledger for `pkg/worker/scaling/priors/priors.yaml`. The catalog file holds only
-lean profiles (`role`, `model`, `quantization`, `engine`, `hardware`, `topology`,
-`points[]`); everything about *where the numbers came from* lives here: upstream URLs, capture
-dates, SHA-256 checksums, the alignment rules applied at import, and retirement or refusal
-records. Upstream snapshots are never committed — `gen/priors/snapshots/` stays out of git, and
-raw downloads go to a temporary directory. Every catalog change lands together with its entry
-in this file.
+This file records provenance for `pkg/worker/scaling/priors/priors.yaml`. The catalog contains
+only profiles (`role`, `model`, `quantization`, `engine`, `hardware`, `topology` and `points[]`);
+this ledger records upstream URLs, capture dates, SHA-256 checksums, import alignment rules, and
+retirements or refusals. Do not commit upstream snapshots: keep `gen/priors/snapshots/` out of git
+and put raw downloads in a temporary directory. Include a ledger entry with every catalog change.
 
 ## Alignment rules applied to accepted sources
 
@@ -32,8 +30,8 @@ The 2026-10-27 InferenceX imports below were qualified under these rules:
 
 ## Accepted sources — InferenceX, captured 2026-10-27
 
-Eleven upstream datasets. All are `Apache-2.0` licensed. Source URLs follow the pattern
-`https://inferencex.semianalysis.com/api/v1/benchmarks?model=<query id>` and are listed per row.
+These eleven upstream datasets are licensed under `Apache-2.0`. Their source URLs follow the
+pattern `https://inferencex.semianalysis.com/api/v1/benchmarks?model=<query id>` and appear below.
 
 | Upstream query ID | Canonical Hugging Face model | Rows | SHA-256 |
 |---|---|---:|---|

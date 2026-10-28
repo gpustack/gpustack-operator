@@ -1,10 +1,9 @@
 # Model Deployment Scaling Simulation
 
-A deterministic local simulation runs the three `ModelDeploymentScaler` algorithms over identical
-synthetic traffic and records how each configuration adjusts replica counts, which requests
-complete, and the *time to first token (TTFT)*, *time per output token (TPOT)* and *inter-token
-latency (ITL)* the serving produces. It is a local evaluation fixture for algorithm behavior:
-nothing in it is measured on hardware, and it makes no tuning or purchasing recommendation.
+A deterministic local simulation compares the three `ModelDeploymentScaler` algorithms on identical
+synthetic traffic. It records replica adjustments, request outcomes, *time to first token (TTFT)*,
+*time per output token (TPOT)* and *inter-token latency (ITL)*. These results are not hardware
+measurements and are not tuning or purchasing recommendations.
 
 The measured hardware comparison — including a four-node H200 sensitivity wave scored against the
 same true-SLO and goodput metrics — lives in
@@ -22,10 +21,10 @@ contract lives in [Model Deployment Scaling](scaling.md).
 
 ## Fixture and provenance
 
-One synthetic plant serves every configuration. All configurations receive identical open-loop
-arrivals from the same per-scenario seed, drive the same fleet lifecycle and clock, and differ
-only in the algorithm configured on the scaler. Every run replays identically per seed, and a
-separate fixed `Shadow` control observes the same traffic without committing changes.
+Every configuration uses the same synthetic plant, fleet lifecycle and clock. Each receives the
+same open-loop arrivals for a given scenario seed; only the scaler algorithm differs. Runs replay
+identically for each seed. A separate fixed `Shadow` control observes the same traffic without
+committing changes.
 
 | Item | Value |
 |---|---|
@@ -41,19 +40,19 @@ separate fixed `Shadow` control observes the same traffic without committing cha
 
 Scenarios: `idle` (no traffic), `step` (1 to 3 requests/s at 60 s), `burst-fault-reset` (burst, a
 70–90 s scrape outage, a counter reset at 100 s and a controller restart at 120 s),
-`holdout-cache-shift` (prefix-cache fraction rises from 0 to 0.5 at 120 s; holdout), `noise`
-(constant 2 requests/s with strongly jittered lengths),
+`holdout-cache-shift` (prefix-cache fraction rises from 0 to 0.5 at 120 s; holdout), and `noise`
+(constant 2 requests/s with strongly jittered lengths).
 
-`ramp` (0.5 to 4 requests/s in five steps), `quota-ceiling` (10 requests/s against a 6-replica
-quota equal to the scaler maximum), `quota-shortfall` (8 requests/s against a 4-replica quota below
-the maximum, then 0.5 requests/s), and `length-shift` (50/50-token requests switch to
-200/400-token requests at 120 s).
+The remaining scenarios are `ramp` (0.5 to 4 requests/s in five steps), `quota-ceiling` (10
+requests/s against a 6-replica quota equal to the scaler maximum), `quota-shortfall` (8 requests/s
+against a 4-replica quota below the maximum, then 0.5 requests/s), and `length-shift` (50/50-token
+requests switch to 200/400-token requests at 120 s).
 
-The fixture lives beside the scaler controller tests; running its comparison suite rewrites two
-deterministic artifacts in the OS temp directory, seed for seed: a per-scenario, per-configuration
-summary with provenance notes, and a timeline with one sampled instant per line — offered traffic,
-the signals each algorithm read with null for missing readings, the raw recommendation, the
-committed count, ready replicas and reasons.
+The fixture lives beside the scaler controller tests. Its comparison suite rewrites two deterministic
+artifacts in the OS temp directory: a summary for each scenario and configuration, with provenance
+notes, and a timeline with one sampled instant per line. The timeline records offered traffic,
+signals read by each algorithm (null when missing), the raw recommendation, committed count,
+ready replicas and reasons.
 
 ## Results
 
