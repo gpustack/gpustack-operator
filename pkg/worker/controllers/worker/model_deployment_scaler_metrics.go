@@ -21,14 +21,6 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/scaling/algorithm"
 )
 
-// modelDeploymentScalerLatencyQuantile is the quantile of a latency histogram the sampler
-// reports.
-//
-// IT IS THE NINETY-FIFTH PERCENTILE, because a tail is what a latency guard acts on: a
-// deployment whose p95 is inside its target is serving inside its target, and one whose
-// average is inside it while its p95 is not is not.
-const modelDeploymentScalerLatencyQuantile = 0.95
-
 var defaultModelDeploymentScalerHTTPClient = &http.Client{
 	Transport: httpx.Transport(httpx.TransportOptions().WithoutProxy()),
 	Timeout:   samplerPodTimeout,
@@ -472,8 +464,16 @@ func modelDeploymentScalerWindowOf(
 	window.promptTokens = current.promptTokens - previous.promptTokens
 	window.generationTokens = current.generationTokens - previous.generationTokens
 	window.cacheMissedPromptTokens = modelDeploymentScalerCacheMissedPromptTokens(*previous, current)
-	window.ttft = modelDeploymentScalerHistogramDelta(previous.ttft, current.ttft)
-	window.itl = modelDeploymentScalerHistogramDelta(previous.itl, current.itl)
+	var ttftEstablished, itlEstablished bool
+	window.ttft, ttftEstablished = modelDeploymentScalerHistogramDelta(previous.ttft, current.ttft)
+	window.itl, itlEstablished = modelDeploymentScalerHistogramDelta(previous.itl, current.itl)
+	if !ttftEstablished || !itlEstablished {
+		// THE HISTOGRAMS DO NOT ESTABLISH THE CHANGE OVER THE WINDOW, so the window is
+		// not a reading. The next window reads from the sample taken now, and a
+		// window that follows a refused one is a window of its own.
+		window.state = algorithm.SignalMissing
+		window.reason = "the latency histograms do not establish the change over the window"
+	}
 	return window
 }
 
@@ -508,6 +508,10 @@ func modelDeploymentScalerCounterReset(
 		return true
 	case current.itl.count < previous.itl.count:
 		return true
+	case current.ttft.sum < previous.ttft.sum:
+		return true
+	case current.itl.sum < previous.itl.sum:
+		return true
 	}
 	return false
 }
@@ -539,19 +543,58 @@ func modelDeploymentScalerCacheMissedPromptTokens(
 	return math.Max(0, (current.promptTokens-previous.promptTokens)-hits)
 }
 
-// modelDeploymentScalerHistogramDelta returns the change between two readings of a histogram.
+// modelDeploymentScalerHistogramDelta returns the change between two readings of a histogram
+// and says whether the two readings establish it.
+//
+// IT REFUSES A CHANGE A BUCKET HAS NO BASELINE FOR, because a bucket the previous reading did
+// not carry has no count to subtract, and the count it holds now is the total since the engine
+// started rather than the count inside the window. A reader that treats the missing baseline
+// as zero reads the lifetime total as the window.
+//
+// IT REFUSES A CHANGE WHOSE BUCKETS HOLD MORE THAN THE WINDOW HOLDS, because a bucket is a
+// part of the window and no part of a window is larger than the window. The buckets of a
+// histogram are cumulative, so a bucket that holds more than the bucket above it describes a
+// count that never happened.
+//
+// IT REFUSES A CHANGE OF A DIFFERENT SHAPE, because two readings of different buckets do not
+// describe the same observations.
 func modelDeploymentScalerHistogramDelta(
 	previous, current modelDeploymentScalerHistogram,
-) modelDeploymentScalerHistogram {
+) (modelDeploymentScalerHistogram, bool) {
 	delta := modelDeploymentScalerHistogram{
 		sum:     current.sum - previous.sum,
 		count:   current.count - previous.count,
 		buckets: map[float64]float64{},
 	}
 	for bound, count := range current.buckets {
-		delta.buckets[bound] = math.Max(0, count-previous.buckets[bound])
+		baseline, carried := previous.buckets[bound]
+		if !carried {
+			return modelDeploymentScalerHistogram{}, false
+		}
+		if count < baseline {
+			// A CUMULATIVE BUCKET NEVER GOES DOWN, and one that did belongs to
+			// another life of the engine.
+			return modelDeploymentScalerHistogram{}, false
+		}
+		delta.buckets[bound] = count - baseline
 	}
-	return delta
+	if len(previous.buckets) != len(current.buckets) {
+		return modelDeploymentScalerHistogram{}, false
+	}
+	bounds := make([]float64, 0, len(delta.buckets))
+	for bound := range delta.buckets {
+		bounds = append(bounds, bound)
+	}
+	sort.Float64s(bounds)
+	for i, bound := range bounds {
+		if delta.buckets[bound] > delta.count {
+			return modelDeploymentScalerHistogram{}, false
+		}
+		if i > 0 && delta.buckets[bound] < delta.buckets[bounds[i-1]] {
+			return modelDeploymentScalerHistogram{}, false
+		}
+	}
+	return delta, true
 }
 
 // modelDeploymentScalerHistogramMerge adds one histogram to another.
@@ -575,10 +618,13 @@ func modelDeploymentScalerHistogramMerge(
 // modelDeploymentScalerQuantileMilliseconds returns the quantile of a histogram in
 // milliseconds.
 //
-// IT READS THE BUCKETS WHEN THEY RESOLVE THE QUANTILE, and falls back to the mean when they
-// do not: a histogram exported without bucket boundaries, or one whose quantile falls in the
-// infinite bucket, cannot say which observations it holds, and the mean is the only figure
-// left that is true of them.
+// IT READS THE BUCKETS WHEN THEY RESOLVE THE QUANTILE.
+//
+// IT SAYS THAT THE QUANTILE IS UNAVAILABLE WHEN THEY DO NOT, because a histogram exported
+// without bucket boundaries, or one whose quantile falls in the infinite bucket, cannot say
+// which observations it holds. The mean of those observations is a different statistic, and
+// reporting it as the quantile would answer a question nobody asked with a number that does
+// not answer it.
 func modelDeploymentScalerQuantileMilliseconds(
 	histogram modelDeploymentScalerHistogram, quantile float64,
 ) (float64, bool) {
@@ -599,7 +645,7 @@ func modelDeploymentScalerQuantileMilliseconds(
 			return bound * 1000, true
 		}
 	}
-	return histogram.sum / histogram.count * 1000, true
+	return 0, false
 }
 
 // modelDeploymentScalerWorseState returns the state that describes a role made of the states

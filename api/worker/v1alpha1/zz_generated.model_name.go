@@ -646,6 +646,36 @@ func (in ModelDeploymentScalerBindingStatus) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScalerCapacityPriorCatalog) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerCapacityPriorCatalog"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScalerCapacityPriorPoint) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerCapacityPriorPoint"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScalerCapacityPriorProfile) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerCapacityPriorProfile"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScalerCapacityPriorSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerCapacityPriorSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScalerCapacityPriorTopology) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerCapacityPriorTopology"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScalerCatalogReference) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerCatalogReference"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentScalerCommitStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerCommitStatus"
 }
@@ -698,6 +728,21 @@ func (in ModelDeploymentScalerRebalanceSpec) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentScalerRebalanceStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerRebalanceStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScalerResolvedCapacityFieldStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerResolvedCapacityFieldStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScalerResolvedCapacityPriorStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerResolvedCapacityPriorStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScalerResolvedLatencyBoundStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerResolvedLatencyBoundStatus"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

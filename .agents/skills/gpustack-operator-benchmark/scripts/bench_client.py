@@ -519,19 +519,23 @@ def _delegate_if_local(script_name):
     driver_ns = env.get("BENCH_DRIVER_NS", "default")
     driver_pod = env.get("BENCH_DRIVER", "bench-driver")
 
-    if subprocess.call(
-        ["kubectl", "-n", driver_ns, "exec", driver_pod, "--", "mkdir", "-p", "/tmp/bench"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    ) != 0:
+    def exec_ok(cmd_args, retries=3):
+        for attempt in range(retries):
+            if subprocess.call(
+                cmd_args,
+                env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ) == 0:
+                return True
+            time.sleep(0.5 * (attempt + 1))
+        return False
+
+    if not exec_ok(["kubectl", "-n", driver_ns, "exec", driver_pod, "--", "mkdir", "-p", "/tmp/bench"]):
         print(f"warning: driver pod {driver_ns}/{driver_pod} unavailable; running locally", file=sys.stderr)
         return None
     for name in sorted({"bench_client.py", script_name}):
         src = os.path.join(script_dir, name)
         if os.path.isfile(src):
-            if subprocess.call(
-                ["kubectl", "-n", driver_ns, "cp", src, f"{driver_pod}:/tmp/bench/{name}"],
-                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            ) != 0:
+            if not exec_ok(["kubectl", "-n", driver_ns, "cp", src, f"{driver_pod}:/tmp/bench/{name}"]):
                 print(f"warning: failed to copy {name} to {driver_ns}/{driver_pod}; running locally", file=sys.stderr)
                 return None
 
@@ -558,7 +562,7 @@ def _delegate_if_local(script_name):
                     if m_pod:
                         ip = subprocess.check_output(
                             ["kubectl", "-n", ns, "get", "pod", m_pod.group(1), "-o", "jsonpath={.status.podIP}"],
-                            env=env, text=True
+                            env=env, stdin=subprocess.DEVNULL, text=True
                         ).strip()
                         if ip:
                             return f"http://{ip}:8000"
@@ -567,7 +571,7 @@ def _delegate_if_local(script_name):
         try:
             ep_cluster = subprocess.check_output(
                 ["kubectl", "-n", ns, "get", "modeldeployment", "-o", "jsonpath={.items[0].status.endpoint}"],
-                env=env, text=True
+                env=env, stdin=subprocess.DEVNULL, text=True
             ).strip()
             if ep_cluster:
                 return ep_cluster
@@ -585,12 +589,38 @@ def _delegate_if_local(script_name):
             local_reqs = argv[i + 1]
             argv[i + 1] = remote_reqs
 
+    def read_remote_file(remote_path):
+        reader_py = (
+            "import sys, time\n"
+            "with open(sys.argv[1], 'rb') as f:\n"
+            "    data = f.read()\n"
+            "chunk = 65536\n"
+            "for off in range(0, len(data), chunk):\n"
+            "    sys.stdout.buffer.write(data[off:off + chunk])\n"
+            "    sys.stdout.buffer.flush()\n"
+            "    if off + chunk < len(data):\n"
+            "        time.sleep(0.02)\n"
+            "if len(data) > chunk:\n"
+            "    time.sleep(0.5)\n"
+        )
+        last_err = None
+        for attempt in range(5):
+            try:
+                return subprocess.check_output(
+                    ["kubectl", "-n", driver_ns, "exec", driver_pod, "--", "python3", "-c", reader_py, remote_path],
+                    env=env, stdin=subprocess.DEVNULL,
+                )
+            except subprocess.CalledProcessError as err:
+                last_err = err
+                time.sleep(1.0 * (attempt + 1))
+        raise last_err
+
     cmd = ["kubectl", "-n", driver_ns, "exec", driver_pod, "--", "env", "IN_BENCH_DRIVER=1", "python3", f"/tmp/bench/{script_name}"] + argv
-    rc = subprocess.call(cmd, env=env)
+    rc = subprocess.call(cmd, env=env, stdin=subprocess.DEVNULL)
     if local_out:
         if rc == 0:
             try:
-                data = subprocess.check_output(["kubectl", "-n", driver_ns, "exec", driver_pod, "--", "cat", remote_out], env=env)
+                data = read_remote_file(remote_out)
                 os.makedirs(os.path.dirname(os.path.abspath(local_out)), exist_ok=True)
                 with open(local_out, "wb") as f:
                     f.write(data)
@@ -598,18 +628,18 @@ def _delegate_if_local(script_name):
             except subprocess.CalledProcessError as err:
                 print(f"error: failed to retrieve {remote_out} from {driver_ns}/{driver_pod}: {err}", file=sys.stderr)
                 rc = err.returncode or 1
-        subprocess.call(["kubectl", "-n", driver_ns, "exec", driver_pod, "--", "rm", "-f", remote_out], env=env)
+        subprocess.call(["kubectl", "-n", driver_ns, "exec", driver_pod, "--", "rm", "-f", remote_out], env=env, stdin=subprocess.DEVNULL)
     if local_reqs:
         if rc == 0:
             try:
-                data = subprocess.check_output(["kubectl", "-n", driver_ns, "exec", driver_pod, "--", "cat", remote_reqs], env=env)
+                data = read_remote_file(remote_reqs)
                 os.makedirs(os.path.dirname(os.path.abspath(local_reqs)), exist_ok=True)
                 with open(local_reqs, "wb") as f:
                     f.write(data)
             except subprocess.CalledProcessError as err:
                 print(f"error: failed to retrieve {remote_reqs} from {driver_ns}/{driver_pod}: {err}", file=sys.stderr)
                 rc = err.returncode or 1
-        subprocess.call(["kubectl", "-n", driver_ns, "exec", driver_pod, "--", "rm", "-f", remote_reqs], env=env)
+        subprocess.call(["kubectl", "-n", driver_ns, "exec", driver_pod, "--", "rm", "-f", remote_reqs], env=env, stdin=subprocess.DEVNULL)
     return rc
 
 

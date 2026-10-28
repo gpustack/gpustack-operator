@@ -139,6 +139,15 @@ function generate_chart() {
   fi
 }
 
+# generate_priors writes the offline capacity prior catalog.
+#
+# IT READS THE PINNED SOURCES IN THIS TREE AND FETCHES NOTHING, so the catalog
+# depends only on the tree and two runs produce the same bytes.
+function generate_priors() {
+  PATH="${ROOT_DIR}/.sbin:${PATH}" \
+    go run -mod=mod "${ROOT_DIR}/gen/priors" "$@"
+}
+
 function generate() {
   local tasks
   if [[ "$#" -gt 0 ]]; then

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# CASE 5 — ModelDeployment autoscaling benchmark, two waves over 8 GPUs   (MUTATING, self-recovering)
+# CASE 5: capacity comparison or legacy topology benchmark (mutating).
+# Capacity comparison: --capacity-comparison --config FILE --out DIR --validate-only|--execute
+# The description below applies to the legacy topology mode.
 #
 #   case-5-autoscaling.sh [OUT_DIR] [--parallel|--serial] [--arm <arm-name>]
 #
@@ -56,6 +58,13 @@
 set -uo pipefail
 
 CASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "${1:-}" == "--capacity-comparison" ]]; then
+  shift
+  exec bash "${CASE_DIR}/../scripts/autoscaling_rounds.sh" "$@"
+fi
+if [[ "${1:-}" == "--legacy-topology" ]]; then
+  shift
+fi
 SKILL_DIR="$(cd "${CASE_DIR}/.." && pwd)"
 REPO="$(cd "${SKILL_DIR}/../../.." && pwd)"
 export PATH="${REPO}/.agents/skills/_e2e-lib/scripts/kubectl-shim:${PATH}"
@@ -174,7 +183,22 @@ arm_kind() {
 arm_roles() {
   case "$1" in
     vllm-epd-predictive)
-      cat <<'ROLES'
+      local cap
+      cap="$(kubectl get instancetype.worker.gpustack.ai -o jsonpath='{.items[?(@.spec.acceleratable==true)].status.accelerator.capacity}' 2>/dev/null | awk '{print $1}')"
+      if [ "${cap:-8}" -lt 6 ] 2>/dev/null; then
+        cat <<'ROLES'
+    - name: encode
+      minReplicas: 1
+      maxReplicas: 1
+    - name: prefill
+      minReplicas: 1
+      maxReplicas: 2
+    - name: decode
+      minReplicas: 1
+      maxReplicas: 1
+ROLES
+      else
+        cat <<'ROLES'
     - name: encode
       minReplicas: 1
       maxReplicas: 2
@@ -185,6 +209,7 @@ arm_roles() {
       minReplicas: 1
       maxReplicas: 2
 ROLES
+      fi
       ;;
     *)
       cat <<'ROLES'
@@ -349,7 +374,14 @@ deploy_arm() { # <manifest> <deploy>
 # in the file is rewritten on the way in, because kubectl refuses an object whose namespace
 # differs from the one it was told to use.
 apply_manifest() { # <manifest>
-  sed "s/^  namespace: gpustack-bench$/  namespace: ${NS}/" "${SKILL_DIR}/manifests/$1" | kubectl apply -f - >/dev/null 2>&1
+  local inst_type="${BENCH_QUAL_INSTANCE_TYPE:-bench-gpu}"
+  if ! kubectl get instancetype.worker.gpustack.ai "$inst_type" >/dev/null 2>&1; then
+    inst_type="$(kubectl get instancetype.worker.gpustack.ai -o jsonpath='{.items[?(@.spec.acceleratable==true)].metadata.name}' 2>/dev/null | awk '{print $1}')"
+    inst_type="${inst_type:-bench-gpu}"
+  fi
+  sed -e "s/^  namespace: gpustack-bench$/  namespace: ${NS}/" \
+      -e "s/^      instanceType: bench-gpu$/      instanceType: ${inst_type}/" \
+      "${SKILL_DIR}/manifests/$1" | kubectl apply -f - >/dev/null 2>&1
 }
 
 drop_arm() { # <deploy> [scaler]
@@ -750,7 +782,7 @@ write_summary() {
 # above it, because a summary that cannot see a broken case is not a summary of the run.
 write_summary_md() {
   {
-    echo "# Autoscaling benchmark"
+    echo "# Autoscaling benchmark: legacy topology"
     echo
     echo "Generated at $(date -u +%Y-%m-%dT%H:%M:%SZ), mode ${MODE}."
     echo
@@ -853,7 +885,7 @@ jq -n \
       jq -c --arg arm "$arm" '{key: $arm, value: .}' "${OUT_BASE}/${arm}/summary.json" 2>/dev/null
     fi
   done | jq -s 'from_entries' 2>/dev/null || echo '{}')" \
-  '{generated_at: $generated_at, mode: $mode, e2e: {case128: $case128, case129: $case129}, arms: $arms}' \
+  '{comparisonKind: "legacy-topology", generated_at: $generated_at, mode: $mode, e2e: {case128: $case128, case129: $case129}, arms: $arms}' \
   > "${OUT_BASE}/comparison.json"
 
 # The summary a reader opens first: one row per arm and phase, and the exit code of each E2E

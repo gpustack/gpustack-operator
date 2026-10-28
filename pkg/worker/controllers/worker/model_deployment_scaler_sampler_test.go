@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,7 +83,7 @@ vllm:time_to_first_token_seconds_sum{engine="0",model_name="Qwen/Qwen2.5-7B-Inst
 vllm:time_to_first_token_seconds_count{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 140.0
 # TYPE vllm:inter_token_latency_seconds histogram
 vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct",le="0.01"} 1500.0
-vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct",le="0.05"} 5400.0
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct",le="0.05"} 5350.0
 vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct",le="+Inf"} 6000.0
 vllm:inter_token_latency_seconds_sum{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 33.09642936099135
 vllm:inter_token_latency_seconds_count{engine="0",model_name="Qwen/Qwen2.5-7B-Instruct"} 6000.0
@@ -178,7 +179,7 @@ sglang:time_to_first_token_seconds_sum{model_name="Qwen/Qwen2.5-7B-Instruct",pp_
 sglang:time_to_first_token_seconds_count{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="1"} 900.0
 # TYPE sglang:inter_token_latency_seconds histogram
 sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0",le="0.01"} 1500.0
-sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0",le="0.05"} 5400.0
+sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0",le="0.05"} 5350.0
 sglang:inter_token_latency_seconds_bucket{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0",le="+Inf"} 6000.0
 sglang:inter_token_latency_seconds_sum{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 17.15720793402943
 sglang:inter_token_latency_seconds_count{model_name="Qwen/Qwen2.5-7B-Instruct",pp_rank="0",tp_rank="0"} 6000.0
@@ -499,14 +500,35 @@ func TestModelDeploymentScalerSampler_SGLangRankFreeHistogram(t *testing.T) {
 	second := sampler.SampleRoleMetrics(context.Background(), scaler, target, []core.Pod{pod}, start.Add(10*time.Second))
 
 	observation := second["server"]
-	assert.Equal(t, algorithm.SignalFresh, observation.LatencyState,
-		"a rank-free histogram is read rather than dropped")
-	// The first-token latency has no bucket boundaries, so the mean of the 117 observations is
-	// the only figure that is true of them.
-	wantTTFT := (27.006403835998753 + 1.3266321940018315) / 117.0 * 1000
-	assert.InDelta(t, wantTTFT, observation.TTFTMilliseconds, 1e-6)
-	wantITL := 15.15720793402943 / 2699.0 * 1000
-	assert.InDelta(t, wantITL, observation.ITLMilliseconds, 1e-6)
+	// THE HISTOGRAM IS READ RATHER THAN DROPPED, and the rate is read over the window it
+	// built, so the shape under test is the one that would have been dropped.
+	assert.Equal(t, algorithm.SignalMissing, observation.LatencyState,
+		"a histogram without bucket boundaries cannot represent a quantile")
+	assert.Zero(t, observation.TTFTMilliseconds,
+		"the mean of the observations is not the quantile")
+	assert.Zero(t, observation.ITLMilliseconds,
+		"the mean of the observations is not the quantile")
+	assert.False(t, observation.CompleteCoverage,
+		"a role whose latency could not be read is not fully covered")
+
+	// THE ENGINE REPORTS NO TOKEN COUNTERS, so the throughput is missing for a reason of
+	// its own, and the reason says which.
+	assert.Equal(t, algorithm.SignalMissing, observation.ThroughputState,
+		"an engine that reports no token counters has no throughput")
+	reasons := sampler.RoleSamples(scaler)["server"].Reasons
+	assert.True(t, slices.ContainsFunc(reasons, func(reason string) bool {
+		return strings.Contains(reason, "did not report its token counters")
+	}), "the reason names the missing token counters: %v", reasons)
+
+	// THE HISTOGRAM WAS READ, because the reason for the missing latency is the one that
+	// says the quantile cannot be represented and not the one that says the histogram was
+	// not reported.
+	assert.True(t, slices.ContainsFunc(reasons, func(reason string) bool {
+		return strings.Contains(reason, "cannot represent")
+	}), "the histogram was read: %v", reasons)
+	assert.False(t, slices.ContainsFunc(reasons, func(reason string) bool {
+		return strings.Contains(reason, "did not report its latency histograms")
+	}), "the histogram was not dropped: %v", reasons)
 }
 
 // TestModelDeploymentScalerSampler_CounterResetAndRestart holds the sampler against the three
@@ -1282,4 +1304,169 @@ func TestModelDeploymentScalerSampler_AddedReplicaWithoutHistograms(t *testing.T
 		"a role that served nothing returns to its floor")
 	assert.False(t, recommendation.HoldScaleDown,
 		"a role that served nothing is not held above its floor")
+}
+
+// scalerSamplerQuantileExposition is an engine whose first token latency or inter token
+// latency falls in the infinite bucket.
+//
+// IT IS THE SHAPE A HISTOGRAM TAKES WHEN THE QUANTILE CANNOT BE REPRESENTED, because every
+// observation sits above the last finite bound and the infinite bucket holds them all.
+func scalerSamplerQuantileExposition(n float64, ttftInf, itlInf bool) []byte {
+	tf, il := n, n
+	if ttftInf {
+		tf = 0
+	}
+	if itlInf {
+		il = 0
+	}
+	return []byte(fmt.Sprintf(`# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running 1
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting 0
+# TYPE vllm:prompt_tokens_total counter
+vllm:prompt_tokens_total %g
+# TYPE vllm:generation_tokens_total counter
+vllm:generation_tokens_total %g
+# TYPE vllm:time_to_first_token_seconds histogram
+vllm:time_to_first_token_seconds_bucket{le="1"} %g
+vllm:time_to_first_token_seconds_bucket{le="+Inf"} %g
+vllm:time_to_first_token_seconds_sum %g
+vllm:time_to_first_token_seconds_count %g
+# TYPE vllm:inter_token_latency_seconds histogram
+vllm:inter_token_latency_seconds_bucket{le="0.05"} %g
+vllm:inter_token_latency_seconds_bucket{le="+Inf"} %g
+vllm:inter_token_latency_seconds_sum %g
+vllm:inter_token_latency_seconds_count %g
+`, n*10, n*10, tf, n, n*.8, n, il, n, n*.04, n))
+}
+
+// TestModelDeploymentScalerSampler_LatencyTheRoleIsHeldTo asserts a latency the role is not
+// held by cannot take the reading away from the one it is.
+//
+// IT MATTERS BECAUSE A PREFILL ROLE IS HELD BY ITS FIRST TOKEN LATENCY and a decode role by its
+// inter token latency, and a reader that demands both of them holds a role above its floor
+// because of a metric it was never measured by.
+func TestModelDeploymentScalerSampler_LatencyTheRoleIsHeldTo(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		kind         workercore.ModelDeploymentRoleKind
+		ttftInf      bool
+		itlInf       bool
+		wantTTFT     float64
+		wantITL      float64
+		wantState    algorithm.SignalState
+		wantReplicas int32
+	}{
+		{
+			name:         "a prefill role keeps its first token latency when the inter token latency cannot be represented",
+			kind:         workercore.ModelDeploymentRoleKindPrefill,
+			itlInf:       true,
+			wantTTFT:     1000,
+			wantState:    algorithm.SignalFresh,
+			wantReplicas: 2,
+		},
+		{
+			name:         "a decode role keeps its inter token latency when the first token latency cannot be represented",
+			kind:         workercore.ModelDeploymentRoleKindDecode,
+			ttftInf:      true,
+			wantITL:      50,
+			wantState:    algorithm.SignalFresh,
+			wantReplicas: 2,
+		},
+		{
+			name:         "a server role keeps the breach of the latency it could read",
+			kind:         workercore.ModelDeploymentRoleKindServer,
+			itlInf:       true,
+			wantTTFT:     1000,
+			wantState:    algorithm.SignalFresh,
+			wantReplicas: 2,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			pod := scalerSamplerPod("engine-0", "role", types.UID("pod-uid"), 0)
+			target := scalerSamplerTarget(types.UID("target-uid"), workercore.ModelDeploymentEngineVLLM,
+				scalerSamplerRole("role", testCase.kind, 1))
+			scaler := scalerSamplerScaler(types.UID("scaler-uid"), 10)
+			scalerSamplerSetQuantile(scaler, "0.95")
+			script := &scalerSamplerScripted{
+				bodies:   map[string][]byte{"engine-0": scalerSamplerQuantileExposition(0, testCase.ttftInf, testCase.itlInf)},
+				failures: map[string]bool{},
+				asked:    map[string]int{},
+			}
+			sampler := &modelDeploymentScalerSampler{Scrape: script.scrape}
+
+			start := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+			sampler.SampleRoleMetrics(context.Background(), scaler, target, []core.Pod{pod}, start)
+			script.mu.Lock()
+			script.bodies["engine-0"] = scalerSamplerQuantileExposition(100, testCase.ttftInf, testCase.itlInf)
+			script.mu.Unlock()
+
+			observation := sampler.SampleRoleMetrics(context.Background(), scaler, target,
+				[]core.Pod{pod}, start.Add(10*time.Second))["role"]
+			require.NotNil(t, observation.TTFTMilliseconds, "the role was observed")
+
+			assert.Equal(t, testCase.wantState, observation.LatencyState,
+				"a latency the role is not held by does not take the reading away")
+			assert.InDelta(t, testCase.wantTTFT, observation.TTFTMilliseconds, 1e-6)
+			assert.InDelta(t, testCase.wantITL, observation.ITLMilliseconds, 1e-6)
+
+			throughput := algorithm.NewTokenThroughput()
+			throughput.PrefillTargetTokensPerSecond = 1000
+			throughput.DecodeTargetTokensPerSecond = 1000
+			throughput.ServerTargetTokensPerSecond = 1000
+			throughput.TTFTTargetMilliseconds = 100
+			throughput.ITLTargetMilliseconds = 10
+			recommendation, _ := throughput.Recommend(observation, nil)
+			assert.Equal(t, testCase.wantReplicas, recommendation.DesiredReplicas,
+				"the breach of the latency the role is held by still scales the role")
+		})
+	}
+}
+
+// TestModelDeploymentScalerSampler_AMissingLatencyIsNotMasked asserts a role whose latency was
+// not measured at all stays missing.
+//
+// IT MATTERS BECAUSE A READER THAT HOLDS A ROLE BY A METRIC IT NEVER MEASURED is a reader that
+// cannot tell a quiet role from a broken one.
+func TestModelDeploymentScalerSampler_AMissingLatencyIsNotMasked(t *testing.T) {
+	t.Parallel()
+
+	pod := scalerSamplerPod("engine-0", "server", types.UID("pod-uid"), 0)
+	target := scalerSamplerTarget(types.UID("target-uid"), workercore.ModelDeploymentEngineVLLM,
+		scalerSamplerRole("server", workercore.ModelDeploymentRoleKindServer, 1))
+	scaler := scalerSamplerScaler(types.UID("scaler-uid"), 10)
+	scalerSamplerSetQuantile(scaler, "0.95")
+	script := &scalerSamplerScripted{
+		bodies:   map[string][]byte{"engine-0": scalerSamplerQuantileExposition(0, false, false)},
+		failures: map[string]bool{},
+		asked:    map[string]int{},
+	}
+	sampler := &modelDeploymentScalerSampler{Scrape: script.scrape}
+
+	start := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	sampler.SampleRoleMetrics(context.Background(), scaler, target, []core.Pod{pod}, start)
+	script.mu.Lock()
+	script.bodies["engine-0"] = scalerSamplerQuantileExposition(100, true, true)
+	script.mu.Unlock()
+
+	observation := sampler.SampleRoleMetrics(context.Background(), scaler, target,
+		[]core.Pod{pod}, start.Add(10*time.Second))["server"]
+	assert.Equal(t, algorithm.SignalMissing, observation.LatencyState,
+		"a role whose latency cannot be represented is missing, not fresh")
+	assert.False(t, observation.CompleteCoverage,
+		"a role whose latency could not be read is not fully covered")
+
+	throughput := algorithm.NewTokenThroughput()
+	throughput.ServerTargetTokensPerSecond = 1000
+	throughput.TTFTTargetMilliseconds = 100
+	throughput.ITLTargetMilliseconds = 10
+	recommendation, _ := throughput.Recommend(observation, nil)
+	assert.True(t, recommendation.HoldScaleDown,
+		"a role whose latency was not measured is held")
 }

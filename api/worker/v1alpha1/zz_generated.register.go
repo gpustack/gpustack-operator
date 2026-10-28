@@ -83,6 +83,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ModelDeployment{},
 		&ModelDeploymentList{},
 		&ModelDeploymentScaler{},
+		&ModelDeploymentScalerCapacityPriorCatalog{},
 		&ModelDeploymentScalerList{},
 		&ModelPrefetch{},
 		&ModelPrefetchList{},

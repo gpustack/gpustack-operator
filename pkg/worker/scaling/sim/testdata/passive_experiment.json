@@ -1,0 +1,43 @@
+{
+  "synthetic": true,
+  "version": 1,
+  "baselineSHA256": "7366a9ffbc6170646940196ce18e3a8b8958460eb862343a47aab08a3aaaf6ca",
+  "heldoutSeeds": [1009, 2003],
+  "calibration": {
+    "scenario": "steady_noise base plant, no jitter, one fixed replica",
+    "requestRates": [0.5, 2, 3],
+    "activeSeconds": 180,
+    "drainSeconds": 60,
+    "inputTokens": 100,
+    "outputTokens": 100,
+    "capacityMetric": "mean observed cache-missed input plus output TPS over active 10-second windows",
+    "latencyBounds": "maximum observed TTFT and maximum per-request maximum ITL, including failed requests with a first token",
+    "headroom": 0.75
+  },
+  "candidate": {
+    "formula": "processedTPS/ready * sqrt(min(2000/TTFTms,100/ITLms))",
+    "consecutiveFreshSamples": 3,
+    "shortestWindowSeconds": 10,
+    "maximumAgeSeconds": 20,
+    "ttlSeconds": 60,
+    "outlierSeedFactors": [0.25, 4],
+    "invalidSampleAction": "clear evidence and restore seed; warming samples preserve consecutive count",
+    "timestampWatermark": "monotone; old rejected samples do not replace timestamp or membership baseline",
+    "rejections": ["stale", "duplicate", "ttl", "coverage", "transition", "idle", "missing", "window", "outlier"],
+    "storage": "one timestamp, ready count and consecutive count per test arm; fresh instance per run"
+  },
+  "sensitivity": {
+    "factors": [0.5, 0.75, 1, 1.5, 2],
+    "interpretation": "multiply measured unheadroom seed; effective capacity also includes 0.75 headroom",
+    "reference": "static manual 300 tokens per second for reference cost/excess; matched static resolved seed for paired tolerance gates, same startup and quota",
+    "excess": "positive integral of ready replicas minus paired manual ready replicas; not an optimal oracle",
+    "costTolerance": 0.1,
+    "sloDecreaseTolerance": 0.02
+  },
+  "limitations": [
+    "Test-only candidate. No production online policy or Auto API.",
+    "Sampler exposes only shortest window, no aligned per-replica window boundaries or latency counts.",
+    "No request-length distribution or saturation certificate is available to the candidate.",
+    "Resolved base seed is deliberately transferred to heldout engines and workload shapes; this does not establish production Catalog eligibility."
+  ]
+}

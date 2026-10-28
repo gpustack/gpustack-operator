@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -246,4 +249,44 @@ vllm:time_to_first_token_seconds_count{engine="0",model_name="test"} 56.0
 vllm:inter_token_latency_seconds_sum{engine="0",model_name="test"} 31.0
 vllm:inter_token_latency_seconds_count{engine="0",model_name="test"} 5428.0
 `, prompt, generation))
+}
+
+// TestModelDeploymentScalerStatusFollowsTheConfiguredQuantile asserts the status says the
+// quantile the specification names, even when the planning did not run.
+//
+// IT MATTERS BECAUSE A STATUS THAT KEEPS THE QUANTILE OF ANOTHER CONFIGURATION describes a
+// quantile the scaler is no longer held to, and a status that says it observed the generation
+// has to describe that generation.
+func TestModelDeploymentScalerStatusFollowsTheConfiguredQuantile(t *testing.T) {
+	now := time.Unix(1000, 0)
+	md := scalerTestDeployment("target", "target-uid", map[string]int32{"server": 1})
+	scaler := scalerTestScaler("scaler", "s", workercore.ModelDeploymentScalerModeActive)
+	scaler.Spec.Algorithm = workercore.ModelDeploymentScalerAlgorithmSpec{
+		Type: workercore.ModelDeploymentScalerAlgorithmTypeTokenThroughput,
+		TokenThroughput: &workercore.ModelDeploymentScalerTokenThroughputSpec{
+			ServerTargetTokensPerSecond: ptr.To(resource.MustParse("1000")),
+		},
+	}
+	client := scalerTestClient(t, md, scaler)
+	reconciler := scalerTestReconciler(client, now)
+	reconcileScaler(t, reconciler, scaler.Name)
+
+	before := scalerTestGetScaler(t, client, scaler.Name)
+	assert.Equal(t, "0.95", before.Status.LatencyQuantile,
+		"a scaler that names no quantile says the ninety fifth percentile")
+
+	before.Generation++
+	before.Spec.Algorithm.TokenThroughput.LatencyQuantile = ptr.To(resource.MustParse("0.99"))
+	before.Spec.Algorithm.TokenThroughput.ServerTargetTokensPerSecond = nil
+	before.Spec.Algorithm.CapacityPrior = &workercore.ModelDeploymentScalerCapacityPriorSpec{
+		CatalogRef: &workercore.ModelDeploymentScalerCatalogReference{Name: "absent-catalog"},
+	}
+	require.NoError(t, client.Update(context.Background(), before))
+
+	reconcileScaler(t, reconciler, scaler.Name)
+	stored := scalerTestGetScaler(t, client, scaler.Name)
+	assert.Equal(t, "0.99", stored.Status.LatencyQuantile,
+		"the status says the quantile the specification names, not the one it held to before")
+	assert.Equal(t, stored.Generation, stored.Status.ObservedGeneration,
+		"the generation the status observed is the generation it describes")
 }

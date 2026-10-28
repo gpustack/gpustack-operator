@@ -31,12 +31,34 @@ const (
 	// The finalizer is what lets a deleted scaler remove its binding annotation before the scaler
 	// object disappears, so that the target keeps serving and becomes bindable again.
 	ModelDeploymentScalerFinalizerKey = "modeldeployment.gpustack.ai/scaler-binding"
+
+	// ModelDeploymentScalerModelIDAnnotationKey declares the exact catalog model identity on a
+	// target ModelDeployment when the deployment spec does not establish it.
+	ModelDeploymentScalerModelIDAnnotationKey = "worker.gpustack.ai/model-id"
+
+	// ModelDeploymentScalerHardwareIDAnnotationKey declares the exact catalog hardware identity on
+	// a target ModelDeployment when the deployment spec does not establish it.
+	ModelDeploymentScalerHardwareIDAnnotationKey = "worker.gpustack.ai/hardware-id"
+
+	// ModelDeploymentScalerPrecisionAnnotationKey declares the exact catalog precision or
+	// quantization identity on a target ModelDeployment when the deployment spec does not establish
+	// it.
+	ModelDeploymentScalerPrecisionAnnotationKey = "worker.gpustack.ai/precision"
+
+	// ModelDeploymentScalerPrefillHardwareIDAnnotationKey overrides the catalog hardware identity
+	// declaration for Prefill roles on a target ModelDeployment.
+	ModelDeploymentScalerPrefillHardwareIDAnnotationKey = "worker.gpustack.ai/prefill-hardware-id"
+
+	// ModelDeploymentScalerDecodeHardwareIDAnnotationKey overrides the catalog hardware identity
+	// declaration for Decode roles on a target ModelDeployment.
+	ModelDeploymentScalerDecodeHardwareIDAnnotationKey = "worker.gpustack.ai/decode-hardware-id"
 )
 
 // The conditions a scaler reports.
 //
 // Bound says whether the scaler owns its target, Active says whether it is allowed to change it,
-// MetricsReady says whether it has what it needs to plan, and Blocked says what stops it.
+// MetricsReady says whether it has what it needs to plan, CapacityPriorsReady says whether
+// configured catalog priors resolved, and Blocked says what stops it.
 const (
 	// ModelDeploymentScalerConditionTypeBound says whether the scaler holds the binding on its
 	// target.
@@ -48,6 +70,10 @@ const (
 	// ModelDeploymentScalerConditionTypeMetricsReady says whether the scaler has the signals its
 	// algorithm needs.
 	ModelDeploymentScalerConditionTypeMetricsReady = "MetricsReady"
+
+	// ModelDeploymentScalerConditionTypeCapacityPriorsReady says whether the scaler resolved the
+	// capacity priors its algorithm needs.
+	ModelDeploymentScalerConditionTypeCapacityPriorsReady = "CapacityPriorsReady"
 
 	// ModelDeploymentScalerConditionTypeBlocked says whether something stops the scaler.
 	ModelDeploymentScalerConditionTypeBlocked = "Blocked"
@@ -112,6 +138,18 @@ const (
 
 	// ModelDeploymentScalerReasonRebalanceBlocked says a rebalance step cannot be taken.
 	ModelDeploymentScalerReasonRebalanceBlocked = "RebalanceBlocked"
+
+	// ModelDeploymentScalerReasonCapacityPriorUnresolved says a required capacity prior could not
+	// be resolved from the catalog.
+	ModelDeploymentScalerReasonCapacityPriorUnresolved = "CapacityPriorUnresolved"
+
+	// ModelDeploymentScalerReasonInsufficientLoadCoverage says the matched profile does not carry
+	// enough load points or boundary evidence to establish capacity.
+	ModelDeploymentScalerReasonInsufficientLoadCoverage = "InsufficientLoadCoverage"
+
+	// ModelDeploymentScalerReasonIncompatibleMetric says the matched profile does not measure the
+	// throughput numerator, latency quantile, or cache convention the role requires.
+	ModelDeploymentScalerReasonIncompatibleMetric = "IncompatibleMetric"
 )
 
 const (
@@ -406,6 +444,17 @@ type ModelDeploymentScalerAlgorithmSpec struct {
 	//
 	// +optional
 	Predictive *ModelDeploymentScalerPredictiveSpec `json:"predictive,omitempty" protobuf:"bytes,4,opt,name=predictive"`
+
+	// CapacityPrior permits resolving missing token capacities from a measured catalog for
+	// TokenThroughput and Predictive.
+	//
+	// An absent object means every capacity is stated by hand, and the scaler uses only those
+	// values. A present object permits resolving the capacities the scaler does not state, and
+	// only from the offline catalog it names. A capacity the scaler states is never replaced by a
+	// catalog value. When every serving capacity is stated, no catalog is read at all.
+	//
+	// +optional
+	CapacityPrior *ModelDeploymentScalerCapacityPriorSpec `json:"capacityPrior,omitempty" protobuf:"bytes,5,opt,name=capacityPrior"` // nolint: lll
 }
 
 // ModelDeploymentScalerAlgorithmType is the algorithm a scaler runs.
@@ -559,6 +608,18 @@ type ModelDeploymentScalerTokenThroughputSpec struct {
 	//
 	// +optional
 	ITLTargetMilliseconds *resource.Quantity `json:"itlTargetMilliseconds,omitempty" protobuf:"bytes,8,opt,name=itlTargetMilliseconds"`
+
+	// LatencyQuantile is the quantile of the latency distribution the role is held to.
+	//
+	// IT IS THE QUANTILE THE ONLINE HISTOGRAMS ARE SAMPLED AT and the quantile the capacity
+	// prior is resolved against. An absent value means the ninety fifth percentile.
+	//
+	// IT IS A NUMBER BETWEEN ZERO EXCLUSIVE AND ONE INCLUSIVE, and any percentile is allowed.
+	// THE VALUE IS READ AT THE PRECISION THE QUANTITY RESOLVES IT, so a quantile with more
+	// digits than that resolution keeps the rounded value and not the written one.
+	//
+	// +optional
+	LatencyQuantile *resource.Quantity `json:"latencyQuantile,omitempty" protobuf:"bytes,9,opt,name=latencyQuantile"`
 }
 
 // ModelDeploymentScalerPredictiveSpec holds the parameters of the Predictive algorithm.
@@ -617,6 +678,53 @@ type ModelDeploymentScalerPredictiveSpec struct {
 	// +k8s:validation:minimum=1
 	// +k8s:validation:maximum=64
 	MinPoints int32 `json:"minPoints,omitempty" protobuf:"varint,9,opt,name=minPoints"`
+}
+
+// ModelDeploymentScalerCapacityPriorSpec permits resolving missing token capacities from an
+// offline catalog for TokenThroughput and Predictive.
+//
+// The presence of the spec is the request, because it holds no switch that turns the resolution
+// off. The resolution fills only the capacities the scaler does not state, and only from the
+// offline catalog, so there is no source outside it.
+type ModelDeploymentScalerCapacityPriorSpec struct {
+	// CatalogRef names an optional ConfigMap and key in this namespace as the sole catalog source.
+	//
+	// When omitted, the embedded catalog is used.
+	//
+	// +optional
+	CatalogRef *ModelDeploymentScalerCatalogReference `json:"catalogRef,omitempty" protobuf:"bytes,2,opt,name=catalogRef"`
+
+	// Headroom is the margin in (0,1] applied to catalog-derived seed capacities.
+	//
+	// It defaults to 0.75 when capacityPrior is present and does not apply to explicit capacity
+	// fields.
+	//
+	// +optional
+	Headroom *resource.Quantity `json:"headroom,omitempty" protobuf:"bytes,4,opt,name=headroom"`
+}
+
+// ModelDeploymentScalerCatalogReference selects a catalog key in a ConfigMap in the scaler's
+// namespace.
+type ModelDeploymentScalerCatalogReference struct {
+	// Name is the name of the ConfigMap in this namespace.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=253
+	Name string `json:"name" protobuf:"bytes,1,name=name"`
+
+	// Key is the ConfigMap data key that holds the catalog document.
+	//
+	// The document is YAML or JSON, and the reader accepts the catalog under
+	// the priors.yaml key and under the priors.json key.
+	//
+	// It defaults to priors.yaml when omitted.
+	//
+	// +optional
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=253
+	// +k8s:validation:default="priors.yaml"
+	Key string `json:"key,omitempty" protobuf:"bytes,2,opt,name=key"`
 }
 
 // ModelDeploymentScalerBehaviorSpec tunes how fast a role may move and how long the scaler
@@ -820,6 +928,27 @@ type ModelDeploymentScalerStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []gpustack.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,9,rep,name=conditions"`
+
+	// ResolvedCapacityPriors records the resolved capacity prior basis and per-field effective
+	// capacities for each role.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	ResolvedCapacityPriors []ModelDeploymentScalerResolvedCapacityPriorStatus `json:"resolvedCapacityPriors,omitempty" protobuf:"bytes,10,rep,name=resolvedCapacityPriors"` // nolint: lll
+
+	// LatencyQuantile is the quantile of the latency distribution the scaler is held to.
+	//
+	// IT IS THE QUANTILE THE SCALER ASKED FOR, and the observed latencies of every role were
+	// sampled at it. It is absent only when the scaler names none, which means the ninety
+	// fifth percentile.
+	//
+	// IT IS A STABLE VALUE, because it changes when the configuration changes and not when the
+	// sampler reads a new sample.
+	//
+	// +optional
+	// +k8s:validation:maxLength=64
+	LatencyQuantile string `json:"latencyQuantile,omitempty" protobuf:"bytes,11,opt,name=latencyQuantile"`
 }
 
 // ModelDeploymentScalerBindingStatus is the binding a scaler holds.
@@ -1177,4 +1306,324 @@ type ModelDeploymentScalerDemandSample struct {
 	//
 	// +required
 	TokensPerSecond resource.Quantity `json:"tokensPerSecond" protobuf:"bytes,2,name=tokensPerSecond"`
+}
+
+// ModelDeploymentScalerCapacityFieldSource names where an effective capacity field value came
+// from.
+type ModelDeploymentScalerCapacityFieldSource string
+
+const (
+	// ModelDeploymentScalerCapacityFieldSourceExplicit says the capacity field was set explicitly
+	// in the scaler spec.
+	ModelDeploymentScalerCapacityFieldSourceExplicit ModelDeploymentScalerCapacityFieldSource = "Explicit"
+
+	// ModelDeploymentScalerCapacityFieldSourceCatalog says the capacity field was derived from a
+	// catalog profile.
+	ModelDeploymentScalerCapacityFieldSourceCatalog ModelDeploymentScalerCapacityFieldSource = "Catalog"
+)
+
+// ModelDeploymentScalerResolvedCapacityPriorStatus records the resolved capacity prior basis and
+// effective field values for one role.
+type ModelDeploymentScalerResolvedCapacityPriorStatus struct {
+	// Name is the role this status belongs to.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=253
+	Name string `json:"name" protobuf:"bytes,1,name=name"`
+
+	// SourceID is the catalog source identifier the profile came from.
+	//
+	// +optional
+	// +k8s:validation:maxLength=253
+	SourceID string `json:"sourceID,omitempty" protobuf:"bytes,3,opt,name=sourceID"`
+
+	// ProfileDigest is the content digest of the catalog profile.
+	//
+	// +optional
+	// +k8s:validation:maxLength=253
+	ProfileDigest string `json:"profileDigest,omitempty" protobuf:"bytes,4,opt,name=profileDigest"`
+
+	// CompatibilityFingerprint covers the target, role, model, engine, hardware, quantization,
+	// topology, workload, catalog digest, and latency targets this resolution depends on.
+	//
+	// +optional
+	// +k8s:validation:maxLength=253
+	CompatibilityFingerprint string `json:"compatibilityFingerprint,omitempty" protobuf:"bytes,5,opt,name=compatibilityFingerprint"` // nolint: lll
+
+	// Metric is the throughput metric numerator the capacity was resolved from.
+	//
+	// +optional
+	// +k8s:validation:maxLength=253
+	Metric string `json:"metric,omitempty" protobuf:"bytes,6,opt,name=metric"`
+
+	// Quantile is the latency quantile statistic used to verify the role's latency constraints.
+	//
+	// +optional
+	// +k8s:validation:maxLength=253
+	Quantile string `json:"quantile,omitempty" protobuf:"bytes,7,opt,name=quantile"`
+
+	// WorkloadID is the workload envelope identifier the profile was measured under.
+	//
+	// +optional
+	// +k8s:validation:maxLength=253
+	WorkloadID string `json:"workloadID,omitempty" protobuf:"bytes,8,opt,name=workloadID"`
+
+	// Denominator is the measurement denominator reconstructed for one scaling replica.
+	//
+	// +optional
+	// +k8s:validation:maxLength=253
+	Denominator string `json:"denominator,omitempty" protobuf:"bytes,9,opt,name=denominator"`
+
+	// Headroom is the margin applied to the catalog seed capacity.
+	//
+	// +optional
+	Headroom *resource.Quantity `json:"headroom,omitempty" protobuf:"bytes,10,opt,name=headroom"`
+
+	// SeedTokensPerSecond is the per-replica catalog seed capacity before headroom is applied.
+	//
+	// +optional
+	SeedTokensPerSecond *resource.Quantity `json:"seedTokensPerSecond,omitempty" protobuf:"bytes,11,opt,name=seedTokensPerSecond"` // nolint: lll
+
+	// Fields records the effective value and source of each required capacity field for this role.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=field
+	// +k8s:validation:maxItems=8
+	Fields []ModelDeploymentScalerResolvedCapacityFieldStatus `json:"fields,omitempty" protobuf:"bytes,12,rep,name=fields"` // nolint: lll
+
+	// CatalogDigest is the content digest of the catalog the profile was resolved from.
+	//
+	// +optional
+	// +k8s:validation:maxLength=253
+	CatalogDigest string `json:"catalogDigest,omitempty" protobuf:"bytes,13,opt,name=catalogDigest"`
+
+	// SourceRevision pins the upstream source revision the catalog profile was imported from.
+	//
+	// +optional
+	// +k8s:validation:maxLength=253
+	SourceRevision string `json:"sourceRevision,omitempty" protobuf:"bytes,14,opt,name=sourceRevision"`
+
+	// WorkloadRevision pins the workload definition the profile was measured under.
+	//
+	// +optional
+	// +k8s:validation:maxLength=253
+	WorkloadRevision string `json:"workloadRevision,omitempty" protobuf:"bytes,15,opt,name=workloadRevision"`
+
+	// GPUsPerReplica is the number of accelerators in one scaling replica used to reconstruct a
+	// PerGPU measurement denominator.
+	//
+	// +optional
+	// +k8s:validation:minimum=0
+	GPUsPerReplica int32 `json:"gpusPerReplica,omitempty" protobuf:"varint,16,opt,name=gpusPerReplica"`
+
+	// MeasuredReplicas is the number of scaling replicas in the measured system used to
+	// reconstruct a WholeSystem measurement denominator.
+	//
+	// +optional
+	// +k8s:validation:minimum=0
+	MeasuredReplicas int32 `json:"measuredReplicas,omitempty" protobuf:"varint,17,opt,name=measuredReplicas"`
+
+	// LatencyBounds records the quantile and conservative-bound basis for each required latency
+	// metric of the role.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=metric
+	// +k8s:validation:maxItems=8
+	LatencyBounds []ModelDeploymentScalerResolvedLatencyBoundStatus `json:"latencyBounds,omitempty" protobuf:"bytes,18,rep,name=latencyBounds"` // nolint: lll
+
+	// RequestedQuantile is the latency quantile the resolution was held to.
+	//
+	// IT IS THE QUANTILE THE SCALER ASKED FOR and not the quantile the catalog measured, and
+	// the two differ when the catalog measured a higher quantile than the request needed.
+	//
+	// +optional
+	// +k8s:validation:maxLength=253
+	RequestedQuantile string `json:"requestedQuantile,omitempty" protobuf:"bytes,19,opt,name=requestedQuantile"`
+}
+
+// ModelDeploymentScalerResolvedLatencyBoundStatus records the measured quantile basis for one
+// required latency metric.
+type ModelDeploymentScalerResolvedLatencyBoundStatus struct {
+	// Metric is the required latency metric name, such as TTFT or ITL.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=64
+	Metric string `json:"metric" protobuf:"bytes,1,name=metric"`
+
+	// Quantile is the measured latency quantile statistic used to bound the metric.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=64
+	Quantile string `json:"quantile" protobuf:"bytes,2,name=quantile"`
+
+	// Conservative says whether a quantile higher than the required quantile was used as a
+	// conservative upper bound.
+	//
+	// +optional
+	Conservative bool `json:"conservative,omitempty" protobuf:"varint,3,opt,name=conservative"`
+}
+
+// ModelDeploymentScalerResolvedCapacityFieldStatus records the effective value and source of one
+// algorithm capacity field.
+type ModelDeploymentScalerResolvedCapacityFieldStatus struct {
+	// Field is the name of the capacity field.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=253
+	Field string `json:"field" protobuf:"bytes,1,name=field"`
+
+	// Source says whether the effective value came from an explicit spec field or from the
+	// catalog.
+	//
+	// +required
+	// +k8s:validation:enum=["Explicit","Catalog"]
+	Source ModelDeploymentScalerCapacityFieldSource `json:"source" protobuf:"bytes,2,name=source"`
+
+	// EffectiveTokensPerSecond is the effective per-replica token capacity used for this field.
+	//
+	// +required
+	EffectiveTokensPerSecond resource.Quantity `json:"effectiveTokensPerSecond" protobuf:"bytes,3,name=effectiveTokensPerSecond"` // nolint: lll
+}
+
+// ModelDeploymentScalerCapacityPriorCatalog is an offline catalog of measured per-replica token
+// capacities and latency quantiles across load levels.
+//
+// +protobuf=false
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type ModelDeploymentScalerCapacityPriorCatalog struct {
+	meta.TypeMeta `json:",inline"`
+
+	// Profiles holds the measured profiles in this catalog.
+	//
+	// +optional
+	// +listType=atomic
+	Profiles []ModelDeploymentScalerCapacityPriorProfile `json:"profiles" yaml:"profiles"`
+}
+
+var _ runtime.Object = (*ModelDeploymentScalerCapacityPriorCatalog)(nil)
+
+// ModelDeploymentScalerCapacityPriorProfile is one measured serving profile in a capacity prior
+// catalog.
+//
+// +protobuf=false
+type ModelDeploymentScalerCapacityPriorProfile struct {
+	// Role is the serving role the measurements describe.
+	//
+	// +required
+	Role string `json:"role" yaml:"role"`
+
+	// Model is the served model identifier.
+	//
+	// +required
+	Model string `json:"model" yaml:"model"`
+
+	// Quantization is the model quantization recipe.
+	//
+	// +required
+	Quantization string `json:"quantization" yaml:"quantization"`
+
+	// Engine is the serving engine family.
+	//
+	// +required
+	Engine string `json:"engine" yaml:"engine"`
+
+	// Hardware is the accelerator family.
+	//
+	// +required
+	Hardware string `json:"hardware" yaml:"hardware"`
+
+	// Topology is the parallelism shape of one scaling replica.
+	//
+	// +required
+	Topology ModelDeploymentScalerCapacityPriorTopology `json:"topology" yaml:"topology"`
+
+	// Points are the load points measured for this profile.
+	//
+	// +required
+	// +listType=atomic
+	Points []ModelDeploymentScalerCapacityPriorPoint `json:"points" yaml:"points"`
+}
+
+// ModelDeploymentScalerCapacityPriorTopology is the parallelism shape of one scaling replica in a
+// capacity prior profile.
+//
+// +protobuf=false
+type ModelDeploymentScalerCapacityPriorTopology struct {
+	// GPUsPerReplica is how many accelerators one scaling replica uses.
+	//
+	// +optional
+	GPUsPerReplica int `json:"gpusPerReplica,omitempty" yaml:"gpusPerReplica,omitempty"`
+
+	// TensorParallel is the tensor parallel width.
+	//
+	// +optional
+	TensorParallel int `json:"tensorParallel,omitempty" yaml:"tensorParallel,omitempty"`
+
+	// PipelineParallel is the pipeline parallel width.
+	//
+	// +optional
+	PipelineParallel int `json:"pipelineParallel,omitempty" yaml:"pipelineParallel,omitempty"`
+
+	// DataParallel is the data parallel width.
+	//
+	// +optional
+	DataParallel int `json:"dataParallel,omitempty" yaml:"dataParallel,omitempty"`
+
+	// LocalDataParallel is the local data parallel width.
+	//
+	// +optional
+	LocalDataParallel int `json:"localDataParallel,omitempty" yaml:"localDataParallel,omitempty"`
+
+	// ContextParallel is the context parallel width.
+	//
+	// +optional
+	ContextParallel int `json:"contextParallel,omitempty" yaml:"contextParallel,omitempty"`
+
+	// ExpertParallel is the expert parallel width.
+	//
+	// +optional
+	ExpertParallel int `json:"expertParallel,omitempty" yaml:"expertParallel,omitempty"`
+}
+
+// ModelDeploymentScalerCapacityPriorPoint is one measured load point in a capacity prior profile.
+//
+// +protobuf=false
+type ModelDeploymentScalerCapacityPriorPoint struct {
+	// Concurrency is how many requests ran at the same time.
+	//
+	// +required
+	Concurrency int `json:"concurrency" yaml:"concurrency"`
+
+	// TotalTokensPerSecond is the combined prompt and generated token rate of one replica.
+	//
+	// +required
+	TotalTokensPerSecond float64 `json:"totalTokensPerSecond" yaml:"totalTokensPerSecond"`
+
+	// InputTokensPerSecond is the prompt token rate of one replica.
+	//
+	// +required
+	InputTokensPerSecond float64 `json:"inputTokensPerSecond" yaml:"inputTokensPerSecond"`
+
+	// OutputTokensPerSecond is the generated token rate of one replica.
+	//
+	// +required
+	OutputTokensPerSecond float64 `json:"outputTokensPerSecond" yaml:"outputTokensPerSecond"`
+
+	// TTFTMilliseconds maps latency quantile keys such as p25, p50, p70, p90, p95, or p99 to
+	// measured time to first token in milliseconds.
+	//
+	// +optional
+	TTFTMilliseconds map[string]float64 `json:"ttftMilliseconds,omitempty" yaml:"ttftMilliseconds,omitempty"`
+
+	// ITLMilliseconds maps latency quantile keys such as p25, p50, p70, p90, p95, or p99 to
+	// measured inter-token latency in milliseconds.
+	//
+	// +optional
+	ITLMilliseconds map[string]float64 `json:"itlMilliseconds,omitempty" yaml:"itlMilliseconds,omitempty"`
 }

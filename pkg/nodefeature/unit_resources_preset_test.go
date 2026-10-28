@@ -752,3 +752,94 @@ func TestPresetUnitResourcesNormalization(t *testing.T) {
 		})
 	}
 }
+
+// presetFamilyCases is the corpus of accelerator names driven through
+// ResolveAcceleratorFamily.
+//
+// The names are the ones a benchmark and a node publish: a bare part number, a product line name,
+// a part number inside a longer product string, and a name that already is a family.
+var presetFamilyCases = []struct {
+	name   string
+	raw    string
+	family string
+}{
+	{"the bare part number", "mi325x", "amd-mi325x"},
+	{"the product line name", "AMD Instinct MI325X", "amd-mi325x"},
+	{"the family itself", "amd-mi325x", "amd-mi325x"},
+	{"the part number in a product string", "NVIDIA H100-SXM5-80GB", "nvidia-h100"},
+	{"the memory in the name", "NVIDIA H100 80GB HBM3", "nvidia-h100"},
+	{"the board suffix", "h100-sxm", "nvidia-h100"},
+	{"the capacity in the name", "A100-SXM4-80GB", "nvidia-a100-80gb"},
+	{"the smaller capacity in the name", "A100-SXM4-40GB", "nvidia-a100-40gb"},
+	{"leading words that name no vendor", "Example Accelerator MI325X", "amd-mi325x"},
+	{"the blackwell part", "b200", "nvidia-b200"},
+	{"the blackwell superchip", "gb200", "nvidia-gb200"},
+	{"the hopper part", "h200", "nvidia-h200"},
+	{"the instinct part", "mi355x", "amd-mi355x"},
+	{"the instinct part before it", "mi300x", "amd-mi300x"},
+	{"an accelerator the table does not cover", "Example Accelerator", ""},
+	{"an empty name", "", ""},
+	{"a name the table does not cover", "RTX 5070", ""},
+	// A bare "v100" names the NVIDIA part and the Iluvatar boards that end in it, so it names
+	// neither of them. The vendor settles it, and then it resolves.
+	{"a bare name two families answer to", "v100", ""},
+	{"the same name with its vendor", "NVIDIA V100", "nvidia-v100"},
+	{"the board of another vendor", "Iluvatar BI-V100", "iluvatar-bi-v100"},
+	{"a vendor-led name does not fall through to another vendor's family", "NVIDIA BI-V100", ""},
+}
+
+// TestResolveAcceleratorFamily asserts the family a raw accelerator name resolves to.
+func TestResolveAcceleratorFamily(t *testing.T) {
+	for _, c := range presetFamilyCases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.family, ResolveAcceleratorFamily(c.raw), "family")
+		})
+	}
+}
+
+// TestPresetAcceleratorFamily asserts the family the table declares for a manufacturer and a
+// product.
+//
+// It reads the same entries the unit lookup reads, so the two cannot drift apart.
+func TestPresetAcceleratorFamily(t *testing.T) {
+	cases := []struct {
+		name         string
+		manufacturer string
+		product      string
+		family       string
+	}{
+		{"the instinct part", "amd", "AMD Instinct MI325X", "amd-mi325x"},
+		{"the bare part number", "amd", "mi325x", "amd-mi325x"},
+		{"the hopper part", "nvidia", "NVIDIA H100 80GB HBM3", "nvidia-h100"},
+		{"the capacity in the name", "nvidia", "NVIDIA A100 80GB PCIe", "nvidia-a100-80gb"},
+		{"the product no entry matches", "nvidia", "NVIDIA RTX 5070", ""},
+		{"a manufacturer the table does not cover", "kunlun", "P800", ""},
+		{"an empty product", "nvidia", "", ""},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.family, PresetAcceleratorFamily(c.manufacturer, c.product), "family")
+		})
+	}
+}
+
+// TestResolveAcceleratorFamilyReadsEveryDeclaredFamily asserts every family the
+// table declares is resolved by its own name.
+//
+// It is the property a catalog depends on: a family the table states is a name
+// this operator can read back.
+func TestResolveAcceleratorFamilyReadsEveryDeclaredFamily(t *testing.T) {
+	for _, entries := range _UnitResourcesPresetTable.Families {
+		for _, e := range entries {
+			t.Run(e.Family, func(t *testing.T) {
+				assert.Equal(t, e.Family, ResolveAcceleratorFamily(e.Family), "family")
+			})
+			for _, v := range e.By {
+				t.Run(v.Family, func(t *testing.T) {
+					assert.Equal(t, v.Family, ResolveAcceleratorFamily(v.Family), "family")
+				})
+			}
+		}
+	}
+}

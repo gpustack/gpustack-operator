@@ -50,6 +50,16 @@ type ModelDeploymentScalerTokenThroughputSpecApplyConfiguration struct {
 	// ITLTargetMilliseconds is the inter-token latency the role is expected to keep under.
 	//
 	ITLTargetMilliseconds *resource.Quantity `json:"itlTargetMilliseconds,omitempty"`
+	// LatencyQuantile is the quantile of the latency distribution the role is held to.
+	//
+	// IT IS THE QUANTILE THE ONLINE HISTOGRAMS ARE SAMPLED AT and the quantile the capacity
+	// prior is resolved against. An absent value means the ninety fifth percentile.
+	//
+	// IT IS A NUMBER BETWEEN ZERO EXCLUSIVE AND ONE INCLUSIVE, and any percentile is allowed.
+	// THE VALUE IS READ AT THE PRECISION THE QUANTITY RESOLVES IT, so a quantile with more
+	// digits than that resolution keeps the rounded value and not the written one.
+	//
+	LatencyQuantile *resource.Quantity `json:"latencyQuantile,omitempty"`
 }
 
 // ModelDeploymentScalerTokenThroughputSpecApplyConfiguration constructs a declarative configuration of the ModelDeploymentScalerTokenThroughputSpec type for use with
@@ -119,5 +129,13 @@ func (b *ModelDeploymentScalerTokenThroughputSpecApplyConfiguration) WithTTFTTar
 // If called multiple times, the ITLTargetMilliseconds field is set to the value of the last call.
 func (b *ModelDeploymentScalerTokenThroughputSpecApplyConfiguration) WithITLTargetMilliseconds(value resource.Quantity) *ModelDeploymentScalerTokenThroughputSpecApplyConfiguration {
 	b.ITLTargetMilliseconds = &value
+	return b
+}
+
+// WithLatencyQuantile sets the LatencyQuantile field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the LatencyQuantile field is set to the value of the last call.
+func (b *ModelDeploymentScalerTokenThroughputSpecApplyConfiguration) WithLatencyQuantile(value resource.Quantity) *ModelDeploymentScalerTokenThroughputSpecApplyConfiguration {
+	b.LatencyQuantile = &value
 	return b
 }

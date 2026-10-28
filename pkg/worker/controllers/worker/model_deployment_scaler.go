@@ -1,8 +1,10 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 	"time"
 
@@ -32,8 +34,9 @@ const (
 
 // ModelDeploymentScalerReconciler plans replica vectors for ModelDeployments.
 type ModelDeploymentScalerReconciler struct {
-	Client   ctrlcli.Client
-	Recorder ctrlrecord.EventRecorder
+	Client    ctrlcli.Client
+	APIReader ctrlcli.Reader
+	Recorder  ctrlrecord.EventRecorder
 
 	clock   func() time.Time
 	sampler *modelDeploymentScalerSampler
@@ -41,6 +44,7 @@ type ModelDeploymentScalerReconciler struct {
 
 func (r *ModelDeploymentScalerReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
+	r.APIReader = opts.Manager.GetAPIReader()
 	r.Recorder = opts.Manager.GetEventRecorderFor("modeldeploymentscaler")
 	r.clock = time.Now
 	r.sampler = &modelDeploymentScalerSampler{HTTPClient: defaultModelDeploymentScalerHTTPClient}
@@ -51,6 +55,11 @@ func (r *ModelDeploymentScalerReconciler) SetupController(ctx context.Context, o
 		Watches(
 			&workercore.ModelDeployment{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapTargetDeployment),
+		).
+		Watches(
+			&core.ConfigMap{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapCapacityPriorCatalog),
+			ctrlbuilder.WithPredicates(modelDeploymentScalerCatalogPredicate()),
 		).
 		Watches(
 			&kueue.Workload{},
@@ -87,6 +96,7 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 			return ctrlreconcile.Result{}, err
 		}
 		before := scaler.DeepCopy()
+		r.invalidateCapacityPriorState(scaler, workercore.ModelDeploymentScalerReasonTargetNotFound, "the target does not exist", now)
 		r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBound, meta.ConditionFalse,
 			workercore.ModelDeploymentScalerReasonTargetNotFound, "the target ModelDeployment does not exist", now)
 		r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeActive, meta.ConditionFalse,
@@ -101,6 +111,7 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 	if scaler.Status.Binding != nil && scaler.Status.Binding.TargetUID != "" && scaler.Status.Binding.TargetUID != string(md.UID) {
 		if scaler.Status.ObservedGeneration >= scaler.Generation {
 			before := scaler.DeepCopy()
+			r.invalidateCapacityPriorState(scaler, workercore.ModelDeploymentScalerReasonTargetReplaced, "the target was replaced", now)
 			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBound, meta.ConditionFalse,
 				workercore.ModelDeploymentScalerReasonTargetReplaced, "the target was replaced; edit the Scaler spec to bind the new target", now)
 			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeActive, meta.ConditionFalse,
@@ -128,6 +139,7 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 		}
 		if scaler.Spec.Suspend {
 			before := scaler.DeepCopy()
+			r.invalidateCapacityPriorState(scaler, workercore.ModelDeploymentScalerReasonSuspended, "the scaler is suspended", now)
 			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBound, meta.ConditionFalse,
 				workercore.ModelDeploymentScalerReasonSuspended, "the scaler is suspended", now)
 			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeActive, meta.ConditionFalse,
@@ -224,7 +236,17 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 	} else if scaler.Status.Binding != nil {
 		term = maxInt64(modelDeploymentScalerInitialTerm, scaler.Status.Binding.Term+1)
 	}
+	var preResolved *ModelDeploymentScalerCapacityPriors
 	if !hasBinding || binding.ScalerUID != string(scaler.UID) || binding.Term != term {
+		resolved, resolutionErr := ResolveModelDeploymentScalerCapacityPriors(ctx, r.priorReader(), scaler, md)
+		if resolutionErr != nil {
+			before := scaler.DeepCopy()
+			r.applyCapacityPriorResolution(scaler, resolved, resolutionErr, now)
+			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBound, meta.ConditionFalse,
+				workercore.ModelDeploymentScalerReasonCapacityPriorUnresolved, "capacity priors must resolve before acquiring a binding", now)
+			return r.stopForCapacityPrior(ctx, before, scaler, resolutionErr, now)
+		}
+		preResolved = resolved
 		if md.Annotations == nil {
 			md.Annotations = make(map[string]string)
 		}
@@ -251,7 +273,7 @@ func (r *ModelDeploymentScalerReconciler) Reconcile(
 		meta.ConditionTrue, "Active", "the scaler is planning replica changes", now,
 	)
 
-	return r.plan(ctx, before, scaler, md, now, true)
+	return r.planWithPriors(ctx, before, scaler, md, preResolved, now, true)
 }
 
 // modelDeploymentScalerPredicate decides which changes of a scaler wake its reconciler.
@@ -275,6 +297,43 @@ func modelDeploymentScalerPredicate() ctrlpredicate.Predicate {
 				return true
 			}
 			return !slices.Equal(e.ObjectOld.GetFinalizers(), e.ObjectNew.GetFinalizers())
+		},
+	}
+}
+
+// modelDeploymentScalerCatalogPredicate filters ConfigMap events to payload changes and deletions.
+func modelDeploymentScalerCatalogPredicate() ctrlpredicate.Predicate {
+	return ctrlpredicate.Funcs{
+		CreateFunc: func(e ctrlevent.CreateEvent) bool {
+			cm, ok := e.Object.(*core.ConfigMap)
+			return ok && (len(cm.Data) > 0 || len(cm.BinaryData) > 0)
+		},
+		DeleteFunc: func(ctrlevent.DeleteEvent) bool { return true },
+		GenericFunc: func(e ctrlevent.GenericEvent) bool {
+			cm, ok := e.Object.(*core.ConfigMap)
+			return ok && (len(cm.Data) > 0 || len(cm.BinaryData) > 0)
+		},
+		UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+			oldCM, okOld := e.ObjectOld.(*core.ConfigMap)
+			newCM, okNew := e.ObjectNew.(*core.ConfigMap)
+			if !okOld || !okNew {
+				return true
+			}
+			if oldCM.GetDeletionTimestamp().IsZero() != newCM.GetDeletionTimestamp().IsZero() {
+				return true
+			}
+			if !maps.Equal(oldCM.Data, newCM.Data) {
+				return true
+			}
+			if len(oldCM.BinaryData) != len(newCM.BinaryData) {
+				return true
+			}
+			for k, v := range oldCM.BinaryData {
+				if other, ok := newCM.BinaryData[k]; !ok || !bytes.Equal(v, other) {
+					return true
+				}
+			}
+			return false
 		},
 	}
 }
