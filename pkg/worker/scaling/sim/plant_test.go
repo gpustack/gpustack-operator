@@ -8,6 +8,10 @@ import (
 )
 
 func TestPlantPartialServiceQuantum(t *testing.T) {
+	values := []float64{30, 10, 20}
+	if got := Quantile(values, 0.5); got != 20 || values[0] != 30 || values[1] != 10 || values[2] != 20 {
+		t.Fatalf("Quantile mutated caller slice or returned %v: %v", got, values)
+	}
 	p := NewPlant(PlantConfig{TokensPerSecond: 100, BatchSize: 1, TimeoutSeconds: 3, TTFTSLOSeconds: 1, ITLSLOSeconds: 0.02})
 	p.Offer(Request{InputTokens: 10, OutputTokens: 20})
 	p.Step(0, 0.25, []int{0})
