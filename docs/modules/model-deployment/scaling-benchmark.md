@@ -172,8 +172,30 @@ Failed requests remain in the request and error columns.
 
 ## Suite 1: Scaling comparison
 
-The charts show *TTFT* p50 and output throughput per phase for the three vLLM *PD* configurations.
-The lines are, in order, `vllm-pd-proportional`, `vllm-pd-token-throughput` and `vllm-pd-predictive`.
+The charts trace algorithm feedback sensitivity (`rawRecommendedReplicas`), Ready serving replicas
+(`readyReplicas`) across phase checkpoints (`B1–B2` baseline, `R1–R3` ramp, `S1–S3` sustain,
+`C1–C3` cooldown) and resulting *TTFT* p50 for `vllm-pd-proportional`, `vllm-pd-token-throughput`
+and `vllm-pd-predictive`.
+
+```mermaid
+xychart-beta
+    title "Feedback sensitivity (rawRecommendedReplicas)"
+    x-axis ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
+    y-axis "rawRecommendedReplicas" 0 --> 80
+    line [1, 1, 1, 2, 2, 2, 2, 2, 1, 1, 1]
+    line [1, 2, 2, 12, 25, 25, 23, 23, 19, 1, 1]
+    line [1, 7, 1, 47, 75, 22, 22, 24, 3, 1, 1]
+```
+
+```mermaid
+xychart-beta
+    title "Ready replicas by checkpoint"
+    x-axis ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
+    y-axis "readyReplicas" 0 --> 3
+    line [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
+    line [1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2]
+    line [1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+```
 
 ```mermaid
 xychart-beta
@@ -185,21 +207,10 @@ xychart-beta
     line [164.044, 467.906, 447.864, 60.883]
 ```
 
-```mermaid
-xychart-beta
-    title "Output throughput by phase"
-    x-axis ["baseline", "ramp", "sustain", "cooldown"]
-    y-axis "Output (tok/s)" 0 --> 2500
-    line [258.325, 1117.481, 2044.782, 274.402]
-    line [256.117, 1230.879, 2054.687, 276.51]
-    line [282.371, 2109.251, 2128.27, 288.484]
-```
-
-Both `ramp` and `sustain` run at concurrency 24. In `ramp`, `vllm-pd-proportional` and
-`vllm-pd-token-throughput` exceed 2300 ms *TTFT* p50 and cap near single-replica throughput
-(1117–1231 tok/s) while the second replica starts. Once that replica is Ready in `sustain`,
-*TTFT* p50 drops below 510 ms and output throughput nearly doubles above 2040 tok/s at the same
-concurrency, while `vllm-pd-predictive` enters `ramp` already scaled and holds below 470 ms.
+Both `ramp` and `sustain` run at concurrency 24. Because manual token targets sat below baseline
+traffic, `vllm-pd-token-throughput` (`raw = 2`) and `vllm-pd-predictive` (`raw = 7`) requested scale-out
+at `B2`, so `vllm-pd-predictive` entered `ramp` (`R1`) with two Ready replicas and held *TTFT* p50
+below 470 ms while `vllm-pd-proportional` waited until `R2` (`2540.853` ms in `ramp`, `506.734` ms in `sustain`).
 
 ### vLLM proportional PD
 
@@ -283,10 +294,31 @@ requests) to construct the offline `ConfigMap` catalog profile:
 | 24 | 672 | 14527.811 | 2857.152 | 352.587 / 527.173 / 547.8 | 6.346 / 6.556 / 9.713 | 119.205 |
 | 32 | 800 | 17135.159 | 3369.918 | 490.591 / 689.956 / 736.115 | 6.576 / 6.824 / 20.012 | 105.395 |
 
+```mermaid
+xychart-beta
+    title "Single-replica total throughput vs capacity targets (tok/s)"
+    x-axis ["c=2", "c=4", "c=8", "c=16", "c=24", "c=32"]
+    y-axis "Total throughput (tok/s)" 0 --> 18000
+    line [1882.56, 3653.261, 6414.232, 11477.608, 14527.811, 17135.159]
+    line [17135.159, 17135.159, 17135.159, 17135.159, 17135.159, 17135.159]
+    line [12851.37, 12851.37, 12851.37, 12851.37, 12851.37, 12851.37]
+```
+
+```mermaid
+xychart-beta
+    title "Single-replica TTFT percentiles by concurrency (ms)"
+    x-axis ["c=2", "c=4", "c=8", "c=16", "c=24", "c=32"]
+    y-axis "TTFT (ms)" 0 --> 800
+    line [48.084, 58.658, 166.364, 224.723, 352.587, 490.591]
+    line [50.489, 94.228, 190.725, 362.343, 527.173, 689.956]
+    line [120.712, 98.486, 193.563, 384.708, 547.8, 736.115]
+```
+
 Under the P95 targets of *`ttftTargetMilliseconds: "2000"`* and *`itlTargetMilliseconds: "33"`*,
 every measured point passed (`ExplicitSaturation`). `Catalog.Resolve` selected `17135.159`
 tokens/s at concurrency `32` as the seed capacity and applied *`headroom: "0.75"`* to derive an
-effective per-replica capacity of `12851.37` tokens/s.
+effective per-replica capacity of `12851.37` tokens/s, which crosses the throughput curve between
+`c = 16` (`11477.608` tok/s) and `c = 24` (`14527.811` tok/s).
 
 ### Capacity-arm rounds
 
@@ -304,26 +336,49 @@ Eighteen serial rounds (`3` alternating repeats per arm for `TokenThroughput` an
 | `Predictive` | `tuned-manual` | 3 / 3 | 392.089 (370.123–392.919) | 2 | 350.769 / 564.252 | 206.453 / 370.607 | 5.744 / 8.301 |
 | `Predictive` | `catalog` | 3 / 3 | 423.031 (392.662–679.002) | 2 | 349.685 / 554.122 | 189.511 / 364.141 | 5.741 / 9.839 |
 
-All 18 rounds completed with zero failed requests, verified UID-preconditioned cleanup and full
-return to the one-replica baseline. Under `TokenThroughput`, both unmargined manual arms stayed at
-one replica because single-replica throughput at concurrency 24 (`~14.5k` tok/s) sat below the
-`17135.159` tok/s saturation seed.
+```mermaid
+xychart-beta
+    title "Capacity-arm feedback sensitivity (rawRecommendedReplicas)"
+    x-axis ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
+    y-axis "rawRecommendedReplicas" 0 --> 5
+    line [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    line [1, 1, 1, 2, 2, 1, 1, 2, 1, 1, 1]
+    line [1, 1, 1, 2, 4, 1, 4, 3, 1, 1, 1]
+```
 
-The `TokenThroughput` `catalog` arm (`0.75` headroom) grew to two replicas in all three repeats,
-but vLLM startup and CUDA graph compilation took ~76 s (`99.6–105.6` s from ramp start), so the
-second replica became Ready near the end of the 45 s `sustain` window and produced no `sustain`
-*TTFT* reduction (`343.842` ms vs `321.352` ms).
+```mermaid
+xychart-beta
+    title "Capacity-arm Ready replicas by checkpoint"
+    x-axis ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
+    y-axis "readyReplicas" 0 --> 3
+    line [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    line [1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 1]
+    line [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 1]
+```
+
+The three lines in both checkpoint charts correspond to `TokenThroughput` (`tuned-manual`),
+`TokenThroughput` (`catalog`) and `Predictive` (`catalog`). All 18 rounds completed with zero
+failed requests, verified UID-preconditioned cleanup and full return to the one-replica baseline.
+
+Under `TokenThroughput`, both unmargined manual arms stayed at one replica (`raw = 1` throughout)
+because single-replica throughput at concurrency 24 (`~14.5k` tok/s) sat below the `17135.159`
+tok/s saturation seed.
+
+The `TokenThroughput` `catalog` arm (`0.75` headroom) grew to two replicas (`raw = 2` at `R2`) in
+all three repeats, but vLLM startup and CUDA graph compilation took ~76 s (`99.6–105.6` s from ramp
+start), so the second replica became Ready at `S3` near the end of the 45 s `sustain` window and
+produced no `sustain` *TTFT* reduction (`343.842` ms vs `321.352` ms).
 
 Under `Predictive`, the 300 s Kalman linear-trend forecast scaled all three arms early (`15.1–21.9`
-s from ramp start; Ready at `81.9–94.6` s), cutting `sustain` median *TTFT* p50 to `189.511` ms
-(`catalog`), `194.733` ms (`frozen-manual`) and `206.453` ms (`tuned-manual`).
+s from ramp start; Ready at `R3`, `81.9–94.6` s), cutting `sustain` median *TTFT* p50 to `189.511`
+ms (`catalog`), `194.733` ms (`frozen-manual`) and `206.453` ms (`tuned-manual`).
 
 ### Algorithm sensitivity
 
 A longer 360-second wave (`baseline` 60 s at `c = 2`, `ramp` 90 s at `c = 24`, `sustain` 90 s at
-`c = 24`, `cooldown` 120 s at `c = 0`) compared `Proportional` (`RunningRequests` target `8`),
-`TokenThroughput` (`14000` tok/s) and catalog-backed `Predictive` (`12851.37` effective tok/s)
-against the [Scaling Simulation](scaling-simulation.md) metrics (*TTFT* <= `2000` ms, *ITL* <= `33` ms):
+`c = 24`, `cooldown` 120 s at `c = 0`, `maxReplicas: 4`) compared `Proportional` (`RunningRequests`
+target `8`), `TokenThroughput` (`14000` tok/s) and catalog-backed `Predictive` (`12851.37`
+effective tok/s) against the [Scaling Simulation](scaling-simulation.md) metrics (*TTFT* <= `2000` ms, *ITL* <= `33` ms):
 
 | Algorithm | Phase | Requests | Failed | True SLO | Goodput (`req/s`) | *TTFT* p50 / p90 / p99 (ms) | *ITL* p50 / p90 / p99 (ms) | Output (`tok/s`) |
 |---|---|---:|---:|---:|---:|---|---|---:|
@@ -337,10 +392,30 @@ against the [Scaling Simulation](scaling-simulation.md) metrics (*TTFT* <= `2000
 | `Predictive` | `ramp` | 1244 | 0 | 1.0 | 13.625 | 192.093 / 325.727 / 340.679 | 5.746 / 6.004 / 7.8 | 3487.99 |
 | `Predictive` | `sustain` | 1383 | 0 | 1.0 | 15.18 | 120.59 / 187.599 / 195.3 | 5.596 / 5.847 / 7.21 | 3886.136 |
 
-When the load wave outlasts engine startup (`90` s `ramp` + `90` s `sustain`), catalog-backed
-`Predictive` brought the second replica Ready inside `ramp`, lowering `ramp` *TTFT* p50 from
-`347.282–350.591` ms to `192.093` ms and `sustain` *TTFT* p50 to `120.59` ms (`3886.136` output
-tok/s, zero failed requests).
+```mermaid
+xychart-beta
+    title "360 s wave Ready replicas by checkpoint"
+    x-axis ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
+    y-axis "readyReplicas" 0 --> 5
+    line [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
+    line [1, 1, 1, 1, 3, 3, 4, 4, 4, 4, 4]
+    line [1, 1, 1, 3, 4, 4, 4, 4, 4, 4, 4]
+```
+
+```mermaid
+xychart-beta
+    title "360 s wave TTFT p50 by phase (ms)"
+    x-axis ["baseline", "ramp", "sustain"]
+    y-axis "TTFT p50 (ms)" 0 --> 400
+    line [49.439, 347.282, 190.555]
+    line [49.263, 350.591, 145.939]
+    line [49.742, 192.093, 120.59]
+```
+
+In the 360-second wave (lines ordered `Proportional`, `TokenThroughput`, `Predictive`),
+catalog-backed `Predictive` brought three replicas Ready by `R2` and all four Ready by `R3`,
+lowering `ramp` *TTFT* p50 from `347.282–350.591` ms to `192.093` ms and `sustain` *TTFT* p50 to
+`120.59` ms (`3886.136` output tok/s, zero failed requests).
 
 ### Embedded catalog
 
