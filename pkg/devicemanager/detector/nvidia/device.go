@@ -178,15 +178,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 					}
 				}
 			}
-
-			memEccDramUE, ret := dev.GetMemoryErrorCounter(
-				nvml.MEMORY_ERROR_TYPE_UNCORRECTED,
-				nvml.VOLATILE_ECC,
-				nvml.MEMORY_LOCATION_DRAM,
-			)
-			if ret.IsSuccess() && memEccDramUE > 0 {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		grpIndex := slices.IndexFunc(grpList, func(grp device.DevicesGroup) bool {
@@ -357,15 +349,7 @@ func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 			memory = device.ConvertBytesToMiB(memInfo.Total)
 			memoryUsage = device.ConvertBytesToMiB(memInfo.Used)
 			memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-
-			memEccDramUE, ret := dev.GetMemoryErrorCounter(
-				nvml.MEMORY_ERROR_TYPE_UNCORRECTED,
-				nvml.VOLATILE_ECC,
-				nvml.MEMORY_LOCATION_DRAM,
-			)
-			if ret.IsSuccess() && memEccDramUE > 0 {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		var (
@@ -419,6 +403,21 @@ func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 	}
 
 	return grpList, nil
+}
+
+func isDeviceUnhealthy(dev nvml.Device) bool {
+	memEccDramUE, ret := dev.GetMemoryErrorCounter(
+		nvml.MEMORY_ERROR_TYPE_UNCORRECTED,
+		nvml.VOLATILE_ECC,
+		nvml.MEMORY_LOCATION_DRAM,
+	)
+	return evaluateDeviceUnhealthy(memEccDramUE, ret)
+}
+
+// evaluateDeviceUnhealthy reports whether the vendor's uncorrectable ECC count makes the
+// accelerator unhealthy. A query the driver could not answer is not a fault, so it reads healthy.
+func evaluateDeviceUnhealthy(eccErrors uint64, ret nvml.Return) bool {
+	return ret.IsSuccess() && eccErrors > 0
 }
 
 // coresUtilizationOf reads an accelerator's whole-device cores utilization.

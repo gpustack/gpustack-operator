@@ -126,11 +126,7 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 				}
 			}
 			memory = device.ConvertBytesToMiB(memInfo.Total)
-
-			memHealth, ret := dev.GetHealth()
-			if ret.IsSuccess() && memHealth != ixml.HealthOK {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		ccMajor, ccMinor, _ := dev.GetCudaComputeCapability()
@@ -269,11 +265,7 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 			memory = device.ConvertBytesToMiB(memInfo.Total)
 			memoryUsage = device.ConvertBytesToMiB(memInfo.Used)
 			memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-
-			memHealth, ret := dev.GetHealth()
-			if ret.IsSuccess() && memHealth != ixml.HealthOK {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		var (
@@ -337,6 +329,17 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 	}
 
 	return grpList, nil
+}
+
+func isDeviceUnhealthy(dev ixml.Device) bool {
+	memHealth, ret := dev.GetHealth()
+	return evaluateDeviceUnhealthy(memHealth, ret)
+}
+
+// evaluateDeviceUnhealthy reports whether the vendor's health state makes the accelerator
+// unhealthy. A query the driver could not answer is not a fault, so it reads healthy.
+func evaluateDeviceUnhealthy(health uint64, ret ixml.Return) bool {
+	return ret.IsSuccess() && health != ixml.HealthOK
 }
 
 func (in *iluvatar) init() {

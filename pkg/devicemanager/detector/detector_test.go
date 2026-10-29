@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -182,6 +183,87 @@ func TestAlignDeviceGroups(t *testing.T) {
 			got, changed := alignDeviceGroups(c.aGroups, c.eGroups, allowed)
 			assert.True(t, changed, "a capability change on an existing group must be reported as changed")
 			assert.Equal(t, c.want, got)
+		})
+	}
+}
+
+// TestAlignDeviceGroups_RetainsUnhealthyAcceleratorsAcrossAllManufacturers pins that an
+// accelerator the vendor reported as unhealthy is still an accelerator: the alignment keeps every
+// card of the group and carries the health flag onto the card it belongs to.
+//
+// A card dropped from the group would take its health report with it, and a flag landing on the
+// wrong card would condemn a healthy one. The case is the node the report describes: eight cards,
+// one of them faulty.
+func TestAlignDeviceGroups_RetainsUnhealthyAcceleratorsAcrossAllManufacturers(t *testing.T) {
+	const (
+		groupID     = "group-0"
+		cardCount   = 8
+		faultyIndex = 3
+	)
+
+	// group builds the node's group of cards, with the card at faultyIndex faulty when faulty is
+	// true. The cards are enumerated in order, which is the order the alignment must keep them in.
+	group := func(manufacturer string, faulty bool) device.DevicesGroup {
+		accels := make([]device.Accelerator, 0, cardCount)
+		for i := 0; i < cardCount; i++ {
+			accels = append(accels, device.Accelerator{
+				ID:    fmt.Sprintf("%s-%d", manufacturer, i),
+				Index: uint32(i),
+				Status: device.AcceleratorStatus{
+					Unhealthy: faulty && i == faultyIndex,
+				},
+			})
+		}
+		return device.DevicesGroup{
+			ID:           groupID,
+			Manufacturer: manufacturer,
+			Name:         "Test Accelerator",
+			Accelerators: accels,
+		}
+	}
+
+	for _, manufacturer := range nodefeature.GetKnownAcceleratableManufacturers() {
+		t.Run(manufacturer, func(t *testing.T) {
+			cases := []struct {
+				name        string
+				stored      device.DevicesGroup
+				wantChanged bool
+			}{
+				{
+					// The card failed since the ledger was written, so the pass has a health
+					// change to publish as well as cards to keep.
+					name:        "a card that became faulty is marked in place and retained",
+					stored:      group(manufacturer, false),
+					wantChanged: true,
+				},
+				{
+					// The card was already faulty in the ledger, so nothing changed and the
+					// alignment must say so rather than rewrite the group.
+					name:        "a card that stays faulty is still retained",
+					stored:      group(manufacturer, true),
+					wantChanged: false,
+				},
+			}
+
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					got, changed := alignDeviceGroups(
+						device.DevicesGroupList{c.stored},
+						device.DevicesGroupList{group(manufacturer, true)},
+						sets.New(manufacturer),
+					)
+					assert.Equal(t, c.wantChanged, changed)
+
+					require.Len(t, got, 1, "the group is kept")
+					require.Len(t, got[0].Accelerators, cardCount,
+						"an unhealthy accelerator is still an accelerator, so the group keeps every card")
+					for i, accel := range got[0].Accelerators {
+						assert.Equal(t, uint32(i), accel.Index, "the cards keep their enumeration order")
+						assert.Equal(t, i == faultyIndex, accel.Status.Unhealthy,
+							"the health report follows the card it belongs to")
+					}
+				})
+			}
 		})
 	}
 }

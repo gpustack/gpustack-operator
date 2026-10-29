@@ -134,11 +134,7 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				continue
 			}
 			memory = device.ConvertBytesToMiB(memTotal)
-
-			memEcc, ret := dev.GetEccCount(rsmi.GPU_BLOCK_UMC)
-			if ret.IsSuccess() && memEcc.Uncorrectable_err > 0 {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		physicalIndexes := getPhysicalIndexes(pciBusId)
@@ -346,11 +342,7 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 			}
 
 			memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-
-			memEcc, ret := dev.GetEccCount(rsmi.GPU_BLOCK_UMC)
-			if ret.IsSuccess() && memEcc.Uncorrectable_err > 0 {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		var (
@@ -395,6 +387,17 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 	}
 
 	return grpList, nil
+}
+
+func isDeviceUnhealthy(dev rsmi.Device) bool {
+	memEcc, ret := dev.GetEccCount(rsmi.GPU_BLOCK_UMC)
+	return evaluateDeviceUnhealthy(memEcc, ret)
+}
+
+// evaluateDeviceUnhealthy reports whether the vendor's uncorrectable ECC count makes the
+// accelerator unhealthy. A query the driver could not answer is not a fault, so it reads healthy.
+func evaluateDeviceUnhealthy(eccCount rsmi.ErrorCount, ret rsmi.Return) bool {
+	return ret.IsSuccess() && eccCount.Uncorrectable_err > 0
 }
 
 // modelNameCache resolves a card's name ONCE PER MODEL rather than once per card.

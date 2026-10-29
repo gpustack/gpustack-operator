@@ -58,6 +58,12 @@ const capPreflightPanicked = "preflight-panicked"
 // anybody's hardware.
 const capStaleSweep = "stale-container-sweep"
 
+// capDeviceHealth is the capability an unhealthy accelerator reports under. Like
+// capPreflightPanicked and capStaleSweep, it is this package's own word: the detect pass already
+// asked the vendor library whether the card is healthy, and an unhealthy card is withheld from
+// every allocation mode by the device plugin.
+const capDeviceHealth = "device-health"
+
 // Why a detect pass reports no accelerator. The two are never collapsed: one says the hardware is
 // not here, the other says nobody was able to look.
 const (
@@ -395,6 +401,67 @@ func panickedChecks(groups device.DevicesGroupList, r any) []device.PreflightChe
 	return checks
 }
 
+// unhealthyCount is how many of a group's accelerators the detect pass reported unhealthy.
+func unhealthyCount(accels []device.Accelerator) int {
+	unhealthy := 0
+	for i := range accels {
+		if accels[i].Status.Unhealthy {
+			unhealthy++
+		}
+	}
+	return unhealthy
+}
+
+// partitionHealthyGroups splits the detected groups into the accelerators that may be probed and the
+// rows that report the ones that may not.
+//
+// A card the detect pass reported unhealthy is withheld from every allocation mode by the device
+// plugin, so probing it would start a container on hardware the plugin already refuses to hand out.
+// It gets a row of its own instead, and the healthy cards beside it are still measured.
+//
+// The groups are copied rather than filtered in place. The detection answer was computed from the
+// groups the detect pass returned, and a report that counted eight cards and then probed seven has
+// to have counted them before it filtered them.
+//
+// A group left with no healthy accelerator is dropped rather than carried empty: it has nothing to
+// be asked, and an empty group in the list is one a reader has to work out what it means.
+func partitionHealthyGroups(
+	groups device.DevicesGroupList,
+) (device.DevicesGroupList, []device.PreflightCheck) {
+	reason := "the detect pass reported this accelerator unhealthy, so the device plugin withholds " +
+		"it from allocations and preflight skipped its capability checks"
+
+	var (
+		healthyGroups = make(device.DevicesGroupList, 0, len(groups))
+		checks        []device.PreflightCheck
+	)
+	for i := range groups {
+		healthy := make([]device.Accelerator, 0, len(groups[i].Accelerators))
+		for j := range groups[i].Accelerators {
+			accel := groups[i].Accelerators[j]
+			if accel.Status.Unhealthy {
+				checks = append(checks, device.PreflightCheck{
+					Accelerator: accel.ID,
+					Capability:  capDeviceHealth,
+					Mode:        device.PreflightModeUnnamed,
+					State:       device.PreflightStateUnavailable,
+					Depth:       device.PreflightDepthDeclared,
+					Reason:      reason,
+				})
+				continue
+			}
+			healthy = append(healthy, accel)
+		}
+		if len(healthy) == 0 {
+			continue
+		}
+		grp := groups[i]
+		grp.Accelerators = healthy
+		healthyGroups = append(healthyGroups, grp)
+	}
+	return healthyGroups, checks
+}
+
 func (p *Preflighter) preflight(
 	ctx context.Context, manufacturer string, det device.PreflightDetection,
 	groups device.DevicesGroupList, unmeasured bool,
@@ -427,66 +494,78 @@ func (p *Preflighter) preflight(
 		return grp
 	}
 
-	// The manufacturer's library is loaded here rather than at construction, so a host carrying one
-	// manufacturer's hardware never initializes another's driver to report that it has none.
-	pf := creator(device.PreflighterOptions{
-		Logger:   logger.V(3),
-		DryRun:   p.dryRun,
-		HostRoot: hostRootForManufacturers(p.hostRoot, p.hostRootErr),
-	})
-	read := pf.PreflightAccelerator(groups)
-	grp.Checks = read.Checks
+	// The unhealthy accelerators are separated out before anything is asked of the manufacturer:
+	// the device plugin withholds them from every allocation mode, so they are never driven, never
+	// toggled and never probed. The healthy cards beside them are measured as usual.
+	healthyGroups, healthChecks := partitionHealthyGroups(groups)
 
-	// The floor no preflighter can fall through: an answer that names no depth is read as the
-	// shallowest one, never as a deeper one it did not earn. Applied before the slice rows are
-	// added, because those carry the depth they reached and must not be flattened to this one.
-	//
-	// Mode gets the same treatment, and for a sharper reason: Capability is the vendor's own word, so
-	// Mode is the only thing that makes two manufacturers' rows comparable and a missing mode visible
-	// as a gap. A check that names none is left naming none, and says so — inventing one here would
-	// file the row under a mode nobody established it belongs to.
-	for i := range grp.Checks {
-		c := &grp.Checks[i]
-		if c.Depth == "" {
-			c.Depth = device.PreflightDepthDeclared
+	if len(healthyGroups) > 0 {
+		// The manufacturer's library is loaded here rather than at construction, so a host carrying
+		// one manufacturer's hardware never initializes another's driver to report that it has none.
+		pf := creator(device.PreflighterOptions{
+			Logger:   logger.V(3),
+			DryRun:   p.dryRun,
+			HostRoot: hostRootForManufacturers(p.hostRoot, p.hostRootErr),
+		})
+		read := pf.PreflightAccelerator(healthyGroups)
+		grp.Checks = read.Checks
+
+		// The floor no preflighter can fall through: an answer that names no depth is read as the
+		// shallowest one, never as a deeper one it did not earn. Applied before the slice rows are
+		// added, because those carry the depth they reached and must not be flattened to this one.
+		//
+		// Mode gets the same treatment, and for a sharper reason: Capability is the vendor's own
+		// word, so Mode is the only thing that makes two manufacturers' rows comparable and a
+		// missing mode visible as a gap. A check that names none is left naming none, and says so —
+		// inventing one here would file the row under a mode nobody established it belongs to.
+		for i := range grp.Checks {
+			c := &grp.Checks[i]
+			if c.Depth == "" {
+				c.Depth = device.PreflightDepthDeclared
+			}
+			if c.Mode == "" {
+				c.Mode = device.PreflightModeUnnamed
+				c.Reason = strings.TrimSpace(c.Reason + " (this check names no allocation mode, so it " +
+					"cannot be compared with another manufacturer's answer for the same one)")
+			}
 		}
-		if c.Mode == "" {
-			c.Mode = device.PreflightModeUnnamed
-			c.Reason = strings.TrimSpace(c.Reason + " (this check names no allocation mode, so it " +
-				"cannot be compared with another manufacturer's answer for the same one)")
+
+		// The library tree both container questions mount, put on the host once and handed to each,
+		// so neither of them depends on the other having run and neither writes it twice.
+		//
+		// And only where one of them will start something. Both skip an accelerator that can host no
+		// logical slice, so a node whose cards all report none reaches no container at all -- while
+		// this tree, once written, is never removed. Staging it there would leave a permanent
+		// directory on a host that had nothing to measure.
+		var staged StageResult
+		if anyLogicallySliceable(healthyGroups) {
+			staged = p.stageLibFor(manufacturer)
+		} else {
+			staged = StageResult{Manufacturer: manufacturer}
 		}
+
+		// The slice itself, asked rather than the driver, and asked whatever the driver read
+		// produced: three manufacturers read no driver at all when they serve an allocation, and
+		// every one of the nine still has an injection to drive.
+		grp.Checks = append(grp.Checks, p.measureSliced(ctx, manufacturer, pf, staged, healthyGroups)...)
+
+		// What an allocation grants a second container, asked after the slice and independently of
+		// it: it is a behavior of the allocator rather than of the slice, so a node whose slice
+		// could not be measured still has this answer worth having.
+		grp.Checks = append(grp.Checks, p.checkManagement(ctx, manufacturer, pf, staged, healthyGroups)...)
+
+		// The manufacturer's own words are kept whatever the later stages appended. A manufacturer
+		// that reads no driver says so here, and the simulated rows the responder produces
+		// afterwards do not answer that -- they are a different question at a different depth.
+		// Dropping the note as soon as those rows arrive leaves a reader to infer a driver read
+		// that never happened, which is what a Hygon node's report did.
+		grp.Note = read.Note
 	}
 
-	// The library tree both container questions mount, put on the host once and handed to each, so
-	// neither of them depends on the other having run and neither writes it twice.
-	//
-	// And only where one of them will start something. Both skip an accelerator that can host no
-	// logical slice, so a node whose cards all report none reaches no container at all -- while this
-	// tree, once written, is never removed. Staging it there would leave a permanent directory on a
-	// host that had nothing to measure.
-	var staged StageResult
-	if anyLogicallySliceable(groups) {
-		staged = p.stageLibFor(manufacturer)
-	} else {
-		staged = StageResult{Manufacturer: manufacturer}
-	}
-
-	// The slice itself, asked rather than the driver, and asked whatever the driver read produced:
-	// three manufacturers read no driver at all when they serve an allocation, and every one of the
-	// nine still has an injection to drive.
-	grp.Checks = append(grp.Checks, p.measureSliced(ctx, manufacturer, pf, staged, groups)...)
-
-	// What an allocation grants a second container, asked after the slice and independently of it:
-	// it is a behavior of the allocator rather than of the slice, so a node whose slice could not be
-	// measured still has this answer worth having.
-	grp.Checks = append(grp.Checks, p.checkManagement(ctx, manufacturer, pf, staged, groups)...)
-
-	// The manufacturer's own words are kept whatever the later stages appended. A manufacturer that
-	// reads no driver says so here, and the simulated rows the responder produces afterwards do not
-	// answer that -- they are a different question at a different depth. Dropping the note as soon
-	// as those rows arrive leaves a reader to infer a driver read that never happened, which is what
-	// a Hygon node's report did.
-	grp.Note = read.Note
+	// The health rows are added outside the loop above on purpose: they name the accelerator rather
+	// than one allocation mode, and a check with no mode is not the kind that gets the warning a
+	// vendor check with no mode does.
+	grp.Checks = append(grp.Checks, healthChecks...)
 
 	// The generic sentence only has to cover the manufacturer that read nothing and did not say why.
 	// What must never happen is neither: an empty group with no note reads as a node that passed.
@@ -525,6 +604,16 @@ func detection(groups device.DevicesGroupList, unmeasured bool) device.Preflight
 		d.Accelerators += len(groups[i].Accelerators)
 		if groups[i].Name == "" {
 			unnamed = true
+		}
+		// The count is the inventory and the unhealthy count is what an operator acts on, so both
+		// are said in one fragment rather than leaving a reader to subtract one from the other to
+		// work out which card to pull. An unhealthy card is still a card that is there, so the
+		// count beside the name stays the whole group.
+		unhealthy := unhealthyCount(groups[i].Accelerators)
+		if unhealthy > 0 {
+			names = append(names, fmt.Sprintf("%s x%d (%d unhealthy)",
+				groups[i].Name, len(groups[i].Accelerators), unhealthy))
+			continue
 		}
 		names = append(names, fmt.Sprintf("%s x%d", groups[i].Name, len(groups[i].Accelerators)))
 	}
