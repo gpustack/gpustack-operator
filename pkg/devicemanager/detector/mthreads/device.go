@@ -149,9 +149,7 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 					mtml.VOLATILE_ECC,
 					mtml.MEMORY_LOCATION_DRAM,
 				)
-				if ret.IsSuccess() && memEccDramUE > 0 {
-					memoryUnhealthy = true
-				}
+				memoryUnhealthy = evaluateDeviceUnhealthy(memEccDramUE, ret)
 			}
 
 			grpIndex := slices.IndexFunc(grpList, func(grp device.DevicesGroup) bool {
@@ -308,9 +306,8 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 				)
 				if !ret.IsSuccess() {
 					logger.V(3).Error(ret, "failed to get device memory ECC error counter")
-				} else if memEccDramUE > 0 {
-					memoryUnhealthy = true
 				}
+				memoryUnhealthy = evaluateDeviceUnhealthy(memEccDramUE, ret)
 			}
 
 			var (
@@ -361,6 +358,12 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 	}
 
 	return grpList, nil
+}
+
+// evaluateDeviceUnhealthy reports whether the vendor's uncorrectable ECC count makes the
+// accelerator unhealthy. A query the driver could not answer is not a fault, so it reads healthy.
+func evaluateDeviceUnhealthy(eccErrors uint64, ret mtml.Return) bool {
+	return ret.IsSuccess() && eccErrors > 0
 }
 
 func (in *mthreads) init() {

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gpustack.ai/gpustack/binding/nvml"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
@@ -147,6 +148,48 @@ func TestDetectAcceleratorMemory(t *testing.T) {
 			)
 			output, err := cmd.CombinedOutput()
 			require.NoError(t, err, "%s", output)
+		})
+	}
+}
+
+// TestEvaluateDeviceUnhealthy pins the NVIDIA health rule: an uncorrectable DRAM ECC error makes
+// the card unhealthy, while a count the driver could not read is not a fault of the card.
+func TestEvaluateDeviceUnhealthy(t *testing.T) {
+	testCases := []struct {
+		name      string
+		eccErrors uint64
+		ret       nvml.Return
+		want      bool
+	}{
+		{
+			name:      "no uncorrectable ECC error is healthy",
+			eccErrors: 0,
+			ret:       nvml.SUCCESS,
+			want:      false,
+		},
+		{
+			name:      "an uncorrectable ECC error is unhealthy",
+			eccErrors: 3,
+			ret:       nvml.SUCCESS,
+			want:      true,
+		},
+		{
+			name:      "an unsupported ECC query is healthy even with a nonzero count",
+			eccErrors: 3,
+			ret:       nvml.ERROR_NOT_SUPPORTED,
+			want:      false,
+		},
+		{
+			name:      "an ECC query whose driver is not loaded is healthy even with a nonzero count",
+			eccErrors: 3,
+			ret:       nvml.ERROR_DRIVER_NOT_LOADED,
+			want:      false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, evaluateDeviceUnhealthy(tc.eccErrors, tc.ret))
 		})
 	}
 }

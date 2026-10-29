@@ -137,9 +137,7 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				hgml.VOLATILE_ECC,
 				hgml.MEMORY_LOCATION_DRAM,
 			)
-			if ret.IsSuccess() && memEccDramUE > 0 {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = evaluateDeviceUnhealthy(memEccDramUE, ret)
 		}
 
 		ccMajor, ccMinor, _ := dev.GetHggcComputeCapability()
@@ -335,9 +333,7 @@ func (in *thead) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 				hgml.VOLATILE_ECC,
 				hgml.MEMORY_LOCATION_DRAM,
 			)
-			if ret.IsSuccess() && memEccDramUE > 0 {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = evaluateDeviceUnhealthy(memEccDramUE, ret)
 		}
 
 		var (
@@ -391,6 +387,12 @@ func (in *thead) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 	}
 
 	return grpList, nil
+}
+
+// evaluateDeviceUnhealthy reports whether the vendor's uncorrectable ECC count makes the
+// accelerator unhealthy. A query the driver could not answer is not a fault, so it reads healthy.
+func evaluateDeviceUnhealthy(eccErrors uint64, ret hgml.Return) bool {
+	return ret.IsSuccess() && eccErrors > 0
 }
 
 // coresUtilizationOf reads an accelerator's whole-device cores utilization.

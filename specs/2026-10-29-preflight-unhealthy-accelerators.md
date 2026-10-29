@@ -1,7 +1,7 @@
 # Spec: Preflight and Detect Unhealthy Accelerator Reporting Across All Manufacturers
 
 Status: Building
-Blocked on: implementation and verification of T2–T3
+Blocked on: implementation and verification of T3
 Type: Feature
 
 ## Summary
@@ -159,7 +159,7 @@ const capDeviceHealth = "device-health"
     - Add table-driven unit tests in `pkg/devicemanager/preflight/preflight_test.go` covering `Detection.Detail` formatting, `device-health` check emission, healthy-only filtering for sliceable and management checks, all-unhealthy groups, and `Failed()` error reporting.
   - `Verify`: `go test -v ./pkg/devicemanager/preflight -run 'TestPreflight|TestFailed'`
 
-- [ ] **T2 · Detector health-evaluation helpers and unhealthy-retention unit tests across all 9 manufacturers** `[pending]`
+- [x] **T2 · Detector health-evaluation helpers and unhealthy-retention unit tests across all 9 manufacturers** `[completed]`
   - `Blocked by`: None
   - `Owns`: `pkg/devicemanager/detector/detector_test.go`, `pkg/devicemanager/detector/amd/device.go`, `pkg/devicemanager/detector/amd/device_test.go`, `pkg/devicemanager/detector/ascend/device_test.go`, `pkg/devicemanager/detector/cambricon/device_test.go`, `pkg/devicemanager/detector/hygon/device.go`, `pkg/devicemanager/detector/hygon/device_test.go`, `pkg/devicemanager/detector/iluvatar/device.go`, `pkg/devicemanager/detector/iluvatar/device_test.go`, `pkg/devicemanager/detector/metax/device.go`, `pkg/devicemanager/detector/metax/device_test.go`, `pkg/devicemanager/detector/mthreads/device.go`, `pkg/devicemanager/detector/mthreads/device_test.go`, `pkg/devicemanager/detector/nvidia/device.go`, `pkg/devicemanager/detector/nvidia/device_test.go`, `pkg/devicemanager/detector/thead/device.go`, `pkg/devicemanager/detector/thead/device_test.go`
   - **Work**:

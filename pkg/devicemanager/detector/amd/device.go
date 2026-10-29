@@ -137,9 +137,7 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 			memory = uint64(mem.Total)
 
 			memEcc, ret := dev.GetGpuEccCount(amdsmi.GPU_BLOCK_UMC)
-			if ret.IsSuccess() && memEcc.Uncorrectable_count > 0 {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = evaluateDeviceUnhealthy(memEcc, ret)
 		}
 
 		physicalIndexes := getPhysicalIndexes(pciBusId)
@@ -319,9 +317,7 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 			memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
 
 			memEcc, ret := dev.GetGpuEccCount(amdsmi.GPU_BLOCK_UMC)
-			if ret.IsSuccess() && memEcc.Uncorrectable_count > 0 {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = evaluateDeviceUnhealthy(memEcc, ret)
 		}
 
 		var (
@@ -375,6 +371,12 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 	}
 
 	return grpList, nil
+}
+
+// evaluateDeviceUnhealthy reports whether the vendor's uncorrectable ECC count makes the
+// accelerator unhealthy. A query the driver could not answer is not a fault, so it reads healthy.
+func evaluateDeviceUnhealthy(eccCount amdsmi.ErrorCount, ret amdsmi.Return) bool {
+	return ret.IsSuccess() && eccCount.Uncorrectable_count > 0
 }
 
 func (in *amd) init() {

@@ -113,9 +113,7 @@ func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			memory = device.ConvertKiBToMiB(memInfo.VramTotal)
 
 			memEcc, ret := dev.GetTotalEccErrors()
-			if ret.IsSuccess() && memEcc.DramUE > 0 {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = evaluateDeviceUnhealthy(memEcc, ret)
 		}
 
 		grpIndex := slices.IndexFunc(grpList, func(grp device.DevicesGroup) bool {
@@ -234,9 +232,7 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 			memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
 
 			memEcc, ret := dev.GetTotalEccErrors()
-			if ret.IsSuccess() && memEcc.DramUE > 0 {
-				memoryUnhealthy = true
-			}
+			memoryUnhealthy = evaluateDeviceUnhealthy(memEcc, ret)
 		}
 
 		var (
@@ -285,6 +281,12 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 	}
 
 	return grpList, nil
+}
+
+// evaluateDeviceUnhealthy reports whether the vendor's uncorrectable DRAM ECC count makes the
+// accelerator unhealthy. A query the driver could not answer is not a fault, so it reads healthy.
+func evaluateDeviceUnhealthy(eccErrors mxsml.EccErrorCount, ret mxsml.Return) bool {
+	return ret.IsSuccess() && eccErrors.DramUE > 0
 }
 
 func (in *metax) init() {
