@@ -1,7 +1,6 @@
 # Spec: Preflight and Detect Unhealthy Accelerator Reporting Across All Manufacturers
 
-Status: Building
-Blocked on: implementation and verification of T3
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -168,7 +167,7 @@ const capDeviceHealth = "device-health"
     - Add a unit test in `pkg/devicemanager/detector/detector_test.go` verifying that an 8-card group with 1 `Status.Unhealthy == true` card across all 9 manufacturers retains all 8 cards through `alignDeviceGroups` with `Status.Unhealthy` preserved on the faulty card.
   - `Verify`: `go test -v ./pkg/devicemanager/detector/... -run 'TestEvaluate|TestAlignDeviceGroups'`
 
-- [ ] **T3 · Preflight documentation for `device-health` and in-Pod `kubectl exec` inspection** `[pending]`
+- [x] **T3 · Preflight documentation for `device-health` and in-Pod `kubectl exec` inspection** `[completed]`
   - `Blocked by`: T1
   - `Owns`: `docs/modules/devices/preflight.md`
   - **Work**:
