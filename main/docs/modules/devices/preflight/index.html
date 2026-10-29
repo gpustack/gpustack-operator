@@ -1604,6 +1604,37 @@ the workload container brings its own SDK and there is no generation to match an
 rest of the questions need. Only NVIDIA, Ascend and AMD carry a host CLI to cross-check that
 detection against, so for manufacturers without a host CLI a detection of zero is this container&rsquo;s own view and not the
 host&rsquo;s; the Host cross-check column below says which is which.</p>
+<h3 id="inside-a-running-pod">Inside a running Pod</h3>
+<p><strong>The Device Manager runs on the node, and its <code>Pod</code> carries what a run needs.</strong> The
+<code>gpustack-operator-device-manager-&lt;manufacturer&gt;</code> <code>DaemonSet</code> mounts <code>/dev</code>, <code>/sys</code> and that
+manufacturer&rsquo;s driver paths into its container, so a command run there reads the same hardware the
+Device Manager reads, with no second container and no image to pull:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl <span class="nb">exec</span> -n gpustack-system &lt;device-manager-pod&gt; -- <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager detect
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">kubectl <span class="nb">exec</span> -n gpustack-system &lt;device-manager-pod&gt; -- <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>&lt;manufacturer&gt;</span></span></code></pre></div>
+</div><p><code>detect</code> prints the accelerators it found and the health status of each, which is where an
+accelerator the vendor reports as faulty is told apart from one that is not there. <code>preflight</code>
+prints the same document a run on a bare host prints, and it is the one that fails the run. Neither
+reads the cluster&rsquo;s <code>Devices</code> objects or the Pod&rsquo;s log.</p>
+<p><strong>The <code>Pod</code> does not mount the host&rsquo;s root, so the run is a dry run.</strong> Preflight enters the host root
+to lock the node, to run the host&rsquo;s container CLI and to stage the preload libraries. A <code>Pod</code> that
+does not mount it is downgraded before any of that, and a row that would have read the host root
+says it never looked rather than answering out of this container&rsquo;s own filesystem.</p>
+<p>What the run still does is everything that needs no host root:</p>
+<ul>
+<li>the detect pass, which reads <code>/dev</code> and <code>/sys</code> in this container and reports <code>detection</code>;</li>
+<li>the <code>device-health</code> rows, which name an accelerator the vendor library reports as unhealthy;</li>
+<li>the driver precondition reads, which are calls this process makes into a driver it already holds
+open. A driver mode found off is reported as read but not established, because asking for it is a
+write;</li>
+<li>the container steps, printed as commands rather than run.</li>
+</ul>
+<p><strong>The node is left as it was.</strong> No lock is taken, no driver mode is toggled, no probe container is
+started, and a dry run writes nothing to the host.</p>
 <h2 id="mounts">Mounts</h2>
 <table>
   <thead>
@@ -2353,6 +2384,39 @@ and the two are told apart:</p>
 </table>
 <p>The last row is why a node carrying <code>nerdctl</code> beside a containerd that is not listening stays green:
 the CLI is there, its socket file may even be there, but nothing can be behind it.</p>
+<h3 id="unhealthy-accelerators">Unhealthy accelerators</h3>
+<p><strong>An unhealthy accelerator is reported, and left alone.</strong> The detect pass marks an enumerable
+accelerator with <code>status.unhealthy: true</code> when its vendor library reports a fault it cannot
+correct, such as uncorrectable DRAM ECC errors or a failed health state. Preflight reads that flag
+out of the detection it already did, and the group says so in its <code>detection.detail</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">detection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l">ok</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">depth</span><span class="p">:</span><span class="w"> </span><span class="l">declared</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="m">8</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">detail</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA A100 x8 (1 unhealthy)</span></span></span></code></pre></div>
+</div><p><strong>The detection still succeeds.</strong> <code>state</code> stays <code>ok</code> and <code>accelerators</code> still counts every card on
+the node, because a node with one faulty accelerator still carries eight of them and seven serve
+allocations. The count beside the name is the whole group; the count in brackets is the faulty
+subset of it.</p>
+<p><strong>Each faulty accelerator gets one <code>device-health</code> row</strong>, and the rest of the pass is skipped on that
+one alone: its driver preconditions are not read, no probe container is started for it, and no
+management check is asked about it. The healthy accelerators beside it are preflighted as usual.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s1">&#39;0&#39;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">capability</span><span class="p">:</span><span class="w"> </span><span class="l">device-health</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">unnamed</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l">unavailable</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">depth</span><span class="p">:</span><span class="w"> </span><span class="l">declared</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="p">&gt;-</span><span class="sd">
+</span></span></span><span class="line"><span class="cl"><span class="sd">    the detect pass reported this accelerator unhealthy, so the device plugin
+</span></span></span><span class="line"><span class="cl"><span class="sd">    withholds it from allocations and preflight skipped its capability checks</span></span></span></code></pre></div>
+</div><p><strong>It is a failure, and the run exits non-zero</strong>, the same as <code>stale-container-sweep</code> and
+<code>preflight-panicked</code>. The device plugin withholds that accelerator from every allocation, so the
+node cannot serve what it appears to carry. The <code>mode</code> is <code>unnamed</code> because the fault is in the
+accelerator rather than in one allocation mode.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
@@ -2379,7 +2443,7 @@ never creates.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/3e49060a0e11d7488522dd119527f9177df8f07f/docs/modules/devices/preflight.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/a4b463899a64d9e79c3b3c599f470f79f6701a09/docs/modules/devices/preflight.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/preflight.md">Edit this page</a>
             
@@ -2403,6 +2467,7 @@ never creates.</div>
         <li><a href="#nvidia">NVIDIA</a></li>
         <li><a href="#t-head">T-Head</a></li>
         <li><a href="#every-manufacturer-at-once">Every manufacturer at once</a></li>
+        <li><a href="#inside-a-running-pod">Inside a running Pod</a></li>
       </ul>
     </li>
     <li><a href="#mounts">Mounts</a></li>
@@ -2419,7 +2484,11 @@ never creates.</div>
         <li><a href="#slice-rows-and-probes">Slice rows and probes</a></li>
       </ul>
     </li>
-    <li><a href="#reading-the-result">Reading the result</a></li>
+    <li><a href="#reading-the-result">Reading the result</a>
+      <ul>
+        <li><a href="#unhealthy-accelerators">Unhealthy accelerators</a></li>
+      </ul>
+    </li>
   </ul>
 </nav>
         

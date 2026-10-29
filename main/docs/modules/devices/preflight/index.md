@@ -201,6 +201,43 @@ rest of the questions need. Only NVIDIA, Ascend and AMD carry a host CLI to cros
 detection against, so for manufacturers without a host CLI a detection of zero is this container's own view and not the
 host's; the Host cross-check column below says which is which.
 
+### Inside a running Pod
+
+**The Device Manager runs on the node, and its `Pod` carries what a run needs.** The
+`gpustack-operator-device-manager-<manufacturer>` `DaemonSet` mounts `/dev`, `/sys` and that
+manufacturer's driver paths into its container, so a command run there reads the same hardware the
+Device Manager reads, with no second container and no image to pull:
+
+```bash
+kubectl exec -n gpustack-system <device-manager-pod> -- \
+    gpustack-operator device-manager detect
+
+kubectl exec -n gpustack-system <device-manager-pod> -- \
+    gpustack-operator device-manager preflight --manufacturer=<manufacturer>
+```
+
+`detect` prints the accelerators it found and the health status of each, which is where an
+accelerator the vendor reports as faulty is told apart from one that is not there. `preflight`
+prints the same document a run on a bare host prints, and it is the one that fails the run. Neither
+reads the cluster's `Devices` objects or the Pod's log.
+
+**The `Pod` does not mount the host's root, so the run is a dry run.** Preflight enters the host root
+to lock the node, to run the host's container CLI and to stage the preload libraries. A `Pod` that
+does not mount it is downgraded before any of that, and a row that would have read the host root
+says it never looked rather than answering out of this container's own filesystem.
+
+What the run still does is everything that needs no host root:
+
+- the detect pass, which reads `/dev` and `/sys` in this container and reports `detection`;
+- the `device-health` rows, which name an accelerator the vendor library reports as unhealthy;
+- the driver precondition reads, which are calls this process makes into a driver it already holds
+  open. A driver mode found off is reported as read but not established, because asking for it is a
+  write;
+- the container steps, printed as commands rather than run.
+
+**The node is left as it was.** No lock is taken, no driver mode is toggled, no probe container is
+started, and a dry run writes nothing to the host.
+
 ## Mounts
 
 | Mount | Purpose |
@@ -670,6 +707,46 @@ and the two are told apart:
 
 The last row is why a node carrying `nerdctl` beside a containerd that is not listening stays green:
 the CLI is there, its socket file may even be there, but nothing can be behind it.
+
+### Unhealthy accelerators
+
+**An unhealthy accelerator is reported, and left alone.** The detect pass marks an enumerable
+accelerator with `status.unhealthy: true` when its vendor library reports a fault it cannot
+correct, such as uncorrectable DRAM ECC errors or a failed health state. Preflight reads that flag
+out of the detection it already did, and the group says so in its `detection.detail`:
+
+```yaml
+detection:
+  state: ok
+  depth: declared
+  accelerators: 8
+  detail: NVIDIA A100 x8 (1 unhealthy)
+```
+
+**The detection still succeeds.** `state` stays `ok` and `accelerators` still counts every card on
+the node, because a node with one faulty accelerator still carries eight of them and seven serve
+allocations. The count beside the name is the whole group; the count in brackets is the faulty
+subset of it.
+
+**Each faulty accelerator gets one `device-health` row**, and the rest of the pass is skipped on that
+one alone: its driver preconditions are not read, no probe container is started for it, and no
+management check is asked about it. The healthy accelerators beside it are preflighted as usual.
+
+```yaml
+- accelerator: '0'
+  capability: device-health
+  mode: unnamed
+  state: unavailable
+  depth: declared
+  reason: >-
+    the detect pass reported this accelerator unhealthy, so the device plugin
+    withholds it from allocations and preflight skipped its capability checks
+```
+
+**It is a failure, and the run exits non-zero**, the same as `stale-container-sweep` and
+`preflight-panicked`. The device plugin withholds that accelerator from every allocation, so the
+node cannot serve what it appears to carry. The `mode` is `unnamed` because the fault is in the
+accelerator rather than in one allocation mode.
 
 ---
 
