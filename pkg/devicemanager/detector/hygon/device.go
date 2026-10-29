@@ -134,9 +134,7 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				continue
 			}
 			memory = device.ConvertBytesToMiB(memTotal)
-
-			memEcc, ret := dev.GetEccCount(rsmi.GPU_BLOCK_UMC)
-			memoryUnhealthy = evaluateDeviceUnhealthy(memEcc, ret)
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		physicalIndexes := getPhysicalIndexes(pciBusId)
@@ -344,9 +342,7 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 			}
 
 			memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-
-			memEcc, ret := dev.GetEccCount(rsmi.GPU_BLOCK_UMC)
-			memoryUnhealthy = evaluateDeviceUnhealthy(memEcc, ret)
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		var (
@@ -391,6 +387,11 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 	}
 
 	return grpList, nil
+}
+
+func isDeviceUnhealthy(dev rsmi.Device) bool {
+	memEcc, ret := dev.GetEccCount(rsmi.GPU_BLOCK_UMC)
+	return evaluateDeviceUnhealthy(memEcc, ret)
 }
 
 // evaluateDeviceUnhealthy reports whether the vendor's uncorrectable ECC count makes the

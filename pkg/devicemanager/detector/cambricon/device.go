@@ -124,7 +124,7 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 				continue
 			}
 			memory = uint64(memInfo.PhysicalMemoryTotal)
-			memoryUnhealthy = isCardUnhealthy(dev)
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		grpIndex := slices.IndexFunc(grpList, func(grp device.DevicesGroup) bool {
@@ -246,7 +246,7 @@ func (in *cambricon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupL
 			memory = uint64(memInfo.PhysicalMemoryTotal)
 			memoryUsage = uint64(memInfo.PhysicalMemoryUsed)
 			memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-			memoryUnhealthy = isCardUnhealthy(dev)
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		var (
@@ -303,12 +303,14 @@ func (in *cambricon) init() {
 	})
 }
 
-func isCardUnhealthy(dev cndev.Device) bool {
+func isDeviceUnhealthy(dev cndev.Device) bool {
 	healthHandler := dev.GetCardHealthStateV()
-	return evaluateCardUnhealthy(healthHandler.V2, healthHandler.V1)
+	return evaluateDeviceUnhealthy(healthHandler.V2, healthHandler.V1)
 }
 
-func evaluateCardUnhealthy(
+// evaluateDeviceUnhealthy reports whether the vendor's card health state (V2 with V1 fallback)
+// makes the accelerator unhealthy. A query the driver could not answer is not a fault, so it reads healthy.
+func evaluateDeviceUnhealthy(
 	readV2 func() (cndev.CardHealthStateV2, cndev.Return),
 	readV1 func() (cndev.CardHealthStateV2, cndev.Return),
 ) bool {

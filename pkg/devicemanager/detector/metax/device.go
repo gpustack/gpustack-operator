@@ -111,9 +111,7 @@ func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				continue
 			}
 			memory = device.ConvertKiBToMiB(memInfo.VramTotal)
-
-			memEcc, ret := dev.GetTotalEccErrors()
-			memoryUnhealthy = evaluateDeviceUnhealthy(memEcc, ret)
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		grpIndex := slices.IndexFunc(grpList, func(grp device.DevicesGroup) bool {
@@ -230,9 +228,7 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 			memory = device.ConvertKiBToMiB(memInfo.VramTotal)
 			memoryUsage = device.ConvertKiBToMiB(memInfo.VramUse)
 			memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-
-			memEcc, ret := dev.GetTotalEccErrors()
-			memoryUnhealthy = evaluateDeviceUnhealthy(memEcc, ret)
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		var (
@@ -281,6 +277,11 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 	}
 
 	return grpList, nil
+}
+
+func isDeviceUnhealthy(dev mxsml.Device) bool {
+	memEcc, ret := dev.GetTotalEccErrors()
+	return evaluateDeviceUnhealthy(memEcc, ret)
 }
 
 // evaluateDeviceUnhealthy reports whether the vendor's uncorrectable DRAM ECC count makes the

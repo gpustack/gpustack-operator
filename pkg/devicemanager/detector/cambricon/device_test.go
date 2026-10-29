@@ -11,7 +11,7 @@ import (
 	"gpustack.ai/gpustack/binding/cndev"
 )
 
-func TestEvaluateCardUnhealthy(t *testing.T) {
+func TestEvaluateDeviceUnhealthy(t *testing.T) {
 	testCases := []struct {
 		name  string
 		v2    cndev.CardHealthStateV2
@@ -56,7 +56,7 @@ func TestEvaluateCardUnhealthy(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := evaluateCardUnhealthy(
+			got := evaluateDeviceUnhealthy(
 				func() (cndev.CardHealthStateV2, cndev.Return) { return tc.v2, tc.v2Ret },
 				func() (cndev.CardHealthStateV2, cndev.Return) { return tc.v1, tc.v1Ret },
 			)

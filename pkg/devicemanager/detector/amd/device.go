@@ -135,9 +135,7 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 				continue
 			}
 			memory = uint64(mem.Total)
-
-			memEcc, ret := dev.GetGpuEccCount(amdsmi.GPU_BLOCK_UMC)
-			memoryUnhealthy = evaluateDeviceUnhealthy(memEcc, ret)
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		physicalIndexes := getPhysicalIndexes(pciBusId)
@@ -315,9 +313,7 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 			memory = uint64(mem.Total)
 			memoryUsage = uint64(mem.Used)
 			memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-
-			memEcc, ret := dev.GetGpuEccCount(amdsmi.GPU_BLOCK_UMC)
-			memoryUnhealthy = evaluateDeviceUnhealthy(memEcc, ret)
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		var (
@@ -371,6 +367,11 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 	}
 
 	return grpList, nil
+}
+
+func isDeviceUnhealthy(dev amdsmi.Device) bool {
+	memEcc, ret := dev.GetGpuEccCount(amdsmi.GPU_BLOCK_UMC)
+	return evaluateDeviceUnhealthy(memEcc, ret)
 }
 
 // evaluateDeviceUnhealthy reports whether the vendor's uncorrectable ECC count makes the

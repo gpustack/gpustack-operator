@@ -126,9 +126,7 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 				}
 			}
 			memory = device.ConvertBytesToMiB(memInfo.Total)
-
-			memHealth, ret := dev.GetHealth()
-			memoryUnhealthy = evaluateDeviceUnhealthy(memHealth, ret)
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		ccMajor, ccMinor, _ := dev.GetCudaComputeCapability()
@@ -267,9 +265,7 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 			memory = device.ConvertBytesToMiB(memInfo.Total)
 			memoryUsage = device.ConvertBytesToMiB(memInfo.Used)
 			memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-
-			memHealth, ret := dev.GetHealth()
-			memoryUnhealthy = evaluateDeviceUnhealthy(memHealth, ret)
+			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
 		var (
@@ -333,6 +329,11 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 	}
 
 	return grpList, nil
+}
+
+func isDeviceUnhealthy(dev ixml.Device) bool {
+	memHealth, ret := dev.GetHealth()
+	return evaluateDeviceUnhealthy(memHealth, ret)
 }
 
 // evaluateDeviceUnhealthy reports whether the vendor's health state makes the accelerator

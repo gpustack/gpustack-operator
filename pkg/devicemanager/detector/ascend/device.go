@@ -591,6 +591,9 @@ func isDeviceUnhealthy(dev dcmi.Device, memType dcmi.DeviceType) bool {
 	})
 }
 
+// evaluateDeviceUnhealthy reports whether the vendor's device health state or uncorrectable
+// double-bit ECC fallback makes the accelerator unhealthy. A query the driver could not answer
+// is not a fault, so it reads healthy.
 func evaluateDeviceUnhealthy(health uint32, healthRet dcmi.Return, readECC func() (dcmi.EccInfo, dcmi.Return)) bool {
 	if healthRet.IsSuccess() {
 		return health >= 2
