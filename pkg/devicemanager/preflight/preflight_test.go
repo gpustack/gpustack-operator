@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -283,12 +284,14 @@ func TestPreflight_Detection(t *testing.T) {
 		wantState        device.PreflightState
 		wantAccelerators int
 		wantReason       string
+		wantDetail       string
 	}{
 		{
 			name:             "accelerators detected",
 			groups:           twoAccelerators,
 			wantState:        device.PreflightStateOK,
 			wantAccelerators: 2,
+			wantDetail:       "NVIDIA A100 x2",
 		},
 		{
 			// Nothing is wrong with this node; this manufacturer's hardware is simply not on it.
@@ -332,6 +335,57 @@ func TestPreflight_Detection(t *testing.T) {
 			wantAccelerators: 3,
 			wantReason:       detectionUnnamed,
 		},
+		{
+			// The count is the inventory and the unhealthy count is what an operator acts on.
+			// Both are said in one fragment, so a reader does not have to subtract one from the
+			// other to work out which card to pull -- and the detection still says the node was
+			// found, because it was: a faulty card is not a card that is not there.
+			name: "a group with an unhealthy card names how many",
+			groups: device.DevicesGroupList{{
+				ID:           "a100",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Name:         "NVIDIA A100",
+				Accelerators: eightCards(0),
+			}},
+			wantState:        device.PreflightStateOK,
+			wantAccelerators: 8,
+			wantDetail:       "NVIDIA A100 x8 (1 unhealthy)",
+		},
+		{
+			name: "a group whose cards are all unhealthy names how many",
+			groups: device.DevicesGroupList{{
+				ID:           "a100",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Name:         "NVIDIA A100",
+				Accelerators: eightCards(0, 1, 2, 3, 4, 5, 6, 7),
+			}},
+			wantState:        device.PreflightStateOK,
+			wantAccelerators: 8,
+			wantDetail:       "NVIDIA A100 x8 (8 unhealthy)",
+		},
+		{
+			// One group carrying a faulty card says so; the group beside it says nothing about
+			// health, because nothing is wrong with it. A reader has to be able to tell which
+			// group the count belongs to.
+			name: "only the group with an unhealthy card is annotated",
+			groups: device.DevicesGroupList{
+				{
+					ID:           "h100",
+					Manufacturer: nodefeature.ManufacturerNVIDIA,
+					Name:         "NVIDIA H100",
+					Accelerators: eightCards(3),
+				},
+				{
+					ID:           "a100",
+					Manufacturer: nodefeature.ManufacturerNVIDIA,
+					Name:         "NVIDIA A100",
+					Accelerators: []workercore.Accelerator{{ID: "GPU-0"}, {ID: "GPU-1"}},
+				},
+			},
+			wantState:        device.PreflightStateOK,
+			wantAccelerators: 10,
+			wantDetail:       "NVIDIA H100 x8 (1 unhealthy), NVIDIA A100 x2",
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -342,10 +396,214 @@ func TestPreflight_Detection(t *testing.T) {
 			assert.Equal(t, tc.wantReason, det.Reason, "reason")
 			assert.Equal(t, device.PreflightDepthDeclared, det.Depth,
 				"a detect pass asks the driver and observes nothing further")
-			if tc.wantState == device.PreflightStateOK {
-				assert.Contains(t, det.Detail, "NVIDIA A100",
-					"what was detected, in the detector's own words")
+			assert.Equal(t, tc.wantDetail, det.Detail, "what was detected, in the detector's own words")
+		})
+	}
+}
+
+// eightCards is eight accelerators, the count an eight-card node has, each of them able to host
+// eight logical slices. The cards are named by their index so a reader can tell which one was
+// withheld, and the ones named in unhealthy carry the flag the detect pass set.
+func eightCards(unhealthy ...int) []workercore.Accelerator {
+	accels := make([]workercore.Accelerator, 0, 8)
+	for i := 0; i < 8; i++ {
+		accel := workercore.Accelerator{
+			ID:     strconv.Itoa(i),
+			Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 8}},
+		}
+		for _, u := range unhealthy {
+			if u == i {
+				accel.Status.Unhealthy = true
 			}
+		}
+		accels = append(accels, accel)
+	}
+	return accels
+}
+
+// recordingPreflighter is a manufacturer's preflighter that records what it was asked about and
+// answers as an injector, so the rows the later stages produce can be attributed to the cards they
+// name.
+type recordingPreflighter struct {
+	fakeInjector
+	groups device.DevicesGroupList
+	calls  int
+	note   string
+}
+
+func (f *recordingPreflighter) PreflightAccelerator(
+	groups device.DevicesGroupList,
+) device.PreflightGroup {
+	f.calls++
+	f.groups = groups
+	return device.PreflightGroup{Note: f.note}
+}
+
+// acceleratorIDs names every accelerator in a group list, so a reader can tell which cards a
+// preflighter was handed.
+func acceleratorIDs(groups device.DevicesGroupList) []string {
+	var ids []string
+	for i := range groups {
+		for j := range groups[i].Accelerators {
+			ids = append(ids, groups[i].Accelerators[j].ID)
+		}
+	}
+	return ids
+}
+
+// An accelerator the detect pass reported unhealthy is withheld from every allocation mode by the
+// device plugin, so preflight must not probe it -- and must still say which card it is.
+//
+// Three facts are kept apart on purpose: the card is still counted as detected, it is reported as
+// unavailable under a capability of this package's own, and the healthy cards beside it are the
+// ones the rest of the pass measures.
+func TestPreflight_UnhealthyAccelerators(t *testing.T) {
+	testCases := []struct {
+		name                string
+		manufacturer        string
+		groups              device.DevicesGroupList
+		preflighterNote     string
+		wantHealthIDs       []string
+		wantPreflighterCall int
+		wantPreflighterIDs  []string
+		wantRowIDs          []string
+		wantStaged          bool
+		wantNote            string
+		wantDetected        int
+	}{
+		{
+			// The node is not broken: seven of its eight cards are fine, and they are measured.
+			// The eighth is reported and left alone.
+			name:         "one unhealthy card among eight is reported and withheld",
+			manufacturer: nodefeature.ManufacturerAscend,
+			groups: device.DevicesGroupList{{
+				ID:             "grp-0",
+				Manufacturer:   nodefeature.ManufacturerAscend,
+				Name:           "Ascend910B2",
+				Family:         "910B",
+				RuntimeVersion: "8.0.0",
+				Memory:         65536,
+				Accelerators:   eightCards(0),
+			}},
+			wantHealthIDs:       []string{"0"},
+			wantPreflighterCall: 1,
+			wantPreflighterIDs:  []string{"1", "2", "3", "4", "5", "6", "7"},
+			wantRowIDs:          []string{"1", "2", "3", "4", "5", "6", "7"},
+			wantStaged:          true,
+			wantDetected:        8,
+		},
+		{
+			// Nothing is left to measure, so nothing is measured -- and the group still says what
+			// is wrong with it rather than reading as a node that passed.
+			name:         "every card unhealthy leaves nothing to measure",
+			manufacturer: nodefeature.ManufacturerAscend,
+			groups: device.DevicesGroupList{{
+				ID:             "grp-0",
+				Manufacturer:   nodefeature.ManufacturerAscend,
+				Name:           "Ascend910B2",
+				Family:         "910B",
+				RuntimeVersion: "8.0.0",
+				Memory:         65536,
+				Accelerators:   eightCards(0, 1, 2, 3, 4, 5, 6, 7),
+			}},
+			wantHealthIDs: []string{"0", "1", "2", "3", "4", "5", "6", "7"},
+			wantStaged:    false,
+			wantDetected:  8,
+		},
+		{
+			// A manufacturer that reads no driver still has cards that can be unhealthy, and the
+			// row saying so is what the exit code is read from. Its own note says why it read
+			// nothing, and that note survives the rows appended beside it.
+			name:         "a manufacturer that reads no driver still reports the unhealthy card",
+			manufacturer: nodefeature.ManufacturerHygon,
+			groups: device.DevicesGroupList{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerHygon,
+				Name:         "DCU Z100",
+				Accelerators: []workercore.Accelerator{
+					{ID: "0", Status: workercore.AcceleratorStatus{Unhealthy: true}},
+					{ID: "1"},
+				},
+			}},
+			preflighterNote:     "the hygon allocator reads no driver at allocation time",
+			wantHealthIDs:       []string{"0"},
+			wantPreflighterCall: 1,
+			wantPreflighterIDs:  []string{"1"},
+			wantNote:            "the hygon allocator reads no driver at allocation time",
+			wantDetected:        2,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := &recordingPreflighter{
+				fakeInjector: fakeInjector{
+					build: func(string, string, string) *deviceplugin.ContainerAllocateResponse {
+						return &deviceplugin.ContainerAllocateResponse{
+							Envs: map[string]string{"ASCEND_VISIBLE_DEVICES": "0"},
+						}
+					},
+				},
+				note: tc.preflighterNote,
+			}
+			withRegistry(t, map[string]func(device.PreflighterOptions) device.AcceleratorPreflighter{
+				tc.manufacturer: func(device.PreflighterOptions) device.AcceleratorPreflighter {
+					return recorder
+				},
+			})
+
+			imageRoot := withStagingRoots(t)
+			require.NoError(t, os.MkdirAll(filepath.Join(imageRoot, tc.manufacturer), 0o755))
+			require.NoError(t, os.WriteFile(
+				filepath.Join(imageRoot, tc.manufacturer, "ld.so.preload"), []byte("x"), 0o644,
+			))
+
+			root := fakeHostRoot(t)
+			host, _ := answeringHost(root, "", nil)
+			// No runtime is resolved, so every container step is emitted rather than run: what is
+			// under test here is which cards are asked, not what a container printed.
+			p := &Preflighter{
+				host:          host,
+				manufacturers: sets.New(tc.manufacturer),
+			}
+
+			grp := p.preflight(context.Background(), tc.manufacturer,
+				detection(tc.groups, false), tc.groups, false)
+
+			var healthIDs, rowIDs []string
+			for _, c := range grp.Checks {
+				if c.Capability == capDeviceHealth {
+					healthIDs = append(healthIDs, c.Accelerator)
+					assert.Equal(t, device.PreflightModeUnnamed, c.Mode,
+						"the row names no allocation mode, because it applies to all of them")
+					assert.Equal(t, device.PreflightStateUnavailable, c.State,
+						"an unhealthy card is refused by the device plugin, so it is a failure")
+					assert.Equal(t, device.PreflightDepthDeclared, c.Depth,
+						"read at the shallowest depth, because the detect pass is what said so")
+					assert.NotEmpty(t, c.Reason, "and it says why")
+					continue
+				}
+				rowIDs = append(rowIDs, c.Accelerator)
+			}
+			assert.Equal(t, tc.wantHealthIDs, healthIDs, "one row per unhealthy accelerator")
+			assert.Equal(t, sets.New[string](tc.wantRowIDs...), sets.New[string](rowIDs...),
+				"no row below the health ones names a card that was withheld")
+
+			assert.Equal(t, tc.wantPreflighterCall, recorder.calls,
+				"the manufacturer's own preflighter is driven for the healthy cards only")
+			assert.Equal(t, sets.New[string](tc.wantPreflighterIDs...),
+				sets.New[string](acceleratorIDs(recorder.groups)...),
+				"and it is handed the healthy cards only")
+
+			staged := filepath.Join(root, deviceplugin.OperatorLibDir, tc.manufacturer)
+			if tc.wantStaged {
+				assert.DirExists(t, staged, "the preload library tree the healthy cards need")
+			} else {
+				assert.NoDirExists(t, staged, "a tree that is never removed was staged for nothing")
+			}
+
+			assert.Equal(t, tc.wantNote, grp.Note, "note")
+			assert.Len(t, tc.groups[0].Accelerators, tc.wantDetected,
+				"the caller's groups are filtered into a copy, not in place")
 		})
 	}
 }
@@ -384,9 +642,10 @@ func TestPreflight_DepthNeverBlankNeverInflated(t *testing.T) {
 // which are merely answers has to be pinned rather than inferred from the words around them.
 func TestFailed(t *testing.T) {
 	testCases := []struct {
-		name       string
-		group      device.PreflightGroup
-		wantFailed bool
+		name        string
+		group       device.PreflightGroup
+		wantFailed  bool
+		wantContain []string
 	}{
 		{
 			name: "a capability that could not be read is a failure",
@@ -394,6 +653,22 @@ func TestFailed(t *testing.T) {
 				{Accelerator: "GPU-0", Capability: "mig", State: device.PreflightStateUnavailable},
 			}},
 			wantFailed: true,
+		},
+		{
+			// The exit code is the part of the result a script reads, so the unhealthy card has to
+			// reach it -- named, so that the row can be found in the document beside it.
+			name: "an accelerator the detect pass reported unhealthy is a failure",
+			group: device.PreflightGroup{Checks: []device.PreflightCheck{
+				{
+					Accelerator: "0", Capability: capDeviceHealth, State: device.PreflightStateUnavailable,
+					Reason: "the detect pass reported this accelerator unhealthy",
+				},
+			}},
+			wantFailed: true,
+			wantContain: []string{
+				nodefeature.ManufacturerNVIDIA + ": device-health on 0:",
+				"the detect pass reported this accelerator unhealthy",
+			},
 		},
 		{
 			name: "a detect pass that could not measure is a failure",
@@ -445,6 +720,9 @@ func TestFailed(t *testing.T) {
 			require.Len(t, failed, 1)
 			assert.Contains(t, failed[0], nodefeature.ManufacturerNVIDIA,
 				"a failure names the manufacturer it belongs to")
+			for _, want := range tc.wantContain {
+				assert.Contains(t, failed[0], want)
+			}
 		})
 	}
 }
