@@ -434,7 +434,8 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 	}
 
 	allocationSize := ctrReq.GetAllocationSize()
-	preferredDeviceIDsSet := preferredAcceleratorIDsOf(pod, devs)
+	preferredDeviceIDs := preferredAcceleratorIDsOf(pod, devs)
+	preferredDeviceIDsSet := sets.New[string](preferredDeviceIDs...)
 
 	// For sliced, every accelerator this HINT offers must still have a free slot and this
 	// container's per-accelerator ".sliced.units" (the memory budget the Pod webhook folded in)
@@ -451,22 +452,18 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 	}
 
 	sel := s.selectPreferredUnits(room, availableResTokensMap, mustIncludedResTokensMap,
-		preferredDeviceIDsSet, allocationSize, slicedUnits)
+		preferredDeviceIDs, preferredDeviceIDsSet, allocationSize, slicedUnits)
 	selectedResTokens, remainingSize := sel.Selected, sel.RemainingSize
 
 	if preferredDeviceIDsSet.Len() > 0 {
 		s.Logger.Error(nil, "not enough preferred devices",
 			"unmet", sets.List(preferredDeviceIDsSet))
+	}
+	if len(preferredDeviceIDs) > 0 && remainingSize > 0 {
 		if len(sel.Unselected) == 0 {
 			return &ContainerPreferredAllocationResponse{}, nil
 		}
-		// remainingSize can be negative: the walk keeps taking preferred accelerators after the
-		// claim is full, because it only stops early once the preferred set is ALSO empty — and a
-		// "accelerator.preferred-id" annotation is taken at face value, so an ID naming no
-		// accelerator on this node never clears from that set. A pod rescheduled onto a different
-		// node carries exactly such an annotation. Without the lower bound the slice below panics
-		// on a negative index and takes the device-manager down with it.
-		if remainingSize > 0 && remainingSize <= int32(len(sel.Unselected)) {
+		if remainingSize <= int32(len(sel.Unselected)) {
 			s.Logger.Info("try to allocate from unselected devices since preferred devices are not enough")
 			selectedResTokens = append(selectedResTokens, sel.Unselected[:remainingSize]...)
 			remainingSize = 0
@@ -477,6 +474,10 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 		s.Logger.Error(nil, "not enough devices",
 			"required", allocationSize, "available", allocationSize-remainingSize)
 		return &ContainerPreferredAllocationResponse{}, nil
+	}
+
+	if len(preferredDeviceIDs) > 0 {
+		sortTokensByHardwareOrder(devs, selectedResTokens)
 	}
 
 	deviceIDs := make([]string, 0, len(selectedResTokens))
@@ -532,10 +533,12 @@ type _PreferredSelection struct {
 func (s *ResourceServer) selectPreferredUnits(
 	room _SlicedRoom,
 	availableResTokensMap, mustIncludedResTokensMap map[Resource][]ResourceToken,
+	preferredDeviceIDs []string,
 	preferredDeviceIDsSet sets.Set[string],
 	allocationSize, slicedUnits int32,
 ) _PreferredSelection {
 	devs := room.devs
+	hasPreferred := len(preferredDeviceIDs) > 0
 	sel := _PreferredSelection{
 		Selected:      make([]ResourceToken, 0, allocationSize),
 		RemainingSize: allocationSize,
@@ -594,7 +597,7 @@ func (s *ResourceServer) selectPreferredUnits(
 					sel.Unselected = append(sel.Unselected, resTokens[0])
 					continue
 				}
-				if preferredDeviceIDsSet.Len() != 0 && !preferredDeviceIDsSet.Has(res.Device) {
+				if hasPreferred && !preferredDeviceIDsSet.Has(res.Device) {
 					sel.Unselected = append(sel.Unselected, resTokens[0])
 					continue
 				}
@@ -602,13 +605,60 @@ func (s *ResourceServer) selectPreferredUnits(
 				sel.Selected = append(sel.Selected, resTokens[0])
 			}
 			sel.RemainingSize--
-			if preferredDeviceIDsSet.Len() == 0 && sel.RemainingSize <= 0 {
+			if !hasPreferred && sel.RemainingSize <= 0 {
 				return sel
 			}
 		}
 	}
 
+	if hasPreferred {
+		sel.Selected, sel.RemainingSize = capAndOrderPreferredTokens(
+			mustIncludedResTokensMap, preferredDeviceIDs, sel.Selected, allocationSize,
+		)
+	}
 	return sel
+}
+
+// capAndOrderPreferredTokens orders selected tokens with must-include accelerators first and
+// preferred accelerators in their declared preference order, then caps the slice to allocationSize.
+func capAndOrderPreferredTokens(
+	mustInclude map[Resource][]ResourceToken,
+	preferredOrder []string,
+	selected []ResourceToken,
+	allocationSize int32,
+) ([]ResourceToken, int32) {
+	preferredRank := make(map[string]int, len(preferredOrder))
+	for i, id := range preferredOrder {
+		preferredRank[id] = i
+	}
+	slices.SortStableFunc(selected, func(a, b ResourceToken) int {
+		_, mustA := mustInclude[a.Resource]
+		_, mustB := mustInclude[b.Resource]
+		if c := slicex.CompareTrueFirst(mustA, mustB); c != 0 {
+			return c
+		}
+		return cmp.Compare(preferredRank[a.Device], preferredRank[b.Device])
+	})
+	if int32(len(selected)) > allocationSize {
+		selected = selected[:allocationSize]
+	}
+	return selected, allocationSize - int32(len(selected))
+}
+
+// sortTokensByHardwareOrder orders tokens by their accelerator's position in devs.Spec.Groups.
+func sortTokensByHardwareOrder(devs *workercore.Devices, tokens []ResourceToken) {
+	pos := make(map[Resource]int)
+	idx := 0
+	for i := range devs.Spec.Groups {
+		grp := &devs.Spec.Groups[i]
+		for j := range grp.Accelerators {
+			pos[Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}] = idx
+			idx++
+		}
+	}
+	slices.SortStableFunc(tokens, func(a, b ResourceToken) int {
+		return cmp.Compare(pos[a.Resource], pos[b.Resource])
+	})
 }
 
 // slicedPackingOrder returns the positions of grp's accelerators in the order a claim of
