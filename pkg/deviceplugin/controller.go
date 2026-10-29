@@ -1660,38 +1660,46 @@ func (r *DevicesReconciler) liveDeviceIDs(ctx context.Context) (sets.Set[string]
 	return held, nil
 }
 
-func preferredAcceleratorIDsOf(pod *core.Pod, devices *workercore.Devices) sets.Set[string] {
-	if pod != nil && pod.Annotations != nil {
-		str, ok := pod.Annotations[_PreferredAcceleratorIDAnnoKey]
-		if ok {
-			requiredIDs := strings.Split(str, ",")
-			for i := range requiredIDs {
-				requiredIDs[i] = strings.TrimSpace(requiredIDs[i])
+func preferredAcceleratorIDsOf(pod *core.Pod, devices *workercore.Devices) []string {
+	if pod == nil || pod.Annotations == nil {
+		return nil
+	}
+
+	if str, ok := pod.Annotations[_PreferredAcceleratorIDAnnoKey]; ok {
+		seen := sets.New[string]()
+		var ids []string
+		for _, raw := range strings.Split(str, ",") {
+			id := strings.TrimSpace(raw)
+			if id == "" || seen.Has(id) {
+				continue
 			}
-			return sets.New[string](requiredIDs...)
+			seen.Insert(id)
+			ids = append(ids, id)
 		}
+		return ids
+	}
 
-		str, ok = pod.Annotations[_PreferredAcceleratorIndexAnnoKey]
-		if ok {
-			requiredIndexes := strings.Split(str, ",")
-			for i := range requiredIndexes {
-				requiredIndexes[i] = strings.TrimSpace(requiredIndexes[i])
+	if str, ok := pod.Annotations[_PreferredAcceleratorIndexAnnoKey]; ok {
+		seen := sets.New[string]()
+		var ids []string
+		for _, raw := range strings.Split(str, ",") {
+			idxStr := strings.TrimSpace(raw)
+			if idxStr == "" {
+				continue
 			}
-			requiredIndexesSet := sets.New[string](requiredIndexes...)
-
-			requiredIDsSet := sets.New[string]()
 			for i := range devices.Spec.Groups {
 				grp := &devices.Spec.Groups[i]
 				for j := range grp.Accelerators {
 					acc := &grp.Accelerators[j]
-					if requiredIndexesSet.Has(strconv.Itoa(int(acc.Index))) {
-						requiredIDsSet.Insert(acc.ID)
+					if strconv.Itoa(int(acc.Index)) == idxStr && !seen.Has(acc.ID) {
+						seen.Insert(acc.ID)
+						ids = append(ids, acc.ID)
 					}
 				}
 			}
-			return requiredIDsSet
 		}
+		return ids
 	}
 
-	return sets.New[string]()
+	return nil
 }

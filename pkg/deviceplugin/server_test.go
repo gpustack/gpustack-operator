@@ -4030,6 +4030,82 @@ func TestResourceServer_PreferredAllocation_StalePreferredIDDoesNotPanic(t *test
 	for _, id := range resp.GetDeviceIDs() {
 		assert.True(t, offered.Has(id), "the hint must name a token kubelet offered: %q", id)
 	}
+	assert.Equal(t, []string{"grp-0:dev-0:0000"}, resp.GetDeviceIDs(),
+		"a one-accelerator claim must hint at most one accelerator, even when more preferred IDs match")
+}
+
+// TestResourceServer_PreferredAllocation_OrderSizeAndFallback verifies that preferred-index and
+// preferred-id annotations honor preference priority order when selecting up to AllocationSize
+// accelerators, cap the hint at AllocationSize, return the chosen accelerators sorted in ascending
+// hardware order, and do not discard a satisfied selection when Unselected is empty.
+func TestResourceServer_PreferredAllocation_OrderSizeAndFallback(t *testing.T) {
+	const tokensPerCard = 64
+	full := int32(nodefeature.ResourceMaxUnits)
+
+	cases := []struct {
+		name           string
+		annotations    map[string]string
+		busyCards      map[int]workercore.DeviceAllocationMode
+		allocationSize int32
+		wantDeviceIDs  []string
+	}{
+		{
+			name:           "out-of-order preferred-index selects top priorities and sorts ascending",
+			annotations:    map[string]string{_PreferredAcceleratorIndexAnnoKey: "3,1,0,2"},
+			allocationSize: 2,
+			wantDeviceIDs:  []string{"grp-0:dev-1:0000", "grp-0:dev-3:0000"},
+		},
+		{
+			name:           "over-specified preferred-index caps hint to allocation size",
+			annotations:    map[string]string{_PreferredAcceleratorIndexAnnoKey: "0,1,2,3"},
+			allocationSize: 2,
+			wantDeviceIDs:  []string{"grp-0:dev-0:0000", "grp-0:dev-1:0000"},
+		},
+		{
+			name:        "all-node preferred-index with one busy card keeps satisfied selection when unselected is empty",
+			annotations: map[string]string{_PreferredAcceleratorIndexAnnoKey: "0,1,2,3"},
+			busyCards: map[int]workercore.DeviceAllocationMode{
+				3: workercore.DeviceAllocationModeExclusive,
+			},
+			allocationSize: 3,
+			wantDeviceIDs:  []string{"grp-0:dev-0:0000", "grp-0:dev-1:0000", "grp-0:dev-2:0000"},
+		},
+		{
+			name:        "preferred-index falls back to unselected and returns ascending order",
+			annotations: map[string]string{_PreferredAcceleratorIndexAnnoKey: "2,3"},
+			busyCards: map[int]workercore.DeviceAllocationMode{
+				2: workercore.DeviceAllocationModeExclusive,
+			},
+			allocationSize: 2,
+			wantDeviceIDs:  []string{"grp-0:dev-0:0000", "grp-0:dev-3:0000"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			devs := slicedLedgerDevices("node-pref", tokensPerCard, full, full, full, full)
+			for idx, mode := range c.busyCards {
+				devs.Status.Groups[0].Accelerators[idx].Mode = mode
+			}
+			availableDeviceIDs := availableDeviceIDsFor(devs, workercore.DeviceAllocationModeShared, tokensPerCard)
+
+			pod := &core.Pod{ObjectMeta: meta.ObjectMeta{Annotations: c.annotations}}
+			s := &ResourceServer{
+				Manufacturer:   nodefeature.ManufacturerNVIDIA,
+				AllocationMode: workercore.DeviceAllocationModeShared,
+			}
+
+			resp, err := s.getContainerPreferredAllocationResponse(
+				&ContainerPreferredAllocationRequest{
+					AvailableDeviceIDs: availableDeviceIDs,
+					AllocationSize:     c.allocationSize,
+				},
+				pod, nil, _SlicedRoom{devs: devs},
+			)
+			require.NoError(t, err)
+			assert.Equal(t, c.wantDeviceIDs, resp.GetDeviceIDs())
+		})
+	}
 }
 
 // --- lifecycle: registration across a kubelet restart ---
