@@ -1,6 +1,7 @@
 package nvidia
 
 import (
+	"encoding/binary"
 	"fmt"
 	"slices"
 	"strconv"
@@ -411,13 +412,51 @@ func isDeviceUnhealthy(dev nvml.Device) bool {
 		nvml.VOLATILE_ECC,
 		nvml.MEMORY_LOCATION_DRAM,
 	)
-	return evaluateDeviceUnhealthy(memEccDramUE, ret)
+	if evaluateDeviceUnhealthy(memEccDramUE, ret) {
+		return true
+	}
+	action, actionRet := readRecoveryAction(dev)
+	return evaluateRecoveryActionUnhealthy(actionRet, action)
 }
 
 // evaluateDeviceUnhealthy reports whether the vendor's uncorrectable ECC count makes the
 // accelerator unhealthy. A query the driver could not answer is not a fault, so it reads healthy.
 func evaluateDeviceUnhealthy(eccErrors uint64, ret nvml.Return) bool {
 	return ret.IsSuccess() && eccErrors > 0
+}
+
+// readRecoveryAction reads the driver's GPU recovery action for a device through the field-values
+// interface. The deprecated reset-status fields answer the same question and are deliberately
+// left unread.
+func readRecoveryAction(dev nvml.Device) (nvml.FieldValue, nvml.Return) {
+	values := []nvml.FieldValue{{FieldId: nvml.FI_DEV_GET_GPU_RECOVERY_ACTION}}
+	ret := dev.GetFieldValues(values)
+	return values[0], ret
+}
+
+// evaluateRecoveryActionUnhealthy reports whether the driver's recovery action makes the
+// accelerator unhealthy. Every action but "none" asks for an intervention -- a GPU reset, a
+// node reboot, or draining the card -- so any of them is a fault.
+//
+// A query the driver could not answer, in whole or for this one field, is not a fault of the
+// card and reads no verdict; nor does a value that arrived in a type this reader does not
+// decode. A field the driver never answered carries the zero value, whose type is DOUBLE, so
+// the type gate is what keeps that reading from decoding as a "none" verdict. None of these
+// can erase a verdict the caller already returned: the ECC fault is checked first, and this
+// runs only when it read healthy.
+func evaluateRecoveryActionUnhealthy(fieldRet nvml.Return, value nvml.FieldValue) bool {
+	if !fieldRet.IsSuccess() || nvml.Return(value.NvmlReturn) != nvml.SUCCESS {
+		return false
+	}
+	switch nvml.ValueType(value.ValueType) {
+	case nvml.VALUE_TYPE_UNSIGNED_INT, nvml.VALUE_TYPE_UNSIGNED_LONG, nvml.VALUE_TYPE_UNSIGNED_LONG_LONG:
+	default:
+		return false
+	}
+	// The union was written in host byte order, and every platform an NVIDIA driver serves is
+	// little-endian, so the low word carries the action for all three accepted types.
+	action := nvml.DeviceGpuRecoveryAction(binary.LittleEndian.Uint32(value.Value[:4]))
+	return action != nvml.GPU_RECOVERY_ACTION_NONE
 }
 
 // coresUtilizationOf reads an accelerator's whole-device cores utilization.
