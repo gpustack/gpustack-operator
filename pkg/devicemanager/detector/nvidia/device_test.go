@@ -4,6 +4,7 @@
 package nvidia
 
 import (
+	"encoding/binary"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,25 @@ import (
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
+
+// compileNVMLFixture builds the simulated driver every subprocess test in this file loads, one
+// library per test directory.
+func compileNVMLFixture(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	flags := make([]string, 0, 7)
+	if runtime.GOOS == "darwin" {
+		flags = append(flags, "-dynamiclib")
+	} else {
+		flags = append(flags, "-shared", "-fPIC")
+	}
+	flags = append(flags, "-DNVML_NO_UNVERSIONED_FUNC_DEFS=1", "-I../../../../binding/nvml",
+		"testdata/memory_nvml.c", "-o", filepath.Join(dir, "libnvidia-ml.so.1"))
+	output, err := exec.Command("cc", flags...).CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	return dir
+}
 
 // TestDetectAcceleratorMemory drives the real DetectAccelerator and Node-label construction
 // against a simulated NVML driver in a subprocess, one fixture library per case. The capacity
@@ -41,17 +61,7 @@ func TestDetectAcceleratorMemory(t *testing.T) {
 		return
 	}
 
-	dir := t.TempDir()
-	flags := make([]string, 0, 7)
-	if runtime.GOOS == "darwin" {
-		flags = append(flags, "-dynamiclib")
-	} else {
-		flags = append(flags, "-shared", "-fPIC")
-	}
-	flags = append(flags, "-DNVML_NO_UNVERSIONED_FUNC_DEFS=1", "-I../../../../binding/nvml",
-		"testdata/memory_nvml.c", "-o", filepath.Join(dir, "libnvidia-ml.so.1"))
-	output, err := exec.Command("cc", flags...).CombinedOutput()
-	require.NoError(t, err, "%s", output)
+	dir := compileNVMLFixture(t)
 
 	cases := []struct {
 		name     string
@@ -190,6 +200,249 @@ func TestEvaluateDeviceUnhealthy(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, evaluateDeviceUnhealthy(tc.eccErrors, tc.ret))
+		})
+	}
+}
+
+// TestEvaluateRecoveryActionUnhealthy pins the recovery-action reading itself: the overall call,
+// the field's own return, and the value's type each gate the verdict, and every action but
+// "none" is a fault. The type gate doubles as the guard against an unanswered field, whose zero
+// value carries DOUBLE.
+func TestEvaluateRecoveryActionUnhealthy(t *testing.T) {
+	fieldValue := func(action nvml.DeviceGpuRecoveryAction) [8]byte {
+		var value [8]byte
+		binary.LittleEndian.PutUint32(value[:4], uint32(action))
+		return value
+	}
+
+	testCases := []struct {
+		name      string
+		fieldRet  nvml.Return
+		nvmlRet   uint32
+		valueType uint32
+		value     [8]byte
+		want      bool
+	}{
+		{
+			name:      "a gpu reset action is unhealthy",
+			valueType: uint32(nvml.VALUE_TYPE_UNSIGNED_INT),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_GPU_RESET),
+			want:      true,
+		},
+		{
+			name:      "a node reboot action is unhealthy",
+			valueType: uint32(nvml.VALUE_TYPE_UNSIGNED_INT),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_NODE_REBOOT),
+			want:      true,
+		},
+		{
+			name:      "a drain p2p action is unhealthy",
+			valueType: uint32(nvml.VALUE_TYPE_UNSIGNED_INT),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_DRAIN_P2P),
+			want:      true,
+		},
+		{
+			name:      "a drain and reset action is unhealthy",
+			valueType: uint32(nvml.VALUE_TYPE_UNSIGNED_INT),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_DRAIN_AND_RESET),
+			want:      true,
+		},
+		{
+			name:      "an unlisted action is a fault too",
+			valueType: uint32(nvml.VALUE_TYPE_UNSIGNED_INT),
+			value:     fieldValue(99),
+			want:      true,
+		},
+		{
+			name:      "a none action is healthy",
+			valueType: uint32(nvml.VALUE_TYPE_UNSIGNED_INT),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_NONE),
+			want:      false,
+		},
+		{
+			name:      "a failed field-values call reads no verdict",
+			fieldRet:  nvml.ERROR_NOT_SUPPORTED,
+			valueType: uint32(nvml.VALUE_TYPE_UNSIGNED_INT),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_GPU_RESET),
+			want:      false,
+		},
+		{
+			name:      "a failed field reads no verdict",
+			nvmlRet:   uint32(nvml.ERROR_NOT_SUPPORTED),
+			valueType: uint32(nvml.VALUE_TYPE_UNSIGNED_INT),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_GPU_RESET),
+			want:      false,
+		},
+		{
+			name:      "a double value reads no verdict",
+			valueType: uint32(nvml.VALUE_TYPE_DOUBLE),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_GPU_RESET),
+			want:      false,
+		},
+		{
+			name:      "a signed int value reads no verdict",
+			valueType: uint32(nvml.VALUE_TYPE_SIGNED_INT),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_GPU_RESET),
+			want:      false,
+		},
+		{
+			name:      "an unsigned short value reads no verdict",
+			valueType: uint32(nvml.VALUE_TYPE_UNSIGNED_SHORT),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_GPU_RESET),
+			want:      false,
+		},
+		{
+			name:      "an unsigned long value decodes like an unsigned int",
+			valueType: uint32(nvml.VALUE_TYPE_UNSIGNED_LONG),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_GPU_RESET),
+			want:      true,
+		},
+		{
+			name:      "an unsigned long long value decodes like an unsigned int",
+			valueType: uint32(nvml.VALUE_TYPE_UNSIGNED_LONG_LONG),
+			value:     fieldValue(nvml.GPU_RECOVERY_ACTION_DRAIN_AND_RESET),
+			want:      true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			value := nvml.FieldValue{
+				ValueType:  tc.valueType,
+				NvmlReturn: tc.nvmlRet,
+				Value:      tc.value,
+			}
+			assert.Equal(t, tc.want, evaluateRecoveryActionUnhealthy(tc.fieldRet, value))
+		})
+	}
+}
+
+// TestAcceleratorUnhealthy drives the real DetectAccelerator and MonitorAccelerator against a
+// simulated NVML driver in a subprocess, one fixture library per case. The health it pins has
+// two sources: an uncorrectable DRAM ECC count, and the driver's GPU recovery action -- the
+// field a zero ECC count cannot replace, since a card whose driver asks for a reset, a reboot,
+// or a drain is not healthy no matter what its counters read.
+func TestAcceleratorUnhealthy(t *testing.T) {
+	// Each subprocess loads its own NVML fixture without affecting other tests.
+	if os.Getenv("GPUSTACK_TEST_NVML_HEALTH") == "true" {
+		wantUnhealthy := os.Getenv("GPUSTACK_TEST_NVML_WANT_UNHEALTHY") == "true"
+		if os.Getenv("GPUSTACK_TEST_NVML_MONITOR") == "true" {
+			groups, err := New(device.DetectorOptions{}).MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 1)
+			assert.Equal(t, wantUnhealthy, groups[0].Accelerators[0].Unhealthy)
+			return
+		}
+		groups, err := New(device.DetectorOptions{}).DetectAccelerator(true)
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+		require.Len(t, groups[0].Accelerators, 1)
+		assert.Equal(t, wantUnhealthy, groups[0].Accelerators[0].Status.Unhealthy)
+		return
+	}
+
+	dir := compileNVMLFixture(t)
+
+	// value type 1 is VALUE_TYPE_UNSIGNED_INT, the type the field answers in; type 0 is
+	// VALUE_TYPE_DOUBLE, what an unanswered field's zero value carries.
+	cases := []struct {
+		name           string
+		eccUECounter   string // fixture's volatile uncorrected DRAM ECC count
+		eccUEError     bool   // make the ECC query fail
+		recoveryAction string // fixture's FI_DEV_GET_GPU_RECOVERY_ACTION value
+		raType         string // fixture's value type for that field
+		raError        bool   // fail the recovery action field alone
+		fvError        bool   // fail the whole field-values call
+		monitor        bool   // drive MonitorAccelerator instead of DetectAccelerator
+		wantUnhealthy  bool
+	}{
+		{
+			name:           "a gpu reset action with an unreadable ecc count is unhealthy",
+			eccUEError:     true,
+			recoveryAction: "1", raType: "1",
+			wantUnhealthy: true,
+		},
+		{
+			name:           "a node reboot action is unhealthy",
+			recoveryAction: "2", raType: "1",
+			wantUnhealthy: true,
+		},
+		{
+			name:           "a drain p2p action is unhealthy",
+			recoveryAction: "3", raType: "1",
+			wantUnhealthy: true,
+		},
+		{
+			name:           "a drain and reset action is unhealthy",
+			recoveryAction: "4", raType: "1",
+			wantUnhealthy: true,
+		},
+		{
+			name:           "a none action with a clean ecc count is healthy",
+			recoveryAction: "0", raType: "1",
+			wantUnhealthy: false,
+		},
+		{
+			name:          "a failed recovery action query is no verdict when ecc is clean",
+			fvError:       true,
+			wantUnhealthy: false,
+		},
+		{
+			name:          "a failed recovery action field is no verdict when ecc is clean",
+			raError:       true,
+			wantUnhealthy: false,
+		},
+		{
+			// DOUBLE is what an unanswered field's zero value carries; decoding it as an
+			// integer would read garbage as a verdict.
+			name:           "a value in the wrong type is no verdict",
+			recoveryAction: "1", raType: "0",
+			wantUnhealthy: false,
+		},
+		{
+			name:         "an ecc fault stands when the recovery query fails",
+			eccUECounter: "3", fvError: true,
+			wantUnhealthy: true,
+		},
+		{
+			name:         "an ecc fault stands when the recovery action is none",
+			eccUECounter: "3", recoveryAction: "0", raType: "1",
+			wantUnhealthy: true,
+		},
+		{
+			name:           "monitoring reports the recovery action fault",
+			eccUEError:     true,
+			recoveryAction: "1", raType: "1",
+			monitor:       true,
+			wantUnhealthy: true,
+		},
+		{
+			name:          "monitoring reports healthy with no verdict",
+			fvError:       true,
+			monitor:       true,
+			wantUnhealthy: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestAcceleratorUnhealthy$", "-test.count=1")
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(),
+				"GPUSTACK_TEST_NVML_HEALTH=true",
+				"GPUSTACK_TEST_NVML_ECC_UE_COUNTER="+tc.eccUECounter,
+				"GPUSTACK_TEST_NVML_ECC_UE_ERROR="+strconv.FormatBool(tc.eccUEError),
+				"GPUSTACK_TEST_NVML_RECOVERY_ACTION="+tc.recoveryAction,
+				"GPUSTACK_TEST_NVML_RECOVERY_ACTION_TYPE="+tc.raType,
+				"GPUSTACK_TEST_NVML_RECOVERY_ACTION_ERROR="+strconv.FormatBool(tc.raError),
+				"GPUSTACK_TEST_NVML_FIELD_VALUES_ERROR="+strconv.FormatBool(tc.fvError),
+				"GPUSTACK_TEST_NVML_MONITOR="+strconv.FormatBool(tc.monitor),
+				"GPUSTACK_TEST_NVML_WANT_UNHEALTHY="+strconv.FormatBool(tc.wantUnhealthy),
+				"LD_LIBRARY_PATH="+dir,
+				"DYLD_LIBRARY_PATH="+dir,
+			)
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
 		})
 	}
 }
