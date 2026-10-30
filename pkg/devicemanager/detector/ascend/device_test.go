@@ -197,3 +197,118 @@ func TestEvaluateDeviceUnhealthy(t *testing.T) {
 		})
 	}
 }
+
+// TestSelectMemoryType pins which memory query a device's readings come from. A successful HBM
+// answer is trusted only when it reports capacity: trusting a zero-size answer reports zero
+// capacity and checks the wrong ECC counters, which is the misalignment with the vendor runtime
+// this guards against. The V2 API declares no DDR query at all -- the V1 call passes through and
+// a V2 driver refuses it -- so its HBM answer is used as reported, whatever size it carries, and
+// a device is never sent to a query its driver cannot serve.
+func TestSelectMemoryType(t *testing.T) {
+	testCases := []struct {
+		name       string
+		hbmInfo    dcmi.HbmInfo
+		hbmRet     dcmi.Return
+		apiVersion dcmi.APIVersion
+		want       dcmi.DeviceType
+	}{
+		{
+			name:       "an hbm answer with capacity is hbm",
+			hbmInfo:    dcmi.HbmInfo{Memory_size: 32768},
+			hbmRet:     dcmi.SUCCESS,
+			apiVersion: dcmi.APIVersionV1,
+			want:       dcmi.DEVICE_TYPE_HBM,
+		},
+		{
+			name:       "a successful zero hbm answer is ddr",
+			hbmInfo:    dcmi.HbmInfo{},
+			hbmRet:     dcmi.SUCCESS,
+			apiVersion: dcmi.APIVersionV1,
+			want:       dcmi.DEVICE_TYPE_DDR,
+		},
+		{
+			name:       "a failed hbm query is ddr",
+			hbmRet:     dcmi.ERROR_NOT_SUPPORT,
+			apiVersion: dcmi.APIVersionV1,
+			want:       dcmi.DEVICE_TYPE_DDR,
+		},
+		{
+			name:       "the v2 api keeps a zero hbm answer",
+			hbmInfo:    dcmi.HbmInfo{},
+			hbmRet:     dcmi.SUCCESS,
+			apiVersion: dcmi.APIVersionV2,
+			want:       dcmi.DEVICE_TYPE_HBM,
+		},
+		{
+			name:       "the v2 api keeps hbm capacity",
+			hbmInfo:    dcmi.HbmInfo{Memory_size: 131072},
+			hbmRet:     dcmi.SUCCESS,
+			apiVersion: dcmi.APIVersionV2,
+			want:       dcmi.DEVICE_TYPE_HBM,
+		},
+		{
+			name:       "a failed hbm query is ddr on the v2 api too",
+			hbmRet:     dcmi.ERROR_NOT_SUPPORT,
+			apiVersion: dcmi.APIVersionV2,
+			want:       dcmi.DEVICE_TYPE_DDR,
+		},
+		{
+			name:       "an unknown api generation is not read as v2",
+			hbmRet:     dcmi.SUCCESS,
+			apiVersion: dcmi.APIVersionUnknown,
+			want:       dcmi.DEVICE_TYPE_DDR,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, selectMemoryType(tc.hbmInfo, tc.hbmRet, tc.apiVersion))
+		})
+	}
+}
+
+// TestKeepOnMissingDDR pins which unreadable DDR queries keep a device in the output. A query
+// the library cannot even make -- the entry point is missing, or the library and driver are an
+// incompatible pair -- is not the driver's answer about the device, so a device the HBM query
+// did answer keeps that answer instead of vanishing from detection and monitoring. A refusal
+// the driver itself returned is a different case: it has always dropped the device, and still
+// does.
+func TestKeepOnMissingDDR(t *testing.T) {
+	testCases := []struct {
+		name   string
+		hbmRet dcmi.Return
+		ddrRet dcmi.Return
+		want   bool
+	}{
+		{
+			name:   "an hbm answer stands when the ddr entry point is missing",
+			hbmRet: dcmi.SUCCESS,
+			ddrRet: dcmi.ERROR_FUNCTION_NOT_FOUND,
+			want:   true,
+		},
+		{
+			name:   "an hbm answer stands when the library cannot serve the ddr query",
+			hbmRet: dcmi.SUCCESS,
+			ddrRet: dcmi.ERROR_LIBRARY_NOT_FOUND,
+			want:   true,
+		},
+		{
+			name:   "the driver refusing the ddr query still drops the device",
+			hbmRet: dcmi.SUCCESS,
+			ddrRet: dcmi.ERROR_NOT_SUPPORT,
+			want:   false,
+		},
+		{
+			name:   "a device the hbm query never answered still drops",
+			hbmRet: dcmi.ERROR_NOT_SUPPORT,
+			ddrRet: dcmi.ERROR_FUNCTION_NOT_FOUND,
+			want:   false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, keepOnMissingDDR(tc.hbmRet, tc.ddrRet))
+		})
+	}
+}

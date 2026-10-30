@@ -170,19 +170,24 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				memoryUnhealthy bool
 			)
 			{
-				hbmInfo, ret := dev.GetHbmInfo()
-				if !ret.IsSuccess() {
-					memHandler := dev.GetMemoryInfoV()
-					memInfo, ret := memHandler.V2()
-					if !ret.IsSuccess() {
-						logger.Error(ret, "failed to get device memory info")
-						continue
-					}
-					memory = memInfo.Memory_size
-					memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_DDR)
-				} else {
+				hbmInfo, hbmRet := dev.GetHbmInfo()
+				if selectMemoryType(hbmInfo, hbmRet, in.dcmi.APIVersion()) == dcmi.DEVICE_TYPE_HBM {
 					memory = hbmInfo.Memory_size
 					memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_HBM)
+				} else {
+					memHandler := dev.GetMemoryInfoV()
+					memInfo, ddrRet := memHandler.V2()
+					switch {
+					case ddrRet.IsSuccess():
+						memory = memInfo.Memory_size
+						memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_DDR)
+					case keepOnMissingDDR(hbmRet, ddrRet):
+						memory = hbmInfo.Memory_size
+						memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_HBM)
+					default:
+						logger.Error(ddrRet, "failed to get device memory info")
+						continue
+					}
 				}
 			}
 
@@ -343,24 +348,30 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 				memoryUnhealthy   bool
 			)
 			{
-				hbmInfo, ret := dev.GetHbmInfo()
-				if !ret.IsSuccess() {
-					memHandler := dev.GetMemoryInfoV()
-					memInfo, ret := memHandler.V2()
-					if !ret.IsSuccess() {
-						logger.Error(ret, "failed to get device memory info")
-						continue
-					}
-
-					memory = memInfo.Memory_size
-					memoryUsage = memInfo.Memory_size - memInfo.Memory_available
-					memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
-					memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_DDR)
-				} else {
+				hbmInfo, hbmRet := dev.GetHbmInfo()
+				if selectMemoryType(hbmInfo, hbmRet, in.dcmi.APIVersion()) == dcmi.DEVICE_TYPE_HBM {
 					memory = hbmInfo.Memory_size
 					memoryUsage = hbmInfo.Memory_usage
 					memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
 					memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_HBM)
+				} else {
+					memHandler := dev.GetMemoryInfoV()
+					memInfo, ddrRet := memHandler.V2()
+					switch {
+					case ddrRet.IsSuccess():
+						memory = memInfo.Memory_size
+						memoryUsage = memInfo.Memory_size - memInfo.Memory_available
+						memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
+						memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_DDR)
+					case keepOnMissingDDR(hbmRet, ddrRet):
+						memory = hbmInfo.Memory_size
+						memoryUsage = hbmInfo.Memory_usage
+						memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
+						memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_HBM)
+					default:
+						logger.Error(ddrRet, "failed to get device memory info")
+						continue
+					}
 				}
 			}
 
@@ -589,6 +600,28 @@ func isDeviceUnhealthy(dev dcmi.Device, memType dcmi.DeviceType) bool {
 	return evaluateDeviceUnhealthy(health, ret, func() (dcmi.EccInfo, dcmi.Return) {
 		return dev.GetEccInfo(memType)
 	})
+}
+
+// selectMemoryType reports which memory a device's readings must come from: HBM when the driver
+// answers the HBM query with capacity, and the DDR query otherwise. A successful answer of zero
+// size carries no HBM reading, so trusting it reports zero capacity and checks the wrong ECC
+// counters; the vendor runtime selects on the same two conditions. The V2 API is the exception:
+// it declares no DDR query at all -- the V1 call passes through and a V2 driver refuses it -- so
+// its HBM answer is used as reported, whatever size it carries.
+func selectMemoryType(hbmInfo dcmi.HbmInfo, hbmRet dcmi.Return, apiVersion dcmi.APIVersion) dcmi.DeviceType {
+	if hbmRet.IsSuccess() && (hbmInfo.Memory_size > 0 || apiVersion == dcmi.APIVersionV2) {
+		return dcmi.DEVICE_TYPE_HBM
+	}
+	return dcmi.DEVICE_TYPE_DDR
+}
+
+// keepOnMissingDDR reports whether a device stays in the output when its DDR query cannot be
+// made at all. A silence of the library -- the entry point is missing from the shared object,
+// or the library and driver are an incompatible pair -- is not the driver's answer about the
+// device, so one the HBM query did answer keeps that answer; a refusal the driver itself
+// returned drops the device as it always has.
+func keepOnMissingDDR(hbmRet, ddrRet dcmi.Return) bool {
+	return hbmRet.IsSuccess() && ddrRet.IsAPIUnavailable()
 }
 
 // evaluateDeviceUnhealthy reports whether the vendor's device health state or uncorrectable
