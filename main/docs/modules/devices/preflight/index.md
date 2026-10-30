@@ -712,7 +712,8 @@ the CLI is there, its socket file may even be there, but nothing can be behind i
 
 **An unhealthy accelerator is reported, and left alone.** The detect pass marks an enumerable
 accelerator with `status.unhealthy: true` when its vendor library reports a fault it cannot
-correct, such as uncorrectable DRAM ECC errors or a failed health state. Preflight reads that flag
+correct, such as uncorrectable DRAM ECC errors, a failed health state, or a recovery action the
+driver asks for. Preflight reads that flag
 out of the detection it already did, and the group says so in its `detection.detail`:
 
 ```yaml

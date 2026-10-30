@@ -2387,7 +2387,8 @@ the CLI is there, its socket file may even be there, but nothing can be behind i
 <h3 id="unhealthy-accelerators">Unhealthy accelerators</h3>
 <p><strong>An unhealthy accelerator is reported, and left alone.</strong> The detect pass marks an enumerable
 accelerator with <code>status.unhealthy: true</code> when its vendor library reports a fault it cannot
-correct, such as uncorrectable DRAM ECC errors or a failed health state. Preflight reads that flag
+correct, such as uncorrectable DRAM ECC errors, a failed health state, or a recovery action the
+driver asks for. Preflight reads that flag
 out of the detection it already did, and the group says so in its <code>detection.detail</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -2443,7 +2444,7 @@ never creates.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/a4b463899a64d9e79c3b3c599f470f79f6701a09/docs/modules/devices/preflight.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/modules/devices/preflight.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/preflight.md">Edit this page</a>
             
