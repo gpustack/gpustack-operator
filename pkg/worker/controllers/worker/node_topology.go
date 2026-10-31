@@ -30,8 +30,10 @@ import (
 )
 
 const (
-	// TopologyProfileLabel partitions Nodes by their ordered topology label-key set.
-	TopologyProfileLabel = "topology.gpustack.ai/profile"
+	// TopologyProfileLabel partitions Nodes by their ordered topology label-key set. It lives in
+	// nodefeature (the label algebra's home) beside the topology-qualified flavor naming; this
+	// alias keeps the package's spelling.
+	TopologyProfileLabel = nodefeature.TopologyProfileLabel
 
 	topologyNamePrefix    = "gpustack-"
 	topologyProfilePrefix = "fnv64-"

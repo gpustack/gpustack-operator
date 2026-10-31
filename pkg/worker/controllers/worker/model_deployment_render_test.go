@@ -3524,7 +3524,7 @@ func TestRenderModelDeploymentPods_TCPTWReuseFollowsTheSetting(t *testing.T) {
 	})
 }
 
-func TestRenderModelDeploymentPod_EngramCapabilities(t *testing.T) {
+func TestRenderModelDeploymentPod_Capabilities(t *testing.T) {
 	engramCaps := &core.SecurityContext{
 		Capabilities: &core.Capabilities{
 			Add: []core.Capability{"IPC_LOCK", "SYS_RESOURCE"},
@@ -3533,14 +3533,37 @@ func TestRenderModelDeploymentPod_EngramCapabilities(t *testing.T) {
 	privilegedSC := &core.SecurityContext{Privileged: ptr.To(true)}
 
 	cases := []struct {
-		name string
-		md   *workercore.ModelDeployment
-		want *core.SecurityContext
+		name              string
+		md                *workercore.ModelDeployment
+		interfaceResource core.ResourceName
+		artifact          *ModelDeploymentArtifactRender
+		want              *core.SecurityContext
 	}{
 		{
 			name: "plain vLLM role renders no securityContext",
 			md:   newRenderDeployment(),
 			want: nil,
+		},
+		{
+			name: "role requesting RDMA interfaces grants IPC_LOCK and SYS_RESOURCE",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					Interface: ptr.To(resource.MustParse("2")),
+				}
+			}),
+			interfaceResource: "rdma.gpustack.ai/hca",
+			want:              engramCaps,
+		},
+		{
+			name: "role with remote model-transfer delivery grants IPC_LOCK and SYS_RESOURCE",
+			md:   newRenderDeployment(),
+			artifact: &ModelDeploymentArtifactRender{
+				Delivery:       workercore.ModelDeploymentModelDeliveryRemote,
+				ArtifactName:   "qwen3-8b",
+				ArtifactUID:    "uid-1",
+				ManifestDigest: "sha256:fea7da0c5227e595df7f4fa5822011e7a33cabe1dff13e3ffa7be6898dd1c363",
+			},
+			want: engramCaps,
 		},
 		{
 			name: "vLLM with --engram-config cpu_offload true grants IPC_LOCK and SYS_RESOURCE",
@@ -3616,7 +3639,14 @@ func TestRenderModelDeploymentPod_EngramCapabilities(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			pod := renderOne(t, tc.md, newRenderInstanceType())
+			pod, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+				Deployment:        tc.md,
+				Role:              &tc.md.Spec.Roles[0],
+				InstanceType:      newRenderInstanceType(),
+				InterfaceResource: tc.interfaceResource,
+				Artifact:          tc.artifact,
+			})
+			require.NoError(t, err)
 			assert.Equal(t, tc.want, pod.Spec.Containers[0].SecurityContext)
 		})
 	}

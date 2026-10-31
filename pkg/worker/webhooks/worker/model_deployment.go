@@ -491,7 +491,7 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentPoolTransport(
 		}
 		seen[role.InstanceType] = struct{}{}
 		manufacturer := ""
-		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
+		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM || md.Spec.Model.ArtifactRef != nil {
 			instType, err := r.getInstanceType(ctx, role.InstanceType, i)
 			if err != nil {
 				return nil, err
@@ -576,7 +576,7 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 	// The probes differ, which only a non-Ascend manufacturer can turn into a real leg change,
 	// so the rendered legs are compared at the type's own manufacturer before rejudging.
 	manufacturer := ""
-	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM || md.Spec.Model.ArtifactRef != nil {
 		instType, err := r.getInstanceType(ctx, role.InstanceType, i)
 		if err != nil {
 			return false, err
@@ -667,7 +667,7 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 			continue
 		}
 		manufacturer := ""
-		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
+		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM || md.Spec.Model.ArtifactRef != nil {
 			instType, err := r.getInstanceType(ctx, role.InstanceType, i)
 			if err != nil {
 				return nil, err
