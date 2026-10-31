@@ -45,6 +45,7 @@ TRANSLATOR:
     - { target: "^amdsmi", default: "raw" }
   Rules:
     const:
+      - { action: ignore, from: "^AMDSMI_LIB_VERSION_STRING$" }
       - { action: accept, from: "^AMDSMI_" }
       - { action: accept, from: "^amdsmi_" }
       - { action: replace, from: "^AMDSMI_" }

@@ -173,10 +173,47 @@ jobs:
     secrets:
       dockerhub-password: ${{ secrets.CI_DOCKERHUB_PASSWORD }}
 
+  # The universal gpustack_model_transfer wheel and its sdist: one pure-Python artifact for
+  # every arch and accelerator runtime, built on every run so test workflows can
+  # download it, and attached to the GitHub Release on a tag. The vendor imports
+  # (torch, torch_npu, nixl, hixl) stay lazy inside the adapters, so the wheel is
+  # buildable on a stock runner with nothing installed.
+  model-transfer-wheel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel and sdist
+        run: |
+          cd model-transfer/python
+          uv build
+          test -n "$(ls dist/gpustack_model_transfer-*-py3-none-any.whl 2>/dev/null)" || {
+            echo "::error::the universal wheel (py3-none-any) was not produced" >&2
+            exit 1
+          }
+          ls -la dist/
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpustack-model-transfer-dist
+          path: model-transfer/python/dist/*
+          if-no-files-found: error
+          retention-days: 30
+
   release:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs:
       - image
+      - model-transfer-wheel
     timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
@@ -212,9 +249,15 @@ jobs:
                   "on_property": "title", "target": "$1" }
               ]
             }
+      - name: Download the model-transfer distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: gpustack-model-transfer-dist
+          path: dist
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "${{ github.ref_name }}"
           prerelease: true
           body: ${{ steps.changelog.outputs.changelog }}
+          files: dist/*

@@ -219,15 +219,15 @@ echo "# build ${TARGET} → ${XB_IMAGE} (${XB_PLATFORM}) on $(xtarget_desc)"
 # Prepare the build context on the target.
 if [ "${XB_MODE}" = ssh ]; then
   CTX="${XB_REMOTE_CTX}"
-  xput "${XB_REPO}/${DOCKERFILE_REL}" "${CTX}/${DOCKERFILE_REL}"
-  xput "${XB_REPO}/${BUILDSH_REL}"    "${CTX}/${BUILDSH_REL}"
+  xput "${XB_REPO}/${DOCKERFILE_REL}" "${CTX}/${DOCKERFILE_REL}" || exit 1
+  xput "${XB_REPO}/${BUILDSH_REL}"    "${CTX}/${BUILDSH_REL}" || exit 1
   # The patch dir is bind-mounted by the stage, so it must exist in the remote context.
   # Wipe it first: a patch dropped locally would otherwise linger here and be applied.
   if [ -n "${PATCHES_REL}" ]; then
-    xrun "rm -rf '${CTX}/${PATCHES_REL}'" >/dev/null
+    xrun "rm -rf '${CTX}/${PATCHES_REL}'" >/dev/null || exit 1
     for p in "${XB_REPO}/${PATCHES_REL}"/*.patch; do
       [ -f "${p}" ] || { echo "build.sh: no *.patch under ${PATCHES_REL}" >&2; exit 1; }
-      xput "${p}" "${CTX}/${PATCHES_REL}/$(basename "${p}")"
+      xput "${p}" "${CTX}/${PATCHES_REL}/$(basename "${p}")" || exit 1
     done
   fi
 else

@@ -57,8 +57,6 @@ const (
 	NAME_BUFFER_SIZE = 200
 	// MLU_CLUSTER_FREQUENCY_COUNT as defined in cndev/cndev.h:45
 	MLU_CLUSTER_FREQUENCY_COUNT = 20
-	// EXPORT as defined in cndev/cndev.h:50
-	EXPORT = 0x1022f1470
 	// UUID_SIZE as defined in cndev/cndev.h:301
 	UUID_SIZE = 37
 	// IP_ADDRESS_LEN as defined in cndev/cndev.h:305

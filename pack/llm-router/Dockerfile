@@ -1,3 +1,12 @@
+# Build target: the default final stage bundles epp, vllm-router and sgl-model-gateway.
+# Platforms: linux/amd64 and linux/arm64.
+# Run from the repository root:
+#   PACKAGE_ARCH=amd64 PACKAGE_TAG=dev make package llm-router
+# Router source versions are the LLMD_ROUTER_VERSION, VLLM_ROUTER_VERSION and
+# SGLANG_GATEWAY_VERSION build arguments below. Pass overrides with Docker Buildx:
+#   docker buildx build --platform linux/amd64 --load -t gpustack/llm-router:dev \
+#     --build-arg VLLM_ROUTER_VERSION=v0.1.16.1 -f pack/llm-router/Dockerfile .
+
 # One image carrying every router a ModelDeployment can name.
 #
 # WHAT: three independent router binaries built from three upstream sources into one runtime layer.

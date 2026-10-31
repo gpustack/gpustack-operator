@@ -104,6 +104,160 @@ fetches nothing beyond the chart itself. Each is pinned at the version shown and
 
 {{ template "chart.requirementsSection" . }}
 
+## Remote weight delivery
+
+By default, a `ModelDeployment`'s weights reach the engine the way they always
+have — the node's model-manager plugin materializes them on the node's cache
+(`modelManager`, Node delivery) or the engine downloads them itself (Engine
+delivery). **Remote weight delivery is off**, and everything in `modelTransfer`
+ships nothing until an administrator turns it on:
+
+1. `modelTransfer.enabled=true` ships the source runtime's identity and policy: a
+   ServiceAccount whose RBAC is what a source broker runs under (TokenReview to
+   admit a session's bearer token, the read side of the prefetch, artifact,
+   binding, store, instance-type, pool and settings surface the shared
+   eligibility check resolves against, the Binding's initial annotation, and a
+   Role scoped to the operator namespace's ConfigMaps where the Binding-wide
+   reservation authority lives — no devices, no cache paths, no tenant secrets),
+   and the chart-owned `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY` on the
+   worker.
+2. `modelTransfer.policy` chooses the policy: `Disabled` (default), `Require`, or
+   `Prefer`. Require and Prefer additionally need the model-manager plugin
+   installed, which the worker's Setting admission enforces independently of
+   this value.
+3. `modelTransfer.images` turns the source runtime on, one DaemonSet per named
+   manufacturer, each Pod carrying two containers: the operator image runs the
+   `model-transfer` broker (its engine session listener on :9251 is TLS only,
+   its worker control wire stays on the Pod's loopback at 127.0.0.1:9250), and
+   the named vendor image runs the `gpustack_model_transfer.source` module. The
+   broker keeps its durable ledger per vendor under `/var/lib/gpustack/model-transfer`,
+   which the model-manager plugin mounts read-only when remote delivery is on to
+   report the ModelTransfer status; both containers see the node's model cache,
+   writable for the broker, read-only for the worker; the two share the Pod-local
+   bootstrap credential and nothing else. The universal
+   `gpustack_model_transfer` wheel a remote replica's engine installs is staged
+   on every node by device-manager
+   (`pack/gpustack-operator/Dockerfile` stages it under `/etc/gpustack/lib/model-transfer`;
+   the `stage-libs` initContainer copies it to `/var/lib/gpustack/operator/lib/model-transfer`).
+
+The default `modelTransfer.images` references cover NVIDIA, AMD and Ascend A5.
+Override the full references when selecting a different qualified runtime:
+
+```yaml
+modelTransfer:
+  enabled: true
+  source:
+    maxMemoryBytes: 26843545600 # 25 GiB; 0 follows the node's total RAM (one sixteenth)
+    minMemoryBytes: 1073741824  # 1 GiB, the smallest buffer the node still serves
+    maxSessions: 64             # the node's concurrent source-session cap
+  env:
+    GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES: "17179869184"
+  images:
+    nvidia: gpustack/model-transfer:v0.0.1-cuda12.9
+    amd: gpustack/model-transfer:v0.0.1-rocm7.2
+    ascend: gpustack/model-transfer:v0.0.1-cann9.2-a5
+```
+
+These explicit references are used as supplied, including registry and
+namespace — no `global` image rewrite applies. Missing entries ship no source
+runtime for that manufacturer. Helm merges map overrides with the defaults; set
+`modelTransfer.images.<manufacturer>: null` to remove a default entry. Each DaemonSet schedules only on nodes NFD
+labelled with the manufacturer's PCI vendor, merged under whatever
+`global.nodeSelector` and `modelTransfer.nodeSelector` state; a NVIDIA source
+worker runs under its RuntimeClass so the container runtime injects the driver.
+All configured vendors run privileged workers with host `/dev` and `/sys` access, including
+InfiniBand/RoCE devices. Ascend mounts the host's driver and DCMI libraries separately,
+leaving the image's own CANN in place. `modelTransfer.source` carries the node's
+memory window and session policy. `maxMemoryBytes` is the transfer buffer
+ceiling: `0` (the default) follows the node's total RAM — one sixteenth of it,
+floored at `minMemoryBytes` — and a positive figure below `minMemoryBytes`
+silently resolves up to it. `minMemoryBytes` defaults to `1 GiB`; lower values
+resolve to `1 GiB`. `maxSessions` caps concurrent source sessions in the
+DaemonSet Pod; zero resolves to `64`. Chart validation rejects negative values.
+`workerResources` is empty by default and renders no `resources` block, so both
+the broker and the worker size the transfer buffer against the node's RAM via
+`/proc/meminfo` without a container cgroup memory cap; set explicit resources
+only when you want Kubernetes resource bounds on the worker container. Disk warm-up keeps its separate
+Python Alpine image. Host driver versions do not select images; runtime
+compatibility remains required.
+
+`ModelStoreBinding.spec.sourceMemory` is an optional, namespace-wide grant.
+When it is omitted or removed, source prefetches use the node ceiling, `4096`
+registrations and the node session cap. An administrator can set the grant to
+cap a Binding below the node ceiling. Its bytes and registrations can only grow
+while present; sessions can change online, and admitted sessions above a lowered
+cap drain naturally.
+
+For each generation, the broker reserves the full checkpoint size plus 10%
+against the effective grant and the node ceiling. The source worker allocates every
+registered file. Leave space for other live and retained generations and for
+worker runtime memory.
+
+When the Binding has a source-memory grant, the controller checks a planned
+source window against it. Without a grant, it skips this check. It deducts a
+`1 GiB` fill window and `256 MiB` runtime overhead, then sets aside one quarter
+of residency for quarantine. The maximum is
+`((grantBytes - 1.25 GiB) / 5) * 4`, with integer division in bytes. A `25Gi`
+grant backs a planned `19 GiB` window: a `15 GiB` checkpoint fits fully, while a
+`67 GiB` checkpoint is clamped in the plan. The plan is currently only a floor
+check. The broker still requests `73.7 GiB` for the larger checkpoint and
+refuses the `25Gi` grant; the worker does not have a bounded host-memory sliding
+window.
+
+The controller's planned-source-window floor is fixed at `1 GiB` and no longer
+reads an environment figure. Below this floor, `Prefer` reports
+`SourceWindowFallback` and `Require` reports `SourceWindowBelowFloor`. The
+floor applies to the grant's capacity, not the checkpoint size.
+`modelTransfer.env` applies to the source broker and worker, not the
+controller or serving engine. Its HIXL budget defaults to `16 GiB` and
+controls registration paging, not host allocations; one file can exceed it.
+A nonzero value below `1 GiB` silently resolves up to `1 GiB`; zero uses the
+default.
+`GPUSTACK_MODEL_TRANSFER_MAX_WINDOW_BYTES` defaults to `8 GiB` for the engine
+reader. Set it on the engine, not in `modelTransfer.env`; it accepts `1 GiB`
+through `1 TiB` — a value below `1 GiB` silently resolves up to `1 GiB`, and
+`16 GiB`, `64 GiB`, `128 GiB` are all legal — and does not change the source
+grant. When available RAM backs a source window, the broker reports it as
+`sourceWindowBytes`. The reader clamps its session window to the smaller budget,
+with a `256 MiB` adaptive floor, and transfers larger spans in chunks. The
+broker omits the figure when available RAM is unreadable or cannot clear the
+floor. The engine's `GPUSTACK_MODEL_TRANSFER_TP_MODE` variable also belongs on
+the serving role, not in `modelTransfer.env`. See
+[Remote Weight Delivery](../../../docs/modules/model-delivery/remote.md#replica-startup)
+for its modes and window sizing.
+
+Before initial allocation, the worker checks available RAM when its maximum is
+configured and the RAM figure is readable. A zero maximum derives one sixteenth
+of total RAM, floored at the minimum. The worker skips the check if the maximum
+is unset or available RAM is unreadable. After active sessions drain, it releases
+idle blocks when no native operations or unknown sessions remain. A later session
+rebuilds them from the verified node cache. `Prefer` can fall back to local or
+peer delivery when source preparation fails; `Require` waits. See
+[Remote Weight Delivery](../../../docs/modules/model-delivery/remote.md#source-preparation)
+for dynamic sizing and troubleshooting.
+
+Every broker's session listener serves TLS under a per-manufacturer certificate
+the chart provisions — via cert-manager when `global.certmanager.enabled`
+resolves to it, otherwise a chart-generated pair kept across upgrades — issued
+for the manufacturer's headless Service DNS name, whose endpoints an engine
+resolves to pick one source Pod rather than a random backend. The public CA
+half lands in the `<release>-model-transfer-<manufacturer>-cert` Secret beside
+the serving pair; the worker's renderer mirrors it into the namespaces that
+consume it, since a cross-namespace Secret cannot be mounted directly.
+
+When an existing image reference in `modelTransfer.images` changes on `helm upgrade`,
+the DaemonSet uses `OnDelete` so the controller drains source Pods before replacing them.
+Removing a manufacturer entry or disabling the source runtime lets Helm delete the
+corresponding DaemonSet directly, without waiting for that drain acknowledgement.
+Perform this maintenance when the affected workload is stable.
+
+Rolling back is turning the policy back: set `modelTransfer.policy=Disabled` (or
+`modelTransfer.enabled=false`) and the worker reasserts `Disabled` on its next
+start. Replicas already loaded keep serving; new replicas are admitted on the
+base delivery mode exactly as before remote delivery existed, and no
+destination checkpoint a Require deployment refused to materialize was ever
+written.
+
 {{ template "chart.valuesSection" . }}
 
 ----------------------------------------------

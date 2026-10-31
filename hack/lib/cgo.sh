@@ -14,11 +14,8 @@ c_for_go_version=${C_FOR_GO_VERSION:-"cef5ec7833f3274488b3edd519f46ddfb57d5735"}
 # Was "master". A floating specifier makes the baseline move, so the same commit can produce a
 # different binding/ tree tomorrow and a drift check reports it as drift the author did not cause.
 # This hash is what master resolved to when it was pinned (2026-03-05, the branch tip), so the pin
-# records current behaviour rather than changing it: a regeneration at the hash and one at master
-# produce the same binding/ diff, down to the three address-valued constants that differ between
-# any two runs (amdsmi LIB_VERSION_STRING, cndev EXPORT, rsmi MAX_NUM_POWER_PROFILES -- c-for-go
-# bakes in a pointer for a macro that is not a compile-time constant, so "byte identical" is not a
-# property this generator has in the first place).
+# records current behaviour rather than changing it. Non-scalar macros that this parser evaluates
+# as addresses are excluded by their binding configs; C preprocessing owns required values.
 c_for_go_c99_version=${C_FOR_GO_C99_VERSION:-"6dd1c017f91eea5364499f7926d94583eaddaadb"}
 
 function gpustack::cgo::c_for_go::install() {

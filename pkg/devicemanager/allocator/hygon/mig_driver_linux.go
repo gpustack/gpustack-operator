@@ -50,7 +50,8 @@ type dmiMigDriver struct {
 func (d *dmiMigDriver) device(pciBusID string) (dmi.Device, error) {
 	if !d.initRet.IsSuccess() {
 		return dmi.Device{}, fmt.Errorf(
-			"hygon multi-instance library unavailable (%v); the node cannot serve partitions", d.initRet)
+			"hygon multi-instance library unavailable (%w); the node cannot serve partitions", d.initRet,
+		)
 	}
 	dev, ret := d.lib.GetDeviceHandleByPciBusId(pciBusID)
 	if !ret.IsSuccess() {
@@ -269,7 +270,8 @@ func (d *dmiMigDriver) CreateInstance(pciBusID, profile string, slot migPlacemen
 	if err != nil {
 		if r := gi.Destroy(); !r.IsSuccess() {
 			return migInstance{}, fmt.Errorf(
-				"card %s: %w (and the half-built gpu instance could not be removed: %v)", pciBusID, err, r)
+				"card %s: %w (and the half-built gpu instance could not be removed: %w)", pciBusID, err, r,
+			)
 		}
 		return migInstance{}, fmt.Errorf("card %s: %w", pciBusID, err)
 	}
@@ -308,7 +310,8 @@ func (d *dmiMigDriver) completeInstance(
 		if r := ci.Destroy(); !r.IsSuccess() {
 			err = fmt.Errorf(
 				"%w (and the compute instance could not be removed, so the gpu instance holding it"+
-					" cannot be either: %v)", err, r)
+					" cannot be either: %v)", err, r,
+			)
 		}
 	}()
 
@@ -368,7 +371,8 @@ func (d *dmiMigDriver) DestroyInstance(pciBusID string, inst migInstance) error 
 	if inst.UUID != "" && found.UUID != "" && found.UUID != inst.UUID {
 		return fmt.Errorf(
 			"card %s: gpu instance %d now carries identity %q, not the recorded %q (id reused): refusing to destroy it",
-			pciBusID, inst.GiID, found.UUID, inst.UUID)
+			pciBusID, inst.GiID, found.UUID, inst.UUID,
+		)
 	}
 
 	profiles, err := cardProfiles(dev)
@@ -422,7 +426,7 @@ func (d *dmiMigDriver) destroyGpuInstance(pciBusID string, gi dmi.GpuInstance, p
 // nothing else to ask.
 func migDestroyError(pciBusID, what string, ret dmi.Return) error {
 	if ret == dmi.ERROR_IN_USE {
-		return fmt.Errorf("card %s: destroy %s: %w: %v", pciBusID, what, errInstanceInUse, ret)
+		return fmt.Errorf("card %s: destroy %s: %w: %w", pciBusID, what, errInstanceInUse, ret)
 	}
 	return fmt.Errorf("card %s: destroy %s: %w", pciBusID, what, ret)
 }
@@ -431,7 +435,8 @@ func migDestroyError(pciBusID, what string, ret dmi.Return) error {
 func (d *dmiMigDriver) ListInstances() ([]migLiveInstance, error) {
 	if !d.initRet.IsSuccess() {
 		return nil, fmt.Errorf(
-			"hygon multi-instance library unavailable (%v); the node cannot serve partitions", d.initRet)
+			"hygon multi-instance library unavailable (%w); the node cannot serve partitions", d.initRet,
+		)
 	}
 
 	count, ret := d.lib.GetDeviceCount()

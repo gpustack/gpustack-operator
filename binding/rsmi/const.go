@@ -49,8 +49,6 @@ const (
 	MAX_POLICY_NAME = 32
 	// MAX_UTILIZATION_VALUES as defined in rsmi/rocm_smi.h:901
 	MAX_UTILIZATION_VALUES = 4
-	// MAX_NUM_POWER_PROFILES as defined in rsmi/rocm_smi.h:922
-	MAX_NUM_POWER_PROFILES = 0x100ac5470
 	// MAX_CACHE_TYPES as defined in rsmi/rocm_smi.h:1038
 	MAX_CACHE_TYPES = 10
 	// NUM_HBM_INSTANCES as defined in rsmi/rocm_smi.h:1157

@@ -1,3 +1,11 @@
+# GPUStack Operator, bundled charts, tools and accelerator preload libraries.
+# Build target: gpustack (default final stage); the other stages build inputs.
+# Platforms: linux/amd64 and linux/arm64.
+# Run from the repository root:
+#   PACKAGE_ARCH=amd64 PACKAGE_TAG=dev make package gpustack-operator
+# Set PACKAGE_NAMESPACE to select the image namespace; PACKAGE_PUSH=true publishes.
+# VERSION sets the operator version embedded by the packaging script.
+
 ARG GO_VERSION="1.27.3"
 ARG SKOPEO_VERSION="1.24.1"
 ARG HELM_VERSION="3.21.4"
@@ -104,7 +112,7 @@ RUN <<EOF
     apt-get update -y
     apt-get install -y --no-install-recommends \
         ca-certificates curl git git-lfs \
-        build-essential pkg-config \
+        build-essential binutils pkg-config python3 python3-packaging \
         unzip file \
         libgpgme-dev libassuan-dev libbtrfs-dev libdrm-dev
     rm -rf /var/lib/apt/lists/*
@@ -177,24 +185,28 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     # Link staging modules under GOROOT/src for legacy lookups.
     for dir in $(find ${GPUSTACK_WORKSPACE}/staging -mindepth 1 -maxdepth 1 -type d); do
         target="$(go env GOROOT)/src/$(basename ${dir})"
-        ln -s ${dir} ${target}
+        ln -sfn ${dir} ${target}
     done
 
     # Build
     CI="true"
-    if [[ "${BUILDPLATFORM}" != "${TARGETPLATFORM}" ]]; then
+    if [[ "${BUILDPLATFORM}" != "${TARGETPLATFORM}" ]] || [[ ! -d "${GPUSTACK_WORKSPACE}/.git" ]]; then
       CI="false"
     fi
-    BUILD_OS=${TARGETOS}
-    BUILD_ARCH=${TARGETARCH}
-    LINT_DIRTY=${CI}
+    export BUILD_OS=${TARGETOS}
+    export BUILD_ARCH=${TARGETARCH}
+    export LINT_DIRTY=${CI}
     # Lets the .agents shell check tell this build from a host whose git broke: from a worktree
     # checkout the context carries .git but not the gitdir it points at, and only here is that a
     # reason to skip rather than a failure. hack/check/agents-shell.sh states why.
     export GPUSTACK_IMAGE_BUILD="true"
-    pushd ${GPUSTACK_WORKSPACE} \
-        && if [[ "${CI}" == "true" ]]; then make ci; else make build; fi \
-        && cp ${GPUSTACK_WORKSPACE}/.dist/build/gpustack-operator /out/bin/gpustack-operator
+    pushd ${GPUSTACK_WORKSPACE}
+    if [[ "${CI}" == "true" ]]; then
+        make ci
+    else
+        make build
+    fi
+    cp ${GPUSTACK_WORKSPACE}/.dist/build/gpustack-operator /out/bin/gpustack-operator
     popd
 
     # Review
@@ -390,6 +402,59 @@ WORKDIR /out
 FROM xbuild-amd-rocm-${TARGETARCH} AS xbuild-amd-rocm
 
 # =============================================================================
+# Stage: model-transfer-wheel
+# Build the universal gpustack_model_transfer wheel. Pure Python (py3-none-any), one
+# artifact for every arch and accelerator runtime: the vendor imports --
+# torch, torch_npu, nixl, hixl -- stay lazy inside the adapters, so the same
+# wheel installs on x86_64/arm64, CUDA 12/13 and CANN 910B/Atlas A2,
+# 910C/Atlas A3 and 950/Atlas A5 alike.
+#
+# The build context carries no .git, so hatch-vcs cannot derive a version: the
+# operator's Git version is injected, normalized to a PEP 440 release (a bare
+# "dev" from a non-tag build would break packaging.version) and exported under
+# both spellings setuptools_scm reads, with 0.0.0 for anything else. The build
+# runs with --no-build-isolation against the apt-packaged build backends,
+# because Ubuntu 24.04's pip cannot create the isolation venv (PEP 668, no
+# python3-venv ensurepip) and would fetch hatchling from the network instead.
+# Staged under ${GPUSTACK_LIB_DIR}/model-transfer beside the logical-slicing preload
+# libraries below, so device-manager's stage-libs initContainer (copy-dir.sh
+# /etc/gpustack/lib /var/lib/gpustack/operator/lib) places it on the host for
+# the remote delivery's offline install.
+# =============================================================================
+FROM ${UBUNTU_IMAGE} AS model-transfer-wheel
+SHELL ["/bin/bash", "-c"]
+ARG GPUSTACK_GIT_VERSION
+
+RUN apt-get update -y \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates python3 python3-venv python3-pip \
+        python3-hatchling python3-hatch-vcs \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY model-transfer/python /build/model-transfer/python
+
+RUN <<EOF
+    set -exo pipefail
+
+    cd /build/model-transfer/python
+    # Preserve release and development versions without requiring .git in the context.
+    version="$(python3 -c '
+import sys
+from packaging.version import InvalidVersion, Version
+try:
+    print(Version(sys.argv[1]))
+except InvalidVersion:
+    print("0.0.0")
+' "${GPUSTACK_GIT_VERSION}")"
+    export SETUPTOOLS_SCM_PRETEND_VERSION="${version}"
+    export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_GPUSTACK_MODEL_TRANSFER="${version}"
+    export PIP_BREAK_SYSTEM_PACKAGES=1
+    python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir /out/model-transfer .
+    test -n "$(ls /out/model-transfer/gpustack_model_transfer-*-py3-none-any.whl 2>/dev/null)"
+    ls -la /out/model-transfer/
+EOF
+
+# =============================================================================
 # Stage: gpustack (final)
 # Ubuntu 24.04 with only runtime packages — no Go, no build toolchain, no
 # download utilities, no -dev headers. Compiled binaries and CLI tools are
@@ -480,6 +545,13 @@ COPY --from=xbuild-thead-ppu /out ${GPUSTACK_LIB_DIR}/thead
 ## Flat, with no ROCm-version subdirectory: the library links no ROCm object, so one build
 ## serves every runtime the workload brings. Empty on arm64, by design.
 COPY --from=xbuild-amd-rocm /out ${GPUSTACK_LIB_DIR}/amd
+
+## Copy the universal gpustack_model_transfer wheel. Flat, and universal by design: one pure-Python
+## artifact for every arch and accelerator runtime, with the vendor imports lazy inside the
+## adapters. device-manager's stage-libs initContainer (copy-dir.sh /etc/gpustack/lib
+## /var/lib/gpustack/operator/lib) places it on the host, where the remote delivery's
+## pre-start install reads it offline (--no-deps --no-index --find-links).
+COPY --from=model-transfer-wheel /out/model-transfer ${GPUSTACK_LIB_DIR}/model-transfer
 
 ## Copy CLI binaries from the build stages
 

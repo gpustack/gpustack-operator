@@ -9,7 +9,7 @@ package hgml
 /*
 #cgo linux LDFLAGS: -Wl,--export-dynamic -Wl,--unresolved-symbols=ignore-in-object-files
 #cgo darwin LDFLAGS: -Wl,-undefined,dynamic_lookup
-#cgo CFLAGS: -w
+#cgo CFLAGS: -std=gnu17 -w
 #include "hgml.h"
 #include <stdlib.h>
 #include "cgo_helpers.h"

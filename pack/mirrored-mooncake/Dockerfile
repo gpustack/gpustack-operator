@@ -1,3 +1,16 @@
+# Build targets: mooncake-store (default), cuda, cann and rocm.
+# The default carries Mooncake Store with Kubernetes Lease leadership support.
+# Vendor targets also link the corresponding accelerator runtime.
+# Platforms: linux/amd64 and linux/arm64; rocm is linux/amd64 only.
+# Run from the repository root:
+#   PACKAGE_ARCH=amd64 PACKAGE_TAG=dev make package mirrored-mooncake
+# Build a vendor target with Docker Buildx (use cuda, cann or rocm):
+#   docker buildx build --platform linux/amd64 --target cuda --load \
+#     -t gpustack/mirrored-mooncake:dev-cuda \
+#     -f pack/mirrored-mooncake/Dockerfile .
+# Set MOONCAKE_VERSION and vendor base-image overrides with --build-arg.
+# Use distinct tags for each vendor target to preserve each image's platform list.
+
 # Mooncake Store, rebuilt with the leadership backends turned on.
 #
 # WHAT: one image carrying both of the store's entrypoints, from one compile of one source tree.

@@ -1,0 +1,37 @@
+{{- if .Values.modelTransfer.enabled }}
+{{- range $manufacturer := list "amd" "ascend" "nvidia" }}
+{{- if hasKey $.Values.modelTransfer.images $manufacturer }}
+{{- /*
+  Headless, so DNS answers with the source Pods' own addresses and an engine picks one
+  endpoint — the Pod its scheduler or its preference names — instead of a random Service
+  backend. The name is also the identity the session certificates are issued for: a client
+  dialing an exact Pod IP sets its TLS ServerName to this Service's DNS name, which is on
+  the certificate, so Pod identity stays out of both the SAN list and the DaemonSet's
+  naming.
+*/}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gpustack-operator.modelTransfer.fullname" $ }}-{{ $manufacturer }}
+  namespace: {{ include "gpustack-operator.namespace" $ }}
+  labels:
+    {{- include "gpustack-operator.modelTransfer.labels" $ | nindent 4 }}
+    gpustack.ai/manufacturer: {{ $manufacturer }}
+  {{- with $.Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "gpustack-operator.modelTransfer.selectorLabels" $ | nindent 4 }}
+    gpustack.ai/manufacturer: {{ $manufacturer }}
+  ports:
+    - name: sessions
+      port: 9251
+      targetPort: sessions
+      protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}

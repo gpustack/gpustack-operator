@@ -6,6 +6,7 @@ set -o pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "${ROOT_DIR}/hack/lib/init.sh"
+cd "${ROOT_DIR}"
 
 PACKAGE_NAMESPACE=${PACKAGE_NAMESPACE:-gpustack}
 PACKAGE_ARCH=${PACKAGE_ARCH:-$(uname -m | sed 's/aarch64/arm64/' | sed 's/x86_64/amd64/')}
@@ -14,6 +15,19 @@ PACKAGE_WITH_CACHE=${PACKAGE_WITH_CACHE:-true}
 PACKAGE_PUSH=${PACKAGE_PUSH:-false}
 
 function pack() {
+  local tasks
+  if [[ "$#" -gt 0 ]]; then
+    IFS=" " read -r -a tasks <<<"$*"
+  else
+    tasks=("gpustack-operator")
+  fi
+
+  for task in "${tasks[@]}"; do
+    if [[ ! -f "${ROOT_DIR}/pack/${task}/Dockerfile" ]]; then
+      gpustack::log::fatal "No Dockerfile for package task: ${task}"
+    fi
+  done
+
   if ! command -v docker &>/dev/null; then
     gpustack::log::fatal "Docker is not installed. Please install Docker to use this target."
     exit 1
@@ -33,23 +47,13 @@ function pack() {
 
   labels=(
     "org.opencontainers.image.source=https://github.com/gpustack/gpustack-operator"
-    "org.opencontainers.image.version=dev"
-    "org.opencontainers.image.revision=$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
+    "org.opencontainers.image.version=${GIT_VERSION}"
+    "org.opencontainers.image.revision=${GIT_COMMIT}"
     "org.opencontainers.image.created=$(date +"%Y-%m-%dT%H:%M:%S.%s")"
   )
 
-  local tasks
-  if [[ "$#" -gt 0 ]]; then
-    IFS=" " read -r -a tasks <<<"$*"
-  else
-    tasks=("gpustack-operator")
-  fi
 
   for task in "${tasks[@]}"; do
-    if [[ ! -f "${ROOT_DIR}/pack/${task}/Dockerfile" ]]; then
-      continue
-    fi
-
     extra_args=()
     if [[ "${PACKAGE_WITH_CACHE}" == "true" ]]; then
       extra_args+=(
@@ -58,6 +62,8 @@ function pack() {
     fi
     if [[ "${PACKAGE_PUSH}" == "true" ]]; then
       extra_args+=("--push")
+    else
+      extra_args+=("--load")
     fi
     for label in "${labels[@]}"; do
       extra_args+=("--label" "${label}")
@@ -112,7 +118,7 @@ function pack() {
       --builder "gpustack" \
       --platform "linux/${PACKAGE_ARCH}" \
       --tag "${tag}" \
-      --build-arg "GPUSTACK_GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")" \
+      --build-arg "GPUSTACK_GIT_COMMIT=${GIT_COMMIT}" \
       --build-arg "GPUSTACK_GIT_VERSION=${GIT_VERSION}" \
       --file "${ROOT_DIR}/pack/${task}/Dockerfile" \
       --ulimit nofile=65536:65536 \
