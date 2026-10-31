@@ -64,6 +64,11 @@ func (s *Store) WriteRef(r Ref) error {
 func (s *Store) Claim(r Ref) (bool, error) {
 	s.claimMu.Lock()
 	defer s.claimMu.Unlock()
+	unlock, err := s.lockClaims()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
 
 	if !s.IsPublished(r.Hex) {
 		return false, nil
@@ -131,7 +136,12 @@ func (s *Store) Refs() ([]Ref, error) {
 		}
 		refs = append(refs, r)
 	}
-	sort.Slice(refs, func(i, j int) bool { return refs[i].TargetPath < refs[j].TargetPath })
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].TargetPath != refs[j].TargetPath {
+			return refs[i].TargetPath < refs[j].TargetPath
+		}
+		return refs[i].VolumeID < refs[j].VolumeID
+	})
 
 	return refs, nil
 }

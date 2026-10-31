@@ -2,11 +2,42 @@ package settings
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
-	"gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/setting"
+)
+
+// The watermark Settings' names. Each one's admission reads the other by name, since a reference
+// from one Setting's declaration to the other's would be an initialization cycle.
+const (
+	modelStoreHighWatermarkName = "model-store-high-watermark"
+	modelStoreLowWatermarkName  = "model-store-low-watermark"
+)
+
+// The values of ModelArtifactDeliveryMode.
+const (
+	// ModelArtifactDeliveryEngine has an engine download a hub artifact's resolved commit itself.
+	ModelArtifactDeliveryEngine = "Engine"
+	// ModelArtifactDeliveryNode has the node's model-manager plugin materialize and mount it.
+	ModelArtifactDeliveryNode = "Node"
+)
+
+// The values of ModelArtifactRemoteDeliveryPolicy. The policy is OFF until an administrator
+// names it: a cluster that never opt-in keeps every Pod, condition and status field exactly as
+// it was, and the values spell the two delivery policies the ModelDeployment status echoes.
+const (
+	// ModelArtifactRemoteDeliveryDisabled keeps remote weight delivery off entirely.
+	ModelArtifactRemoteDeliveryDisabled = "Disabled"
+	// ModelArtifactRemoteDeliveryRequire holds a qualified replica's startup until a prepared
+	// source serves the weights, and never materializes a destination checkpoint or falls back.
+	ModelArtifactRemoteDeliveryRequire = "Require"
+	// ModelArtifactRemoteDeliveryPrefer uses remote delivery when it qualifies and a prepared
+	// source is available, and otherwise takes the declared identity-preserving fallback.
+	ModelArtifactRemoteDeliveryPrefer = "Prefer"
 )
 
 var settings = setting.Settings{}
@@ -320,6 +351,20 @@ var (
 		setting.Allow(),
 	)
 
+	// ModelArtifactDeliveryMode is how a Hugging Face artifact's weights reach a ModelDeployment's
+	// engine. It is explicit and never inferred from whether the plugin is installed: changing it
+	// changes every Hugging Face deployment's Pods, which each roll once. The chart declares "Node"
+	// when it deploys the plugin, and the worker reasserts that declaration on every start.
+	ModelArtifactDeliveryMode = settings.NewEditable(
+		"model-artifact-delivery-mode",
+		"Indicates how a Hugging Face ModelArtifact's weights reach a ModelDeployment: Engine, the engine "+
+			"downloads them, or Node, the node's model-manager plugin materializes and mounts them. Node needs "+
+			"the plugin installed. Changing it rolls every Hugging Face deployment once.",
+		setting.InitializeFromEnv(ModelArtifactDeliveryEngine),
+		setting.AllowEnum(ModelArtifactDeliveryEngine, ModelArtifactDeliveryNode),
+		setting.AllowCSIDriverWhen(modelstore.DriverName, ModelArtifactDeliveryNode),
+	)
+
 	// ModelArtifactHTTPSProxy is the proxy the ModelArtifact controller reaches the Hub through, and
 	// the HTTPS_PROXY an engine downloading the weights itself is given, where a role's own value
 	// wins. Blank leaves the worker's own environment in effect and renders nothing. It carries no
@@ -330,7 +375,9 @@ var (
 			"the weights themselves. Blank keeps the worker's own environment and renders nothing.",
 		setting.InitializeFromEnv(),
 		setting.AllowBlank(),
-		func(_ context.Context, _, newVal string) error { return modelartifact.ValidateProxy(newVal) },
+		setting.AllowUrlWithSchema("https", "http"),
+		setting.AllowUrlWithHost(),
+		setting.DisallowUrlWithUser(),
 	)
 
 	// ModelArtifactHuggingFaceEndpoint is the Hugging Face Hub the ModelArtifact controller
@@ -344,9 +391,7 @@ var (
 		setting.InitializeFromEnv("https://huggingface.co"),
 		setting.DisallowBlank(),
 		setting.AllowUrlWithSchema("https", "http"),
-		// A URL without a host passes the schema check and fails every node's; refused here, a
-		// write never freezes the node configuration it feeds.
-		func(_ context.Context, _, newVal string) error { return modelstore.ValidateEndpoint(newVal) },
+		setting.AllowUrlWithHost(),
 	)
 
 	// ModelArtifactModelScopeEndpoint is the ModelScope hub the ModelArtifact controller resolves
@@ -361,7 +406,7 @@ var (
 		setting.InitializeFromEnv("https://www.modelscope.cn"),
 		setting.DisallowBlank(),
 		setting.AllowUrlWithSchema("https", "http"),
-		func(_ context.Context, _, newVal string) error { return modelstore.ValidateEndpoint(newVal) },
+		setting.AllowUrlWithHost(),
 	)
 
 	// ModelArtifactNoProxy is the comma-separated host list that bypasses ModelArtifactHTTPSProxy,
@@ -372,6 +417,31 @@ var (
 		setting.InitializeFromEnv(),
 		setting.AllowBlank(),
 		setting.Allow(),
+	)
+
+	// ModelArtifactRemoteDeliveryPolicy is the cluster's remote weight delivery policy, and it
+	// defaults to Disabled: nothing about a cluster that does not opt in changes. Require and
+	// Prefer need the model-manager plugin's CSIDriver, because the metadata-only view a remote
+	// replica mounts is the plugin's to serve. The workercore side spells the two delivery
+	// policies the deployment status echoes back.
+	ModelArtifactRemoteDeliveryPolicy = settings.NewEditable(
+		"model-artifact-remote-delivery-policy",
+		"Indicates the cluster's remote weight delivery policy for qualified hub artifacts: Disabled, the "+
+			"delivery is off; Require, a qualified replica's startup holds until a prepared source serves the "+
+			"weights and never falls back; Prefer, remote delivery is used when a prepared source is available "+
+			"and the declared identity-preserving fallback otherwise. Require and Prefer need the "+
+			"model-manager plugin installed.",
+		setting.InitializeFromEnv(ModelArtifactRemoteDeliveryDisabled),
+		setting.AllowEnum(
+			ModelArtifactRemoteDeliveryDisabled,
+			ModelArtifactRemoteDeliveryRequire,
+			ModelArtifactRemoteDeliveryPrefer,
+		),
+		setting.AllowCSIDriverWhen(
+			modelstore.DriverName,
+			ModelArtifactRemoteDeliveryRequire,
+			ModelArtifactRemoteDeliveryPrefer,
+		),
 	)
 
 	// ModelArtifactRevalidateInterval is how often a resolved Hugging Face ModelArtifact's access is
@@ -507,6 +577,58 @@ var (
 		setting.AllowContainerImageReference(),
 	)
 
+	// Model store.
+
+	// ModelStoreHighWatermark is the cache filesystem's usage, in percent, above which the plugin
+	// removes unreferenced content. It must stay below kubelet's eviction and image collection
+	// thresholds when the cache shares kubelet's filesystem; the plugin caps it there.
+	ModelStoreHighWatermark = settings.NewEditable(
+		modelStoreHighWatermarkName,
+		"Indicates the node model cache's usage percent above which unreferenced models are removed, "+
+			"at most 95 and above model-store-low-watermark.",
+		setting.InitializeFromEnv("80"),
+		setting.AllowInt64InRange(modelstore.MinLowWatermarkPercent+1, modelstore.MaxHighWatermarkPercent),
+		settings.AllowInt64GreaterThan(modelStoreLowWatermarkName),
+	)
+
+	// ModelStoreLowWatermark is the usage, in percent, a collection removes down to.
+	ModelStoreLowWatermark = settings.NewEditable(
+		modelStoreLowWatermarkName,
+		"Indicates the node model cache's usage percent a removal stops at, at least 1 and below "+
+			"model-store-high-watermark.",
+		setting.InitializeFromEnv("70"),
+		setting.AllowInt64InRange(modelstore.MinLowWatermarkPercent, modelstore.MaxHighWatermarkPercent-1),
+		settings.AllowInt64LessThan(modelStoreHighWatermarkName),
+	)
+
+	// ModelStorePeerSync is whether a node's plugin may pull content the other nodes' plugins
+	// hold published, instead of the hub.
+	ModelStorePeerSync = settings.NewEditable(
+		"model-store-peer-sync",
+		"Indicates whether a node's plugin may pull a model's content from the plugins of other "+
+			"nodes that hold it published, instead of the hub.",
+		setting.InitializeFromEnv("true"),
+		setting.AllowBool(),
+	)
+
+	// ModelStoreDownloadConcurrency is how many HTTP requests a node runs at once across its
+	// downloads. A large file is fetched as ranges that share this budget.
+	ModelStoreDownloadConcurrency = settings.NewEditable(
+		"model-store-download-concurrency",
+		"Indicates how many HTTP requests a node runs at once across its model downloads, 1 to 64.",
+		setting.InitializeFromEnv("8"),
+		setting.AllowInt64InRange(modelstore.MinDownloadConcurrency, modelstore.MaxDownloadConcurrency),
+	)
+
+	// ModelStoreDownloadBandwidth is a node's download rate limit, a quantity of bytes per second
+	// such as "200Mi"; "0" is unlimited.
+	ModelStoreDownloadBandwidth = settings.NewEditable(
+		"model-store-download-bandwidth",
+		"Indicates a node's model download rate limit in bytes per second, a quantity such as 200Mi; 0 is unlimited.",
+		setting.InitializeFromEnv("0"),
+		setting.AllowNonNegativeInt64Quantity(),
+	)
+
 	// Workload.
 
 	// WorkloadFitAffinity indicates whether the Workload webhook pins a slice or shared request of
@@ -523,3 +645,88 @@ var (
 		setting.AllowBool(),
 	)
 )
+
+// ModelStoreLayer reads the cluster layer of a node model cache's configuration from the Settings,
+// through value: a Setting's current value at runtime, or its default at startup.
+func ModelStoreLayer(value func(setting.Setting) string) (modelstore.Layer, error) {
+	var errs []error
+	parse32 := func(s setting.Setting) *int32 {
+		v, err := strconv.ParseInt(value(s), 10, 32)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("setting %s: %w", s.Name(), err))
+			return nil
+		}
+		v32 := int32(v)
+		return &v32
+	}
+	str := func(s setting.Setting) *string {
+		v := value(s)
+		return &v
+	}
+
+	peerSync := func(s setting.Setting) *bool {
+		raw := value(s)
+		if raw == "" {
+			return nil
+		}
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("setting %s: %w", s.Name(), err))
+			return nil
+		}
+		return &v
+	}
+
+	l := modelstore.Layer{
+		HighWatermarkPercent: parse32(ModelStoreHighWatermark),
+		LowWatermarkPercent:  parse32(ModelStoreLowWatermark),
+		DownloadConcurrency:  parse32(ModelStoreDownloadConcurrency),
+		PeerSyncEnabled:      peerSync(ModelStorePeerSync),
+		HuggingFaceEndpoint:  str(ModelArtifactHuggingFaceEndpoint),
+		ModelScopeEndpoint:   str(ModelArtifactModelScopeEndpoint),
+		HTTPSProxy:           str(ModelArtifactHTTPSProxy),
+		NoProxy:              str(ModelArtifactNoProxy),
+		CABundleConfigMap:    str(ModelArtifactCABundle),
+	}
+	if bw, err := modelstore.ParseBandwidth(value(ModelStoreDownloadBandwidth)); err != nil {
+		errs = append(errs, fmt.Errorf("setting %s: %w", ModelStoreDownloadBandwidth.Name(), err))
+	} else {
+		l.DownloadBytesPerSecond = &bw
+	}
+
+	return l, errors.Join(errs...)
+}
+
+// ValidateModelStoreDefaults checks the values the node model cache's Settings take from the
+// environment, which no admission reads, so the worker refuses to start on one that would be
+// written to every node. The delivery mode's CSIDriver condition is not checked here: whether the
+// plugin exists is a runtime fact, which consumers wait on.
+func ValidateModelStoreDefaults() error {
+	ctx := context.Background()
+	if err := setting.AllowEnum(ModelArtifactDeliveryEngine, ModelArtifactDeliveryNode)(
+		ctx, "", ModelArtifactDeliveryMode.DefaultValue(),
+	); err != nil {
+		return fmt.Errorf("setting %s: %w", ModelArtifactDeliveryMode.Name(), err)
+	}
+	if err := setting.AllowEnum(
+		ModelArtifactRemoteDeliveryDisabled,
+		ModelArtifactRemoteDeliveryRequire,
+		ModelArtifactRemoteDeliveryPrefer,
+	)(ctx, "", ModelArtifactRemoteDeliveryPolicy.DefaultValue()); err != nil {
+		return fmt.Errorf("setting %s: %w", ModelArtifactRemoteDeliveryPolicy.Name(), err)
+	}
+	l, err := ModelStoreLayer(setting.Setting.DefaultValue)
+	if err != nil {
+		return err
+	}
+
+	return validateLayer(l)
+}
+
+func validateLayer(l modelstore.Layer) error {
+	if err := modelstore.Validate(modelstore.Merge(l)); err != nil {
+		return fmt.Errorf("the node model cache's settings: %w", err)
+	}
+
+	return nil
+}

@@ -66,8 +66,9 @@ func Client(opts ...*ClientOption) *http.Client {
 	}
 
 	return &http.Client{
-		Transport: transport,
-		Timeout:   o.timeout,
+		Transport:     transport,
+		Timeout:       o.timeout,
+		CheckRedirect: o.checkRedirect,
 	}
 }
 

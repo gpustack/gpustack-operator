@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -82,12 +84,21 @@ type Driver struct {
 	Store *store.Store
 	// Artifacts reads ModelArtifacts from the informer cache, never with a GET per call.
 	Artifacts ctrlcli.Reader
+	// APIReader verifies live Pod ownership and public source discovery for a
+	// metadata-only mount. It never borrows the plugin's credential for source HTTP.
+	APIReader ctrlcli.Reader
 	// Ready reports whether the caches synced and references were rebuilt; until then every mount
 	// answers Unavailable rather than a refusal the cache could not yet back.
 	Ready        func() bool
 	Mounter      Mounter
 	Materializer Materializer
 	Events       Events
+	// MetadataViews builds the metadata-only views a model-transfer delivery mounts.
+	// Nil serves content-addressed views out of the store's own root.
+	MetadataViews MetadataViews
+
+	metadataEndpointCursor atomic.Uint64
+	metadataDialContext    func(context.Context, string, string) (net.Conn, error)
 
 	targetsMu sync.Mutex
 	targets   map[string]*targetLock // target path -> its lock, while a call holds or waits for it
@@ -145,6 +156,12 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 
 	unlock := d.lockTarget(target)
 	defer unlock()
+
+	// A metadata-only model-transfer delivery is a contract of its own: it never sees
+	// the complete-tree materializer and never mounts a published tree.
+	if vc[attrModelTransferDelivery] != "" {
+		return d.publishModelTransferVolume(ctx, req, vc, target)
+	}
 
 	namespace, attrs := vc[attrPodNamespace], attributesOf(vc)
 	ma, err := d.artifact(ctx, namespace, attrs.Artifact)

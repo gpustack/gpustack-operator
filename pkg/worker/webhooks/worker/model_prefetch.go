@@ -114,6 +114,11 @@ func (r *ModelPrefetchWebhook) validateModelPrefetch(ctx context.Context, pf *wo
 			"an image artifact delivers on demand through kubelet and never enters the node cache: "+
 				"there is nothing to warm, no budget to count against, and no pinning to grant")}
 	}
+	if pf.Spec.Source != nil && artifact.Spec.Source.PersistentVolumeClaim != nil {
+		return field.ErrorList{field.Forbidden(field.NewPath("spec", "source"),
+			"a claim artifact mounts an existing PersistentVolumeClaim directly and carries no "+
+				"verified node-cache manifest to prepare an in-memory transfer source from")}
+	}
 
 	binding := new(workercore.ModelStoreBinding)
 	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Namespace: pf.Namespace, Name: pf.Spec.BindingRef.Name}, binding); err != nil {
@@ -125,6 +130,10 @@ func (r *ModelPrefetchWebhook) validateModelPrefetch(ctx context.Context, pf *wo
 		return field.ErrorList{field.InternalError(field.NewPath("spec", "bindingRef", "name"),
 			fmt.Errorf("get model store binding %q: %w", pf.Spec.BindingRef.Name, err))}
 	}
+
+	// A Binding without a sourceMemory section is a valid shape for source
+	// preparation: the node's own modelTransfer.source.* capacity governs
+	// what its sources draw, so admission does not demand the section.
 
 	if pf.Spec.Retention.Pinned && !modelStoreBindingAllowsPinned(binding) {
 		return field.ErrorList{field.Invalid(field.NewPath("spec", "retention", "pinned"),
@@ -303,13 +312,23 @@ func (r *ModelPrefetchWebhook) validateModelPrefetchBudget(
 		projected, binding.Spec.Quota.Bytes.String(), binding.Name))}
 }
 
-// validateModelPrefetchPlacement refuses what the schema cannot see: both placement kinds set. The
-// shared error is the controller's, so admission and delivery name the same mistake the same way.
+// validateModelPrefetchPlacement refuses what the schema cannot see: both placement kinds set,
+// and — for a source intent only — no target set at all. The shared error is the controller's, so
+// admission and delivery name the same mistake the same way.
 func validateModelPrefetchPlacement(pf *workercore.ModelPrefetch) field.ErrorList {
 	placement := pf.Spec.Placement
 	if placement != nil && len(placement.InstanceTypes) > 0 && placement.NodeSelector != nil {
 		return field.ErrorList{field.Invalid(field.NewPath("spec", "placement"), "",
 			workerctrl.ErrPrefetchPlacementAmbiguous.Error())}
+	}
+
+	if pf.Spec.Source != nil &&
+		(placement == nil || (len(placement.InstanceTypes) == 0 && placement.NodeSelector == nil)) {
+		return field.ErrorList{field.Invalid(field.NewPath("spec", "source"), "",
+			"source preparation fills a target set this prefetch does not name: a source is memory "+
+				"a node holds, so the derived-from-deployments default an ordinary prefetch keeps is not "+
+				"available to it — set placement.nodeSelector or placement.instanceTypes, or drop "+
+				"spec.source to warm wherever this namespace's deployments run")}
 	}
 
 	return nil

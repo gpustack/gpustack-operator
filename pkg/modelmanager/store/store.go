@@ -72,7 +72,7 @@ func HexOf(digest string) string {
 	return h
 }
 
-// Store is a node's cache root. It is the root's only writer.
+// Store is a node's cache root. Claim and collection also synchronize across processes.
 type Store struct {
 	root string
 	// claimMu orders a mount's reference against a removal: Claim and RemoveUnreferenced hold it,
@@ -241,6 +241,11 @@ func (s *Store) RemoveUnreferenced(hex string) (bool, error) {
 func (s *Store) trashUnreferenced(hex string) (string, error) {
 	s.claimMu.Lock()
 	defer s.claimMu.Unlock()
+	unlock, err := s.lockClaims()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 
 	refs, err := s.Refs()
 	if err != nil {

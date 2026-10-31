@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -228,9 +229,10 @@ func TestParseMountInfo(t *testing.T) {
 func TestRebuild(t *testing.T) {
 	s := openTestStore(t)
 	kept := Ref{VolumeID: "csi-kept", TargetPath: testTarget("uid-1", "gpustack-model"), Hex: testHex, PodName: "p1"}
+	modelTransferRef := Ref{VolumeID: "model-transfer.7", Hex: testHex, PodNamespace: "team-a", PodName: "source-worker-a"}
 	corrected := Ref{VolumeID: "csi-corrected", TargetPath: testTarget("uid-2", "gpustack-model"), Hex: testHex, PodName: "p2"}
 	dropped := Ref{VolumeID: "csi-dropped", TargetPath: testTarget("uid-3", "gpustack-model"), Hex: testHex, PodName: "p3"}
-	for _, r := range []Ref{kept, corrected, dropped} {
+	for _, r := range []Ref{kept, modelTransferRef, corrected, dropped} {
 		require.NoError(t, s.WriteRef(r))
 	}
 
@@ -250,7 +252,7 @@ func TestRebuild(t *testing.T) {
 
 	got, err := s.Rebuild(mounts, testDevice)
 	require.NoError(t, err)
-	assert.Equal(t, []Ref{kept}, got.Kept)
+	assert.Equal(t, []Ref{modelTransferRef, kept}, got.Kept)
 	corrected.Hex = otherHex
 	assert.Equal(t, []Ref{corrected}, got.Corrected)
 	assert.Equal(t, []Ref{dropped}, got.Dropped)
@@ -268,4 +270,117 @@ func TestRebuild(t *testing.T) {
 func TestEphemeralVolumeID(t *testing.T) {
 	// kubelet's formula, computed independently: "csi-" + sha256("uid" + "vol").
 	assert.Equal(t, "csi-59a84980f8ef4826da54c7ced3605cf80e85f6bb08948be904a09383f8317b93", EphemeralVolumeID("uid", "vol"))
+}
+
+// TestRebuildKeepsMetadataViewMounts pins the metadata-view half of the
+// rebuild: a bind mount of a view directory keeps its reference with the
+// digest the view's own record names, without a published tree behind it,
+// and a ledger entry the mount corrects is corrected.
+func TestRebuildKeepsMetadataViewMounts(t *testing.T) {
+	s := openTestStore(t)
+
+	// Stage a verified metadata view under the store's model-transfer/views root,
+	// carrying the golden fixture's manifest and checkpoint header.
+	viewRoot := filepath.Join(s.Root(), "model-transfer", "views")
+	require.NoError(t, os.MkdirAll(viewRoot, 0o755))
+	viewDir := filepath.Join(viewRoot, strings.Repeat("9", 64))
+	require.NoError(t, os.MkdirAll(viewDir, 0o755))
+	record := fmt.Sprintf(
+		`{"kind":"gpustack-model-transfer-metadata-view/v1","artifactDigest":"sha256:%s",`+
+			`"incomplete":true,"files":[]}`, testHex,
+	)
+	require.NoError(t, os.WriteFile(filepath.Join(viewDir, "view.json"),
+		[]byte(record), 0o444))
+
+	kept := Ref{
+		VolumeID: "csi-view-kept", TargetPath: testTarget("uid-7", "gpustack-model"),
+		Hex: testHex, PodName: "p7",
+	}
+	wrong := Ref{
+		VolumeID: "csi-view-wrong", TargetPath: testTarget("uid-8", "gpustack-model"),
+		Hex: otherHex, PodName: "p8",
+	}
+	for _, r := range []Ref{kept, wrong} {
+		require.NoError(t, s.WriteRef(r))
+	}
+
+	mounts := []Mount{
+		{
+			Device: testDevice, Root: "/model-transfer/views/" + strings.Repeat("9", 64),
+			MountPoint: kept.TargetPath,
+		},
+		{
+			Device: testDevice, Root: "/model-transfer/views/" + strings.Repeat("9", 64),
+			MountPoint: wrong.TargetPath,
+		},
+		// Mounted with no ledger record: adopted, digest from the record.
+		{
+			Device: testDevice, Root: "/model-transfer/views/" + strings.Repeat("9", 64),
+			MountPoint: testTarget("uid-9", "weights"),
+		},
+	}
+	got, err := s.Rebuild(mounts, testDevice)
+	require.NoError(t, err)
+
+	assert.Contains(t, got.Kept, kept, "a matching view ref is kept")
+	wrong.Hex = testHex
+	assert.Contains(t, got.Corrected, wrong,
+		"the view's own digest corrects a stale ledger entry")
+	adopted := Ref{
+		VolumeID:   EphemeralVolumeID("uid-9", "weights"),
+		TargetPath: testTarget("uid-9", "weights"), Hex: testHex, PodUID: "uid-9",
+	}
+	assert.Contains(t, got.Adopted, adopted,
+		"a mounted view the ledger lost is adopted with its record's digest")
+
+	// Nothing about a view mount made the digest published.
+	assert.False(t, s.IsPublished(testHex))
+}
+
+func TestRebuildRetainsScopedModelTransferReferences(t *testing.T) {
+	// The source brokers' cache references keep the stable `model-transfer.`
+	// pool prefix, with the vendor scope and ledger identity after it; a
+	// rebuild must retain them as broker-owned, not orphan them.
+	s := openTestStore(t)
+	scoped := Ref{
+		VolumeID:     "model-transfer.ascend.g-ascend-0123456789abcdef0123456789abcdef-7",
+		Hex:          testHex,
+		PodNamespace: "team-a", PodName: "source-worker-a",
+	}
+	require.NoError(t, s.WriteRef(scoped))
+	kept, err := s.Rebuild(nil, "9:9")
+	require.NoError(t, err)
+	found := false
+	for _, ref := range kept.Kept {
+		if ref.VolumeID == scoped.VolumeID {
+			found = true
+		}
+	}
+	assert.True(t, found, "a scoped model-transfer reference must survive rebuild")
+}
+
+func TestRebuildRefusesUnrecoverableMountedView(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		record string
+	}{
+		{name: "missing"},
+		{name: "corrupt", record: "{"},
+		{name: "invalid digest", record: `{"artifactDigest":"invalid"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := openTestStore(t)
+			viewID := strings.Repeat("9", 64)
+			if tc.record != "" {
+				viewDir := filepath.Join(s.Root(), "model-transfer", "views", viewID)
+				require.NoError(t, os.MkdirAll(viewDir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(viewDir, "view.json"), []byte(tc.record), 0o600))
+			}
+			_, err := s.Rebuild([]Mount{{
+				Device: testDevice, Root: "/model-transfer/views/" + viewID,
+				MountPoint: testTarget("uid-9", "weights"),
+			}}, testDevice)
+			require.ErrorContains(t, err, "no recoverable artifact digest")
+		})
+	}
 }
