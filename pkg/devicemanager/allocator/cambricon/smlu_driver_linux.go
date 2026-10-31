@@ -40,7 +40,8 @@ func (d *cndevSMLUDriver) device(card string) (cndev.Device, error) {
 	dev, ret := d.lib.GetDeviceHandleByPciBusId(card)
 	if !ret.IsSuccess() {
 		return cndev.Device{}, smluModeError(
-			fmt.Sprintf("get cndev handle for %s", card), ret, ret.IsAPIUnavailable())
+			fmt.Sprintf("get cndev handle for %s", card), ret, ret.IsAPIUnavailable(),
+		)
 	}
 	return dev, nil
 }

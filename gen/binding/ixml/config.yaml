@@ -36,7 +36,7 @@ GENERATOR:
   Includes:
    - "ixml.h"
   FlagGroups:
-    - { name: "LDFLAGS", flags: [ "-Wl,--export-dynamic", "-Wl,--unresolved-symbols=ignore-in-object-files" ] }
+    - { name: "LDFLAGS", traits: [ "linux" ], flags: [ "-Wl,--export-dynamic", "-Wl,--unresolved-symbols=ignore-in-object-files" ] }
     - { name: "LDFLAGS", traits: [ "darwin" ], flags: [ "-Wl,-undefined,dynamic_lookup" ] }
     - { name: "CFLAGS", flags: [ "-w" ] }
 PARSER:

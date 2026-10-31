@@ -109,8 +109,6 @@ const (
 	LIB_VERSION_MINOR = 3
 	// LIB_VERSION_RELEASE as defined in amdsmi/amdsmi.h:232
 	LIB_VERSION_RELEASE = 0
-	// LIB_VERSION_STRING as defined in amdsmi/amdsmi.h:237
-	LIB_VERSION_STRING = 0x102b71470
 	// PF_INDEX as defined in amdsmi/amdsmi.h:246
 	PF_INDEX = (MAX_VF_COUNT - 1)
 	// MAX_DRIVER_INFO_RSVD as defined in amdsmi/amdsmi.h:247

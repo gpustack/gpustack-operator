@@ -146,6 +146,14 @@ spec:
             - name: GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE
               value: Node
             {{- end }}
+            {{- if .Values.modelTransfer.enabled }}
+            # Declares the chart-owned remote delivery policy on the same terms: Disabled by
+            # default, so a cluster that never opted in has no key here at all; the worker asserts
+            # the value on every start, and Require and Prefer additionally need the model-manager
+            # plugin installed, which the Setting's own admission enforces.
+            - name: GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY
+              value: {{ .Values.modelTransfer.policy | quote }}
+            {{- end }}
             # Propagate each manufacturer's identity, so the worker reads the same facts the
             # chart states: its NodeFeatureRule, its resource accounting and the RuntimeClass
             # it attaches to a workload all come from these.

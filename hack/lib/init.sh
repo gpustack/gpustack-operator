@@ -21,6 +21,8 @@ for file in "${ROOT_DIR}/hack/lib/"*; do
   fi
 done
 
+# Discover the toolchain and installed tools before target detection calls go.
+gpustack::build::add_go_paths
 gpustack::log::install_errexit
 gpustack::version::get_version_vars
 gpustack::target::get_target_vars

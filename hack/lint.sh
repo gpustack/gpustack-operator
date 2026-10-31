@@ -6,6 +6,7 @@ set -o pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "${ROOT_DIR}/hack/lib/init.sh"
+cd "${ROOT_DIR}"
 
 function chart_lint() {
   # A static assertion over rendered output, needing no cluster, so it belongs to lint
@@ -13,6 +14,8 @@ function chart_lint() {
   gpustack::helm::verify_images "${ROOT_DIR}/deploy/gpustack-operator/chart"
   HELM_BIN="$(gpustack::helm::helm::bin)" \
     bash "${ROOT_DIR}/deploy/gpustack-operator/chart/ci/test-topograph.sh"
+  HELM_BIN="$(gpustack::helm::helm::bin)" \
+    bash "${ROOT_DIR}/deploy/gpustack-operator/chart/ci/test-model-transfer.sh"
   bash "${ROOT_DIR}/deploy/gpustack-operator/chart/ci/test-kueue-releases.sh"
   gpustack::helm::lint "${ROOT_DIR}/deploy/gpustack-operator/chart"
 }
@@ -99,6 +102,30 @@ function docs_lint() {
   fi
 }
 
+# The covering set for a turn that dirtied only Python sources under model-transfer/python/. The Stop hook
+# routes such a turn here in addition to or instead of the full code gate so uv + ruff check and
+# format verification run directly on model-transfer/python, plus check-symbols.sh which also scans tracked
+# sources for decorative symbols.
+function python_lint() {
+  local py_dir="${ROOT_DIR}/model-transfer/python"
+  if [[ ! -d "${py_dir}" ]]; then
+    return 0
+  fi
+  if [[ -z "$(command -v uv 2>/dev/null)" ]]; then
+    if [[ "${GPUSTACK_IMAGE_BUILD:-}" == "true" ]]; then
+      gpustack::log::info "uv is not installed in the Go builder image, skipping python lint"
+      return 0
+    fi
+    gpustack::log::fatal "cannot execute python lint as uv is not found"
+  fi
+  gpustack::log::info "linting Python sources in model-transfer/python with uv and ruff"
+  (
+    cd "${py_dir}"
+    uv run ruff check .
+    uv run ruff format --check .
+  )
+}
+
 # The covering set for a turn that dirtied only shell under .agents/ outside hooks/. The Stop hook
 # routes such a turn here instead of the full code gate: of everything lint() runs, only
 # check-symbols.sh reads those files, so it runs beside the shell gate and the steps that read no
@@ -106,6 +133,7 @@ function docs_lint() {
 # equal to, and fails when a step of lint() is added without a classification or when this
 # function's set disagrees with the table.
 function agents_shell_lint() {
+  bash "${ROOT_DIR}/hack/check/build-pipeline-selftest.sh" "${ROOT_DIR}"
   if ! bash "${ROOT_DIR}/hack/check/agents-shell-selftest.sh" "${ROOT_DIR}"; then
     gpustack::log::fatal "the .agents shell check is not trustworthy: its self-test failed"
   fi
@@ -150,9 +178,19 @@ function lint() {
     return
   fi
 
+  if [[ "${1:-}" == "python" ]]; then
+    python_lint
+    return
+  fi
+
+  python_lint
+
+  bash "${ROOT_DIR}/hack/check/build-pipeline-selftest.sh" "${ROOT_DIR}"
+  gpustack::build::setup_env "$(go env GOOS)" "$(go env GOARCH)"
+
   local opts=()
   if [[ ${#BUILD_TAGS[@]} -gt 0 ]]; then
-    opts+=("--build-tags=\"${BUILD_TAGS[*]}\"")
+    opts+=("--build-tags=${BUILD_TAGS[*]}")
   fi
   opts+=("./...")
   GOLANGCI_LINT_CACHE="$(go env GOCACHE)/golangci-lint" gpustack::lint::run "${opts[@]}"

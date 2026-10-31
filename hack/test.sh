@@ -6,11 +6,12 @@ set -o pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "${ROOT_DIR}/hack/lib/init.sh"
+cd "${ROOT_DIR}"
 
 TEST_DIR="${ROOT_DIR}/.dist/test"
 mkdir -p "${TEST_DIR}"
 
-function test() {
+function test() (
   if [[ "${1:-}" == "chart" ]]; then
     gpustack::helm::test "${ROOT_DIR}/deploy/gpustack-operator/chart"
     return
@@ -25,12 +26,14 @@ function test() {
   target_os="$(go env GOOS)"
 
   local extldflags=""
+  gpustack::build::setup_env "${target_os}" "$(go env GOARCH)"
   if [[ "${target_os}" == "linux" ]]; then
     extldflags=" -extldflags=-Wl,-z,lazy"
   fi
 
   local opts=(
     "-v"
+    "-buildvcs=false"
     "-failfast"
     "-cover"
     # Order-dependent tests hide behind a fixed run order; shuffle so every run probes it.
@@ -44,20 +47,32 @@ function test() {
   if [[ "${RACE:-}" != "false" ]]; then
     opts+=("-race")
   fi
+  local list_opts=()
   if [[ ${#BUILD_TAGS[@]} -gt 0 ]]; then
-    opts+=("-tags=\"${BUILD_TAGS[*]}\"")
+    opts+=("-tags=${BUILD_TAGS[*]}")
+    list_opts+=("-tags=${BUILD_TAGS[*]}")
   fi
 
-  set -x
+  local packages=("./...")
   if [[ $# -gt 0 ]]; then
-    CGO_ENABLED=1 \
-      go list ./... | grep -v -E "$(gpustack::util::join_array "|" "$@")" | xargs -I {} go test "${opts[@]}" {}"/..."
-  else
-    CGO_ENABLED=1 \
-      go test "${opts[@]}" ./...
+    local listing package pattern
+    listing="$(go list "${list_opts[@]}" ./...)"
+    pattern="$(gpustack::util::join_array "|" "$@")"
+    packages=()
+    while IFS= read -r package; do
+      if [[ -n "${package}" && ! "${package}" =~ ${pattern} ]]; then
+        packages+=("${package}")
+      fi
+    done <<<"${listing}"
+    if [[ ${#packages[@]} -eq 0 ]]; then
+      gpustack::log::info "No test packages remain after exclusions"
+      return
+    fi
   fi
+  set -x
+  go test "${opts[@]}" "${packages[@]}"
   set +x
-}
+)
 
 gpustack::log::info "+++ TEST +++"
 test "$@"

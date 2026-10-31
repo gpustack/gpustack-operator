@@ -10,7 +10,7 @@ GENERATOR:
   FlagGroups:
     - { name: "LDFLAGS", traits: [ "linux" ], flags: [ "-Wl,--export-dynamic", "-Wl,--unresolved-symbols=ignore-in-object-files" ] }
     - { name: "LDFLAGS", traits: [ "darwin" ], flags: [ "-Wl,-undefined,dynamic_lookup" ] }
-    - { name: "CFLAGS", flags: [ "-w" ] }
+    - { name: "CFLAGS", flags: [ "-std=gnu17", "-w" ] }
 PARSER:
   SourcesPaths:
     - "hgml.h"

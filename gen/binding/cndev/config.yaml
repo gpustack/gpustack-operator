@@ -39,6 +39,7 @@ TRANSLATOR:
     - { target: "^cndev", default: "raw" }
   Rules:
     const:
+      - { action: ignore, from: "^CNDEV_EXPORT$" }
       - { action: accept, from: "^CNDEV_" }
       - { action: accept, from: "^cndev_" }
       - { action: replace, from: "^CNDEV_" }
