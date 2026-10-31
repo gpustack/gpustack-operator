@@ -227,7 +227,120 @@ type NodeModelStoreStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []gpustack.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,4,rep,name=conditions"` // nolint: lll
+
+	// ModelTransfer is the node's registered-memory source state for remote weight loading, one
+	// entry per source generation this node currently holds. It is ABSENT while the node runs no
+	// source runtime or holds no generation, and a generation the source stops serving leaves
+	// this report rather than turning into a zero — the absence IS the invalidation, because a
+	// registration nobody serves must not read as one ready to serve.
+	//
+	// It is deliberately separate from the models above, and neither implies the other: a
+	// generation that drains keeps its published tree disk-ready, and a daemon restart drops the
+	// entries without un-publishing anything.
+	//
+	// The plugin writes it, as it writes every status figure here; the transport workers report
+	// their health to the plugin and never write this object, which is what keeps this object
+	// single-writer.
+	//
+	// +optional
+	ModelTransfer *NodeModelStoreModelTransferStatus `json:"modelTransfer,omitempty" protobuf:"bytes,5,opt,name=modelTransfer"`
 }
+
+// NodeModelStoreModelTransferStatus is the node's source generations for remote weight loading.
+type NodeModelStoreModelTransferStatus struct {
+	// Generations is one entry per source generation this node currently holds registered. Two
+	// entries for one digest are the drain-and-refill window, not a duplicate: each carries its
+	// own figures, and neither borrows the other's.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=generation
+	// +k8s:validation:maxItems=64
+	Generations []NodeModelStoreModelTransferGeneration `json:"generations,omitempty" protobuf:"bytes,1,rep,name=generations"` // nolint: lll
+}
+
+// NodeModelStoreModelTransferGeneration is one source generation on this node, as the node
+// currently serves it. An entry names a digest and a generation and never a tenant: the
+// namespace's own view of what it may draw is on the Binding, not here.
+type NodeModelStoreModelTransferGeneration struct {
+	// Generation is the source's identity for this registered content: an opaque token assigned
+	// when the fill has verified, and the only thing the figures beside it are true of. A new
+	// generation never inherits the old one's figures. It carries no key.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=128
+	Generation string `json:"generation" protobuf:"bytes,1,opt,name=generation"`
+
+	// Digest is the manifest digest the generation serves.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	Digest string `json:"digest" protobuf:"bytes,2,opt,name=digest"`
+
+	// State is how this node is serving the generation. Serving admits readers; Draining has
+	// stopped admitting and is fencing its in-flight work; Quarantined holds its registration
+	// because its completion could not be proven, and nothing recycles its memory while it
+	// stands.
+	//
+	// +required
+	// +k8s:validation:enum=["Serving","Draining","Quarantined"]
+	State NodeModelStoreModelTransferGenerationState `json:"state" protobuf:"bytes,3,opt,name=state,casttype=NodeModelStoreModelTransferGenerationState"` // nolint: lll
+
+	// ResidentBytes is what this node holds registered for this generation, serving and draining
+	// alike, because a draining generation's memory is still held.
+	//
+	// +optional
+	ResidentBytes int64 `json:"residentBytes,omitempty" protobuf:"varint,4,opt,name=residentBytes"`
+
+	// Registrations is this node's live registration count for this generation.
+	//
+	// +optional
+	Registrations int32 `json:"registrations,omitempty" protobuf:"varint,5,opt,name=registrations"`
+
+	// ActiveSessions is how many read sessions this node has admitted against this generation.
+	//
+	// +optional
+	ActiveSessions int32 `json:"activeSessions,omitempty" protobuf:"varint,6,opt,name=activeSessions"`
+
+	// RejectedAdmissions counts the admission refusals this node has reported since this
+	// generation started, so a capacity shortfall is visible where it was made.
+	//
+	// +optional
+	RejectedAdmissions int64 `json:"rejectedAdmissions,omitempty" protobuf:"varint,7,opt,name=rejectedAdmissions"` // nolint: lll
+
+	// SourcePodUID identifies the source Pod that owns this generation.
+	// +optional
+	SourcePodUID string `json:"sourcePodUID,omitempty" protobuf:"bytes,8,opt,name=sourcePodUID"`
+
+	// SourceInstanceID identifies the native worker boot holding this generation.
+	// +optional
+	SourceInstanceID string `json:"sourceInstanceID,omitempty" protobuf:"bytes,9,opt,name=sourceInstanceID"`
+
+	// SourceGeneration is the ModelArtifact specification generation served.
+	// +optional
+	SourceGeneration int64 `json:"sourceGeneration,omitempty" protobuf:"varint,10,opt,name=sourceGeneration"`
+
+	// LeaseExpiresAt is the source worker lease's expiry.
+	// +optional
+	LeaseExpiresAt *meta.Time `json:"leaseExpiresAt,omitempty" protobuf:"bytes,11,opt,name=leaseExpiresAt"`
+}
+
+// NodeModelStoreModelTransferGenerationState is how a node is serving one source generation.
+// +enum
+type NodeModelStoreModelTransferGenerationState string
+
+const (
+	// NodeModelStoreModelTransferGenerationStateServing is a generation that admits readers.
+	NodeModelStoreModelTransferGenerationStateServing NodeModelStoreModelTransferGenerationState = "Serving"
+	// NodeModelStoreModelTransferGenerationStateDraining is a generation that has stopped
+	// admitting new sessions and is fencing its in-flight work before release.
+	NodeModelStoreModelTransferGenerationStateDraining NodeModelStoreModelTransferGenerationState = "Draining"
+	// NodeModelStoreModelTransferGenerationStateQuarantined is a generation whose completion
+	// could not be proven; it retains its registration and memory until a qualified fence
+	// applies, and never exposes recycled addresses while it stands.
+	NodeModelStoreModelTransferGenerationStateQuarantined NodeModelStoreModelTransferGenerationState = "Quarantined"
+)
 
 // NodeModelStoreCapacity is the cache filesystem's size and usage, coarse enough that it changes
 // only when content does.

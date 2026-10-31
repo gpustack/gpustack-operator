@@ -28,6 +28,21 @@ type NodeModelStoreStatusApplyConfiguration struct {
 	// is above the high watermark with nothing the plugin may remove.
 	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
+	// ModelTransfer is the node's registered-memory source state for remote weight loading, one
+	// entry per source generation this node currently holds. It is ABSENT while the node runs no
+	// source runtime or holds no generation, and a generation the source stops serving leaves
+	// this report rather than turning into a zero — the absence IS the invalidation, because a
+	// registration nobody serves must not read as one ready to serve.
+	//
+	// It is deliberately separate from the models above, and neither implies the other: a
+	// generation that drains keeps its published tree disk-ready, and a daemon restart drops the
+	// entries without un-publishing anything.
+	//
+	// The plugin writes it, as it writes every status figure here; the transport workers report
+	// their health to the plugin and never write this object, which is what keeps this object
+	// single-writer.
+	//
+	ModelTransfer *NodeModelStoreModelTransferStatusApplyConfiguration `json:"modelTransfer,omitempty"`
 }
 
 // NodeModelStoreStatusApplyConfiguration constructs a declarative configuration of the NodeModelStoreStatus type for use with
@@ -75,5 +90,13 @@ func (b *NodeModelStoreStatusApplyConfiguration) WithConditions(values ...*v1.Co
 		}
 		b.Conditions = append(b.Conditions, *values[i])
 	}
+	return b
+}
+
+// WithModelTransfer sets the ModelTransfer field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ModelTransfer field is set to the value of the last call.
+func (b *NodeModelStoreStatusApplyConfiguration) WithModelTransfer(value *NodeModelStoreModelTransferStatusApplyConfiguration) *NodeModelStoreStatusApplyConfiguration {
+	b.ModelTransfer = value
 	return b
 }

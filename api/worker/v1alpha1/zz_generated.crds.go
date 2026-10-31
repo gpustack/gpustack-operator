@@ -5660,7 +5660,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													Type:        "string",
 												},
 												"delivery": {
-													Description: "Delivery is how the weights reach the engine: \"PVC\", the claim mounted read-only at a fixed\npath; \"Engine\", the engine downloading the pinned commit itself; \"Node\", the node's\nmodel-manager plugin materializing the verified files and mounting them read-only at the same\nfixed path; or \"Image\", kubelet pulling the pinned OCI image into a read-only image volume.",
+													Description: "Delivery is how the weights reach the engine: \"PVC\", the claim mounted read-only at a fixed\npath; \"Engine\", the engine downloading the pinned commit itself; \"Node\", the node's\nmodel-manager plugin materializing the verified files and mounting them read-only at the same\nfixed path; \"Image\", kubelet pulling the pinned OCI image into a read-only image volume; or\n\"Remote\", the weights arriving from a prepared in-memory source over a qualified transfer,\nwith no complete checkpoint on this filesystem.\n\"Remote\" is the configured outcome, and it does not summarize the replicas: the delivery\neach replica actually uses right now — including which took the declared fallback — is in\nstatus.model.remote, and that view is what a reader of a half-rolled-out fallback trusts.",
 													Type:        "string",
 													Enum: []v1.JSON{
 														{
@@ -5675,11 +5675,127 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														{
 															Raw: []byte(`"Image"`),
 														},
+														{
+															Raw: []byte(`"Remote"`),
+														},
 													},
 												},
 												"manifestDigest": {
 													Description: "ManifestDigest is a hub artifact's content address. Absent for a claim.",
 													Type:        "string",
+												},
+												"remote": {
+													Description: "Remote is the remote-delivery view, present when the weights are configured to arrive from\na prepared source. It is ABSENT for every legacy delivery, so a consumer that has never\nheard of remote delivery keeps reading delivery alone, and an absent view never reads as a\nremote delivery that silently changed its mind.",
+													Type:        "object",
+													Required: []string{
+														"policy",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"policy": {
+															Description: "Policy is the effective policy in force for this deployment's remote delivery.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"Require"`),
+																},
+																{
+																	Raw: []byte(`"Prefer"`),
+																},
+															},
+														},
+														"roles": {
+															Description: "Roles is one entry per role that loads weights, so a mixed deployment — a role half rolled\nover to its fallback, or two roles on different outcomes — is described by its entries\nrather than compressed into the aggregate above.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"role",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"replicas": {
+																			Description: "Replicas is one entry per replica of the role, ordered by ordinal. It is an ordinary list,\nnot a map: like the groups above, a replica's observed delivery changes without its\nidentity changing, so a map keyed on the ordinal would replace the whole entry on the very\nchange a reader came to see.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"ordinal",
+																						"delivery",
+																						"load",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"delivery": {
+																							Description: "Delivery is the outcome this replica currently uses: Remote while it loads from the source,\nor the declared fallback it visibly took, with the reason below saying why. A fallback is\nNode or Engine — never a claim or an image delivery, which are different artifacts and not\nidentity-preserving — and it is recorded as a fallback here rather than relabeled as the\nconfigured outcome.",
+																							Type:        "string",
+																							Enum: []v1.JSON{
+																								{
+																									Raw: []byte(`"Remote"`),
+																								},
+																								{
+																									Raw: []byte(`"Node"`),
+																								},
+																								{
+																									Raw: []byte(`"Engine"`),
+																								},
+																							},
+																						},
+																						"fallbackAttempts": {
+																							Description: "FallbackAttempts is how many bounded fallback attempts this replica has consumed. A count\npast the declared budget is a visible overrun a reader can act on, not a state the next\nrender quietly resets.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"load": {
+																							Description: "Load is how far the replica's remote load has got, and it keeps the observations the\nstartup path makes distinct: metadata supplied, source available, an attempt under way,\nweights loaded. Serving readiness is deliberately not here — it stays with the readiness\nthis deployment already publishes, whose meanings this view does not change — so a loaded\nweight set and a serving replica remain two observations, and a source that later drains\ndoes not retract a load that already confirmed.",
+																							Type:        "string",
+																							Enum: []v1.JSON{
+																								{
+																									Raw: []byte(`"Unknown"`),
+																								},
+																								{
+																									Raw: []byte(`"AwaitingMetadata"`),
+																								},
+																								{
+																									Raw: []byte(`"AwaitingSource"`),
+																								},
+																								{
+																									Raw: []byte(`"Loading"`),
+																								},
+																								{
+																									Raw: []byte(`"Loaded"`),
+																								},
+																							},
+																						},
+																						"ordinal": {
+																							Description: "Ordinal is the replica's position within its role. Zero is a real position, the first\nreplica, and is always encoded rather than omitted.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"reason": {
+																							Description: "Reason names what holds the load at its state, or why the replica is on the delivery it is\non. It is empty while nothing needs saying, and a quota, authorization or integrity failure\nnames its own kind here rather than collapsing into a generic wait.",
+																							Type:        "string",
+																						},
+																					},
+																				},
+																			},
+																			Nullable:  true,
+																			XListType: ptr.To[string]("atomic"),
+																		},
+																		"role": {
+																			Description: "Role is the role this entry describes.",
+																			Type:        "string",
+																		},
+																	},
+																},
+															},
+															Nullable: true,
+															XListMapKeys: []string{
+																"role",
+															},
+															XListType: ptr.To[string]("map"),
+														},
+													},
+													Nullable: true,
 												},
 												"revision": {
 													Description: "Revision is the commit a hub artifact resolved to. Absent for a claim.",
@@ -8314,6 +8430,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelPrefetch() *v1.CustomResourceDefiniti
 												},
 											},
 										},
+										"source": {
+											Description: "Source opts this prefetch into source preparation for remote weight loading, beside the\ndisk residency it always asked for. With it, the target nodes may fill a registered-memory\nsource from this artifact, and the prefetch reports that readiness in status.transfer,\nseparately from the disk figures above.\nIT REQUIRES AN EXPLICIT PLACEMENT. A source is memory a node holds against a known target\nset, so the derived-from-deployments default an ordinary prefetch falls back to — which\nfollows this namespace's consumers around — would prepare whatever machines happen to\nserve the model this week. A source intent on a prefetch whose placement names no\ninstanceTypes and no nodeSelector is refused at admission, and the two out together stay\nrefused for the ambiguity they already were.\nThe optional Binding sourceMemory grant bounds memory independently of disk quota.\nWithout it, source preparation uses the node's configured source capacity.\nAbsent means a prefetch that warms the node cache only, exactly as this object has always\nmeant, with the same placement defaults, warm-up behavior and status meaning as before.",
+											Type:        "object",
+											Nullable:    true,
+										},
 									},
 								},
 								"status": {
@@ -8397,6 +8518,145 @@ func crd_gpustack_api_worker_v1alpha1_ModelPrefetch() *v1.CustomResourceDefiniti
 											Description: "ReadyNodes is how many target nodes report the digest published and mountable.",
 											Type:        "integer",
 											Format:      "int32",
+										},
+										"transfer": {
+											Description: "Transfer reports the source preparation spec.source asks for, aggregated from the target\nnodes' reports. It is ABSENT without spec.source — the intent is what turns it on — and\nabsent while nothing has been observed, rather than present and empty, for the same reason\nthe disk figures above are zero rather than missing only when measured.\nIt is deliberately separate from the disk figures above, and neither implies the other:\nreadyNodes counts complete published trees, which survive a daemon restart, while the\ntransfer entries are scoped to a generation held in memory, and a generation that stops\nbeing served does not un-publish the tree beneath it.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"generations": {
+													Description: "Generations summarizes at most 16 source generations, with serving entries first\nand generation identity order within each group. The SourceSummaryTruncated condition\nreports omitted entries. Accounting and source readiness use the complete observation.",
+													Type:        "array",
+													MaxItems:    ptr.To[int64](16),
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Required: []string{
+																"generation",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"activeSessions": {
+																	Description: "ActiveSessions is how many read sessions the nodes have admitted against this generation.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"drainingNodes": {
+																	Description: "DrainingNodes is how many target nodes hold this generation past admission — they have\nstopped admitting new sessions and are fencing their in-flight work, or their completion\ncould not be proven and they hold the registration until a qualified fence applies. Their\nmemory is still held.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"generation": {
+																	Description: "Generation is the source's identity for this registered content: an opaque token assigned\nwhen the fill has verified, and the only thing the figures beside it are true of. A drain,\na refill or a daemon restart supersedes it; a new generation never inherits the old one's\nfigures. It names no tenant and carries no key.",
+																	Type:        "string",
+																	MaxLength:   ptr.To[int64](128),
+																	MinLength:   ptr.To[int64](1),
+																},
+																"readyNodes": {
+																	Description: "ReadyNodes is how many target nodes hold this generation registered and admit readers\nagainst it. It is NOT readyNodes, and neither implies the other: a node whose daemon\nrestarted stops counting here while the published tree beneath it stays disk-ready.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"registrations": {
+																	Description: "Registrations is the live registration count the nodes hold for this generation.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"rejectedAdmissions": {
+																	Description: "RejectedAdmissions counts the admission refusals the nodes have reported since this\ngeneration started — over the memory grant, out of registrations, past the session limit —\nso a capacity shortfall is visible where it was made rather than only as a replica that\nnever starts.",
+																	Type:        "integer",
+																	Format:      "int64",
+																},
+																"residentBytes": {
+																	Description: "ResidentBytes sums what the target nodes hold registered for this generation, serving and\ndraining alike, because a draining generation's memory is still held. The bytes are\nphysical, so a copy two namespaces share counts once here and once in each namespace's\nreservation.",
+																	Type:        "integer",
+																	Format:      "int64",
+																},
+															},
+														},
+													},
+													Nullable: true,
+													XListMapKeys: []string{
+														"generation",
+													},
+													XListType: ptr.To[string]("map"),
+												},
+												"limits": {
+													Description: "Limits echoes the policy the source applies to this namespace's read sessions: the grant's\nlimits as they were admitted, which a later edit of the Binding cannot reach back and\nchange. Absent until a generation is admitted.",
+													Type:        "object",
+													Required: []string{
+														"bytes",
+														"registrations",
+														"sessions",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"bytes": {
+															Description: "Bytes is the registered-memory ceiling the namespace's admitted reservations draw on.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															XIntOrString: true,
+														},
+														"registrations": {
+															Description: "Registrations is the live registration count the source allows the namespace.",
+															Type:        "integer",
+															Format:      "int32",
+															Minimum:     ptr.To[float64](1),
+														},
+														"sessions": {
+															Description: "Sessions is the concurrent admitted read sessions the source allows the namespace.",
+															Type:        "integer",
+															Format:      "int32",
+															Minimum:     ptr.To[float64](1),
+														},
+													},
+													Nullable: true,
+												},
+												"reservedBytes": {
+													Description: "ReservedBytes is the memory this prefetch's admitted generations hold reserved against the\nnamespace's grant. It is charged to this namespace even when the physical bytes are shared\nwith another namespace's reservation, so it can exceed the residency any one node reports.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+												"serving": {
+													Description: "Serving binds SourceReady to the current artifact revision and the earliest\nlease expiry among its serving generations. It is an observation, not an\nauthorization; absent or expired proof grants no source readiness.",
+													Type:        "object",
+													Required: []string{
+														"artifactUID",
+														"artifactGeneration",
+														"digest",
+														"readyLeaseExpiresAt",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"artifactGeneration": {
+															Description: "ArtifactGeneration is the artifact revision the source serves.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](1),
+														},
+														"artifactUID": {
+															Description: "ArtifactUID identifies the artifact whose source was observed.",
+															Type:        "string",
+															MinLength:   ptr.To[int64](1),
+														},
+														"digest": {
+															Description: "Digest is the resolved content identity the source serves.",
+															Type:        "string",
+															MinLength:   ptr.To[int64](1),
+														},
+														"readyLeaseExpiresAt": {
+															Description: "ReadyLeaseExpiresAt bounds how long this readiness observation is usable.",
+															Type:        "string",
+															Format:      "date-time",
+														},
+													},
+													Nullable: true,
+												},
+											},
+											Nullable: true,
 										},
 									},
 								},
@@ -8836,6 +9096,43 @@ func crd_gpustack_api_worker_v1alpha1_ModelStoreBinding() *v1.CustomResourceDefi
 												},
 											},
 										},
+										"sourceMemory": {
+											Description: "SourceMemory grants the registered memory this namespace's source preparation may hold: the\nceiling its admitted reservations draw on, the registration count, and the admitted read\nsessions it may run. It is the whole grant and it is SEPARATE from the disk one —\nquota.bytes counts filesystem usage and allowPinned grants pinning, and neither authorizes\na byte of memory.\nAbsent means source preparation follows the node's configured source capacity.\nWhile present, bytes and registrations may grow but cannot shrink. Sessions may\nchange online; existing sessions finish before a lower limit admits new ones.\nRemoving the section returns to node capacity without releasing existing charges.",
+											Type:        "object",
+											Required: []string{
+												"bytes",
+												"registrations",
+												"sessions",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"bytes": {
+													Description: "Bytes is the registered-memory ceiling this namespace's admitted reservations draw on. It\nis a memory budget, not a second disk quota: filesystem usage never consumes it, and\nregistered bytes never consume quota.bytes.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"registrations": {
+													Description: "Registrations is how many live registrations the namespace's source generations may hold at\nonce.",
+													Type:        "integer",
+													Format:      "int32",
+													Minimum:     ptr.To[float64](1),
+												},
+												"sessions": {
+													Description: "Sessions is how many read sessions the namespace may hold admitted at once. Read-session\nadmission is deliberately its own limit and never inferred from prefetch retention: a\nnamespace whose prefetches pin content has not thereby bought its engines unlimited reads.",
+													Type:        "integer",
+													Format:      "int32",
+													Minimum:     ptr.To[float64](1),
+												},
+											},
+											Nullable: true,
+										},
 										"storeRefs": {
 											Description: "StoreRefs names the ModelStores this namespace may prefetch into, at least one of them.\nPrefetch admission refuses a prefetch whose target set falls outside every granted store.",
 											Type:        "array",
@@ -8934,6 +9231,20 @@ func crd_gpustack_api_worker_v1alpha1_ModelStoreBinding() *v1.CustomResourceDefi
 											Description: "PhaseMessage carries the reason for the phase.",
 											Type:        "string",
 										},
+										"reservedMemory": {
+											Description: "ReservedMemory is this binding's retained source-memory charge in the pinned authority,\nincluding filling and draining generations and their runtime overhead. Physical bytes\nshared with another namespace still charge each reservation separately. It is absent\nwhile no retained charge is measured or the authority cannot be read.",
+											Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+											AnyOf: []v1.JSONSchemaProps{
+												{
+													Type: "integer",
+												},
+												{
+													Type: "string",
+												},
+											},
+											Nullable:     true,
+											XIntOrString: true,
+										},
 										"usedBytes": {
 											Description: "UsedBytes is what the namespace's prefetches occupy, the full size of every distinct digest\nany of them targets on any node holding it. It is absent while nothing has been measured,\nand zero is a measurement rather than the lack of one.",
 											Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
@@ -8972,6 +9283,14 @@ func crd_gpustack_api_worker_v1alpha1_ModelStoreBinding() *v1.CustomResourceDefi
 							Description: "",
 							Priority:    0,
 							JSONPath:    ".spec.allowPinned",
+						},
+						{
+							Name:        "SourceMemory",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.sourceMemory.bytes",
 						},
 						{
 							Name:        "Used",
@@ -9273,6 +9592,100 @@ func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinit
 												"type",
 											},
 											XListType: ptr.To[string]("map"),
+										},
+										"modelTransfer": {
+											Description: "ModelTransfer is the node's registered-memory source state for remote weight loading, one\nentry per source generation this node currently holds. It is ABSENT while the node runs no\nsource runtime or holds no generation, and a generation the source stops serving leaves\nthis report rather than turning into a zero — the absence IS the invalidation, because a\nregistration nobody serves must not read as one ready to serve.\nIt is deliberately separate from the models above, and neither implies the other: a\ngeneration that drains keeps its published tree disk-ready, and a daemon restart drops the\nentries without un-publishing anything.\nThe plugin writes it, as it writes every status figure here; the transport workers report\ntheir health to the plugin and never write this object, which is what keeps this object\nsingle-writer.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"generations": {
+													Description: "Generations is one entry per source generation this node currently holds registered. Two\nentries for one digest are the drain-and-refill window, not a duplicate: each carries its\nown figures, and neither borrows the other's.",
+													Type:        "array",
+													MaxItems:    ptr.To[int64](64),
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Required: []string{
+																"generation",
+																"digest",
+																"state",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"activeSessions": {
+																	Description: "ActiveSessions is how many read sessions this node has admitted against this generation.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"digest": {
+																	Description: "Digest is the manifest digest the generation serves.",
+																	Type:        "string",
+																	MinLength:   ptr.To[int64](1),
+																},
+																"generation": {
+																	Description: "Generation is the source's identity for this registered content: an opaque token assigned\nwhen the fill has verified, and the only thing the figures beside it are true of. A new\ngeneration never inherits the old one's figures. It carries no key.",
+																	Type:        "string",
+																	MaxLength:   ptr.To[int64](128),
+																	MinLength:   ptr.To[int64](1),
+																},
+																"leaseExpiresAt": {
+																	Description: "LeaseExpiresAt is the source worker lease's expiry.",
+																	Type:        "string",
+																	Format:      "date-time",
+																	Nullable:    true,
+																},
+																"registrations": {
+																	Description: "Registrations is this node's live registration count for this generation.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"rejectedAdmissions": {
+																	Description: "RejectedAdmissions counts the admission refusals this node has reported since this\ngeneration started, so a capacity shortfall is visible where it was made.",
+																	Type:        "integer",
+																	Format:      "int64",
+																},
+																"residentBytes": {
+																	Description: "ResidentBytes is what this node holds registered for this generation, serving and draining\nalike, because a draining generation's memory is still held.",
+																	Type:        "integer",
+																	Format:      "int64",
+																},
+																"sourceGeneration": {
+																	Description: "SourceGeneration is the ModelArtifact specification generation served.",
+																	Type:        "integer",
+																	Format:      "int64",
+																},
+																"sourceInstanceID": {
+																	Description: "SourceInstanceID identifies the native worker boot holding this generation.",
+																	Type:        "string",
+																},
+																"sourcePodUID": {
+																	Description: "SourcePodUID identifies the source Pod that owns this generation.",
+																	Type:        "string",
+																},
+																"state": {
+																	Description: "State is how this node is serving the generation. Serving admits readers; Draining has\nstopped admitting and is fencing its in-flight work; Quarantined holds its registration\nbecause its completion could not be proven, and nothing recycles its memory while it\nstands.",
+																	Type:        "string",
+																	Enum: []v1.JSON{
+																		{
+																			Raw: []byte(`"Serving"`),
+																		},
+																		{
+																			Raw: []byte(`"Draining"`),
+																		},
+																		{
+																			Raw: []byte(`"Quarantined"`),
+																		},
+																	},
+																},
+															},
+														},
+													},
+													Nullable: true,
+													XListMapKeys: []string{
+														"generation",
+													},
+													XListType: ptr.To[string]("map"),
+												},
+											},
+											Nullable: true,
 										},
 										"models": {
 											Description: "Models is the content on the node, keyed by digest. When more is on disk than fits, the\nreferenced entries are kept first and then the most recently used, and the Ready condition's\nmessage counts the omission.",

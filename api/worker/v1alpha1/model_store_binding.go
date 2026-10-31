@@ -28,6 +28,7 @@ import (
 // +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["msb"],subResources=["status"]
 // +k8s:crd-gen:printcolumn:name="Quota",type="string",jsonPath=".spec.quota.bytes"
 // +k8s:crd-gen:printcolumn:name="AllowPinned",type="boolean",jsonPath=".spec.allowPinned"
+// +k8s:crd-gen:printcolumn:name="SourceMemory",type="string",jsonPath=".spec.sourceMemory.bytes"
 // +k8s:crd-gen:printcolumn:name="Used",type="string",jsonPath=".status.usedBytes"
 // +k8s:crd-gen:printcolumn:name="Phase",type="string",jsonPath=".status.phase"
 // +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
@@ -41,10 +42,9 @@ type ModelStoreBinding struct {
 
 var _ runtime.Object = (*ModelStoreBinding)(nil)
 
-// ModelStoreBindingSpec is the grant. EVERY FIELD IS IMMUTABLE, webhook-enforced, except
-// AllowPinned going false to true and Quota.Bytes growing: re-pointing the grant would strand the
-// old accounting, and shrinking a budget under existing consumption would retroactively make an
-// admitted prefetch over budget.
+// ModelStoreBindingSpec is the grant. StoreRefs is immutable, AllowPinned may be enabled,
+// and Quota.Bytes may grow. SourceMemory follows its field's online update rules;
+// existing reservations remain accounted when the grant changes or is removed.
 type ModelStoreBindingSpec struct {
 	// StoreRefs names the ModelStores this namespace may prefetch into, at least one of them.
 	// Prefetch admission refuses a prefetch whose target set falls outside every granted store.
@@ -65,6 +65,47 @@ type ModelStoreBindingSpec struct {
 	//
 	// +optional
 	AllowPinned *bool `json:"allowPinned,omitempty" protobuf:"varint,3,opt,name=allowPinned"`
+
+	// SourceMemory grants the registered memory this namespace's source preparation may hold: the
+	// ceiling its admitted reservations draw on, the registration count, and the admitted read
+	// sessions it may run. It is the whole grant and it is SEPARATE from the disk one —
+	// quota.bytes counts filesystem usage and allowPinned grants pinning, and neither authorizes
+	// a byte of memory.
+	//
+	// Absent means source preparation follows the node's configured source capacity.
+	// While present, bytes and registrations may grow but cannot shrink. Sessions may
+	// change online; existing sessions finish before a lower limit admits new ones.
+	// Removing the section returns to node capacity without releasing existing charges.
+	//
+	// +optional
+	SourceMemory *ModelStoreBindingSourceMemory `json:"sourceMemory,omitempty" protobuf:"bytes,4,opt,name=sourceMemory"`
+}
+
+// ModelStoreBindingSourceMemory is the registered-memory grant source preparation draws on. All
+// three limits are administrator-set, because a limit nobody set would be a default pretending to
+// be a capacity answer: the memory a checkpoint needs is the artifact's, not the chart's.
+type ModelStoreBindingSourceMemory struct {
+	// Bytes is the registered-memory ceiling this namespace's admitted reservations draw on. It
+	// is a memory budget, not a second disk quota: filesystem usage never consumes it, and
+	// registered bytes never consume quota.bytes.
+	//
+	// +required
+	Bytes resource.Quantity `json:"bytes" protobuf:"bytes,1,name=bytes"`
+
+	// Registrations is how many live registrations the namespace's source generations may hold at
+	// once.
+	//
+	// +required
+	// +k8s:validation:minimum=1
+	Registrations int32 `json:"registrations" protobuf:"varint,2,opt,name=registrations"`
+
+	// Sessions is how many read sessions the namespace may hold admitted at once. Read-session
+	// admission is deliberately its own limit and never inferred from prefetch retention: a
+	// namespace whose prefetches pin content has not thereby bought its engines unlimited reads.
+	//
+	// +required
+	// +k8s:validation:minimum=1
+	Sessions int32 `json:"sessions" protobuf:"varint,3,opt,name=sessions"`
 }
 
 // ModelStoreBindingStoreReference names a cluster-scoped ModelStore this namespace is granted.
@@ -114,6 +155,14 @@ type ModelStoreBindingStatus struct {
 	//
 	// +optional
 	UsedBytes *resource.Quantity `json:"usedBytes,omitempty" protobuf:"bytes,4,opt,name=usedBytes"`
+
+	// ReservedMemory is this binding's retained source-memory charge in the pinned authority,
+	// including filling and draining generations and their runtime overhead. Physical bytes
+	// shared with another namespace still charge each reservation separately. It is absent
+	// while no retained charge is measured or the authority cannot be read.
+	//
+	// +optional
+	ReservedMemory *resource.Quantity `json:"reservedMemory,omitempty" protobuf:"bytes,5,opt,name=reservedMemory"`
 }
 
 // ModelStoreBindingList holds the list of ModelStoreBinding.

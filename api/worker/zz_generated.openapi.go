@@ -198,10 +198,13 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentKVTransfer{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVTransfer(ref),
 		v1alpha1.ModelDeploymentList{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelDeploymentList(ref),
 		v1alpha1.ModelDeploymentModel{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref),
+		v1alpha1.ModelDeploymentModelRemoteStatus{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelRemoteStatus(ref),
 		v1alpha1.ModelDeploymentModelStatus{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelStatus(ref),
 		v1alpha1.ModelDeploymentParallelismDeclaredStatus{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_ModelDeploymentParallelismDeclaredStatus(ref),
 		v1alpha1.ModelDeploymentParallelismSourceStatus{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentParallelismSourceStatus(ref),
 		v1alpha1.ModelDeploymentPort{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelDeploymentPort(ref),
+		v1alpha1.ModelDeploymentRemoteReplicaStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentRemoteReplicaStatus(ref),
+		v1alpha1.ModelDeploymentRemoteRoleStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentRemoteRoleStatus(ref),
 		v1alpha1.ModelDeploymentRetirementStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentRetirementStatus(ref),
 		v1alpha1.ModelDeploymentRole{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref),
 		v1alpha1.ModelDeploymentRoleElasticEP{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleElasticEP(ref),
@@ -263,12 +266,18 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelPrefetchList{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1alpha1_ModelPrefetchList(ref),
 		v1alpha1.ModelPrefetchPlacement{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_ModelPrefetchPlacement(ref),
 		v1alpha1.ModelPrefetchRetention{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_ModelPrefetchRetention(ref),
+		v1alpha1.ModelPrefetchSource{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelPrefetchSource(ref),
 		v1alpha1.ModelPrefetchSpec{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1alpha1_ModelPrefetchSpec(ref),
 		v1alpha1.ModelPrefetchStatus{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelPrefetchStatus(ref),
+		v1alpha1.ModelPrefetchTransferGeneration{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelPrefetchTransferGeneration(ref),
+		v1alpha1.ModelPrefetchTransferLimits{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelPrefetchTransferLimits(ref),
+		v1alpha1.ModelPrefetchTransferServing{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelPrefetchTransferServing(ref),
+		v1alpha1.ModelPrefetchTransferStatus{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelPrefetchTransferStatus(ref),
 		v1alpha1.ModelStore{}.OpenAPIModelName():                                       schema_gpustack_api_worker_v1alpha1_ModelStore(ref),
 		v1alpha1.ModelStoreBinding{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1alpha1_ModelStoreBinding(ref),
 		v1alpha1.ModelStoreBindingList{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelStoreBindingList(ref),
 		v1alpha1.ModelStoreBindingQuota{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_ModelStoreBindingQuota(ref),
+		v1alpha1.ModelStoreBindingSourceMemory{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelStoreBindingSourceMemory(ref),
 		v1alpha1.ModelStoreBindingSpec{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelStoreBindingSpec(ref),
 		v1alpha1.ModelStoreBindingStatus{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelStoreBindingStatus(ref),
 		v1alpha1.ModelStoreBindingStoreReference{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelStoreBindingStoreReference(ref),
@@ -284,6 +293,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.NodeModelStoreKubelet{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_NodeModelStoreKubelet(ref),
 		v1alpha1.NodeModelStoreList{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1alpha1_NodeModelStoreList(ref),
 		v1alpha1.NodeModelStoreModel{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_NodeModelStoreModel(ref),
+		v1alpha1.NodeModelStoreModelTransferGeneration{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_NodeModelStoreModelTransferGeneration(ref),
+		v1alpha1.NodeModelStoreModelTransferStatus{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_NodeModelStoreModelTransferStatus(ref),
 		v1alpha1.NodeModelStoreSpec{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1alpha1_NodeModelStoreSpec(ref),
 		v1alpha1.NodeModelStoreStatus{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_NodeModelStoreStatus(ref),
 		v1alpha1.NodeModelStoreWatermarks{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_NodeModelStoreWatermarks(ref),
@@ -10149,6 +10160,52 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref common.Referen
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelRemoteStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentModelRemoteStatus is the remote-delivery view of the model's weights: the effective policy and, per role and replica, the delivery each replica actually uses.\n\nTHE ENTRIES ARE THE OBSERVED TRUTH AND THE AGGREGATE IS THE CONFIGURED ANSWER. delivery above names the path the weights were configured to take; a replica that took a declared fallback reads Node or Engine in the entries here while it uses them, which is exactly the mixing one aggregate string cannot say. A reader asking what a replica is doing reads the entries; a reader asking how the deployment is configured reads delivery.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"policy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Policy is the effective policy in force for this deployment's remote delivery.\n\n\nPossible enum values:\n - `\"Prefer\"` uses remote delivery when it qualifies and is available, and otherwise permits only the declared identity-preserving fallback, visibly counted as a fallback rather than silently re-rendered as an ordinary run.\n - `\"Require\"` holds a replica's startup until a qualified remote path serves the weights, within the declared startup limits, and then reports failure: it never materializes a complete destination checkpoint on its own, and an unsupported combination is blocked with the reason it was blocked for.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Prefer", "Require"},
+						},
+					},
+					"roles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"role",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Roles is one entry per role that loads weights, so a mixed deployment — a role half rolled over to its fallback, or two roles on different outcomes — is described by its entries rather than compressed into the aggregate above.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentRemoteRoleStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"policy"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentRemoteRoleStatus{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -10180,17 +10237,25 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelStatus(ref common.R
 					},
 					"delivery": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Delivery is how the weights reach the engine: \"PVC\", the claim mounted read-only at a fixed path; \"Engine\", the engine downloading the pinned commit itself; \"Node\", the node's model-manager plugin materializing the verified files and mounting them read-only at the same fixed path; or \"Image\", kubelet pulling the pinned OCI image into a read-only image volume.\n\n\nPossible enum values:\n - `\"Engine\"` has the engine download a hub artifact's resolved commit into a size-limited cache volume, with the artifact's token from its Secret.\n - `\"Image\"` mounts an image artifact's OCI image read-only through a Kubernetes image volume: kubelet pulls the pinned image on the node that needs it, and the node's plugin cache plays no part.\n - `\"Node\"` has the node's model-manager plugin materialize a hub artifact's verified files into the node's cache and mount them read-only.\n - `\"PVC\"` mounts a claim artifact read-only at a fixed path.",
+							Description: "Delivery is how the weights reach the engine: \"PVC\", the claim mounted read-only at a fixed path; \"Engine\", the engine downloading the pinned commit itself; \"Node\", the node's model-manager plugin materializing the verified files and mounting them read-only at the same fixed path; \"Image\", kubelet pulling the pinned OCI image into a read-only image volume; or \"Remote\", the weights arriving from a prepared in-memory source over a qualified transfer, with no complete checkpoint on this filesystem.\n\n\"Remote\" is the configured outcome, and it does not summarize the replicas: the delivery each replica actually uses right now — including which took the declared fallback — is in status.model.remote, and that view is what a reader of a half-rolled-out fallback trusts.\n\n\nPossible enum values:\n - `\"Engine\"` has the engine download a hub artifact's resolved commit into a size-limited cache volume, with the artifact's token from its Secret.\n - `\"Image\"` mounts an image artifact's OCI image read-only through a Kubernetes image volume: kubelet pulls the pinned image on the node that needs it, and the node's plugin cache plays no part.\n - `\"Node\"` has the node's model-manager plugin materialize a hub artifact's verified files into the node's cache and mount them read-only.\n - `\"PVC\"` mounts a claim artifact read-only at a fixed path.\n - `\"Remote\"` has the engine's load phase receive the weights from a prepared in-memory source over a qualified transfer, so the destination needs no complete checkpoint. It reads only under the cluster's remote-delivery configuration, and it is never spelled as Node or Engine to stay legible to an older consumer: which replica is actually using which outcome is status.model.remote's answer, not this constant's to blur.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Engine", "Image", "Node", "PVC"},
+							Enum:        []interface{}{"Engine", "Image", "Node", "PVC", "Remote"},
+						},
+					},
+					"remote": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Remote is the remote-delivery view, present when the weights are configured to arrive from a prepared source. It is ABSENT for every legacy delivery, so a consumer that has never heard of remote delivery keeps reading delivery alone, and an absent view never reads as a remote delivery that silently changed its mind.",
+							Ref:         ref(v1alpha1.ModelDeploymentModelRemoteStatus{}.OpenAPIModelName()),
 						},
 					},
 				},
 				Required: []string{"artifact", "delivery"},
 			},
 		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentModelRemoteStatus{}.OpenAPIModelName()},
 	}
 }
 
@@ -10336,6 +10401,102 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentPort(ref common.Referenc
 				Required: []string{"port"},
 			},
 		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRemoteReplicaStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRemoteReplicaStatus is one replica's effective delivery and its load progress.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"ordinal": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Ordinal is the replica's position within its role. Zero is a real position, the first replica, and is always encoded rather than omitted.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"delivery": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Delivery is the outcome this replica currently uses: Remote while it loads from the source, or the declared fallback it visibly took, with the reason below saying why. A fallback is Node or Engine — never a claim or an image delivery, which are different artifacts and not identity-preserving — and it is recorded as a fallback here rather than relabeled as the configured outcome.\n\n\nPossible enum values:\n - `\"Engine\"` has the engine download a hub artifact's resolved commit into a size-limited cache volume, with the artifact's token from its Secret.\n - `\"Image\"` mounts an image artifact's OCI image read-only through a Kubernetes image volume: kubelet pulls the pinned image on the node that needs it, and the node's plugin cache plays no part.\n - `\"Node\"` has the node's model-manager plugin materialize a hub artifact's verified files into the node's cache and mount them read-only.\n - `\"PVC\"` mounts a claim artifact read-only at a fixed path.\n - `\"Remote\"` has the engine's load phase receive the weights from a prepared in-memory source over a qualified transfer, so the destination needs no complete checkpoint. It reads only under the cluster's remote-delivery configuration, and it is never spelled as Node or Engine to stay legible to an older consumer: which replica is actually using which outcome is status.model.remote's answer, not this constant's to blur.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Engine", "Image", "Node", "PVC", "Remote"},
+						},
+					},
+					"load": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Load is how far the replica's remote load has got, and it keeps the observations the startup path makes distinct: metadata supplied, source available, an attempt under way, weights loaded. Serving readiness is deliberately not here — it stays with the readiness this deployment already publishes, whose meanings this view does not change — so a loaded weight set and a serving replica remain two observations, and a source that later drains does not retract a load that already confirmed.\n\n\nPossible enum values:\n - `\"AwaitingMetadata\"` is the verified metadata view not being supplied yet. It permits no startup, and it is a prerequisite rather than a progress step the engine could hurry.\n - `\"AwaitingSource\"` is metadata supplied with no authorized source holding the content reachable yet.\n - `\"Loaded\"` is weights confirmed loaded and the engine initialized on them: the observation WeightsReady draws on for this replica, and one an already loaded replica keeps when its source later drains.\n - `\"Loading\"` is a load attempt under way against an admitted source.\n - `\"Unknown\"` is no observation yet: the replica has not reported, which is not the report of a failure.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"AwaitingMetadata", "AwaitingSource", "Loaded", "Loading", "Unknown"},
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Reason names what holds the load at its state, or why the replica is on the delivery it is on. It is empty while nothing needs saying, and a quota, authorization or integrity failure names its own kind here rather than collapsing into a generic wait.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"fallbackAttempts": {
+						SchemaProps: spec.SchemaProps{
+							Description: "FallbackAttempts is how many bounded fallback attempts this replica has consumed. A count past the declared budget is a visible overrun a reader can act on, not a state the next render quietly resets.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"ordinal", "delivery", "load"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRemoteRoleStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRemoteRoleStatus is one role's per-replica delivery split.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"role": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Role is the role this entry describes.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"replicas": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Replicas is one entry per replica of the role, ordered by ordinal. It is an ordinary list, not a map: like the groups above, a replica's observed delivery changes without its identity changing, so a map keyed on the ordinal would replace the whole entry on the very change a reader came to see.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentRemoteReplicaStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"role"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentRemoteReplicaStatus{}.OpenAPIModelName()},
 	}
 }
 
@@ -13999,6 +14160,17 @@ func schema_gpustack_api_worker_v1alpha1_ModelPrefetchRetention(ref common.Refer
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchSource is the source-preparation intent, and its presence is the opt-in. It carries no settings of its own: the target set is the placement's, the memory it may hold is bounded by node capacity and the optional Binding grant. Readiness is reported in status.transfer. An object an older client wrote has no source and keeps its meaning unchanged.",
+				Type:        []string{"object"},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelPrefetchSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -14041,12 +14213,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelPrefetchSpec(ref common.ReferenceC
 							Ref:         ref(v1alpha1.ModelPrefetchRetention{}.OpenAPIModelName()),
 						},
 					},
+					"source": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Source opts this prefetch into source preparation for remote weight loading, beside the disk residency it always asked for. With it, the target nodes may fill a registered-memory source from this artifact, and the prefetch reports that readiness in status.transfer, separately from the disk figures above.\n\nIT REQUIRES AN EXPLICIT PLACEMENT. A source is memory a node holds against a known target set, so the derived-from-deployments default an ordinary prefetch falls back to — which follows this namespace's consumers around — would prepare whatever machines happen to serve the model this week. A source intent on a prefetch whose placement names no instanceTypes and no nodeSelector is refused at admission, and the two out together stay refused for the ambiguity they already were.\n\nThe optional Binding sourceMemory grant bounds memory independently of disk quota. Without it, source preparation uses the node's configured source capacity.\n\nAbsent means a prefetch that warms the node cache only, exactly as this object has always meant, with the same placement defaults, warm-up behavior and status meaning as before.",
+							Ref:         ref(v1alpha1.ModelPrefetchSource{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"artifactRef", "bindingRef"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelPrefetchArtifactReference{}.OpenAPIModelName(), v1alpha1.ModelPrefetchBindingReference{}.OpenAPIModelName(), v1alpha1.ModelPrefetchPlacement{}.OpenAPIModelName(), v1alpha1.ModelPrefetchRetention{}.OpenAPIModelName()},
+			v1alpha1.ModelPrefetchArtifactReference{}.OpenAPIModelName(), v1alpha1.ModelPrefetchBindingReference{}.OpenAPIModelName(), v1alpha1.ModelPrefetchPlacement{}.OpenAPIModelName(), v1alpha1.ModelPrefetchRetention{}.OpenAPIModelName(), v1alpha1.ModelPrefetchSource{}.OpenAPIModelName()},
 	}
 }
 
@@ -14101,11 +14279,228 @@ func schema_gpustack_api_worker_v1alpha1_ModelPrefetchStatus(ref common.Referenc
 							},
 						},
 					},
+					"transfer": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Transfer reports the source preparation spec.source asks for, aggregated from the target nodes' reports. It is ABSENT without spec.source — the intent is what turns it on — and absent while nothing has been observed, rather than present and empty, for the same reason the disk figures above are zero rather than missing only when measured.\n\nIt is deliberately separate from the disk figures above, and neither implies the other: readyNodes counts complete published trees, which survive a daemon restart, while the transfer entries are scoped to a generation held in memory, and a generation that stops being served does not un-publish the tree beneath it.",
+							Ref:         ref(v1alpha1.ModelPrefetchTransferStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			apiv1.Condition{}.OpenAPIModelName()},
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelPrefetchTransferStatus{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchTransferGeneration(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchTransferGeneration is one source generation's standing across the target nodes.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"generation": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Generation is the source's identity for this registered content: an opaque token assigned when the fill has verified, and the only thing the figures beside it are true of. A drain, a refill or a daemon restart supersedes it; a new generation never inherits the old one's figures. It names no tenant and carries no key.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](128),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"readyNodes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReadyNodes is how many target nodes hold this generation registered and admit readers against it. It is NOT readyNodes, and neither implies the other: a node whose daemon restarted stops counting here while the published tree beneath it stays disk-ready.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"drainingNodes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DrainingNodes is how many target nodes hold this generation past admission — they have stopped admitting new sessions and are fencing their in-flight work, or their completion could not be proven and they hold the registration until a qualified fence applies. Their memory is still held.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"residentBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ResidentBytes sums what the target nodes hold registered for this generation, serving and draining alike, because a draining generation's memory is still held. The bytes are physical, so a copy two namespaces share counts once here and once in each namespace's reservation.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"registrations": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Registrations is the live registration count the nodes hold for this generation.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"activeSessions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ActiveSessions is how many read sessions the nodes have admitted against this generation.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"rejectedAdmissions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RejectedAdmissions counts the admission refusals the nodes have reported since this generation started — over the memory grant, out of registrations, past the session limit — so a capacity shortfall is visible where it was made rather than only as a replica that never starts.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+				Required: []string{"generation"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchTransferLimits(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchTransferLimits is the applied source policy, echoed where it was admitted so a reader can see what is enforced without reading the grant and guessing what admission made of it.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"bytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Bytes is the registered-memory ceiling the namespace's admitted reservations draw on.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"registrations": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Registrations is the live registration count the source allows the namespace.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"sessions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Sessions is the concurrent admitted read sessions the source allows the namespace.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"bytes", "registrations", "sessions"},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchTransferServing(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchTransferServing identifies the source readiness a prefetch observed.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"artifactUID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ArtifactUID identifies the artifact whose source was observed.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"artifactGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ArtifactGeneration is the artifact revision the source serves.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"digest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Digest is the resolved content identity the source serves.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"readyLeaseExpiresAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReadyLeaseExpiresAt bounds how long this readiness observation is usable.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"artifactUID", "artifactGeneration", "digest", "readyLeaseExpiresAt"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchTransferStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchTransferStatus is the transfer half of a source-preparing prefetch, aggregated from the target nodes' reports for this artifact's digest. The bytes are observed figures the nodes reported as exact integer bytes; quantity comparisons use resource.Quantity.Value(). The limits echo the admitted grant policy.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"reservedBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReservedBytes is the memory this prefetch's admitted generations hold reserved against the namespace's grant. It is charged to this namespace even when the physical bytes are shared with another namespace's reservation, so it can exceed the residency any one node reports.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"limits": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Limits echoes the policy the source applies to this namespace's read sessions: the grant's limits as they were admitted, which a later edit of the Binding cannot reach back and change. Absent until a generation is admitted.",
+							Ref:         ref(v1alpha1.ModelPrefetchTransferLimits{}.OpenAPIModelName()),
+						},
+					},
+					"generations": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"generation",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Generations summarizes at most 16 source generations, with serving entries first and generation identity order within each group. The SourceSummaryTruncated condition reports omitted entries. Accounting and source readiness use the complete observation.",
+							MaxItems:    ptr.To[int64](16),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelPrefetchTransferGeneration{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"serving": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Serving binds SourceReady to the current artifact revision and the earliest lease expiry among its serving generations. It is an observation, not an authorization; absent or expired proof grants no source readiness.",
+							Ref:         ref(v1alpha1.ModelPrefetchTransferServing{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelPrefetchTransferGeneration{}.OpenAPIModelName(), v1alpha1.ModelPrefetchTransferLimits{}.OpenAPIModelName(), v1alpha1.ModelPrefetchTransferServing{}.OpenAPIModelName()},
 	}
 }
 
@@ -14275,11 +14670,51 @@ func schema_gpustack_api_worker_v1alpha1_ModelStoreBindingQuota(ref common.Refer
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelStoreBindingSourceMemory(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreBindingSourceMemory is the registered-memory grant source preparation draws on. All three limits are administrator-set, because a limit nobody set would be a default pretending to be a capacity answer: the memory a checkpoint needs is the artifact's, not the chart's.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"bytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Bytes is the registered-memory ceiling this namespace's admitted reservations draw on. It is a memory budget, not a second disk quota: filesystem usage never consumes it, and registered bytes never consume quota.bytes.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"registrations": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Registrations is how many live registrations the namespace's source generations may hold at once.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"sessions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Sessions is how many read sessions the namespace may hold admitted at once. Read-session admission is deliberately its own limit and never inferred from prefetch retention: a namespace whose prefetches pin content has not thereby bought its engines unlimited reads.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"bytes", "registrations", "sessions"},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelStoreBindingSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelStoreBindingSpec is the grant. EVERY FIELD IS IMMUTABLE, webhook-enforced, except AllowPinned going false to true and Quota.Bytes growing: re-pointing the grant would strand the old accounting, and shrinking a budget under existing consumption would retroactively make an admitted prefetch over budget.",
+				Description: "ModelStoreBindingSpec is the grant. StoreRefs is immutable, AllowPinned may be enabled, and Quota.Bytes may grow. SourceMemory follows its field's online update rules; existing reservations remain accounted when the grant changes or is removed.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"storeRefs": {
@@ -14316,12 +14751,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelStoreBindingSpec(ref common.Refere
 							Format:      "",
 						},
 					},
+					"sourceMemory": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SourceMemory grants the registered memory this namespace's source preparation may hold: the ceiling its admitted reservations draw on, the registration count, and the admitted read sessions it may run. It is the whole grant and it is SEPARATE from the disk one — quota.bytes counts filesystem usage and allowPinned grants pinning, and neither authorizes a byte of memory.\n\nAbsent means source preparation follows the node's configured source capacity. While present, bytes and registrations may grow but cannot shrink. Sessions may change online; existing sessions finish before a lower limit admits new ones. Removing the section returns to node capacity without releasing existing charges.",
+							Ref:         ref(v1alpha1.ModelStoreBindingSourceMemory{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"storeRefs", "quota"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelStoreBindingQuota{}.OpenAPIModelName(), v1alpha1.ModelStoreBindingStoreReference{}.OpenAPIModelName()},
+			v1alpha1.ModelStoreBindingQuota{}.OpenAPIModelName(), v1alpha1.ModelStoreBindingSourceMemory{}.OpenAPIModelName(), v1alpha1.ModelStoreBindingStoreReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -14372,6 +14813,12 @@ func schema_gpustack_api_worker_v1alpha1_ModelStoreBindingStatus(ref common.Refe
 					"usedBytes": {
 						SchemaProps: spec.SchemaProps{
 							Description: "UsedBytes is what the namespace's prefetches occupy, the full size of every distinct digest any of them targets on any node holding it. It is absent while nothing has been measured, and zero is a measurement rather than the lack of one.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"reservedMemory": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReservedMemory is this binding's retained source-memory charge in the pinned authority, including filling and draining generations and their runtime overhead. Physical bytes shared with another namespace still charge each reservation separately. It is absent while no retained charge is measured or the authority cannot be read.",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
@@ -14939,6 +15386,142 @@ func schema_gpustack_api_worker_v1alpha1_NodeModelStoreModel(ref common.Referenc
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_NodeModelStoreModelTransferGeneration(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreModelTransferGeneration is one source generation on this node, as the node currently serves it. An entry names a digest and a generation and never a tenant: the namespace's own view of what it may draw is on the Binding, not here.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"generation": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Generation is the source's identity for this registered content: an opaque token assigned when the fill has verified, and the only thing the figures beside it are true of. A new generation never inherits the old one's figures. It carries no key.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](128),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"digest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Digest is the manifest digest the generation serves.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"state": {
+						SchemaProps: spec.SchemaProps{
+							Description: "State is how this node is serving the generation. Serving admits readers; Draining has stopped admitting and is fencing its in-flight work; Quarantined holds its registration because its completion could not be proven, and nothing recycles its memory while it stands.\n\n\nPossible enum values:\n - `\"Draining\"` is a generation that has stopped admitting new sessions and is fencing its in-flight work before release.\n - `\"Quarantined\"` is a generation whose completion could not be proven; it retains its registration and memory until a qualified fence applies, and never exposes recycled addresses while it stands.\n - `\"Serving\"` is a generation that admits readers.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Draining", "Quarantined", "Serving"},
+						},
+					},
+					"residentBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ResidentBytes is what this node holds registered for this generation, serving and draining alike, because a draining generation's memory is still held.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"registrations": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Registrations is this node's live registration count for this generation.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"activeSessions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ActiveSessions is how many read sessions this node has admitted against this generation.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"rejectedAdmissions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RejectedAdmissions counts the admission refusals this node has reported since this generation started, so a capacity shortfall is visible where it was made.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"sourcePodUID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SourcePodUID identifies the source Pod that owns this generation.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"sourceInstanceID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SourceInstanceID identifies the native worker boot holding this generation.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"sourceGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SourceGeneration is the ModelArtifact specification generation served.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"leaseExpiresAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LeaseExpiresAt is the source worker lease's expiry.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"generation", "digest", "state"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_NodeModelStoreModelTransferStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreModelTransferStatus is the node's source generations for remote weight loading.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"generations": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"generation",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Generations is one entry per source generation this node currently holds registered. Two entries for one digest are the drain-and-refill window, not a duplicate: each carries its own figures, and neither borrows the other's.",
+							MaxItems:    ptr.To[int64](64),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.NodeModelStoreModelTransferGeneration{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.NodeModelStoreModelTransferGeneration{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_NodeModelStoreSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -15081,11 +15664,17 @@ func schema_gpustack_api_worker_v1alpha1_NodeModelStoreStatus(ref common.Referen
 							},
 						},
 					},
+					"modelTransfer": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ModelTransfer is the node's registered-memory source state for remote weight loading, one entry per source generation this node currently holds. It is ABSENT while the node runs no source runtime or holds no generation, and a generation the source stops serving leaves this report rather than turning into a zero — the absence IS the invalidation, because a registration nobody serves must not read as one ready to serve.\n\nIt is deliberately separate from the models above, and neither implies the other: a generation that drains keeps its published tree disk-ready, and a daemon restart drops the entries without un-publishing anything.\n\nThe plugin writes it, as it writes every status figure here; the transport workers report their health to the plugin and never write this object, which is what keeps this object single-writer.",
+							Ref:         ref(v1alpha1.NodeModelStoreModelTransferStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.NodeModelStoreCapacity{}.OpenAPIModelName(), v1alpha1.NodeModelStoreModel{}.OpenAPIModelName()},
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.NodeModelStoreCapacity{}.OpenAPIModelName(), v1alpha1.NodeModelStoreModel{}.OpenAPIModelName(), v1alpha1.NodeModelStoreModelTransferStatus{}.OpenAPIModelName()},
 	}
 }
 

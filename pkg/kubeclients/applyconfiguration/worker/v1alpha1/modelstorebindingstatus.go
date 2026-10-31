@@ -29,6 +29,12 @@ type ModelStoreBindingStatusApplyConfiguration struct {
 	// and zero is a measurement rather than the lack of one.
 	//
 	UsedBytes *resource.Quantity `json:"usedBytes,omitempty"`
+	// ReservedMemory is this binding's retained source-memory charge in the pinned authority,
+	// including filling and draining generations and their runtime overhead. Physical bytes
+	// shared with another namespace still charge each reservation separately. It is absent
+	// while no retained charge is measured or the authority cannot be read.
+	//
+	ReservedMemory *resource.Quantity `json:"reservedMemory,omitempty"`
 }
 
 // ModelStoreBindingStatusApplyConfiguration constructs a declarative configuration of the ModelStoreBindingStatus type for use with
@@ -71,5 +77,13 @@ func (b *ModelStoreBindingStatusApplyConfiguration) WithConditions(values ...*v1
 // If called multiple times, the UsedBytes field is set to the value of the last call.
 func (b *ModelStoreBindingStatusApplyConfiguration) WithUsedBytes(value resource.Quantity) *ModelStoreBindingStatusApplyConfiguration {
 	b.UsedBytes = &value
+	return b
+}
+
+// WithReservedMemory sets the ReservedMemory field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ReservedMemory field is set to the value of the last call.
+func (b *ModelStoreBindingStatusApplyConfiguration) WithReservedMemory(value resource.Quantity) *ModelStoreBindingStatusApplyConfiguration {
+	b.ReservedMemory = &value
 	return b
 }
