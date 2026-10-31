@@ -8,7 +8,7 @@ import (
 	"gpustack.ai/gpustack/cmd"
 	"gpustack.ai/gpustack/pkg/devicemanager"
 	"gpustack.ai/gpustack/pkg/modelmanager"
-	modeltransfer "gpustack.ai/gpustack/pkg/modeltransfer"
+	"gpustack.ai/gpustack/pkg/modeltransfer"
 	"gpustack.ai/gpustack/pkg/utils/signalx"
 	"gpustack.ai/gpustack/pkg/worker"
 	"gpustack.ai/gpustack/pkg/workergateway"

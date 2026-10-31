@@ -291,7 +291,7 @@ func TestModelPlacementPreferenceResolve(t *testing.T) {
 			modelArtifactDeliveryMode = func(context.Context) string { return c.delivery }
 			cli := newModelDeploymentClient(c.objs...)
 
-			w, err := resolveModelArtifactWeights(context.Background(), cli, "team-a", "qwen", 1, c.nodeOnly)
+			w, err := resolveModelArtifactWeights(context.Background(), cli, "team-a", "qwen", 1, c.nodeOnly, nil)
 			require.NoError(t, err)
 			term := w.placementPreference(context.Background(), cli)
 			if !c.want {

@@ -26,17 +26,40 @@ import (
 func BindingCoversNode(
 	ctx context.Context, reader ctrlcli.Reader, binding *workercore.ModelStoreBinding, node *core.Node,
 ) (bool, error) {
-	if binding == nil || node == nil || binding.DeletionTimestamp != nil {
+	if node == nil {
 		return false, nil
 	}
+	covered, err := BindingCoversNodes(ctx, reader, binding, []core.Node{*node})
+	return covered[node.Name], err
+}
+
+// BindingCoversNodes evaluates one binding against a node snapshot, reading each
+// referenced ModelStore at most once. No observations survive this call; errors
+// are returned without publishing a partial coverage result.
+func BindingCoversNodes(
+	ctx context.Context, reader ctrlcli.Reader, binding *workercore.ModelStoreBinding, nodes []core.Node,
+) (map[string]bool, error) {
+	covered := make(map[string]bool, len(nodes))
+	if binding == nil || binding.DeletionTimestamp != nil || len(nodes) == 0 {
+		return covered, nil
+	}
+	remaining := make(map[string]labels.Set, len(nodes))
+	for i := range nodes {
+		remaining[nodes[i].Name] = labels.Set(nodes[i].Labels)
+	}
+	seen := make(map[string]bool, len(binding.Spec.StoreRefs))
 	for _, ref := range binding.Spec.StoreRefs {
+		if seen[ref.Name] {
+			continue
+		}
+		seen[ref.Name] = true
 		store := new(workercore.ModelStore)
 		err := reader.Get(ctx, ctrlcli.ObjectKey{Name: ref.Name}, store)
 		if kerrors.IsNotFound(err) {
 			continue
 		}
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		if store.DeletionTimestamp != nil {
 			continue
@@ -45,10 +68,16 @@ func BindingCoversNode(
 		if err != nil {
 			continue
 		}
-		if sel.Matches(labels.Set(node.Labels)) {
-			return true, nil
+		for name, nodeLabels := range remaining {
+			if sel.Matches(nodeLabels) {
+				covered[name] = true
+				delete(remaining, name)
+			}
+		}
+		if len(remaining) == 0 {
+			break
 		}
 	}
 
-	return false, nil
+	return covered, nil
 }

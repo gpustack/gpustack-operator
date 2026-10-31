@@ -626,6 +626,11 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	}
 	if in.Artifact != nil {
 		in.Artifact.raiseEphemeralStorageLimit(&mainC, takeOver)
+		// A remote delivery decorates the container here: the bootstrap
+		// that installs the staged wheel before the engine starts, the
+		// load format that selects the model-transfer adapter, and the env the
+		// adapter reads.
+		in.Artifact.applyModelTransfer(&mainC)
 	}
 	if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
 		if in.InterfaceResource == "" {
@@ -635,10 +640,10 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	}
 	if role.Privileged {
 		mainC.SecurityContext = &core.SecurityContext{Privileged: ptr.To(true)}
-	} else if modelDeploymentRoleNeedsEngramCapabilities(md.Spec.Engine.Name, role, command) {
+	} else if modelDeploymentRoleNeedsCapabilities(md.Spec.Engine.Name, role, command, in.Artifact) {
 		mainC.SecurityContext = &core.SecurityContext{
 			Capabilities: &core.Capabilities{
-				// IPC_LOCK pins the host memory the Engram table registers for UVA access, and
+				// IPC_LOCK pins the host memory an Engram table or RDMA fabric registers, and
 				// SYS_RESOURCE lets the runtime raise the locked-memory limit when needed.
 				Add: []core.Capability{"IPC_LOCK", "SYS_RESOURCE"},
 			},
@@ -1682,6 +1687,33 @@ func modelDeploymentDefaultedArgs(groups [][]string, userArgs []string) []string
 	return out
 }
 
+// modelDeploymentRoleNeedsCapabilities reports whether the role requires IPC_LOCK and SYS_RESOURCE
+// capabilities when running unprivileged, checking fabric memory registration and Engram host DRAM
+// offload in turn.
+func modelDeploymentRoleNeedsCapabilities(
+	engine string, role *workercore.ModelDeploymentRole, command []string,
+	artifact *ModelDeploymentArtifactRender,
+) bool {
+	return modelDeploymentRoleNeedsFabricCapabilities(role, artifact) ||
+		modelDeploymentRoleNeedsEngramCapabilities(engine, role, command)
+}
+
+// modelDeploymentRoleNeedsFabricCapabilities reports whether the role requests RDMA fabric
+// interfaces or uses remote model-transfer delivery that pins host memory for RDMA registration.
+func modelDeploymentRoleNeedsFabricCapabilities(
+	role *workercore.ModelDeploymentRole,
+	artifact *ModelDeploymentArtifactRender,
+) bool {
+	if role != nil && role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
+		return true
+	}
+	if artifact != nil && artifact.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
+		return true
+	}
+
+	return false
+}
+
 // modelDeploymentRoleNeedsEngramCapabilities reports whether the role configures an Engram host
 // memory lookup table that requires IPC_LOCK and SYS_RESOURCE to pin host DRAM.
 func modelDeploymentRoleNeedsEngramCapabilities(
@@ -1995,6 +2027,12 @@ func modelDeploymentBindingHash(
 		a.Endpoint = ""
 		a.HTTPSProxy = ""
 		a.NoProxy = ""
+		// Source readiness and the pool's transfer backend are hardware
+		// observations, not spec facts: a source that drains, or a backend
+		// name, must never read as a Pod spec change and roll a serving
+		// replica.
+		a.SourceReady = false
+		a.ModelTransferBackend = ""
 		artifact = &a
 	}
 

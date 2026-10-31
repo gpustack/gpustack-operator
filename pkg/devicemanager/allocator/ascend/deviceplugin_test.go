@@ -302,6 +302,10 @@ func TestGetSlicedContainerAllocateResponse_MultiCardRejected(t *testing.T) {
 // device-visibility response as exclusive/shared, and never `all` (Ascend has no wildcard)
 // — with no vcann-rt logical-slicing env or mounts.
 func TestGetContainerAllocateResponse_Visibility(t *testing.T) {
+	// The driver-tree mount is pinned by TestGetContainerAllocateResponse_MountsAscendDriver;
+	// this case stands a host without the tree so "no vcann-rt mounts" stays the exact answer
+	// whatever the host this suite runs on carries.
+	absentAscendDriverHostPath(t)
 	s := &server{
 		ResourceServer: deviceplugin.ResourceServer{
 			Manufacturer:   Manufacturer,
@@ -489,5 +493,118 @@ func Test_ascendCANNDir(t *testing.T) {
 	}
 	for _, c := range cases {
 		assert.Equal(t, c.want, ascendCANNDir(c.ver, c.family))
+	}
+}
+
+// redirectAscendDriverHostPath stands the driver tree where the responder's existence check
+// stats it, so the mount decision is exercised for real without touching the host's own
+// /usr/local/Ascend/driver. Callers wanting a host without the tree point the path at a
+// directory that was never created instead.
+func redirectAscendDriverHostPath(t *testing.T) string {
+	t.Helper()
+
+	dir := filepath.Join(t.TempDir(), "driver")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	orig := ascendDriverHostPath
+	ascendDriverHostPath = dir
+	t.Cleanup(func() { ascendDriverHostPath = orig })
+
+	return dir
+}
+
+// absentAscendDriverHostPath points the driver tree at a path that does not exist, standing a
+// host that carries no /usr/local/Ascend/driver for the responder to stat.
+func absentAscendDriverHostPath(t *testing.T) {
+	t.Helper()
+
+	orig := ascendDriverHostPath
+	ascendDriverHostPath = filepath.Join(t.TempDir(), "driver", "absent")
+	t.Cleanup(func() { ascendDriverHostPath = orig })
+}
+
+// driverMountOf returns the response's driver-tree mount, or nil when it carries none.
+func driverMountOf(resp *deviceplugin.ContainerAllocateResponse) *deviceplugin.Mount {
+	for _, m := range resp.Mounts {
+		if m.ContainerPath == ascendDriverHostPath {
+			return m
+		}
+	}
+	return nil
+}
+
+// TestGetContainerAllocateResponse_MountsAscendDriver pins the driver-tree mount: HIXL and HCCL
+// read /usr/local/Ascend/driver directly and ascend-docker-runtime does not mount it in full, so
+// every mode a container is served in carries the tree read-only, and a host without the tree
+// carries no mount rather than an error.
+func TestGetContainerAllocateResponse_MountsAscendDriver(t *testing.T) {
+	cases := []struct {
+		name       string
+		mode       workercore.DeviceAllocationMode
+		driverPath func(t *testing.T) string
+	}{
+		{
+			name:       "an exclusive container carries the driver tree read-only",
+			mode:       workercore.DeviceAllocationModeExclusive,
+			driverPath: redirectAscendDriverHostPath,
+		},
+		{
+			name:       "a visibility container carries the driver tree read-only",
+			mode:       workercore.DeviceAllocationModeVisibility,
+			driverPath: redirectAscendDriverHostPath,
+		},
+		{
+			name:       "a sliced container carries the driver tree read-only",
+			mode:       workercore.DeviceAllocationModeSliced,
+			driverPath: redirectAscendDriverHostPath,
+		},
+		{
+			name: "a host without the driver tree gets no mount",
+			mode: workercore.DeviceAllocationModeExclusive,
+			driverPath: func(t *testing.T) string {
+				absentAscendDriverHostPath(t)
+				return ascendDriverHostPath
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			driverDir := c.driverPath(t)
+
+			var (
+				s   *server
+				pod *core.Pod
+				ctr *core.Container
+			)
+			if c.mode == workercore.DeviceAllocationModeSliced {
+				redirectLogicalSliceDirs(t)
+				s = newSlicedServer()
+				pod, ctr = slicedPod("uid-driver-"+c.mode.String(), "train", 10, 25)
+			} else {
+				s = &server{
+					ResourceServer: deviceplugin.ResourceServer{
+						Logger:         logr.Discard(),
+						Manufacturer:   Manufacturer,
+						AllocationMode: c.mode,
+					},
+					share:   &fakeShareDriver{enabled: map[[2]int32]bool{{3, 0}: true}},
+					product: newFakeProductResolver(),
+				}
+				pod = &core.Pod{ObjectMeta: meta.ObjectMeta{UID: types.UID("uid-driver-" + c.mode.String())}}
+			}
+
+			resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, ascendDevicesFixture(),
+				map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
+			require.NoError(t, err)
+
+			m := driverMountOf(resp)
+			if filepath.Base(driverDir) == "absent" {
+				assert.Nil(t, m, "a host without the driver tree must carry no mount")
+				return
+			}
+			require.NotNil(t, m, "the response carries no driver-tree mount")
+			assert.Equal(t, driverDir, m.ContainerPath)
+			assert.Equal(t, driverDir, m.HostPath)
+			assert.True(t, m.ReadOnly, "the driver tree is mounted read-only")
+		})
 	}
 }
