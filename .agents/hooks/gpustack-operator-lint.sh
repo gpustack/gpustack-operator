@@ -127,6 +127,11 @@ if paths_match '\.md$|/check-docs\.sh$|^hack/check/skills\.sh$|\.agents/skills/|
   run_lint "make lint docs" make lint docs
 fi
 
+# Lint Python sources under model-transfer/python with uv and ruff when any Python source or project config changes.
+if paths_match '\.py$|^model-transfer/python/(pyproject\.toml|ruff\.toml|pytest\.ini|uv\.lock|Makefile)$'; then
+  run_lint "make lint python" make lint python
+fi
+
 # Lint the Helm chart when the chart or its helm tooling is changed/added.
 if paths_match 'deploy/gpustack-operator/chart/|hack/lib/helm\.sh'; then
   run_lint "make lint chart" make lint chart

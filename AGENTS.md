@@ -87,6 +87,7 @@ default, not a list, so a file type nobody named still has an answer:
 
 - Markdown → `make lint docs`
 - the chart → `make lint chart`
+- Python under `model-transfer/python/` → `make lint python` (`uv run ruff check` + `uv run ruff format --check`)
 - shell under `.agents/skills/` and nothing else non-markdown → `make lint agents-shell`, the
   `.agents` shell gate plus the symbol check, the two steps that read such files
 - every other source, Go and shell included → `make lint`

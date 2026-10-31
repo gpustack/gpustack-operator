@@ -71,6 +71,7 @@ writes chooses where a node connects. The `Setting`s this adds:
 | `Setting` | Default | Check |
 | --- | --- | --- |
 | `model-artifact-delivery-mode` | `Engine`; the chart declares `Node` with the plugin, and the worker reasserts it | `Engine` or `Node`; `Node` needs the `CSIDriver` |
+| `model-artifact-remote-delivery-policy` | `Disabled`; the chart declares the configured policy with its `modelTransfer` section, and the worker reasserts it | `Disabled`, `Require` or `Prefer`; `Require` and `Prefer` need the `CSIDriver` |
 | `model-store-high-watermark` | `80` | integer, above the low watermark, at most `95` |
 | `model-store-low-watermark` | `70` | integer, at least `1`, below the high watermark |
 | `model-store-download-concurrency` | `8` | concurrent requests per node, `1` to `64` |
@@ -194,6 +195,10 @@ uses the plugin for a hub artifact, whatever the `Setting` says.
   `NodeDeliveryUnavailable`, and no new `Pod`; running `Pod`s are not touched.
 - **A filtered artifact needs `Node`.** Under `Engine`, a deployment on an artifact with
   *`allowPatterns`* or *`ignorePatterns`* creates no `Pod` and reports `FilterNeedsNodeDelivery`.
+
+[Remote weight delivery](remote.md) is a second, opt-in policy beside this one: it chooses what a
+qualified replica does inside the delivery the `Setting` above already admits, and it never changes
+what `Engine` and `Node` mean.
 
 ## Where replicas land
 
