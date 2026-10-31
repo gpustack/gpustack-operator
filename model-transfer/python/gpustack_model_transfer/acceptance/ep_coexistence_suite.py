@@ -86,7 +86,7 @@ def _discover_harness(context):
     if not spec:
         return None, (
             "no EP coexistence harness on this host: this suite runs only on "
-            "its separately approved EP environment through testing/model-transfer or "
+            "its separately approved EP environment through a configured harness or "
             f"against a harness injected as runtime=; set {HARNESS_VARIABLE} "
             'to "module:factory" on that host'
         )

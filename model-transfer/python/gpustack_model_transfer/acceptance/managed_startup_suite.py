@@ -123,7 +123,7 @@ def _discover_harness(context):
     if not spec:
         return None, (
             "no managed-startup harness on this host: this suite runs on the "
-            "approved cluster through testing/model-transfer or against a harness "
+            "approved cluster through a configured harness or against a harness "
             f"injected as runtime=; set {HARNESS_VARIABLE} to "
             '"module:factory" on the cluster host'
         )
