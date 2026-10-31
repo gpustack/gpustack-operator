@@ -32,6 +32,26 @@ For cluster-backed tests, provide a kind cluster and its kubeconfig/context. Fol
 CI (`hack/ci.sh`) runs `make generate && make deps && make lint && make build` inside the image build. The unit tests run
 separately, in `test.yml`, as `RACE=false make test` on linux/amd64 and linux/arm64.
 
+Linux builds and tests use GNU C17 and lazy symbol binding for the vendor CGO bindings.
+Cross-compilation needs a target C compiler: set `CC` or install `aarch64-linux-gnu-gcc` or
+`x86_64-linux-gnu-gcc`. Linux builds require `readelf`, `llvm-readelf`, `greadelf` or an explicit
+`READELF`; failed inspection and eager binding fail the build. Native builds also execute `--version`.
+Non-login shells discover `/usr/local/go/bin` and `$HOME/go/bin` without replacing a selected toolchain.
+
+Keep `-Wl,-z,lazy` in the build environment and final linker flags. Go rejects it inside
+`#cgo LDFLAGS` directives; generated bindings use only flags accepted by the Go toolchain.
+
+`VERSION` and `COMMIT` override `GIT_VERSION` and `GIT_COMMIT`; all four work without a readable
+`.git`. The package target forwards the resolved values into the image build. Wheel builds preserve
+valid release, prerelease and development versions; an unversioned development tree uses `0.0.0`.
+Run `bash hack/check/build-pipeline-selftest.sh` for isolated build, stamp, linker and image-load
+regressions. Both `make lint` and `make lint agents-shell` run it; Python 3 and `packaging` are required.
+
+The E2E build helper requires a known SSH host key and rsync with `--protect-args` for remote builds.
+It synchronizes tracked and nonignored new files, preserves remote-only state, and verifies the pushed
+digest. Local mode loads the selected namespace and always disables pushing. Unknown runtimes and
+failed imports return an error.
+
 An image built from a git worktree carries the worktree's `.git` pointer file but not the gitdir it names, so git cannot read
 the tree inside the build. There the `.agents` shell gate, `hack/check/agents-shell.sh`, reports itself skipped with its reason
 instead of failing the build: in local mode it checks only uncommitted changes, so inside an image its set is empty even from a

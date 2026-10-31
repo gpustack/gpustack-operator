@@ -138,6 +138,35 @@ rather than being it. Changing either file here leaves that third copy to update
 - Comments stay plain and short; flag emoji, decorative symbols and circled digits in any commented
   source file, Go and shell alike.
 
+## Python conventions (`model-transfer/python`)
+
+- Favor precision over recall: only raise a finding when you can name a concrete input or runtime
+  scenario that causes a wrong result, resource leak, security hole, or scale failure.
+- Flag mutable default arguments (`def f(x=[])`), unintended class-level mutable attributes,
+  unsynchronized module-level mutable state, empty inputs indexed without guard (`xs[0]`,
+  `max()`/`min()`), unguarded `None`, float equality with `==` instead of `math.isclose`, and
+  `is`/`is not` on literals instead of `==`.
+- Flag bare `except:`, overly broad `except Exception:` that hides bugs, silent `pass`, lost
+  tracebacks without `raise ... from err`, and `assert` validating external runtime inputs.
+- Flag resource leaks: files, sockets, `mmap` buffers, locks, or `gpustack_model_transfer`
+  readers/sessions opened without `with` or left open on preflight refusal, error, or cancellation.
+- Enforce `gpustack_model_transfer` domain invariants:
+  - Safetensors header probes must read only header bytes (`8 + header_len`) and cross-check
+    dtype, shape, and byte offsets against the verified manifest.
+  - Engine adapters (`vllm`, `sglang`, `vllm_ascend`) must preflight the full load plan and
+    owned-output budget before mutating any parameter, and never claim clean fallback after mutation.
+  - Borrowed-storage views require an explicit lifetime owner and completion fence; `finalize()`
+    must release load-only windows and registrations before KV cache profiling.
+  - `gpustack_model_transfer` ships as a universal `py3-none-any.whl` with `dependencies = []`;
+    vendor libraries (`torch`, `torch_npu`, `nixl`, `hixl`, `vllm`, `sglang`) must import lazily.
+  - Preserve wire compatibility between older `gpustack_model_transfer` clients and newer
+    `model-transfer` servers: flag removed/renamed wire fields or endpoints, changed derived-digest
+    preimages within a contract version, required request fields without server defaults, or
+    rejected unknown additive response fields.
+- Flag security hazards on untrusted input (`eval`/`exec`/`compile`, `shell=True`, unsafe
+  `pickle`/`marshal`/`yaml.load`, unvalidated path joins) and over-engineering (`delete:`, `reuse:`,
+  `stdlib:`, `yagni:`, `merge:`, `shrink:`) when code duplicates helpers or adds single-caller layers.
+
 ## Kubernetes conventions
 
 - Reconcile desired state declaratively; flag imperative, scripted actions.

@@ -43,6 +43,13 @@ namespace a *`quota.bytes`* budget and, with *`allowPinned`*, the right to pin. 
 (there is no default pool a binding falls back to) and frozen: *`storeRefs`* cannot move, the budget
 can only grow, and *`allowPinned`* only turns on.
 
+Optional *`spec.sourceMemory`* caps source reservations shared by this Binding's prefetches
+across nodes and manufacturers. Omit or remove it to use node limits. While present, bytes and
+registrations can only grow; sessions can change in either direction.
+
+The [source-memory examples](remote.md#source-memory-examples) use `Qwen3-8B` and
+`Qwen3.6-35B-A3B` to distinguish node capacity, per-model windows and a shared Binding grant.
+
 > **Why** — a grant that shrank under consumption would retroactively make an admitted prefetch
 > over budget, and a re-pointed grant would strand the accounting of everything admitted before the
 > edit. Both rules are admission-time refusals, so the namespace sees the refusal at the moment of
@@ -156,6 +163,38 @@ means *`readyNodes`* reached *`minReady`* (0 = all of them).
 would close the gap lapsed past *`ttlAfterLastUse`*, were unpinned and are not re-warmed, and the
 message says how many. It stays False while the shortfall has any other cause, so a lapse never
 masks a warm-up still running or a delivery that failed.
+
+A source prefetch also publishes `SourceReady` for its current revision. Its serving observation
+binds the artifact UID, artifact revision and digest to an unexpired source lease. Missing or expired
+proof provides no source readiness. The broker checks authorization live when a client connects.
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelPrefetch
+metadata:
+  name: warm-model
+  namespace: team-a
+status:
+  transfer:
+    # Display summary: at most 16 generations, serving entries first, then by identity.
+    generations: []
+    # Readiness and reservedBytes use the full observation, even when the summary is truncated.
+    serving:
+      artifactUID: artifact-uid
+      artifactGeneration: 1
+      digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      readyLeaseExpiresAt: "2026-11-07T12:01:00Z"
+  conditions:
+    - type: SourceReady
+      status: "True"
+      observedGeneration: 2
+      reason: SourceServing
+    # True means some generation entries were omitted from the display summary.
+    - type: SourceSummaryTruncated
+      status: "False"
+      observedGeneration: 2
+      reason: CompleteSummary
+```
 
 The [ModelPrefetch API](views.md) supports resource operations and adds no subresource: the per-node
 facts already live on the nodes' reports, and the table prints who warms what and how far.

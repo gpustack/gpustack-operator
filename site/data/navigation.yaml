@@ -68,6 +68,7 @@ order:
     - prefetch
     - node-store
     - peer-sync
+    - remote
     - operations
   /docs/modules/model-deployment/:
     - deployment
@@ -161,6 +162,7 @@ labels:
   /docs/modules/model-delivery/prefetch/: Prefetch
   /docs/modules/model-delivery/node-store/: Node Store
   /docs/modules/model-delivery/peer-sync/: Node-to-Node Sync
+  /docs/modules/model-delivery/remote/: Remote Delivery
   /docs/modules/model-delivery/operations/: Operations
   /docs/modules/model-deployment/deployment/: Configuration
   /docs/modules/model-deployment/scaling/: Scaling
