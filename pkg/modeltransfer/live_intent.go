@@ -19,9 +19,9 @@ import (
 // validateLiveIntent reuses positive entitlement checks for at most ten seconds.
 func (c *Config) validateLiveIntent(ctx context.Context, intent broker.LiveIntent) error {
 	c.liveIntentMu.Lock()
-	defer c.liveIntentMu.Unlock()
 	now := time.Now()
 	if expires, ok := c.liveIntentCache[intent]; ok && now.Before(expires) {
+		c.liveIntentMu.Unlock()
 		return nil
 	}
 	for key, expires := range c.liveIntentCache {
@@ -29,8 +29,15 @@ func (c *Config) validateLiveIntent(ctx context.Context, intent broker.LiveInten
 			delete(c.liveIntentCache, key)
 		}
 	}
+	epoch := c.liveIntentEpoch
+	c.liveIntentMu.Unlock()
 	if err := c.validateLiveIntentUncached(ctx, intent); err != nil {
 		return err
+	}
+	c.liveIntentMu.Lock()
+	defer c.liveIntentMu.Unlock()
+	if epoch != c.liveIntentEpoch {
+		return nil
 	}
 	if c.liveIntentCache == nil {
 		c.liveIntentCache = make(map[broker.LiveIntent]time.Time)
@@ -42,6 +49,7 @@ func (c *Config) validateLiveIntent(ctx context.Context, intent broker.LiveInten
 func (c *Config) invalidateLiveIntentCache() {
 	c.liveIntentMu.Lock()
 	defer c.liveIntentMu.Unlock()
+	c.liveIntentEpoch++
 	c.liveIntentCache = nil
 }
 

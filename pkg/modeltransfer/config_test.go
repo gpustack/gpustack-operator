@@ -227,6 +227,11 @@ func TestCompleteOpensStoreAndBroker(t *testing.T) {
 	opts.PhysicalBytes = 1 << 30
 	opts.LeaseTTL = time.Minute
 
+	staging := filepath.Join(opts.BrokerRoot, "manifest-staging")
+	require.NoError(t, os.MkdirAll(staging, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(staging, "orphan"), []byte("page"), 0o600))
+	unowned := filepath.Join(opts.BrokerRoot, "unrelated")
+	require.NoError(t, os.WriteFile(unowned, []byte("keep"), 0o600))
 	restCfg := &rest.Config{Host: "https://127.0.0.1"}
 	cfg, err := opts.complete(restCfg)
 	require.NoError(t, err)
@@ -234,6 +239,9 @@ func TestCompleteOpensStoreAndBroker(t *testing.T) {
 	require.NotNil(t, cfg.Broker)
 	require.NotNil(t, cfg.Authorizer)
 	require.NotNil(t, cfg.Client)
+	assert.Equal(t, staging, cfg.manifestPageRoot)
+	assert.NoDirExists(t, staging)
+	assert.FileExists(t, unowned)
 	assert.Equal(t, "node-1", cfg.NodeName)
 	assert.Equal(t, "ascend", cfg.VendorScope)
 	assert.Zero(t, restCfg.QPS, "caller rest.Config must not be mutated in place")

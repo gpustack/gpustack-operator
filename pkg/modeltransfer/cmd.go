@@ -34,7 +34,11 @@ func NewCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("complete config: %w", err)
 			}
-			defer cfg.Close()
+			defer func() {
+				if err := cfg.Close(); err != nil {
+					klog.ErrorS(err, "close model-transfer runtime")
+				}
+			}()
 			if err := cfg.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}
@@ -109,12 +113,6 @@ func (c *Config) Run(ctx context.Context) error {
 		if err := c.Broker.Reconstruct(func() (map[string]bool, error) { return live, nil }); err != nil {
 			return fmt.Errorf("reconstruct the source generations: %w", err)
 		}
-		// A Pod UID absent from the live set, other than this Pod's own,
-		// belongs to a replaced source worker whose native state kubelet
-		// destroyed with it; fence it so the replacement can bind.
-		if err := c.Broker.FenceReplacedWorkerPods(live, c.WorkerID); err != nil {
-			return fmt.Errorf("fence replaced source workers: %w", err)
-		}
 	default:
 		// Not fatal when the worker set cannot be listed on start: keep
 		// recorded fills so a control-plane hiccup never drops a reservation,
@@ -188,22 +186,7 @@ func (c *Config) Run(ctx context.Context) error {
 	defer func() { _ = sessionServer.Close() }()
 
 	sweeps := make(chan error, 1)
-	go func() {
-		ticker := time.NewTicker(max(c.TickEvery, time.Second))
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				sweeps <- nil
-				return
-			case <-ticker.C:
-				if err := c.Broker.Tick(); err != nil {
-					sweeps <- fmt.Errorf("sweep the leases: %w", err)
-					return
-				}
-			}
-		}
-	}()
+	go c.sweepLeases(ctx, sweeps)
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
@@ -225,5 +208,22 @@ func (c *Config) Run(ctx context.Context) error {
 	case err := <-sweeps:
 		_ = server.Close()
 		return err
+	}
+}
+
+// sweepLeases reports lifecycle failures; cancellation only ends the monitor.
+func (c *Config) sweepLeases(ctx context.Context, failures chan<- error) {
+	ticker := time.NewTicker(max(c.TickEvery, time.Second))
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := c.Broker.Tick(); err != nil {
+				failures <- fmt.Errorf("sweep the leases: %w", err)
+				return
+			}
+		}
 	}
 }

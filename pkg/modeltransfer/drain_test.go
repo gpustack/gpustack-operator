@@ -62,6 +62,23 @@ func TestRuntimeAttestationRequiresExactEmptySnapshot(t *testing.T) {
 	}
 }
 
+func TestRuntimeTransportFailurePreservesCause(t *testing.T) {
+	for _, freeze := range []bool{false, true} {
+		t.Run(fmt.Sprintf("freeze=%t", freeze), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			cfg := &Config{runtimeURL: "http://127.0.0.1:1/v1/runtime", bootstrapToken: "secret"}
+			var err error
+			if freeze {
+				_, err = cfg.freezeRuntime(ctx)
+			} else {
+				_, err = cfg.inspectEmptyRuntime(ctx, "instance")
+			}
+			require.ErrorIs(t, err, context.Canceled)
+		})
+	}
+}
+
 func TestDrainAcknowledgementRequiresInventoryAndRuntimeProof(t *testing.T) {
 	root := t.TempDir()
 	st, err := store.Open(filepath.Join(root, "cache"))
@@ -268,15 +285,28 @@ func TestReconcileSourceDrainsServingOnlyOnSustainedFailure(t *testing.T) {
 func TestReconcileSourceDrainsServingOnAuthorityOutageImmediately(t *testing.T) {
 	b, _, cfg, _, generation := hysteresisFixture(t)
 	require.NoError(t, b.RequireAuthorityInventory("node"))
-	cfg.Intents = &kubernetesIntentSource{
-		config: cfg,
-		client: failingListClient{
-			Client:  ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build(),
-			listErr: errors.New("the API server is unreachable"),
-		},
-	}
-	err := cfg.reconcileSource(context.Background())
+	_, err := cfg.Client.CoreV1().ConfigMaps(cfg.WorkerNamespace).Create(context.Background(), &core.ConfigMap{
+		ObjectMeta: meta.ObjectMeta{Name: "model-transfer-resv-corrupt", Namespace: cfg.WorkerNamespace},
+		Data:       map[string]string{"reservations.json": "{"},
+	}, meta.CreateOptions{})
+	require.NoError(t, err)
+	err = cfg.reconcileSource(context.Background())
 	require.ErrorIs(t, err, broker.ErrReservationUnavailable)
-	assert.Equal(t, string(broker.StateDraining), generationState(t, b, generation),
-		"a proved authority outage holds serving readiness at once")
+	require.NotErrorIs(t, err, broker.ErrReservationReadFailed)
+	require.Equal(t, string(broker.StateDraining), generationState(t, b, generation))
+}
+
+func TestReconcileSourceAuthorityReadFailureWaitsForThreshold(t *testing.T) {
+	b, _, cfg, _, generation := hysteresisFixture(t)
+	require.NoError(t, b.RequireAuthorityInventory("node"))
+	cfg.Intents = &kubernetesIntentSource{config: cfg, client: failingListClient{
+		Client:  ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build(),
+		listErr: errors.New("the API server is unreachable"),
+	}}
+	for _, want := range []string{string(broker.StateServing), string(broker.StateServing), string(broker.StateDraining)} {
+		err := cfg.reconcileSource(context.Background())
+		require.ErrorIs(t, err, broker.ErrReservationUnavailable)
+		require.ErrorIs(t, err, broker.ErrReservationReadFailed)
+		require.Equal(t, want, generationState(t, b, generation))
+	}
 }

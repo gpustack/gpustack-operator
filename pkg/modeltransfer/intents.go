@@ -15,6 +15,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
@@ -76,6 +77,7 @@ func (s *kubernetesIntentSource) ListIntents(ctx context.Context) (_ []broker.In
 			}
 		}
 	}()
+	var cpuAware *bool
 	for i := range prefetches.Items {
 		pf := &prefetches.Items[i]
 		if pf.Spec.Source == nil || pf.DeletionTimestamp != nil || pf.UID == "" || pf.Generation < 1 {
@@ -83,21 +85,26 @@ func (s *kubernetesIntentSource) ListIntents(ctx context.Context) (_ []broker.In
 		}
 		var pools modelstore.InstanceTypeFlavorNames
 		if pf.Spec.Placement != nil && len(pf.Spec.Placement.InstanceTypes) > 0 {
-			setting, err := c.Client.GpustackV1().Settings(c.WorkerNamespace).Get(ctx, settings.InstanceTypeAwareCPUManufacturer.Name(), meta.GetOptions{})
-			if err != nil {
-				return nil, fmt.Errorf("read CPU-aware setting: %w", err)
+			if cpuAware == nil {
+				setting, err := c.Client.GpustackV1().Settings(c.WorkerNamespace).Get(ctx, settings.InstanceTypeAwareCPUManufacturer.Name(), meta.GetOptions{})
+				if err != nil {
+					return nil, fmt.Errorf("read CPU-aware setting: %w", err)
+				}
+				value, err := strconv.ParseBool(setting.Status.Value)
+				if err != nil {
+					return nil, fmt.Errorf("invalid CPU-aware setting: %w", err)
+				}
+				cpuAware = &value
 			}
-			cpuAware, err := strconv.ParseBool(setting.Status.Value)
-			if err != nil {
-				return nil, fmt.Errorf("invalid CPU-aware setting: %w", err)
-			}
-			pools, err = modelstore.ResolvePlacementInstanceTypeFlavorNames(ctx, s.client, pf.Spec.Placement.InstanceTypes, cpuAware)
+			var err error
+			pools, err = modelstore.ResolvePlacementInstanceTypeFlavorNames(ctx, s.client, pf.Spec.Placement.InstanceTypes, *cpuAware)
 			if err != nil {
 				return nil, fmt.Errorf("resolve placement: %w", err)
 			}
 		}
 		targets, err := modelstore.PrefetchSourceTargetNodes(pf, nodes.Items, pools)
 		if err != nil {
+			ctrllog.FromContext(ctx).Error(err, "skip source prefetch with invalid placement", "prefetch", ctrlcli.ObjectKeyFromObject(pf))
 			continue
 		}
 		target := false
@@ -202,24 +209,36 @@ func (s *kubernetesIntentSource) ListIntents(ctx context.Context) (_ []broker.In
 		if !claimed {
 			continue
 		}
-		pageDirectory, err := os.MkdirTemp("", "gpustack-manifest-")
+		pageRoot := c.manifestPageRoot
+		if err := os.MkdirAll(pageRoot, 0o700); err != nil {
+			_ = c.Store.RemoveRef(ref)
+			return nil, err
+		}
+		pageDirectory, err := os.MkdirTemp(pageRoot, "manifest-")
 		if err != nil {
 			_ = c.Store.RemoveRef(ref)
 			return nil, err
 		}
 		view, err := artifact.BuildPaged(ctx, c.Store, string(model.UID), model.Generation, resolved.ManifestDigest, pageDirectory)
 		if err != nil {
+			ctrllog.FromContext(ctx).Error(err, "build source manifest", "prefetch", ctrlcli.ObjectKeyFromObject(pf), "artifact", model.Name)
 			_ = c.Store.RemoveRef(ref)
 			_ = os.RemoveAll(pageDirectory)
 			continue
 		}
 		if len(view.Raw) > protocol.MaxManifestBytes {
+			ctrllog.FromContext(ctx).Info("skip oversized source manifest",
+				"prefetch", ctrlcli.ObjectKeyFromObject(pf), "artifact", model.Name,
+				"bytes", len(view.Raw), "limit", protocol.MaxManifestBytes)
 			_ = c.Store.RemoveRef(ref)
 			_ = os.RemoveAll(pageDirectory)
 			continue
 		}
 		encodedManifest, err := json.Marshal(string(view.Raw))
 		if err != nil || len(encodedManifest) > protocol.MaxManifestResponseBytes {
+			ctrllog.FromContext(ctx).Info("skip invalid source manifest response",
+				"prefetch", ctrlcli.ObjectKeyFromObject(pf), "artifact", model.Name, "error", err,
+				"bytes", len(encodedManifest), "limit", protocol.MaxManifestResponseBytes)
 			_ = c.Store.RemoveRef(ref)
 			_ = os.RemoveAll(pageDirectory)
 			continue

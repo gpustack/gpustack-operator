@@ -241,13 +241,15 @@ type Config struct {
 	// Authorizer admits engine sessions using the live cluster client.
 	Authorizer broker.SessionAuthorizer
 	// Intents resolves live Kubernetes source preparations for this node.
-	Intents         broker.IntentSource
-	bootstrapToken  string
-	runtimeURL      string
-	metadataOnce    sync.Once
-	metadataSlots   chan struct{}
-	liveIntentMu    sync.Mutex
-	liveIntentCache map[broker.LiveIntent]time.Time
+	Intents          broker.IntentSource
+	bootstrapToken   string
+	runtimeURL       string
+	metadataOnce     sync.Once
+	metadataSlots    chan struct{}
+	manifestPageRoot string
+	liveIntentEpoch  uint64
+	liveIntentMu     sync.Mutex
+	liveIntentCache  map[broker.LiveIntent]time.Time
 	// reconcileFailures counts consecutive failed source-intent passes on
 	// the single reconciliation goroutine; it resets on the first pass
 	// that lists cleanly. Draining serving generations waits for a
@@ -324,6 +326,11 @@ func (o *Options) complete(restCfg *rest.Config) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open the broker ledger %s: %w", o.BrokerRoot, err)
 	}
+	manifestRoot := filepath.Join(o.BrokerRoot, "manifest-staging")
+	if err := os.RemoveAll(manifestRoot); err != nil {
+		_ = b.Close()
+		return nil, fmt.Errorf("clean manifest staging: %w", err)
+	}
 	if err := b.EnableOperationJournal(); err != nil {
 		_ = b.Close()
 		return nil, fmt.Errorf("initialize operation journal: %w", err)
@@ -337,7 +344,8 @@ func (o *Options) complete(restCfg *rest.Config) (*Config, error) {
 		return nil, fmt.Errorf("initialize authority inventory: %w", err)
 	}
 	cfg := &Config{
-		NodeName: o.NodeName, Store: st, Broker: b, RestConfig: cfgCopy, Client: client,
+		manifestPageRoot: manifestRoot,
+		NodeName:         o.NodeName, Store: st, Broker: b, RestConfig: cfgCopy, Client: client,
 		WorkerNamespace: o.WorkerNamespace, WorkerLabel: SourceWorkerLabel,
 		ControlAddr: o.ControlAddr, TickEvery: o.LeaseTTL / 2,
 		SessionAddr: o.SessionAddr, SessionTLSCert: o.SessionTLSCert,
@@ -390,7 +398,7 @@ func (c *Config) writeBootstrapCredential() (string, error) {
 
 // LiveWorkers answers which admitted source-worker Pods exist right now. An
 // answer that cannot be read is an error, never an empty set in its place:
-// an empty set would release every filling reservation.
+// even a readable empty set retains native ownership and only invalidates readiness.
 func (c *Config) LiveWorkers(ctx context.Context) (map[string]bool, error) {
 	if c.Client == nil {
 		return nil, errors.New("no cluster client is connected")

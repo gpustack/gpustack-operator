@@ -38,7 +38,7 @@ func (c *Config) reconcileSource(ctx context.Context) error {
 		// API request must not empty the node.
 		c.reconcileFailures++
 		if c.reconcileFailures >= reconcileFailureLimit ||
-			errors.Is(err, broker.ErrReservationUnavailable) {
+			(errors.Is(err, broker.ErrReservationUnavailable) && !errors.Is(err, broker.ErrReservationReadFailed)) {
 			if holdErr := c.Broker.InvalidateServing(); holdErr != nil {
 				return fmt.Errorf("invalidate source readiness: %w", holdErr)
 			}
@@ -163,7 +163,7 @@ func (c *Config) freezeRuntime(ctx context.Context) (string, error) {
 	req.Header.Set("Authorization", "Bearer "+c.bootstrapToken)
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
-		return "", errors.New("runtime freeze is unavailable")
+		return "", fmt.Errorf("runtime freeze is unavailable: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -204,7 +204,7 @@ func (c *Config) inspectEmptyRuntime(ctx context.Context, instance string) (stri
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", errors.New("runtime attestation is unavailable")
+		return "", fmt.Errorf("runtime attestation is unavailable: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

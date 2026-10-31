@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	gpustack "gpustack.ai/gpustack/api/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -156,7 +158,7 @@ func TestKubernetesIntentsAdmitRealPublishedArtifactAndHoldOnReadFailure(t *test
 	binding := &workercore.ModelStoreBinding{ObjectMeta: meta.ObjectMeta{Name: "grant", Namespace: "tenant", UID: "binding-uid"}, Spec: workercore.ModelStoreBindingSpec{StoreRefs: []workercore.ModelStoreBindingStoreReference{{Name: "store"}}, SourceMemory: &workercore.ModelStoreBindingSourceMemory{Bytes: resource.MustParse("1Gi"), Registrations: 4, Sessions: 4}}}
 	modelStore := &workercore.ModelStore{ObjectMeta: meta.ObjectMeta{Name: "store"}, Spec: workercore.ModelStoreSpec{NodeSelector: meta.LabelSelector{MatchLabels: map[string]string{"pool": "source"}}}}
 	client := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(node, pf, model, binding, modelStore).Build()
-	cfg := &Config{Store: st, Broker: b, Client: kube, WorkerNamespace: "operator", WorkerID: "pod-uid", NodeName: "node-1", VendorScope: "nvidia"}
+	cfg := &Config{manifestPageRoot: filepath.Join(root, "broker", "manifest-staging"), Store: st, Broker: b, Client: kube, WorkerNamespace: "operator", WorkerID: "pod-uid", NodeName: "node-1", VendorScope: "nvidia"}
 	src := &kubernetesIntentSource{config: cfg, client: client}
 	cfg.Intents = src
 	b.SetIntentValidator(cfg.validateLiveIntent)
@@ -201,6 +203,31 @@ func TestKubernetesIntentsAdmitRealPublishedArtifactAndHoldOnReadFailure(t *test
 	require.NoError(t, cfg.validateLiveIntent(ctx, liveIntent))
 	assert.Greater(t, counting.reads, reads)
 	cfg.invalidateLiveIntentCache()
+	entered, resume := make(chan struct{}), make(chan struct{})
+	var blockOnce sync.Once
+	src.client = ctrlinterceptor.NewClient(client, ctrlinterceptor.Funcs{
+		Get: func(ctx context.Context, cli ctrlcli.WithWatch, key ctrlcli.ObjectKey, obj ctrlcli.Object, opts ...ctrlcli.GetOption) error {
+			blockOnce.Do(func() { close(entered); <-resume })
+			return cli.Get(ctx, key, obj, opts...)
+		},
+	})
+	validated := make(chan error, 1)
+	go func() { validated <- cfg.validateLiveIntent(ctx, liveIntent) }()
+	<-entered
+	invalidated := make(chan struct{})
+	go func() { cfg.invalidateLiveIntentCache(); close(invalidated) }()
+	select {
+	case <-invalidated:
+	case <-time.After(2 * time.Second):
+		t.Error("live API verification must not block cache invalidation")
+	}
+	close(resume)
+	require.NoError(t, <-validated)
+	<-invalidated
+	cfg.liveIntentMu.Lock()
+	_, cached := cfg.liveIntentCache[liveIntent]
+	cfg.liveIntentMu.Unlock()
+	assert.False(t, cached, "an invalidated verification must not publish a stale positive cache entry")
 	src.client = client
 	for _, offer := range offers {
 		assert.Equal(t, "artifact-uid", offer.ArtifactUID)
@@ -356,7 +383,7 @@ func TestReconcileIntentsRecoversRecreatedBindingAndReclaimsDeletedTargetPodSess
 	targetPod := &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "engine", Namespace: "tenant", UID: "engine-uid"}, Status: core.PodStatus{Phase: core.PodRunning}}
 
 	client := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(node, pf, model, binding, modelStore, targetPod).Build()
-	cfg := &Config{Store: st, Broker: b, Client: kube, WorkerNamespace: "operator", WorkerID: "pod-uid", NodeName: "node-1", VendorScope: "nvidia"}
+	cfg := &Config{manifestPageRoot: filepath.Join(root, "broker", "manifest-staging"), Store: st, Broker: b, Client: kube, WorkerNamespace: "operator", WorkerID: "pod-uid", NodeName: "node-1", VendorScope: "nvidia"}
 	src := &kubernetesIntentSource{config: cfg, client: client}
 	cfg.Intents = src
 	b.SetIntentValidator(cfg.validateLiveIntent)
