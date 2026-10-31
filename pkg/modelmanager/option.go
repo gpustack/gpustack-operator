@@ -28,6 +28,11 @@ type Options struct {
 	KubeletDir string
 	CacheRoot  string
 	CSISocket  string
+	// ModelTransferStateRoot is the source broker's durable ledger root, read by the
+	// reporter to write the NodeModelStore's ModelTransfer status. The source runtime
+	// is a separate process; this is the only path through which its state
+	// reaches this plugin.
+	ModelTransferStateRoot string
 
 	// Peer sync.
 	PeerSyncPort              int
@@ -71,6 +76,8 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 		"the kubelet's root directory, whose pods directory holds the volume targets.")
 	fs.StringVar(&o.CacheRoot, "cache-root", o.CacheRoot,
 		"the node's model cache directory.")
+	fs.StringVar(&o.ModelTransferStateRoot, "model-transfer-state-root", o.ModelTransferStateRoot,
+		"the source broker's durable ledger root, read to report the node's source generations; empty reports none.")
 	fs.StringVar(&o.CSISocket, "csi-socket", o.CSISocket,
 		"the Unix socket the CSI services listen on; empty is <kubelet-dir>/plugins/"+modelstore.DriverName+"/csi.sock.")
 
@@ -102,6 +109,8 @@ func (o *Options) Validate(ctx context.Context) error {
 		return errors.New("--kubelet-dir: must be absolute")
 	case !filepath.IsAbs(o.CacheRoot):
 		return errors.New("--cache-root: must be absolute")
+	case o.ModelTransferStateRoot != "" && !filepath.IsAbs(o.ModelTransferStateRoot):
+		return errors.New("--model-transfer-state-root: must be absolute")
 	case o.CSISocket != "" && !filepath.IsAbs(o.CSISocket):
 		return errors.New("--csi-socket: must be absolute")
 	}
@@ -167,13 +176,19 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 		return nil, err
 	}
 
+	modelTransferStateRoot := o.ModelTransferStateRoot
+	if modelTransferStateRoot != "" {
+		modelTransferStateRoot = filepath.Clean(modelTransferStateRoot)
+	}
+
 	return &Config{
-		ServerConfig:  srvConfig,
-		ManagerConfig: mgrConfig,
-		NodeName:      o.NodeName,
-		KubeletDir:    filepath.Clean(o.KubeletDir),
-		CacheRoot:     filepath.Clean(o.CacheRoot),
-		CSISocket:     socket,
-		PeerSync:      peerSync,
+		ServerConfig:           srvConfig,
+		ManagerConfig:          mgrConfig,
+		NodeName:               o.NodeName,
+		KubeletDir:             filepath.Clean(o.KubeletDir),
+		CacheRoot:              filepath.Clean(o.CacheRoot),
+		ModelTransferStateRoot: modelTransferStateRoot,
+		CSISocket:              socket,
+		PeerSync:               peerSync,
 	}, nil
 }

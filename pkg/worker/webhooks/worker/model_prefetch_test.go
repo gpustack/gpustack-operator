@@ -28,8 +28,8 @@ func newModelPrefetchWebhook(objs ...ctrlcli.Object) *ModelPrefetchWebhook {
 }
 
 // the fixture: one store granting pool=h100, one node in it, a grant over that store, and a
-// resolved artifact of 5Gi.
-func newModelPrefetchFixture(allowPinned bool, quota string, sizeBytes int64) []ctrlcli.Object {
+// resolved artifact of 5Gi. An optional last argument puts a source-memory grant on the binding.
+func newModelPrefetchFixture(allowPinned bool, quota string, sizeBytes int64, sourceMemory ...*workercore.ModelStoreBindingSourceMemory) []ctrlcli.Object {
 	tr := true
 	store := &workercore.ModelStore{
 		ObjectMeta: meta.ObjectMeta{Name: "h100"},
@@ -46,6 +46,9 @@ func newModelPrefetchFixture(allowPinned bool, quota string, sizeBytes int64) []
 	}
 	if allowPinned {
 		binding.Spec.AllowPinned = &tr
+	}
+	if len(sourceMemory) > 0 {
+		binding.Spec.SourceMemory = sourceMemory[0]
 	}
 	artifact := &workercore.ModelArtifact{
 		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "model", UID: types.UID("artifact-uid")},
@@ -171,5 +174,109 @@ func TestModelPrefetchAdmission(t *testing.T) {
 		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 20<<30)...)
 		_, err := r.ValidateUpdate(context.Background(), newModelPrefetch(), newModelPrefetch())
 		require.Error(t, err, "a retarget that busts the budget is refused as readily as a create")
+	})
+}
+
+// TestModelPrefetchSourceIntentAdmission pins the two rules a source intent adds: the target set
+// must be named, and the namespace's Binding must carry the registered-memory grant. A prefetch
+// without the intent is none of the webhook's business — that is the absence-of-opt-in contract.
+func TestModelPrefetchSourceIntentAdmission(t *testing.T) {
+	newSourcePrefetch := func(placement *workercore.ModelPrefetchPlacement) *workercore.ModelPrefetch {
+		pf := newModelPrefetch()
+		pf.Spec.Placement = placement
+		pf.Spec.Source = &workercore.ModelPrefetchSource{}
+
+		return pf
+	}
+
+	t.Run("a source intent with no placement at all is refused", func(t *testing.T) {
+		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30)...)
+		_, err := r.ValidateCreate(context.Background(), newSourcePrefetch(nil))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "placement")
+	})
+
+	t.Run("a source intent on an empty placement is refused", func(t *testing.T) {
+		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30)...)
+		_, err := r.ValidateCreate(context.Background(), newSourcePrefetch(&workercore.ModelPrefetchPlacement{}))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "placement")
+	})
+
+	t.Run("a source intent keeps the ambiguity refusal", func(t *testing.T) {
+		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30)...)
+		pf := newSourcePrefetch(&workercore.ModelPrefetchPlacement{
+			NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}},
+		})
+		pf.Spec.Placement.InstanceTypes = []string{"h100-8"}
+		_, err := r.ValidateCreate(context.Background(), pf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "both instanceTypes and nodeSelector")
+	})
+
+	t.Run("a source intent with a named target set and a grant passes", func(t *testing.T) {
+		grant := &workercore.ModelStoreBindingSourceMemory{
+			Bytes:         resource.MustParse("16Gi"),
+			Registrations: 4,
+			Sessions:      8,
+		}
+		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30, grant)...)
+		_, err := r.ValidateCreate(context.Background(), newSourcePrefetch(
+			&workercore.ModelPrefetchPlacement{NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}}},
+		))
+		require.NoError(t, err)
+	})
+
+	t.Run("a source intent over instanceTypes names the target set too", func(t *testing.T) {
+		grant := &workercore.ModelStoreBindingSourceMemory{
+			Bytes:         resource.MustParse("16Gi"),
+			Registrations: 4,
+			Sessions:      8,
+		}
+		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30, grant)...)
+		pf := newSourcePrefetch(&workercore.ModelPrefetchPlacement{InstanceTypes: []string{"h100-8"}})
+		pf.Spec.MinReady = 0
+		_, err := r.ValidateCreate(context.Background(), pf)
+		require.NoError(t, err)
+	})
+
+	t.Run("a source intent over a grant without source memory is admitted", func(t *testing.T) {
+		// A Binding without a sourceMemory section is a valid shape: the
+		// node's own modelTransfer.source.* capacity governs what its
+		// sources draw, so admission does not demand the section.
+		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30)...)
+		_, err := r.ValidateCreate(context.Background(), newSourcePrefetch(
+			&workercore.ModelPrefetchPlacement{NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}}},
+		))
+		require.NoError(t, err)
+	})
+
+	t.Run("a prefetch without the intent stays out of the source rules", func(t *testing.T) {
+		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30)...)
+		pf := newModelPrefetch()
+		pf.Spec.Placement = nil
+		_, err := r.ValidateCreate(context.Background(), pf)
+		require.NoError(t, err,
+			"an ordinary prefetch keeps the derived-from-deployments default; the source rules "+
+				"are the intent's, not the object's")
+	})
+
+	t.Run("a source intent over a claim artifact is refused", func(t *testing.T) {
+		grant := &workercore.ModelStoreBindingSourceMemory{
+			Bytes:         resource.MustParse("16Gi"),
+			Registrations: 4,
+			Sessions:      8,
+		}
+		objs := newModelPrefetchFixture(true, "10Gi", 5<<30, grant)
+		objs[2].(*workercore.ModelArtifact).Spec.Source.PersistentVolumeClaim = &workercore.ModelArtifactPersistentVolumeClaimSource{
+			ClaimName: "models",
+			Path:      "qwen",
+		}
+		r := newModelPrefetchWebhook(objs...)
+		_, err := r.ValidateCreate(context.Background(), newSourcePrefetch(
+			&workercore.ModelPrefetchPlacement{NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}}},
+		))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "claim")
 	})
 }

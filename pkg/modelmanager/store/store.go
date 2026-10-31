@@ -18,6 +18,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -72,13 +73,14 @@ func HexOf(digest string) string {
 	return h
 }
 
-// Store is a node's cache root. It is the root's only writer.
+// Store is a node's cache root. Claim and collection also synchronize across processes.
 type Store struct {
 	root string
-	// claimMu orders a mount's reference against a removal: Claim and RemoveUnreferenced hold it,
-	// so a tree is never removed between the check that it is published and the record that a
-	// target mounts it.
-	claimMu sync.Mutex
+	// claimSem admits one claim path at a time: Claim, Rebuild and RemoveUnreferenced hold it and
+	// then the cross-process lock, so a tree is never removed between the check that it is
+	// published and the record that a target mounts it. It is a channel rather than a mutex so a
+	// caller whose context is done stops waiting instead of queueing behind a stuck holder.
+	claimSem chan struct{}
 	// digestMu serializes the updates of the digest records.
 	digestMu sync.Mutex
 }
@@ -112,7 +114,7 @@ func Open(root string) (*Store, error) {
 		}
 	}
 
-	return &Store{root: root}, nil
+	return &Store{root: root, claimSem: make(chan struct{}, 1)}, nil
 }
 
 // Root is the cache root.
@@ -226,8 +228,10 @@ func (s *Store) trashPublished(hex string) (string, error) {
 // the tree an instant earlier keeps it; a reference that cannot be read keeps it too. Only the rename
 // out of published/ holds that lock: a mount then no longer finds the tree, so the files are removed
 // after it is released, rather than stalling every mount on the node while a large tree is deleted.
-func (s *Store) RemoveUnreferenced(hex string) (bool, error) {
-	trash, err := s.trashUnreferenced(hex)
+// Cancellation stops waiting for the claim locks without renaming the tree.
+// Once the locks are held, ledger work finishes; later kernel unlink work is not interruptible.
+func (s *Store) RemoveUnreferenced(ctx context.Context, hex string) (bool, error) {
+	trash, err := s.trashUnreferenced(ctx, hex)
 	if err != nil || trash == "" {
 		return false, err
 	}
@@ -238,9 +242,16 @@ func (s *Store) RemoveUnreferenced(hex string) (bool, error) {
 	return true, nil
 }
 
-func (s *Store) trashUnreferenced(hex string) (string, error) {
-	s.claimMu.Lock()
-	defer s.claimMu.Unlock()
+func (s *Store) trashUnreferenced(ctx context.Context, hex string) (string, error) {
+	if err := s.lockClaimMu(ctx); err != nil {
+		return "", err
+	}
+	defer s.unlockClaimMu()
+	unlock, err := s.lockClaims(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 
 	refs, err := s.Refs()
 	if err != nil {

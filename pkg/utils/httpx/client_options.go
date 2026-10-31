@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"errors"
 	"net/http"
 	"time"
 )
@@ -8,9 +9,10 @@ import (
 type ClientOption struct {
 	*TransportOption
 
-	timeout    time.Duration
-	debug      bool
-	roundTrips []func(req *http.Request) error
+	timeout       time.Duration
+	debug         bool
+	checkRedirect func(req *http.Request, via []*http.Request) error
+	roundTrips    []func(req *http.Request) error
 }
 
 func ClientOptions() *ClientOption {
@@ -35,6 +37,17 @@ func (o *ClientOption) WithTimeout(timeout time.Duration) *ClientOption {
 		return o
 	}
 	o.timeout = timeout
+	return o
+}
+
+// WithoutRedirect disables following HTTP redirects.
+func (o *ClientOption) WithoutRedirect() *ClientOption {
+	if o == nil {
+		return o
+	}
+	o.checkRedirect = func(*http.Request, []*http.Request) error {
+		return errors.New("redirects are disabled")
+	}
 	return o
 }
 

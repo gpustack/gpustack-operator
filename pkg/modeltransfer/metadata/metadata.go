@@ -17,12 +17,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // The view record's file name and kind.
@@ -153,6 +156,16 @@ func viewSatisfies(view *View, artifactDigest string, required []string) bool {
 	return true
 }
 
+// newBuildStage stages a build beside its destination under the canonical
+// staging prefix, so crash residue is recognized by recovery no matter
+// which caller created it, creating the destination's parent when needed.
+func newBuildStage(viewDir string) (*Staging, error) {
+	if err := os.MkdirAll(filepath.Dir(viewDir), 0o755); err != nil {
+		return nil, err
+	}
+	return newStaging(filepath.Dir(viewDir), stagingPrefix)
+}
+
 // Build materializes the metadata view of srcDir into viewDir.
 //
 // Every required file must be a known metadata file present in srcDir as a
@@ -191,11 +204,12 @@ func Build(
 		manifest = manifestSource[0]
 	}
 
-	staging, err := os.MkdirTemp(filepath.Dir(viewDir), filepath.Base(viewDir)+".staging-*")
+	stage, err := newBuildStage(viewDir)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = os.RemoveAll(staging) }()
+	defer stage.Release()
+	staging := stage.Dir()
 
 	var files []ViewFile
 	// Whole files first: the required set plus known optional files present.
@@ -222,6 +236,14 @@ func Build(
 			continue
 		}
 		entry, err := copyWhole(srcDir, staging, name, manifest, false)
+		if errors.Is(err, fs.ErrNotExist) {
+			// copyWhole's permitted sentinel: an optional file vanished
+			// between the listing and the open, so the view simply carries
+			// one optional file fewer. Required files never take this
+			// path, and identity, symlink, and other I/O failures still
+			// refuse the build.
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -264,25 +286,10 @@ func Build(
 	if err := writeSealed(filepath.Join(staging, viewFile), raw); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(viewDir), 0o755); err != nil {
+	if err := publishView(staging, viewDir, artifactDigest, required); err != nil {
 		return nil, err
 	}
-	// A directory left by an interrupted build is replaced whole; a rename
-	// lost to a concurrent build of the same view is still a success, so
-	// the winner is verified instead of reported as an error.
-	if err := os.Rename(staging, viewDir); err != nil {
-		if existing, verifyErr := Verify(viewDir); verifyErr == nil &&
-			viewSatisfies(existing, artifactDigest, required) {
-			return existing, nil
-		}
-		if removeErr := os.RemoveAll(viewDir); removeErr != nil {
-			return nil, removeErr
-		}
-		if err := os.Rename(staging, viewDir); err != nil {
-			return nil, err
-		}
-	}
-	return view, nil
+	return Verify(viewDir)
 }
 
 // Load reads a view's record without verifying its files.
@@ -530,6 +537,13 @@ func parseHeaderEntry(name string, raw json.RawMessage) (HeaderEntry, error) {
 	return HeaderEntry{Dtype: *entry.Dtype, Shape: *entry.Shape, Begin: begin, End: end}, nil
 }
 
+// openMetadataSource opens one source file verbatim for a view; indirected
+// the way this repository indirects syscalls, so tests can hold the
+// list-then-open race still.
+var openMetadataSource = func(path string) (int, error) {
+	return unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+}
+
 // copyWhole copies one known metadata file verbatim, refusing what is not a
 // regular file and what exceeds the metadata bound. manifestSource, when
 // given, supplies manifest.json when srcDir lacks it: a published tree
@@ -544,24 +558,37 @@ func copyWhole(srcDir, staging, name, manifestSource string, required bool) (Vie
 			source = manifestSource
 		}
 	}
-	info, err := os.Lstat(source)
+	fd, err := openMetadataSource(source)
 	switch {
 	case errors.Is(err, fs.ErrNotExist) && !required:
 		return ViewFile{}, fs.ErrNotExist
 	case errors.Is(err, fs.ErrNotExist):
 		return ViewFile{}, fmt.Errorf("%w: %s", ErrMissingRequiredFile, name)
+	case errors.Is(err, unix.ELOOP):
+		return ViewFile{}, fmt.Errorf("%w: %s", ErrNotRegularFile, name)
 	case err != nil:
 		return ViewFile{}, err
-	case !info.Mode().IsRegular():
-		return ViewFile{}, fmt.Errorf("%w: %s", ErrNotRegularFile, name)
-	case info.Size() > MaxMetadataBytes:
-		return ViewFile{}, fmt.Errorf("%w: %s holds %d bytes, above the %d bound",
-			ErrTooLarge, name, info.Size(), MaxMetadataBytes)
 	}
-	b, err := os.ReadFile(source)
+	file := os.NewFile(uintptr(fd), source)
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		return ViewFile{}, err
 	}
+	if !info.Mode().IsRegular() {
+		return ViewFile{}, fmt.Errorf("%w: %s", ErrNotRegularFile, name)
+	}
+	if info.Size() > MaxMetadataBytes {
+		return ViewFile{}, fmt.Errorf("%w: %s", ErrTooLarge, name)
+	}
+	b, err := io.ReadAll(io.LimitReader(file, MaxMetadataBytes+1))
+	if err != nil {
+		return ViewFile{}, err
+	}
+	if int64(len(b)) > MaxMetadataBytes {
+		return ViewFile{}, fmt.Errorf("%w: %s", ErrTooLarge, name)
+	}
+
 	target := filepath.Join(staging, filepath.FromSlash(name))
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return ViewFile{}, err
@@ -571,7 +598,7 @@ func copyWhole(srcDir, staging, name, manifestSource string, required bool) (Vie
 	}
 	sum := sha256.Sum256(b)
 	return ViewFile{
-		Name: name, Size: info.Size(),
+		Name: name, Size: int64(len(b)),
 		SHA256: hex.EncodeToString(sum[:]),
 	}, nil
 }
@@ -585,11 +612,22 @@ func copyHeaderStub(srcDir, staging, path string) (ViewFile, error) {
 		return ViewFile{}, err
 	}
 	name := filepath.ToSlash(rel)
-	source, err := os.Open(path)
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if errors.Is(err, unix.ELOOP) {
+		return ViewFile{}, fmt.Errorf("%w: %s", ErrNotRegularFile, name)
+	}
 	if err != nil {
 		return ViewFile{}, err
 	}
+	source := os.NewFile(uintptr(fd), path)
 	defer func() { _ = source.Close() }()
+	info, err := source.Stat()
+	if err != nil {
+		return ViewFile{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return ViewFile{}, fmt.Errorf("%w: %s", ErrNotRegularFile, name)
+	}
 	prefix := make([]byte, 8)
 	if err := readFull(source, prefix); err != nil {
 		return ViewFile{}, err
@@ -598,7 +636,7 @@ func copyHeaderStub(srcDir, staging, path string) (ViewFile, error) {
 	if err != nil {
 		return ViewFile{}, err
 	}
-	if info, err := source.Stat(); err != nil {
+	if info, err = source.Stat(); err != nil {
 		return ViewFile{}, err
 	} else if info.Size() < 8+length {
 		return ViewFile{}, fmt.Errorf("%w: %s holds %d bytes, its header claims %d",
@@ -617,7 +655,7 @@ func copyHeaderStub(srcDir, staging, path string) (ViewFile, error) {
 	// The header's own data extents must fit the file: the largest entry
 	// end, past the length prefix and header, cannot overflow int64 or run
 	// past the bytes that are actually there.
-	info, err := source.Stat()
+	info, err = source.Stat()
 	if err != nil {
 		return ViewFile{}, err
 	}

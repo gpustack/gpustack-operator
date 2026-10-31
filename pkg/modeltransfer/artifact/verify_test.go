@@ -613,6 +613,45 @@ func TestVerifyFilesCancellationJoinsActiveWorkers(t *testing.T) {
 	assert.EqualValues(t, 2, finished.Load())
 }
 
+// TestVerifyFilesCancellationDispatchesWithExitedWorkers pins the schedule
+// the dispatch-loop suspicion worried about: cancellation lands while every
+// worker has already left, and the consumer still performs one dispatch send
+// into the jobs buffer before observing the cancellation. The taken-always-
+// leads-consumed invariant keeps that send below the buffer capacity, so the
+// run must join instead of deadlocking.
+func TestVerifyFilesCancellationDispatchesWithExitedWorkers(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(previous)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{}, 2)
+	done := make(chan error, 1)
+	go func() {
+		_, err := verifyFiles(ctx, []modelartifact.ManifestEntry{{Path: "a"}, {Path: "b"}, {Path: "c"}, {Path: "d"}},
+			func(ctx context.Context, _ modelartifact.ManifestEntry, _ int64) (*verifiedFile, error) {
+				started <- struct{}{}
+				<-ctx.Done()
+				return nil, ctx.Err()
+			})
+		done <- err
+	}()
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("verification workers did not start")
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled,
+			"the consumer exits through its own cancellation check after the buffered dispatch")
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancellation deadlocked the consumer behind its buffered dispatch")
+	}
+}
+
 func TestVerifyFilesEnforcesAggregateBounds(t *testing.T) {
 	tensors := make([]protocol.TensorDescriptor, MaxTensors+1)
 	tests := []struct {

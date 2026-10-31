@@ -150,3 +150,81 @@ func seedDelegatedSecret(t *testing.T, name string, stored *string) {
 	InvalidateCache()
 	t.Cleanup(InvalidateCache)
 }
+
+func TestAllowEnumAndCSIDriverWhen(t *testing.T) {
+	admit := AdmitWith(
+		AllowEnum("Engine", "Node"),
+		AllowCSIDriverWhen("model.gpustack.ai", "Node"),
+	)
+	cases := []struct {
+		name    string
+		value   string
+		exists  bool
+		lookErr error
+		wantErr string
+	}{
+		{name: "Engine needs nothing", value: "Engine"},
+		{name: "Node with the CSIDriver", value: "Node", exists: true},
+		{name: "Node without the CSIDriver", value: "Node", wantErr: "does not exist"},
+		{name: "Node when the lookup fails", value: "Node", lookErr: errors.New("boom"), wantErr: "check the CSIDriver"},
+		{name: "another value", value: "Pvc", wantErr: "want Engine or Node"},
+		{name: "a lowercase value", value: "node", wantErr: "want Engine or Node"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			orig := csiDriverExists
+			t.Cleanup(func() { csiDriverExists = orig })
+			csiDriverExists = func(context.Context, string) (bool, error) { return c.exists, c.lookErr }
+
+			err := admit(context.Background(), "", c.value)
+			if c.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.wantErr)
+		})
+	}
+}
+
+func TestAllowInt64Order(t *testing.T) {
+	reg := Settings{}
+	cases := []struct {
+		name     string
+		greater  bool
+		other    string
+		otherErr error
+		value    string
+		wantErr  string
+	}{
+		{name: "greater above peer", greater: true, other: "70", value: "85"},
+		{name: "greater equal to peer", greater: true, other: "70", value: "70", wantErr: "must be above other"},
+		{name: "greater below peer", greater: true, other: "70", value: "60", wantErr: "must be above other"},
+		{name: "less below peer", other: "80", value: "50"},
+		{name: "less equal to peer", other: "80", value: "80", wantErr: "must be below other"},
+		{name: "value is not a number", other: "80", value: "x", wantErr: "invalid syntax"},
+		{name: "unparseable peer value is left to its own check", greater: true, other: "x", value: "85"},
+		{name: "store read failure refuses", greater: true, otherErr: errors.New("connection refused"), value: "85", wantErr: "connection refused"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			orig := currentValue
+			t.Cleanup(func() { currentValue = orig })
+			currentValue = func(context.Context, Settings, string) (string, error) { return c.other, c.otherErr }
+
+			var admit Admission
+			if c.greater {
+				admit = reg.AllowInt64GreaterThan("other")
+			} else {
+				admit = reg.AllowInt64LessThan("other")
+			}
+			err := admit(context.Background(), "", c.value)
+			if c.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.wantErr)
+		})
+	}
+}

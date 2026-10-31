@@ -397,7 +397,7 @@ func TestNodePublishClaimsTheTreeBeforeBinding(t *testing.T) {
 			_, found, rerr := env.d.Store.ReadRef("csi-vol-1")
 			require.NoError(t, rerr)
 			assert.Equal(t, c.wantRef, found)
-			removed, rerr := env.d.Store.RemoveUnreferenced(testHex)
+			removed, rerr := env.d.Store.RemoveUnreferenced(t.Context(), testHex)
 			require.NoError(t, rerr)
 			assert.Equal(t, !c.wantRef, removed, "the collector removes the tree only when no mount claimed it")
 		})

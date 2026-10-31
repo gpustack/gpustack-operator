@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -102,7 +103,7 @@ func (c *testCache) collector(referenced, downloading map[string]bool, pinned ..
 // claim records a mount of hex the way a mount does, after the collector's view of the references.
 func (c *testCache) claim(t *testing.T, hex string) {
 	t.Helper()
-	published, err := c.store.Claim(store.Ref{VolumeID: "csi-" + hex[:8], TargetPath: "/var/lib/kubelet/pods/p/" + hex[:8], Hex: hex})
+	published, err := c.store.Claim(t.Context(), store.Ref{VolumeID: "csi-" + hex[:8], TargetPath: "/var/lib/kubelet/pods/p/" + hex[:8], Hex: hex})
 	require.NoError(t, err)
 	require.True(t, published)
 }
@@ -325,6 +326,30 @@ func TestCollectKeepsTreeReusedAfterCandidateSnapshot(t *testing.T) {
 	_, err := col.Collect(context.Background())
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{hexOf('b')}, cache.published(t))
+}
+
+// holdClaimLock takes the store's cross-process claim lock the way another process would hold it,
+// so a collection in this test waits at its first candidate.
+func holdClaimLock(t *testing.T, c *testCache) {
+	t.Helper()
+	lock, err := os.OpenFile(filepath.Join(c.store.Root(), "ledger", "claims.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Close() })
+	require.NoError(t, unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB))
+}
+
+func TestCollectKeepsTheTreeWhenTheCallerGivesUpWaiting(t *testing.T) {
+	cache := newTestCache(t, 900)
+	hex := hexOf('a')
+	cache.publish(t, hex, 100, testNow.Add(-4*time.Hour))
+	col := cache.collector(nil, nil)
+	holdClaimLock(t, cache)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := col.Collect(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "a collection must answer the caller's own deadline, not report a skip")
+	assert.Equal(t, []string{hex}, cache.published(t), "a collection that gave up waiting removes nothing")
 }
 
 func TestCollectPartials(t *testing.T) {

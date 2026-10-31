@@ -24,17 +24,29 @@ func (m *Manifest) ReferencedFiles() []FileDescriptor {
 }
 
 // ValidTensorSpan accepts a tensor slice, or a contiguous run ending on a
-// tensor boundary. Page reads are bounded and canceled with ctx.
-func (m *Manifest) ValidTensorSpan(ctx context.Context, tensor TensorDescriptor, offset, length int64) bool {
+// tensor boundary. Page reads are bounded and canceled with ctx. The
+// boolean answers only the range question: false, nil means the span is
+// genuinely invalid — outside the tensor, negative, overflowing, or running
+// past the manifest's tensors. A non-nil error means the verdict could not
+// be proven: the context was canceled (returned unchanged, so callers can
+// errors.Is it), a page read or digest check failed, or the pages were
+// never verified. Callers must treat any error as an unavailable source,
+// never as a range violation.
+func (m *Manifest) ValidTensorSpan(ctx context.Context, tensor TensorDescriptor, offset, length int64) (bool, error) {
 	size, err := tensor.ByteSize()
-	if err != nil || offset < 0 || length < 0 || offset > size {
-		return false
+	if err != nil {
+		// A descriptor that cannot state its size is a genuinely invalid
+		// span — the malformed descriptor is the verdict, not a read failure.
+		return false, nil // nolint: nilerr // the malformed descriptor is the invalid span itself.
+	}
+	if offset < 0 || length < 0 || offset > size {
+		return false, nil
 	}
 	if length <= size-offset {
-		return true
+		return true, nil
 	}
 	if offset != 0 || tensor.DataBegin > (1<<63-1)-length {
-		return false
+		return false, nil
 	}
 	targetEnd := tensor.DataBegin + length
 	end := tensor.DataEnd
@@ -71,22 +83,22 @@ func (m *Manifest) ValidTensorSpan(ctx context.Context, tensor TensorDescriptor,
 			return items[i].DataEnd < items[j].DataEnd
 		})
 		_, valid := visit(items)
-		return valid
+		return valid, nil
 	}
 	for number, page := range m.TensorPages {
 		if page.File != tensor.File || page.End < tensor.DataBegin {
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			return false
+			return false, err
 		}
 		items, err := m.page(ctx, number)
 		if err != nil {
-			return false
+			return false, err
 		}
 		if done, valid := visit(items); done {
-			return valid
+			return valid, nil
 		}
 	}
-	return false
+	return false, nil
 }
