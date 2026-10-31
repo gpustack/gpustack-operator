@@ -1130,11 +1130,25 @@ type ModelDeploymentModelStatus struct {
 	// Delivery is how the weights reach the engine: "PVC", the claim mounted read-only at a fixed
 	// path; "Engine", the engine downloading the pinned commit itself; "Node", the node's
 	// model-manager plugin materializing the verified files and mounting them read-only at the same
-	// fixed path; or "Image", kubelet pulling the pinned OCI image into a read-only image volume.
+	// fixed path; "Image", kubelet pulling the pinned OCI image into a read-only image volume; or
+	// "Remote", the weights arriving from a prepared in-memory source over a qualified transfer,
+	// with no complete checkpoint on this filesystem.
+	//
+	// "Remote" is the configured outcome, and it does not summarize the replicas: the delivery
+	// each replica actually uses right now — including which took the declared fallback — is in
+	// status.model.remote, and that view is what a reader of a half-rolled-out fallback trusts.
 	//
 	// +required
-	// +k8s:validation:enum=["PVC","Engine","Node","Image"]
+	// +k8s:validation:enum=["PVC","Engine","Node","Image","Remote"]
 	Delivery ModelDeploymentModelDelivery `json:"delivery" protobuf:"bytes,4,name=delivery,casttype=ModelDeploymentModelDelivery"`
+
+	// Remote is the remote-delivery view, present when the weights are configured to arrive from
+	// a prepared source. It is ABSENT for every legacy delivery, so a consumer that has never
+	// heard of remote delivery keeps reading delivery alone, and an absent view never reads as a
+	// remote delivery that silently changed its mind.
+	//
+	// +optional
+	Remote *ModelDeploymentModelRemoteStatus `json:"remote,omitempty" protobuf:"bytes,5,opt,name=remote"`
 }
 
 // ModelDeploymentModelDelivery is how a deployment's weights reach its engine.
@@ -1154,6 +1168,143 @@ const (
 	// Kubernetes image volume: kubelet pulls the pinned image on the node that needs it, and the
 	// node's plugin cache plays no part.
 	ModelDeploymentModelDeliveryImage ModelDeploymentModelDelivery = "Image"
+	// ModelDeploymentModelDeliveryRemote has the engine's load phase receive the weights from a
+	// prepared in-memory source over a qualified transfer, so the destination needs no complete
+	// checkpoint. It reads only under the cluster's remote-delivery configuration, and it is
+	// never spelled as Node or Engine to stay legible to an older consumer: which replica is
+	// actually using which outcome is status.model.remote's answer, not this constant's to blur.
+	ModelDeploymentModelDeliveryRemote ModelDeploymentModelDelivery = "Remote"
+)
+
+// ModelDeploymentRemotePolicy is the effective remote-delivery policy a deployment was admitted
+// under, echoed from the cluster configuration rather than restated by each deployment.
+// +enum
+type ModelDeploymentRemotePolicy string
+
+const (
+	// ModelDeploymentRemotePolicyRequire holds a replica's startup until a qualified remote path
+	// serves the weights, within the declared startup limits, and then reports failure: it never
+	// materializes a complete destination checkpoint on its own, and an unsupported combination
+	// is blocked with the reason it was blocked for.
+	ModelDeploymentRemotePolicyRequire ModelDeploymentRemotePolicy = "Require"
+	// ModelDeploymentRemotePolicyPrefer uses remote delivery when it qualifies and is available,
+	// and otherwise permits only the declared identity-preserving fallback, visibly counted as a
+	// fallback rather than silently re-rendered as an ordinary run.
+	ModelDeploymentRemotePolicyPrefer ModelDeploymentRemotePolicy = "Prefer"
+)
+
+// ModelDeploymentModelRemoteStatus is the remote-delivery view of the model's weights: the
+// effective policy and, per role and replica, the delivery each replica actually uses.
+//
+// THE ENTRIES ARE THE OBSERVED TRUTH AND THE AGGREGATE IS THE CONFIGURED ANSWER. delivery above
+// names the path the weights were configured to take; a replica that took a declared fallback
+// reads Node or Engine in the entries here while it uses them, which is exactly the mixing one
+// aggregate string cannot say. A reader asking what a replica is doing reads the entries; a
+// reader asking how the deployment is configured reads delivery.
+type ModelDeploymentModelRemoteStatus struct {
+	// Policy is the effective policy in force for this deployment's remote delivery.
+	//
+	// +required
+	// +k8s:validation:enum=["Require","Prefer"]
+	Policy ModelDeploymentRemotePolicy `json:"policy" protobuf:"bytes,1,opt,name=policy,casttype=ModelDeploymentRemotePolicy"` // nolint: lll
+
+	// Roles is one entry per role that loads weights, so a mixed deployment — a role half rolled
+	// over to its fallback, or two roles on different outcomes — is described by its entries
+	// rather than compressed into the aggregate above.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=role
+	Roles []ModelDeploymentRemoteRoleStatus `json:"roles,omitempty" protobuf:"bytes,2,rep,name=roles"` // nolint: lll
+}
+
+// ModelDeploymentRemoteRoleStatus is one role's per-replica delivery split.
+type ModelDeploymentRemoteRoleStatus struct {
+	// Role is the role this entry describes.
+	//
+	// +required
+	Role string `json:"role" protobuf:"bytes,1,opt,name=role"`
+
+	// Replicas is one entry per replica of the role, ordered by ordinal. It is an ordinary list,
+	// not a map: like the groups above, a replica's observed delivery changes without its
+	// identity changing, so a map keyed on the ordinal would replace the whole entry on the very
+	// change a reader came to see.
+	//
+	// +optional
+	// +listType=atomic
+	Replicas []ModelDeploymentRemoteReplicaStatus `json:"replicas,omitempty" protobuf:"bytes,2,rep,name=replicas"` // nolint: lll
+}
+
+// ModelDeploymentRemoteReplicaStatus is one replica's effective delivery and its load progress.
+type ModelDeploymentRemoteReplicaStatus struct {
+	// Ordinal is the replica's position within its role. Zero is a real position, the first
+	// replica, and is always encoded rather than omitted.
+	//
+	// +required
+	Ordinal int32 `json:"ordinal" protobuf:"varint,1,opt,name=ordinal"`
+
+	// Delivery is the outcome this replica currently uses: Remote while it loads from the source,
+	// or the declared fallback it visibly took, with the reason below saying why. A fallback is
+	// Node or Engine — never a claim or an image delivery, which are different artifacts and not
+	// identity-preserving — and it is recorded as a fallback here rather than relabeled as the
+	// configured outcome.
+	//
+	// +required
+	// +k8s:validation:enum=["Remote","Node","Engine"]
+	Delivery ModelDeploymentModelDelivery `json:"delivery" protobuf:"bytes,2,opt,name=delivery,casttype=ModelDeploymentModelDelivery"` // nolint: lll
+
+	// Load is how far the replica's remote load has got, and it keeps the observations the
+	// startup path makes distinct: metadata supplied, source available, an attempt under way,
+	// weights loaded. Serving readiness is deliberately not here — it stays with the readiness
+	// this deployment already publishes, whose meanings this view does not change — so a loaded
+	// weight set and a serving replica remain two observations, and a source that later drains
+	// does not retract a load that already confirmed.
+	//
+	// +required
+	// +k8s:validation:enum=["Unknown","AwaitingMetadata","AwaitingSource","Loading","Loaded"]
+	Load ModelDeploymentRemoteLoadState `json:"load" protobuf:"bytes,3,opt,name=load,casttype=ModelDeploymentRemoteLoadState"` // nolint: lll
+
+	// Reason names what holds the load at its state, or why the replica is on the delivery it is
+	// on. It is empty while nothing needs saying, and a quota, authorization or integrity failure
+	// names its own kind here rather than collapsing into a generic wait.
+	//
+	// +optional
+	Reason string `json:"reason,omitempty" protobuf:"bytes,4,opt,name=reason"`
+
+	// FallbackAttempts is how many bounded fallback attempts this replica has consumed. A count
+	// past the declared budget is a visible overrun a reader can act on, not a state the next
+	// render quietly resets.
+	//
+	// +optional
+	FallbackAttempts int32 `json:"fallbackAttempts,omitempty" protobuf:"varint,5,opt,name=fallbackAttempts"` // nolint: lll
+}
+
+// ModelDeploymentRemoteLoadState is how far one replica's remote load has got. The stages are
+// distinct observations, not one readiness with synonyms: metadata and source are PREREQUISITES
+// that permit a replica to start, Loading is an attempt under way, and Loaded is the confirmed
+// load behind the deployment's WeightsReady. Serving ready is deliberately absent, because it is
+// the serving views' answer and not this one's.
+// +enum
+type ModelDeploymentRemoteLoadState string
+
+const (
+	// ModelDeploymentRemoteLoadStateUnknown is no observation yet: the replica has not reported,
+	// which is not the report of a failure.
+	ModelDeploymentRemoteLoadStateUnknown ModelDeploymentRemoteLoadState = "Unknown"
+	// ModelDeploymentRemoteLoadStateAwaitingMetadata is the verified metadata view not being
+	// supplied yet. It permits no startup, and it is a prerequisite rather than a progress step
+	// the engine could hurry.
+	ModelDeploymentRemoteLoadStateAwaitingMetadata ModelDeploymentRemoteLoadState = "AwaitingMetadata"
+	// ModelDeploymentRemoteLoadStateAwaitingSource is metadata supplied with no authorized source
+	// holding the content reachable yet.
+	ModelDeploymentRemoteLoadStateAwaitingSource ModelDeploymentRemoteLoadState = "AwaitingSource"
+	// ModelDeploymentRemoteLoadStateLoading is a load attempt under way against an admitted
+	// source.
+	ModelDeploymentRemoteLoadStateLoading ModelDeploymentRemoteLoadState = "Loading"
+	// ModelDeploymentRemoteLoadStateLoaded is weights confirmed loaded and the engine initialized
+	// on them: the observation WeightsReady draws on for this replica, and one an already loaded
+	// replica keeps when its source later drains.
+	ModelDeploymentRemoteLoadStateLoaded ModelDeploymentRemoteLoadState = "Loaded"
 )
 
 // ModelDeploymentRoleStatus is one role's observed readiness.
