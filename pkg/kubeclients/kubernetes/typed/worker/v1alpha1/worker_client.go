@@ -18,6 +18,7 @@ import (
 type WorkerV1alpha1Interface interface {
 	RESTClient() rest.Interface
 	DevicesGetter
+	DevicesRDMASelectionPoliciesGetter
 	InstancesGetter
 	InstanceTypesGetter
 	KVCacheBackendsGetter
@@ -40,6 +41,10 @@ type WorkerV1alpha1Client struct {
 
 func (c *WorkerV1alpha1Client) Devices() DevicesInterface {
 	return newDevices(c)
+}
+
+func (c *WorkerV1alpha1Client) DevicesRDMASelectionPolicies() DevicesRDMASelectionPolicyInterface {
+	return newDevicesRDMASelectionPolicies(c)
 }
 
 func (c *WorkerV1alpha1Client) Instances(namespace string) InstanceInterface {

@@ -16,20 +16,21 @@ import (
 
 func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 	return map[string]*v1.CustomResourceDefinition{
-		"Devices":               crd_gpustack_api_worker_v1alpha1_Devices(),
-		"Instance":              crd_gpustack_api_worker_v1alpha1_Instance(),
-		"InstanceType":          crd_gpustack_api_worker_v1alpha1_InstanceType(),
-		"KVCacheBackend":        crd_gpustack_api_worker_v1alpha1_KVCacheBackend(),
-		"KVCachePool":           crd_gpustack_api_worker_v1alpha1_KVCachePool(),
-		"KVCachePoolBinding":    crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding(),
-		"ModelArtifact":         crd_gpustack_api_worker_v1alpha1_ModelArtifact(),
-		"ModelDeployment":       crd_gpustack_api_worker_v1alpha1_ModelDeployment(),
-		"ModelDeploymentScaler": crd_gpustack_api_worker_v1alpha1_ModelDeploymentScaler(),
-		"ModelPrefetch":         crd_gpustack_api_worker_v1alpha1_ModelPrefetch(),
-		"ModelStore":            crd_gpustack_api_worker_v1alpha1_ModelStore(),
-		"ModelStoreBinding":     crd_gpustack_api_worker_v1alpha1_ModelStoreBinding(),
-		"NodeModelStore":        crd_gpustack_api_worker_v1alpha1_NodeModelStore(),
-		"TopologySource":        crd_gpustack_api_worker_v1alpha1_TopologySource(),
+		"Devices":                    crd_gpustack_api_worker_v1alpha1_Devices(),
+		"DevicesRDMASelectionPolicy": crd_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicy(),
+		"Instance":                   crd_gpustack_api_worker_v1alpha1_Instance(),
+		"InstanceType":               crd_gpustack_api_worker_v1alpha1_InstanceType(),
+		"KVCacheBackend":             crd_gpustack_api_worker_v1alpha1_KVCacheBackend(),
+		"KVCachePool":                crd_gpustack_api_worker_v1alpha1_KVCachePool(),
+		"KVCachePoolBinding":         crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding(),
+		"ModelArtifact":              crd_gpustack_api_worker_v1alpha1_ModelArtifact(),
+		"ModelDeployment":            crd_gpustack_api_worker_v1alpha1_ModelDeployment(),
+		"ModelDeploymentScaler":      crd_gpustack_api_worker_v1alpha1_ModelDeploymentScaler(),
+		"ModelPrefetch":              crd_gpustack_api_worker_v1alpha1_ModelPrefetch(),
+		"ModelStore":                 crd_gpustack_api_worker_v1alpha1_ModelStore(),
+		"ModelStoreBinding":          crd_gpustack_api_worker_v1alpha1_ModelStoreBinding(),
+		"NodeModelStore":             crd_gpustack_api_worker_v1alpha1_NodeModelStore(),
+		"TopologySource":             crd_gpustack_api_worker_v1alpha1_TopologySource(),
 	}
 }
 
@@ -690,6 +691,70 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 								"status": {
 									Type: "object",
 									Properties: map[string]v1.JSONSchemaProps{
+										"conditions": {
+											Description: "Conditions is the observed condition set, keyed by type. RDMASelectionResolved is the\nRDMA selection's single condition: it reports whether the node resolved a selection —\nincluding the no-policy default, whose resolved state carries no policyRef — and its\nmessage names the cause whenever the resolution failed. A missing reference alone is\nneither success nor default, and an absent condition is unreported, not satisfied.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
 										"groups": {
 											Description: "Groups is the list of device groups on the worker.",
 											Type:        "array",
@@ -887,6 +952,76 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 											},
 											XListType: ptr.To[string]("map"),
 										},
+										"interfaces": {
+											Description: "Interfaces is this worker's interface-related status. It is an object keyed by feature,\nnot a second inventory: spec.interfaces stays the only interface list, and a feature\nsummarizes its state here to be read alongside that inventory.\nAn absent field carries no interface feature details — not a report that there are\nnone. The root conditions, not this field's absence, establish resolution and\napplication.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"rdmaSelectionPolicy": {
+													Description: "RDMASelectionPolicy is the state of the node's RDMA selection: which policy the node\nresolves its selection from, and which HCAs that selection leaves out.\nAn absent field carries no selection reference or exclusion details — not a report\nthat there is no selection. The root conditions, not this field's absence,\nestablish the resolution.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"excluded": {
+															Description: "Excluded are the HCAs the resolved selection leaves out, with why. An empty list and\nan absent one are the same on the wire, and neither implies the selection resolved:\na failed resolution clears the list instead of keeping a stale one.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"name",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"name": {
+																			Description: "Name is the excluded device's HCA name, as the host observed it.",
+																			Type:        "string",
+																			MinLength:   ptr.To[int64](1),
+																		},
+																		"reason": {
+																			Description: "Reason is why the selection leaves it out, as a word the writer defines — a filter,\nan external owner, an invalid rule naming it — not a sentence.",
+																			Type:        "string",
+																		},
+																	},
+																},
+															},
+															Nullable: true,
+															XListMapKeys: []string{
+																"name",
+															},
+															XListType: ptr.To[string]("map"),
+														},
+														"policyRef": {
+															Description: "PolicyRef is the policy whose rules the node resolves its selection from. Nil\nrecords no policy, which may be unknown, conflicted, or genuinely none; absence is\ninterpreted with the root condition, and only a successful RDMASelectionResolved\nwithout a policyRef establishes the resolved default. On a failed resolution that\nnames one offending policy, policyRef points at that policy so the report carries\nthe provenance of the broken rules.",
+															Type:        "object",
+															Required: []string{
+																"name",
+																"uid",
+																"generation",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"generation": {
+																	Description: "Generation is the policy's metadata.generation the reference was read at. A policy\ncarries generation 1 from its first write, so 0 is not a value a real reference has.",
+																	Type:        "integer",
+																	Format:      "int64",
+																	Minimum:     ptr.To[float64](1),
+																},
+																"name": {
+																	Description: "Name is the policy's metadata.name.",
+																	Type:        "string",
+																	MinLength:   ptr.To[int64](1),
+																},
+																"uid": {
+																	Description: "UID is the policy's metadata.uid.",
+																	Type:        "string",
+																	MinLength:   ptr.To[int64](1),
+																},
+															},
+															Nullable: true,
+														},
+													},
+													Nullable: true,
+												},
+											},
+											Nullable: true,
+										},
 									},
 								},
 							},
@@ -894,6 +1029,167 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 					},
 					Subresources: &v1.CustomResourceSubresources{
 						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicy() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "devicesrdmaselectionpolicies.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "devicesrdmaselectionpolicies",
+				Singular: "devicesrdmaselectionpolicy",
+				ShortNames: []string{
+					"rdmasel",
+				},
+				Kind:     "DevicesRDMASelectionPolicy",
+				ListKind: "DevicesRDMASelectionPolicyList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Cluster",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "DevicesRDMASelectionPolicy is the cluster-scoped administrator filter restricting\nwhich RDMA HCAs are allocation candidates on the Nodes it selects.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"nodeSelector",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"exclude": {
+											Description: "Exclude removes these exact HCA names from the candidates. Absence or null excludes none.\nInclude and Exclude are mutually exclusive: at most one of the two may be specified. The\nname length is bounded here because the CRD registration cost budget prices an unbounded\nstring at its worst case; uniqueness stays with the webhook, which needs no budget.",
+											Type:        "array",
+											MaxItems:    ptr.To[int64](64),
+											MinItems:    ptr.To[int64](1),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "string",
+												},
+											},
+											Nullable:  true,
+											XListType: ptr.To[string]("atomic"),
+											XValidations: []v1.ValidationRule{
+												{
+													Rule:    "self.all(x, size(x) > 0 && size(x) <= 64)",
+													Message: "each HCA name must be non-empty and at most 64 characters",
+												},
+											},
+										},
+										"include": {
+											Description: "Include restricts candidates to these exact HCA names. Absence or null imposes no restriction.\nInclude and Exclude are mutually exclusive: at most one of the two may be specified. The\nname length is bounded here because the CRD registration cost budget prices an unbounded\nstring at its worst case; uniqueness stays with the webhook, which needs no budget.",
+											Type:        "array",
+											MaxItems:    ptr.To[int64](64),
+											MinItems:    ptr.To[int64](1),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "string",
+												},
+											},
+											Nullable:  true,
+											XListType: ptr.To[string]("atomic"),
+											XValidations: []v1.ValidationRule{
+												{
+													Rule:    "self.all(x, size(x) > 0 && size(x) <= 64)",
+													Message: "each HCA name must be non-empty and at most 64 characters",
+												},
+											},
+										},
+										"nodeSelector": {
+											Description: "NodeSelector selects the Nodes this policy targets. A nil selector is invalid; an\nempty selector explicitly matches every Node.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"matchExpressions": {
+													Description: "matchExpressions is a list of label selector requirements. The requirements are ANDed.",
+													Type:        "array",
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Required: []string{
+																"key",
+																"operator",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"key": {
+																	Description: "key is the label key that the selector applies to.",
+																	Type:        "string",
+																},
+																"operator": {
+																	Description: "operator represents a key's relationship to a set of values.\nValid operators are In, NotIn, Exists and DoesNotExist.",
+																	Type:        "string",
+																},
+																"values": {
+																	Description: "values is an array of string values. If the operator is In or NotIn,\nthe values array must be non-empty. If the operator is Exists or DoesNotExist,\nthe values array must be empty. This array is replaced during a strategic\nmerge patch.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:  true,
+																	XListType: ptr.To[string]("atomic"),
+																},
+															},
+														},
+													},
+													Nullable:  true,
+													XListType: ptr.To[string]("atomic"),
+												},
+												"matchLabels": {
+													Description: "matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels\nmap is equivalent to an element of matchExpressions, whose key field is \"key\", the\noperator is \"In\", and the values array contains only \"value\". The requirements are ANDed.",
+													Type:        "object",
+													AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+														Allows: true,
+														Schema: &v1.JSONSchemaProps{
+															Type: "string",
+														},
+													},
+													Nullable: true,
+												},
+											},
+											Nullable: true,
+										},
+									},
+									XValidations: []v1.ValidationRule{
+										{
+											Rule:    "!(has(self.include) && has(self.exclude))",
+											Message: "include and exclude are mutually exclusive: specify at most one of them",
+										},
+									},
+								},
+							},
+						},
 					},
 				},
 			},

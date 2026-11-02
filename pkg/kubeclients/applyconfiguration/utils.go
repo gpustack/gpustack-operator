@@ -1280,6 +1280,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		// Group=worker.gpustack.ai, Version=v1
 	case workerv1.SchemeGroupVersion.WithKind("Devices"):
 		return &applyconfigurationworkerv1.DevicesApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("DevicesRDMASelectionPolicy"):
+		return &applyconfigurationworkerv1.DevicesRDMASelectionPolicyApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("Instance"):
 		return &applyconfigurationworkerv1.InstanceApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceImagePullSecret"):
@@ -1370,6 +1372,18 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.DevicesAllocationGroupApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("DevicesGroup"):
 		return &applyconfigurationworkerv1alpha1.DevicesGroupApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("DevicesInterfacesStatus"):
+		return &applyconfigurationworkerv1alpha1.DevicesInterfacesStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("DevicesRDMAExclusion"):
+		return &applyconfigurationworkerv1alpha1.DevicesRDMAExclusionApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("DevicesRDMASelectionPolicy"):
+		return &applyconfigurationworkerv1alpha1.DevicesRDMASelectionPolicyApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("DevicesRDMASelectionPolicyReference"):
+		return &applyconfigurationworkerv1alpha1.DevicesRDMASelectionPolicyReferenceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("DevicesRDMASelectionPolicySpec"):
+		return &applyconfigurationworkerv1alpha1.DevicesRDMASelectionPolicySpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("DevicesRDMASelectionPolicyStatus"):
+		return &applyconfigurationworkerv1alpha1.DevicesRDMASelectionPolicyStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("DevicesSpec"):
 		return &applyconfigurationworkerv1alpha1.DevicesSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("DevicesStatus"):

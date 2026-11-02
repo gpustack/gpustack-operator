@@ -24,6 +24,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 	return map[string]common.OpenAPIDefinition{
 		v1.Devices{}.OpenAPIModelName():                                                schema_gpustack_api_worker_v1_Devices(ref),
 		v1.DevicesList{}.OpenAPIModelName():                                            schema_gpustack_api_worker_v1_DevicesList(ref),
+		v1.DevicesRDMASelectionPolicy{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1_DevicesRDMASelectionPolicy(ref),
+		v1.DevicesRDMASelectionPolicyList{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1_DevicesRDMASelectionPolicyList(ref),
 		v1.Instance{}.OpenAPIModelName():                                               schema_gpustack_api_worker_v1_Instance(ref),
 		v1.InstanceAcceleratorMetrics{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1_InstanceAcceleratorMetrics(ref),
 		v1.InstanceEvents{}.OpenAPIModelName():                                         schema_gpustack_api_worker_v1_InstanceEvents(ref),
@@ -104,7 +106,14 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.Devices{}.OpenAPIModelName():                                          schema_gpustack_api_worker_v1alpha1_Devices(ref),
 		v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_DevicesAllocationGroup(ref),
 		v1alpha1.DevicesGroup{}.OpenAPIModelName():                                     schema_gpustack_api_worker_v1alpha1_DevicesGroup(ref),
+		v1alpha1.DevicesInterfacesStatus{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_DevicesInterfacesStatus(ref),
 		v1alpha1.DevicesList{}.OpenAPIModelName():                                      schema_gpustack_api_worker_v1alpha1_DevicesList(ref),
+		v1alpha1.DevicesRDMAExclusion{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_DevicesRDMAExclusion(ref),
+		v1alpha1.DevicesRDMASelectionPolicy{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicy(ref),
+		v1alpha1.DevicesRDMASelectionPolicyList{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicyList(ref),
+		v1alpha1.DevicesRDMASelectionPolicyReference{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicyReference(ref),
+		v1alpha1.DevicesRDMASelectionPolicySpec{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicySpec(ref),
+		v1alpha1.DevicesRDMASelectionPolicyStatus{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicyStatus(ref),
 		v1alpha1.DevicesSpec{}.OpenAPIModelName():                                      schema_gpustack_api_worker_v1alpha1_DevicesSpec(ref),
 		v1alpha1.DevicesStatus{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1alpha1_DevicesStatus(ref),
 		v1alpha1.Instance{}.OpenAPIModelName():                                         schema_gpustack_api_worker_v1alpha1_Instance(ref),
@@ -679,6 +688,101 @@ func schema_gpustack_api_worker_v1_DevicesList(ref common.ReferenceCallback) com
 		},
 		Dependencies: []string{
 			v1.Devices{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_DevicesRDMASelectionPolicy(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DevicesRDMASelectionPolicy restricts which RDMA HCAs are allocation candidates on the Nodes it selects.\n\nConfiguration changes proxy to the v1alpha1 resource. The public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "include and exclude are mutually exclusive: specify at most one of them", "rule": "!(has(self.include) && has(self.exclude))"}},
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.DevicesRDMASelectionPolicySpec{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.DevicesRDMASelectionPolicySpec{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_DevicesRDMASelectionPolicyList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DevicesRDMASelectionPolicyList holds the list of DevicesRDMASelectionPolicies.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1.DevicesRDMASelectionPolicy{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.DevicesRDMASelectionPolicy{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -5119,6 +5223,27 @@ func schema_gpustack_api_worker_v1alpha1_DevicesGroup(ref common.ReferenceCallba
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_DevicesInterfacesStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DevicesInterfacesStatus is the interface-related status of a worker.\n\nIt is a container keyed by feature, never a list: each member summarizes one feature's state, and per-interface detail stays in spec.interfaces where the inventory lives.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"rdmaSelectionPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RDMASelectionPolicy is the state of the node's RDMA selection: which policy the node resolves its selection from, and which HCAs that selection leaves out.\n\nAn absent field carries no selection reference or exclusion details — not a report that there is no selection. The root conditions, not this field's absence, establish the resolution.",
+							Ref:         ref(v1alpha1.DevicesRDMASelectionPolicyStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.DevicesRDMASelectionPolicyStatus{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_DevicesList(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -5164,6 +5289,280 @@ func schema_gpustack_api_worker_v1alpha1_DevicesList(ref common.ReferenceCallbac
 		},
 		Dependencies: []string{
 			v1alpha1.Devices{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_DevicesRDMAExclusion(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DevicesRDMAExclusion records one HCA the resolved selection leaves out.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the excluded device's HCA name, as the host observed it.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Reason is why the selection leaves it out, as a word the writer defines — a filter, an external owner, an invalid rule naming it — not a sentence.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicy(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DevicesRDMASelectionPolicy is the cluster-scoped administrator filter restricting which RDMA HCAs are allocation candidates on the Nodes it selects.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "include and exclude are mutually exclusive: specify at most one of them", "rule": "!(has(self.include) && has(self.exclude))"}},
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.DevicesRDMASelectionPolicySpec{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.DevicesRDMASelectionPolicySpec{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicyList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DevicesRDMASelectionPolicyList holds a list of DevicesRDMASelectionPolicy objects.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.DevicesRDMASelectionPolicy{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.DevicesRDMASelectionPolicy{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicyReference(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DevicesRDMASelectionPolicyReference names one cluster-scoped DevicesRDMASelectionPolicy object at one point in its history.\n\nNo namespace is carried because the policy is cluster-scoped, and no kind because the reference is only ever to that one kind. Name and UID together distinguish a replacement object from the same object: the same name with a different UID is another policy. UID is what binds the reference to an object rather than to a name, and generation says WHICH revision of it the node read when it resolved the selection.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the policy's metadata.name.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"uid": {
+						SchemaProps: spec.SchemaProps{
+							Description: "UID is the policy's metadata.uid.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"generation": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Generation is the policy's metadata.generation the reference was read at. A policy carries generation 1 from its first write, so 0 is not a value a real reference has.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+				Required: []string{"name", "uid", "generation"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicySpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DevicesRDMASelectionPolicySpec selects Nodes and the HCA include/exclude filters.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"nodeSelector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodeSelector selects the Nodes this policy targets. A nil selector is invalid; an empty selector explicitly matches every Node.",
+							Ref:         ref(metav1.LabelSelector{}.OpenAPIModelName()),
+						},
+					},
+					"include": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type":   "atomic",
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "each HCA name must be non-empty and at most 64 characters", "rule": "self.all(x, size(x) > 0 && size(x) <= 64)"}},
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Include restricts candidates to these exact HCA names. Absence or null imposes no restriction.\n\nInclude and Exclude are mutually exclusive: at most one of the two may be specified. The name length is bounded here because the CRD registration cost budget prices an unbounded string at its worst case; uniqueness stays with the webhook, which needs no budget.",
+							MinItems:    ptr.To[int64](1),
+							MaxItems:    ptr.To[int64](64),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+					"exclude": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type":   "atomic",
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "each HCA name must be non-empty and at most 64 characters", "rule": "self.all(x, size(x) > 0 && size(x) <= 64)"}},
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Exclude removes these exact HCA names from the candidates. Absence or null excludes none.\n\nInclude and Exclude are mutually exclusive: at most one of the two may be specified. The name length is bounded here because the CRD registration cost budget prices an unbounded string at its worst case; uniqueness stays with the webhook, which needs no budget.",
+							MinItems:    ptr.To[int64](1),
+							MaxItems:    ptr.To[int64](64),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"nodeSelector"},
+			},
+		},
+		Dependencies: []string{
+			metav1.LabelSelector{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicyStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DevicesRDMASelectionPolicyStatus records the RDMA selection's policy reference and the selection's exclusions.\n\nThe reference names an object; the Devices root conditions carry the state. Reference equality alone never establishes that grants are served under that policy: the policy, the Node and the inventory may all have moved since, and only RDMASelectionResolved reports the current resolution. An unresolved selection fails closed — policyRef is withdrawn or names the offending policy, excluded is empty, and the resolved condition reports the cause.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"policyRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PolicyRef is the policy whose rules the node resolves its selection from. Nil records no policy, which may be unknown, conflicted, or genuinely none; absence is interpreted with the root condition, and only a successful RDMASelectionResolved without a policyRef establishes the resolved default. On a failed resolution that names one offending policy, policyRef points at that policy so the report carries the provenance of the broken rules.",
+							Ref:         ref(v1alpha1.DevicesRDMASelectionPolicyReference{}.OpenAPIModelName()),
+						},
+					},
+					"excluded": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Excluded are the HCAs the resolved selection leaves out, with why. An empty list and an absent one are the same on the wire, and neither implies the selection resolved: a failed resolution clears the list instead of keeping a stale one.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.DevicesRDMAExclusion{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.DevicesRDMAExclusion{}.OpenAPIModelName(), v1alpha1.DevicesRDMASelectionPolicyReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -5255,11 +5654,40 @@ func schema_gpustack_api_worker_v1alpha1_DevicesStatus(ref common.ReferenceCallb
 							},
 						},
 					},
+					"interfaces": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Interfaces is this worker's interface-related status. It is an object keyed by feature, not a second inventory: spec.interfaces stays the only interface list, and a feature summarizes its state here to be read alongside that inventory.\n\nAn absent field carries no interface feature details — not a report that there are none. The root conditions, not this field's absence, establish resolution and application.",
+							Ref:         ref(v1alpha1.DevicesInterfacesStatus{}.OpenAPIModelName()),
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions is the observed condition set, keyed by type. RDMASelectionResolved is the RDMA selection's single condition: it reports whether the node resolved a selection — including the no-policy default, whose resolved state carries no policyRef — and its message names the cause whenever the resolution failed. A missing reference alone is neither success nor default, and an absent condition is unreported, not satisfied.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName()},
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName(), v1alpha1.DevicesInterfacesStatus{}.OpenAPIModelName()},
 	}
 }
 

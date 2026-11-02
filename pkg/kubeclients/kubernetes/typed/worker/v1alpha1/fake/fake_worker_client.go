@@ -21,6 +21,10 @@ func (c *FakeWorkerV1alpha1) Devices() v1alpha1.DevicesInterface {
 	return newFakeDevices(c)
 }
 
+func (c *FakeWorkerV1alpha1) DevicesRDMASelectionPolicies() v1alpha1.DevicesRDMASelectionPolicyInterface {
+	return newFakeDevicesRDMASelectionPolicies(c)
+}
+
 func (c *FakeWorkerV1alpha1) Instances(namespace string) v1alpha1.InstanceInterface {
 	return newFakeInstances(c, namespace)
 }

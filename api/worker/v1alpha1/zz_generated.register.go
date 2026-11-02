@@ -68,6 +68,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&Devices{},
 		&DevicesList{},
+		&DevicesRDMASelectionPolicy{},
+		&DevicesRDMASelectionPolicyList{},
 		&Instance{},
 		&InstanceList{},
 		&InstanceType{},

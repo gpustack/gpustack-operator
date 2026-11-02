@@ -9,6 +9,8 @@ package v1alpha1
 
 type DevicesExpansion interface{}
 
+type DevicesRDMASelectionPolicyExpansion interface{}
+
 type InstanceExpansion interface{}
 
 type InstanceTypeExpansion interface{}

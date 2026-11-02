@@ -111,8 +111,43 @@ func (in DevicesGroup) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in DevicesInterfacesStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.DevicesInterfacesStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in DevicesList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.DevicesList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in DevicesRDMAExclusion) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.DevicesRDMAExclusion"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in DevicesRDMASelectionPolicy) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.DevicesRDMASelectionPolicy"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in DevicesRDMASelectionPolicyList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.DevicesRDMASelectionPolicyList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in DevicesRDMASelectionPolicyReference) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.DevicesRDMASelectionPolicyReference"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in DevicesRDMASelectionPolicySpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.DevicesRDMASelectionPolicySpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in DevicesRDMASelectionPolicyStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.DevicesRDMASelectionPolicyStatus"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

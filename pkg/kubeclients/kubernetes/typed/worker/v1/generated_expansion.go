@@ -9,6 +9,8 @@ package v1
 
 type DevicesExpansion interface{}
 
+type DevicesRDMASelectionPolicyExpansion interface{}
+
 type InstanceExpansion interface{}
 
 type InstanceImagePullSecretExpansion interface{}

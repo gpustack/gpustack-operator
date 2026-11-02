@@ -2,6 +2,10 @@
 
 package v1alpha1
 
+import (
+	v1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/api/v1"
+)
+
 // DevicesStatusApplyConfiguration represents a declarative configuration of the DevicesStatus type for use
 // with apply.
 //
@@ -10,6 +14,22 @@ type DevicesStatusApplyConfiguration struct {
 	// Groups is the list of device groups on the worker.
 	//
 	Groups []DevicesAllocationGroupApplyConfiguration `json:"groups,omitempty"`
+	// Interfaces is this worker's interface-related status. It is an object keyed by feature,
+	// not a second inventory: spec.interfaces stays the only interface list, and a feature
+	// summarizes its state here to be read alongside that inventory.
+	//
+	// An absent field carries no interface feature details — not a report that there are
+	// none. The root conditions, not this field's absence, establish resolution and
+	// application.
+	//
+	Interfaces *DevicesInterfacesStatusApplyConfiguration `json:"interfaces,omitempty"`
+	// Conditions is the observed condition set, keyed by type. RDMASelectionResolved is the
+	// RDMA selection's single condition: it reports whether the node resolved a selection —
+	// including the no-policy default, whose resolved state carries no policyRef — and its
+	// message names the cause whenever the resolution failed. A missing reference alone is
+	// neither success nor default, and an absent condition is unreported, not satisfied.
+	//
+	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 }
 
 // DevicesStatusApplyConfiguration constructs a declarative configuration of the DevicesStatus type for use with
@@ -27,6 +47,27 @@ func (b *DevicesStatusApplyConfiguration) WithGroups(values ...*DevicesAllocatio
 			panic("nil value passed to WithGroups")
 		}
 		b.Groups = append(b.Groups, *values[i])
+	}
+	return b
+}
+
+// WithInterfaces sets the Interfaces field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Interfaces field is set to the value of the last call.
+func (b *DevicesStatusApplyConfiguration) WithInterfaces(value *DevicesInterfacesStatusApplyConfiguration) *DevicesStatusApplyConfiguration {
+	b.Interfaces = value
+	return b
+}
+
+// WithConditions adds the given value to the Conditions field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Conditions field.
+func (b *DevicesStatusApplyConfiguration) WithConditions(values ...*v1.ConditionApplyConfiguration) *DevicesStatusApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithConditions")
+		}
+		b.Conditions = append(b.Conditions, *values[i])
 	}
 	return b
 }
