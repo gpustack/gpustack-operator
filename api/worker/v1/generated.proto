@@ -45,6 +45,34 @@ message DevicesList {
   repeated Devices items = 2;
 }
 
+// DevicesRDMASelectionPolicy restricts which RDMA HCAs are allocation candidates on the
+// Nodes it selects.
+//
+// Configuration changes proxy to the v1alpha1 resource. The public API serves no status
+// subresource. Main-resource writes preserve the backing resource's status.
+//
+// +genclient
+// +genclient:noStatus
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["rdmasel"]
+message DevicesRDMASelectionPolicy {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  // +k8s:validation:cel[0]:rule="!(has(self.include) && has(self.exclude))"
+  // +k8s:validation:cel[0]:message="include and exclude are mutually exclusive: specify at most one of them"
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.DevicesRDMASelectionPolicySpec spec = 2;
+}
+
+// DevicesRDMASelectionPolicyList holds the list of DevicesRDMASelectionPolicies.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message DevicesRDMASelectionPolicyList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated DevicesRDMASelectionPolicy items = 2;
+}
+
 // Instance is the schema for worker.gpustack.ai.
 //
 // +genclient

@@ -37,13 +37,26 @@ only get, list and watch on `modelartifacts` and `nodemodelstores`, update on
 `nodemodelstores/status`, and `ConfigMap`s in the operator namespace. It reads no `Secret`: kubelet
 hands each mount its artifact's `Secret`.
 
-| Value | Default | Meaning |
-| --- | --- | --- |
-| `modelManager.rootPath` | `/var/lib/gpustack/models` | the node's cache directory, a hostPath; mount a dedicated filesystem here |
-| `modelManager.kubeletDir` | `/var/lib/kubelet` | kubelet's root; the plugin mounts its `pods` directory with `Bidirectional` propagation and its own plugin directory separately |
-| `modelManager.securePort` | `32444` | metrics, readiness and liveness |
-| `modelManager.registrar.image` | `docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0` | the sidecar that registers the plugin with kubelet |
-| `modelManager.nodeSelector`, *`tolerations`* | every node, every taint | where it runs; a node without it cannot mount node-delivered weights |
+The following chart values show the defaults:
+
+```yaml
+modelManager:
+  enabled: true
+  rootPath: /var/lib/gpustack/models  # Node cache hostPath; mount a dedicated filesystem here.
+  kubeletDir: /var/lib/kubelet  # Kubelet root.
+  securePort: 32444  # Metrics, readiness and liveness.
+  registrar:
+    image:
+      repository: docker.io/gpustack/mirrored-csi-node-driver-registrar
+      tag: v2.17.0
+  nodeSelector: {}  # Every node by default.
+  tolerations:
+    - operator: Exists  # Every taint by default.
+```
+
+The registrar sidecar registers the plugin with kubelet. The plugin mounts the kubelet `pods`
+directory with `Bidirectional` propagation and mounts its own plugin directory separately.
+A node without the plugin cannot mount node-delivered weights.
 
 | Layer | Carrier | Who changes it | What |
 | --- | --- | --- | --- |
@@ -74,6 +87,19 @@ download starts.
 
 ```bash
 kubectl -n gpustack-system patch setting model-store-download-bandwidth --type merge -p '{"spec":{"value":"200Mi"}}'
+```
+
+The patch sets the value to `200Mi`:
+
+```diff
+ apiVersion: gpustack.ai/v1
+ kind: Setting
+ metadata:
+   name: model-store-download-bandwidth
+   namespace: gpustack-system
+ spec:
+-  value: <current-value>
++  value: "200Mi"
 ```
 
 ### Pool layer

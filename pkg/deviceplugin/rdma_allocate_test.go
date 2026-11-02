@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,8 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 	deviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlintercept "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
@@ -58,14 +62,27 @@ func (f *rdmaAllocateFixture) nodePath(name string) string {
 	return filepath.Join(f.devDir, name)
 }
 
-// deviceSpecsOf renders the specs a response carries as comparable plain values: each node's
-// permissions and host path, in order. The proto messages themselves carry internal marshaling
+// rdmaDeviceSpec renders one injected device as comparable plain values: the host path, the
+// container path and the permissions. The proto messages themselves carry internal marshaling
 // state once they have been logged, which a deep comparison would trip over without saying
 // anything about the grant.
-func deviceSpecsOf(ctrResp *ContainerAllocateResponse) []string {
-	specs := make([]string, 0, len(ctrResp.Devices))
+type rdmaDeviceSpec struct {
+	HostPath      string
+	ContainerPath string
+	Permissions   string
+}
+
+// deviceSpecsOf renders the specs a response carries, in order. Every field the container
+// depends on is rendered: a wrong container path or permission fails the same way a wrong
+// host path does.
+func deviceSpecsOf(ctrResp *ContainerAllocateResponse) []rdmaDeviceSpec {
+	specs := make([]rdmaDeviceSpec, 0, len(ctrResp.Devices))
 	for _, d := range ctrResp.Devices {
-		specs = append(specs, d.Permissions+":"+d.HostPath)
+		specs = append(specs, rdmaDeviceSpec{
+			HostPath:      d.HostPath,
+			ContainerPath: d.ContainerPath,
+			Permissions:   d.Permissions,
+		})
 	}
 	return specs
 }
@@ -77,7 +94,8 @@ func allocateRequest(ids ...string) *AllocateRequest {
 
 // TestRDMAServer_Allocate pins the response a granted endpoint earns: its own verbs character
 // device and never a sibling's, the node-level connection manager once however many endpoints were
-// granted, and the environment variable naming the granted RDMA devices.
+// granted, the NCCL variable carrying the granted devices as an exact filter, and the unified
+// plain variable carrying the same devices without the filter mark.
 func TestRDMAServer_Allocate(t *testing.T) {
 	const nodeName = "node-rdma-alloc"
 
@@ -94,8 +112,9 @@ func TestRDMAServer_Allocate(t *testing.T) {
 		nodes []string
 		// wantPaths are the injected device node paths, in order.
 		wantPaths []string
-		// wantHCA is the environment variable's value.
-		wantHCA string
+		// wantEnvs is the response's complete environment, spelled out literally: the exact NCCL
+		// filter and the served family's plain list, and never another family's key.
+		wantEnvs map[string]string
 	}{
 		{
 			// The sibling's node is present on the host, so an implementation that injects
@@ -111,9 +130,14 @@ func TestRDMAServer_Allocate(t *testing.T) {
 			verbs:     map[string]string{"mlx5_0": "uverbs1", "rxe0_eth1": "uverbs0"},
 			nodes:     []string{"uverbs0", "uverbs1", "rdma_cm"},
 			wantPaths: []string{"uverbs1", "rdma_cm"},
-			wantHCA:   "mlx5_0",
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_0",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_0",
+			},
 		},
 		{
+			// The two names sort mlx5_0 before rxe0_eth1, so both the filter and the plain list
+			// come out in name order, and the devices follow them.
 			name: "two granted endpoints carry the connection manager once",
 			mode: workercore.DeviceAllocationModeShared,
 			ifaces: []workercore.DeviceInterface{
@@ -123,8 +147,11 @@ func TestRDMAServer_Allocate(t *testing.T) {
 			ids:       []string{"ib0:ib0:0000", "eth1:eth1:0000"},
 			verbs:     map[string]string{"mlx5_0": "uverbs1", "rxe0_eth1": "uverbs0"},
 			nodes:     []string{"uverbs0", "uverbs1", "rdma_cm"},
-			wantPaths: []string{"uverbs0", "uverbs1", "rdma_cm"},
-			wantHCA:   "rxe0_eth1,mlx5_0",
+			wantPaths: []string{"uverbs1", "uverbs0", "rdma_cm"},
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_0,rxe0_eth1",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_0,rxe0_eth1",
+			},
 		},
 		{
 			// A second token on one endpoint is a second claim on the same thing: the endpoint's
@@ -138,7 +165,66 @@ func TestRDMAServer_Allocate(t *testing.T) {
 			verbs:     map[string]string{"mlx5_0": "uverbs1"},
 			nodes:     []string{"uverbs1", "rdma_cm"},
 			wantPaths: []string{"uverbs1", "rdma_cm"},
-			wantHCA:   "mlx5_0",
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_0",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_0",
+			},
+		},
+		{
+			// The granted IDs sort eth1's token first, so the resolved names arrive in the order
+			// mlx5_10, mlx5_1 and the sorted name list is observable in the value itself: an
+			// implementation trusting the grant order emits the pair the other way round.
+			name: "granted names come out sorted whatever order the IDs arrived in",
+			mode: workercore.DeviceAllocationModeShared,
+			ifaces: []workercore.DeviceInterface{
+				wholeFunctionIface("ib0", "0", "mlx5_1", nil),
+				wholeFunctionIface("eth1", "1", "mlx5_10", nil),
+			},
+			ids:       []string{"ib0:ib0:0000", "eth1:eth1:0000"},
+			verbs:     map[string]string{"mlx5_1": "uverbs1", "mlx5_10": "uverbs10"},
+			nodes:     []string{"uverbs1", "uverbs10", "rdma_cm"},
+			wantPaths: []string{"uverbs1", "uverbs10", "rdma_cm"},
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_1,mlx5_10",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_1,mlx5_10",
+			},
+		},
+		{
+			// mlx5_10 is on the host -- sysfs resolves it and its node is present -- so a filter
+			// that prefix-matched would name a second adapter too, and a grant that wandered
+			// would inject the sibling's still-valid node. The '=' keeps mlx5_1 meaning mlx5_1.
+			name: "an exact filter naming mlx5_1 does not also claim mlx5_10",
+			mode: workercore.DeviceAllocationModeShared,
+			ifaces: []workercore.DeviceInterface{
+				wholeFunctionIface("ib0", "0", "mlx5_1", nil),
+				wholeFunctionIface("eth1", "1", "mlx5_10", nil),
+			},
+			ids:       []string{"ib0:ib0:0000"},
+			verbs:     map[string]string{"mlx5_1": "uverbs1", "mlx5_10": "uverbs10"},
+			nodes:     []string{"uverbs1", "uverbs10", "rdma_cm"},
+			wantPaths: []string{"uverbs1", "rdma_cm"},
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_1",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_1",
+			},
+		},
+		{
+			// Two endpoints of the record bound to one HCA: the name and its node are carried
+			// once, whatever claimed them twice.
+			name: "two endpoints bound to one HCA inject it once",
+			mode: workercore.DeviceAllocationModeShared,
+			ifaces: []workercore.DeviceInterface{
+				wholeFunctionIface("ib0", "0", "mlx5_0", nil),
+				wholeFunctionIface("ib1", "0", "mlx5_0", nil),
+			},
+			ids:       []string{"ib0:ib0:0000", "ib1:ib1:0000"},
+			verbs:     map[string]string{"mlx5_0": "uverbs1"},
+			nodes:     []string{"uverbs1", "rdma_cm"},
+			wantPaths: []string{"uverbs1", "rdma_cm"},
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_0",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_0",
+			},
 		},
 		{
 			name: "a host with no connection manager is not an error",
@@ -150,7 +236,10 @@ func TestRDMAServer_Allocate(t *testing.T) {
 			verbs:     map[string]string{"mlx5_0": "uverbs1"},
 			nodes:     []string{"uverbs1"},
 			wantPaths: []string{"uverbs1"},
-			wantHCA:   "mlx5_0",
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_0",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_0",
+			},
 		},
 		{
 			name: "an exclusive grant injects its endpoint",
@@ -162,7 +251,10 @@ func TestRDMAServer_Allocate(t *testing.T) {
 			verbs:     map[string]string{"mlx5_0": "uverbs1"},
 			nodes:     []string{"uverbs1", "rdma_cm"},
 			wantPaths: []string{"uverbs1", "rdma_cm"},
-			wantHCA:   "mlx5_0",
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_0",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_0",
+			},
 		},
 		{
 			// A partitioned grant names one virtual function; its sibling VF's node is present,
@@ -178,7 +270,10 @@ func TestRDMAServer_Allocate(t *testing.T) {
 			verbs:     map[string]string{"mlx5_1": "uverbs2", "mlx5_2": "uverbs3"},
 			nodes:     []string{"uverbs2", "uverbs3", "rdma_cm"},
 			wantPaths: []string{"uverbs2", "rdma_cm"},
-			wantHCA:   "mlx5_1",
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_1",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_1",
+			},
 		},
 	}
 	for _, c := range cases {
@@ -197,12 +292,18 @@ func TestRDMAServer_Allocate(t *testing.T) {
 			require.Len(t, resp.ContainerResponses, 1)
 
 			ctrResp := resp.ContainerResponses[0]
-			want := make([]string, 0, len(c.wantPaths))
+			// Every DeviceSpec field is spelled out from the fixture's node path: NewDevice
+			// derives both paths from the one node, and the permission is the "rw" grant.
+			want := make([]rdmaDeviceSpec, 0, len(c.wantPaths))
 			for _, p := range c.wantPaths {
-				want = append(want, "rw:"+f.nodePath(p))
+				want = append(want, rdmaDeviceSpec{
+					HostPath:      f.nodePath(p),
+					ContainerPath: f.nodePath(p),
+					Permissions:   "rw",
+				})
 			}
 			assert.Equal(t, want, deviceSpecsOf(ctrResp))
-			assert.Equal(t, map[string]string{"NCCL_IB_HCA": c.wantHCA}, ctrResp.Envs)
+			assert.Equal(t, c.wantEnvs, ctrResp.Envs)
 			assert.Empty(t, ctrResp.Mounts)
 			assert.Empty(t, ctrResp.Annotations)
 			assert.Empty(t, ctrResp.CdiDevices)
@@ -360,8 +461,11 @@ func TestRDMAServer_Allocate_NoCrossModeExclusion(t *testing.T) {
 
 	// wantWatchingTokens is passed in rather than computed from rdmaPoolSizeOf, which would let
 	// the assertion agree with the production function by construction and stop discriminating.
+	// wantGrantEnv is likewise a literal: the family key the response must carry, named here and
+	// not computed by the production mapping.
 	runHalf := func(
-		t *testing.T, allocating, watching workercore.DeviceAllocationMode, wantWatchingTokens int,
+		t *testing.T, allocating, watching workercore.DeviceAllocationMode, wantGrantEnv string,
+		wantWatchingTokens int,
 	) {
 		t.Helper()
 
@@ -404,7 +508,10 @@ func TestRDMAServer_Allocate_NoCrossModeExclusion(t *testing.T) {
 		// The allocation crossing the family boundary, for real.
 		resp, err := allocatingServer.Allocate(context.Background(), allocateRequest("ib0:ib0:0000"))
 		require.NoError(t, err, "the allocation must really succeed: an errored Allocate crosses no boundary")
-		require.Equal(t, map[string]string{"NCCL_IB_HCA": "mlx5_0"}, resp.ContainerResponses[0].Envs)
+		require.Equal(t, map[string]string{
+			"NCCL_IB_HCA": "=mlx5_0",
+			wantGrantEnv:  "mlx5_0",
+		}, resp.ContainerResponses[0].Envs)
 
 		// The watching family's next advertisement, pushed by a live-pod sweep broadcast the
 		// way a real reconcile would.
@@ -434,10 +541,11 @@ func TestRDMAServer_Allocate_NoCrossModeExclusion(t *testing.T) {
 	// was observed.
 	t.Run("an exclusive allocation leaves the shared advertisement healthy", func(t *testing.T) {
 		runHalf(t, workercore.DeviceAllocationModeExclusive, workercore.DeviceAllocationModeShared,
-			nodefeature.RDMAEndpointPoolSize)
+			"GPUSTACK_RDMA_DEVICES", nodefeature.RDMAEndpointPoolSize)
 	})
 	t.Run("a shared allocation leaves the exclusive advertisement healthy", func(t *testing.T) {
-		runHalf(t, workercore.DeviceAllocationModeShared, workercore.DeviceAllocationModeExclusive, 1)
+		runHalf(t, workercore.DeviceAllocationModeShared, workercore.DeviceAllocationModeExclusive,
+			"GPUSTACK_RDMA_DEVICES", 1)
 	})
 }
 
@@ -460,7 +568,7 @@ func TestRDMAServer_Allocate_ReadsCurrentInventory(t *testing.T) {
 
 	first, err := s.Allocate(context.Background(), allocateRequest("ib0:ib0:0000"))
 	require.NoError(t, err)
-	assert.Equal(t, "mlx5_0", first.ContainerResponses[0].Envs["NCCL_IB_HCA"])
+	assert.Equal(t, "=mlx5_0", first.ContainerResponses[0].Envs["NCCL_IB_HCA"])
 
 	// The detector rebinds the interface to another device; the next allocation hands over the
 	// new one, not the remembered old one.
@@ -469,9 +577,15 @@ func TestRDMAServer_Allocate_ReadsCurrentInventory(t *testing.T) {
 
 	second, err := s.Allocate(context.Background(), allocateRequest("ib0:ib0:0000"))
 	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"NCCL_IB_HCA": "mlx5_9"}, second.ContainerResponses[0].Envs)
+	assert.Equal(t, map[string]string{
+		"NCCL_IB_HCA":           "=mlx5_9",
+		"GPUSTACK_RDMA_DEVICES": "mlx5_9",
+	}, second.ContainerResponses[0].Envs)
 	assert.Equal(t,
-		[]string{"rw:" + f.nodePath("uverbs4"), "rw:" + f.nodePath("rdma_cm")},
+		[]rdmaDeviceSpec{
+			{HostPath: f.nodePath("uverbs4"), ContainerPath: f.nodePath("uverbs4"), Permissions: "rw"},
+			{HostPath: f.nodePath("rdma_cm"), ContainerPath: f.nodePath("rdma_cm"), Permissions: "rw"},
+		},
 		deviceSpecsOf(second.ContainerResponses[0]))
 }
 
@@ -544,6 +658,411 @@ func TestRDMAServer_AdvertisedIDsAllocate(t *testing.T) {
 				assert.NotEmpty(t, out.ContainerResponses[0].Envs,
 					"the grant for %q named no RDMA device", token.Resource)
 			}
+		})
+	}
+}
+
+// TestRDMAServer_Allocate_BindsOneSnapshotRevision pins that one response names one revision of
+// the record: the inventory is captured once, every granted token resolves against that capture,
+// and every verbs node binds through it. The seam is the inventory read itself, deterministic and
+// without sleeps or global hooks: the fake client serves a second, different revision to any read
+// after the first, so an implementation that builds any part of the response from a second read
+// names revision-B facts beside revision-A ones — one endpoint's capture-time device beside the
+// other's later one — and the exact per-grant values below report them.
+func TestRDMAServer_Allocate_BindsOneSnapshotRevision(t *testing.T) {
+	const nodeName = "node-rdma-rev"
+
+	f := newRdmaAllocateFixture(t)
+	f.mapVerbs("mlx5_0", "uverbs1")
+	f.mapVerbs("rxe0_eth1", "uverbs0")
+	f.mapVerbs("mlx5_9", "uverbs4")
+	f.writeNode("uverbs0")
+	f.writeNode("uverbs1")
+	f.writeNode("uverbs4")
+	f.writeNode("rdma_cm")
+
+	// Revision A is what the tracker holds: two whole-function interfaces over their own
+	// devices. Any read after the first is served revision B, where both were rebound to mlx5_9.
+	devs := rdmaDevices(nodeName,
+		wholeFunctionIface("ib0", "0", "mlx5_0", nil),
+		wholeFunctionIface("eth1", "1", "rxe0_eth1", nil))
+	var reads atomic.Int32
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(devs).
+		WithInterceptorFuncs(ctrlintercept.Funcs{
+			Get: func(
+				ctx context.Context, c ctrlcli.WithWatch, key ctrlcli.ObjectKey,
+				obj ctrlcli.Object, opts ...ctrlcli.GetOption,
+			) error {
+				if err := c.Get(ctx, key, obj, opts...); err != nil {
+					return err
+				}
+				if reads.Add(1) > 1 {
+					bound := obj.(*workercore.Devices)
+					for i := range bound.Spec.Interfaces {
+						bound.Spec.Interfaces[i].RDMADevice = "mlx5_9"
+					}
+				}
+				return nil
+			},
+		}).
+		Build()
+
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	resp, err := rdmaTestServer(t, workercore.DeviceAllocationModeShared, rec).
+		Allocate(context.Background(), allocateRequest("ib0:ib0:0000", "eth1:eth1:0000"))
+	require.NoError(t, err)
+	require.Len(t, resp.ContainerResponses, 1)
+
+	// The response names revision A end to end, in the sorted order of the granted names:
+	// mlx5_0 sorts before rxe0_eth1, each grants its own verbs node, and the connection
+	// manager rides along once.
+	ctrResp := resp.ContainerResponses[0]
+	assert.Equal(t, map[string]string{
+		"NCCL_IB_HCA":           "=mlx5_0,rxe0_eth1",
+		"GPUSTACK_RDMA_DEVICES": "mlx5_0,rxe0_eth1",
+	}, ctrResp.Envs)
+	assert.Equal(t,
+		[]rdmaDeviceSpec{
+			{HostPath: f.nodePath("uverbs1"), ContainerPath: f.nodePath("uverbs1"), Permissions: "rw"},
+			{HostPath: f.nodePath("uverbs0"), ContainerPath: f.nodePath("uverbs0"), Permissions: "rw"},
+			{HostPath: f.nodePath("rdma_cm"), ContainerPath: f.nodePath("rdma_cm"), Permissions: "rw"},
+		},
+		deviceSpecsOf(ctrResp))
+}
+
+// TestRDMAServer_Allocate_MidConstructionFailureRefusesWholeResponse pins that a grant failing
+// after a valid mapping refuses the whole response. The granted names are resolved in sorted
+// order, so every case grants two names of one family with the successful one lexically first:
+// its verbs device resolves, its node is on the host and its spec is already appended when the
+// second name fails. Kubelet receives the error, never a response granting the resolvable
+// subset, which would start a container holding half its grant.
+func TestRDMAServer_Allocate_MidConstructionFailureRefusesWholeResponse(t *testing.T) {
+	const nodeName = "node-rdma-whole"
+
+	cases := []struct {
+		name   string
+		ifaces []workercore.DeviceInterface
+		ids    []string
+		// verbs maps each RDMA device name to the sysfs entry resolving it. The case removes
+		// the failing name's entry, or the device node its entry resolves to.
+		verbs map[string]string
+		// nodes are the device nodes the host carries, by entry name.
+		nodes []string
+		// wantErr holds substrings the diagnostic must carry, every one of them.
+		wantErr []string
+		// resolvedNodes are the device nodes the successful first mapping produced; the
+		// diagnostic names none of them, because none of them was handed out.
+		resolvedNodes []string
+	}{
+		{
+			// mlx5_1 resolves and its node is present; mlx5_2 resolves under neither sysfs
+			// layout and sorts after mlx5_1, so the refusal lands after a complete mapping.
+			name: "a name resolving under neither sysfs layout fails after a valid mapping",
+			ifaces: []workercore.DeviceInterface{
+				wholeFunctionIface("ib0", "0", "mlx5_1", nil),
+				wholeFunctionIface("eth1", "1", "mlx5_2", nil),
+			},
+			ids:   []string{"ib0:ib0:0000", "eth1:eth1:0000"},
+			verbs: map[string]string{"mlx5_1": "uverbs1"},
+			nodes: []string{"uverbs1", "rdma_cm"},
+			wantErr: []string{
+				"resolve the verbs character device",
+				"mlx5_2",
+			},
+			resolvedNodes: []string{"uverbs1"},
+		},
+		{
+			// Both names resolve, but the host carries no node for mlx5_2's entry: the grant
+			// would hand over a device the container cannot open, and the refusal lands after
+			// mlx5_1's node was already injected.
+			name: "a required device node missing from the host fails after a valid mapping",
+			ifaces: []workercore.DeviceInterface{
+				wholeFunctionIface("ib0", "0", "mlx5_1", nil),
+				wholeFunctionIface("eth1", "1", "mlx5_2", nil),
+			},
+			ids:   []string{"ib0:ib0:0000", "eth1:eth1:0000"},
+			verbs: map[string]string{"mlx5_1": "uverbs1", "mlx5_2": "uverbs2"},
+			nodes: []string{"uverbs1", "rdma_cm"},
+			wantErr: []string{
+				"has no verbs device node",
+				"mlx5_2",
+				"uverbs2",
+			},
+			resolvedNodes: []string{"uverbs1"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newRdmaAllocateFixture(t)
+			for name, entry := range c.verbs {
+				f.mapVerbs(name, entry)
+			}
+			for _, node := range c.nodes {
+				f.writeNode(node)
+			}
+
+			rec := &DevicesReconciler{NodeName: nodeName, Client: nodeFixture(rdmaDevices(nodeName, c.ifaces...))}
+			resp, err := rdmaTestServer(t, workercore.DeviceAllocationModeShared, rec).
+				Allocate(context.Background(), allocateRequest(c.ids...))
+
+			require.Error(t, err)
+			require.Nil(t, resp, "a partial response escaped for a grant refused after a valid mapping")
+			for _, want := range c.wantErr {
+				assert.Contains(t, err.Error(), want)
+			}
+			for _, node := range c.resolvedNodes {
+				assert.NotContains(t, err.Error(), f.nodePath(node),
+					"the error is about the failing grant, and no resolved device was handed out either")
+			}
+		})
+	}
+}
+
+// TestRDMAServer_Allocate_InFlightRevisionPublication pins the publication boundary on the
+// allocation path. Revision A is read, the store publishes B while that request is still in
+// flight, and the observable response is entirely A — the granted endpoints' HCAs, the
+// environment naming them and the verbs nodes they resolve to — while the next request is served
+// entirely B. The boundary is the read, not a point inside endpoint iteration, and no read count
+// is asserted: the exact outputs are.
+func TestRDMAServer_Allocate_InFlightRevisionPublication(t *testing.T) {
+	const nodeName = "node-rdma-publish-alloc"
+
+	f := newRdmaAllocateFixture(t)
+	f.mapVerbs("mlx5_0", "uverbs1")
+	f.mapVerbs("rxe0_eth1", "uverbs0")
+	f.mapVerbs("mlx5_9", "uverbs4")
+	f.writeNode("uverbs0")
+	f.writeNode("uverbs1")
+	f.writeNode("uverbs4")
+	f.writeNode("rdma_cm")
+
+	// Revision A binds each interface to its own device; revision B rebinds ib0 to mlx5_9 and
+	// leaves eth1 alone, so the two revisions answer the same grant differently.
+	revA := rdmaDevices(nodeName,
+		wholeFunctionIface("ib0", "0", "mlx5_0", nil),
+		wholeFunctionIface("eth1", "1", "rxe0_eth1", nil))
+	revB := rdmaDevices(nodeName,
+		wholeFunctionIface("ib0", "0", "mlx5_9", nil),
+		wholeFunctionIface("eth1", "1", "rxe0_eth1", nil))
+	rec := &DevicesReconciler{NodeName: nodeName, Client: rdmaPublicationClient(t, revA, revB)}
+	s := rdmaTestServer(t, workercore.DeviceAllocationModeShared, rec)
+
+	rounds := []struct {
+		name      string
+		wantEnvs  map[string]string
+		wantNodes []string
+	}{
+		{
+			name: "the in-flight request completes entirely on its read revision",
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_0,rxe0_eth1",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_0,rxe0_eth1",
+			},
+			wantNodes: []string{"uverbs1", "uverbs0", "rdma_cm"},
+		},
+		{
+			name: "the next request is served the published revision",
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_9,rxe0_eth1",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_9,rxe0_eth1",
+			},
+			wantNodes: []string{"uverbs4", "uverbs0", "rdma_cm"},
+		},
+	}
+	for _, round := range rounds {
+		t.Run(round.name, func(t *testing.T) {
+			resp, err := s.Allocate(context.Background(),
+				allocateRequest("ib0:ib0:0000", "eth1:eth1:0000"))
+			require.NoError(t, err)
+			require.Len(t, resp.ContainerResponses, 1)
+
+			ctrResp := resp.ContainerResponses[0]
+			assert.Equal(t, round.wantEnvs, ctrResp.Envs)
+
+			// Full DeviceSpec values, spelled out per field and asserted one field at a time:
+			// NewDevice derives both paths from the one node, so the container path must
+			// equal the host path and the permission must be the "rw" grant.
+			wantSpecs := make([]*deviceplugin.DeviceSpec, 0, len(round.wantNodes))
+			for _, node := range round.wantNodes {
+				wantSpecs = append(wantSpecs, &deviceplugin.DeviceSpec{
+					HostPath:      f.nodePath(node),
+					ContainerPath: f.nodePath(node),
+					Permissions:   "rw",
+				})
+			}
+			require.Len(t, ctrResp.Devices, len(wantSpecs))
+			for i := range wantSpecs {
+				assert.Equal(t, wantSpecs[i].HostPath, ctrResp.Devices[i].HostPath, "device %d host path", i)
+				assert.Equal(t, wantSpecs[i].ContainerPath, ctrResp.Devices[i].ContainerPath, "device %d container path", i)
+				assert.Equal(t, wantSpecs[i].Permissions, ctrResp.Devices[i].Permissions, "device %d permissions", i)
+			}
+		})
+	}
+}
+
+// TestRDMAServer_Allocate_MixedFamilyResponsesCarryTheUnifiedKey pins that each family's response
+// names the one plain variable beside the NCCL one, and injects its granted HCA's device node and
+// the connection manager as complete DeviceSpecs: kubelet receives independent responses from the
+// three servers, every one of them keyed GPUSTACK_RDMA_DEVICES, and none of them may carry another
+// family's device. This pins response construction only -- it proves nothing about how kubelet
+// unions mixed responses or how a consumer reads the variables at run time.
+func TestRDMAServer_Allocate_MixedFamilyResponsesCarryTheUnifiedKey(t *testing.T) {
+	const nodeName = "node-rdma-mixed"
+
+	f := newRdmaAllocateFixture(t)
+	f.mapVerbs("mlx5_0", "uverbs0")
+	f.mapVerbs("mlx5_1", "uverbs1")
+	f.writeNode("uverbs0")
+	f.writeNode("uverbs1")
+	f.writeNode("rdma_cm")
+
+	// One record carrying an interface of each shape, so all three families can allocate from
+	// the same inventory independently.
+	rec := &DevicesReconciler{NodeName: nodeName, Client: nodeFixture(rdmaDevices(nodeName,
+		wholeFunctionIface("ib0", "0", "mlx5_0", nil),
+		sriovPF("pf0", "0", rdmaVF("vf0", "0", "mlx5_1", nil)),
+	))}
+
+	cases := []struct {
+		name     string
+		mode     workercore.DeviceAllocationMode
+		id       string
+		wantEnvs map[string]string
+		// wantNodes are the device nodes the response injects, in order: the family's granted
+		// HCA's node and the node-level connection manager.
+		wantNodes []string
+	}{
+		{
+			name: "the exclusive family names the unified key",
+			mode: workercore.DeviceAllocationModeExclusive,
+			id:   "ib0:ib0:0000",
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_0",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_0",
+			},
+			wantNodes: []string{"uverbs0", "rdma_cm"},
+		},
+		{
+			name: "the shared family names the unified key",
+			mode: workercore.DeviceAllocationModeShared,
+			id:   "ib0:ib0:0000",
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_0",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_0",
+			},
+			wantNodes: []string{"uverbs0", "rdma_cm"},
+		},
+		{
+			name: "the partitioned family names the unified key",
+			mode: workercore.DeviceAllocationModePartitioned,
+			id:   "pf0:vf0:0000",
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_1",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_1",
+			},
+			wantNodes: []string{"uverbs1", "rdma_cm"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			resp, err := rdmaTestServer(t, c.mode, rec).Allocate(context.Background(), allocateRequest(c.id))
+			require.NoError(t, err)
+			require.Len(t, resp.ContainerResponses, 1)
+			ctrResp := resp.ContainerResponses[0]
+			assert.Equal(t, c.wantEnvs, ctrResp.Envs)
+
+			want := make([]rdmaDeviceSpec, 0, len(c.wantNodes))
+			for _, node := range c.wantNodes {
+				want = append(want, rdmaDeviceSpec{
+					HostPath:      f.nodePath(node),
+					ContainerPath: f.nodePath(node),
+					Permissions:   "rw",
+				})
+			}
+			assert.Equal(t, want, deviceSpecsOf(ctrResp))
+		})
+	}
+}
+
+// TestRDMAServer_Allocate_SelectionPolicyFiltering pins that a grant resolves only through the
+// active selection: an HCA the policy withholds — unselected or externally owned — injects no
+// device node and carries no name, and a grant whose every endpoint is withheld is answered with
+// the variables carried empty and no device nodes at all, not even the node-level connection
+// manager. kubelet offered the token before the policy landed; the empty response is what keeps
+// the container from starting on hardware the node no longer serves.
+func TestRDMAServer_Allocate_SelectionPolicyFiltering(t *testing.T) {
+	const nodeName = "node-rdma-policy"
+
+	cases := []struct {
+		name string
+		// selected is the active selection the reconciler carries when the request lands.
+		selected []string
+		ids      []string
+		// wantEnvs is the complete environment of the response.
+		wantEnvs map[string]string
+		// wantNodes are the injected device nodes, in order; none for a withheld grant.
+		wantNodes []string
+	}{
+		{
+			name:     "a grant of nothing but an unselected HCA carries the variables empty",
+			selected: []string{"mlx5_1"},
+			ids:      []string{"ib0:ib0:0000"},
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "",
+				"GPUSTACK_RDMA_DEVICES": "",
+			},
+			wantNodes: nil,
+		},
+		{
+			// Both endpoints are granted, but only mlx5_1 is selected: mlx5_0's name and its
+			// node are withheld, and the surviving grant is the selected HCA alone.
+			name:     "a grant spanning a selected and an unselected HCA carries the selected one",
+			selected: []string{"mlx5_1"},
+			ids:      []string{"ib0:ib0:0000", "eth1:eth1:0000"},
+			wantEnvs: map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_1",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_1",
+			},
+			wantNodes: []string{"uverbs1", "rdma_cm"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newRdmaAllocateFixture(t)
+			f.mapVerbs("mlx5_0", "uverbs0")
+			f.mapVerbs("mlx5_1", "uverbs1")
+			f.writeNode("uverbs0")
+			f.writeNode("uverbs1")
+			f.writeNode("rdma_cm")
+
+			rec := &DevicesReconciler{NodeName: nodeName, Client: nodeFixture(rdmaDevices(nodeName,
+				wholeFunctionIface("ib0", "0", "mlx5_0", nil),
+				wholeFunctionIface("eth1", "1", "mlx5_1", nil),
+			))}
+			rec.applyRDMASelection(RDMAPolicyResolution{
+				Status:   RDMAPolicyResolutionPolicy,
+				Selected: c.selected,
+			})
+
+			resp, err := rdmaTestServer(t, workercore.DeviceAllocationModeShared, rec).
+				Allocate(context.Background(), allocateRequest(c.ids...))
+			require.NoError(t, err)
+			require.Len(t, resp.ContainerResponses, 1)
+
+			ctrResp := resp.ContainerResponses[0]
+			assert.Equal(t, c.wantEnvs, ctrResp.Envs)
+
+			want := make([]rdmaDeviceSpec, 0, len(c.wantNodes))
+			for _, node := range c.wantNodes {
+				want = append(want, rdmaDeviceSpec{
+					HostPath:      f.nodePath(node),
+					ContainerPath: f.nodePath(node),
+					Permissions:   "rw",
+				})
+			}
+			assert.Equal(t, want, deviceSpecsOf(ctrResp))
 		})
 	}
 }

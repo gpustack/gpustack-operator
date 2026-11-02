@@ -13,6 +13,7 @@ import (
 
 // setups is the list of all webhook handlers.
 var setups = []webhook.Setup{
+	new(worker.DevicesRDMASelectionPolicyWebhook),
 	new(worker.InstanceWebhook),
 	new(worker.InstanceTypeWebhook),
 	new(worker.KVCacheBackendWebhook),

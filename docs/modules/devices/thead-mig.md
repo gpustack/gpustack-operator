@@ -136,12 +136,19 @@ rules](requests.md#request-rules) (one PPU, one profile shape, one container gro
 `.units` webhook-derived, exclusive of every other family):
 
 ```yaml
-resources:
-  limits:
-    # Request exactly one PPU.
-    alibabacloud.com/ppu.partitioned: "1"
-    # Request exactly one instance of the selected profile.
-    alibabacloud.com/ppu.partitioned.mig-<profile>: "1"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: thead-partition
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          # Request exactly one PPU.
+          alibabacloud.com/ppu.partitioned: "1"
+          # Request exactly one instance of the selected profile.
+          alibabacloud.com/ppu.partitioned.mig-<profile>: "1"
 ```
 
 Or through the `Instance` API, as with [NVIDIA's

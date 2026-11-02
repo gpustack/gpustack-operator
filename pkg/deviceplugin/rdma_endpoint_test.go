@@ -18,6 +18,28 @@ var rdmaWholeFunctionModes = []workercore.DeviceAllocationMode{
 	workercore.DeviceAllocationModeShared,
 }
 
+func TestRDMAEndpointsCopiesLink(t *testing.T) {
+	// Both branches the mode judgment has copy the verdict out of the record: an endpoint that
+	// aliased the interface's or the virtual function's Link would change health after the fact,
+	// when the detector corrects a verdict in place under an already-built endpoint.
+	t.Run("the whole-function branch", func(t *testing.T) {
+		iface := wholeFunctionIface("ib0", "0", "mlx5_0", &workercore.DeviceInterfaceLink{State: workercore.DeviceInterfaceLinkStateFailed})
+		endpoints := rdmaEndpoints(&iface, workercore.DeviceAllocationModeShared)
+		require.Len(t, endpoints, 1)
+		iface.Link.State = ""
+		assert.Equal(t, workercore.DeviceInterfaceLinkStateFailed, endpoints[0].Link.State)
+	})
+
+	t.Run("the partitioned branch", func(t *testing.T) {
+		pf := sriovPF("pf0", "0", rdmaVF("vf0", "", "mlx5_1",
+			&workercore.DeviceInterfaceLink{State: workercore.DeviceInterfaceLinkStateFailed}))
+		endpoints := rdmaEndpoints(&pf, workercore.DeviceAllocationModePartitioned)
+		require.Len(t, endpoints, 1)
+		pf.VirtualFunctions[0].Link.State = ""
+		assert.Equal(t, workercore.DeviceInterfaceLinkStateFailed, endpoints[0].Link.State)
+	})
+}
+
 func TestRDMAEndpointsModeJudgment(t *testing.T) {
 	cases := []struct {
 		name  string

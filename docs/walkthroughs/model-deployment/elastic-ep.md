@@ -204,6 +204,22 @@ kubectl -n gpustack-bench patch modeldeployment b2-elastic-ep --type=json \
   -p '[{"op":"test","path":"/spec/roles/0/elasticEp/width","value":2},{"op":"replace","path":"/spec/roles/0/elasticEp/width","value":4}]'
 ```
 
+The patch changes the target width and tests that its previous value is still 2:
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: b2-elastic-ep
+   namespace: gpustack-bench
+ spec:
+   roles:
+     - name: server
+       elasticEp:
+-        width: 2
++        width: 4
+```
+
 Wait for the current generation's effective width. A spec edit or four running `Pod`s alone does not prove a native resize.
 Read the diagnostic observation belonging to this deployment:
 

@@ -94,6 +94,40 @@ func (in *Devices) CopyStatusTo(out runtime.Object) {
 	out.(*Devices).Status = in.Status
 }
 
+var _ rest.Scoper = (*DevicesRDMASelectionPolicy)(nil)
+
+func (*DevicesRDMASelectionPolicy) NamespaceScoped() bool {
+	return false
+}
+
+var _ rest.KindProvider = (*DevicesRDMASelectionPolicy)(nil)
+
+func (*DevicesRDMASelectionPolicy) Kind() string {
+	return "DevicesRDMASelectionPolicy"
+}
+
+var _ rest.SingularNameProvider = (*DevicesRDMASelectionPolicy)(nil)
+
+func (*DevicesRDMASelectionPolicy) GetSingularName() string {
+	return "devicesrdmaselectionpolicy"
+}
+
+var _ rest.ShortNamesProvider = (*DevicesRDMASelectionPolicy)(nil)
+
+func (*DevicesRDMASelectionPolicy) ShortNames() []string {
+	return []string{
+		"rdmasel",
+	}
+}
+
+var _ rest.CategoriesProvider = (*DevicesRDMASelectionPolicy)(nil)
+
+func (*DevicesRDMASelectionPolicy) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
 var _ rest.Scoper = (*Instance)(nil)
 
 func (*Instance) NamespaceScoped() bool {

@@ -11,6 +11,10 @@ package v1
 // DevicesLister.
 type DevicesListerExpansion interface{}
 
+// DevicesRDMASelectionPolicyListerExpansion allows custom methods to be added to
+// DevicesRDMASelectionPolicyLister.
+type DevicesRDMASelectionPolicyListerExpansion interface{}
+
 // InstanceListerExpansion allows custom methods to be added to
 // InstanceLister.
 type InstanceListerExpansion interface{}

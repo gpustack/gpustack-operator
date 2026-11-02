@@ -11,9 +11,11 @@ import (
 // rdmaEndpoint is one allocatable RDMA endpoint of a network interface, with the facts an
 // advertisement and an allocation read from the inventory record.
 //
-// It is derived, never stored: every field is read out of Devices.spec.interfaces[] on each call,
-// so a fact the detector has since corrected cannot survive into a response built from an older
-// one.
+// It is derived, never stored: every field is read out of the record captured for one response,
+// so a fact the detector has since corrected cannot survive into a response built from a later
+// capture. The endpoint carries its own copy of the mutable ones, so the reverse cannot happen
+// either — a detector write landing under an already-built endpoint changes the next endpoint,
+// never this one.
 type rdmaEndpoint struct {
 	// Resource is the locator naming the endpoint, built by endpointOf.
 	Resource Resource
@@ -27,8 +29,8 @@ type rdmaEndpoint struct {
 	// endpoint nor its parent reported an affinity.
 	Topology *deviceplugin.TopologyInfo
 
-	// Link is the endpoint's link verdict, which an advertisement's health gate reads. Nil when
-	// no verdict was recorded.
+	// Link is the endpoint's link verdict, which an advertisement's health gate reads, copied so
+	// the endpoint aliases no record it was read from. Nil when no verdict was recorded.
 	Link *workercore.DeviceInterfaceLink
 }
 
@@ -37,8 +39,8 @@ type rdmaEndpoint struct {
 // for a virtual function, which is what lets one lookup reach both without a second key.
 //
 // It is a locator, not a record: everything a response needs — the RDMA device name, the NUMA
-// affinity, the link verdict — is read back out of Devices.spec.interfaces[] at the time it is
-// needed, so a token can never carry a stale copy of a fact the detector has since corrected.
+// affinity, the link verdict — is read back out of the inventory capture the response started
+// from, so a token can never carry a stale copy of a fact the detector has since corrected.
 func endpointOf(iface *workercore.DeviceInterface, endpoint string) Resource {
 	return Resource{Group: iface.Name, Device: endpoint}
 }
@@ -79,11 +81,15 @@ func rdmaEndpoints(iface *workercore.DeviceInterface, mode workercore.DeviceAllo
 			if vf.RDMADevice == "" {
 				continue
 			}
+			vfName := vf.Name
+			if vfName == "" {
+				vfName = vf.RDMADevice
+			}
 			endpoints = append(endpoints, rdmaEndpoint{
-				Resource:   endpointOf(iface, vf.Name),
+				Resource:   endpointOf(iface, vfName),
 				RDMADevice: vf.RDMADevice,
 				Topology:   numaTopologyOf(vf.NumaAffinity, iface.NumaAffinity),
-				Link:       vf.Link,
+				Link:       vf.Link.DeepCopy(),
 			})
 		}
 		return endpoints
@@ -97,7 +103,7 @@ func rdmaEndpoints(iface *workercore.DeviceInterface, mode workercore.DeviceAllo
 			Resource:   endpointOf(iface, iface.Name),
 			RDMADevice: iface.RDMADevice,
 			Topology:   numaTopologyOf(iface.NumaAffinity, ""),
-			Link:       iface.Link,
+			Link:       iface.Link.DeepCopy(),
 		}}
 	}
 

@@ -15,6 +15,8 @@ import (
 type Interface interface {
 	// Devices returns a DevicesInformer.
 	Devices() DevicesInformer
+	// DevicesRDMASelectionPolicies returns a DevicesRDMASelectionPolicyInformer.
+	DevicesRDMASelectionPolicies() DevicesRDMASelectionPolicyInformer
 	// Instances returns a InstanceInformer.
 	Instances() InstanceInformer
 	// InstanceTypes returns a InstanceTypeInformer.
@@ -57,6 +59,11 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 // Devices returns a DevicesInformer.
 func (v *version) Devices() DevicesInformer {
 	return &devicesInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// DevicesRDMASelectionPolicies returns a DevicesRDMASelectionPolicyInformer.
+func (v *version) DevicesRDMASelectionPolicies() DevicesRDMASelectionPolicyInformer {
+	return &devicesRDMASelectionPolicyInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
 // Instances returns a InstanceInformer.

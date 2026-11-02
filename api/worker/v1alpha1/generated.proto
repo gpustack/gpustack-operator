@@ -687,6 +687,22 @@ message DevicesGroup {
   optional AcceleratorSlicedDetail acceleratorSlicedDetail = 11;
 }
 
+// DevicesInterfacesStatus is the interface-related status of a worker.
+//
+// It is a container keyed by feature, never a list: each member summarizes one feature's
+// state, and per-interface detail stays in spec.interfaces where the inventory lives.
+message DevicesInterfacesStatus {
+  // RDMASelectionPolicy is the state of the node's RDMA selection: which policy the node
+  // resolves its selection from, and which HCAs that selection leaves out.
+  //
+  // An absent field carries no selection reference or exclusion details — not a report
+  // that there is no selection. The root conditions, not this field's absence,
+  // establish the resolution.
+  //
+  // +optional
+  optional DevicesRDMASelectionPolicyStatus rdmaSelectionPolicy = 1;
+}
+
 // DevicesList holds the list of Devices.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -694,6 +710,137 @@ message DevicesList {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
 
   repeated Devices items = 2;
+}
+
+// DevicesRDMAExclusion records one HCA the resolved selection leaves out.
+message DevicesRDMAExclusion {
+  // Name is the excluded device's HCA name, as the host observed it.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  optional string name = 1;
+
+  // Reason is why the selection leaves it out, as a word the writer defines — a filter,
+  // an external owner, an invalid rule naming it — not a sentence.
+  //
+  // +optional
+  optional string reason = 2;
+}
+
+// DevicesRDMASelectionPolicy is the cluster-scoped administrator filter restricting
+// which RDMA HCAs are allocation candidates on the Nodes it selects.
+//
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:crd-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["rdmasel"]
+message DevicesRDMASelectionPolicy {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  // +k8s:validation:cel[0]:rule="!(has(self.include) && has(self.exclude))"
+  // +k8s:validation:cel[0]:message="include and exclude are mutually exclusive: specify at most one of them"
+  optional DevicesRDMASelectionPolicySpec spec = 2;
+}
+
+// DevicesRDMASelectionPolicyList holds a list of DevicesRDMASelectionPolicy objects.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message DevicesRDMASelectionPolicyList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated DevicesRDMASelectionPolicy items = 2;
+}
+
+// DevicesRDMASelectionPolicyReference names one cluster-scoped DevicesRDMASelectionPolicy
+// object at one point in its history.
+//
+// No namespace is carried because the policy is cluster-scoped, and no kind because the
+// reference is only ever to that one kind. Name and UID together distinguish a replacement
+// object from the same object: the same name with a different UID is another policy. UID is
+// what binds the reference to an object rather than to a name, and generation says WHICH
+// revision of it the node read when it resolved the selection.
+message DevicesRDMASelectionPolicyReference {
+  // Name is the policy's metadata.name.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  optional string name = 1;
+
+  // UID is the policy's metadata.uid.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  optional string uid = 2;
+
+  // Generation is the policy's metadata.generation the reference was read at. A policy
+  // carries generation 1 from its first write, so 0 is not a value a real reference has.
+  //
+  // +required
+  // +k8s:validation:minimum=1
+  optional int64 generation = 3;
+}
+
+// DevicesRDMASelectionPolicySpec selects Nodes and the HCA include/exclude filters.
+message DevicesRDMASelectionPolicySpec {
+  // NodeSelector selects the Nodes this policy targets. A nil selector is invalid; an
+  // empty selector explicitly matches every Node.
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector nodeSelector = 1;
+
+  // Include restricts candidates to these exact HCA names. Absence or null imposes no restriction.
+  //
+  // Include and Exclude are mutually exclusive: at most one of the two may be specified. The
+  // name length is bounded here because the CRD registration cost budget prices an unbounded
+  // string at its worst case; uniqueness stays with the webhook, which needs no budget.
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:minItems=1
+  // +k8s:validation:maxItems=64
+  // +k8s:validation:cel[0]:rule="self.all(x, size(x) > 0 && size(x) <= 64)"
+  // +k8s:validation:cel[0]:message="each HCA name must be non-empty and at most 64 characters"
+  repeated string include = 2;
+
+  // Exclude removes these exact HCA names from the candidates. Absence or null excludes none.
+  //
+  // Include and Exclude are mutually exclusive: at most one of the two may be specified. The
+  // name length is bounded here because the CRD registration cost budget prices an unbounded
+  // string at its worst case; uniqueness stays with the webhook, which needs no budget.
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:minItems=1
+  // +k8s:validation:maxItems=64
+  // +k8s:validation:cel[0]:rule="self.all(x, size(x) > 0 && size(x) <= 64)"
+  // +k8s:validation:cel[0]:message="each HCA name must be non-empty and at most 64 characters"
+  repeated string exclude = 3;
+}
+
+// DevicesRDMASelectionPolicyStatus records the RDMA selection's policy reference and the
+// selection's exclusions.
+//
+// The reference names an object; the Devices root conditions carry the state. Reference
+// equality alone never establishes that grants are served under that policy: the policy,
+// the Node and the inventory may all have moved since, and only RDMASelectionResolved
+// reports the current resolution. An unresolved selection fails closed — policyRef is
+// withdrawn or names the offending policy, excluded is empty, and the resolved condition
+// reports the cause.
+message DevicesRDMASelectionPolicyStatus {
+  // PolicyRef is the policy whose rules the node resolves its selection from. Nil
+  // records no policy, which may be unknown, conflicted, or genuinely none; absence is
+  // interpreted with the root condition, and only a successful RDMASelectionResolved
+  // without a policyRef establishes the resolved default. On a failed resolution that
+  // names one offending policy, policyRef points at that policy so the report carries
+  // the provenance of the broken rules.
+  //
+  // +optional
+  optional DevicesRDMASelectionPolicyReference policyRef = 1;
+
+  // Excluded are the HCAs the resolved selection leaves out, with why. An empty list and
+  // an absent one are the same on the wire, and neither implies the selection resolved:
+  // a failed resolution clears the list instead of keeping a stale one.
+  //
+  // +listType=map
+  // +listMapKey=name
+  repeated DevicesRDMAExclusion excluded = 2;
 }
 
 // DevicesSpec defines the desired state of Devices.
@@ -743,6 +890,29 @@ message DevicesStatus {
   // +listMapKey=id
   // +listMapKey=manufacturer
   repeated DevicesAllocationGroup groups = 1;
+
+  // Interfaces is this worker's interface-related status. It is an object keyed by feature,
+  // not a second inventory: spec.interfaces stays the only interface list, and a feature
+  // summarizes its state here to be read alongside that inventory.
+  //
+  // An absent field carries no interface feature details — not a report that there are
+  // none. The root conditions, not this field's absence, establish resolution and
+  // application.
+  //
+  // +optional
+  optional DevicesInterfacesStatus interfaces = 2;
+
+  // Conditions is the observed condition set, keyed by type. RDMASelectionResolved is the
+  // RDMA selection's single condition: it reports whether the node resolved a selection —
+  // including the no-policy default, whose resolved state carries no policyRef — and its
+  // message names the cause whenever the resolution failed. A missing reference alone is
+  // neither success nor default, and an absent condition is unreported, not satisfied.
+  //
+  // +patchMergeKey=type
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=type
+  repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 3;
 }
 
 // Instance is the schema for worker.gpustack.ai.

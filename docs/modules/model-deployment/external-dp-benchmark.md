@@ -212,6 +212,11 @@ Update `external-dp.yaml` from the
 The diff uses current interface allocation; the recorded run used manual device exposure.
 
 ```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: external-dp-arm2-external-dp
+   namespace: gpustack-bench
  spec:
    roles:
      - name: server

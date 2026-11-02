@@ -3,6 +3,7 @@ package deviceplugin
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/go-logr/logr"
 	core "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -140,16 +142,30 @@ type (
 		// slicedAllocateGateOff lifts the refusal of a logical slice its card cannot hold, so a
 		// sliced Allocate clamps the ledger and allocates, as it did before the refusal existed.
 		slicedAllocateGateOff bool
+
+		// RDMAInterfaceInventory supplies the detector's latest host verbs snapshot so RDMA
+		// advertisements and allocations can include netdev-free verbs devices and filter
+		// externally owned ones.
+		RDMAInterfaceInventory func() *device.RDMASnapshot
+
+		// rdmaSelectionMutex guards rdmaSelection.
+		rdmaSelectionMutex sync.RWMutex
+		// rdmaSelection is the selection the RDMA selection observer last applied. A nil
+		// value means no selection has been applied yet, and every non-external HCA stays
+		// eligible under the default rules; once any selection has been applied, a failed
+		// resolution replaces it with an empty set, so every HCA is withheld until the
+		// resolution recovers — the selection never serves stale state.
+		rdmaSelection *rdmaAppliedSelection
 	}
 )
 
-// Reconcile rebuilds one node's Devices Status from its Spec and the annotations of the Pods
-// scheduled to it, then sweeps the resulting live pod-UID set through the in-process
-// reservation/visibility-grant tables and notifies ListAndWatch subscribers. The Status rebuild
-// is wholesale, not incremental: BuildDesiredStatus recomputes every accelerator's Mode,
-// Remaining, AllocatedProfiles and RemainingProfiles from Spec + Pod annotations in a single pass,
-// and this method assigns the result once — there is deliberately no second, separately-applied
-// write that a later pass could stomp.
+// Reconcile rebuilds one node's Devices status ledger from its Spec and the annotations of the
+// Pods scheduled to it, then sweeps the resulting live pod-UID set through the in-process
+// reservation/visibility-grant tables and notifies ListAndWatch subscribers. The ledger rebuild is
+// wholesale: BuildDesiredStatus recomputes every accelerator from Spec + Pod annotations in one
+// pass, and this method publishes that one result to status.groups and nothing else — a merge
+// patch carrying the read's resource version, so racing a foreign status writer is a conflict to
+// retry, never an overwrite.
 func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	nodeName := req.Name
 
@@ -185,15 +201,13 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	desiredStatus, livePodUIDs := BuildDesiredStatus(logger, devs, podList)
 
-	// The ledger is published only from a verification that passed. Under a conflict nothing is
-	// written, because a ledger rebuilt over a kubelet record this pass could not confirm is a guess,
-	// and refusing to publish a guess is the whole point of the verification.
-	if verifyErr == nil && !kubemeta.DeepEqual(devs.Status, desiredStatus) {
-		devs.Status = desiredStatus
-		err = r.Client.Status().Update(ctx, devs)
-		if err != nil {
-			logger.Error(err, "update devices status")
-			return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+	// The ledger is published only from a verification that passed. Only groups are compared and
+	// written: the rest of the status belongs to other writers.
+	var statusErr error
+	if verifyErr == nil && !ledgerGroupsEqual(devs.Status.Groups, desiredStatus.Groups) {
+		statusErr = r.publishAcceleratorLedger(ctx, devs, desiredStatus.Groups)
+		if statusErr != nil {
+			logger.Error(statusErr, "update devices status")
 		}
 	}
 
@@ -206,6 +220,11 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// and before this pass publishes anything derived from a list it could not confirm.
 	if verifyErr != nil {
 		return ctrl.Result{}, verifyErr
+	}
+	// The status write is reported after the compensations, which do not depend on it, so the
+	// next pass retries it from a fresh read.
+	if statusErr != nil {
+		return ctrl.Result{}, statusErr
 	}
 
 	r.notifiersMutex.Lock()
@@ -225,6 +244,33 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// publishAcceleratorLedger writes the rebuilt ledger with a merge patch carrying only
+// status.groups and the resource version the ledger was read at, so a foreign status writer that
+// moved the object in between is told so instead of overwritten. NotFound means the Devices object
+// is gone and there is nothing left to publish onto.
+func (r *DevicesReconciler) publishAcceleratorLedger(
+	ctx context.Context, devs *workercore.Devices, groups []workercore.DevicesAllocationGroup,
+) error {
+	patched := devs.DeepCopy()
+	patched.Status.Groups = groups
+	err := r.Client.Status().Patch(ctx, patched, ctrlcli.MergeFromWithOptions(
+		devs, ctrlcli.MergeFromWithOptimisticLock{},
+	))
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+// ledgerGroupsEqual reports whether two ledgers hold the same allocation state. The comparison is
+// semantic and length-first, so nil and empty are one no-op, and only a real ledger change writes.
+func ledgerGroupsEqual(a, b []workercore.DevicesAllocationGroup) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return kubemeta.DeepEqual(a, b)
 }
 
 // BuildDesiredStatus rebuilds a node's Devices Status wholesale from Spec + Pod annotations: it
@@ -609,6 +655,82 @@ func (r *DevicesReconciler) getDevices(ctx context.Context) (*workercore.Devices
 			},
 		})
 	return devs, err
+}
+
+// captureRDMAInterfaceSnapshot freezes the node's interface inventory, local verbs inventory,
+// and active policy selection for one RDMA response.
+func (r *DevicesReconciler) captureRDMAInterfaceSnapshot(devs *workercore.Devices) rdmaInterfaceSnapshot {
+	if r == nil {
+		return captureRDMAInterfaceSnapshot(devs)
+	}
+	var inv *device.RDMASnapshot
+	if r.RDMAInterfaceInventory != nil {
+		inv = r.RDMAInterfaceInventory()
+	}
+	r.rdmaSelectionMutex.RLock()
+	sel := r.rdmaSelection.clone()
+	r.rdmaSelectionMutex.RUnlock()
+	return captureRDMAInterfaceSnapshotFrom(devs, inv, sel)
+}
+
+// applyRDMASelection updates the active RDMA selection from an observer resolution and notifies
+// RDMA ListAndWatch subscribers when the effective candidate set changes.
+//
+// When the resolution is Policy or Default, the resolved candidate set becomes active immediately
+// for subsequent advertisements and allocations. When the resolution is Invalid, Conflict, or
+// Unknown, the selection fails closed: any previously applied selection is replaced with an
+// empty set, so every HCA is withheld — advertisements turn unhealthy and new grants carry
+// nothing — until a valid resolution lands. Before the first applied selection, every
+// non-external candidate stays eligible under the default rules.
+func (r *DevicesReconciler) applyRDMASelection(resolution RDMAPolicyResolution) {
+	if r == nil {
+		return
+	}
+	var next map[string]struct{}
+	switch resolution.Status {
+	case RDMAPolicyResolutionPolicy, RDMAPolicyResolutionDefault:
+		next = make(map[string]struct{}, len(resolution.Selected))
+		for _, name := range resolution.Selected {
+			next[name] = struct{}{}
+		}
+	default:
+		// Invalid, Conflict, and Unknown fail closed: withhold every HCA rather than keep
+		// serving a selection that can no longer be proven.
+		next = map[string]struct{}{}
+	}
+
+	var changed bool
+	r.rdmaSelectionMutex.Lock()
+	if r.rdmaSelection == nil || !maps.Equal(r.rdmaSelection.selected, next) {
+		r.rdmaSelection = &rdmaAppliedSelection{selected: next}
+		changed = true
+	}
+	r.rdmaSelectionMutex.Unlock()
+
+	if changed {
+		r.notifyRDMAListeners()
+	}
+}
+
+// notifyRDMAListeners wakes every subscribed RDMA ListAndWatch stream so an updated RDMA selection
+// is advertised to kubelet immediately.
+func (r *DevicesReconciler) notifyRDMAListeners() {
+	r.notifiersMutex.Lock()
+	defer r.notifiersMutex.Unlock()
+	payload := r.lastLivePodUIDs
+	if payload == nil {
+		payload = []string{}
+	}
+	for i := range r.notifiers {
+		notifier := &r.notifiers[i]
+		if notifier.Manufacturer != rdmaFamilyName {
+			continue
+		}
+		select {
+		case notifier.Channel <- payload:
+		default:
+		}
+	}
 }
 
 // reserveDevices records the accelerator devices a container was allocated, keyed by pod UID

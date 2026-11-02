@@ -17,9 +17,10 @@ and configure multi-tenant and cache fabric interconnects.
 
 ## Summary
 
-Device Manager discovers *RDMA* NICs from `/sys/class/net`, resolves bound *RDMA* devices, verifies link
-status, and advertises three extended resource keys — shared, exclusive, and *single-root I/O virtualization (SR-IOV)* partitioned — so
-a workload can request network fabric beside its accelerators.
+Device Manager discovers network interfaces from `/sys/class/net` and verbs devices from
+`/sys/class/infiniband`, including devices without a netdev. It verifies link status and advertises
+shared, exclusive and *single-root I/O virtualization (SR-IOV)* partitioned resource keys.
+A workload can request network fabric beside its accelerators.
 
 When at least one endpoint is active, the node carries `feature.gpustack.ai/rdma.capable=true` (see
 [Network Topology](../../modules/rdma/network-topology.md) and
@@ -81,11 +82,20 @@ spec:
           device.gpustack.ai/rdma.shared: "1"
 ```
 
-The allocated container receives character devices and `NCCL_IB_HCA` configuration
-(see [Injected devices](../../modules/rdma/operations.md#injected-devices)).
+The allocated container receives character devices, an exact `NCCL_IB_HCA` filter and
+`GPUSTACK_RDMA_DEVICES`, the plain list of granted HCA names in every resource mode.
+See [Injected devices](../../modules/rdma/operations.md#injected-devices) for variable values,
+mixed-family limits and application startup requirements.
 
-Prefer `device.gpustack.ai/rdma.shared` when a container needs a single endpoint. Use the exclusive
-key `device.gpustack.ai/rdma` when requesting multiple distinct network endpoints.
+Prefer `device.gpustack.ai/rdma.shared` unless the workload needs exclusive-family endpoint ownership.
+`GetPreferredAllocation` distributes shared tokens across distinct eligible HCAs in round-robin
+order before assigning a second token on one HCA. The exclusive key `device.gpustack.ai/rdma`
+reserves whole endpoints within its family; shared workloads can still use those HCAs.
+
+Fewer `uverbs` devices than requested shared units occur when the request exceeds the number of
+eligible HCAs, or when policy excludes granted endpoints. Inspect the
+[selection policy status](../../modules/rdma/operations.md#selection-policy) if grants change
+after a policy update.
 
 ## Step 2: Align NUMA with kubelet
 
@@ -232,10 +242,10 @@ In `ModelDeployment`, set `kvTransfer.protocol: EFA` and specify custom runner i
 
 | Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| *RDMA* resource keys present but all `Unhealthy` | Status: every port link `Failed` or unreadable | Inspect `kubectl get devices <node> -o json` for `.spec.interfaces[].link`; verify physical cable and subnet manager |
+| *RDMA* resource keys present but all `Unhealthy` | Status: links `Failed` or HCAs unselected by policy | Inspect `kubectl get devices <node> -o json` for link verdicts and [selection policy status](../../modules/rdma/operations.md#selection-policy); verify physical cable, subnet manager and policy filters |
 | `Workload` admitted by Kueue but `Pod` remains `Pending` | Over-admission: Kueue does not meter network resources | Inspect cluster allocatable *RDMA* keys (`device.gpustack.ai/rdma*`); add nodes or wait for active `Pod`s to finish |
 | `Pod` rejected at placement | Reason: `TopologyAffinityError` — free GPUs and NICs reside on mismatched *NUMA* nodes | Ensure kubelet has `topologyManagerPolicy: restricted`; verify GPU and NIC requests are declared in the same container |
-| Fewer `uverbs` devices inside container than expected | Shared tokens coalesced into duplicate endpoints | Requesting `rdma.shared: N` (N>1) may merge tokens from the same NIC; use `device.gpustack.ai/rdma: N` for distinct adapters |
+| Fewer `uverbs` devices inside container than requested shared units | Request exceeds eligible HCA count, or policy excludes granted endpoints | `GetPreferredAllocation` spreads `rdma.shared` tokens across distinct eligible HCAs first, then repeats HCAs. Check eligible capacity and [policy status](../../modules/rdma/operations.md#selection-policy). Use `device.gpustack.ai/rdma` for whole-endpoint ownership within the exclusive family |
 | `Node` unexpectedly loses `feature.gpustack.ai/rdma.capable` | Status: every endpoint on the node reports `Failed` or lacks a bound *RDMA* device | Check kernel dmesg and interface carrier status; operator removes the label when every endpoint reports `Failed` or lacks a bound *RDMA* device. See [Network Topology](../../modules/rdma/network-topology.md#three-node-labels) |
 | AWS EFA workload remains `Pending` indefinitely | `Workload` requested `device.gpustack.ai/rdma` instead of EFA | EFA nodes expose 0 allocatable for standard *RDMA* keys; configure `transport.protocol: EFA` or `TCP` |
 | `ModelDeployment` rejected with `no effective RDMA or EFA transfer leg uses the requested interfaces` | Interface requested with no *RDMA* or EFA path | Pair the request with `kvTransfer.protocol: RDMA` or `EFA` on a *prefill* and *decode* pair, or with a `KVCacheBackend` on that transport. A role with its own *`command`* has no managed direct path |

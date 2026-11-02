@@ -103,10 +103,17 @@ only the MIG device: no logical-slicing runtime (`libvgpu.so`), no fractional tr
 **request shape**: one partitioned GPU plus the profile, one instance per `Pod`:
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu.partitioned: "1"              # always exactly 1 GPU
-    nvidia.com/gpu.partitioned.mig-1g.10gb: "1"  # always exactly 1 instance of this profile
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nvidia-partition
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu.partitioned: "1"              # always exactly 1 GPU
+          nvidia.com/gpu.partitioned.mig-1g.10gb: "1"  # always exactly 1 instance of this profile
 ```
 
 - `mig` is NVIDIA's name for hardware partitioning, carried as `<kind>`; another manufacturer registers its

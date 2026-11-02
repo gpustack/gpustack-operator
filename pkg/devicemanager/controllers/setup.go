@@ -11,6 +11,7 @@ import (
 // setups is the list of controller setup functions.
 var setups = []controller.Setup{
 	new(deviceplugin.DevicesReconciler),
+	new(deviceplugin.RDMASelectionObserver),
 }
 
 // Get returns the controller setup of the specified type.

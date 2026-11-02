@@ -21,6 +21,7 @@ import (
 var setups = []extensionapi.Setup{
 	extensionapi.NewSettingHandler(settings.Indexer()),
 	new(worker.DevicesHandler),
+	new(worker.DevicesRDMASelectionPolicyHandler),
 	new(worker.InstanceHandler),
 	new(worker.ModelDeploymentHandler),
 	new(worker.ModelDeploymentScalerHandler),
