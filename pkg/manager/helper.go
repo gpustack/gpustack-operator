@@ -34,6 +34,14 @@ type (
 	}
 )
 
+// NewCtrlManager wraps an already-constructed raw controller-runtime manager into the wrapper
+// the component code takes. Production builds the wrapper inside New, which also wires the
+// loopback client and the start sentinel; this wraps only, for an embedder or a test that
+// holds a raw manager and needs the repeatable field indexer to behave.
+func NewCtrlManager(raw ctrl.Manager) CtrlManager {
+	return CtrlManager{Manager: raw, indexedFields: sets.Set[string]{}}
+}
+
 // GetHTTPClient implements the controller manager interface to returns the singleton HTTP client of the system.
 func (m CtrlManager) GetHTTPClient() *http.Client {
 	if m.httpClient != nil {

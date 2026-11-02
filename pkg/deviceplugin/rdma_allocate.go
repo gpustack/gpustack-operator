@@ -9,8 +9,6 @@ import (
 
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
-
-	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
 // Host trees the allocation response reads. They are vars rather than consts for the reason this
@@ -33,18 +31,25 @@ var (
 // it once wherever the host has one.
 const rdmaCmName = "rdma_cm"
 
-// ncclIbHCAEnv names the granted RDMA devices to the container, comma-joined in the order the
-// sorted device IDs name their endpoints. A container granted a device it cannot name has been
-// handed half a resource, which is the one engine-facing shape this feature takes on.
+// ncclIbHCAEnv names the granted RDMA devices to the container. The value carries one leading
+// '=' so NCCL matches the listed names exactly: a plain mlx5_1 would also match an mlx5_10 the
+// grant never named. A container granted a device it cannot name has been handed half a
+// resource, which is the one engine-facing shape this feature takes on.
 const ncclIbHCAEnv = "NCCL_IB_HCA"
+
+// rdmaDevicesEnv is the plain grant list every served family names. One key serves the three
+// allocation modes, so a container's startup script reads the same variable whichever family's
+// server answered it.
+const rdmaDevicesEnv = "GPUSTACK_RDMA_DEVICES"
 
 // Allocate is called during container creation so that the Device Plugin can run device specific
 // operations and instruct Kubelet of the steps to make the devices available in the container.
 //
-// Each granted token is resolved back to its endpoint in Devices.spec.interfaces[] at this moment,
-// and nothing is written anywhere: no ledger entry, no Pod annotation, no reservation. The
-// response is therefore always built from the record as it stands, which is what lets the two
-// pooled families draw on the same HCAs without decrementing each other.
+// Each granted token is resolved back to its endpoint in the one capture of
+// Devices.spec.interfaces[] the response starts from, and nothing is written anywhere: no ledger
+// entry, no Pod annotation, no reservation. The response is therefore always built from the
+// record as it stands at that capture, which is what lets the two pooled families draw on the
+// same HCAs without decrementing each other.
 //
 // A token that does not parse, or that names no endpoint of the family being served, is refused:
 // a response that quietly grants less than was asked is the silent half-grant this resource
@@ -73,9 +78,16 @@ func (s *rdmaServer) Allocate(ctx context.Context, req *AllocateRequest) (*Alloc
 }
 
 // allocateContainer builds one container's response from the granted device IDs: the endpoints
-// they name under the family being served, the verbs character device each endpoint resolves to
-// at this moment, the node-level connection manager where the host carries one, and the
-// environment variable naming the granted RDMA devices.
+// they name under the family being served, the verbs character device each granted HCA resolves
+// to at this moment, the node-level connection manager where the host carries one, the NCCL
+// variable naming the granted HCAs as an exact filter, and the plain variable naming the same
+// HCAs. An endpoint whose HCA the active selection withholds — unselected or externally owned —
+// grants nothing, and a grant that then has nothing left to hand over is answered with the
+// variables carried empty rather than an error.
+//
+// The inventory is captured once and every grant is resolved against that one capture, so a
+// detector write landing mid-construction corrects the next response but cannot rearrange this
+// one into two revisions — and a failure anywhere refuses the whole response, never a part of it.
 func (s *rdmaServer) allocateContainer(
 	ctx context.Context,
 	deviceIDs []string,
@@ -85,39 +97,72 @@ func (s *rdmaServer) allocateContainer(
 		return nil, fmt.Errorf("read the interface inventory: %w", err)
 	}
 
-	endpoints, err := s.grantedEndpoints(devs, deviceIDs)
+	snap := s.Reconciler.captureRDMAInterfaceSnapshot(devs)
+	endpoints, err := s.grantedEndpoints(snap, deviceIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	names := make([]string, 0, len(endpoints))
+	// Two granted endpoints can resolve to one HCA name, the way two netdevs of one adapter do.
+	// One name earns one list entry and one device node, whatever claimed it twice, and the
+	// list is sorted so the response does not depend on the order kubelet granted the IDs in.
+	// An HCA the active selection withholds is skipped rather than granted: kubelet offered the
+	// token before the policy landed, and the grant names only hardware the node still serves.
+	grants := make([]string, 0, len(endpoints))
+	seen := make(map[string]struct{}, len(endpoints))
 	for i := range endpoints {
-		names = append(names, endpoints[i].RDMADevice)
+		name := endpoints[i].RDMADevice
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		if !snap.isHCAEligible(name) {
+			continue
+		}
+		grants = append(grants, name)
+	}
+	sort.Strings(grants)
+
+	// Nothing left to grant. The variables go out empty rather than failing the call, so the
+	// container starts with the names of no HCA and the device nodes of none — a response
+	// kubelet and the container's own startup can read the same way in all three modes.
+	if len(grants) == 0 {
+		return &ContainerAllocateResponse{
+			Envs: map[string]string{
+				ncclIbHCAEnv:   "",
+				rdmaDevicesEnv: "",
+			},
+		}, nil
 	}
 
+	names := strings.Join(grants, ",")
 	ctrResp := &ContainerAllocateResponse{
-		Envs: map[string]string{ncclIbHCAEnv: strings.Join(names, ",")},
+		Envs: map[string]string{
+			// The leading '=' switches NCCL to exact name matching, so mlx5_1 stops also
+			// matching mlx5_10; the plain key carries the names without it.
+			ncclIbHCAEnv:   "=" + names,
+			rdmaDevicesEnv: names,
+		},
 	}
 
-	// Devices are injected one endpoint at a time with NewRWDevice, never with NewDevicesIn over
-	// /dev/infiniband. That helper injects every entry of a directory it can read, so it would
-	// hand every container every adapter on the node, and it returns nil when it cannot read the
-	// directory, so the same code would degrade to handing the container none of them with no
-	// error — either way the opposite of the per-endpoint grant this resource exists to make.
-	// The verbs node is the grant itself, so a host that exposes no node for a resolved endpoint
-	// fails the allocation naming it rather than starting a container that was granted nothing it
-	// can open.
-	for i := range endpoints {
-		verbs, err := verbsDevicePath(rdmaSysfsRoot, endpoints[i].RDMADevice)
+	// Devices are injected one granted HCA at a time with NewRWDevice, never with NewDevicesIn
+	// over /dev/infiniband. That helper injects every entry of a directory it can read, so it
+	// would hand every container every adapter on the node, and it returns nil when it cannot
+	// read the directory, so the same code would degrade to handing the container none of them
+	// with no error — either way the opposite of the per-grant handover this resource exists to
+	// make. The verbs node is the grant itself, so a host that exposes no node for a granted
+	// name fails the allocation naming it rather than starting a container that was granted
+	// nothing it can open.
+	for _, name := range grants {
+		verbs, err := verbsDevicePath(rdmaSysfsRoot, name)
 		if err != nil {
-			return nil, fmt.Errorf("resolve the verbs character device of endpoint %s: %w",
-				endpoints[i].Resource, err)
+			return nil, fmt.Errorf("resolve the verbs character device of the granted device %s: %w",
+				name, err)
 		}
 		node := rdmaDeviceNodePath(verbs)
 		spec := NewRWDevice(node)
 		if spec == nil {
-			return nil, fmt.Errorf("endpoint %s has no verbs device node %q",
-				endpoints[i].Resource, node)
+			return nil, fmt.Errorf("granted device %s has no verbs device node %q", name, node)
 		}
 		ctrResp.Devices = append(ctrResp.Devices, spec)
 	}
@@ -132,12 +177,13 @@ func (s *rdmaServer) allocateContainer(
 }
 
 // grantedEndpoints resolves each granted device ID to the RDMA endpoint it names under the family
-// being served, first occurrence per endpoint, in the sorted order of the IDs. A second token on
-// one endpoint is a second claim on the same thing and resolves to the same endpoint, so it adds
-// nothing to the list. An empty grant is refused: kubelet does not send one, and a success the
-// container cannot use is worse than the error that says so.
+// being served, first occurrence per endpoint, in the sorted order of the IDs. Every token
+// resolves against the same capture: the response names one revision of the record or fails as a
+// whole. A second token on one endpoint is a second claim on the same thing and resolves to the
+// same endpoint, so it adds nothing to the list. An empty grant is refused: kubelet does not send
+// one, and a success the container cannot use is worse than the error that says so.
 func (s *rdmaServer) grantedEndpoints(
-	devs *workercore.Devices,
+	snap rdmaInterfaceSnapshot,
 	deviceIDs []string,
 ) ([]rdmaEndpoint, error) {
 	endpoints := make([]rdmaEndpoint, 0, len(deviceIDs))
@@ -151,7 +197,7 @@ func (s *rdmaServer) grantedEndpoints(
 		if _, dup := seen[token.Resource]; dup {
 			continue
 		}
-		endpoint, ok := s.grantedEndpoint(devs, token.Resource)
+		endpoint, ok := s.grantedEndpoint(snap, token.Resource)
 		if !ok {
 			return nil, grpcstatus.Errorf(grpccodes.InvalidArgument,
 				"device id %q names no RDMA endpoint of the %s family", id, s.AllocationMode)
@@ -165,15 +211,16 @@ func (s *rdmaServer) grantedEndpoints(
 	return endpoints, nil
 }
 
-// grantedEndpoint finds the endpoint a locator names in the interface inventory, under the family
-// being served. It reads the record as it stands: nothing an earlier allocation did can change
-// the answer, because no earlier allocation wrote anything.
+// grantedEndpoint finds the endpoint a locator names in the captured interface inventory, under
+// the family being served. It reads the capture the response started from: nothing an earlier
+// allocation did can change the answer, because no earlier allocation wrote anything, and
+// nothing a detector writes after the capture reaches this one.
 func (s *rdmaServer) grantedEndpoint(
-	devs *workercore.Devices,
+	snap rdmaInterfaceSnapshot,
 	res Resource,
 ) (rdmaEndpoint, bool) {
-	for i := range devs.Spec.Interfaces {
-		iface := &devs.Spec.Interfaces[i]
+	for i := range snap.interfaces {
+		iface := &snap.interfaces[i]
 		for _, endpoint := range rdmaEndpoints(iface, s.AllocationMode) {
 			if endpoint.Resource == res {
 				return endpoint, true

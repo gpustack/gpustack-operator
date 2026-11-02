@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	grpccodes "google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
 	deviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
@@ -84,11 +87,11 @@ func (s *rdmaServer) Stop() {
 	s.serving.Stop(s.Logger)
 }
 
-// GetDevicePluginOptions returns options to be communicated with the Device Manager. No
-// preferred allocation is offered: this server expresses no preference among its tokens, so
-// kubelet picks freely.
+// GetDevicePluginOptions returns options to be communicated with the Device Manager. Preferred
+// allocation is offered: the shared family's tokens are interchangeable to kubelet but each
+// resolves to one endpoint, and the round-robin below is where that difference is expressed.
 func (s *rdmaServer) GetDevicePluginOptions(context.Context, *Empty) (*Options, error) {
-	return &Options{}, nil
+	return &Options{GetPreferredAllocationAvailable: true}, nil
 }
 
 // ListAndWatch returns a stream of List of Devices.
@@ -150,36 +153,64 @@ func (s *rdmaServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[ListA
 // It is a pure function of that inventory — the reconciler is read for the object and for nothing
 // else — so allocation state anywhere in the process cannot change a response, which is what lets
 // the two pooled families serve the same HCAs without interfering with each other.
+//
+// The inventory is captured once and the whole advertisement is derived from that one capture, so
+// a response can never mix two revisions of the record.
+//
+// The tokens are emitted round by round: one index across every advertised endpoint in hardware
+// order before the next index. The pooled families carry one token per endpoint and come out in
+// the order they always had; the shared family's first tokens are then one per endpoint, matching
+// the spread GetPreferredAllocation prefers, so kubelet walking the advertisement in order lands
+// on distinct HCAs before a second token of any one of them.
 func (s *rdmaServer) getListAndWatchResponse(ctx context.Context) (*ListAndWatchResponse, error) {
 	devs, err := s.Reconciler.getDevices(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	// Every advertised endpoint of the family, in hardware order, with the facts its tokens
+	// carry. Collecting them ahead of the emission is what keeps the token order an
+	// outer-round / inner-endpoint one rather than an endpoint-major one.
+	type advertisedEndpoint struct {
+		health   string
+		ids      []string
+		topology *deviceplugin.TopologyInfo
+	}
 	resp := &ListAndWatchResponse{}
-	for i := range devs.Spec.Interfaces {
-		iface := &devs.Spec.Interfaces[i]
+	snap := s.Reconciler.captureRDMAInterfaceSnapshot(devs)
+	endpoints := make([]advertisedEndpoint, 0)
+	for i := range snap.interfaces {
+		iface := &snap.interfaces[i]
 		for _, ep := range rdmaEndpoints(iface, s.AllocationMode) {
-			// A link verdict withholds an endpoint's tokens from new Pods by marking them, never
-			// by withdrawing them: removing an advertised ID strands the kubelet's checkpointed
-			// allocation for whatever container holds it. No verdict at all is not a verdict of
-			// failure — an endpoint reached here carries a bound RDMA device, so a missing link
-			// record is the unverified case arriving by a different route.
+			// A link verdict or policy exclusion withholds an endpoint's tokens from new Pods by
+			// marking them, never by withdrawing them: removing an advertised ID strands the
+			// kubelet's checkpointed allocation for whatever container holds it. No verdict at all
+			// is not a verdict of failure — an endpoint reached here carries a bound RDMA device,
+			// so a missing link record is the unverified case arriving by a different route.
 			health := deviceplugin.Healthy
-			if ep.Link != nil && ep.Link.State == workercore.DeviceInterfaceLinkStateFailed {
+			if (ep.Link != nil && ep.Link.State == workercore.DeviceInterfaceLinkStateFailed) ||
+				!snap.isHCAEligible(ep.RDMADevice) {
 				health = deviceplugin.Unhealthy
 			}
-			for _, id := range rdmaDeviceIDs(ep.Resource, s.AllocationMode) {
-				// The partition family carries a NUMA hint too, where the accelerator partition
-				// pool carries none: an RDMA partition token names exactly one virtual function,
-				// whose affinity a hint can honor, while an accelerator partition token names no
-				// accelerator at all.
-				resp.Devices = append(resp.Devices, &deviceplugin.Device{
-					ID:       id,
-					Health:   health,
-					Topology: ep.Topology,
-				})
-			}
+			// The partition family carries a NUMA hint too, where the accelerator partition
+			// pool carries none: an RDMA partition token names exactly one virtual function,
+			// whose affinity a hint can honor, while an accelerator partition token names no
+			// accelerator at all.
+			endpoints = append(endpoints, advertisedEndpoint{
+				health:   health,
+				ids:      rdmaDeviceIDs(ep.Resource, s.AllocationMode),
+				topology: ep.Topology,
+			})
+		}
+	}
+
+	for round := 0; round < int(rdmaPoolSizeOf(s.AllocationMode)); round++ {
+		for i := range endpoints {
+			resp.Devices = append(resp.Devices, &deviceplugin.Device{
+				ID:       endpoints[i].ids[round],
+				Health:   endpoints[i].health,
+				Topology: endpoints[i].topology,
+			})
 		}
 	}
 	return resp, nil
@@ -222,4 +253,165 @@ func rdmaPoolSizeOf(mode workercore.DeviceAllocationMode) int32 {
 	default:
 		return 1
 	}
+}
+
+// GetPreferredAllocation returns a preferred set of devices to allocate from a list of available
+// ones. The hint is advisory: kubelet may ignore it, and Allocate answers for whatever arrives.
+//
+// The preference is a spread, not a packing. A shared token resolves to one endpoint, so a claim
+// of N tokens over N endpoints names one token per endpoint before a second token of any one of
+// them. The walk runs an outer round over token indices and an inner walk over the eligible
+// endpoints in hardware order — round 1 takes the first free token of every endpoint still below
+// one pick, round 2 the next, until the claim is full — first under a distinct-HCA rule, so two
+// endpoints bound to one HCA name do not both draw it, then without the rule for the inventory
+// that genuinely carries several endpoints on one device. A claim the available tokens cannot
+// satisfy earns an empty response, which leaves the choice, and the reason, to Allocate.
+func (s *rdmaServer) GetPreferredAllocation(ctx context.Context, req *PreferredAllocationRequest) (*PreferredAllocationResponse, error) {
+	ctrRequests := req.GetContainerRequests()
+	if len(ctrRequests) == 0 {
+		// Refused rather than indexed, the way Allocate refuses it: an external gRPC boundary
+		// grpc-go does not recover a handler panic behind.
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument,
+			"the preferred allocation request carries no container requests")
+	}
+
+	devs, err := s.Reconciler.getDevices(ctx)
+	if err != nil {
+		return nil, grpcstatus.Errorf(grpccodes.Internal, "read the interface inventory: %v", err)
+	}
+	snap := s.Reconciler.captureRDMAInterfaceSnapshot(devs)
+	endpoints := s.eligibleRDMAEndpoints(snap)
+
+	resp := &PreferredAllocationResponse{
+		ContainerResponses: make([]*ContainerPreferredAllocationResponse, 0, len(ctrRequests)),
+	}
+	for _, ctrReq := range ctrRequests {
+		ctrResp, err := s.getContainerPreferredAllocation(ctrReq, endpoints)
+		if err != nil {
+			return nil, err
+		}
+		resp.ContainerResponses = append(resp.ContainerResponses, ctrResp)
+	}
+	s.Logger.Info("get preferred allocation response", "response", resp)
+	return resp, nil
+}
+
+// eligibleRDMAEndpoints returns the endpoints of the family being served that a preferred
+// allocation may draw on: a failed link withholds an endpoint, as does an HCA the active
+// selection excludes — unselected or externally owned. The order is the inventory's hardware
+// order, which is the order the spread promises.
+func (s *rdmaServer) eligibleRDMAEndpoints(snap rdmaInterfaceSnapshot) []rdmaEndpoint {
+	endpoints := make([]rdmaEndpoint, 0)
+	for i := range snap.interfaces {
+		iface := &snap.interfaces[i]
+		for _, ep := range rdmaEndpoints(iface, s.AllocationMode) {
+			if (ep.Link != nil && ep.Link.State == workercore.DeviceInterfaceLinkStateFailed) ||
+				!snap.isHCAEligible(ep.RDMADevice) {
+				continue
+			}
+			endpoints = append(endpoints, ep)
+		}
+	}
+	return endpoints
+}
+
+// getContainerPreferredAllocation picks one container's tokens from the eligible endpoints.
+// MustIncludeDeviceIDs are taken first, in sorted order, whatever the walk would have chosen;
+// the rounds then spend one index across every endpoint per pass, until the claim is full.
+func (s *rdmaServer) getContainerPreferredAllocation(
+	ctrReq *ContainerPreferredAllocationRequest,
+	endpoints []rdmaEndpoint,
+) (*ContainerPreferredAllocationResponse, error) {
+	availableByRes, err := parseResourceTokensByAccelerator(ctrReq.GetAvailableDeviceIDs())
+	if err != nil {
+		return nil, grpcstatus.Errorf(grpccodes.InvalidArgument, "convert available device id: %v", err)
+	}
+
+	mustTokens := make(map[string]ResourceToken, len(ctrReq.GetMustIncludeDeviceIDs()))
+	for _, id := range ctrReq.GetMustIncludeDeviceIDs() {
+		tok, err := ParseResourceToken(id)
+		if err != nil {
+			return nil, grpcstatus.Errorf(grpccodes.InvalidArgument,
+				"invalid must include device id %q: %v", id, err)
+		}
+		mustTokens[id] = tok
+	}
+
+	allocationSize := int(ctrReq.GetAllocationSize())
+	if allocationSize <= 0 {
+		return &ContainerPreferredAllocationResponse{}, nil
+	}
+
+	endpointByRes := make(map[Resource]rdmaEndpoint, len(endpoints))
+	for _, ep := range endpoints {
+		endpointByRes[ep.Resource] = ep
+	}
+
+	selected := make([]string, 0, allocationSize)
+	usedIDs := sets.New[string]()
+	pickedPerEndpoint := make(map[Resource]int, len(endpoints))
+	pickedPerHCA := make(map[string]int, len(endpoints))
+
+	// A set makes the walk independent of the order the request listed the IDs in, and of
+	// the same name arriving twice. A must-include naming an endpoint outside the eligible
+	// set — a link that failed or an HCA the resolved selection excludes — is skipped, and
+	// its pick is replaced from the eligible endpoints by the rounds below.
+	for _, id := range sets.List(sets.New(ctrReq.GetMustIncludeDeviceIDs()...)) {
+		if len(selected) >= allocationSize || usedIDs.Has(id) {
+			continue
+		}
+		tok := mustTokens[id]
+		ep, ok := endpointByRes[tok.Resource]
+		if !ok {
+			continue
+		}
+		selected = append(selected, id)
+		usedIDs.Insert(id)
+		pickedPerEndpoint[tok.Resource]++
+		pickedPerHCA[ep.RDMADevice]++
+	}
+
+	// One pass of the rounds. Round r sits an endpoint out while it already holds r or more
+	// picks, which is what makes the walk a round-robin over endpoints rather than a refill of
+	// the first one. requireDistinctHCA applies the same ceiling to each HCA name, so a second
+	// endpoint bound to an already-drawn device waits for a round the device is below.
+	poolSize := int(rdmaPoolSizeOf(s.AllocationMode))
+	walk := func(requireDistinctHCA bool) {
+		for round := 1; round <= poolSize && len(selected) < allocationSize; round++ {
+			for i := range endpoints {
+				if len(selected) >= allocationSize {
+					return
+				}
+				ep := &endpoints[i]
+				if pickedPerEndpoint[ep.Resource] >= round {
+					continue
+				}
+				if requireDistinctHCA && pickedPerHCA[ep.RDMADevice] >= round {
+					continue
+				}
+				for _, tok := range availableByRes[ep.Resource] {
+					if usedIDs.Has(tok.String()) {
+						continue
+					}
+					selected = append(selected, tok.String())
+					usedIDs.Insert(tok.String())
+					pickedPerEndpoint[ep.Resource]++
+					pickedPerHCA[ep.RDMADevice]++
+					break
+				}
+			}
+		}
+	}
+
+	// Pass one prefers distinct HCAs; pass two drops the rule, for an inventory that carries
+	// more endpoints than HCA names and cannot fill the claim under it.
+	walk(true)
+	if len(selected) < allocationSize {
+		walk(false)
+	}
+
+	if len(selected) < allocationSize {
+		return &ContainerPreferredAllocationResponse{}, nil
+	}
+	return &ContainerPreferredAllocationResponse{DeviceIDs: selected}, nil
 }

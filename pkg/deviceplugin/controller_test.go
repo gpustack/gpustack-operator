@@ -6,19 +6,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/types"
+	k8stesting "k8s.io/client-go/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlintercept "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
 
+	apiv1 "gpustack.ai/gpustack/api/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/json"
 )
@@ -613,11 +619,8 @@ func TestDevicesReconciler_TerminatedContainerStillCharges(t *testing.T) {
 		"the free count must not rebound while the Pod lives")
 }
 
-// statusCapture records the last DevicesStatus a reconcile writes via Status().Update. A
-// fake-client interceptor is used (rather than reading the object back) because the
-// Devices status carries a uint64 field the fake client's status-subresource path
-// (structured-merge-diff) cannot handle; capturing the write asserts exactly what the
-// reconciler produces.
+// statusCapture records the last ledger a reconcile publishes, captured at the status write
+// rather than read back, so the assertion is on exactly what the reconciler wrote.
 type statusCapture struct{ last *workercore.DevicesStatus }
 
 func acceleratorByID(t *testing.T, status *workercore.DevicesStatus, id string) workercore.AcceleratorAllocation {
@@ -656,8 +659,12 @@ func newReconciler(t *testing.T, nodeName string, capture *statusCapture, objs .
 			return []string{obj.(*core.Pod).Spec.NodeName}
 		}).
 		WithInterceptorFuncs(ctrlintercept.Funcs{
-			SubResourceUpdate: func(_ context.Context, _ ctrlcli.Client, _ string, obj ctrlcli.Object, _ ...ctrlcli.SubResourceUpdateOption) error {
-				capture.last = obj.(*workercore.Devices).Status.DeepCopy()
+			SubResourcePatch: func(
+				_ context.Context, _ ctrlcli.Client, _ string, obj ctrlcli.Object,
+				_ ctrlcli.Patch, _ ...ctrlcli.SubResourcePatchOption,
+			) error {
+				published := obj.(*workercore.Devices).Status.DeepCopy()
+				capture.last = &workercore.DevicesStatus{Groups: published.Groups}
 				return nil
 			},
 		}).
@@ -795,4 +802,373 @@ func TestDevicesReconciler_ReconcileNotifier_Unsubscribes(t *testing.T) {
 
 	releaseShared()
 	assert.Empty(t, r.notifiers)
+}
+
+// foreignSelection builds interface-policy state a concurrent writer owns on the same status:
+// a selection reference, exclusions and the resolved condition. No production writer publishes
+// it yet; the tests below stand in for whoever does.
+func foreignSelection() (workercore.DevicesInterfacesStatus, []apiv1.Condition) {
+	transition := meta.NewTime(time.Date(2026, 10, 30, 8, 0, 0, 0, time.UTC))
+	return workercore.DevicesInterfacesStatus{
+		RDMASelectionPolicy: &workercore.DevicesRDMASelectionPolicyStatus{
+			PolicyRef: &workercore.DevicesRDMASelectionPolicyReference{
+				Name: "edge-select", UID: "uid-policy", Generation: 2,
+			},
+			Excluded: []workercore.DevicesRDMAExclusion{{Name: "mlx5_5", Reason: "external"}},
+		},
+	}, []apiv1.Condition{
+		{
+			Type:               "RDMASelectionResolved",
+			Status:             meta.ConditionTrue,
+			LastTransitionTime: transition,
+			Reason:             "PolicyResolved",
+			Message:            "selection resolved from policy edge-select",
+		},
+	}
+}
+
+// ledgerWriteSpy counts status writes on every subresource path and keeps the last patch payload
+// and its transport type. failWrite fails status writes only; raceForeign runs a concurrent
+// writer's update just before the reconciler's write lands, over the underlying client so the spy
+// does not count it.
+type ledgerWriteSpy struct {
+	writes        int
+	patches       int
+	lastPatch     []byte
+	lastPatchType types.PatchType
+	failWrite     bool
+	raceForeign   func(context.Context, ctrlcli.Client)
+}
+
+// newLedgerReconciler builds a reconciler over a store with the Devices status subresource
+// enabled, so both writers' writes land. The tracker is a plain object tracker: the default one
+// records managed fields over the typed object, and the Devices spec carries a uint64 that walk
+// cannot represent. Resource versions, status semantics and patch application are kept.
+func newLedgerReconciler(
+	t *testing.T, node string, objs ...ctrlcli.Object,
+) (*DevicesReconciler, *ledgerWriteSpy) {
+	t.Helper()
+	spy := new(ledgerWriteSpy)
+	tracker := k8stesting.NewObjectTracker(
+		scheme.Scheme, serializer.NewCodecFactory(scheme.Scheme).UniversalDecoder(),
+	)
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjectTracker(tracker).
+		WithStatusSubresource(&workercore.Devices{}).
+		WithObjects(objs...).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		WithInterceptorFuncs(ctrlintercept.Funcs{
+			SubResourceUpdate: func(
+				ctx context.Context, cli ctrlcli.Client, sub string, obj ctrlcli.Object,
+				opts ...ctrlcli.SubResourceUpdateOption,
+			) error {
+				spy.writes++
+				if spy.failWrite {
+					return errors.New("the api server is unreachable")
+				}
+				if spy.raceForeign != nil {
+					spy.raceForeign(ctx, cli)
+				}
+				return cli.SubResource(sub).Update(ctx, obj, opts...)
+			},
+			SubResourcePatch: func(
+				ctx context.Context, cli ctrlcli.Client, sub string, obj ctrlcli.Object,
+				patch ctrlcli.Patch, opts ...ctrlcli.SubResourcePatchOption,
+			) error {
+				spy.writes++
+				spy.patches++
+				data, err := patch.Data(obj)
+				if err != nil {
+					return err
+				}
+				spy.lastPatch = data
+				spy.lastPatchType = patch.Type()
+				if spy.failWrite {
+					return errors.New("the api server is unreachable")
+				}
+				if spy.raceForeign != nil {
+					spy.raceForeign(ctx, cli)
+				}
+				return cli.SubResource(sub).Patch(ctx, obj, patch, opts...)
+			},
+		}).
+		Build()
+	return &DevicesReconciler{NodeName: node, Client: cli}, spy
+}
+
+// storedDevices reads the node's Devices back from the store the writers share.
+func storedDevices(t *testing.T, rec *DevicesReconciler) *workercore.Devices {
+	t.Helper()
+	got := new(workercore.Devices)
+	require.NoError(t, rec.Client.Get(
+		context.Background(), ctrlcli.ObjectKey{Name: rec.NodeName}, got,
+	))
+	return got
+}
+
+// agreeingLedgerOf rebuilds the ledger a reconcile would publish for the given pods, so a fixture
+// can seed the store with an already-agreeing accelerator state.
+func agreeingLedgerOf(t *testing.T, devs *workercore.Devices, pods ...*core.Pod) workercore.DevicesStatus {
+	t.Helper()
+	items := make([]core.Pod, 0, len(pods))
+	for i := range pods {
+		items = append(items, *pods[i])
+	}
+	ledger, _ := BuildDesiredStatus(logr.Discard(), devs, &core.PodList{Items: items})
+	return ledger
+}
+
+// assertSelectionSurvived compares the foreign state semantically: the references, exclusions and
+// condition content must be exactly what the writer wrote, and the condition instants must be the
+// same moments, wherever the codec renders them.
+func assertSelectionSurvived(
+	t *testing.T,
+	wantIfaces workercore.DevicesInterfacesStatus, wantConditions []apiv1.Condition,
+	got *workercore.DevicesStatus,
+) {
+	t.Helper()
+	require.NotNil(t, got.Interfaces, "the selection state must survive")
+	assert.True(t, kubemeta.DeepEqual(wantIfaces, *got.Interfaces),
+		"the selection references and exclusions changed")
+	require.Len(t, got.Conditions, len(wantConditions), "the root conditions must survive")
+	for i := range wantConditions {
+		want, have := wantConditions[i], got.Conditions[i]
+		assert.Equal(t, want.Type, have.Type)
+		assert.Equal(t, want.Status, have.Status)
+		assert.Equal(t, want.Reason, have.Reason)
+		assert.Equal(t, want.Message, have.Message)
+		assert.True(t, want.LastTransitionTime.Time.Equal(have.LastTransitionTime.Time),
+			"condition %s reports a different instant", want.Type)
+	}
+}
+
+// TestDevicesReconciler_StatusWriteOwnsGroupsOnly verifies the accelerator reconcile publishes
+// status.groups and nothing else: a groups change keeps the foreign selection and conditions, the
+// merge patch itself carries the read's resource version and only the rebuilt groups, an emptied
+// ledger removes groups while the foreign state survives, a foreign-only difference and a
+// nil-beside-empty ledger write nothing, and a write that lost a race comes back as a conflict a
+// fresh pass completes.
+func TestDevicesReconciler_StatusWriteOwnsGroupsOnly(t *testing.T) {
+	const nodeName = "node-ledger-owner"
+
+	seedForeign := func(devs *workercore.Devices) {
+		ifaces, conditions := foreignSelection()
+		devs.Status.Interfaces = &ifaces
+		devs.Status.Conditions = conditions
+	}
+
+	// assertOwnedPatch opens the captured write and checks the transport contract it must keep:
+	// exactly one merge patch, conditioned on the resource version the ledger was read at, whose
+	// body is metadata plus status and whose status touches groups alone.
+	assertOwnedPatch := func(t *testing.T, spy *ledgerWriteSpy, rvAtRead string) map[string]json.RawMessage {
+		t.Helper()
+		assert.Equal(t, 1, spy.patches, "one ledger change is one status patch")
+		assert.Equal(t, types.MergePatchType, spy.lastPatchType,
+			"the ledger is published as a merge patch, so it cannot carry foreign fields")
+		patchFields := map[string]json.RawMessage{}
+		require.NoError(t, json.Unmarshal(spy.lastPatch, &patchFields))
+		require.Len(t, patchFields, 2,
+			"the patch carries its precondition and its status fields, and nothing else")
+		require.Contains(t, patchFields, "metadata")
+		require.Contains(t, patchFields, "status")
+		patchMeta := map[string]any{}
+		require.NoError(t, json.Unmarshal(patchFields["metadata"], &patchMeta))
+		assert.Equal(t, rvAtRead, patchMeta["resourceVersion"],
+			"the precondition is the resource version the ledger was read at")
+		patchStatus := map[string]json.RawMessage{}
+		require.NoError(t, json.Unmarshal(patchFields["status"], &patchStatus))
+		require.Len(t, patchStatus, 1, "groups is the only status field this writer owns")
+		require.Contains(t, patchStatus, "groups")
+		return patchStatus
+	}
+
+	t.Run("a groups change keeps the foreign selection and conditions", func(t *testing.T) {
+		devs := physicalAndLogicalDevices(nodeName)
+		seedForeign(devs)
+		pod := physicalSlicePod(t, "p-3g", "grp-0", "mig-0", "3g.20gb", nodeName, pl(0, 4))
+		want := agreeingLedgerOf(t, devs, pod)
+		rec, spy := newLedgerReconciler(t, nodeName, devs, pod)
+		rvAtRead := storedDevices(t, rec).ResourceVersion
+
+		reconcileNode(t, rec, nodeName)
+
+		patchStatus := assertOwnedPatch(t, spy, rvAtRead)
+		var published []workercore.DevicesAllocationGroup
+		require.NoError(t, json.Unmarshal(patchStatus["groups"], &published))
+		assert.True(t, kubemeta.DeepEqual(want.Groups, published),
+			"the patch publishes the full rebuilt ledger, not a partial one")
+
+		got := storedDevices(t, rec)
+		mig := acceleratorByID(t, &got.Status, "mig-0")
+		assert.Equal(t, []workercore.AcceleratorProfileCount{{Name: "3g.20gb", Count: 1}},
+			mig.AllocatedProfiles, "the rebuild still publishes the accelerator ledger")
+		ifaces, conditions := foreignSelection()
+		assertSelectionSurvived(t, ifaces, conditions, &got.Status)
+	})
+
+	t.Run("a foreign-only difference writes nothing", func(t *testing.T) {
+		pod := physicalSlicePod(t, "p-3g", "grp-0", "mig-0", "3g.20gb", nodeName, pl(0, 4))
+		devs := physicalAndLogicalDevices(nodeName)
+		devs.Status = agreeingLedgerOf(t, devs, pod)
+		ifaces, conditions := foreignSelection()
+		// The same instants the writer reported, rendered in another zone.
+		shifted := make([]apiv1.Condition, len(conditions))
+		for i := range conditions {
+			shifted[i] = conditions[i]
+			shifted[i].LastTransitionTime = meta.NewTime(
+				conditions[i].LastTransitionTime.In(time.FixedZone("UTC+8", 8*3600)),
+			)
+		}
+		devs.Status.Interfaces = &ifaces
+		devs.Status.Conditions = shifted
+		rec, spy := newLedgerReconciler(t, nodeName, devs, pod)
+
+		reconcileNode(t, rec, nodeName)
+
+		assert.Zero(t, spy.writes,
+			"an agreeing ledger writes nothing, whatever the foreign fields say")
+		got := storedDevices(t, rec)
+		assertSelectionSurvived(t, ifaces, shifted, &got.Status)
+	})
+
+	t.Run("a nil and an empty ledger are the same no-op", func(t *testing.T) {
+		devs := &workercore.Devices{ObjectMeta: meta.ObjectMeta{Name: nodeName}}
+		seedForeign(devs)
+		rec, spy := newLedgerReconciler(t, nodeName, devs)
+
+		reconcileNode(t, rec, nodeName)
+
+		assert.Zero(t, spy.writes,
+			"an empty ledger beside a nil one is not a change worth a write")
+		got := storedDevices(t, rec)
+		ifaces, conditions := foreignSelection()
+		assertSelectionSurvived(t, ifaces, conditions, &got.Status)
+	})
+
+	t.Run("an emptied ledger removes groups and keeps the foreign status", func(t *testing.T) {
+		seed := physicalAndLogicalDevices(nodeName)
+		devs := seed.DeepCopy()
+		devs.Status = agreeingLedgerOf(t, seed)
+		ifaces, conditions := foreignSelection()
+		devs.Status.Interfaces = &ifaces
+		devs.Status.Conditions = conditions
+		devs.Spec.Groups = nil
+		rec, spy := newLedgerReconciler(t, nodeName, devs)
+		rvAtRead := storedDevices(t, rec).ResourceVersion
+
+		reconcileNode(t, rec, nodeName)
+
+		patchStatus := assertOwnedPatch(t, spy, rvAtRead)
+		cleared := string(patchStatus["groups"])
+		assert.True(t, cleared == "null" || cleared == "[]",
+			"an emptied ledger still sends groups and clears it, but got %s", cleared)
+
+		got := storedDevices(t, rec)
+		assert.Empty(t, got.Status.Groups, "the retired accelerators leave no ledger behind")
+		assertSelectionSurvived(t, ifaces, conditions, &got.Status)
+	})
+
+	t.Run("a lost race is a conflict a fresh pass completes", func(t *testing.T) {
+		devs := physicalAndLogicalDevices(nodeName)
+		devs.Status = agreeingLedgerOf(t, devs)
+		seedForeign(devs)
+		pod := physicalSlicePod(t, "p-3g", "grp-0", "mig-0", "3g.20gb", nodeName, pl(0, 4))
+		rec, spy := newLedgerReconciler(t, nodeName, devs, pod)
+
+		// The interface policy writer lands its own update between this pass's read and its
+		// write: the selection reference moves and the resolved condition reports it.
+		spy.raceForeign = func(_ context.Context, cli ctrlcli.Client) {
+			live := new(workercore.Devices)
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: nodeName}, live))
+			live.Status.Interfaces.RDMASelectionPolicy.PolicyRef.Generation = 2
+			for i := range live.Status.Conditions {
+				if live.Status.Conditions[i].Type == "RDMASelectionResolved" {
+					live.Status.Conditions[i].Message = "selection resolved from policy edge-select at generation 2"
+				}
+			}
+			require.NoError(t, cli.Status().Update(context.Background(), live))
+		}
+
+		_, err := rec.Reconcile(context.Background(),
+			ctrl.Request{NamespacedName: ctrlcli.ObjectKey{Name: nodeName}})
+		require.Error(t, err, "a write that raced a foreign update must come back as an error")
+		assert.True(t, apierrors.IsConflict(err),
+			"the error is the conflict itself, not a publish that guessed its way past one")
+
+		got := storedDevices(t, rec)
+		mig := acceleratorByID(t, &got.Status, "mig-0")
+		assert.Nil(t, mig.AllocatedProfiles, "the stale pass publishes nothing")
+		require.NotNil(t, got.Status.Interfaces)
+		assert.Equal(t, int64(2), got.Status.Interfaces.RDMASelectionPolicy.PolicyRef.Generation,
+			"the foreign write that won the race keeps its value")
+		afterRace := got.Status.DeepCopy()
+
+		spy.raceForeign = nil
+		reconcileNode(t, rec, nodeName)
+
+		got = storedDevices(t, rec)
+		mig = acceleratorByID(t, &got.Status, "mig-0")
+		assert.Equal(t, []workercore.AcceleratorProfileCount{{Name: "3g.20gb", Count: 1}},
+			mig.AllocatedProfiles, "the fresh pass completes the ledger update")
+		require.NotNil(t, got.Status.Interfaces)
+		assert.True(t, kubemeta.DeepEqual(afterRace.Interfaces, got.Status.Interfaces) &&
+			kubemeta.DeepEqual(afterRace.Conditions, got.Status.Conditions),
+			"completing the ledger keeps the foreign state the race wrote")
+	})
+}
+
+// TestDevicesReconciler_StatusWriteFailureStillPaysReleases verifies a failed status write does
+// not starve the compensations: the pending give-back still lands in the same pass, the
+// reservation and visibility sweeps still retire the entries whose pod is gone while keeping the
+// live ones, the failure is still returned, and nothing is published over the failed write.
+func TestDevicesReconciler_StatusWriteFailureStillPaysReleases(t *testing.T) {
+	const nodeName = "node-status-fail"
+	devs := physicalAndLogicalDevices(nodeName)
+	devs.Status = agreeingLedgerOf(t, devs)
+	pod := physicalSlicePod(t, "p-3g", "grp-0", "mig-0", "3g.20gb", nodeName, pl(0, 4))
+	vanished := types.UID("pod-vanished")
+	rec, spy := newLedgerReconciler(t, nodeName, devs, pod)
+	// Both in-process sweep tables hold one live entry and one whose pod is long gone, so either
+	// way the prune decides is observable after the pass.
+	rec.reserveDevices(pod.UID, "main",
+		physicalSliceAllocation("grp-0", "mig-0", "3g.20gb", pl(0, 4)), []string{"grp-0:mig-0:0000"})
+	rec.reserveDevices(vanished, "main",
+		physicalSliceAllocation("grp-0", "mig-0", "1g.10gb", pl(4, 2)), []string{"grp-0:mig-0:0001"})
+	rec.grantVisibility(pod.UID, "main")
+	rec.grantVisibility(vanished, "main")
+	rec.recordPendingRelease(pod.UID, "main", nil)
+	require.Equal(t, []string{string(pod.UID) + "/main"}, pendingReleaseKeys(rec))
+	spy.failWrite = true
+
+	_, err := rec.Reconcile(context.Background(),
+		ctrl.Request{NamespacedName: ctrlcli.ObjectKey{Name: nodeName}})
+	require.ErrorContains(t, err, "api server",
+		"the write failure is still reported, so the ledger is retried from a fresh read")
+	assert.Empty(t, pendingReleaseKeys(rec),
+		"the compensating write must not wait on the publish")
+
+	_, liveReserved := rec.reservedDevices(pod.UID, "main")
+	assert.True(t, liveReserved,
+		"the failed publish does not touch the live container's reservation")
+	_, goneReserved := rec.reservedDevices(vanished, "main")
+	assert.False(t, goneReserved,
+		"the dead entry still leaves the reservation table in the same failed pass")
+	assert.True(t, rec.visibilityGranted(pod.UID, "main"),
+		"the live container's visibility grant survives the failed publish")
+	assert.False(t, rec.visibilityGranted(vanished, "main"),
+		"the dead grant still leaves the visibility table in the same failed pass")
+
+	recorded := new(core.Pod)
+	require.NoError(t, rec.Client.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), recorded))
+	allocations, readErr := AllocatedAcceleratorsOf(recorded)
+	require.NoError(t, readErr)
+	assert.NotContains(t, allocations, "main",
+		"the give-back landed during the very pass whose publish failed")
+
+	got := storedDevices(t, rec)
+	mig := acceleratorByID(t, &got.Status, "mig-0")
+	assert.Zero(t, mig.Allocated, "nothing was published over the failed write")
 }

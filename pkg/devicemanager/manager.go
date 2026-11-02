@@ -13,6 +13,7 @@ import (
 	"gpustack.ai/gpustack/pkg/devicemanager/controllers"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector"
 	"gpustack.ai/gpustack/pkg/devicemanager/exporter"
+	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/manager"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 )
@@ -61,6 +62,23 @@ func (m *Manager) Start(ctx context.Context) error {
 	// Register the accelerator monitor snapshot readout.
 	ms.Register(MonitorSnapshotPath, newMonitorSnapshotHandler(m.Detector.MonitorSnapshot))
 
+	// The RDMA selection observer and devices reconciler read this process's verbs observation
+	// through the detector, which no controller setup can reach, so the sources and the
+	// observer-to-reconciler activation link are attached and the controllers are set up before
+	// any subsystem runs: the detector's first pass reads OnRDMAInterfacesChanged and can fire it
+	// while this wiring would still be running beside it, and a fired Notify only lands once
+	// SetupController has armed the observer's event channel.
+	obs := controllers.Get[*deviceplugin.RDMASelectionObserver]()
+	rec := controllers.Get[*deviceplugin.DevicesReconciler]()
+	obs.RDMAInterfaceInventory = m.Detector.RDMAInterfaceSnapshot
+	obs.Reconciler = rec
+	rec.RDMAInterfaceInventory = m.Detector.RDMAInterfaceSnapshot
+	m.Detector.OnRDMAInterfacesChanged = obs.Notify
+	err := controllers.Setup(ctx, cm)
+	if err != nil {
+		return fmt.Errorf("setup controllers: %w", err)
+	}
+
 	// Start.
 	gp := gox.GroupWithContextIn(ctx)
 	gp.Go(func(ctx context.Context) error {
@@ -91,10 +109,6 @@ func (m *Manager) Start(ctx context.Context) error {
 	})
 	gp.Go(func(ctx context.Context) error {
 		klog.Info("starting controller manager")
-		err := controllers.Setup(ctx, cm)
-		if err != nil {
-			return fmt.Errorf("setup controllers: %w", err)
-		}
 		return m.Manager.Start(ctx)
 	})
 	return gp.Wait()
